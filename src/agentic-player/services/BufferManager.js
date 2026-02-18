@@ -38,26 +38,34 @@ export class BufferManager {
     preload.muted = true;
     preload.style.display = 'none';
     preload.crossOrigin = 'anonymous';
-    
+
     // Add to DOM (required for some browsers)
     document.body.appendChild(preload);
-    
+
     // Start loading
     preload.load();
 
     return new Promise((resolve, reject) => {
-      preload.addEventListener('loadeddata', () => {
-        log.info('agent', '[BufferManager] Preloaded:', { v0: clip.name });
-        this.preloadedVideo = preload;
-        this.preloadedClip = clip;
-        resolve(preload);
-      }, { once: true });
+      preload.addEventListener(
+        'loadeddata',
+        () => {
+          log.info('agent', '[BufferManager] Preloaded:', { v0: clip.name });
+          this.preloadedVideo = preload;
+          this.preloadedClip = clip;
+          resolve(preload);
+        },
+        { once: true }
+      );
 
-      preload.addEventListener('error', (e) => {
-        log.error('agent', '[BufferManager] Preload error', { error: e });
-        preload.remove();
-        reject(e);
-      }, { once: true });
+      preload.addEventListener(
+        'error',
+        (e) => {
+          log.error('agent', '[BufferManager] Preload error', { error: e });
+          preload.remove();
+          reject(e);
+        },
+        { once: true }
+      );
     });
   }
 
@@ -89,7 +97,7 @@ export class BufferManager {
       mainVideo.src = this.preloadedVideo.src;
       mainVideo.currentTime = startTime;
       mainVideo.muted = false;
-      
+
       this.clearPreloaded();
       log.info('agent', '[BufferManager] Transfer complete');
       return true;
@@ -123,19 +131,3 @@ export class BufferManager {
     return this.preloadedClip.id === clip.id;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

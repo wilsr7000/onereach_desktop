@@ -18,23 +18,23 @@ const pronounResolver = {
       /\b(and|but|also)\s+(that|this|it)\b/i,
       /^(it|that|this|that one)$/i,
     ];
-    return patterns.some(pattern => pattern.test(lower));
+    return patterns.some((pattern) => pattern.test(lower));
   },
-  
+
   resolve(transcript, recentContext = []) {
     if (!this.needsResolution(transcript)) {
       return { resolved: transcript, wasResolved: false, referencedSubject: null };
     }
-    
+
     const recent = recentContext[0];
     if (!recent?.subject) {
       return { resolved: transcript, wasResolved: false, referencedSubject: null };
     }
-    
+
     const subject = recent.subject;
     let resolved = transcript;
     const pronouns = ['it', 'that', 'this', 'that one', 'this one', 'the same'];
-    
+
     for (const pronoun of pronouns) {
       const pronounRegex = new RegExp(`\\b${pronoun}\\b`, 'gi');
       if (pronounRegex.test(resolved)) {
@@ -42,24 +42,24 @@ const pronounResolver = {
         break;
       }
     }
-    
+
     return {
       resolved,
       wasResolved: resolved !== transcript,
-      referencedSubject: resolved !== transcript ? subject : null
+      referencedSubject: resolved !== transcript ? subject : null,
     };
   },
-  
+
   extractSubject(transcript) {
     if (!transcript || typeof transcript !== 'string') return null;
-    
+
     const patterns = [
       /\bplay\s+(.+?)(?:\s+on\s+\w+|\s+in\s+\w+|$)/i,
       /weather\s+(?:in|for|at)\s+(.+?)(?:\?|$)/i,
       /tell me about\s+(.+?)(?:\?|$)/i,
       /what(?:'s| is| are)\s+(?:the\s+)?(.+?)(?:\?|$)/i,
     ];
-    
+
     for (const pattern of patterns) {
       const match = transcript.match(pattern);
       if (match && match[1]) {
@@ -69,9 +69,9 @@ const pronounResolver = {
         }
       }
     }
-    
+
     return transcript.length < 40 ? transcript : null;
-  }
+  },
 };
 
 describe('pronounResolver', () => {
@@ -104,49 +104,37 @@ describe('pronounResolver', () => {
 
   describe('resolve', () => {
     it('should resolve "play it" with recent subject', () => {
-      const result = pronounResolver.resolve(
-        'play it',
-        [{ subject: 'jazz' }]
-      );
-      
+      const result = pronounResolver.resolve('play it', [{ subject: 'jazz' }]);
+
       expect(result.resolved).toBe('play jazz');
       expect(result.wasResolved).toBe(true);
       expect(result.referencedSubject).toBe('jazz');
     });
 
     it('should resolve "what about that" with recent subject', () => {
-      const result = pronounResolver.resolve(
-        'what about that',
-        [{ subject: 'Denver' }]
-      );
-      
+      const result = pronounResolver.resolve('what about that', [{ subject: 'Denver' }]);
+
       expect(result.resolved).toBe('what about Denver');
       expect(result.wasResolved).toBe(true);
     });
 
     it('should not resolve without recent context', () => {
       const result = pronounResolver.resolve('play it', []);
-      
+
       expect(result.resolved).toBe('play it');
       expect(result.wasResolved).toBe(false);
       expect(result.referencedSubject).toBeNull();
     });
 
     it('should not resolve when no subject in context', () => {
-      const result = pronounResolver.resolve(
-        'play it',
-        [{ response: 'something' }]
-      );
-      
+      const result = pronounResolver.resolve('play it', [{ response: 'something' }]);
+
       expect(result.wasResolved).toBe(false);
     });
 
     it('should pass through non-pronoun text unchanged', () => {
-      const result = pronounResolver.resolve(
-        'play jazz',
-        [{ subject: 'rock' }]
-      );
-      
+      const result = pronounResolver.resolve('play jazz', [{ subject: 'rock' }]);
+
       expect(result.resolved).toBe('play jazz');
       expect(result.wasResolved).toBe(false);
     });

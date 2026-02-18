@@ -1,6 +1,6 @@
 /**
  * Preload script for Claude Code Terminal window
- * 
+ *
  * Provides IPC bridge for PTY communication
  */
 
@@ -32,25 +32,25 @@ contextBridge.exposeInMainWorld('claudeTerminal', {
    * @returns {Promise<{ success: boolean, error?: string }>}
    */
   start: (cols, rows) => ipcRenderer.invoke('claude-terminal:start', cols, rows),
-  
+
   /**
    * Write data to PTY
    * @param {string} data - Data to write
    */
   write: (data) => ipcRenderer.send('claude-terminal:write', data),
-  
+
   /**
    * Resize PTY
    * @param {number} cols - New columns
    * @param {number} rows - New rows
    */
   resize: (cols, rows) => ipcRenderer.send('claude-terminal:resize', cols, rows),
-  
+
   /**
    * Kill the PTY process
    */
   kill: () => ipcRenderer.send('claude-terminal:kill'),
-  
+
   /**
    * Register callback for PTY output
    * @param {Function} callback - Callback receiving data string
@@ -58,7 +58,7 @@ contextBridge.exposeInMainWorld('claudeTerminal', {
   onData: (callback) => {
     onDataCallback = callback;
   },
-  
+
   /**
    * Register callback for PTY exit
    * @param {Function} callback - Callback receiving exit code
@@ -66,7 +66,7 @@ contextBridge.exposeInMainWorld('claudeTerminal', {
   onExit: (callback) => {
     onExitCallback = callback;
   },
-  
+
   /**
    * Check Claude Code authentication status
    * @returns {Promise<{ authenticated: boolean, error?: string }>}

@@ -9,7 +9,12 @@
 
 const { test, expect } = require('@playwright/test');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
 } = require('./helpers/electron-app');
 
 let app;
@@ -18,7 +23,6 @@ let mainWindow;
 let errorSnapshot;
 
 test.describe('Budget Manager', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -107,7 +111,7 @@ test.describe('Budget Manager', () => {
           return {
             summaryKeys: summary ? Object.keys(summary) : [],
             hasLimits: !!limits,
-            limitKeys: limits ? Object.keys(limits) : []
+            limitKeys: limits ? Object.keys(limits) : [],
           };
         }
         return { summaryKeys: [], hasLimits: false };
@@ -214,10 +218,12 @@ test.describe('Budget Manager', () => {
     const result = await mainWindow.evaluate(async () => {
       try {
         if (window.api?.invoke) {
-          const check = await window.api.invoke('budget:preCheck', {
-            profile: 'fast',
-            estimatedCost: 0.01
-          }).catch(() => null);
+          const check = await window.api
+            .invoke('budget:preCheck', {
+              profile: 'fast',
+              estimatedCost: 0.01,
+            })
+            .catch(() => null);
           return { hasCheck: !!check, blocked: check?.blocked, warnings: check?.warnings?.length || 0 };
         }
         return { hasCheck: false };
@@ -236,14 +242,18 @@ test.describe('Budget Manager', () => {
   test('budget estimates can be saved', async () => {
     // Check if budget window has save functionality
     const windows = await electronApp.windows();
-    const budgetPage = windows.find(p => {
-      try { return p.url().includes('budget'); } catch { return false; }
+    const budgetPage = windows.find((p) => {
+      try {
+        return p.url().includes('budget');
+      } catch {
+        return false;
+      }
     });
 
     if (budgetPage) {
       const result = await budgetPage.evaluate(() => ({
         hasLocalStorage: typeof localStorage !== 'undefined',
-        hasBudgetAPI: typeof window.budgetAPI !== 'undefined'
+        hasBudgetAPI: typeof window.budgetAPI !== 'undefined',
       }));
       expect(result.hasLocalStorage).toBe(true);
     }
@@ -251,14 +261,18 @@ test.describe('Budget Manager', () => {
 
   test('saved estimates persist in localStorage', async () => {
     const windows = await electronApp.windows();
-    const budgetPage = windows.find(p => {
-      try { return p.url().includes('budget'); } catch { return false; }
+    const budgetPage = windows.find((p) => {
+      try {
+        return p.url().includes('budget');
+      } catch {
+        return false;
+      }
     });
 
     if (budgetPage) {
       const result = await budgetPage.evaluate(() => {
         // Check for saved estimates in localStorage
-        const keys = Object.keys(localStorage).filter(k => k.includes('budget') || k.includes('estimate'));
+        const keys = Object.keys(localStorage).filter((k) => k.includes('budget') || k.includes('estimate'));
         return { storageKeys: keys, count: keys.length };
       });
       expect(result).toBeDefined();
@@ -270,11 +284,7 @@ test.describe('Budget Manager', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   test('budget IPC methods respond without error', async () => {
-    const ipcMethods = [
-      'budget:getCostSummary',
-      'budget:getLimits',
-      'budget:getStatus',
-    ];
+    const ipcMethods = ['budget:getCostSummary', 'budget:getLimits', 'budget:getStatus'];
 
     const results = await mainWindow.evaluate(async (methods) => {
       const results = {};
@@ -295,7 +305,7 @@ test.describe('Budget Manager', () => {
 
     expect(results).toBeDefined();
     // At least one method should work
-    const anySuccess = Object.values(results).some(r => r.success);
+    const anySuccess = Object.values(results).some((r) => r.success);
     expect(anySuccess || Object.keys(results).length > 0).toBeTruthy();
   });
 
@@ -307,7 +317,10 @@ test.describe('Budget Manager', () => {
     const errors = await checkNewErrors(errorSnapshot);
     const genuine = filterBenignErrors(errors);
     if (genuine.length > 0) {
-      console.log('Budget test errors:', genuine.map(e => e.message));
+      console.log(
+        'Budget test errors:',
+        genuine.map((e) => e.message)
+      );
     }
     expect(genuine.length).toBeLessThanOrEqual(5);
   });

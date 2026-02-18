@@ -1,7 +1,7 @@
 /**
  * Evaluation Agent
  * Part of the Governed Self-Improving Agent Runtime
- * 
+ *
  * Individual agent evaluation logic with LLM integration
  */
 
@@ -18,10 +18,10 @@ class EvalAgent {
     this.weight = config.weight;
     this.criteria = config.criteria || [];
     this.systemPrompt = config.systemPrompt;
-    
+
     // LLM client for evaluation
     this.llmClient = options.llmClient;
-    
+
     // Status tracking
     this.status = 'ready';
     this.startedAt = null;
@@ -72,7 +72,7 @@ Provide your evaluation:`;
 
     const response = await this.llmClient.complete(prompt, {
       temperature: 0.3, // Lower temperature for more consistent evaluations
-      maxTokens: 2000
+      maxTokens: 2000,
     });
 
     // Parse the JSON response
@@ -85,7 +85,7 @@ Provide your evaluation:`;
       } else {
         throw new Error('No JSON found in response');
       }
-    } catch (parseError) {
+    } catch (_parseError) {
       // If parsing fails, create a basic evaluation
       evaluation = {
         overallScore: 70,
@@ -93,7 +93,7 @@ Provide your evaluation:`;
         strengths: ['Evaluation completed'],
         concerns: ['Unable to parse detailed evaluation'],
         suggestions: [],
-        parseError: true
+        parseError: true,
       };
     }
 
@@ -105,16 +105,16 @@ Provide your evaluation:`;
       agentIcon: this.icon,
       perspective: this.perspective,
       weight: this.weight,
-      
+
       overallScore: evaluation.overallScore || 70,
       criteria: evaluation.criteria || [],
       strengths: evaluation.strengths || [],
       concerns: evaluation.concerns || [],
       suggestions: evaluation.suggestions || [],
-      
+
       evaluatedAt: this.completedAt,
       duration: new Date(this.completedAt) - new Date(this.startedAt),
-      method: 'llm'
+      method: 'llm',
     };
   }
 
@@ -136,16 +136,16 @@ Provide your evaluation:`;
       agentIcon: this.icon,
       perspective: this.perspective,
       weight: this.weight,
-      
+
       overallScore,
       criteria,
       strengths: this.identifyStrengths(criteria),
       concerns: this.identifyConcerns(criteria),
       suggestions: this.generateSuggestions(criteria, content),
-      
+
       evaluatedAt: this.completedAt,
       duration: new Date(this.completedAt) - new Date(this.startedAt),
-      method: 'heuristics'
+      method: 'heuristics',
     };
   }
 
@@ -157,31 +157,31 @@ Provide your evaluation:`;
    */
   evaluateCriteria(content, context) {
     const documentType = context.documentType || 'code';
-    
+
     // Heuristic checks based on content characteristics
     const results = [];
 
     // Check readability/clarity
-    const avgLineLength = content.split('\n').reduce((sum, line) => sum + line.length, 0) / 
-                          Math.max(content.split('\n').length, 1);
+    const avgLineLength =
+      content.split('\n').reduce((sum, line) => sum + line.length, 0) / Math.max(content.split('\n').length, 1);
     results.push({
       name: 'clarity',
       score: Math.max(0, Math.min(100, 100 - (avgLineLength - 80) * 0.5)),
       weight: 0.2,
       comment: avgLineLength > 100 ? 'Some lines are too long' : 'Good line length',
-      evidence: []
+      evidence: [],
     });
 
     // Check for comments/documentation (for code)
     if (documentType === 'code') {
-      const commentRatio = (content.match(/\/\/|\/\*|\*\/|#|"""/g) || []).length / 
-                           Math.max(content.split('\n').length, 1);
+      const commentRatio =
+        (content.match(/\/\/|\/\*|\*\/|#|"""/g) || []).length / Math.max(content.split('\n').length, 1);
       results.push({
         name: 'documentation',
         score: Math.min(100, commentRatio * 500),
         weight: 0.15,
         comment: commentRatio > 0.1 ? 'Well documented' : 'Could use more comments',
-        evidence: []
+        evidence: [],
       });
 
       // Check for error handling
@@ -191,7 +191,7 @@ Provide your evaluation:`;
         score: hasErrorHandling ? 80 : 50,
         weight: 0.15,
         comment: hasErrorHandling ? 'Has error handling' : 'Consider adding error handling',
-        evidence: []
+        evidence: [],
       });
     }
 
@@ -202,7 +202,7 @@ Provide your evaluation:`;
       score: hasHeadings ? 75 : 60,
       weight: 0.15,
       comment: 'Structure evaluation',
-      evidence: []
+      evidence: [],
     });
 
     // Default completeness score
@@ -211,7 +211,7 @@ Provide your evaluation:`;
       score: content.length > 100 ? 70 : 50,
       weight: 0.2,
       comment: 'Completeness evaluation',
-      evidence: []
+      evidence: [],
     });
 
     return results;
@@ -224,10 +224,10 @@ Provide your evaluation:`;
    */
   calculateOverallScore(criteria) {
     if (criteria.length === 0) return 70;
-    
+
     const totalWeight = criteria.reduce((sum, c) => sum + (c.weight || 1), 0);
     const weightedSum = criteria.reduce((sum, c) => sum + c.score * (c.weight || 1), 0);
-    
+
     return Math.round(weightedSum / totalWeight);
   }
 
@@ -237,9 +237,7 @@ Provide your evaluation:`;
    * @returns {string[]}
    */
   identifyStrengths(criteria) {
-    return criteria
-      .filter(c => c.score >= 75)
-      .map(c => `Good ${c.name}: ${c.comment}`);
+    return criteria.filter((c) => c.score >= 75).map((c) => `Good ${c.name}: ${c.comment}`);
   }
 
   /**
@@ -248,9 +246,7 @@ Provide your evaluation:`;
    * @returns {string[]}
    */
   identifyConcerns(criteria) {
-    return criteria
-      .filter(c => c.score < 60)
-      .map(c => `${c.name} needs improvement: ${c.comment}`);
+    return criteria.filter((c) => c.score < 60).map((c) => `${c.name} needs improvement: ${c.comment}`);
   }
 
   /**
@@ -259,7 +255,7 @@ Provide your evaluation:`;
    * @param {string} content - Original content
    * @returns {Object[]}
    */
-  generateSuggestions(criteria, content) {
+  generateSuggestions(criteria, _content) {
     const suggestions = [];
 
     for (const criterion of criteria) {
@@ -267,7 +263,7 @@ Provide your evaluation:`;
         suggestions.push({
           priority: criterion.score < 40 ? 'high' : 'medium',
           text: `Improve ${criterion.name}: ${criterion.comment}`,
-          applySuggestion: null // Would need LLM to generate specific fix
+          applySuggestion: null, // Would need LLM to generate specific fix
         });
       }
     }
@@ -285,7 +281,7 @@ Provide your evaluation:`;
       type: this.type,
       status: this.status,
       startedAt: this.startedAt,
-      completedAt: this.completedAt
+      completedAt: this.completedAt,
     };
   }
 
@@ -301,5 +297,3 @@ Provide your evaluation:`;
 
 module.exports = EvalAgent;
 module.exports.EvalAgent = EvalAgent;
-
-

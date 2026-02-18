@@ -2,75 +2,75 @@
  * Unit tests for built-in agents
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // Mock time-agent behavior
 const timeAgent = {
   id: 'time-agent',
-  
+
   bid(task) {
     if (!task?.content) return null;
     const lower = task.content.toLowerCase();
     const timeKeywords = ['time', 'clock', 'hour', 'date', 'day', 'month', 'year'];
-    if (timeKeywords.some(k => lower.includes(k))) {
+    if (timeKeywords.some((k) => lower.includes(k))) {
       return { confidence: 0.95 };
     }
     return null;
   },
-  
+
   async execute(task) {
     const now = new Date();
     const lower = task.content.toLowerCase();
-    
+
     if (lower.includes('date') || lower.includes('today')) {
       return { success: true, message: `It's ${now.toLocaleDateString()}` };
     }
-    
+
     return { success: true, message: `It's ${now.toLocaleTimeString()}` };
-  }
+  },
 };
 
 // Mock weather-agent behavior
 const weatherAgent = {
   id: 'weather-agent',
-  
+
   bid(task) {
     if (!task?.content) return null;
     const lower = task.content.toLowerCase();
-    if (['weather', 'temperature'].some(k => lower.includes(k))) {
+    if (['weather', 'temperature'].some((k) => lower.includes(k))) {
       return { confidence: 0.9 };
     }
     return null;
   },
-  
+
   extractLocation(text) {
     const match = text.match(/weather\s+(?:in|for|at)\s+(.+?)(?:\?|$)/i);
     return match ? match[1].trim() : null;
   },
-  
+
   async execute(task, context = {}) {
     const location = this.extractLocation(task.content) || context?.location;
-    
+
     if (!location) {
       return {
         success: false,
         needsInput: {
-          prompt: "What city would you like the weather for?",
+          prompt: 'What city would you like the weather for?',
           field: 'location',
           agentId: 'weather-agent',
-          taskId: task.id
-        }
+          taskId: task.id,
+        },
       };
     }
-    
+
     return { success: true, message: `It's 72 degrees in ${location}` };
-  }
+  },
 };
 
 // Mock help-agent behavior
 const helpAgent = {
   id: 'help-agent',
-  
+
   bid(task) {
     if (!task?.content) return null;
     const lower = task.content.toLowerCase();
@@ -79,13 +79,13 @@ const helpAgent = {
     }
     return null;
   },
-  
+
   async execute() {
-    return { 
-      success: true, 
-      message: "I can help with time, weather, music, and more." 
+    return {
+      success: true,
+      message: 'I can help with time, weather, music, and more.',
     };
-  }
+  },
 };
 
 describe('time-agent', () => {
@@ -109,14 +109,14 @@ describe('time-agent', () => {
   describe('execute', () => {
     it('should return time for time questions', async () => {
       const result = await timeAgent.execute({ content: 'what time is it' });
-      
+
       expect(result.success).toBe(true);
       expect(result.message).toMatch(/It's/);
     });
 
     it('should return date for date questions', async () => {
       const result = await timeAgent.execute({ content: 'what is the date today' });
-      
+
       expect(result.success).toBe(true);
       expect(result.message).toMatch(/It's/);
     });
@@ -155,11 +155,11 @@ describe('weather-agent', () => {
 
   describe('execute', () => {
     it('should return needsInput when location is missing', async () => {
-      const result = await weatherAgent.execute({ 
-        id: 't1', 
-        content: 'what is the weather' 
+      const result = await weatherAgent.execute({
+        id: 't1',
+        content: 'what is the weather',
       });
-      
+
       expect(result.success).toBe(false);
       expect(result.needsInput).toBeDefined();
       expect(result.needsInput.field).toBe('location');
@@ -167,21 +167,18 @@ describe('weather-agent', () => {
     });
 
     it('should return weather when location is in content', async () => {
-      const result = await weatherAgent.execute({ 
-        id: 't1', 
-        content: 'weather in Denver' 
+      const result = await weatherAgent.execute({
+        id: 't1',
+        content: 'weather in Denver',
       });
-      
+
       expect(result.success).toBe(true);
       expect(result.message).toContain('Denver');
     });
 
     it('should return weather when location is in context', async () => {
-      const result = await weatherAgent.execute(
-        { id: 't1', content: 'what is the weather' },
-        { location: 'Seattle' }
-      );
-      
+      const result = await weatherAgent.execute({ id: 't1', content: 'what is the weather' }, { location: 'Seattle' });
+
       expect(result.success).toBe(true);
       expect(result.message).toContain('Seattle');
     });
@@ -204,7 +201,7 @@ describe('help-agent', () => {
   describe('execute', () => {
     it('should return capabilities', async () => {
       const result = await helpAgent.execute({ content: 'help' });
-      
+
       expect(result.success).toBe(true);
       expect(result.message).toContain('help');
     });

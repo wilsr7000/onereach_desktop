@@ -5,14 +5,14 @@
 export class TeleprompterUI {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // State
-    this.visible = true;  // Show by default when transcript available
+    this.visible = true; // Show by default when transcript available
     this.expanded = false;
-    this.words = [];      // Cached expanded words with timing
-    
+    this.words = []; // Cached expanded words with timing
+
     // Internal state
-    this._mouseMove = null;  // Mouse move handler reference
+    this._mouseMove = null; // Mouse move handler reference
   }
 
   /**
@@ -22,7 +22,7 @@ export class TeleprompterUI {
     this.visible = !this.visible;
     const container = document.getElementById('teleprompterContainer');
     const toggleBtn = document.getElementById('teleprompterToggleBtn');
-    
+
     if (this.visible) {
       container?.classList.remove('hidden');
       toggleBtn?.classList.add('active');
@@ -70,7 +70,7 @@ export class TeleprompterUI {
    */
   init() {
     const wordsContainer = document.getElementById('teleprompterWords');
-    
+
     // Check if we have transcript segments
     if (!this.app.transcriptSegments || this.app.transcriptSegments.length === 0) {
       wordsContainer.innerHTML = `
@@ -81,30 +81,36 @@ export class TeleprompterUI {
       `;
       return;
     }
-    
+
     // Expand segments to individual words
     this.words = this.expandTranscriptToWords(this.app.transcriptSegments);
-    
+
     // Log timing info
     if (this.words.length > 0) {
       const first = this.words[0];
       const last = this.words[this.words.length - 1];
-      window.logging.info('video', 'Teleprompter Loaded', { data: this.words.length, 'words (source:', this.app.transcriptSource + ' })');
-      window.logging.info('video', 'Teleprompter Time range', { data: first.start?.toFixed(1 }) + 's -', last.end?.toFixed(1) + 's');
+      window.logging.info('video', 'Teleprompter Loaded', {
+        wordCount: this.words.length,
+        source: this.app.transcriptSource,
+      });
+      window.logging.info('video', 'Teleprompter Time range', {
+        start: first.start?.toFixed(1) + 's',
+        end: last.end?.toFixed(1) + 's',
+      });
     }
-    
+
     // Render words
     this.renderWords();
-    
+
     // Show warning if not Whisper-generated
     this.updateSourceIndicator();
-    
+
     // Update highlighting and scroll to current time
     const video = document.getElementById('videoPlayer');
     if (video) {
       const currentTime = video.currentTime;
-      window.logging.info('video', 'Teleprompter Scrolling to current time', { data: currentTime.toFixed(1 }) + 's');
-      
+      window.logging.info('video', 'Teleprompter Scrolling to current time', { time: currentTime.toFixed(1) + 's' });
+
       requestAnimationFrame(() => {
         this.updateHighlight(currentTime);
         this.scrollToTime(currentTime);
@@ -119,10 +125,10 @@ export class TeleprompterUI {
   expandTranscriptToWords(segments) {
     const words = [];
 
-    segments.forEach(segment => {
+    segments.forEach((segment) => {
       const text = (segment.text || segment.word || '').trim();
       const startTime = segment.start || 0;
-      const endTime = segment.end || (startTime + 1);
+      const endTime = segment.end || startTime + 1;
       // Preserve speaker ID from segment (supports multiple naming conventions)
       const speakerId = segment.speakerId || segment.speaker_id || segment.speaker || null;
 
@@ -133,23 +139,23 @@ export class TeleprompterUI {
             text: text,
             start: startTime,
             end: endTime,
-            speaker: speakerId
+            speaker: speakerId,
           });
         }
         return;
       }
 
       // Split sentence into words and distribute timing
-      const segmentWords = text.split(/\s+/).filter(w => w.length > 0);
+      const segmentWords = text.split(/\s+/).filter((w) => w.length > 0);
       const segmentDuration = endTime - startTime;
       const wordDuration = segmentDuration / segmentWords.length;
 
       segmentWords.forEach((word, i) => {
         words.push({
           text: word,
-          start: startTime + (i * wordDuration),
-          end: startTime + ((i + 1) * wordDuration),
-          speaker: speakerId  // All words from this segment have the same speaker
+          start: startTime + i * wordDuration,
+          end: startTime + (i + 1) * wordDuration,
+          speaker: speakerId, // All words from this segment have the same speaker
         });
       });
     });
@@ -171,74 +177,75 @@ export class TeleprompterUI {
 
     // Build marker map for highlighting words in markers
     const markerMap = this.app.teleprompterMarkers?.buildMarkerTimeMap() || { ranges: [], spots: [] };
-    
+
     // Track speaker changes for labels
     let lastSpeaker = null;
     const speakerColors = ['#4a9eff', '#22c55e', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'];
-    
+
     // Build a map of unique speakers for consistent coloring
-    const uniqueSpeakers = [...new Set(this.words.map(w => w.speaker).filter(Boolean))];
+    const uniqueSpeakers = [...new Set(this.words.map((w) => w.speaker).filter(Boolean))];
     const speakerColorMap = {};
     uniqueSpeakers.forEach((speaker, i) => {
       speakerColorMap[speaker] = i % speakerColors.length;
     });
-    
+
     // Log speaker info
     if (uniqueSpeakers.length > 0) {
-      window.logging.info('video', 'Teleprompter Speakers detected', { data: uniqueSpeakers.join(', ' }));
+      window.logging.info('video', 'Teleprompter Speakers detected', { speakers: uniqueSpeakers.join(', ') });
     }
 
-    wordsContainer.innerHTML = this.words.map((word, index) => {
-      const startTime = this.app.formatTime(word.start);
-      const endTime = this.app.formatTime(word.end);
-      const duration = ((word.end - word.start) * 1000).toFixed(0);
-      
-      // Check if word falls within any marker
-      const markerInfo = this.app.teleprompterMarkers?.getMarkerForTime(word.start, word.end, markerMap);
-      let markerClass = '';
-      let markerStyle = '';
-      let markerTitle = '';
-      let markerDataAttrs = '';
-      
-      if (markerInfo) {
-        if (markerInfo.type === 'range') {
-          markerClass = 'in-marker-range';
-          markerStyle = `border-bottom: 2px solid ${markerInfo.color};`;
-          markerTitle = ` | 📍 ${markerInfo.name}`;
-          markerDataAttrs = `data-marker-id="${markerInfo.id}" data-marker-name="${markerInfo.name.replace(/"/g, '&quot;')}"`;
-        } else if (markerInfo.type === 'spot') {
-          markerClass = 'at-marker-point';
-          markerStyle = `background: ${markerInfo.color}40;`;
-          markerTitle = ` | 📌 ${markerInfo.name}`;
-          markerDataAttrs = `data-marker-id="${markerInfo.id}" data-marker-name="${markerInfo.name.replace(/"/g, '&quot;')}"`;
+    wordsContainer.innerHTML = this.words
+      .map((word, index) => {
+        const startTime = this.app.formatTime(word.start);
+        const endTime = this.app.formatTime(word.end);
+        const duration = ((word.end - word.start) * 1000).toFixed(0);
+
+        // Check if word falls within any marker
+        const markerInfo = this.app.teleprompterMarkers?.getMarkerForTime(word.start, word.end, markerMap);
+        let markerClass = '';
+        let markerStyle = '';
+        let markerTitle = '';
+        let markerDataAttrs = '';
+
+        if (markerInfo) {
+          if (markerInfo.type === 'range') {
+            markerClass = 'in-marker-range';
+            markerStyle = `border-bottom: 2px solid ${markerInfo.color};`;
+            markerTitle = ` | 📍 ${markerInfo.name}`;
+            markerDataAttrs = `data-marker-id="${markerInfo.id}" data-marker-name="${markerInfo.name.replace(/"/g, '&quot;')}"`;
+          } else if (markerInfo.type === 'spot') {
+            markerClass = 'at-marker-point';
+            markerStyle = `background: ${markerInfo.color}40;`;
+            markerTitle = ` | 📌 ${markerInfo.name}`;
+            markerDataAttrs = `data-marker-id="${markerInfo.id}" data-marker-name="${markerInfo.name.replace(/"/g, '&quot;')}"`;
+          }
         }
-      }
-      
-      // Speaker identification
-      let speakerLabel = '';
-      let speakerClass = '';
-      let speakerDataAttr = '';
-      let speakerTitleInfo = '';
-      
-      if (word.speaker) {
-        const speakerIndex = speakerColorMap[word.speaker] ?? 0;
-        speakerClass = `speaker-${speakerIndex}`;
-        speakerDataAttr = `data-speaker="${word.speaker}"`;
-        speakerTitleInfo = ` | 🎙️ ${word.speaker}`;
-        
-        // Add speaker label when speaker changes
-        if (word.speaker !== lastSpeaker) {
-          const speakerColor = speakerColors[speakerIndex];
-          const displayName = this.formatSpeakerName(word.speaker);
-          speakerLabel = `<span class="teleprompter-speaker-label clickable" 
+
+        // Speaker identification
+        let speakerLabel = '';
+        let speakerClass = '';
+        let speakerDataAttr = '';
+        let speakerTitleInfo = '';
+
+        if (word.speaker) {
+          const speakerIndex = speakerColorMap[word.speaker] ?? 0;
+          speakerClass = `speaker-${speakerIndex}`;
+          speakerDataAttr = `data-speaker="${word.speaker}"`;
+          speakerTitleInfo = ` | 🎙️ ${word.speaker}`;
+
+          // Add speaker label when speaker changes
+          if (word.speaker !== lastSpeaker) {
+            const speakerColor = speakerColors[speakerIndex];
+            const displayName = this.formatSpeakerName(word.speaker);
+            speakerLabel = `<span class="teleprompter-speaker-label clickable" 
             style="background: ${speakerColor}20; color: ${speakerColor}; border-color: ${speakerColor};"
             onclick="event.stopPropagation(); app.showSpeakerEditDropdown(event, '${word.speaker}')"
             title="Click to edit speaker">${displayName}</span>`;
-          lastSpeaker = word.speaker;
+            lastSpeaker = word.speaker;
+          }
         }
-      }
-      
-      return `${speakerLabel}<span class="teleprompter-word ${markerClass} ${speakerClass}"
+
+        return `${speakerLabel}<span class="teleprompter-word ${markerClass} ${speakerClass}"
               data-index="${index}"
               data-start="${word.start}"
               data-end="${word.end}"
@@ -249,66 +256,69 @@ export class TeleprompterUI {
               onclick="app.teleprompterMarkers?.handleWordClick(event, ${word.start}, ${word.end})"
               ondblclick="app.teleprompterMarkers?.editMarkerFromWord(${markerInfo?.id || 'null'})"
               title="${startTime} → ${endTime} (${duration}ms)${speakerTitleInfo}${markerTitle}">${word.text}</span>`;
-    }).join('');
-    
+      })
+      .join('');
+
     // Add marker indicators at marker boundaries
     this.app.teleprompterMarkers?.addMarkerIndicators();
-    
+
     // Add speaker legend if multiple speakers
     this.renderSpeakerLegend(uniqueSpeakers, speakerColorMap, speakerColors);
 
     // Setup insertion cursor
     this.setupInsertionCursor();
   }
-  
+
   /**
    * Format speaker name for display (e.g., "speaker_0" -> "Speaker 1")
    */
   formatSpeakerName(speakerId) {
     if (!speakerId) return '';
-    
+
     // Handle common formats: speaker_0, speaker_1, SPEAKER_0, etc.
     const match = speakerId.match(/speaker[_\s]?(\d+)/i);
     if (match) {
       const num = parseInt(match[1], 10) + 1; // Convert 0-indexed to 1-indexed
       return `Speaker ${num}`;
     }
-    
+
     // Otherwise use as-is (might be a name)
     return speakerId;
   }
-  
+
   /**
    * Render speaker legend showing all speakers and their colors
    */
   renderSpeakerLegend(speakers, colorMap, colors) {
     const container = document.getElementById('teleprompterContainer');
     if (!container) return;
-    
+
     // Remove existing legend
     const existingLegend = container.querySelector('.teleprompter-speaker-legend');
     if (existingLegend) {
       existingLegend.remove();
     }
-    
+
     // Only show legend if multiple speakers
     if (speakers.length < 2) return;
-    
+
     const legend = document.createElement('div');
     legend.className = 'teleprompter-speaker-legend';
-    legend.innerHTML = speakers.map(speaker => {
-      const colorIndex = colorMap[speaker] ?? 0;
-      const color = colors[colorIndex];
-      const displayName = this.formatSpeakerName(speaker);
-      return `<span class="speaker-legend-item clickable" 
+    legend.innerHTML = speakers
+      .map((speaker) => {
+        const colorIndex = colorMap[speaker] ?? 0;
+        const color = colors[colorIndex];
+        const displayName = this.formatSpeakerName(speaker);
+        return `<span class="speaker-legend-item clickable" 
         style="color: ${color};"
         onclick="event.stopPropagation(); app.showSpeakerEditDropdown(event, '${speaker}')"
         title="Click to edit speaker">
         <span class="speaker-legend-dot" style="background: ${color};"></span>
         ${displayName}
       </span>`;
-    }).join('');
-    
+      })
+      .join('');
+
     container.appendChild(legend);
   }
 
@@ -319,9 +329,7 @@ export class TeleprompterUI {
     if (!this.visible || !this.words || this.words.length === 0) return;
 
     // Apply sync adjustments
-    const adjustedTime = this.app.transcriptSync 
-      ? this.app.transcriptSync.adjustTime(currentTime)
-      : currentTime;
+    const adjustedTime = this.app.transcriptSync ? this.app.transcriptSync.adjustTime(currentTime) : currentTime;
 
     const wordElements = document.querySelectorAll('.teleprompter-word');
     let currentWordElement = null;
@@ -370,7 +378,10 @@ export class TeleprompterUI {
     const wordEl = document.querySelector(`.teleprompter-word[data-index="${closestIndex}"]`);
     if (wordEl) {
       this.scrollToWord(wordEl);
-      window.logging.info('video', 'Teleprompter Scrolled to word', { data: closestIndex, ':', this.words[closestIndex].text });
+      window.logging.info('video', 'Teleprompter Scrolled to word', {
+        index: closestIndex,
+        text: this.words[closestIndex].text,
+      });
     }
   }
 
@@ -383,18 +394,18 @@ export class TeleprompterUI {
 
     const containerRect = container.getBoundingClientRect();
     const wordRect = wordElement.getBoundingClientRect();
-    
+
     // Calculate where the word currently is relative to the container's visible area
-    const wordCenterRelativeToContainer = (wordRect.left + wordRect.width / 2) - containerRect.left;
+    const wordCenterRelativeToContainer = wordRect.left + wordRect.width / 2 - containerRect.left;
     const containerCenter = containerRect.width / 2;
-    
+
     // Calculate scroll adjustment needed to center the word
     const scrollAdjustment = wordCenterRelativeToContainer - containerCenter;
     const targetScroll = container.scrollLeft + scrollAdjustment;
 
     container.scrollTo({
       left: targetScroll,
-      behavior: 'smooth'
+      behavior: 'smooth',
     });
   }
 
@@ -431,7 +442,10 @@ export class TeleprompterUI {
     indicator = document.createElement('div');
     indicator.className = 'transcript-source-indicator';
 
-    if (this.app.transcriptSource === 'evenly-distributed' || this.app.transcriptSource === 'pending-evenly-distributed') {
+    if (
+      this.app.transcriptSource === 'evenly-distributed' ||
+      this.app.transcriptSource === 'pending-evenly-distributed'
+    ) {
       indicator.innerHTML = `
         <span class="indicator-warning">⚠️ Timing not synced</span>
         <button class="indicator-action" onclick="app.transcribeForWaveform()" title="Re-transcribe with Whisper for accurate timing">
@@ -580,7 +594,7 @@ export class TeleprompterUI {
     cursor.onclick = (e) => {
       const time = parseFloat(cursor.dataset.time);
       if (isNaN(time)) return;
-      
+
       e.stopPropagation();
       this.app.teleprompterMarkers?.handleCursorClick(e, time);
     };
@@ -620,24 +634,6 @@ export class TeleprompterUI {
    */
   getWordsInRange(startTime, endTime) {
     if (!this.words) return [];
-    return this.words.filter(word => word.start >= startTime && word.end <= endTime);
+    return this.words.filter((word) => word.start >= startTime && word.end <= endTime);
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

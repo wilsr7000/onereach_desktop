@@ -1,9 +1,9 @@
 /**
  * Unified Agent Bidder
- * 
+ *
  * ALL agents (built-in and custom) must use this module for task evaluation.
  * This is the ONLY bidding mechanism in the system.
- * 
+ *
  * POLICY (enforced by .cursorrules and agent-registry.js):
  * - All task routing is 100% LLM-based (GPT-4o-mini semantic evaluation).
  * - Agents MUST NOT have bid() methods. The registry rejects them at load time.
@@ -24,7 +24,7 @@ const log = getLogQueue();
 const bidderCircuit = getCircuit('unified-bidder', {
   failureThreshold: 10,
   resetTimeout: 15000,
-  windowMs: 60000
+  windowMs: 60000,
 });
 
 // Cache for recent evaluations (avoid duplicate API calls)
@@ -62,21 +62,25 @@ ${agent.prompt || agent.description || 'No description provided'}
 `.trim();
 
   const userRequest = task.content || task.phrase || task;
-  
+
   // Conversation history: prefer metadata passed through exchange (fixes the
   // TODO in exchange.ts where history was previously hardcoded to []).
   // Fall back to file read for backward compatibility.
   let conversationText = '';
-  
+
   // 1. Try task metadata (primary path -- set by exchange-bridge, forwarded by exchange)
   if (typeof task === 'object' && task.metadata?.conversationText) {
     conversationText = task.metadata.conversationText;
-  } else if (typeof task === 'object' && Array.isArray(task.metadata?.conversationHistory) && task.metadata.conversationHistory.length > 0) {
+  } else if (
+    typeof task === 'object' &&
+    Array.isArray(task.metadata?.conversationHistory) &&
+    task.metadata.conversationHistory.length > 0
+  ) {
     conversationText = task.metadata.conversationHistory
-      .map(t => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
+      .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
       .join('\n');
   }
-  
+
   // 2. Fallback: read from file in GSX Agent space
   if (!conversationText) {
     try {
@@ -84,16 +88,14 @@ ${agent.prompt || agent.description || 'No description provided'}
       const historyContent = api.files.read('gsx-agent', 'conversation-history.md');
       if (historyContent) {
         const lines = historyContent.split('\n');
-        const conversationLines = lines.filter(line => 
-          line.startsWith('User:') || line.startsWith('Assistant:')
-        );
+        const conversationLines = lines.filter((line) => line.startsWith('User:') || line.startsWith('Assistant:'));
         conversationText = conversationLines.join('\n');
       }
-    } catch (err) {
+    } catch (_err) {
       // No history file yet, that's okay
     }
   }
-  
+
   // Read user profile for personalized routing
   // Profile is pre-loaded by exchange-bridge on startup; access synchronously here
   let userProfileText = '';
@@ -103,7 +105,7 @@ ${agent.prompt || agent.description || 'No description provided'}
     if (profile.isLoaded()) {
       userProfileText = profile.getContextString();
     }
-  } catch (err) {
+  } catch (_err) {
     // User profile not available yet, that's okay
   }
 
@@ -113,14 +115,14 @@ ${agent.prompt || agent.description || 'No description provided'}
     const api = getSpacesAPI();
     const summariesContent = api.files.read('gsx-agent', 'session-summaries.md');
     if (summariesContent) {
-      const lines = summariesContent.split('\n').filter(l => l.startsWith('- '));
+      const lines = summariesContent.split('\n').filter((l) => l.startsWith('- '));
       sessionSummaryText = lines.slice(0, 5).join('\n'); // Last 5 summaries
     }
-  } catch (err) {
+  } catch (_err) {
     // No summaries yet
   }
 
-  const conversationSection = conversationText 
+  const conversationSection = conversationText
     ? `\n\nRECENT CONVERSATION (for context - helps resolve pronouns like "it", "that", "this"):\n${conversationText}\n`
     : '';
 
@@ -288,7 +290,7 @@ function getCacheKey(agent, task) {
         contextHash = historyContent.slice(-100).replace(/\s+/g, ' ').trim();
       }
     }
-  } catch (err) {
+  } catch (_err) {
     // No history file
   }
   return `${agentId}:${taskContent}:${contextHash}`;
@@ -312,9 +314,9 @@ function getCachedEvaluation(cacheKey) {
 function cacheEvaluation(cacheKey, result) {
   evaluationCache.set(cacheKey, {
     result,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
-  
+
   // Clean old entries periodically
   if (evaluationCache.size > 100) {
     const now = Date.now();
@@ -329,7 +331,7 @@ function cacheEvaluation(cacheKey, result) {
 /**
  * Evaluate if an agent can handle a task using LLM
  * This is the ONLY way agents can bid - no keyword fallback
- * 
+ *
  * @param {Object} agent - Agent definition (name, keywords, prompt, capabilities, executionType)
  * @param {Object} task - Task to evaluate (content/phrase)
  * @returns {Promise<{ confidence: number, plan: string, reasoning: string }>}
@@ -341,9 +343,9 @@ async function evaluateAgentBid(agent, task) {
   if (cached) {
     return cached;
   }
-  
+
   const prompt = buildEvaluationPrompt(agent, task);
-  
+
   try {
     const result = await bidderCircuit.execute(async () => {
       return await ai.chat({
@@ -353,12 +355,12 @@ async function evaluateAgentBid(agent, task) {
         temperature: 0,
         maxTokens: 200,
         jsonMode: true,
-        feature: 'unified-bidder'
+        feature: 'unified-bidder',
       });
     });
 
     const content = result.content;
-    
+
     if (!content) {
       log.error('agent', 'Empty response for agent', { name: agent.name });
       return { confidence: 0, plan: '', reasoning: 'Empty LLM response' };
@@ -366,77 +368,111 @@ async function evaluateAgentBid(agent, task) {
 
     // Strip markdown code fences if present (safety net for models that wrap JSON)
     let raw = content;
-    raw = raw.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    raw = raw
+      .replace(/^```(?:json)?\s*\n?/i, '')
+      .replace(/\n?```\s*$/i, '')
+      .trim();
     const evaluation = JSON.parse(raw);
-    
+
     // Validate and normalize
     let confidence = Math.max(0, Math.min(1, parseFloat(evaluation.confidence) || 0));
     const reasoning = evaluation.reasoning || '';
-    
+
     // SANITY CHECK: Detect contradictory responses where reasoning says "doesn't match"
     // but confidence is high. This is a common LLM failure mode.
     // Only trigger on CLEAR negative signals -- never on phrases that could be affirmative
     // for the agent being evaluated (e.g. "this is a time query" is CORRECT for time-agent).
     const reasoningLower = reasoning.toLowerCase();
-    const indicatesNoMatch = 
+    const indicatesNoMatch =
       reasoningLower.includes('does not align') ||
-      reasoningLower.includes('doesn\'t align') ||
+      reasoningLower.includes("doesn't align") ||
       reasoningLower.includes('not related') ||
       reasoningLower.includes('not match') ||
-      reasoningLower.includes('doesn\'t match') ||
+      reasoningLower.includes("doesn't match") ||
       reasoningLower.includes('different domain') ||
       reasoningLower.includes('outside the') ||
       reasoningLower.includes('unsuitable') ||
       reasoningLower.includes('falls under the domain of');
-    
+
     // If reasoning indicates no match but confidence is high, fix it
     if (indicatesNoMatch && confidence > 0.3) {
-      log.info('agent', `Correcting contradictory response for ${agent.name}: "${reasoning.substring(0, 50)}..." had confidence ${confidence}, setting to 0.05`);
+      log.info(
+        'agent',
+        `Correcting contradictory response for ${agent.name}: "${reasoning.substring(0, 50)}..." had confidence ${confidence}, setting to 0.05`
+      );
       confidence = 0.05;
     }
-    
+
     // Hallucination guard: strip fast-path result if risk is high
     const hallucinationRisk = evaluation.hallucinationRisk || 'high'; // Default to high if not specified
     let fastPathResult = evaluation.result || null;
     if (fastPathResult && hallucinationRisk === 'high') {
-      log.info('agent', `${agent.name} fast-path result STRIPPED (hallucinationRisk=high): "${(fastPathResult || '').substring(0, 50)}..."`);
+      log.info(
+        'agent',
+        `${agent.name} fast-path result STRIPPED (hallucinationRisk=high): "${(fastPathResult || '').substring(0, 50)}..."`
+      );
       fastPathResult = null;
     }
-    
+
     const normalized = {
       confidence,
       plan: evaluation.plan || '',
       reasoning,
       hallucinationRisk,
-      result: fastPathResult,  // Fast-path: only if hallucination risk is acceptable
+      result: fastPathResult, // Fast-path: only if hallucination risk is acceptable
     };
-    
+
     if (normalized.result) {
-      log.info('agent', `${agent.name} fast-path result on "${(task.content || task.phrase || '').substring(0, 30)}..."`);
+      log.info(
+        'agent',
+        `${agent.name} fast-path result on "${(task.content || task.phrase || '').substring(0, 30)}..."`
+      );
     }
-    log.info('agent', `${agent.name} bid ${normalized.confidence.toFixed(2)} on "${(task.content || task.phrase || '').substring(0, 30)}..."`);
-    
+    log.info(
+      'agent',
+      `${agent.name} bid ${normalized.confidence.toFixed(2)} on "${(task.content || task.phrase || '').substring(0, 30)}..."`
+    );
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location: 'unified-bidder.js:bid-result',
+        message: 'Agent bid result',
+        data: {
+          agent: agent.name,
+          agentId: agent.id,
+          confidence: normalized.confidence,
+          reasoning: normalized.reasoning,
+          task: (task.content || task.phrase || '').substring(0, 80),
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'BID',
+      }),
+    }).catch((err) => console.warn('[unified-bidder] ingest fetch:', err.message));
+    // #endregion
+
     // Cache the result
     cacheEvaluation(cacheKey, normalized);
-    
-    return normalized;
 
+    return normalized;
   } catch (error) {
     log.error('agent', `Evaluation failed for ${agent.name}`, { error: error.message });
-    
+
     // Circuit breaker may be open
     if (error.message.includes('Circuit breaker')) {
       return {
         confidence: 0,
         plan: '',
-        reasoning: 'Bidding system temporarily unavailable'
+        reasoning: 'Bidding system temporarily unavailable',
       };
     }
-    
+
     return {
       confidence: 0,
       plan: '',
-      reasoning: `Evaluation error: ${error.message}`
+      reasoning: `Evaluation error: ${error.message}`,
     };
   }
 }
@@ -453,23 +489,21 @@ async function getBidsFromAgents(agents, task) {
     log.error('agent', 'Bidder not ready', { error });
     return [];
   }
-  
+
   // Evaluate all agents in parallel
   const bidPromises = agents.map(async (agent) => {
     const evaluation = await evaluateAgentBid(agent, task);
     return {
       agent,
       agentId: agent.id || agent.name,
-      ...evaluation
+      ...evaluation,
     };
   });
-  
+
   const bids = await Promise.all(bidPromises);
-  
+
   // Filter out zero-confidence bids and sort by confidence
-  return bids
-    .filter(bid => bid.confidence > 0.1)
-    .sort((a, b) => b.confidence - a.confidence);
+  return bids.filter((bid) => bid.confidence > 0.1).sort((a, b) => b.confidence - a.confidence);
 }
 
 /**
@@ -481,13 +515,13 @@ function selectWinner(bids) {
   if (!bids || bids.length === 0) {
     return { winner: null, backups: [] };
   }
-  
+
   // Winner must have confidence >= 0.5
   const winner = bids[0].confidence >= 0.5 ? bids[0] : null;
-  
+
   // Backups are other viable bids
-  const backups = bids.slice(1).filter(b => b.confidence >= 0.5);
-  
+  const backups = bids.slice(1).filter((b) => b.confidence >= 0.5);
+
   return { winner, backups };
 }
 
@@ -512,9 +546,13 @@ async function batchEvaluateAgents(agents, task) {
   let conversationText = '';
   if (typeof task === 'object' && task.metadata?.conversationText) {
     conversationText = task.metadata.conversationText;
-  } else if (typeof task === 'object' && Array.isArray(task.metadata?.conversationHistory) && task.metadata.conversationHistory.length > 0) {
+  } else if (
+    typeof task === 'object' &&
+    Array.isArray(task.metadata?.conversationHistory) &&
+    task.metadata.conversationHistory.length > 0
+  ) {
     conversationText = task.metadata.conversationHistory
-      .map(t => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
+      .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
       .join('\n');
   }
   if (!conversationText) {
@@ -522,11 +560,14 @@ async function batchEvaluateAgents(agents, task) {
       const api = getSpacesAPI();
       const historyContent = api.files.read('gsx-agent', 'conversation-history.md');
       if (historyContent) {
-        conversationText = historyContent.split('\n')
-          .filter(l => l.startsWith('User:') || l.startsWith('Assistant:'))
+        conversationText = historyContent
+          .split('\n')
+          .filter((l) => l.startsWith('User:') || l.startsWith('Assistant:'))
           .join('\n');
       }
-    } catch (_) {}
+    } catch (_ignored) {
+      /* conversation history optional */
+    }
   }
 
   // User profile
@@ -535,26 +576,26 @@ async function batchEvaluateAgents(agents, task) {
     const { getUserProfile } = require('../../lib/user-profile-store');
     const profile = getUserProfile();
     if (profile.isLoaded()) userProfileText = profile.getContextString();
-  } catch (_) {}
+  } catch (_ignored) {
+    /* user profile optional context */
+  }
 
   // Agent summaries (compact to keep prompt small)
-  const agentLines = agents.map((a, i) => {
-    const caps = (a.capabilities || []).slice(0, 8).join('; ');
-    const kw   = (a.keywords || []).slice(0, 10).join(', ');
-    const desc = (a.prompt || a.description || '').substring(0, 500);
-    return `### Agent ${i + 1}: ${a.name} (id: ${a.id || a.name})
+  const agentLines = agents
+    .map((a, i) => {
+      const caps = (a.capabilities || []).slice(0, 8).join('; ');
+      const kw = (a.keywords || []).slice(0, 10).join(', ');
+      const desc = (a.prompt || a.description || '').substring(0, 500);
+      return `### Agent ${i + 1}: ${a.name} (id: ${a.id || a.name})
 TYPE: ${a.executionType || a.type || 'general'}
 KEYWORDS: ${kw}
 CAPABILITIES: ${caps}
 DESCRIPTION: ${desc}`;
-  }).join('\n\n');
+    })
+    .join('\n\n');
 
-  const conversationSection = conversationText
-    ? `\nRECENT CONVERSATION:\n${conversationText}\n`
-    : '';
-  const profileSection = userProfileText
-    ? `\nUSER PROFILE:\n${userProfileText}\n`
-    : '';
+  const conversationSection = conversationText ? `\nRECENT CONVERSATION:\n${conversationText}\n` : '';
+  const profileSection = userProfileText ? `\nUSER PROFILE:\n${userProfileText}\n` : '';
 
   const systemPrompt = `You are an intelligent task router. Given a user's voice command and a list of agents, determine which agent(s) can handle it.
 ${profileSection}${conversationSection}
@@ -594,14 +635,17 @@ Return ONLY valid JSON, no markdown fences.`;
         temperature: 0,
         maxTokens: 600,
         jsonMode: true,
-        feature: 'unified-bidder-batch'
+        feature: 'unified-bidder-batch',
       });
     });
 
     let parsed;
     try {
       let batchRaw = result.content || '';
-      batchRaw = batchRaw.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+      batchRaw = batchRaw
+        .replace(/^```(?:json)?\s*\n?/i, '')
+        .replace(/\n?```\s*$/i, '')
+        .trim();
       parsed = JSON.parse(batchRaw);
     } catch (_) {
       log.error('agent', 'Batch evaluation JSON parse failed', { raw: (result.content || '').substring(0, 200) });
@@ -625,7 +669,9 @@ Return ONLY valid JSON, no markdown fences.`;
     }
 
     log.info('agent', `Batch evaluation: ${results.size} agents matched for "${userRequest.substring(0, 40)}"`, {
-      matches: Array.from(results.entries()).map(([id, r]) => `${id}:${r.confidence.toFixed(2)}`).join(', ')
+      matches: Array.from(results.entries())
+        .map(([id, r]) => `${id}:${r.confidence.toFixed(2)}`)
+        .join(', '),
     });
   } catch (error) {
     log.error('agent', 'Batch evaluation failed', { error: error.message });

@@ -9,8 +9,13 @@
 
 const { test, expect } = require('@playwright/test');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors,
-  sleep, LOG_SERVER
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
+  LOG_SERVER,
 } = require('./helpers/electron-app');
 
 let app;
@@ -19,7 +24,6 @@ let mainWindow;
 let errorSnapshot;
 
 test.describe('App Health Dashboard', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -59,8 +63,12 @@ test.describe('App Health Dashboard', () => {
 
   test('dashboard window closes cleanly', async () => {
     const windows = await electronApp.windows();
-    const dashPage = windows.find(p => {
-      try { return p.url().includes('health') || p.url().includes('dashboard'); } catch { return false; }
+    const dashPage = windows.find((p) => {
+      try {
+        return p.url().includes('health') || p.url().includes('dashboard');
+      } catch {
+        return false;
+      }
     });
 
     if (dashPage) {

@@ -1,34 +1,34 @@
 /**
  * LLM Usage Tracker
- * 
+ *
  * Provides real-time session tracking and dashboard notifications.
  * DELEGATES storage to BudgetManager (primary tracker).
- * 
+ *
  * Responsibilities:
  * - Session-level usage summaries
  * - Dashboard badge notifications
  * - Real-time cost display
- * 
+ *
  * Storage is handled by BudgetManager for single source of truth.
  */
 
-const { calculateCost, formatCost, getPricingForModel } = require('./pricing-config');
+const { calculateCost, formatCost, _getPricingForModel } = require('./pricing-config');
 
 class LLMUsageTracker {
   constructor() {
     // In-memory cache for current session only
     this.sessionUsage = {
       claude: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
-      openai: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 }
+      openai: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
     };
-    
+
     // Recent operations cache (last 50 for quick display)
     this.recentOperations = [];
     this.maxRecentOperations = 50;
-    
+
     // Session start time
     this.sessionStart = new Date();
-    
+
     console.log('[LLMUsageTracker] Initialized (delegates to BudgetManager)');
   }
 
@@ -46,18 +46,18 @@ class LLMUsageTracker {
       success = true,
       duration = 0,
       projectId = null,
-      spaceId = null
+      spaceId = null,
     } = data;
 
     // Calculate cost
     const costResult = calculateCost(model, inputTokens, outputTokens);
-    
+
     // Update session totals
     this.sessionUsage.claude.calls++;
     this.sessionUsage.claude.inputTokens += inputTokens;
     this.sessionUsage.claude.outputTokens += outputTokens;
     this.sessionUsage.claude.cost += costResult.totalCost;
-    
+
     // Create operation record
     const operation = {
       id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -71,15 +71,15 @@ class LLMUsageTracker {
       feature,
       purpose,
       success,
-      duration
+      duration,
     };
-    
+
     // Add to recent operations
     this.recentOperations.unshift(operation);
     if (this.recentOperations.length > this.maxRecentOperations) {
       this.recentOperations = this.recentOperations.slice(0, this.maxRecentOperations);
     }
-    
+
     // Delegate storage to BudgetManager
     this._delegateToBudgetManager({
       provider: 'anthropic',
@@ -90,13 +90,13 @@ class LLMUsageTracker {
       spaceId: spaceId || projectId,
       feature,
       operation: purpose || feature,
-      success
+      success,
     });
-    
+
     // Send dashboard notifications
     this._notifyDashboard(operation);
     this._notifyRendererLLMCall(operation);
-    
+
     return operation;
   }
 
@@ -113,18 +113,18 @@ class LLMUsageTracker {
       success = true,
       duration = 0,
       projectId = null,
-      spaceId = null
+      spaceId = null,
     } = data;
 
     // Calculate cost
     const costResult = calculateCost(model, inputTokens, outputTokens);
-    
+
     // Update session totals
     this.sessionUsage.openai.calls++;
     this.sessionUsage.openai.inputTokens += inputTokens;
     this.sessionUsage.openai.outputTokens += outputTokens;
     this.sessionUsage.openai.cost += costResult.totalCost;
-    
+
     // Create operation record
     const operation = {
       id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -138,15 +138,15 @@ class LLMUsageTracker {
       feature,
       purpose,
       success,
-      duration
+      duration,
     };
-    
+
     // Add to recent operations
     this.recentOperations.unshift(operation);
     if (this.recentOperations.length > this.maxRecentOperations) {
       this.recentOperations = this.recentOperations.slice(0, this.maxRecentOperations);
     }
-    
+
     // Delegate storage to BudgetManager
     this._delegateToBudgetManager({
       provider: 'openai',
@@ -157,13 +157,13 @@ class LLMUsageTracker {
       spaceId: spaceId || projectId,
       feature,
       operation: purpose || feature,
-      success
+      success,
     });
-    
+
     // Send notifications
     this._notifyDashboard(operation);
     this._notifyRendererLLMCall(operation);
-    
+
     return operation;
   }
 
@@ -194,11 +194,11 @@ class LLMUsageTracker {
         operation.cost,
         { provider: operation.provider }
       );
-    } catch (error) {
+    } catch (_error) {
       // Dashboard API might not be initialized yet
     }
   }
-  
+
   /**
    * Notify renderer process for badge display
    */
@@ -206,7 +206,7 @@ class LLMUsageTracker {
     try {
       const { BrowserWindow } = require('electron');
       const windows = BrowserWindow.getAllWindows();
-      
+
       const badgeData = {
         provider: operation.provider,
         model: operation.model,
@@ -215,15 +215,15 @@ class LLMUsageTracker {
         cost: operation.cost,
         costFormatted: formatCost(operation.cost),
         timestamp: operation.timestamp,
-        sessionTotal: this.getSessionTotal()
+        sessionTotal: this.getSessionTotal(),
       };
-      
+
       for (const win of windows) {
         if (!win.isDestroyed()) {
           win.webContents.send('llm:call-made', badgeData);
         }
       }
-    } catch (error) {
+    } catch (_error) {
       // Renderer might not be ready
     }
   }
@@ -235,7 +235,7 @@ class LLMUsageTracker {
     return {
       calls: this.sessionUsage.claude.calls + this.sessionUsage.openai.calls,
       cost: Math.round((this.sessionUsage.claude.cost + this.sessionUsage.openai.cost) * 100) / 100,
-      costFormatted: formatCost(this.sessionUsage.claude.cost + this.sessionUsage.openai.cost)
+      costFormatted: formatCost(this.sessionUsage.claude.cost + this.sessionUsage.openai.cost),
     };
   }
 
@@ -246,7 +246,7 @@ class LLMUsageTracker {
     const claude = this.sessionUsage.claude;
     const openai = this.sessionUsage.openai;
     const totalCost = claude.cost + openai.cost;
-    
+
     return {
       period: 'session',
       sessionStart: this.sessionStart.toISOString(),
@@ -256,7 +256,7 @@ class LLMUsageTracker {
         inputTokens: claude.inputTokens,
         outputTokens: claude.outputTokens,
         cost: Math.round(claude.cost * 100) / 100,
-        costFormatted: formatCost(claude.cost)
+        costFormatted: formatCost(claude.cost),
       },
       openai: {
         calls: openai.calls,
@@ -264,15 +264,15 @@ class LLMUsageTracker {
         inputTokens: openai.inputTokens,
         outputTokens: openai.outputTokens,
         cost: Math.round(openai.cost * 100) / 100,
-        costFormatted: formatCost(openai.cost)
+        costFormatted: formatCost(openai.cost),
       },
       total: {
         calls: claude.calls + openai.calls,
         tokens: claude.inputTokens + claude.outputTokens + openai.inputTokens + openai.outputTokens,
         cost: Math.round(totalCost * 100) / 100,
-        costFormatted: formatCost(totalCost)
+        costFormatted: formatCost(totalCost),
       },
-      recentOperations: this.recentOperations.slice(0, 20)
+      recentOperations: this.recentOperations.slice(0, 20),
     };
   }
 
@@ -282,7 +282,7 @@ class LLMUsageTracker {
   resetSession() {
     this.sessionUsage = {
       claude: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
-      openai: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 }
+      openai: { calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
     };
     this.recentOperations = [];
     this.sessionStart = new Date();
@@ -303,9 +303,9 @@ class LLMUsageTracker {
       exportDate: new Date().toISOString(),
       sessionStart: this.sessionStart.toISOString(),
       summary: this.getUsageSummary(),
-      allOperations: this.recentOperations
+      allOperations: this.recentOperations,
     };
-    
+
     return format === 'json' ? JSON.stringify(data, null, 2) : data;
   }
 }
@@ -329,5 +329,5 @@ function resetLLMUsageTracker() {
 module.exports = {
   LLMUsageTracker,
   getLLMUsageTracker,
-  resetLLMUsageTracker
+  resetLLMUsageTracker,
 };

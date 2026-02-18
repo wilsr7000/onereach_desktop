@@ -1,28 +1,28 @@
 /**
  * Omni Data Agent
- * 
+ *
  * Central context provider for all agents. Reads from two main files in "gsx-agent" space:
- * 
+ *
  * 1. main.md - User & system context (auto-populated on first run)
  *    - User info, system info, timezone, locale, installed apps
  *    - User can add location, preferences, custom data
- * 
+ *
  * 2. agent-profile.md - Agent personality settings
  *    - Name, tone, greeting style, verbosity
  *    - User can customize how the agent behaves
- * 
+ *
  * Usage by other agents:
  *   const omniData = require('./omni-data-agent');
- *   
+ *
  *   // Simple query for specific data
  *   const location = await omniData.query('location');
- *   
+ *
  *   // Get agent personality
  *   const profile = await omniData.getAgentProfile();
- *   
+ *
  *   // Smart query based on task context
  *   const context = await omniData.getRelevantContext(task, agentInfo);
- *   
+ *
  *   // Get all available context
  *   const all = await omniData.getAll();
  */
@@ -50,7 +50,7 @@ const CONTEXT_KEYWORDS = {
   preferences: ['prefer', 'settings', 'format', 'units', 'language'],
   user: ['my name', 'who am i', 'about me', 'my profile'],
   system: ['my computer', 'my mac', 'my machine', 'what apps', 'installed'],
-  apps: ['open', 'launch', 'start', 'run app', 'application']
+  apps: ['open', 'launch', 'start', 'run app', 'application'],
 };
 
 /**
@@ -74,7 +74,7 @@ async function getAll() {
 /**
  * Get relevant context based on task and agent info
  * This is the smart query that analyzes what's needed
- * 
+ *
  * @param {Object} task - The task being executed { content, type, data, ... }
  * @param {Object} agentInfo - Info about the requesting agent { id, name, description, ... }
  * @returns {Promise<Object>} - Relevant context for this task
@@ -82,24 +82,24 @@ async function getAll() {
 async function getRelevantContext(task, agentInfo = {}) {
   const allContext = await loadContext();
   const relevantContext = {};
-  
+
   const taskContent = (task?.content || '').toLowerCase();
   const taskType = task?.type || '';
   const agentId = agentInfo?.id || '';
   const agentName = agentInfo?.name || '';
-  
+
   log.info('agent', `Analyzing context for task: "${taskContent.substring(0, 50)}..." agent: ${agentId || agentName}`);
-  
+
   // Check each context type for relevance
   for (const [contextKey, keywords] of Object.entries(CONTEXT_KEYWORDS)) {
-    const isRelevant = keywords.some(keyword => taskContent.includes(keyword));
-    
+    const isRelevant = keywords.some((keyword) => taskContent.includes(keyword));
+
     if (isRelevant && allContext[contextKey]) {
       relevantContext[contextKey] = allContext[contextKey];
       log.info('agent', `Including ${contextKey} context (keyword match)`);
     }
   }
-  
+
   // Agent-specific context rules
   if (agentId === 'search-agent' || agentName?.toLowerCase().includes('search')) {
     // Search agent often needs location for weather, local info
@@ -111,7 +111,7 @@ async function getRelevantContext(task, agentInfo = {}) {
       }
     }
   }
-  
+
   if (agentId === 'time-agent' || taskType === 'time') {
     // Time agent needs timezone
     if (allContext.timezone && !relevantContext.timezone) {
@@ -119,7 +119,7 @@ async function getRelevantContext(task, agentInfo = {}) {
       log.info('agent', 'Including timezone for time task');
     }
   }
-  
+
   // Include preferences if they exist and might be relevant
   if (allContext.preferences && Object.keys(allContext.preferences).length > 0) {
     // Check for preference-sensitive queries
@@ -128,13 +128,13 @@ async function getRelevantContext(task, agentInfo = {}) {
       log.info('agent', 'Including preferences');
     }
   }
-  
+
   // Include system info if relevant
   if (allContext.system && /computer|mac|system|machine|os|version/i.test(taskContent)) {
     relevantContext.system = allContext.system;
     log.info('agent', 'Including system info');
   }
-  
+
   // Include apps if relevant
   if (allContext.apps && allContext.apps.length > 0) {
     if (/app|application|install|open|launch|run|start/i.test(taskContent)) {
@@ -142,7 +142,7 @@ async function getRelevantContext(task, agentInfo = {}) {
       log.info('agent', 'Including installed apps');
     }
   }
-  
+
   // Always include custom data if it exists and task mentions it
   if (allContext.customData) {
     for (const [key, value] of Object.entries(allContext.customData)) {
@@ -152,7 +152,7 @@ async function getRelevantContext(task, agentInfo = {}) {
       }
     }
   }
-  
+
   log.info('agent', `Returning ${Object.keys(relevantContext).length} context items`);
   return relevantContext;
 }
@@ -166,7 +166,7 @@ async function loadContext() {
   if (contextCache && Date.now() - cacheTimestamp < CACHE_TTL) {
     return contextCache;
   }
-  
+
   const context = {
     location: null,
     preferences: {},
@@ -175,16 +175,16 @@ async function loadContext() {
     user: null,
     system: null,
     apps: [],
-    customData: {}
+    customData: {},
   };
-  
+
   try {
     // Use Spaces API instead of direct filesystem access
     const { getSpacesAPI } = require('../../spaces-api');
     const spacesAPI = getSpacesAPI();
-    
+
     let mainContent = null;
-    
+
     // Primary: Try to read from indexed item via Spaces API
     try {
       const item = await spacesAPI.items.get(CONTEXT_SPACE_ID, 'gsx-agent-main-context');
@@ -192,17 +192,17 @@ async function loadContext() {
         mainContent = item.content;
         log.info('agent', 'Loaded context via Spaces API (item)');
       }
-    } catch (e) {
+    } catch (_e) {
       // Item not found via API, try fallback
     }
-    
+
     if (!mainContent) {
       // Fallback: Try to read main.md from the gsx-agent space via filesystem
       // (for backward compatibility with old storage layout)
       const homeDir = process.env.HOME || process.env.USERPROFILE;
       const storageRoot = path.join(homeDir, 'Documents', 'OR-Spaces');
       const itemDir = path.join(storageRoot, 'items', 'gsx-agent-main-context');
-      
+
       if (fs.existsSync(itemDir)) {
         const possibleFiles = ['content.md', 'content.yaml', 'content.txt'];
         for (const file of possibleFiles) {
@@ -215,7 +215,7 @@ async function loadContext() {
         }
       }
     }
-    
+
     if (mainContent) {
       parseMainFile(mainContent, context);
       context.rawContent = mainContent;
@@ -225,17 +225,17 @@ async function loadContext() {
   } catch (error) {
     log.error('agent', 'Error loading context', { error: error.message });
   }
-  
+
   contextCache = context;
   cacheTimestamp = Date.now();
-  
-  const contextSummary = Object.keys(context).filter(k => {
+
+  const contextSummary = Object.keys(context).filter((k) => {
     const v = context[k];
     if (Array.isArray(v)) return v.length > 0;
     return v !== null && (typeof v !== 'object' || Object.keys(v).length > 0);
   });
   log.info('agent', 'Context loaded', { summary: contextSummary.join(', ') || 'empty' });
-  
+
   return context;
 }
 
@@ -246,32 +246,32 @@ async function loadContext() {
 function parseMainFile(content, context) {
   const lines = content.split('\n');
   let currentSection = null;
-  
+
   for (const line of lines) {
     const trimmed = line.trim();
-    
+
     // Check for section header
     if (trimmed.startsWith('## ')) {
       currentSection = trimmed.substring(3).toLowerCase().replace(/\s+/g, '_');
       continue;
     }
-    
+
     // Skip title and empty lines
     if (trimmed.startsWith('# ') || trimmed === '') continue;
-    
+
     // Handle list items for apps
     if (currentSection === 'installed_apps' && trimmed.startsWith('- ')) {
       const app = trimmed.substring(2).trim();
       if (app) context.apps.push(app);
       continue;
     }
-    
+
     // Parse key: value pairs
     const match = trimmed.match(/^(\w+):\s*(.+)$/);
     if (match && currentSection) {
       const key = match[1].toLowerCase();
       const value = match[2].trim();
-      
+
       switch (currentSection) {
         case 'user':
           if (!context.user) context.user = {};
@@ -316,16 +316,16 @@ function parseMainFile(content, context) {
 /**
  * Fallback: Load from individual files (backward compatibility)
  */
-async function loadFromIndividualFiles(spacePath, context) {
+async function _loadFromIndividualFiles(spacePath, context) {
   try {
     if (!fs.existsSync(spacePath)) return;
-    
+
     const files = fs.readdirSync(spacePath);
-    
+
     for (const file of files) {
       if (file === MAIN_FILE || file === PROFILE_FILE) continue;
       if (!file.endsWith('.md') && !file.endsWith('.txt')) continue;
-      
+
       const filePath = path.join(spacePath, file);
       const content = fs.readFileSync(filePath, 'utf-8');
       parseContextFile(file, content, context);
@@ -344,36 +344,36 @@ async function loadAgentProfile() {
   if (profileCache && Date.now() - profileCacheTimestamp < CACHE_TTL) {
     return profileCache;
   }
-  
+
   const profile = {
     identity: {
       name: 'Atlas',
-      role: 'Personal Assistant'
+      role: 'Personal Assistant',
     },
     personality: {
       tone: 'friendly',
       humor: 'light',
-      formality: 'casual'
+      formality: 'casual',
     },
     communication: {
       greeting: null,
       signoff: null,
       verbosity: 'brief',
-      use_emoji: false
+      use_emoji: false,
     },
     preferences: {
       confirm_actions: true,
-      proactive_suggestions: true
-    }
+      proactive_suggestions: true,
+    },
   };
-  
+
   try {
     // Use Spaces API instead of direct filesystem access
     const { getSpacesAPI } = require('../../spaces-api');
     const spacesAPI = getSpacesAPI();
-    
+
     let profileContent = null;
-    
+
     // Primary: Try to read from indexed item via Spaces API
     try {
       const item = await spacesAPI.items.get(CONTEXT_SPACE_ID, 'gsx-agent-profile');
@@ -381,16 +381,16 @@ async function loadAgentProfile() {
         profileContent = item.content;
         log.info('agent', 'Loaded agent profile via Spaces API (item)');
       }
-    } catch (e) {
+    } catch (_e) {
       // Item not found via API, try fallback
     }
-    
+
     if (!profileContent) {
       // Fallback: Try to read from filesystem for backward compatibility
       const homeDir = process.env.HOME || process.env.USERPROFILE;
       const storageRoot = spacesAPI.storage?.baseDir || path.join(homeDir, 'Documents', 'OR-Spaces');
       const profileItemDir = path.join(storageRoot, 'items', 'gsx-agent-profile');
-      
+
       if (fs.existsSync(profileItemDir)) {
         const possibleFiles = ['content.md', 'content.yaml', 'content.txt'];
         for (const file of possibleFiles) {
@@ -403,17 +403,17 @@ async function loadAgentProfile() {
         }
       }
     }
-    
+
     if (profileContent) {
       parseProfileFile(profileContent, profile);
     }
   } catch (error) {
     log.error('agent', 'Error loading agent profile', { error: error.message });
   }
-  
+
   profileCache = profile;
   profileCacheTimestamp = Date.now();
-  
+
   return profile;
 }
 
@@ -423,29 +423,29 @@ async function loadAgentProfile() {
 function parseProfileFile(content, profile) {
   const lines = content.split('\n');
   let currentSection = null;
-  
+
   for (const line of lines) {
     const trimmed = line.trim();
-    
+
     // Check for section header
     if (trimmed.startsWith('## ')) {
       currentSection = trimmed.substring(3).toLowerCase().replace(/\s+/g, '_');
       continue;
     }
-    
+
     // Skip title and empty lines
     if (trimmed.startsWith('# ') || trimmed === '') continue;
-    
+
     // Parse key: value pairs
     const match = trimmed.match(/^(\w+):\s*(.+)$/);
     if (match && currentSection) {
       const key = match[1].toLowerCase();
       let value = match[2].trim();
-      
+
       // Convert boolean strings
       if (value === 'true') value = true;
       else if (value === 'false') value = false;
-      
+
       // Map to profile sections
       if (profile[currentSection]) {
         profile[currentSection][key] = value;
@@ -468,15 +468,15 @@ async function getAgentProfile() {
  */
 function parseContextFile(filename, content, context) {
   const name = filename.toLowerCase().replace(/\.(md|txt)$/, '');
-  
+
   // Parse key: value pairs from content
   const lines = content.split('\n');
   const data = {};
-  
+
   for (const line of lines) {
     // Skip markdown headers and empty lines
     if (line.startsWith('#') || line.trim() === '') continue;
-    
+
     // Match key: value pairs
     const match = line.match(/^(\w+):\s*(.+)$/);
     if (match) {
@@ -485,7 +485,7 @@ function parseContextFile(filename, content, context) {
       data[key] = value;
     }
   }
-  
+
   // Map to context based on filename
   switch (name) {
     case 'location':
@@ -495,30 +495,30 @@ function parseContextFile(filename, content, context) {
           state: data.state || null,
           country: data.country || null,
           zip: data.zip || null,
-          coordinates: data.coordinates || data.coords || null
+          coordinates: data.coordinates || data.coords || null,
         };
       }
       break;
-      
+
     case 'preferences':
     case 'settings':
       context.preferences = { ...context.preferences, ...data };
       break;
-      
+
     case 'timezone':
     case 'time':
       context.timezone = data.timezone || data.tz || data.zone || null;
       break;
-      
+
     case 'user':
     case 'profile':
       context.user = {
         name: data.name || null,
         email: data.email || null,
-        ...data
+        ...data,
       };
       break;
-      
+
     default:
       // Store other files in customData
       if (Object.keys(data).length > 0) {
@@ -545,7 +545,7 @@ function clearCache() {
  */
 async function hasContext() {
   const context = await loadContext();
-  return Object.keys(context).some(k => {
+  return Object.keys(context).some((k) => {
     const v = context[k];
     return v !== null && (typeof v !== 'object' || Object.keys(v).length > 0);
   });
@@ -559,7 +559,7 @@ async function getSummary() {
   const context = await loadContext();
   const profile = await loadAgentProfile();
   const parts = [];
-  
+
   if (context.user?.name) {
     parts.push(`User: ${context.user.name}`);
   }
@@ -581,13 +581,13 @@ async function getSummary() {
   if (profile.identity?.name) {
     parts.push(`Agent: ${profile.identity.name}`);
   }
-  
+
   return parts.length > 0 ? parts.join(' | ') : 'No context data';
 }
 
-module.exports = { 
-  query, 
-  getAll, 
+module.exports = {
+  query,
+  getAll,
   getRelevantContext,
   getAgentProfile,
   clearCache,
@@ -595,5 +595,5 @@ module.exports = {
   getSummary,
   CONTEXT_SPACE_ID,
   MAIN_FILE,
-  PROFILE_FILE
+  PROFILE_FILE,
 };

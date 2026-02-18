@@ -1,13 +1,13 @@
 /**
  * Meeting Notes Agent
- * 
+ *
  * Captures general notes, key points, and bookmarks during meetings:
  * - Notes: General observations or information
  * - Bookmarks: "Bookmark this" marks a moment in the recording
- * 
+ *
  * Part of the meeting-agents space. Used by the Meeting HUD
  * in the recorder to capture notes during meetings.
- * 
+ *
  * Returns structured data: { type, text, tags, deadline }
  */
 
@@ -19,7 +19,8 @@ const log = getLogQueue();
 const meetingNotesAgent = {
   id: 'meeting-notes-agent',
   name: 'Meeting Notes Agent',
-  description: 'Captures general meeting notes, key points, and bookmarks. Says things like "Note: discussed the timeline" or "Key point: 3 sprints needed" or "Bookmark this moment".',
+  description:
+    'Captures general meeting notes, key points, and bookmarks. Says things like "Note: discussed the timeline" or "Key point: 3 sprints needed" or "Bookmark this moment".',
   voice: 'alloy',
   acks: ['Noted.', 'Got it.'],
   categories: ['meeting', 'productivity'],
@@ -37,7 +38,7 @@ const meetingNotesAgent = {
       const items = await spacesApi.getItemsBySpace?.('meeting-agents');
       if (!items || items.length === 0) return { section: 'Meeting Notes', priority: 6, content: null };
       const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-      const recent = items.filter(i => {
+      const recent = items.filter((i) => {
         const created = new Date(i.createdAt || 0).getTime();
         return created > dayAgo && (i.type === 'note' || i.agentId === 'meeting-notes-agent');
       });
@@ -47,7 +48,9 @@ const meetingNotesAgent = {
         priority: 6,
         content: `${recent.length} meeting note${recent.length === 1 ? '' : 's'} captured in the last 24 hours.`,
       };
-    } catch (e) { /* skip */ }
+    } catch (_e) {
+      /* skip */
+    }
     return { section: 'Meeting Notes', priority: 6, content: null };
   },
 
@@ -95,7 +98,7 @@ const meetingNotesAgent = {
             `- [${timestamp}] [${typeLabel}] [${tagStr}] ${extraction.text}`
           );
           this.memory.save();
-        } catch (e) {
+        } catch (_e) {
           // Non-fatal
         }
       }
@@ -123,9 +126,10 @@ async function _extractNote(text) {
   try {
     const data = await ai.chat({
       profile: 'fast',
-      messages: [{
-        role: 'user',
-        content: `Extract the meeting note from this input. Return JSON only.
+      messages: [
+        {
+          role: 'user',
+          content: `Extract the meeting note from this input. Return JSON only.
 
 Input: "${text}"
 
@@ -142,7 +146,8 @@ Examples:
 - "Important: Sarah mentioned the compliance deadline is April 1" -> {"type":"note","text":"Compliance deadline is April 1","tags":["Sarah"],"deadline":"April 1"}
 
 Return ONLY valid JSON, no other text.`,
-      }],
+        },
+      ],
       temperature: 0.1,
       maxTokens: 200,
       jsonMode: true,

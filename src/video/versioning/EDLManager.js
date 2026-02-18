@@ -18,7 +18,7 @@ const log = getLogQueue();
 export const SEGMENT_TYPES = {
   INCLUDE: 'include',
   EXCLUDE: 'exclude',
-  SILENCE: 'silence'
+  SILENCE: 'silence',
 };
 
 /**
@@ -44,12 +44,12 @@ export class EDLManager {
       playlist = [],
       audioTracks = [],
       deadSpaceRegions = [],
-      effects = {}
+      effects = {},
     } = editorState;
 
     // Build segments from playlist or full video
     let segments = [];
-    
+
     if (playlist && playlist.length > 0) {
       // Use playlist items as segments
       segments = playlist.map((item, index) => ({
@@ -58,24 +58,28 @@ export class EDLManager {
         endTime: item.outTime || item.endTime,
         type: SEGMENT_TYPES.INCLUDE,
         name: item.name || `Segment ${index + 1}`,
-        markerId: item.markerId
+        markerId: item.markerId,
       }));
     } else if (trimStart > 0 || trimEnd !== null) {
       // Use trim points
-      segments = [{
-        id: 'seg_001',
-        startTime: trimStart,
-        endTime: trimEnd,
-        type: SEGMENT_TYPES.INCLUDE
-      }];
+      segments = [
+        {
+          id: 'seg_001',
+          startTime: trimStart,
+          endTime: trimEnd,
+          type: SEGMENT_TYPES.INCLUDE,
+        },
+      ];
     } else {
       // Full video
-      segments = [{
-        id: 'seg_001',
-        startTime: 0,
-        endTime: duration || null,
-        type: SEGMENT_TYPES.INCLUDE
-      }];
+      segments = [
+        {
+          id: 'seg_001',
+          startTime: 0,
+          endTime: duration || null,
+          type: SEGMENT_TYPES.INCLUDE,
+        },
+      ];
     }
 
     // Add dead space regions as silence segments
@@ -86,13 +90,13 @@ export class EDLManager {
           startTime: region.startTime,
           endTime: region.endTime,
           type: SEGMENT_TYPES.SILENCE,
-          trackId: region.trackId
+          trackId: region.trackId,
         });
       }
     }
 
     // Build markers list
-    const edlMarkers = markers.map(marker => ({
+    const edlMarkers = markers.map((marker) => ({
       id: marker.id,
       name: marker.name,
       type: marker.type, // 'spot' or 'range'
@@ -105,25 +109,25 @@ export class EDLManager {
       tags: marker.tags || [],
       notes: marker.notes,
       createdAt: marker.createdAt,
-      modifiedAt: marker.modifiedAt
+      modifiedAt: marker.modifiedAt,
     }));
 
     // Build audio tracks
-    const edlAudioTracks = audioTracks.map(track => ({
+    const edlAudioTracks = audioTracks.map((track) => ({
       id: track.id,
       name: track.name,
       type: track.type, // 'original', 'voice', 'music', 'sfx', 'ambience'
       muted: track.muted,
       volume: track.volume,
-      clips: (track.clips || []).map(clip => ({
+      clips: (track.clips || []).map((clip) => ({
         id: clip.id,
         name: clip.name,
         sourcePath: clip.sourcePath,
         startTime: clip.startTime,
         endTime: clip.endTime,
         duration: clip.duration,
-        type: clip.type
-      }))
+        type: clip.type,
+      })),
     }));
 
     // Build effects object
@@ -131,7 +135,7 @@ export class EDLManager {
       fadeIn: effects.fadeIn || null,
       fadeOut: effects.fadeOut || null,
       speed: effects.speed || 1.0,
-      reversed: effects.reversed || false
+      reversed: effects.reversed || false,
     };
 
     return {
@@ -142,7 +146,7 @@ export class EDLManager {
       segments: segments,
       markers: edlMarkers,
       audioTracks: edlAudioTracks,
-      effects: edlEffects
+      effects: edlEffects,
     };
   }
 
@@ -159,35 +163,33 @@ export class EDLManager {
       playlist: [],
       audioTracks: [],
       deadSpaceRegions: [],
-      effects: edl.effects || {}
+      effects: edl.effects || {},
     };
 
     // Convert segments to playlist
-    const includeSegments = (edl.segments || []).filter(
-      seg => seg.type === SEGMENT_TYPES.INCLUDE
-    );
-    
-    state.playlist = includeSegments.map(seg => ({
+    const includeSegments = (edl.segments || []).filter((seg) => seg.type === SEGMENT_TYPES.INCLUDE);
+
+    state.playlist = includeSegments.map((seg) => ({
       id: seg.id,
       name: seg.name || 'Segment',
       inTime: seg.startTime,
       outTime: seg.endTime,
       duration: seg.endTime ? seg.endTime - seg.startTime : null,
-      markerId: seg.markerId
+      markerId: seg.markerId,
     }));
 
     // Extract dead space regions
     state.deadSpaceRegions = (edl.segments || [])
-      .filter(seg => seg.type === SEGMENT_TYPES.SILENCE)
-      .map(seg => ({
+      .filter((seg) => seg.type === SEGMENT_TYPES.SILENCE)
+      .map((seg) => ({
         id: seg.id,
         startTime: seg.startTime,
         endTime: seg.endTime,
-        trackId: seg.trackId
+        trackId: seg.trackId,
       }));
 
     // Convert markers
-    state.markers = (edl.markers || []).map(marker => ({
+    state.markers = (edl.markers || []).map((marker) => ({
       id: marker.id,
       name: marker.name,
       type: marker.type,
@@ -202,25 +204,25 @@ export class EDLManager {
       tags: marker.tags || [],
       notes: marker.notes,
       createdAt: marker.createdAt,
-      modifiedAt: marker.modifiedAt
+      modifiedAt: marker.modifiedAt,
     }));
 
     // Convert audio tracks
-    state.audioTracks = (edl.audioTracks || []).map(track => ({
+    state.audioTracks = (edl.audioTracks || []).map((track) => ({
       id: track.id,
       name: track.name,
       type: track.type,
       muted: track.muted,
       volume: track.volume,
-      clips: (track.clips || []).map(clip => ({
+      clips: (track.clips || []).map((clip) => ({
         id: clip.id,
         name: clip.name,
         sourcePath: clip.sourcePath,
         startTime: clip.startTime,
         endTime: clip.endTime,
         duration: clip.duration,
-        type: clip.type
-      }))
+        type: clip.type,
+      })),
     }));
 
     // Set trim points if only one include segment
@@ -269,9 +271,7 @@ export class EDLManager {
     let output = `TITLE: ${edl.sourceVideo || 'Untitled'}\n`;
     output += `FCM: NON-DROP FRAME\n\n`;
 
-    const includeSegments = (edl.segments || []).filter(
-      seg => seg.type === SEGMENT_TYPES.INCLUDE
-    );
+    const includeSegments = (edl.segments || []).filter((seg) => seg.type === SEGMENT_TYPES.INCLUDE);
 
     let eventNumber = 1;
     let recordIn = 0;
@@ -301,9 +301,7 @@ export class EDLManager {
    * @returns {string} FCP XML formatted string
    */
   exportToFCPXML(edl, fps = 30) {
-    const includeSegments = (edl.segments || []).filter(
-      seg => seg.type === SEGMENT_TYPES.INCLUDE
-    );
+    const includeSegments = (edl.segments || []).filter((seg) => seg.type === SEGMENT_TYPES.INCLUDE);
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
     xml += `<!DOCTYPE xmeml>\n`;
@@ -354,20 +352,22 @@ export class EDLManager {
   importFromCMX3600(cmxContent, sourceVideo, fps = 30) {
     const lines = cmxContent.split('\n');
     const segments = [];
-    
+
     let i = 0;
     while (i < lines.length) {
       const line = lines[i].trim();
-      
+
       // Match event line pattern: NNN  REEL  TYPE  TRANS  SRC_IN  SRC_OUT  REC_IN  REC_OUT
-      const eventMatch = line.match(/^(\d{3})\s+\S+\s+\S+\s+\S+\s+(\d{2}:\d{2}:\d{2}:\d{2})\s+(\d{2}:\d{2}:\d{2}:\d{2})/);
-      
+      const eventMatch = line.match(
+        /^(\d{3})\s+\S+\s+\S+\s+\S+\s+(\d{2}:\d{2}:\d{2}:\d{2})\s+(\d{2}:\d{2}:\d{2}:\d{2})/
+      );
+
       if (eventMatch) {
         const srcIn = this._timecodeToSeconds(eventMatch[2], fps);
         const srcOut = this._timecodeToSeconds(eventMatch[3], fps);
-        
+
         let name = `Segment ${segments.length + 1}`;
-        
+
         // Check for clip name comment
         if (i + 1 < lines.length) {
           const nextLine = lines[i + 1].trim();
@@ -376,16 +376,16 @@ export class EDLManager {
             name = nameMatch[1];
           }
         }
-        
+
         segments.push({
           id: `seg_${String(segments.length + 1).padStart(3, '0')}`,
           startTime: srcIn,
           endTime: srcOut,
           type: SEGMENT_TYPES.INCLUDE,
-          name: name
+          name: name,
         });
       }
-      
+
       i++;
     }
 
@@ -397,7 +397,7 @@ export class EDLManager {
       segments: segments,
       markers: [],
       audioTracks: [],
-      effects: {}
+      effects: {},
     };
   }
 
@@ -411,7 +411,7 @@ export class EDLManager {
     const minutes = Math.floor((totalFrames % (fps * 60 * 60)) / (fps * 60));
     const secs = Math.floor((totalFrames % (fps * 60)) / fps);
     const frames = totalFrames % fps;
-    
+
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}:${String(frames).padStart(2, '0')}`;
   }
 
@@ -422,7 +422,7 @@ export class EDLManager {
   _timecodeToSeconds(timecode, fps) {
     const parts = timecode.split(':').map(Number);
     if (parts.length !== 4) return 0;
-    
+
     const [hours, minutes, seconds, frames] = parts;
     return hours * 3600 + minutes * 60 + seconds + frames / fps;
   }
@@ -445,9 +445,9 @@ export class EDLManager {
     } else {
       // Check for overlapping segments
       const includes = edl.segments
-        .filter(s => s.type === SEGMENT_TYPES.INCLUDE)
+        .filter((s) => s.type === SEGMENT_TYPES.INCLUDE)
         .sort((a, b) => a.startTime - b.startTime);
-      
+
       for (let i = 1; i < includes.length; i++) {
         if (includes[i].startTime < includes[i - 1].endTime) {
           warnings.push(`Overlapping segments: ${includes[i - 1].id} and ${includes[i].id}`);
@@ -468,7 +468,7 @@ export class EDLManager {
     return {
       valid: errors.length === 0,
       errors,
-      warnings
+      warnings,
     };
   }
 
@@ -478,24 +478,11 @@ export class EDLManager {
    * @returns {number} Total duration in seconds
    */
   calculateDuration(edl) {
-    const includeSegments = (edl.segments || []).filter(
-      seg => seg.type === SEGMENT_TYPES.INCLUDE
-    );
-    
+    const includeSegments = (edl.segments || []).filter((seg) => seg.type === SEGMENT_TYPES.INCLUDE);
+
     return includeSegments.reduce((total, seg) => {
       const duration = (seg.endTime || 0) - (seg.startTime || 0);
       return total + Math.max(0, duration);
     }, 0);
   }
 }
-
-
-
-
-
-
-
-
-
-
-

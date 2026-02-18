@@ -5,7 +5,7 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 // Mock docx package before importing agent
 vi.mock('docx', () => ({
   Document: vi.fn().mockImplementation(() => ({})),
-  Packer: { toBuffer: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)])) },
+  Packer: { toBuffer: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)])) },
   Paragraph: vi.fn().mockImplementation((opts) => opts || {}),
   TextRun: vi.fn().mockImplementation((opts) => opts || {}),
   HeadingLevel: { HEADING_1: 'HEADING_1', HEADING_2: 'HEADING_2', HEADING_3: 'HEADING_3' },

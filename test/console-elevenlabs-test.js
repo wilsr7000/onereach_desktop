@@ -1,6 +1,6 @@
 /**
  * ElevenLabs API Test Script - Run in Video Editor DevTools Console
- * 
+ *
  * Copy and paste this entire script into the Video Editor's DevTools console
  * (Open Video Editor > Right-click > Inspect > Console tab)
  */
@@ -38,7 +38,7 @@
   console.log('MODELS API');
   console.log('='.repeat(40));
 
-  const models = await runTest('List Models', async () => {
+  const _models = await runTest('List Models', async () => {
     const result = await window.videoEditor.listModels();
     if (!result.success) throw new Error(result.error);
     return `Found ${result.models?.length || 0} models`;
@@ -59,7 +59,7 @@
   const createdProject = await runTest('Create Studio Project', async () => {
     const result = await window.videoEditor.createStudioProject(testProjectName, {
       defaultModelId: 'eleven_multilingual_v2',
-      qualityPreset: 'standard'
+      qualityPreset: 'standard',
     });
     if (!result.success) throw new Error(result.error);
     return `Created project: ${result.project_id}`;
@@ -70,7 +70,7 @@
     const projectIdMatch = createdProject.match(/Created project: (.+)/);
     if (projectIdMatch) {
       const projectId = projectIdMatch[1];
-      
+
       await runTest('Get Studio Project', async () => {
         const result = await window.videoEditor.getStudioProject(projectId);
         if (!result.success) throw new Error(result.error);
@@ -123,7 +123,7 @@
       age: 'young',
       accent: 'american',
       accentStrength: 1.0,
-      text: 'Hello, this is a test of voice design.'
+      text: 'Hello, this is a test of voice design.',
     });
     if (!result.success) throw new Error(result.error);
     return `Audio generated: ${result.audioPath}`;
@@ -199,21 +199,10 @@
 
   if (results.failed.length > 0) {
     console.log('\n❌ Failed tests:');
-    results.failed.forEach(f => console.log(`   - ${f.name}: ${f.error}`));
+    results.failed.forEach((f) => console.log(`   - ${f.name}: ${f.error}`));
   }
 
   console.log('\n' + '='.repeat(60));
-  
+
   return results;
 })();
-
-
-
-
-
-
-
-
-
-
-

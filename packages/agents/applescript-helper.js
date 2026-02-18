@@ -1,6 +1,6 @@
 /**
  * AppleScript Helper
- * 
+ *
  * Generates dynamic AppleScripts that return structured feedback,
  * allowing agents to understand what happened and retry if needed.
  */
@@ -20,17 +20,17 @@ const execAsync = promisify(exec);
 async function runScript(script, timeout = 10000) {
   try {
     const escapedScript = script.replace(/'/g, "'\"'\"'");
-    const { stdout, stderr } = await execAsync(`osascript -e '${escapedScript}'`, { timeout });
+    const { stdout } = await execAsync(`osascript -e '${escapedScript}'`, { timeout });
     return {
       success: true,
       output: stdout.trim(),
-      error: null
+      error: null,
     };
   } catch (error) {
     return {
       success: false,
       output: '',
-      error: error.message || 'AppleScript execution failed'
+      error: error.message || 'AppleScript execution failed',
     };
   }
 }
@@ -82,24 +82,24 @@ async function getRecentlyPlayed(limit = 10) {
       return output
     end tell
   `;
-  
+
   try {
     const result = await runScript(script, 10000); // 10s is plenty
-    
+
     if (!result.success || !result.output) {
       return [];
     }
-    
+
     const tracks = [];
     const entries = result.output.split('|||');
-    
+
     for (const entry of entries) {
       const [name, artist, album] = entry.split('|');
       if (name && name.trim()) {
         tracks.push({ name: name.trim(), artist: artist?.trim() || '', album: album?.trim() || '' });
       }
     }
-    
+
     return tracks;
   } catch (e) {
     log.warn('agent', 'Play history error', { error: e.message });
@@ -148,18 +148,18 @@ async function getTopGenres() {
       return output
     end tell
   `;
-  
+
   try {
     const result = await runScript(script, 15000);
-    
+
     if (!result.success || !result.output) {
       return [];
     }
-    
+
     // Count occurrences of each genre (simple frequency from what we sampled)
-    const genreList = result.output.split('|').filter(g => g.trim());
-    const genres = genreList.map(genre => ({ genre: genre.trim(), count: 1 }));
-    
+    const genreList = result.output.split('|').filter((g) => g.trim());
+    const genres = genreList.map((genre) => ({ genre: genre.trim(), count: 1 }));
+
     // Return top 5 unique genres
     return genres.slice(0, 5);
   } catch (e) {
@@ -183,11 +183,11 @@ async function getTopGenres() {
  */
 async function createMoodPlaylist(playlistName, criteria = {}) {
   const { genre, mood, artist, limit = 25, shuffle = true } = criteria;
-  
+
   // Escape special characters for AppleScript
-  const escapeAS = (str) => str ? str.replace(/["\\]/g, '\\$&') : '';
+  const escapeAS = (str) => (str ? str.replace(/["\\]/g, '\\$&') : '');
   const safePlaylistName = escapeAS(playlistName);
-  
+
   // Map moods to genres (Apple Music uses genre tags, not mood tags)
   const moodToGenres = {
     mellow: ['Singer/Songwriter', 'Folk', 'Acoustic', 'Ambient', 'Easy Listening', 'Jazz', 'Classical'],
@@ -199,19 +199,19 @@ async function createMoodPlaylist(playlistName, criteria = {}) {
     relaxing: ['Ambient', 'Classical', 'Jazz', 'New Age', 'Easy Listening'],
     workout: ['Dance', 'Electronic', 'Hip-Hop/Rap', 'Rock', 'Metal'],
     romantic: ['R&B/Soul', 'Jazz', 'Pop', 'Singer/Songwriter'],
-    chill: ['Jazz', 'Electronic', 'Ambient', 'R&B/Soul', 'Reggae']
+    chill: ['Jazz', 'Electronic', 'Ambient', 'R&B/Soul', 'Reggae'],
   };
-  
+
   // Strategy 1: Try genre-based search (fastest)
   const targetGenres = [];
   if (genre) targetGenres.push(genre);
   if (mood && moodToGenres[mood.toLowerCase()]) {
     targetGenres.push(...moodToGenres[mood.toLowerCase()]);
   }
-  
+
   // Build the AppleScript - use native search which is MUCH faster
   let script;
-  
+
   if (artist) {
     // Artist-specific playlist
     script = `
@@ -246,10 +246,11 @@ async function createMoodPlaylist(playlistName, criteria = {}) {
     `;
   } else if (targetGenres.length > 0) {
     // Genre-based playlist - use native 'whose' clause for speed
-    const genreConditions = targetGenres.slice(0, 5).map(g => 
-      `genre contains "${escapeAS(g)}"`
-    ).join(' or ');
-    
+    const genreConditions = targetGenres
+      .slice(0, 5)
+      .map((g) => `genre contains "${escapeAS(g)}"`)
+      .join(' or ');
+
     script = `
       tell application "Music"
         try
@@ -367,74 +368,75 @@ async function createMoodPlaylist(playlistName, criteria = {}) {
       end tell
     `;
   }
-  
+
   // Retry logic with exponential backoff
   const maxRetries = 2;
   let lastError = null;
-  
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       if (attempt > 0) {
         log.info('agent', `Playlist retry attempt ${attempt}/${maxRetries}`);
-        await new Promise(r => setTimeout(r, 1000 * attempt)); // Backoff
+        await new Promise((r) => {
+          setTimeout(r, 1000 * attempt);
+        }); // Backoff
       }
-      
+
       const result = await runScript(script, 45000); // 45s timeout
-      
+
       if (!result.success) {
         lastError = result.error;
         log.warn('agent', `Playlist attempt ${attempt} failed`, { error: result.error });
-        
+
         // If it's a permission error, don't retry
         if (result.error?.includes('not allowed') || result.error?.includes('permission')) {
           break;
         }
         continue;
       }
-      
+
       const [status, count] = (result.output || '').split(':');
       const trackCount = parseInt(count) || 0;
-      
+
       if (status === 'EMPTY') {
         log.info('agent', 'No matching tracks found in library');
         return {
           success: false,
           playlistName,
           trackCount: 0,
-          message: `Couldn't find matching tracks in your library`
+          message: `Couldn't find matching tracks in your library`,
         };
       }
-      
+
       if (status === 'SUCCESS' && trackCount > 0) {
         log.info('agent', `Playlist created with ${trackCount} tracks`);
         return {
           success: true,
           playlistName,
           trackCount,
-          message: `Created a ${trackCount}-track mix and started playing`
+          message: `Created a ${trackCount}-track mix and started playing`,
         };
       }
-      
+
       // Unexpected output - retry
       lastError = `Unexpected output: ${result.output}`;
-      
     } catch (e) {
       lastError = e.message;
       log.warn('agent', `Playlist attempt ${attempt} error`, { error: e.message });
-      
+
       // Timeout errors are worth retrying
       if (!e.message?.includes('timeout')) {
         break;
       }
     }
   }
-  
+
   log.error('agent', 'Playlist creation failed after retries', { lastError });
   return {
     success: false,
     playlistName,
     trackCount: 0,
-    message: `Couldn't create playlist from your library`
+    message: `Couldn't create playlist from your library`,
   };
 }
 
@@ -464,23 +466,21 @@ async function addToQueue(searchTerm, count = 5) {
       return addedCount as text
     end tell
   `;
-  
+
   try {
     const result = await runScript(script, 30000);
     const addedCount = parseInt(result.output) || 0;
-    
+
     return {
       success: addedCount > 0,
       count: addedCount,
-      message: addedCount > 0 
-        ? `Added ${addedCount} tracks to queue`
-        : `Couldn't find tracks matching "${searchTerm}"`
+      message: addedCount > 0 ? `Added ${addedCount} tracks to queue` : `Couldn't find tracks matching "${searchTerm}"`,
     };
   } catch (e) {
     return {
       success: false,
       count: 0,
-      message: `Error adding to queue: ${e.message}`
+      message: `Error adding to queue: ${e.message}`,
     };
   }
 }
@@ -547,19 +547,19 @@ async function getFullMusicStatus(app = 'Music') {
       end try
     end tell
   `;
-  
+
   const result = await runScript(script, 15000);
-  
+
   if (!result.success) {
     return {
       running: false,
       state: 'unknown',
-      error: result.error
+      error: result.error,
     };
   }
-  
+
   const output = result.output;
-  
+
   if (output === 'NOT_RUNNING') {
     return {
       running: false,
@@ -567,27 +567,31 @@ async function getFullMusicStatus(app = 'Music') {
       track: null,
       artist: null,
       volume: null,
-      airplayDevices: []
+      airplayDevices: [],
     };
   }
-  
+
   if (output.startsWith('ERROR||')) {
     return {
       running: true,
       state: 'error',
-      error: output.replace('ERROR||', '')
+      error: output.replace('ERROR||', ''),
     };
   }
-  
+
   // Parse the output: state||volume||shuffle||repeat||trackInfo||airplayDevices
   const parts = output.split('||');
   const state = parts[0] || 'unknown';
   const volume = parseInt(parts[1]) || 0;
   const shuffle = parts[2] === 'true';
   const repeat = parts[3] || 'off';
-  
+
   // Parse track info: name|artist|album|position/duration
-  let track = null, artist = null, album = null, position = 0, duration = 0;
+  let track = null,
+    artist = null,
+    album = null,
+    position = 0,
+    duration = 0;
   if (parts[4] && parts[4] !== 'NO_TRACK|NO_ARTIST|NO_ALBUM|0') {
     const trackParts = parts[4].split('|');
     track = trackParts[0] !== 'NO_TRACK' ? trackParts[0] : null;
@@ -599,7 +603,7 @@ async function getFullMusicStatus(app = 'Music') {
       duration = parseInt(posDur[1]) || 0;
     }
   }
-  
+
   // Parse AirPlay devices: name:selected;name:selected
   const airplayDevices = [];
   if (parts[5] && parts[5] !== 'NO_AIRPLAY') {
@@ -609,12 +613,12 @@ async function getFullMusicStatus(app = 'Music') {
       if (name) {
         airplayDevices.push({
           name: name.trim(),
-          selected: selected === 'true'
+          selected: selected === 'true',
         });
       }
     }
   }
-  
+
   return {
     running: true,
     state,
@@ -627,7 +631,7 @@ async function getFullMusicStatus(app = 'Music') {
     position,
     duration,
     airplayDevices,
-    currentSpeaker: airplayDevices.find(d => d.selected)?.name || 'Computer'
+    currentSpeaker: airplayDevices.find((d) => d.selected)?.name || 'Computer',
   };
 }
 
@@ -670,9 +674,9 @@ async function getMediaState(app = 'Music') {
     
     return output
   `;
-  
+
   const result = await runScript(script);
-  
+
   if (!result.success) {
     return {
       running: false,
@@ -680,22 +684,22 @@ async function getMediaState(app = 'Music') {
       track: null,
       artist: null,
       hasContent: false,
-      error: result.error
+      error: result.error,
     };
   }
-  
+
   const output = result.output;
-  
+
   if (output === 'NOT_RUNNING') {
     return {
       running: false,
       state: 'not_running',
       track: null,
       artist: null,
-      hasContent: false
+      hasContent: false,
     };
   }
-  
+
   if (output.startsWith('ERROR|')) {
     return {
       running: true,
@@ -703,21 +707,21 @@ async function getMediaState(app = 'Music') {
       track: null,
       artist: null,
       hasContent: false,
-      error: output.replace('ERROR|', '')
+      error: output.replace('ERROR|', ''),
     };
   }
-  
+
   const parts = output.split('|');
   const state = parts[0] || 'unknown';
   const track = parts[1] !== 'NO_TRACK' ? parts[1] : null;
   const artist = parts[2] !== 'NO_ARTIST' ? parts[2] : null;
-  
+
   return {
     running: true,
     state,
     track,
     artist,
-    hasContent: track !== null
+    hasContent: track !== null,
   };
 }
 
@@ -730,25 +734,28 @@ async function getMediaState(app = 'Music') {
 async function smartPlay(app = 'Music', query = null) {
   // Step 1: Check current state
   const beforeState = await getMediaState(app);
-  
+
   // Not running - try to open
   if (!beforeState.running) {
-    const openResult = await runScript(`
+    const openResult = await runScript(
+      `
       tell application "${app}" to activate
       delay 2
       tell application "${app}" to play
-    `, 15000);
-    
+    `,
+      15000
+    );
+
     if (!openResult.success) {
       return {
         success: false,
         message: `${app} couldn't be opened`,
         action: 'open_failed',
         canRetry: false,
-        suggestion: `Make sure ${app} is installed`
+        suggestion: `Make sure ${app} is installed`,
       };
     }
-    
+
     // Check if it worked
     const afterOpen = await getMediaState(app);
     if (afterOpen.state === 'playing') {
@@ -757,25 +764,26 @@ async function smartPlay(app = 'Music', query = null) {
         message: afterOpen.track ? `Now playing "${afterOpen.track}" by ${afterOpen.artist}` : `${app} is now playing`,
         action: 'opened_and_playing',
         canRetry: false,
-        suggestion: null
+        suggestion: null,
       };
     }
-    
+
     return {
       success: false,
       message: `${app} opened but nothing is playing`,
       action: 'opened_no_content',
       canRetry: true,
-      suggestion: `Try saying "play [song name]" or open ${app} and select some music first`
+      suggestion: `Try saying "play [song name]" or open ${app} and select some music first`,
     };
   }
-  
+
   // If user requested specific content, ALWAYS search for it (don't shortcut)
   if (query) {
     // Search and play specific content - with smart matching
     const searchQuery = query.replace(/"/g, '\\"').replace(/'/g, '');
-    const searchScript = app === 'Music' 
-      ? `
+    const searchScript =
+      app === 'Music'
+        ? `
         tell application "Music"
           set searchResults to search playlist "Library" for "${searchQuery}"
           if length of searchResults = 0 then
@@ -816,7 +824,7 @@ async function smartPlay(app = 'Music', query = null) {
           end try
         end tell
       `
-      : `
+        : `
         tell application "Spotify" to activate
         delay 0.5
         tell application "System Events"
@@ -828,38 +836,38 @@ async function smartPlay(app = 'Music', query = null) {
         end tell
         return "SEARCHED"
       `;
-    
+
     const searchResult = await runScript(searchScript, 20000);
-    
+
     if (searchResult.output === 'NOT_FOUND') {
       return {
         success: false,
         message: `Couldn't find "${query}" in your library`,
         action: 'search_no_results',
         canRetry: true,
-        suggestion: `Try a different search term, or make sure the song is in your ${app} library`
+        suggestion: `Try a different search term, or make sure the song is in your ${app} library`,
       };
     }
-    
+
     // Parse the PLAYING|trackName|artist response
     if (searchResult.output?.startsWith('PLAYING|')) {
       const parts = searchResult.output.split('|');
       const nowPlaying = parts[1] || '';
       const nowArtist = parts[2] || '';
-      
+
       // Verify we're playing something close to what was requested
       const queryLower = query.toLowerCase();
       const trackLower = nowPlaying.toLowerCase();
-      
+
       const isMatch = trackLower.includes(queryLower) || queryLower.includes(trackLower);
-      
+
       if (isMatch) {
         return {
           success: true,
           message: `Now playing "${nowPlaying}" by ${nowArtist}`,
           action: 'search_playing',
           canRetry: false,
-          suggestion: null
+          suggestion: null,
         };
       } else {
         // Found something but not what was requested
@@ -870,28 +878,30 @@ async function smartPlay(app = 'Music', query = null) {
           canRetry: true,
           nowPlaying,
           nowArtist,
-          suggestion: `"${query}" may not be in your library. Playing closest match.`
+          suggestion: `"${query}" may not be in your library. Playing closest match.`,
         };
       }
     }
-    
+
     // Fallback: check state
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => {
+      setTimeout(r, 500);
+    });
     const afterSearch = await getMediaState(app);
-    
+
     if (afterSearch.state === 'playing') {
       // Verify track matches
       const queryLower = query.toLowerCase();
       const trackLower = (afterSearch.track || '').toLowerCase();
       const isMatch = trackLower.includes(queryLower) || queryLower.includes(trackLower);
-      
+
       if (isMatch) {
         return {
           success: true,
           message: `Now playing "${afterSearch.track}" by ${afterSearch.artist}`,
           action: 'search_playing',
           canRetry: false,
-          suggestion: null
+          suggestion: null,
         };
       } else {
         return {
@@ -899,42 +909,40 @@ async function smartPlay(app = 'Music', query = null) {
           message: `Searched for "${query}" but playing "${afterSearch.track}" instead`,
           action: 'search_wrong_track',
           canRetry: true,
-          suggestion: `"${query}" may not be in your library`
+          suggestion: `"${query}" may not be in your library`,
         };
       }
     }
-    
+
     return {
       success: false,
       message: `Searched for "${query}" but playback didn't start`,
       action: 'search_no_play',
       canRetry: true,
-      suggestion: 'Try playing it manually or check if the song is available'
+      suggestion: 'Try playing it manually or check if the song is available',
     };
   }
-  
+
   // Generic play - just try
   await runScript(`tell application "${app}" to play`);
   const afterPlay = await getMediaState(app);
-  
+
   if (afterPlay.state === 'playing') {
     return {
       success: true,
-      message: afterPlay.track 
-        ? `Now playing "${afterPlay.track}" by ${afterPlay.artist}`
-        : 'Music is now playing',
+      message: afterPlay.track ? `Now playing "${afterPlay.track}" by ${afterPlay.artist}` : 'Music is now playing',
       action: 'generic_playing',
       canRetry: false,
-      suggestion: null
+      suggestion: null,
     };
   }
-  
+
   return {
     success: false,
     message: `${app} is open but there's nothing to play`,
     action: 'no_content',
     canRetry: true,
-    suggestion: `Open ${app} and add some music to your library or queue, then try again`
+    suggestion: `Open ${app} and add some music to your library or queue, then try again`,
   };
 }
 
@@ -943,34 +951,34 @@ async function smartPlay(app = 'Music', query = null) {
  */
 async function smartPause(app = 'Music') {
   const beforeState = await getMediaState(app);
-  
+
   if (!beforeState.running) {
     return {
       success: false,
       message: `${app} isn't running`,
       action: 'not_running',
-      canRetry: false
+      canRetry: false,
     };
   }
-  
+
   if (beforeState.state === 'paused' || beforeState.state === 'stopped') {
     return {
       success: true,
       message: 'Already paused',
       action: 'already_paused',
-      canRetry: false
+      canRetry: false,
     };
   }
-  
+
   await runScript(`tell application "${app}" to pause`);
-  
+
   return {
     success: true,
     message: beforeState.track ? `Paused "${beforeState.track}"` : 'Paused',
     action: 'paused',
     previousTrack: beforeState.track,
     previousArtist: beforeState.artist,
-    canRetry: false
+    canRetry: false,
   };
 }
 
@@ -979,46 +987,48 @@ async function smartPause(app = 'Music') {
  */
 async function smartSkip(app = 'Music') {
   const beforeState = await getMediaState(app);
-  
+
   if (!beforeState.running || beforeState.state === 'stopped') {
     return {
       success: false,
       message: `Nothing is playing to skip`,
       action: 'nothing_playing',
       canRetry: false,
-      suggestion: 'Start playing music first'
+      suggestion: 'Start playing music first',
     };
   }
-  
+
   const previousTrack = beforeState.track;
   await runScript(`tell application "${app}" to next track`);
-  
-  await new Promise(r => setTimeout(r, 500));
+
+  await new Promise((r) => {
+    setTimeout(r, 500);
+  });
   const afterState = await getMediaState(app);
-  
+
   if (afterState.track && afterState.track !== previousTrack) {
     return {
       success: true,
       message: `Skipped to "${afterState.track}" by ${afterState.artist}`,
       action: 'skipped',
-      canRetry: false
+      canRetry: false,
     };
   }
-  
+
   if (afterState.state === 'stopped') {
     return {
       success: true,
       message: 'Reached end of playlist',
       action: 'end_of_playlist',
-      canRetry: false
+      canRetry: false,
     };
   }
-  
+
   return {
     success: true,
     message: 'Skipped to next track',
     action: 'skipped',
-    canRetry: false
+    canRetry: false,
   };
 }
 
@@ -1031,41 +1041,43 @@ async function smartSkip(app = 'Music') {
  */
 async function smartPlayGenre(genre, app = 'Music') {
   const genreLower = genre.toLowerCase();
-  
+
   // Map moods to Apple Music playlist/station keywords
   const genreMap = {
-    'jazz': ['Jazz', 'Jazz Essentials', 'Jazz Chill'],
-    'classical': ['Classical', 'Classical Essentials', 'Piano Chill'],
-    'lofi': ['Lo-Fi', 'Lofi Beats', 'Chill Beats', 'Lo-Fi Cafe'],
+    jazz: ['Jazz', 'Jazz Essentials', 'Jazz Chill'],
+    classical: ['Classical', 'Classical Essentials', 'Piano Chill'],
+    lofi: ['Lo-Fi', 'Lofi Beats', 'Chill Beats', 'Lo-Fi Cafe'],
     'lo-fi': ['Lo-Fi', 'Lofi Beats', 'Chill Beats'],
-    'chill': ['Chill', 'Chill Mix', 'Pure Chill', 'Chill Vibes'],
-    'relaxing': ['Chill', 'Pure Chill', 'Peaceful Piano'],
-    'focused': ['Focus', 'Deep Focus', 'Study Beats', 'Concentration'],
-    'electronic': ['Electronic', 'Dance', 'EDM', 'Electronic Mix'],
-    'pop': ['Pop', 'Today\'s Hits', 'Pop Hits'],
-    'rock': ['Rock', 'Rock Classics', 'Classic Rock'],
-    'indie': ['Indie', 'Indie Mix', 'Alternative'],
+    chill: ['Chill', 'Chill Mix', 'Pure Chill', 'Chill Vibes'],
+    relaxing: ['Chill', 'Pure Chill', 'Peaceful Piano'],
+    focused: ['Focus', 'Deep Focus', 'Study Beats', 'Concentration'],
+    electronic: ['Electronic', 'Dance', 'EDM', 'Electronic Mix'],
+    pop: ['Pop', "Today's Hits", 'Pop Hits'],
+    rock: ['Rock', 'Rock Classics', 'Classic Rock'],
+    indie: ['Indie', 'Indie Mix', 'Alternative'],
     'hip-hop': ['Hip-Hop', 'Hip-Hop Hits', 'Rap'],
     'r&b': ['R&B', 'R&B Now', 'Soul'],
-    'soul': ['Soul', 'R&B', 'Soul Music'],
-    'ambient': ['Ambient', 'Sleep', 'Peaceful', 'Calm'],
-    'party': ['Party', 'Dance', 'Party Mix', 'Dance Party'],
-    'energetic': ['Workout', 'Energy', 'Power Workout', 'Motivation'],
-    'romantic': ['Romance', 'Love', 'Love Songs', 'Romantic'],
-    'melancholy': ['Sad', 'Heartbreak', 'Melancholy', 'Rainy Day'],
-    'cafe': ['Cafe', 'Coffee Shop', 'Jazz Cafe', 'Acoustic Chill']
+    soul: ['Soul', 'R&B', 'Soul Music'],
+    ambient: ['Ambient', 'Sleep', 'Peaceful', 'Calm'],
+    party: ['Party', 'Dance', 'Party Mix', 'Dance Party'],
+    energetic: ['Workout', 'Energy', 'Power Workout', 'Motivation'],
+    romantic: ['Romance', 'Love', 'Love Songs', 'Romantic'],
+    melancholy: ['Sad', 'Heartbreak', 'Melancholy', 'Rainy Day'],
+    cafe: ['Cafe', 'Coffee Shop', 'Jazz Cafe', 'Acoustic Chill'],
   };
-  
+
   // Get search terms for this genre
   const searchTerms = genreMap[genreLower] || [genre, `${genre} Mix`, `${genre} Radio`];
-  
+
   // Step 1: Check if app is running
   const beforeState = await getMediaState(app);
   if (!beforeState.running) {
     await runScript(`tell application "${app}" to activate`, 5000);
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise((r) => {
+      setTimeout(r, 2000);
+    });
   }
-  
+
   // Step 2: Try to find and play a matching playlist
   for (const term of searchTerms.slice(0, 3)) {
     const playlistScript = `
@@ -1090,9 +1102,9 @@ async function smartPlayGenre(genre, app = 'Music') {
         return "NOT_FOUND"
       end tell
     `;
-    
+
     const result = await runScript(playlistScript, 10000);
-    
+
     if (result.output && result.output.startsWith('PLAYING|')) {
       const parts = result.output.split('|');
       const source = parts[3] || '';
@@ -1100,21 +1112,21 @@ async function smartPlayGenre(genre, app = 'Music') {
         success: true,
         message: `Playing ${parts[1]} by ${parts[2]} from ${source}`,
         action: 'playlist_playing',
-        source: source
+        source: source,
       };
     }
-    
+
     if (result.output && result.output.startsWith('STARTED|')) {
       const source = result.output.replace('STARTED|', '');
       return {
         success: true,
         message: `Now playing from ${source}`,
         action: 'playlist_started',
-        source: source
+        source: source,
       };
     }
   }
-  
+
   // Step 3: Try to search library and shuffle results
   const shuffleScript = `
     tell application "Music"
@@ -1138,28 +1150,28 @@ async function smartPlayGenre(genre, app = 'Music') {
       return "NOT_FOUND"
     end tell
   `;
-  
+
   const shuffleResult = await runScript(shuffleScript, 10000);
-  
+
   if (shuffleResult.output && shuffleResult.output.startsWith('PLAYING|')) {
     const parts = shuffleResult.output.split('|');
     return {
       success: true,
       message: `Playing ${parts[1]} by ${parts[2]} (shuffled ${genre} from your library)`,
       action: 'library_shuffle',
-      source: 'library'
+      source: 'library',
     };
   }
-  
+
   if (shuffleResult.output === 'STARTED') {
     return {
       success: true,
       message: `Shuffling ${genre} music from your library`,
       action: 'library_shuffle',
-      source: 'library'
+      source: 'library',
     };
   }
-  
+
   // Step 4: Last resort - just shuffle and play
   const fallbackScript = `
     tell application "Music"
@@ -1175,24 +1187,24 @@ async function smartPlayGenre(genre, app = 'Music') {
       end try
     end tell
   `;
-  
+
   const fallbackResult = await runScript(fallbackScript, 5000);
-  
+
   if (fallbackResult.output && fallbackResult.output.startsWith('PLAYING|')) {
     const parts = fallbackResult.output.split('|');
     return {
       success: true,
       message: `Couldn't find ${genre} playlists. Playing ${parts[1]} by ${parts[2]} on shuffle instead.`,
       action: 'fallback_shuffle',
-      source: 'library'
+      source: 'library',
     };
   }
-  
+
   return {
     success: false,
     message: `Couldn't find any ${genre} music. Try creating a playlist named "${genre}" in Apple Music.`,
     action: 'not_found',
-    suggestion: `Create a playlist called "${genre}" or add some ${genre} music to your library`
+    suggestion: `Create a playlist called "${genre}" or add some ${genre} music to your library`,
   };
 }
 
@@ -1207,13 +1219,15 @@ async function smartPlayWithSearchTerms(searchTerms, app = 'Music') {
   const beforeState = await getMediaState(app);
   if (!beforeState.running) {
     await runScript(`tell application "${app}" to activate`, 5000);
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise((r) => {
+      setTimeout(r, 2000);
+    });
   }
-  
+
   // Try each search term until one works
   for (const term of searchTerms) {
     log.info('agent', `Trying search term: "${term}"`);
-    
+
     const playlistScript = `
       tell application "Music"
         try
@@ -1267,9 +1281,9 @@ async function smartPlayWithSearchTerms(searchTerms, app = 'Music') {
         return "NOT_FOUND"
       end tell
     `;
-    
+
     const result = await runScript(playlistScript, 12000);
-    
+
     if (result.output && result.output.startsWith('PLAYING|')) {
       const parts = result.output.split('|');
       const source = parts[3] || `search: ${term}`;
@@ -1277,31 +1291,31 @@ async function smartPlayWithSearchTerms(searchTerms, app = 'Music') {
         success: true,
         message: `Now playing ${parts[1]} by ${parts[2]}`,
         action: 'ai_search_success',
-        source: source
+        source: source,
       };
     }
-    
+
     if (result.output && result.output.startsWith('STARTED|')) {
       const source = result.output.replace('STARTED|', '');
       return {
         success: true,
         message: `Playing from ${source}`,
         action: 'ai_search_started',
-        source: source
+        source: source,
       };
     }
-    
+
     if (result.output && result.output.startsWith('FOUND|')) {
       const source = result.output.replace('FOUND|', '');
       return {
         success: true,
         message: `Found and playing ${term}`,
         action: 'ai_search_found',
-        source: source
+        source: source,
       };
     }
   }
-  
+
   // None of the AI terms worked - fall back to genre play
   log.info('agent', 'AI search terms failed, falling back to shuffle');
   return smartPlayGenre(searchTerms[0], app);
@@ -1366,21 +1380,21 @@ async function getPodcastStatus() {
       return output
     end tell
   `;
-  
+
   try {
     const result = await runScript(script, 10000);
-    
+
     if (!result.success || result.output === 'NOT_RUNNING') {
       return { running: false, playing: false, currentShow: null, currentEpisode: null, subscriptions: [] };
     }
-    
+
     const parts = result.output.split('|');
     return {
       running: parts[0] === 'RUNNING',
       playing: parts[1] === 'playing',
       currentShow: parts[2] || null,
       currentEpisode: parts[3] || null,
-      subscriptions: parts[4] ? parts[4].split(',').filter(s => s.trim()) : []
+      subscriptions: parts[4] ? parts[4].split(',').filter((s) => s.trim()) : [],
     };
   } catch (e) {
     log.warn('agent', 'Podcast status error', { error: e.message });
@@ -1394,9 +1408,9 @@ async function getPodcastStatus() {
  * @returns {Promise<{success: boolean, show: string|null, episode: string|null, message: string}>}
  */
 async function playPodcast(searchTerm) {
-  const escapeAS = (str) => str ? str.replace(/["\\]/g, '\\$&') : '';
+  const escapeAS = (str) => (str ? str.replace(/["\\]/g, '\\$&') : '');
   const safeSearch = escapeAS(searchTerm);
-  
+
   const script = `
     tell application "Podcasts"
       activate
@@ -1445,26 +1459,49 @@ async function playPodcast(searchTerm) {
       return "NOTFOUND|" & "${safeSearch}" & "|"
     end tell
   `;
-  
+
   try {
     const result = await runScript(script, 15000);
-    
+
     if (!result.success) {
-      return { success: false, show: null, episode: null, message: `Could not search podcasts: ${result.error}`, needsCatalogSearch: true };
+      return {
+        success: false,
+        show: null,
+        episode: null,
+        message: `Could not search podcasts: ${result.error}`,
+        needsCatalogSearch: true,
+      };
     }
-    
+
     const [status, show, episode] = result.output.split('|');
-    
+
     if (status === 'SUCCESS') {
       return { success: true, show, episode, message: `Playing "${episode}" from ${show}` };
     } else if (status === 'FALLBACK') {
-      return { success: true, show, episode, message: `I couldn't find "${searchTerm}", but I started playing "${episode}" from ${show}` };
+      return {
+        success: true,
+        show,
+        episode,
+        message: `I couldn't find "${searchTerm}", but I started playing "${episode}" from ${show}`,
+      };
     } else {
       // Not in subscriptions - signal that we should search the catalog
-      return { success: false, show: null, episode: null, message: `I couldn't find a podcast matching "${searchTerm}"`, needsCatalogSearch: true };
+      return {
+        success: false,
+        show: null,
+        episode: null,
+        message: `I couldn't find a podcast matching "${searchTerm}"`,
+        needsCatalogSearch: true,
+      };
     }
   } catch (e) {
-    return { success: false, show: null, episode: null, message: `Podcast error: ${e.message}`, needsCatalogSearch: true };
+    return {
+      success: false,
+      show: null,
+      episode: null,
+      message: `Podcast error: ${e.message}`,
+      needsCatalogSearch: true,
+    };
   }
 }
 
@@ -1475,9 +1512,9 @@ async function playPodcast(searchTerm) {
  * @returns {Promise<{success: boolean, show: string|null, episode: string|null, message: string}>}
  */
 async function searchAndPlayPodcast(searchTerm) {
-  const escapeAS = (str) => str ? str.replace(/["\\]/g, '\\$&') : '';
+  const escapeAS = (str) => (str ? str.replace(/["\\]/g, '\\$&') : '');
   const safeSearch = escapeAS(searchTerm);
-  
+
   // Use System Events to interact with the Podcasts app UI for catalog search
   const script = `
     tell application "Podcasts"
@@ -1525,43 +1562,45 @@ async function searchAndPlayPodcast(searchTerm) {
       return "OPENED|${safeSearch}|"
     end tell
   `;
-  
+
   try {
     const result = await runScript(script, 20000);
-    
+
     if (!result.success) {
-      return { 
-        success: false, 
-        show: null, 
-        episode: null, 
-        message: `I opened Podcasts and searched for "${searchTerm}" - please select what you'd like to hear`
+      return {
+        success: false,
+        show: null,
+        episode: null,
+        message: `I opened Podcasts and searched for "${searchTerm}" - please select what you'd like to hear`,
       };
     }
-    
+
     const [status, show, episode] = result.output.split('|');
-    
+
     if (status === 'SUCCESS') {
       return { success: true, show, episode, message: `Found and playing "${episode}" from ${show}` };
     } else {
       // Search opened but didn't auto-play - that's still useful
-      return { 
-        success: true, 
-        show: null, 
-        episode: null, 
-        message: `I searched for "${searchTerm}" in Podcasts - select a show you like!`
+      return {
+        success: true,
+        show: null,
+        episode: null,
+        message: `I searched for "${searchTerm}" in Podcasts - select a show you like!`,
       };
     }
-  } catch (e) {
+  } catch (_e) {
     // Even if automation fails, try just opening the app
     try {
       await runScript('tell application "Podcasts" to activate', 5000);
-    } catch (e2) {}
-    
-    return { 
-      success: false, 
-      show: null, 
-      episode: null, 
-      message: `I opened Podcasts - search for "${searchTerm}" to find what you're looking for`
+    } catch (_ignored) {
+      /* fallback activate may fail */
+    }
+
+    return {
+      success: false,
+      show: null,
+      episode: null,
+      message: `I opened Podcasts - search for "${searchTerm}" to find what you're looking for`,
     };
   }
 }
@@ -1573,7 +1612,7 @@ async function searchAndPlayPodcast(searchTerm) {
  */
 async function controlPodcast(action) {
   let script;
-  
+
   switch (action) {
     case 'play':
     case 'resume':
@@ -1623,7 +1662,7 @@ async function controlPodcast(action) {
     default:
       return { success: false, message: `Unknown podcast action: ${action}` };
   }
-  
+
   try {
     const result = await runScript(script, 5000);
     if (result.success) {
@@ -1634,7 +1673,7 @@ async function controlPodcast(action) {
         skip: 'Skipped to next episode',
         next: 'Playing next episode',
         rewind: 'Rewound 30 seconds',
-        forward: 'Skipped forward 30 seconds'
+        forward: 'Skipped forward 30 seconds',
       };
       return { success: true, message: messages[action] || 'Done' };
     }
@@ -1680,28 +1719,28 @@ async function getSubscribedPodcasts() {
       return output
     end tell
   `;
-  
+
   try {
     const result = await runScript(script, 15000);
-    
+
     if (!result.success || !result.output) {
       return [];
     }
-    
+
     const shows = [];
     const entries = result.output.split('|||');
-    
+
     for (const entry of entries) {
       const [name, latestEpisode, hasUnplayed] = entry.split('|');
       if (name) {
         shows.push({
           name: name.trim(),
           latestEpisode: latestEpisode?.trim() || '',
-          hasUnplayed: hasUnplayed === 'true'
+          hasUnplayed: hasUnplayed === 'true',
         });
       }
     }
-    
+
     return shows;
   } catch (e) {
     log.warn('agent', 'Subscribed podcasts error', { error: e.message });
@@ -1727,5 +1766,5 @@ module.exports = {
   playPodcast,
   searchAndPlayPodcast,
   controlPodcast,
-  getSubscribedPodcasts
+  getSubscribedPodcasts,
 };

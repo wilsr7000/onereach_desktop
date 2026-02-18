@@ -5,7 +5,10 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 // Mock child_process (FFmpeg-dependent)
 vi.mock('child_process', () => ({
   execFile: vi.fn((cmd, args, opts, cb) => {
-    if (typeof opts === 'function') { cb = opts; opts = {}; }
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
     if (cb) cb(null, 'mock output', '');
     return { on: vi.fn(), stdout: { on: vi.fn() }, stderr: { on: vi.fn() } };
   }),
@@ -49,7 +52,7 @@ const { VideoToTextAgent } = require('../../../lib/converters/video-to-text.js')
 
 // Run the standard lifecycle test harness
 testConverterAgent(VideoToTextAgent, {
-  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1C, 0x66, 0x74, 0x79, 0x70]),
+  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]),
   expectedFromFormats: ['mp4', 'webm', 'mov'],
   expectedToFormats: ['text'],
   expectedStrategies: ['whisper', 'elevenlabs', 'hybrid'],

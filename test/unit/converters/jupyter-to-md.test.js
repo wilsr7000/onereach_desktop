@@ -30,9 +30,7 @@ const sampleNotebook = JSON.stringify({
       cell_type: 'code',
       execution_count: 1,
       metadata: {},
-      outputs: [
-        { output_type: 'stream', name: 'stdout', text: ['Hello World\n'] },
-      ],
+      outputs: [{ output_type: 'stream', name: 'stdout', text: ['Hello World\n'] }],
       source: ['print("Hello World")'],
     },
   ],

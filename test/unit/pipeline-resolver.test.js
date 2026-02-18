@@ -58,11 +58,7 @@ describe('PipelineResolver', () => {
       const result = resolver.resolve('a', 'd');
       expect(result).not.toBeNull();
       expect(result.path).toEqual(['a', 'b', 'c', 'd']);
-      expect(result.agents).toEqual([
-        'converter:a-to-b',
-        'converter:b-to-c',
-        'converter:c-to-d',
-      ]);
+      expect(result.agents).toEqual(['converter:a-to-b', 'converter:b-to-c', 'converter:c-to-d']);
     });
 
     it('finds two-step path (a -> c)', () => {

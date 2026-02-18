@@ -38,7 +38,7 @@ export class TranscodeService {
       fps = null,
       preset = 'medium',
       crf = 23,
-      outputPath = null
+      outputPath = null,
     } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
@@ -54,11 +54,11 @@ export class TranscodeService {
       } else {
         // Default codecs based on format
         const defaultCodecs = {
-          'mp4': 'libx264',
-          'webm': 'libvpx-vp9',
-          'mov': 'libx264',
-          'avi': 'mpeg4',
-          'mkv': 'libx264'
+          mp4: 'libx264',
+          webm: 'libvpx-vp9',
+          mov: 'libx264',
+          avi: 'mpeg4',
+          mkv: 'libx264',
         };
         if (defaultCodecs[format]) {
           command = command.videoCodec(defaultCodecs[format]);
@@ -70,11 +70,11 @@ export class TranscodeService {
         command = command.audioCodec(audioCodec);
       } else {
         const defaultAudioCodecs = {
-          'mp4': 'aac',
-          'webm': 'libopus',
-          'mov': 'aac',
-          'avi': 'mp3',
-          'mkv': 'aac'
+          mp4: 'aac',
+          webm: 'libopus',
+          mov: 'aac',
+          avi: 'mp3',
+          mkv: 'aac',
         };
         if (defaultAudioCodecs[format]) {
           command = command.audioCodec(defaultAudioCodecs[format]);
@@ -102,10 +102,7 @@ export class TranscodeService {
       }
 
       // Preset and CRF for h264/h265
-      command = command.outputOptions([
-        `-preset ${preset}`,
-        `-crf ${crf}`
-      ]);
+      command = command.outputOptions([`-preset ${preset}`, `-crf ${crf}`]);
 
       command
         .format(format)
@@ -121,7 +118,7 @@ export class TranscodeService {
               percent: progress.percent,
               timemark: progress.timemark,
               currentFps: progress.currentFps,
-              targetSize: progress.targetSize
+              targetSize: progress.targetSize,
             });
           }
         })
@@ -147,14 +144,14 @@ export class TranscodeService {
   async compressVideo(inputPath, options = {}, progressCallback = null) {
     const {
       quality = 'medium', // low, medium, high
-      maxSize = null, // Target size in MB
-      outputPath = null
+      maxSize: _maxSize = null, // Target size in MB
+      outputPath = null,
     } = options;
 
     const qualitySettings = {
-      'low': { crf: 32, preset: 'fast', audioBitrate: '96k' },
-      'medium': { crf: 26, preset: 'medium', audioBitrate: '128k' },
-      'high': { crf: 20, preset: 'slow', audioBitrate: '192k' }
+      low: { crf: 32, preset: 'fast', audioBitrate: '96k' },
+      medium: { crf: 26, preset: 'medium', audioBitrate: '128k' },
+      high: { crf: 20, preset: 'slow', audioBitrate: '192k' },
     };
 
     const settings = qualitySettings[quality] || qualitySettings['medium'];
@@ -167,10 +164,7 @@ export class TranscodeService {
         .videoCodec('libx264')
         .audioCodec('aac')
         .audioBitrate(settings.audioBitrate)
-        .outputOptions([
-          `-preset ${settings.preset}`,
-          `-crf ${settings.crf}`
-        ])
+        .outputOptions([`-preset ${settings.preset}`, `-crf ${settings.crf}`])
         .output(output)
         .on('start', (cmd) => {
           log.info('video', '[TranscodeService] Compression started', { data: cmd });
@@ -181,7 +175,7 @@ export class TranscodeService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -197,12 +191,3 @@ export class TranscodeService {
     });
   }
 }
-
-
-
-
-
-
-
-
-

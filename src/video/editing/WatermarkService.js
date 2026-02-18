@@ -34,7 +34,7 @@ export class WatermarkService {
       opacity = 0.8,
       scale = 0.15, // Relative to video width
       margin = 10,
-      outputPath = null
+      outputPath = null,
     } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
@@ -43,11 +43,11 @@ export class WatermarkService {
 
     // Position mapping
     const positionMap = {
-      'topleft': `${margin}:${margin}`,
-      'topright': `main_w-overlay_w-${margin}:${margin}`,
-      'bottomleft': `${margin}:main_h-overlay_h-${margin}`,
-      'bottomright': `main_w-overlay_w-${margin}:main_h-overlay_h-${margin}`,
-      'center': '(main_w-overlay_w)/2:(main_h-overlay_h)/2'
+      topleft: `${margin}:${margin}`,
+      topright: `main_w-overlay_w-${margin}:${margin}`,
+      bottomleft: `${margin}:main_h-overlay_h-${margin}`,
+      bottomright: `main_w-overlay_w-${margin}:main_h-overlay_h-${margin}`,
+      center: '(main_w-overlay_w)/2:(main_h-overlay_h)/2',
     };
 
     return new Promise((resolve, reject) => {
@@ -55,7 +55,7 @@ export class WatermarkService {
         .input(watermarkPath)
         .complexFilter([
           `[1:v]scale=iw*${scale}:-1,format=rgba,colorchannelmixer=aa=${opacity}[wm]`,
-          `[0:v][wm]overlay=${positionMap[position] || positionMap['bottomright']}`
+          `[0:v][wm]overlay=${positionMap[position] || positionMap['bottomright']}`,
         ])
         .videoCodec('libx264')
         .audioCodec('copy')
@@ -70,7 +70,7 @@ export class WatermarkService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -100,7 +100,7 @@ export class WatermarkService {
       fontSize = 24,
       fontColor = 'white',
       backgroundColor = 'black@0.5',
-      outputPath = null
+      outputPath = null,
     } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
@@ -109,15 +109,15 @@ export class WatermarkService {
 
     // Position mapping for drawtext filter
     const positionMap = {
-      'top': 'x=(w-text_w)/2:y=20',
-      'bottom': 'x=(w-text_w)/2:y=h-th-20',
-      'center': 'x=(w-text_w)/2:y=(h-text_h)/2'
+      top: 'x=(w-text_w)/2:y=20',
+      bottom: 'x=(w-text_w)/2:y=h-th-20',
+      center: 'x=(w-text_w)/2:y=(h-text_h)/2',
     };
 
     return new Promise((resolve, reject) => {
       ffmpeg(inputPath)
         .videoFilters([
-          `drawtext=text='${text}':fontsize=${fontSize}:fontcolor=${fontColor}:box=1:boxcolor=${backgroundColor}:${positionMap[position] || positionMap['bottom']}`
+          `drawtext=text='${text}':fontsize=${fontSize}:fontcolor=${fontColor}:box=1:boxcolor=${backgroundColor}:${positionMap[position] || positionMap['bottom']}`,
         ])
         .videoCodec('libx264')
         .audioCodec('copy')
@@ -132,7 +132,7 @@ export class WatermarkService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -148,19 +148,3 @@ export class WatermarkService {
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

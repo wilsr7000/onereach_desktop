@@ -13,64 +13,67 @@
   --bg-tertiary: #1a1a24;
   --bg-card: #15151f;
   --bg-hover: #1e1e2a;
-  
+
   /* Accent colors - Golden/Amber */
   --accent-primary: #d4a84b;
   --accent-secondary: #b8923f;
   --accent-light: #e8c36d;
   --accent-glow: rgba(212, 168, 75, 0.3);
-  
+
   /* Status colors */
   --status-success: #4ade80;
   --status-warning: #fbbf24;
   --status-error: #f87171;
   --status-info: #60a5fa;
-  
+
   /* Text colors */
   --text-primary: #e8e8ed;
   --text-secondary: #9ca3af;
   --text-muted: #6b7280;
   --text-accent: var(--accent-light);
-  
+
   /* Border colors */
   --border-primary: #2a2a3a;
   --border-accent: var(--accent-primary);
-  
+
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 20px var(--accent-glow);
-  
+
   /* Transitions */
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
-  
+
   /* Spacing */
   --space-xs: 0.25rem;
   --space-sm: 0.5rem;
   --space-md: 1rem;
   --space-lg: 1.5rem;
   --space-xl: 2rem;
-  
+
   /* Border radius */
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
-  
+
   /* Font */
   --font-sans: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'SF Mono', 'Monaco', 'Consolas', monospace;
 }
 
 /* Reset and Base */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-html, body {
+html,
+body {
   height: 100%;
   font-family: var(--font-sans);
   font-size: 14px;
@@ -86,10 +89,9 @@ html, body {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  background: 
+  background:
     radial-gradient(ellipse at 50% 0%, rgba(212, 168, 75, 0.05) 0%, transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(212, 168, 75, 0.03) 0%, transparent 40%),
-    var(--bg-primary);
+    radial-gradient(circle at 80% 80%, rgba(212, 168, 75, 0.03) 0%, transparent 40%), var(--bg-primary);
 }
 
 /* Header */
@@ -158,8 +160,13 @@ html, body {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .status-text {
@@ -236,8 +243,14 @@ html, body {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Panel Headers */
@@ -577,7 +590,8 @@ html, body {
 }
 
 /* Form Elements */
-.filter-select, .config-select {
+.filter-select,
+.config-select {
   padding: var(--space-sm) var(--space-md);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-primary);
@@ -588,11 +602,13 @@ html, body {
   transition: all var(--transition-fast);
 }
 
-.filter-select:hover, .config-select:hover {
+.filter-select:hover,
+.config-select:hover {
   border-color: var(--accent-primary);
 }
 
-.filter-select:focus, .config-select:focus {
+.filter-select:focus,
+.config-select:focus {
   outline: none;
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 2px var(--accent-glow);
@@ -619,7 +635,8 @@ html, body {
 }
 
 /* Buttons */
-.btn-primary, .btn-secondary {
+.btn-primary,
+.btn-secondary {
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-md);
   font-size: 13px;
@@ -678,7 +695,7 @@ html, body {
 
 .toggle-slider::before {
   position: absolute;
-  content: "";
+  content: '';
   height: 16px;
   width: 16px;
   left: 3px;
@@ -1197,7 +1214,8 @@ html, body {
 }
 
 /* Agent Diagnoses */
-.agent-diagnoses, .agent-attention {
+.agent-diagnoses,
+.agent-attention {
   background: var(--bg-card);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-lg);
@@ -1205,7 +1223,8 @@ html, body {
   margin-bottom: var(--space-xl);
 }
 
-.agent-diagnoses h3, .agent-attention h3 {
+.agent-diagnoses h3,
+.agent-attention h3 {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
@@ -1336,7 +1355,8 @@ html, body {
   font-size: 13px;
 }
 
-.export-buttons, .maintenance-buttons {
+.export-buttons,
+.maintenance-buttons {
   display: flex;
   gap: var(--space-md);
   flex-wrap: wrap;
@@ -1485,11 +1505,11 @@ html, body {
   .overview-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .activity-feed-card {
     grid-column: span 2;
   }
-  
+
   .agent-banner {
     grid-column: span 2;
   }
@@ -1499,12 +1519,12 @@ html, body {
   .overview-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .activity-feed-card,
   .agent-banner {
     grid-column: span 1;
   }
-  
+
   .stages-grid,
   .llm-overview,
   .llm-breakdown,
@@ -1533,9 +1553,10 @@ html, body {
   left: -50%;
   width: 200%;
   height: 200%;
-  background: radial-gradient(circle at 30% 30%, rgba(255, 59, 48, 0.05) 0%, transparent 50%),
-              radial-gradient(circle at 70% 70%, rgba(48, 209, 88, 0.05) 0%, transparent 50%),
-              radial-gradient(circle at 50% 50%, rgba(0, 122, 255, 0.05) 0%, transparent 50%);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 59, 48, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 70% 70%, rgba(48, 209, 88, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(0, 122, 255, 0.05) 0%, transparent 50%);
   pointer-events: none;
 }
 
@@ -1586,17 +1607,17 @@ html, body {
 }
 
 .stability-ring {
-  stroke: #FF3B30; /* Apple red */
+  stroke: #ff3b30; /* Apple red */
   filter: drop-shadow(0 0 8px rgba(255, 59, 48, 0.5));
 }
 
 .pipeline-ring {
-  stroke: #30D158; /* Apple green */
+  stroke: #30d158; /* Apple green */
   filter: drop-shadow(0 0 8px rgba(48, 209, 88, 0.5));
 }
 
 .healing-ring {
-  stroke: #007AFF; /* Apple blue */
+  stroke: #007aff; /* Apple blue */
   filter: drop-shadow(0 0 8px rgba(0, 122, 255, 0.5));
 }
 
@@ -1614,8 +1635,13 @@ html, body {
 }
 
 @keyframes pulse-emoji {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
 }
 
 .rings-legend {
@@ -1648,17 +1674,17 @@ html, body {
 }
 
 .ring-dot.stability {
-  background: #FF3B30;
+  background: #ff3b30;
   box-shadow: 0 0 8px rgba(255, 59, 48, 0.5);
 }
 
 .ring-dot.pipeline {
-  background: #30D158;
+  background: #30d158;
   box-shadow: 0 0 8px rgba(48, 209, 88, 0.5);
 }
 
 .ring-dot.healing {
-  background: #007AFF;
+  background: #007aff;
   box-shadow: 0 0 8px rgba(0, 122, 255, 0.5);
 }
 
@@ -1714,25 +1740,30 @@ html, body {
 }
 
 @keyframes ring-glow {
-  0%, 100% { filter: drop-shadow(0 0 8px currentColor); }
-  50% { filter: drop-shadow(0 0 16px currentColor) drop-shadow(0 0 24px currentColor); }
+  0%,
+  100% {
+    filter: drop-shadow(0 0 8px currentColor);
+  }
+  50% {
+    filter: drop-shadow(0 0 16px currentColor) drop-shadow(0 0 24px currentColor);
+  }
 }
 
 /* Health score colors */
 .health-score-badge.excellent {
-  background: linear-gradient(135deg, #30D158, #34C759);
+  background: linear-gradient(135deg, #30d158, #34c759);
 }
 
 .health-score-badge.good {
-  background: linear-gradient(135deg, #007AFF, #5AC8FA);
+  background: linear-gradient(135deg, #007aff, #5ac8fa);
 }
 
 .health-score-badge.fair {
-  background: linear-gradient(135deg, #FF9500, #FFCC00);
+  background: linear-gradient(135deg, #ff9500, #ffcc00);
 }
 
 .health-score-badge.poor {
-  background: linear-gradient(135deg, #FF3B30, #FF6961);
+  background: linear-gradient(135deg, #ff3b30, #ff6961);
 }
 
 /* ========================================
@@ -2050,17 +2081,17 @@ html, body {
   .health-rings-card {
     grid-column: span 2;
   }
-  
+
   .rings-container {
     flex-direction: column;
     align-items: center;
   }
-  
+
   .rings-visual {
     width: 160px;
     height: 160px;
   }
-  
+
   .rings-legend {
     width: 100%;
   }
@@ -2070,16 +2101,16 @@ html, body {
   .health-rings-card {
     grid-column: span 1;
   }
-  
+
   .rings-visual {
     width: 140px;
     height: 140px;
   }
-  
+
   .ring-legend-item {
     flex-wrap: wrap;
   }
-  
+
   .ring-detail {
     width: 100%;
     margin-left: calc(12px + var(--space-md));

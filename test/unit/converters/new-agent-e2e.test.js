@@ -9,7 +9,7 @@
  * This exercises test plan 36 section "Create New Agent End-to-End".
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { testConverterAgent } from '../../mocks/converter-test-harness.js';
 import { createMockAIService } from '../../mocks/conversion-mocks.js';
 
@@ -126,7 +126,7 @@ class TestGenerativeReverseAgent extends BaseConverterAgent {
     ];
   }
 
-  async execute(input, strategy) {
+  async execute(input, _strategy) {
     const start = Date.now();
     if (!this._ai) throw new Error('AI service required');
     const output = await this._ai.complete(`Reverse this text: ${input}`, {
@@ -188,7 +188,7 @@ describe('New Agent: Standalone lifecycle', () => {
     expect(agent.to).toEqual(['reversed']);
     expect(agent.modes).toEqual(['symbolic']);
     expect(agent.strategies.length).toBe(2);
-    expect(agent.strategies.map(s => s.id)).toEqual(['char-reverse', 'word-reverse']);
+    expect(agent.strategies.map((s) => s.id)).toEqual(['char-reverse', 'word-reverse']);
   });
 
   it('plan() selects a strategy and returns {strategy, reasoning}', async () => {
@@ -251,7 +251,7 @@ describe('New Agent: Standalone lifecycle', () => {
 
     it('report events array includes converter:start', () => {
       expect(Array.isArray(result.report.events)).toBe(true);
-      expect(result.report.events.some(e => e.event === 'converter:start')).toBe(true);
+      expect(result.report.events.some((e) => e.event === 'converter:start')).toBe(true);
     });
 
     it('report contains decision object', () => {
@@ -341,7 +341,7 @@ describe('New Agent: Context pass-through', () => {
       metadata: { sourceFile: 'hello.txt' },
     });
 
-    const startEvent = agent.logger.getEvents().find(e => e.event === 'converter:start');
+    const startEvent = agent.logger.getEvents().find((e) => e.event === 'converter:start');
     expect(startEvent).toBeDefined();
     // The start event's input description should incorporate metadata
   });
@@ -417,7 +417,7 @@ describe('New Agent: ConversionService integration', () => {
     service.registry.register(agent);
 
     const caps = await service.capabilities();
-    const found = caps.find(c => c.id === 'converter:test-reverse');
+    const found = caps.find((c) => c.id === 'converter:test-reverse');
     expect(found).toBeDefined();
     expect(found.name).toBe('Test Reverse');
     expect(found.from).toContain('plaintext');
@@ -432,7 +432,7 @@ describe('New Agent: ConversionService integration', () => {
     const graph = await service.graph();
     expect(graph.nodes).toContain('plaintext');
     expect(graph.nodes).toContain('reversed');
-    const edge = graph.edges.find(e => e.from === 'plaintext' && e.to === 'reversed');
+    const edge = graph.edges.find((e) => e.from === 'plaintext' && e.to === 'reversed');
     expect(edge).toBeDefined();
     expect(edge.agent).toBe('converter:test-reverse');
   });
@@ -479,14 +479,14 @@ describe('New Agent: ConversionService integration', () => {
 
     // Verify present
     let caps = await service.capabilities();
-    expect(caps.some(c => c.id === 'converter:test-reverse')).toBe(true);
+    expect(caps.some((c) => c.id === 'converter:test-reverse')).toBe(true);
 
     // Simulate removal: delete from internal map
     service.registry._agents.delete('converter:test-reverse');
 
     // Verify absent
     caps = await service.capabilities();
-    expect(caps.some(c => c.id === 'converter:test-reverse')).toBe(false);
+    expect(caps.some((c) => c.id === 'converter:test-reverse')).toBe(false);
   });
 
   it('multiple agents can be registered and convert independently', async () => {
@@ -496,8 +496,8 @@ describe('New Agent: ConversionService integration', () => {
     service.registry.register(generative);
 
     const caps = await service.capabilities();
-    expect(caps.find(c => c.id === 'converter:test-reverse')).toBeDefined();
-    expect(caps.find(c => c.id === 'converter:test-gen-reverse')).toBeDefined();
+    expect(caps.find((c) => c.id === 'converter:test-reverse')).toBeDefined();
+    expect(caps.find((c) => c.id === 'converter:test-gen-reverse')).toBeDefined();
 
     // Convert through each independently
     const r1 = await service.convert({ input: 'abc', from: 'plaintext', to: 'reversed' });
@@ -522,7 +522,9 @@ describe('New Agent: ConversionService integration', () => {
     expect(result.status).toBe('queued');
 
     // Wait for job to complete
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise((r) => {
+      setTimeout(r, 200);
+    });
     const job = service.jobStatus(result.jobId);
     expect(job).toBeDefined();
     // Job should be completed or still running

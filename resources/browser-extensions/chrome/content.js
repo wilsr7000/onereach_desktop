@@ -1,11 +1,11 @@
 /**
  * OneReach.ai Tab Share - Content Script
- * 
+ *
  * Injected into pages to extract readable text content.
  * Can also be used for highlighting and selection features.
  */
 
-(function() {
+(function () {
   'use strict';
 
   /**
@@ -17,12 +17,12 @@
     const main = document.querySelector('main');
     const contentDiv = document.querySelector('[role="main"]');
     const body = document.body;
-    
+
     const container = article || main || contentDiv || body;
-    
+
     // Clone to avoid modifying the actual page
     const clone = container.cloneNode(true);
-    
+
     // Remove non-content elements
     const removeSelectors = [
       'script',
@@ -44,33 +44,33 @@
       '[role="navigation"]',
       '[role="banner"]',
       '[role="complementary"]',
-      '[aria-hidden="true"]'
+      '[aria-hidden="true"]',
     ];
-    
-    removeSelectors.forEach(selector => {
+
+    removeSelectors.forEach((selector) => {
       try {
-        clone.querySelectorAll(selector).forEach(el => el.remove());
-      } catch (e) {
+        clone.querySelectorAll(selector).forEach((el) => el.remove());
+      } catch (_e) {
         // Ignore invalid selectors
       }
     });
-    
+
     // Get text content
     let text = clone.textContent || clone.innerText || '';
-    
+
     // Clean up whitespace
     text = text
       .replace(/\t/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .replace(/ {2,}/g, ' ')
       .trim();
-    
+
     // Limit length to avoid huge payloads
     const MAX_LENGTH = 100000;
     if (text.length > MAX_LENGTH) {
       text = text.substring(0, MAX_LENGTH) + '\n\n[Content truncated...]';
     }
-    
+
     return text;
   }
 
@@ -84,7 +84,7 @@
       description: '',
       author: '',
       publishedDate: '',
-      siteName: ''
+      siteName: '',
     };
 
     // Get meta tags
@@ -109,7 +109,7 @@
     if (selection && selection.toString().trim()) {
       return {
         text: selection.toString(),
-        html: getSelectionHtml()
+        html: getSelectionHtml(),
       };
     }
     return null;
@@ -121,7 +121,7 @@
   function getSelectionHtml() {
     const selection = window.getSelection();
     if (!selection.rangeCount) return '';
-    
+
     const container = document.createElement('div');
     for (let i = 0; i < selection.rangeCount; i++) {
       container.appendChild(selection.getRangeAt(i).cloneContents());
@@ -137,7 +137,7 @@
       case 'extractText':
         sendResponse({
           text: extractPageText(),
-          metadata: extractMetadata()
+          metadata: extractMetadata(),
         });
         break;
 
@@ -152,7 +152,7 @@
       default:
         sendResponse({ error: 'Unknown action' });
     }
-    
+
     return true;
   });
 
@@ -160,12 +160,8 @@
   window.__onereach = {
     extractPageText,
     extractMetadata,
-    getSelection
+    getSelection,
   };
 
   console.log('[OneReach] Content script loaded');
 })();
-
-
-
-

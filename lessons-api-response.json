@@ -494,24 +494,12 @@
           "releasedAt": "2024-11-10T12:00:00Z",
           "videoUrl": "https://example.com/videos/adv-003.mp4",
           "tags": ["security", "encryption", "authentication"],
-          "securityChecklist": [
-            "Input validation",
-            "Authentication",
-            "Authorization",
-            "Encryption",
-            "Audit logging"
-          ]
+          "securityChecklist": ["Input validation", "Authentication", "Authorization", "Encryption", "Audit logging"]
         }
       ]
     }
   },
-  "recommendations": [
-    "wf-002",
-    "int-004",
-    "feat-002",
-    "adv-003",
-    "gs-004"
-  ],
+  "recommendations": ["wf-002", "int-004", "feat-002", "adv-003", "gs-004"],
   "recentlyViewed": [
     {
       "lessonId": "gs-001",

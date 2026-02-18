@@ -11,29 +11,31 @@ const path = require('path');
 let testWindow;
 
 app.whenReady().then(() => {
-    console.log('Running IDW automated tests...\n');
-    
-    // Create test runner window
-    testWindow = new BrowserWindow({
-        width: 1200,
-        height: 900,
-        show: false, // Run headless
-        webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            preload: path.join(__dirname, '..', 'preload.js')
-        }
-    });
-    
-    // Load test runner
-    testWindow.loadFile('test-runner.html');
-    
-    // When loaded, run IDW tests
-    testWindow.webContents.once('did-finish-load', () => {
-        console.log('Test runner loaded, executing IDW tests...\n');
-        
-        // Execute IDW tests via console
-        testWindow.webContents.executeJavaScript(`
+  console.log('Running IDW automated tests...\n');
+
+  // Create test runner window
+  testWindow = new BrowserWindow({
+    width: 1200,
+    height: 900,
+    show: false, // Run headless
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, '..', 'preload.js'),
+    },
+  });
+
+  // Load test runner
+  testWindow.loadFile('test-runner.html');
+
+  // When loaded, run IDW tests
+  testWindow.webContents.once('did-finish-load', () => {
+    console.log('Test runner loaded, executing IDW tests...\n');
+
+    // Execute IDW tests via console
+    testWindow.webContents
+      .executeJavaScript(
+        `
             (async () => {
                 // Get test runner instance
                 const runner = window.testRunner;
@@ -78,24 +80,27 @@ app.whenReady().then(() => {
                 // Return results for process exit code
                 return { passed, failed };
             })();
-        `).then(results => {
-            console.log('\nTests completed!');
-            
-            // Exit with appropriate code
-            const exitCode = results.failed > 0 ? 1 : 0;
-            
-            setTimeout(() => {
-                app.quit();
-                process.exit(exitCode);
-            }, 2000);
-        }).catch(error => {
-            console.error('Error running tests:', error);
-            app.quit();
-            process.exit(1);
-        });
-    });
+        `
+      )
+      .then((results) => {
+        console.log('\nTests completed!');
+
+        // Exit with appropriate code
+        const exitCode = results.failed > 0 ? 1 : 0;
+
+        setTimeout(() => {
+          app.quit();
+          process.exit(exitCode);
+        }, 2000);
+      })
+      .catch((error) => {
+        console.error('Error running tests:', error);
+        app.quit();
+        process.exit(1);
+      });
+  });
 });
 
 app.on('window-all-closed', () => {
-    app.quit();
-}); 
+  app.quit();
+});

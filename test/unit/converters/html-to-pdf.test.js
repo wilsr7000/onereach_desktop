@@ -14,7 +14,9 @@ vi.mock('electron', () => ({
     }
     close() {}
     destroy() {}
-    isDestroyed() { return false; }
+    isDestroyed() {
+      return false;
+    }
   },
 }));
 
@@ -53,7 +55,7 @@ describe('HtmlToPdfAgent (specific)', () => {
 
   it('has exactly two strategies', () => {
     expect(agent.strategies).toHaveLength(2);
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toEqual(['electron', 'styled']);
   });
 

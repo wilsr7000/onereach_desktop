@@ -1,10 +1,10 @@
 /**
  * PlanningPanel - Sidebar panel for pre-production planning
- * 
+ *
  * Manages characters, scenes, locations, and story beats before
  * generating the Line Script. Data flows into StoryBeatsEditor,
  * MarkerManager, and TranscriptionService.
- * 
+ *
  * @module src/video-editor/planning/PlanningPanel
  */
 
@@ -13,27 +13,27 @@ export class PlanningPanel {
     this.app = appContext;
     this.visible = false;
     this.activeTab = 'characters';
-    
+
     // Planning data
     this.planning = {
       characters: [],
       scenes: [],
       locations: [],
-      storyBeats: []
+      storyBeats: [],
     };
-    
+
     // Selection state
     this.selectedCharacterId = null;
     this.selectedSceneId = null;
     this.selectedLocationId = null;
     this.selectedBeatId = null;
-    
+
     // ID counters
     this.nextCharacterId = 1;
     this.nextSceneId = 1;
     this.nextLocationId = 1;
     this.nextBeatId = 1;
-    
+
     // Default colors for characters
     this.characterColors = [
       '#8b5cf6', // Purple
@@ -43,13 +43,13 @@ export class PlanningPanel {
       '#3b82f6', // Blue
       '#ec4899', // Pink
       '#14b8a6', // Teal
-      '#f97316'  // Orange
+      '#f97316', // Orange
     ];
-    
+
     // DOM references
     this.sidebar = null;
     this.tabContents = {};
-    
+
     // Bind methods
     this.toggle = this.toggle.bind(this);
     this.switchTab = this.switchTab.bind(this);
@@ -60,26 +60,26 @@ export class PlanningPanel {
    */
   init() {
     this.sidebar = document.getElementById('planningSidebar');
-    
+
     if (!this.sidebar) {
       window.logging.warn('video', 'PlanningPanel Sidebar element not found');
       return;
     }
-    
+
     // Get tab content containers
     this.tabContents = {
       characters: document.getElementById('planningCharactersTab'),
       scenes: document.getElementById('planningScenesTab'),
       locations: document.getElementById('planningLocationsTab'),
-      beats: document.getElementById('planningBeatsTab')
+      beats: document.getElementById('planningBeatsTab'),
     };
-    
+
     // Load planning data from current version if available
     this.loadFromVersion();
-    
+
     // Initial render
     this.renderAll();
-    
+
     window.logging.info('video', 'PlanningPanel Initialized');
   }
 
@@ -88,17 +88,17 @@ export class PlanningPanel {
    */
   toggle() {
     this.visible = !this.visible;
-    
+
     if (this.sidebar) {
       this.sidebar.classList.toggle('hidden', !this.visible);
     }
-    
+
     // Update toggle button state
     const toggleBtn = document.getElementById('planningToggleBtn');
     if (toggleBtn) {
       toggleBtn.classList.toggle('active', this.visible);
     }
-    
+
     window.logging.info('video', 'PlanningPanel visibility changed', { visible: this.visible });
   }
 
@@ -126,14 +126,14 @@ export class PlanningPanel {
    */
   switchTab(tabName) {
     if (!this.tabContents[tabName]) return;
-    
+
     this.activeTab = tabName;
-    
+
     // Update tab buttons
-    document.querySelectorAll('.planning-tab').forEach(tab => {
+    document.querySelectorAll('.planning-tab').forEach((tab) => {
       tab.classList.toggle('active', tab.dataset.tab === tabName);
     });
-    
+
     // Update tab content visibility
     Object.entries(this.tabContents).forEach(([name, content]) => {
       if (content) {
@@ -147,23 +147,26 @@ export class PlanningPanel {
    */
   loadFromVersion() {
     const versionData = this.app.versionData;
-    
+
     if (versionData?.planning) {
       this.planning = {
         characters: versionData.planning.characters || [],
         scenes: versionData.planning.scenes || [],
         locations: versionData.planning.locations || [],
-        storyBeats: versionData.planning.storyBeats || []
+        storyBeats: versionData.planning.storyBeats || [],
       };
-      
+
       // Update ID counters
-      this.nextCharacterId = Math.max(1, ...this.planning.characters.map(c => c.id || 0)) + 1;
-      this.nextSceneId = Math.max(1, ...this.planning.scenes.map(s => s.id || 0)) + 1;
-      this.nextLocationId = Math.max(1, ...this.planning.locations.map(l => l.id || 0)) + 1;
-      this.nextBeatId = Math.max(1, ...this.planning.storyBeats.map(b => b.id || 0)) + 1;
-      
+      this.nextCharacterId = Math.max(1, ...this.planning.characters.map((c) => c.id || 0)) + 1;
+      this.nextSceneId = Math.max(1, ...this.planning.scenes.map((s) => s.id || 0)) + 1;
+      this.nextLocationId = Math.max(1, ...this.planning.locations.map((l) => l.id || 0)) + 1;
+      this.nextBeatId = Math.max(1, ...this.planning.storyBeats.map((b) => b.id || 0)) + 1;
+
       window.logging.info('video', 'PlanningPanel loaded planning data', {
-        characters: this.planning.characters.length, scenes: this.planning.scenes.length, locations: this.planning.locations.length, storyBeats: this.planning.storyBeats.length
+        characters: this.planning.characters.length,
+        scenes: this.planning.scenes.length,
+        locations: this.planning.locations.length,
+        storyBeats: this.planning.storyBeats.length,
       });
     }
   }
@@ -194,7 +197,7 @@ export class PlanningPanel {
         characters: data.characters || [],
         scenes: data.scenes || [],
         locations: data.locations || [],
-        storyBeats: data.storyBeats || []
+        storyBeats: data.storyBeats || [],
       };
       this.saveToAppState();
       this.renderAll();
@@ -220,22 +223,22 @@ export class PlanningPanel {
    */
   addCharacter(data = {}) {
     const colorIndex = this.planning.characters.length % this.characterColors.length;
-    
+
     const character = {
       id: this.nextCharacterId++,
       name: data.name || `Character ${this.planning.characters.length + 1}`,
       role: data.role || '',
       color: data.color || this.characterColors[colorIndex],
-      speakerIds: data.speakerIds || []
+      speakerIds: data.speakerIds || [],
     };
-    
+
     this.planning.characters.push(character);
     this.saveToAppState();
     this.renderCharacters();
-    
+
     // Open edit modal
     this.editCharacter(character.id);
-    
+
     return character;
   }
 
@@ -245,7 +248,7 @@ export class PlanningPanel {
    * @param {Object} updates - Updates to apply
    */
   updateCharacter(id, updates) {
-    const character = this.planning.characters.find(c => c.id === id);
+    const character = this.planning.characters.find((c) => c.id === id);
     if (character) {
       Object.assign(character, updates);
       this.saveToAppState();
@@ -258,7 +261,7 @@ export class PlanningPanel {
    * @param {number} id - Character ID
    */
   deleteCharacter(id) {
-    const index = this.planning.characters.findIndex(c => c.id === id);
+    const index = this.planning.characters.findIndex((c) => c.id === id);
     if (index !== -1) {
       this.planning.characters.splice(index, 1);
       this.saveToAppState();
@@ -272,7 +275,7 @@ export class PlanningPanel {
    * @param {string} speakerId - ElevenLabs speaker ID
    */
   mapSpeakerToCharacter(characterId, speakerId) {
-    const character = this.planning.characters.find(c => c.id === characterId);
+    const character = this.planning.characters.find((c) => c.id === characterId);
     if (character) {
       if (!character.speakerIds.includes(speakerId)) {
         character.speakerIds.push(speakerId);
@@ -288,9 +291,7 @@ export class PlanningPanel {
    * @returns {Object|null} Character or null
    */
   getCharacterBySpeakerId(speakerId) {
-    return this.planning.characters.find(c => 
-      c.speakerIds && c.speakerIds.includes(speakerId)
-    ) || null;
+    return this.planning.characters.find((c) => c.speakerIds && c.speakerIds.includes(speakerId)) || null;
   }
 
   /**
@@ -299,7 +300,7 @@ export class PlanningPanel {
   renderCharacters() {
     const container = document.getElementById('charactersList');
     if (!container) return;
-    
+
     if (this.planning.characters.length === 0) {
       container.innerHTML = `
         <div class="planning-empty">
@@ -312,8 +313,10 @@ export class PlanningPanel {
       `;
       return;
     }
-    
-    container.innerHTML = this.planning.characters.map(char => `
+
+    container.innerHTML = this.planning.characters
+      .map(
+        (char) => `
       <div class="planning-item character-item ${this.selectedCharacterId === char.id ? 'selected' : ''}"
            data-character-id="${char.id}"
            onclick="app.planningPanel.selectCharacter(${char.id})">
@@ -322,18 +325,24 @@ export class PlanningPanel {
           <span class="planning-item-name">${this.escapeHtml(char.name)}</span>
           ${char.role ? `<span class="planning-item-badge">${this.escapeHtml(char.role)}</span>` : ''}
         </div>
-        ${char.speakerIds && char.speakerIds.length > 0 ? `
+        ${
+          char.speakerIds && char.speakerIds.length > 0
+            ? `
           <div class="character-speaker-ids">
-            ${char.speakerIds.map(id => `<span class="speaker-id-badge">Speaker ${id}</span>`).join('')}
+            ${char.speakerIds.map((id) => `<span class="speaker-id-badge">Speaker ${id}</span>`).join('')}
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         <div class="planning-item-actions">
           <button class="planning-item-btn" onclick="event.stopPropagation(); app.planningPanel.editCharacter(${char.id})">Edit</button>
           <button class="planning-item-btn" onclick="event.stopPropagation(); app.planningPanel.showMapSpeakerDialog(${char.id})">Map Speaker</button>
           <button class="planning-item-btn" onclick="event.stopPropagation(); app.planningPanel.deleteCharacter(${char.id})">Delete</button>
         </div>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   /**
@@ -350,9 +359,9 @@ export class PlanningPanel {
    * @param {number} id - Character ID
    */
   editCharacter(id) {
-    const character = this.planning.characters.find(c => c.id === id);
+    const character = this.planning.characters.find((c) => c.id === id);
     if (!character) return;
-    
+
     const name = prompt('Character name:', character.name);
     if (name !== null) {
       const role = prompt('Character role (e.g., Host, Guest, Narrator):', character.role || '');
@@ -367,17 +376,17 @@ export class PlanningPanel {
   showMapSpeakerDialog(characterId) {
     // Get available speaker IDs from transcript
     const speakerIds = this.getAvailableSpeakerIds();
-    
+
     if (speakerIds.length === 0) {
       this.app.showToast?.('info', 'No speakers found in transcript. Transcribe video first.');
       return;
     }
-    
+
     const speakerId = prompt(
       `Map speaker to character.\nAvailable speaker IDs: ${speakerIds.join(', ')}\n\nEnter speaker ID:`,
       speakerIds[0]
     );
-    
+
     if (speakerId !== null && speakerId.trim()) {
       this.mapSpeakerToCharacter(characterId, speakerId.trim());
       this.app.showToast?.('success', `Mapped Speaker ${speakerId} to character`);
@@ -390,25 +399,25 @@ export class PlanningPanel {
    */
   getAvailableSpeakerIds() {
     const speakerIds = new Set();
-    
+
     // Check transcriptSegments for speaker info
     if (this.app.transcriptSegments) {
-      this.app.transcriptSegments.forEach(seg => {
+      this.app.transcriptSegments.forEach((seg) => {
         if (seg.speaker || seg.speakerId) {
           speakerIds.add(String(seg.speaker || seg.speakerId));
         }
       });
     }
-    
+
     // Check teleprompter words
     if (this.app.teleprompterWords) {
-      this.app.teleprompterWords.forEach(word => {
+      this.app.teleprompterWords.forEach((word) => {
         if (word.speaker) {
           speakerIds.add(String(word.speaker));
         }
       });
     }
-    
+
     return Array.from(speakerIds).sort();
   }
 
@@ -427,17 +436,17 @@ export class PlanningPanel {
       intExt: data.intExt || 'INT',
       location: data.location || '',
       timeOfDay: data.timeOfDay || 'DAY',
-      order: data.order ?? this.planning.scenes.length
+      order: data.order ?? this.planning.scenes.length,
     };
-    
+
     this.planning.scenes.push(scene);
     this.planning.scenes.sort((a, b) => a.order - b.order);
     this.saveToAppState();
     this.renderScenes();
-    
+
     // Open edit modal
     this.editScene(scene.id);
-    
+
     return scene;
   }
 
@@ -447,7 +456,7 @@ export class PlanningPanel {
    * @param {Object} updates - Updates to apply
    */
   updateScene(id, updates) {
-    const scene = this.planning.scenes.find(s => s.id === id);
+    const scene = this.planning.scenes.find((s) => s.id === id);
     if (scene) {
       Object.assign(scene, updates);
       this.planning.scenes.sort((a, b) => a.order - b.order);
@@ -461,11 +470,11 @@ export class PlanningPanel {
    * @param {number} id - Scene ID
    */
   deleteScene(id) {
-    const index = this.planning.scenes.findIndex(s => s.id === id);
+    const index = this.planning.scenes.findIndex((s) => s.id === id);
     if (index !== -1) {
       this.planning.scenes.splice(index, 1);
       // Re-order remaining scenes
-      this.planning.scenes.forEach((s, i) => s.order = i);
+      this.planning.scenes.forEach((s, i) => (s.order = i));
       this.saveToAppState();
       this.renderScenes();
     }
@@ -477,19 +486,21 @@ export class PlanningPanel {
    * @param {number} direction - -1 for up, 1 for down
    */
   moveScene(id, direction) {
-    const index = this.planning.scenes.findIndex(s => s.id === id);
+    const index = this.planning.scenes.findIndex((s) => s.id === id);
     if (index === -1) return;
-    
+
     const newIndex = index + direction;
     if (newIndex < 0 || newIndex >= this.planning.scenes.length) return;
-    
+
     // Swap
-    [this.planning.scenes[index], this.planning.scenes[newIndex]] = 
-    [this.planning.scenes[newIndex], this.planning.scenes[index]];
-    
+    [this.planning.scenes[index], this.planning.scenes[newIndex]] = [
+      this.planning.scenes[newIndex],
+      this.planning.scenes[index],
+    ];
+
     // Update order values
-    this.planning.scenes.forEach((s, i) => s.order = i);
-    
+    this.planning.scenes.forEach((s, i) => (s.order = i));
+
     this.saveToAppState();
     this.renderScenes();
   }
@@ -500,7 +511,7 @@ export class PlanningPanel {
   renderScenes() {
     const container = document.getElementById('scenesList');
     if (!container) return;
-    
+
     if (this.planning.scenes.length === 0) {
       container.innerHTML = `
         <div class="planning-empty">
@@ -513,8 +524,10 @@ export class PlanningPanel {
       `;
       return;
     }
-    
-    container.innerHTML = this.planning.scenes.map((scene, index) => `
+
+    container.innerHTML = this.planning.scenes
+      .map(
+        (scene, index) => `
       <div class="planning-item scene-item ${this.selectedSceneId === scene.id ? 'selected' : ''}"
            data-scene-id="${scene.id}"
            onclick="app.planningPanel.selectScene(${scene.id})">
@@ -535,7 +548,9 @@ export class PlanningPanel {
           <button class="planning-item-btn" onclick="event.stopPropagation(); app.planningPanel.deleteScene(${scene.id})">Delete</button>
         </div>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   /**
@@ -552,22 +567,22 @@ export class PlanningPanel {
    * @param {number} id - Scene ID
    */
   editScene(id) {
-    const scene = this.planning.scenes.find(s => s.id === id);
+    const scene = this.planning.scenes.find((s) => s.id === id);
     if (!scene) return;
-    
+
     const title = prompt('Scene title:', scene.title);
     if (title !== null) {
       const intExt = prompt('INT or EXT:', scene.intExt || 'INT');
       const location = prompt('Location:', scene.location || '');
       const timeOfDay = prompt('Time of day (DAY, NIGHT, DAWN, DUSK, etc.):', scene.timeOfDay || 'DAY');
       const description = prompt('Description (optional):', scene.description || '');
-      
+
       this.updateScene(id, {
         title,
         intExt: (intExt || 'INT').toUpperCase(),
         location: location || '',
         timeOfDay: (timeOfDay || 'DAY').toUpperCase(),
-        description: description || ''
+        description: description || '',
       });
     }
   }
@@ -580,18 +595,18 @@ export class PlanningPanel {
       this.app.showToast?.('info', 'No scenes to generate markers from');
       return;
     }
-    
+
     const confirm = window.confirm(
       `Generate ${this.planning.scenes.length} marker(s) from scenes?\n\n` +
-      'Note: You will need to set the in/out times for each marker manually.'
+        'Note: You will need to set the in/out times for each marker manually.'
     );
-    
+
     if (!confirm) return;
-    
+
     let created = 0;
     for (const scene of this.planning.scenes) {
       const sceneHeader = `${scene.intExt}. ${scene.location || scene.title} - ${scene.timeOfDay}`;
-      
+
       // Add as spot marker (user will convert to range and set times)
       if (this.app.addMarker) {
         this.app.addMarker({
@@ -599,12 +614,12 @@ export class PlanningPanel {
           time: 0, // User will position
           name: scene.title,
           description: `${sceneHeader}\n${scene.description || ''}`.trim(),
-          color: '#4a9eff'
+          color: '#4a9eff',
         });
         created++;
       }
     }
-    
+
     this.app.showToast?.('success', `Created ${created} markers from scenes`);
   }
 
@@ -620,16 +635,16 @@ export class PlanningPanel {
       id: this.nextLocationId++,
       name: data.name || `Location ${this.planning.locations.length + 1}`,
       intExt: data.intExt || 'INT',
-      description: data.description || ''
+      description: data.description || '',
     };
-    
+
     this.planning.locations.push(location);
     this.saveToAppState();
     this.renderLocations();
-    
+
     // Open edit modal
     this.editLocation(location.id);
-    
+
     return location;
   }
 
@@ -639,7 +654,7 @@ export class PlanningPanel {
    * @param {Object} updates - Updates to apply
    */
   updateLocation(id, updates) {
-    const location = this.planning.locations.find(l => l.id === id);
+    const location = this.planning.locations.find((l) => l.id === id);
     if (location) {
       Object.assign(location, updates);
       this.saveToAppState();
@@ -652,7 +667,7 @@ export class PlanningPanel {
    * @param {number} id - Location ID
    */
   deleteLocation(id) {
-    const index = this.planning.locations.findIndex(l => l.id === id);
+    const index = this.planning.locations.findIndex((l) => l.id === id);
     if (index !== -1) {
       this.planning.locations.splice(index, 1);
       this.saveToAppState();
@@ -666,7 +681,7 @@ export class PlanningPanel {
   renderLocations() {
     const container = document.getElementById('locationsList');
     if (!container) return;
-    
+
     if (this.planning.locations.length === 0) {
       container.innerHTML = `
         <div class="planning-empty">
@@ -679,8 +694,10 @@ export class PlanningPanel {
       `;
       return;
     }
-    
-    container.innerHTML = this.planning.locations.map(loc => `
+
+    container.innerHTML = this.planning.locations
+      .map(
+        (loc) => `
       <div class="planning-item ${this.selectedLocationId === loc.id ? 'selected' : ''}"
            data-location-id="${loc.id}"
            onclick="app.planningPanel.selectLocation(${loc.id})">
@@ -694,7 +711,9 @@ export class PlanningPanel {
           <button class="planning-item-btn" onclick="event.stopPropagation(); app.planningPanel.deleteLocation(${loc.id})">Delete</button>
         </div>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   /**
@@ -711,18 +730,18 @@ export class PlanningPanel {
    * @param {number} id - Location ID
    */
   editLocation(id) {
-    const location = this.planning.locations.find(l => l.id === id);
+    const location = this.planning.locations.find((l) => l.id === id);
     if (!location) return;
-    
+
     const name = prompt('Location name:', location.name);
     if (name !== null) {
       const intExt = prompt('INT or EXT:', location.intExt || 'INT');
       const description = prompt('Description (optional):', location.description || '');
-      
+
       this.updateLocation(id, {
         name,
         intExt: (intExt || 'INT').toUpperCase(),
-        description: description || ''
+        description: description || '',
       });
     }
   }
@@ -740,17 +759,17 @@ export class PlanningPanel {
       title: data.title || `Beat ${this.planning.storyBeats.length + 1}`,
       description: data.description || '',
       sceneId: data.sceneId || null,
-      order: data.order ?? this.planning.storyBeats.length
+      order: data.order ?? this.planning.storyBeats.length,
     };
-    
+
     this.planning.storyBeats.push(beat);
     this.planning.storyBeats.sort((a, b) => a.order - b.order);
     this.saveToAppState();
     this.renderStoryBeats();
-    
+
     // Open edit modal
     this.editStoryBeat(beat.id);
-    
+
     return beat;
   }
 
@@ -760,7 +779,7 @@ export class PlanningPanel {
    * @param {Object} updates - Updates to apply
    */
   updateStoryBeat(id, updates) {
-    const beat = this.planning.storyBeats.find(b => b.id === id);
+    const beat = this.planning.storyBeats.find((b) => b.id === id);
     if (beat) {
       Object.assign(beat, updates);
       this.planning.storyBeats.sort((a, b) => a.order - b.order);
@@ -774,10 +793,10 @@ export class PlanningPanel {
    * @param {number} id - Beat ID
    */
   deleteStoryBeat(id) {
-    const index = this.planning.storyBeats.findIndex(b => b.id === id);
+    const index = this.planning.storyBeats.findIndex((b) => b.id === id);
     if (index !== -1) {
       this.planning.storyBeats.splice(index, 1);
-      this.planning.storyBeats.forEach((b, i) => b.order = i);
+      this.planning.storyBeats.forEach((b, i) => (b.order = i));
       this.saveToAppState();
       this.renderStoryBeats();
     }
@@ -789,17 +808,19 @@ export class PlanningPanel {
    * @param {number} direction - -1 for up, 1 for down
    */
   moveStoryBeat(id, direction) {
-    const index = this.planning.storyBeats.findIndex(b => b.id === id);
+    const index = this.planning.storyBeats.findIndex((b) => b.id === id);
     if (index === -1) return;
-    
+
     const newIndex = index + direction;
     if (newIndex < 0 || newIndex >= this.planning.storyBeats.length) return;
-    
-    [this.planning.storyBeats[index], this.planning.storyBeats[newIndex]] = 
-    [this.planning.storyBeats[newIndex], this.planning.storyBeats[index]];
-    
-    this.planning.storyBeats.forEach((b, i) => b.order = i);
-    
+
+    [this.planning.storyBeats[index], this.planning.storyBeats[newIndex]] = [
+      this.planning.storyBeats[newIndex],
+      this.planning.storyBeats[index],
+    ];
+
+    this.planning.storyBeats.forEach((b, i) => (b.order = i));
+
     this.saveToAppState();
     this.renderStoryBeats();
   }
@@ -810,7 +831,7 @@ export class PlanningPanel {
   renderStoryBeats() {
     const container = document.getElementById('storyBeatsList');
     if (!container) return;
-    
+
     if (this.planning.storyBeats.length === 0) {
       container.innerHTML = `
         <div class="planning-empty">
@@ -823,10 +844,11 @@ export class PlanningPanel {
       `;
       return;
     }
-    
-    container.innerHTML = this.planning.storyBeats.map((beat, index) => {
-      const scene = beat.sceneId ? this.planning.scenes.find(s => s.id === beat.sceneId) : null;
-      return `
+
+    container.innerHTML = this.planning.storyBeats
+      .map((beat, index) => {
+        const scene = beat.sceneId ? this.planning.scenes.find((s) => s.id === beat.sceneId) : null;
+        return `
         <div class="planning-item ${this.selectedBeatId === beat.id ? 'selected' : ''}"
              data-beat-id="${beat.id}"
              onclick="app.planningPanel.selectStoryBeat(${beat.id})">
@@ -844,7 +866,8 @@ export class PlanningPanel {
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   /**
@@ -861,28 +884,28 @@ export class PlanningPanel {
    * @param {number} id - Beat ID
    */
   editStoryBeat(id) {
-    const beat = this.planning.storyBeats.find(b => b.id === id);
+    const beat = this.planning.storyBeats.find((b) => b.id === id);
     if (!beat) return;
-    
+
     const title = prompt('Beat title:', beat.title);
     if (title !== null) {
       const description = prompt('Description:', beat.description || '');
-      
+
       // Scene selection
       let sceneId = beat.sceneId;
       if (this.planning.scenes.length > 0) {
-        const sceneOptions = this.planning.scenes.map(s => `${s.id}: ${s.title}`).join('\n');
+        const sceneOptions = this.planning.scenes.map((s) => `${s.id}: ${s.title}`).join('\n');
         const sceneInput = prompt(
           `Link to scene (enter scene ID or leave empty):\n${sceneOptions}`,
           beat.sceneId || ''
         );
         sceneId = sceneInput ? parseInt(sceneInput) || null : null;
       }
-      
+
       this.updateStoryBeat(id, {
         title,
         description: description || '',
-        sceneId
+        sceneId,
       });
     }
   }
@@ -896,13 +919,13 @@ export class PlanningPanel {
     const data = {
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      planning: this.planning
+      planning: this.planning,
     };
-    
+
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    
+
     const a = document.createElement('a');
     a.href = url;
     a.download = `planning-${Date.now()}.json`;
@@ -910,7 +933,7 @@ export class PlanningPanel {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    
+
     this.app.showToast?.('success', 'Planning data exported');
   }
 
@@ -921,15 +944,15 @@ export class PlanningPanel {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
-    
+
     input.onchange = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      
+
       try {
         const text = await file.text();
         const data = JSON.parse(text);
-        
+
         if (data.planning) {
           this.setPlanningData(data.planning);
           this.app.showToast?.('success', 'Planning data imported');
@@ -941,7 +964,7 @@ export class PlanningPanel {
         this.app.showToast?.('error', 'Failed to import planning data');
       }
     };
-    
+
     input.click();
   }
 
@@ -960,14 +983,3 @@ export class PlanningPanel {
 }
 
 export default PlanningPanel;
-
-
-
-
-
-
-
-
-
-
-

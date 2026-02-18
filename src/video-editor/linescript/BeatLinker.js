@@ -1,6 +1,6 @@
 /**
  * BeatLinker - Cross-video beat linking functionality
- * 
+ *
  * Features:
  * - Link beats from different videos in the same Space
  * - Link types: related, continues, references, compare
@@ -16,52 +16,55 @@ function pathToFileUrl(filePath) {
   if (filePath.startsWith('file://') || filePath.startsWith('data:')) return filePath;
   let normalized = filePath.replace(/\\/g, '/');
   if (/^[a-zA-Z]:/.test(normalized)) normalized = '/' + normalized;
-  const encoded = normalized.split('/').map(c => encodeURIComponent(c).replace(/%3A/g, ':')).join('/');
+  const encoded = normalized
+    .split('/')
+    .map((c) => encodeURIComponent(c).replace(/%3A/g, ':'))
+    .join('/');
   return 'file://' + encoded;
 }
 
 // Link type definitions
 export const LINK_TYPES = {
-  RELATED: 'related',      // Same topic
-  CONTINUES: 'continues',  // Story continuation
+  RELATED: 'related', // Same topic
+  CONTINUES: 'continues', // Story continuation
   REFERENCES: 'references', // Citation/callback
-  COMPARE: 'compare'       // A/B comparison
+  COMPARE: 'compare', // A/B comparison
 };
 
 export const LINK_TYPE_INFO = {
-  [LINK_TYPES.RELATED]: { 
-    label: 'Related', 
-    icon: '🔗', 
+  [LINK_TYPES.RELATED]: {
+    label: 'Related',
+    icon: '🔗',
     color: '#3b82f6',
-    description: 'Related content on the same topic'
+    description: 'Related content on the same topic',
   },
-  [LINK_TYPES.CONTINUES]: { 
-    label: 'Continues', 
-    icon: '➡️', 
+  [LINK_TYPES.CONTINUES]: {
+    label: 'Continues',
+    icon: '➡️',
     color: '#10b981',
-    description: 'This beat continues from the linked beat'
+    description: 'This beat continues from the linked beat',
   },
-  [LINK_TYPES.REFERENCES]: { 
-    label: 'References', 
-    icon: '📚', 
+  [LINK_TYPES.REFERENCES]: {
+    label: 'References',
+    icon: '📚',
     color: '#8b5cf6',
-    description: 'This beat references/cites the linked beat'
+    description: 'This beat references/cites the linked beat',
   },
-  [LINK_TYPES.COMPARE]: { 
-    label: 'Compare', 
-    icon: '⚖️', 
+  [LINK_TYPES.COMPARE]: {
+    label: 'Compare',
+    icon: '⚖️',
     color: '#f59e0b',
-    description: 'A/B comparison with the linked beat'
-  }
+    description: 'A/B comparison with the linked beat',
+  },
 };
 
 export class BeatLinker {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Links storage - keyed by source beat ID
     this.links = new Map();
-    
+
     // Preview state
     this.previewBeat = null;
     this.previewMiniPlayer = null;
@@ -73,7 +76,7 @@ export class BeatLinker {
   async init() {
     // Load existing links from project metadata
     await this._loadLinks();
-    
+
     // Create mini player for previews
     this._createMiniPlayer();
   }
@@ -83,13 +86,13 @@ export class BeatLinker {
    */
   async _loadLinks() {
     try {
-      const projectLinks = await window.videoEditor?.getProjectLinks?.() || {};
-      
+      const projectLinks = (await window.videoEditor?.getProjectLinks?.()) || {};
+
       // Convert to Map
       Object.entries(projectLinks).forEach(([sourceId, linkData]) => {
         this.links.set(sourceId, linkData);
       });
-      
+
       log.info('video', '[BeatLinker] Loaded links', { data: this.links.size });
     } catch (error) {
       log.error('video', '[BeatLinker] Failed to load links', { error: error });
@@ -128,19 +131,19 @@ export class BeatLinker {
         videoId: source.videoId || this.app.videoId,
         beatId: source.beatId,
         time: source.time || 0,
-        name: source.name || ''
+        name: source.name || '',
       },
       target: {
         videoId: target.videoId,
         beatId: target.beatId,
         time: target.time || 0,
         name: target.name || '',
-        spaceId: target.spaceId
+        spaceId: target.spaceId,
       },
       metadata: {
         ...metadata,
-        createdAt: new Date().toISOString()
-      }
+        createdAt: new Date().toISOString(),
+      },
     };
 
     // Store link by source beat ID
@@ -153,7 +156,7 @@ export class BeatLinker {
     this._saveLinks();
 
     log.info('video', '[BeatLinker] Created link', { data: link });
-    
+
     // Emit event
     this.app.emit?.('beatLinkCreated', link);
 
@@ -165,7 +168,7 @@ export class BeatLinker {
    */
   removeLink(linkId) {
     for (const [beatId, links] of this.links.entries()) {
-      const index = links.findIndex(l => l.id === linkId);
+      const index = links.findIndex((l) => l.id === linkId);
       if (index !== -1) {
         links.splice(index, 1);
         if (links.length === 0) {
@@ -192,7 +195,7 @@ export class BeatLinker {
   getLinksByType(linkType) {
     const result = [];
     for (const links of this.links.values()) {
-      result.push(...links.filter(l => l.type === linkType));
+      result.push(...links.filter((l) => l.type === linkType));
     }
     return result;
   }
@@ -210,9 +213,7 @@ export class BeatLinker {
   async showBeatBrowser(sourceBeat, onSelect) {
     // Get videos from current space
     const currentSpaceId = this.app.currentSpaceId;
-    const videos = currentSpaceId 
-      ? await window.spaces?.getVideos(currentSpaceId) 
-      : [];
+    const videos = currentSpaceId ? await window.spaces?.getVideos(currentSpaceId) : [];
 
     // Create browser modal
     this._showBrowserModal(sourceBeat, videos, onSelect);
@@ -229,7 +230,7 @@ export class BeatLinker {
     const modal = document.createElement('div');
     modal.id = 'beatBrowserModal';
     modal.className = 'modal-overlay beat-browser-overlay';
-    
+
     modal.innerHTML = `
       <div class="modal-content beat-browser-modal">
         <div class="modal-header">
@@ -246,13 +247,17 @@ export class BeatLinker {
           <div class="beat-browser-link-type">
             <label>Link Type:</label>
             <div class="link-type-options">
-              ${Object.entries(LINK_TYPE_INFO).map(([type, info]) => `
+              ${Object.entries(LINK_TYPE_INFO)
+                .map(
+                  ([type, info]) => `
                 <label class="link-type-option" data-type="${type}">
                   <input type="radio" name="linkType" value="${type}" ${type === LINK_TYPES.RELATED ? 'checked' : ''}>
                   <span class="link-type-icon">${info.icon}</span>
                   <span class="link-type-label">${info.label}</span>
                 </label>
-              `).join('')}
+              `
+                )
+                .join('')}
             </div>
           </div>
           
@@ -260,9 +265,13 @@ export class BeatLinker {
             <label>Select Video:</label>
             <select id="beatBrowserVideoSelect" class="browser-select">
               <option value="">Select a video...</option>
-              ${videos.map(v => `
+              ${videos
+                .map(
+                  (v) => `
                 <option value="${v.id}" data-path="${v.content}">${this._escapeHtml(v.name || 'Unnamed Video')}</option>
-              `).join('')}
+              `
+                )
+                .join('')}
             </select>
           </div>
           
@@ -282,7 +291,7 @@ export class BeatLinker {
 
     // Add styles
     this._addBrowserStyles();
-    
+
     document.body.appendChild(modal);
     requestAnimationFrame(() => modal.classList.add('visible'));
 
@@ -294,7 +303,7 @@ export class BeatLinker {
     modal.querySelector('#beatBrowserVideoSelect')?.addEventListener('change', async (e) => {
       const videoId = e.target.value;
       const beatsList = modal.querySelector('#beatBrowserBeatsList');
-      
+
       if (!videoId) {
         beatsList.innerHTML = '<div class="browser-empty">Select a video to see its beats</div>';
         return;
@@ -306,31 +315,34 @@ export class BeatLinker {
         // Get beats for selected video
         const videoPath = e.target.selectedOptions[0]?.dataset.path;
         const beats = await this._loadBeatsForVideo(videoId, videoPath);
-        
+
         if (beats.length === 0) {
           beatsList.innerHTML = '<div class="browser-empty">No beats found in this video</div>';
           return;
         }
 
-        beatsList.innerHTML = beats.map(beat => `
+        beatsList.innerHTML = beats
+          .map(
+            (beat) => `
           <div class="browser-beat-item" data-beat-id="${beat.id}" data-video-id="${videoId}">
             <div class="browser-beat-time">${this._formatTime(beat.time)}</div>
             <div class="browser-beat-name">${this._escapeHtml(beat.name || 'Unnamed Beat')}</div>
             <div class="browser-beat-type">${beat.type || 'beat'}</div>
           </div>
-        `).join('');
+        `
+          )
+          .join('');
 
         // Beat selection
-        beatsList.querySelectorAll('.browser-beat-item').forEach(item => {
+        beatsList.querySelectorAll('.browser-beat-item').forEach((item) => {
           item.addEventListener('click', () => {
-            beatsList.querySelectorAll('.browser-beat-item').forEach(i => i.classList.remove('selected'));
+            beatsList.querySelectorAll('.browser-beat-item').forEach((i) => i.classList.remove('selected'));
             item.classList.add('selected');
-            selectedBeat = beats.find(b => b.id === item.dataset.beatId);
+            selectedBeat = beats.find((b) => b.id === item.dataset.beatId);
             selectedBeat.videoId = item.dataset.videoId;
             modal.querySelector('#beatBrowserLinkBtn').disabled = false;
           });
         });
-
       } catch (error) {
         log.error('video', '[BeatLinker] Failed to load beats', { error: error });
         beatsList.innerHTML = '<div class="browser-error">Failed to load beats</div>';
@@ -338,7 +350,7 @@ export class BeatLinker {
     });
 
     // Link type selection
-    modal.querySelectorAll('input[name="linkType"]').forEach(input => {
+    modal.querySelectorAll('input[name="linkType"]').forEach((input) => {
       input.addEventListener('change', (e) => {
         selectedLinkType = e.target.value;
       });
@@ -360,12 +372,12 @@ export class BeatLinker {
   async _loadBeatsForVideo(videoId, videoPath) {
     try {
       // Try to get markers from the video's project file
-      const markers = await window.videoEditor?.getVideoMarkers?.(videoPath) || [];
-      return markers.map(m => ({
+      const markers = (await window.videoEditor?.getVideoMarkers?.(videoPath)) || [];
+      return markers.map((m) => ({
         id: m.id,
         name: m.name || m.label,
         time: m.time || m.inTime,
-        type: m.type
+        type: m.type,
       }));
     } catch (error) {
       log.error('video', '[BeatLinker] Failed to load markers', { error: error });
@@ -409,12 +421,11 @@ export class BeatLinker {
     if (!link?.target) return;
 
     this._createMiniPlayer();
-    
+
     try {
       // Get video path
-      const videoPath = link.target.videoPath || 
-                       await window.spaces?.getVideoPath(link.target.videoId);
-      
+      const videoPath = link.target.videoPath || (await window.spaces?.getVideoPath(link.target.videoId));
+
       if (!videoPath) {
         throw new Error('Could not find video file');
       }
@@ -426,19 +437,18 @@ export class BeatLinker {
       // Set video source (cross-platform)
       video.src = pathToFileUrl(videoPath);
       video.currentTime = link.target.time || 0;
-      
+
       // Update info
       nameEl.textContent = link.target.name || 'Linked Beat';
       timeEl.textContent = this._formatTime(link.target.time);
 
       // Show player
       this.previewMiniPlayer.classList.remove('hidden');
-      
+
       // Auto-play
       video.play().catch(() => {
         // Autoplay may be blocked, that's fine
       });
-
     } catch (error) {
       log.error('video', '[BeatLinker] Preview error', { error: error });
       this.app.showToast?.('error', 'Could not preview linked beat');
@@ -466,8 +476,8 @@ export class BeatLinker {
     const links = this.getLinksForBeat(beatId);
     if (links.length === 0) return '';
 
-    const typeIcons = links.map(l => LINK_TYPE_INFO[l.type]?.icon || '🔗').join('');
-    
+    const typeIcons = links.map((l) => LINK_TYPE_INFO[l.type]?.icon || '🔗').join('');
+
     return `
       <div class="beat-links-indicator" data-beat-id="${beatId}" title="${links.length} linked beat(s)">
         <span class="links-icons">${typeIcons}</span>
@@ -759,14 +769,3 @@ export class BeatLinker {
 }
 
 export default BeatLinker;
-
-
-
-
-
-
-
-
-
-
-

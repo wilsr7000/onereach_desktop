@@ -1,0 +1,16 @@
+node_modules/
+_legacy/
+dist/
+build/
+test/fixtures/
+example-module/
+voice-sdk-package/
+packages/task-exchange/
+packages/task-agent/dist/
+Flipboard-IDW-Feed/
+*.min.js
+*.min.css
+package-lock.json
+test/example-automated-tests.js
+aider-ui.html
+templates/

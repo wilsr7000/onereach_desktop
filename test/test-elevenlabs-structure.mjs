@@ -1,6 +1,6 @@
 /**
  * ElevenLabs Implementation Structure Test
- * 
+ *
  * Verifies that all methods and handlers are properly implemented
  * Does NOT require an API key - tests code structure only
  */
@@ -47,15 +47,16 @@ const serviceMethods = [
   'getUserSubscription',
   'getUserInfo',
   'getUsageStats',
-  'generateAudio',  // Original TTS
+  'generateAudio', // Original TTS
   'getApiKey',
-  'transcribeAudio'  // ElevenLabs Scribe (replaces Whisper)
+  'transcribeAudio', // ElevenLabs Scribe (replaces Whisper)
 ];
 
-serviceMethods.forEach(method => {
-  const hasMethod = serviceContent.includes(`async ${method}(`) || 
-                    serviceContent.includes(`${method}(`) ||
-                    serviceContent.includes(`${method} (`);
+serviceMethods.forEach((method) => {
+  const hasMethod =
+    serviceContent.includes(`async ${method}(`) ||
+    serviceContent.includes(`${method}(`) ||
+    serviceContent.includes(`${method} (`);
   test(`ElevenLabsService.${method}()`, hasMethod);
 });
 
@@ -78,10 +79,10 @@ const ipcHandlers = [
   'video-editor:get-usage-stats',
   'video-editor:check-elevenlabs-key',
   'video-editor:generate-elevenlabs-audio',
-  'video-editor:transcribe-scribe'  // ElevenLabs Scribe transcription
+  'video-editor:transcribe-scribe', // ElevenLabs Scribe transcription
 ];
 
-ipcHandlers.forEach(handler => {
+ipcHandlers.forEach((handler) => {
   const hasHandler = ipcContent.includes(`'${handler}'`);
   test(`IPC Handler: ${handler}`, hasHandler);
 });
@@ -105,10 +106,10 @@ const preloadMethods = [
   'getUsageStats',
   'checkElevenLabsApiKey',
   'generateElevenLabsAudio',
-  'transcribeScribe'  // ElevenLabs Scribe transcription
+  'transcribeScribe', // ElevenLabs Scribe transcription
 ];
 
-preloadMethods.forEach(method => {
+preloadMethods.forEach((method) => {
   const hasMethod = preloadContent.includes(`${method}:`);
   test(`Preload: window.videoEditor.${method}`, hasMethod);
 });
@@ -130,12 +131,11 @@ const uiHandlers = [
   'showElevenLabsUsageStats',
   'addGeneratedAudioToTrack',
   'executeGenerateSFX',
-  'executeSpeechToSpeech'
+  'executeSpeechToSpeech',
 ];
 
-uiHandlers.forEach(handler => {
-  const hasHandler = appContent.includes(`${handler}(`) || 
-                     appContent.includes(`${handler} (`);
+uiHandlers.forEach((handler) => {
+  const hasHandler = appContent.includes(`${handler}(`) || appContent.includes(`${handler} (`);
   test(`UI Handler: ${handler}()`, hasHandler);
 });
 
@@ -149,7 +149,7 @@ const shortcuts = [
   { key: 'Alt+k', action: 'cloneVoice' },
   { key: 'Alt+x', action: 'generateSFX' },
   { key: 'Alt+b', action: 'dubRegion' },
-  { key: 'Alt+u', action: 'showUsageStats' }
+  { key: 'Alt+u', action: 'showUsageStats' },
 ];
 
 shortcuts.forEach(({ key, action }) => {
@@ -166,10 +166,10 @@ const menuItems = [
   'Isolate Vocals',
   'Clone Voice',
   'Generate SFX',
-  'Dub to Language'
+  'Dub to Language',
 ];
 
-menuItems.forEach(item => {
+menuItems.forEach((item) => {
   const hasItem = appContent.includes(item);
   test(`Context Menu: "${item}"`, hasItem);
 });
@@ -177,8 +177,7 @@ menuItems.forEach(item => {
 // Test 7: ElevenLabs category in shortcuts panel
 console.log('\n📁 7. Shortcuts Panel Category\n');
 
-const hasCategory = appContent.includes("'ElevenLabs'") && 
-                    appContent.includes("category: 'ElevenLabs'");
+const hasCategory = appContent.includes("'ElevenLabs'") && appContent.includes("category: 'ElevenLabs'");
 test('Shortcuts panel includes ElevenLabs category', hasCategory);
 
 // Summary
@@ -190,21 +189,10 @@ console.log(`❌ Failed:  ${results.failed.length}`);
 
 if (results.failed.length > 0) {
   console.log('\n❌ Failed tests:');
-  results.failed.forEach(f => console.log(`   - ${f}`));
+  results.failed.forEach((f) => console.log(`   - ${f}`));
 }
 
 console.log('\n🏁 Structure tests complete!\n');
 
 // Exit with error code if any tests failed
 process.exit(results.failed.length > 0 ? 1 : 0);
-
-
-
-
-
-
-
-
-
-
-

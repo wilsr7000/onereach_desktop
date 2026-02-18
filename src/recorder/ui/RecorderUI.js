@@ -29,7 +29,7 @@ export class RecorderUI {
       status: document.getElementById('status'),
       modeSelect: document.getElementById('modeSelect'),
       saveDialog: document.getElementById('saveDialog'),
-      playback: document.getElementById('playbackVideo')
+      playback: document.getElementById('playbackVideo'),
     };
   }
 
@@ -39,13 +39,11 @@ export class RecorderUI {
    * @param {string} type - 'camera' or 'screen'
    */
   showPreview(stream, type = 'camera') {
-    const element = type === 'camera' 
-      ? this.elements.cameraPreview 
-      : this.elements.screenPreview;
-    
+    const element = type === 'camera' ? this.elements.cameraPreview : this.elements.screenPreview;
+
     if (element) {
       element.srcObject = stream;
-      element.play().catch(e => window.logging.warn('recorder', 'Preview autoplay blocked'));
+      element.play().catch((_e) => window.logging.warn('recorder', 'Preview autoplay blocked'));
     }
   }
 
@@ -54,10 +52,8 @@ export class RecorderUI {
    * @param {string} type - 'camera' or 'screen'
    */
   hidePreview(type = 'camera') {
-    const element = type === 'camera' 
-      ? this.elements.cameraPreview 
-      : this.elements.screenPreview;
-    
+    const element = type === 'camera' ? this.elements.cameraPreview : this.elements.screenPreview;
+
     if (element) {
       element.srcObject = null;
     }
@@ -73,21 +69,19 @@ export class RecorderUI {
       this.elements.recordBtn.disabled = isRecording;
       this.elements.recordBtn.classList.toggle('hidden', isRecording);
     }
-    
+
     if (this.elements.stopBtn) {
       this.elements.stopBtn.disabled = !isRecording;
       this.elements.stopBtn.classList.toggle('hidden', !isRecording);
     }
-    
+
     if (this.elements.pauseBtn) {
       this.elements.pauseBtn.disabled = !isRecording;
       this.elements.pauseBtn.textContent = isPaused ? '▶ Resume' : '⏸ Pause';
     }
-    
+
     if (this.elements.status) {
-      this.elements.status.textContent = isRecording 
-        ? (isPaused ? 'Paused' : 'Recording')
-        : 'Ready';
+      this.elements.status.textContent = isRecording ? (isPaused ? 'Paused' : 'Recording') : 'Ready';
       this.elements.status.classList.toggle('recording', isRecording && !isPaused);
     }
   }
@@ -110,7 +104,7 @@ export class RecorderUI {
     if (this.elements.playback && blob) {
       this.elements.playback.src = URL.createObjectURL(blob);
     }
-    
+
     if (this.elements.saveDialog) {
       this.elements.saveDialog.classList.remove('hidden');
     }
@@ -123,7 +117,7 @@ export class RecorderUI {
     if (this.elements.saveDialog) {
       this.elements.saveDialog.classList.add('hidden');
     }
-    
+
     if (this.elements.playback) {
       URL.revokeObjectURL(this.elements.playback.src);
       this.elements.playback.src = '';
@@ -149,19 +143,3 @@ export class RecorderUI {
     return this.elements.modeSelect?.value || 'camera';
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

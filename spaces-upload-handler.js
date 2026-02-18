@@ -6,7 +6,7 @@ const os = require('os');
 
 /**
  * Spaces Upload Handler
- * 
+ *
  * Handles file selection from Spaces, file preparation/export,
  * and temp file cleanup for upload operations
  */
@@ -33,12 +33,12 @@ async function showSpacesPicker(parentWindow) {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        preload: path.join(__dirname, 'spaces-picker-preload.js')
-      }
+        preload: path.join(__dirname, 'spaces-picker-preload.js'),
+      },
     });
-    
+
     picker.loadFile('spaces-picker.html');
-    
+
     // Handle selection
     const selectHandler = async (event, items) => {
       try {
@@ -52,18 +52,18 @@ async function showSpacesPicker(parentWindow) {
         resolve(null);
       }
     };
-    
+
     // Handle cancel
     const cancelHandler = () => {
       console.log('[Spaces Upload] User cancelled');
       picker.close();
       resolve(null);
     };
-    
+
     // Register handlers
     ipcMain.once('spaces-picker:select', selectHandler);
     ipcMain.once('spaces-picker:cancel', cancelHandler);
-    
+
     // Cleanup on window close
     picker.on('closed', () => {
       ipcMain.removeListener('spaces-picker:select', selectHandler);
@@ -84,36 +84,35 @@ async function prepareSpacesFiles(items, onProgress = null) {
   const spacesAPI = getSpacesAPI();
   const filePaths = [];
   const total = items.length;
-  
+
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const itemName = item.fileName || item.preview || `Item ${i + 1}`;
-    
+
     // Report progress
     if (onProgress) {
       try {
         onProgress(i, total, itemName);
-      } catch (e) {
+      } catch (_e) {
         // Ignore progress callback errors
       }
     }
-    
+
     try {
       let tempPath = null;
-      
+
       if (item.type === 'file') {
         // Native file - check if it exists and return original path or copy to temp
         const fullItem = await spacesAPI.items.get(item.spaceId, item.id);
         const originalPath = fullItem.content;
         console.log('[Spaces Upload] File item:', originalPath);
-        
+
         if (fs.existsSync(originalPath)) {
           // File exists, use original path
           tempPath = originalPath;
         } else {
           console.warn('[Spaces Upload] File not found:', originalPath);
         }
-        
       } else if (item.type === 'text' || item.type === 'code' || item.type === 'html') {
         // Text/code/html - export to temp file
         const fullItem = await spacesAPI.items.get(item.spaceId, item.id);
@@ -123,34 +122,33 @@ async function prepareSpacesFiles(items, onProgress = null) {
         } else if (item.type === 'html') {
           ext = '.html';
         }
-        
+
         const fileName = fullItem.fileName || item.preview || `item-${item.id}`;
         const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
         tempPath = path.join(os.tmpdir(), `spaces-upload-${safeName}${ext}`);
-        
+
         fs.writeFileSync(tempPath, fullItem.content, 'utf8');
         tempUploadFiles.add(tempPath);
-        
+
         console.log('[Spaces Upload] Text item exported to:', tempPath);
-        
       } else if (item.type === 'image') {
         // Image - export to temp file
         const fullItem = await spacesAPI.items.get(item.spaceId, item.id);
-        
+
         if (fullItem.content && fullItem.content.startsWith('data:')) {
           // Data URL - extract base64 and write to temp file
           const matches = fullItem.content.match(/^data:image\/(\w+);base64,(.+)$/);
           if (matches) {
             const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
             const base64Data = matches[2];
-            
+
             const fileName = fullItem.fileName || `image-${item.id}`;
             const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
             tempPath = path.join(os.tmpdir(), `spaces-upload-${safeName}.${ext}`);
-            
+
             fs.writeFileSync(tempPath, Buffer.from(base64Data, 'base64'));
             tempUploadFiles.add(tempPath);
-            
+
             console.log('[Spaces Upload] Image data URL exported to:', tempPath);
           }
         } else if (fullItem.content && fs.existsSync(fullItem.content)) {
@@ -159,7 +157,7 @@ async function prepareSpacesFiles(items, onProgress = null) {
           console.log('[Spaces Upload] Image file:', tempPath);
         }
       }
-      
+
       if (tempPath) {
         filePaths.push(tempPath);
       } else {
@@ -169,21 +167,21 @@ async function prepareSpacesFiles(items, onProgress = null) {
       console.error('[Spaces Upload] Error preparing item:', item.id, err);
     }
   }
-  
+
   // Report completion
   if (onProgress) {
     try {
       onProgress(total, total, 'Complete');
-    } catch (e) {
+    } catch (_e) {
       // Ignore progress callback errors
     }
   }
-  
+
   // Schedule cleanup after 5 minutes
   if (tempUploadFiles.size > 0) {
     setTimeout(cleanupTempFiles, 5 * 60 * 1000);
   }
-  
+
   return filePaths;
 }
 
@@ -220,23 +218,23 @@ function registerCleanupOnExit() {
   if (cleanupHandlersRegistered) {
     return;
   }
-  
+
   // Clean up on app quit
   app.on('will-quit', () => {
     console.log('[Spaces Upload] App quitting, cleaning up temp files...');
     cleanupTempFiles(true);
   });
-  
+
   // Also clean up on before-quit (earlier in quit sequence)
   app.on('before-quit', () => {
     cleanupTempFiles(true);
   });
-  
+
   // Handle unexpected exits
   process.on('exit', () => {
     cleanupTempFiles(true);
   });
-  
+
   cleanupHandlersRegistered = true;
   console.log('[Spaces Upload] Cleanup handlers registered for app exit');
 }
@@ -262,10 +260,10 @@ function registerIPCHandlers() {
     const spacesAPI = getSpacesAPI();
     return await spacesAPI.items.list(spaceId, { includeContent: false });
   });
-  
+
   // Also register cleanup handlers when IPC is registered
   registerCleanupOnExit();
-  
+
   console.log('[Spaces Upload] IPC handlers registered');
 }
 
@@ -276,11 +274,11 @@ function getTempFileCount() {
   return tempUploadFiles.size;
 }
 
-module.exports = { 
-  showSpacesPicker, 
-  prepareSpacesFiles, 
+module.exports = {
+  showSpacesPicker,
+  prepareSpacesFiles,
   cleanupTempFiles,
   registerIPCHandlers,
   registerCleanupOnExit,
-  getTempFileCount
+  getTempFileCount,
 };

@@ -11,7 +11,12 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
 } = require('./helpers/electron-app');
 
 let app;
@@ -24,7 +29,6 @@ const sampleVideo = path.join(__dirname, '../fixtures/media/sample.mp4');
 const hasVideo = fs.existsSync(sampleVideo);
 
 test.describe('Video Editor Core', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -47,15 +51,21 @@ test.describe('Video Editor Core', () => {
         if (window.api?.invoke) {
           await window.api.invoke('open-video-editor').catch(() => null);
         }
-      } catch {}
+      } catch {
+        /* no-op */
+      }
     });
 
     await sleep(1000);
 
     // Find and close any video editor windows
     const windows = await electronApp.windows();
-    const videoPage = windows.find(p => {
-      try { return p.url().includes('video-editor'); } catch { return false; }
+    const videoPage = windows.find((p) => {
+      try {
+        return p.url().includes('video-editor');
+      } catch {
+        return false;
+      }
     });
 
     if (videoPage) {
@@ -65,8 +75,12 @@ test.describe('Video Editor Core', () => {
 
     // Verify no orphaned video editor windows
     const afterWindows = await electronApp.windows();
-    const orphaned = afterWindows.find(p => {
-      try { return p.url().includes('video-editor'); } catch { return false; }
+    const orphaned = afterWindows.find((p) => {
+      try {
+        return p.url().includes('video-editor');
+      } catch {
+        return false;
+      }
     });
     expect(!orphaned).toBeTruthy();
   });
@@ -110,7 +124,7 @@ test.describe('Video Editor Core', () => {
             start: 0,
             end: 2,
             fadeIn: 0.5,
-            fadeOut: 0.5
+            fadeOut: 0.5,
           });
           return { success: !!trimResult, result: trimResult };
         }
@@ -132,7 +146,7 @@ test.describe('Video Editor Core', () => {
           const trimResult = await window.api.invoke('video-editor:trim', {
             input: videoPath,
             start: 0,
-            end: 2
+            end: 2,
           });
           return { success: !!trimResult, result: trimResult };
         }
@@ -153,7 +167,7 @@ test.describe('Video Editor Core', () => {
         if (window.api?.invoke) {
           const convertResult = await window.api.invoke('video-editor:convert', {
             input: videoPath,
-            format: 'mp4'
+            format: 'mp4',
           });
           return { success: !!convertResult, result: convertResult };
         }
@@ -173,7 +187,7 @@ test.describe('Video Editor Core', () => {
       try {
         if (window.api?.invoke) {
           const audioResult = await window.api.invoke('video-editor:extract-audio', {
-            input: videoPath
+            input: videoPath,
           });
           return { success: !!audioResult, result: audioResult };
         }
@@ -194,7 +208,7 @@ test.describe('Video Editor Core', () => {
         if (window.api?.invoke) {
           const compressResult = await window.api.invoke('video-editor:compress', {
             input: videoPath,
-            quality: 'medium'
+            quality: 'medium',
           });
           return { success: !!compressResult, result: compressResult };
         }
@@ -215,7 +229,7 @@ test.describe('Video Editor Core', () => {
         if (window.api?.invoke) {
           const thumbResult = await window.api.invoke('video-editor:generate-thumbnails', {
             input: videoPath,
-            count: 3
+            count: 3,
           });
           return { success: !!thumbResult, result: thumbResult };
         }
@@ -237,7 +251,7 @@ test.describe('Video Editor Core', () => {
       try {
         if (window.api?.invoke) {
           const version = await window.api.invoke('video-editor:create-version', {
-            label: 'test-version'
+            label: 'test-version',
           });
           return { success: !!version, version };
         }
@@ -255,7 +269,7 @@ test.describe('Video Editor Core', () => {
       try {
         if (window.api?.invoke) {
           const branch = await window.api.invoke('video-editor:create-branch', {
-            name: 'test-branch'
+            name: 'test-branch',
           });
           return { success: !!branch, branch };
         }
@@ -290,7 +304,7 @@ test.describe('Video Editor Core', () => {
         if (window.api?.invoke) {
           const saveResult = await window.api.invoke('video-editor:save-project', {
             spaceId: null,
-            includeMetadata: true
+            includeMetadata: true,
           });
           return { success: !!saveResult, result: saveResult };
         }
@@ -311,7 +325,10 @@ test.describe('Video Editor Core', () => {
     const errors = await checkNewErrors(errorSnapshot);
     const genuine = filterBenignErrors(errors);
     if (genuine.length > 0) {
-      console.log('Video editor test errors:', genuine.map(e => e.message));
+      console.log(
+        'Video editor test errors:',
+        genuine.map((e) => e.message)
+      );
     }
     expect(genuine.length).toBeLessThanOrEqual(5);
   });

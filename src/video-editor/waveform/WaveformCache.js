@@ -7,13 +7,13 @@ const log = getLogQueue();
 export class WaveformCache {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Cache state
-    this.cachePath = null;     // Current video path being cached
-    this.tiers = {};           // Tier-specific peak data
-    this.images = {};          // Rendered image data URLs
-    this.masterPeaks = null;   // High-resolution master peaks
-    this.duration = 0;         // Cached video duration
+    this.cachePath = null; // Current video path being cached
+    this.tiers = {}; // Tier-specific peak data
+    this.images = {}; // Rendered image data URLs
+    this.masterPeaks = null; // High-resolution master peaks
+    this.duration = 0; // Cached video duration
   }
 
   /**
@@ -58,7 +58,12 @@ export class WaveformCache {
     const tierKey = `tier_${samplesPerSec}`;
     if (!this.tiers) this.tiers = {};
     this.tiers[tierKey] = peaks;
-    log.info('video', '[WaveformCache] Stored tier', { arg0: tierKey, arg1: 'with', arg2: peaks.length, arg3: 'samples' });
+    log.info('video', '[WaveformCache] Stored tier', {
+      arg0: tierKey,
+      arg1: 'with',
+      arg2: peaks.length,
+      arg3: 'samples',
+    });
   }
 
   /**
@@ -98,7 +103,7 @@ export class WaveformCache {
     if (!window.videoEditor?.loadWaveformImage) {
       return { exists: false };
     }
-    
+
     try {
       const result = await window.videoEditor.loadWaveformImage(videoPath, imageKey);
       if (result.exists && result.dataUrl) {
@@ -120,7 +125,7 @@ export class WaveformCache {
     if (!window.videoEditor?.saveWaveformImage) {
       return { success: false };
     }
-    
+
     try {
       const result = await window.videoEditor.saveWaveformImage(videoPath, imageKey, dataUrl);
       if (result.success) {
@@ -140,7 +145,7 @@ export class WaveformCache {
     if (!window.videoEditor?.loadWaveformCache) {
       return { exists: false };
     }
-    
+
     try {
       const result = await window.videoEditor.loadWaveformCache(videoPath);
       if (result.exists && result.masterPeaks) {
@@ -149,7 +154,7 @@ export class WaveformCache {
         return { exists: true, peaks: this.masterPeaks };
       }
       return { exists: false };
-    } catch (e) {
+    } catch (_e) {
       log.info('video', '[WaveformCache] No disk cache available');
       return { exists: false };
     }
@@ -162,12 +167,12 @@ export class WaveformCache {
     if (!window.videoEditor?.saveWaveformCache || !this.masterPeaks) {
       return { success: false };
     }
-    
+
     try {
       const result = await window.videoEditor.saveWaveformCache(videoPath, {
         masterPeaks: Array.from(this.masterPeaks),
         duration: duration,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       });
       if (result.success) {
         log.info('video', '[WaveformCache] Master peaks saved to disk');
@@ -186,7 +191,7 @@ export class WaveformCache {
     if (!window.videoEditor?.deleteWaveformCache) {
       return { success: false };
     }
-    
+
     try {
       const result = await window.videoEditor.deleteWaveformCache(videoPath);
       log.info('video', '[WaveformCache] Disk cache deleted', { data: result });
@@ -204,10 +209,10 @@ export class WaveformCache {
     if (!masterPeaks || masterPeaks.length <= targetCount) {
       return masterPeaks;
     }
-    
+
     const result = new Float32Array(targetCount);
     const ratio = masterPeaks.length / targetCount;
-    
+
     for (let i = 0; i < targetCount; i++) {
       const start = Math.floor(i * ratio);
       const end = Math.floor((i + 1) * ratio);
@@ -217,25 +222,7 @@ export class WaveformCache {
       }
       result[i] = max;
     }
-    
+
     return result;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

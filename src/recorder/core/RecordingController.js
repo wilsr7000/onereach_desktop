@@ -17,7 +17,7 @@ export class RecordingController {
     this.startTime = null;
     this.duration = 0;
     this.durationInterval = null;
-    
+
     this.onDataAvailable = null;
     this.onStop = null;
     this.onDurationUpdate = null;
@@ -29,17 +29,14 @@ export class RecordingController {
    * @param {Object} options - Recording options
    */
   start(stream, options = {}) {
-    const {
-      mimeType = 'video/webm;codecs=vp9,opus',
-      videoBitsPerSecond = 5000000
-    } = options;
+    const { mimeType = 'video/webm;codecs=vp9,opus', videoBitsPerSecond = 5000000 } = options;
 
     // Check for supported MIME type
     const supportedMimeType = this.getSupportedMimeType(mimeType);
-    
+
     this.mediaRecorder = new MediaRecorder(stream, {
       mimeType: supportedMimeType,
-      videoBitsPerSecond
+      videoBitsPerSecond,
     });
 
     this.recordedChunks = [];
@@ -66,7 +63,7 @@ export class RecordingController {
     this.isPaused = false;
     this.startTime = Date.now();
     this.duration = 0;
-    
+
     this.startDurationTracking();
 
     log.info('recorder', '[RecordingController] Started recording');
@@ -78,13 +75,7 @@ export class RecordingController {
    * @returns {string} Supported MIME type
    */
   getSupportedMimeType(preferred) {
-    const types = [
-      preferred,
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm',
-      'video/mp4'
-    ];
+    const types = [preferred, 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
 
     for (const type of types) {
       if (MediaRecorder.isTypeSupported(type)) {
@@ -133,10 +124,10 @@ export class RecordingController {
         this.stopDurationTracking();
         this.isRecording = false;
         this.isPaused = false;
-        
+
         const blob = this.getBlob();
         log.info('recorder', '[RecordingController] Stopped, size', { data: blob.size });
-        
+
         if (this.onStop) {
           this.onStop(blob);
         }
@@ -153,8 +144,8 @@ export class RecordingController {
    */
   getBlob() {
     if (this.recordedChunks.length === 0) return null;
-    return new Blob(this.recordedChunks, { 
-      type: this.mediaRecorder?.mimeType || 'video/webm' 
+    return new Blob(this.recordedChunks, {
+      type: this.mediaRecorder?.mimeType || 'video/webm',
     });
   }
 
@@ -189,23 +180,7 @@ export class RecordingController {
     return {
       isRecording: this.isRecording,
       isPaused: this.isPaused,
-      duration: this.duration
+      duration: this.duration,
     };
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

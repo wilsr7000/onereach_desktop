@@ -1,6 +1,6 @@
 /**
  * RatingStorage.js - Rating Storage System
- * 
+ *
  * Handles storage of project ratings:
  * - Per-project metadata storage
  * - Global trends database
@@ -15,7 +15,7 @@ const log = getLogQueue();
 const STORAGE_KEYS = {
   RATINGS: 'project_ratings',
   TRENDS: 'rating_trends',
-  SETTINGS: 'rating_settings'
+  SETTINGS: 'rating_settings',
 };
 
 /**
@@ -26,7 +26,7 @@ export class RatingStorage {
     // In-memory cache
     this.ratingsCache = new Map();
     this.trendsCache = null;
-    
+
     // Initialize
     this.loadFromStorage();
   }
@@ -40,11 +40,11 @@ export class RatingStorage {
       const ratingsData = localStorage.getItem(STORAGE_KEYS.RATINGS);
       if (ratingsData) {
         const ratings = JSON.parse(ratingsData);
-        ratings.forEach(r => {
+        ratings.forEach((r) => {
           this.ratingsCache.set(r.projectId, r);
         });
       }
-      
+
       // Load trends
       const trendsData = localStorage.getItem(STORAGE_KEYS.TRENDS);
       if (trendsData) {
@@ -67,7 +67,7 @@ export class RatingStorage {
       totalRatings: 0,
       byTemplate: {},
       averageByTemplate: {},
-      lastUpdated: null
+      lastUpdated: null,
     };
   }
 
@@ -79,14 +79,14 @@ export class RatingStorage {
   async saveRating(rating) {
     // Add to cache
     this.ratingsCache.set(rating.projectId, rating);
-    
+
     // Update trends
     this.updateTrends(rating);
-    
+
     // Persist to storage
     this.persistRatings();
     this.persistTrends();
-    
+
     return rating;
   }
 
@@ -106,12 +106,13 @@ export class RatingStorage {
    */
   getAllRatings(templateId = null) {
     const ratings = Array.from(this.ratingsCache.values());
-    
+
     if (templateId) {
-      return ratings.filter(r => r.templateId === templateId)
+      return ratings
+        .filter((r) => r.templateId === templateId)
         .sort((a, b) => new Date(a.ratedAt) - new Date(b.ratedAt));
     }
-    
+
     return ratings.sort((a, b) => new Date(a.ratedAt) - new Date(b.ratedAt));
   }
 
@@ -148,27 +149,27 @@ export class RatingStorage {
    */
   updateTrends(rating) {
     const templateId = rating.templateId;
-    
+
     // Update total count
     this.trendsCache.totalRatings = this.ratingsCache.size;
-    
+
     // Update by template
     if (!this.trendsCache.byTemplate[templateId]) {
       this.trendsCache.byTemplate[templateId] = {
         count: 0,
         scores: [],
-        average: 0
+        average: 0,
       };
     }
-    
+
     const templateTrend = this.trendsCache.byTemplate[templateId];
     templateTrend.count++;
     templateTrend.scores.push(rating.overall.score);
     templateTrend.average = templateTrend.scores.reduce((a, b) => a + b, 0) / templateTrend.scores.length;
-    
+
     // Update averages
     this.trendsCache.averageByTemplate[templateId] = templateTrend.average;
-    
+
     this.trendsCache.lastUpdated = new Date().toISOString();
   }
 
@@ -177,8 +178,8 @@ export class RatingStorage {
    */
   recalculateTrends() {
     this.trendsCache = this.initializeTrends();
-    
-    this.ratingsCache.forEach(rating => {
+
+    this.ratingsCache.forEach((rating) => {
       this.updateTrends(rating);
     });
   }
@@ -208,12 +209,12 @@ export class RatingStorage {
    */
   getProgressOverTime(templateId = null, limit = 10) {
     const ratings = this.getAllRatings(templateId);
-    
-    return ratings.slice(-limit).map(r => ({
+
+    return ratings.slice(-limit).map((r) => ({
       date: r.ratedAt,
       score: r.overall.score,
       projectName: r.projectName,
-      templateId: r.templateId
+      templateId: r.templateId,
     }));
   }
 
@@ -225,29 +226,29 @@ export class RatingStorage {
   getImprovementAreas(templateId) {
     const ratings = this.getAllRatings(templateId);
     if (ratings.length < 2) return null;
-    
+
     // Analyze criteria trends
     const criteriaHistory = {};
-    
-    ratings.forEach(r => {
-      r.criteria.forEach(c => {
+
+    ratings.forEach((r) => {
+      r.criteria.forEach((c) => {
         if (!criteriaHistory[c.id]) {
           criteriaHistory[c.id] = {
             name: c.name,
             scores: [],
-            trend: 0
+            trend: 0,
           };
         }
         criteriaHistory[c.id].scores.push(c.score);
       });
     });
-    
+
     // Calculate trends for each criterion
-    Object.values(criteriaHistory).forEach(ch => {
+    Object.values(criteriaHistory).forEach((ch) => {
       if (ch.scores.length >= 2) {
         const recent = ch.scores.slice(-3);
         const older = ch.scores.slice(-6, -3);
-        
+
         if (recent.length > 0 && older.length > 0) {
           const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
           const olderAvg = older.reduce((a, b) => a + b, 0) / older.length;
@@ -255,14 +256,14 @@ export class RatingStorage {
         }
       }
     });
-    
+
     // Sort by trend to find improving and declining
     const sorted = Object.values(criteriaHistory).sort((a, b) => b.trend - a.trend);
-    
+
     return {
-      improving: sorted.filter(c => c.trend > 0.3).slice(0, 3),
-      declining: sorted.filter(c => c.trend < -0.3).slice(0, 3),
-      stable: sorted.filter(c => Math.abs(c.trend) <= 0.3)
+      improving: sorted.filter((c) => c.trend > 0.3).slice(0, 3),
+      declining: sorted.filter((c) => c.trend < -0.3).slice(0, 3),
+      stable: sorted.filter((c) => Math.abs(c.trend) <= 0.3),
     };
   }
 
@@ -272,25 +273,25 @@ export class RatingStorage {
    */
   getStatistics() {
     const ratings = Array.from(this.ratingsCache.values());
-    
+
     if (ratings.length === 0) {
       return {
         totalProjects: 0,
         averageScore: 0,
         highestScore: 0,
         lowestScore: 0,
-        improvement: 0
+        improvement: 0,
       };
     }
-    
-    const scores = ratings.map(r => r.overall.score);
-    
+
+    const scores = ratings.map((r) => r.overall.score);
+
     return {
       totalProjects: ratings.length,
       averageScore: Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10,
       highestScore: Math.max(...scores),
       lowestScore: Math.min(...scores),
-      improvement: this.calculateOverallImprovement(ratings)
+      improvement: this.calculateOverallImprovement(ratings),
     };
   }
 
@@ -301,14 +302,14 @@ export class RatingStorage {
    */
   calculateOverallImprovement(ratings) {
     if (ratings.length < 2) return 0;
-    
+
     const sorted = ratings.sort((a, b) => new Date(a.ratedAt) - new Date(b.ratedAt));
     const firstHalf = sorted.slice(0, Math.floor(sorted.length / 2));
     const secondHalf = sorted.slice(Math.floor(sorted.length / 2));
-    
+
     const firstAvg = firstHalf.reduce((sum, r) => sum + r.overall.score, 0) / firstHalf.length;
     const secondAvg = secondHalf.reduce((sum, r) => sum + r.overall.score, 0) / secondHalf.length;
-    
+
     return Math.round((secondAvg - firstAvg) * 10) / 10;
   }
 
@@ -320,7 +321,7 @@ export class RatingStorage {
     return {
       ratings: Array.from(this.ratingsCache.values()),
       trends: this.trendsCache,
-      exportedAt: new Date().toISOString()
+      exportedAt: new Date().toISOString(),
     };
   }
 
@@ -330,11 +331,11 @@ export class RatingStorage {
    */
   importData(data) {
     if (data.ratings) {
-      data.ratings.forEach(r => {
+      data.ratings.forEach((r) => {
         this.ratingsCache.set(r.projectId, r);
       });
     }
-    
+
     this.recalculateTrends();
     this.persistRatings();
     this.persistTrends();
@@ -346,7 +347,7 @@ export class RatingStorage {
   clearAll() {
     this.ratingsCache.clear();
     this.trendsCache = this.initializeTrends();
-    
+
     localStorage.removeItem(STORAGE_KEYS.RATINGS);
     localStorage.removeItem(STORAGE_KEYS.TRENDS);
   }
@@ -376,14 +377,3 @@ export class RatingStorage {
 }
 
 export default RatingStorage;
-
-
-
-
-
-
-
-
-
-
-

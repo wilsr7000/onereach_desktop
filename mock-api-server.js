@@ -1,9 +1,9 @@
 /**
  * Mock API Server for Agentic University Lessons
- * 
+ *
  * This is a simple Express server that serves the dummy JSON data
  * for testing the dynamic tutorials page.
- * 
+ *
  * To run:
  * 1. npm install express cors body-parser
  * 2. node mock-api-server.js
@@ -41,49 +41,49 @@ const progressStore = {};
 app.get('/api/users/:userId/lessons', (req, res) => {
   const { userId } = req.params;
   const { category, status, limit } = req.query;
-  
+
   console.log(`[API] Fetching lessons for user: ${userId}`);
   console.log(`[API] Query params:`, { category, status, limit });
-  
+
   // Simulate delay
   setTimeout(() => {
     // Customize response based on userId if needed
     const response = { ...mockData };
-    
+
     // Apply filters if provided
     if (category) {
       response.categories = {
-        [category]: response.categories[category]
+        [category]: response.categories[category],
       };
     }
-    
+
     if (status === 'completed') {
       // Filter only completed lessons
-      Object.keys(response.categories).forEach(cat => {
+      Object.keys(response.categories).forEach((cat) => {
         response.categories[cat].lessons = response.categories[cat].lessons.filter(
-          lesson => lesson.completed === true
+          (lesson) => lesson.completed === true
         );
       });
     } else if (status === 'in-progress') {
       // Filter only in-progress lessons
-      Object.keys(response.categories).forEach(cat => {
+      Object.keys(response.categories).forEach((cat) => {
         response.categories[cat].lessons = response.categories[cat].lessons.filter(
-          lesson => lesson.inProgress === true
+          (lesson) => lesson.inProgress === true
         );
       });
     }
-    
+
     // Add any stored progress updates
     if (progressStore[userId]) {
-      Object.keys(response.categories).forEach(cat => {
-        response.categories[cat].lessons.forEach(lesson => {
+      Object.keys(response.categories).forEach((cat) => {
+        response.categories[cat].lessons.forEach((lesson) => {
           if (progressStore[userId][lesson.id]) {
             lesson.progress = progressStore[userId][lesson.id];
           }
         });
       });
     }
-    
+
     res.json(response);
   }, 500); // 500ms delay to simulate network
 });
@@ -91,40 +91,40 @@ app.get('/api/users/:userId/lessons', (req, res) => {
 // Update lesson progress
 app.post('/api/lessons/:lessonId/progress', (req, res) => {
   const { lessonId } = req.params;
-  const { userId, progress, currentChapter, bookmarks, notes } = req.body;
-  
+  const { userId, progress, _currentChapter, _bookmarks, _notes } = req.body;
+
   console.log(`[API] Updating progress for lesson ${lessonId}, user ${userId}: ${progress}%`);
-  
+
   // Store progress in memory
   if (!progressStore[userId]) {
     progressStore[userId] = {};
   }
   progressStore[userId][lessonId] = progress;
-  
+
   res.json({
     success: true,
     message: 'Progress updated successfully',
     data: {
       lessonId,
       progress,
-      estimatedCompletion: progress < 100 ? `${Math.round((100 - progress) / 10)} min` : 'Completed'
-    }
+      estimatedCompletion: progress < 100 ? `${Math.round((100 - progress) / 10)} min` : 'Completed',
+    },
   });
 });
 
 // Complete lesson
 app.post('/api/lessons/:lessonId/complete', (req, res) => {
   const { lessonId } = req.params;
-  const { userId, score, completedAt, feedback } = req.body;
-  
+  const { userId, score, completedAt, _feedback } = req.body;
+
   console.log(`[API] Marking lesson ${lessonId} as complete for user ${userId}`);
-  
+
   // Store completion
   if (!progressStore[userId]) {
     progressStore[userId] = {};
   }
   progressStore[userId][lessonId] = 100;
-  
+
   res.json({
     success: true,
     message: 'Lesson marked as complete',
@@ -132,8 +132,8 @@ app.post('/api/lessons/:lessonId/complete', (req, res) => {
       lessonId,
       score,
       completedAt: completedAt || new Date().toISOString(),
-      achievement: score >= 90 ? 'Excellence Award' : null
-    }
+      achievement: score >= 90 ? 'Excellence Award' : null,
+    },
   });
 });
 
@@ -141,30 +141,30 @@ app.post('/api/lessons/:lessonId/complete', (req, res) => {
 app.get('/api/users/:userId/recommendations', (req, res) => {
   const { userId } = req.params;
   const { limit = 5, basedOn = 'history' } = req.query;
-  
+
   console.log(`[API] Getting recommendations for user ${userId}`);
-  
-  const recommendations = mockData.recommendations.slice(0, limit).map(lessonId => ({
+
+  const recommendations = mockData.recommendations.slice(0, limit).map((lessonId) => ({
     lessonId,
     reason: `Based on your ${basedOn}`,
-    confidence: Math.random() * 0.3 + 0.7 // Random confidence between 0.7-1.0
+    confidence: Math.random() * 0.3 + 0.7, // Random confidence between 0.7-1.0
   }));
-  
+
   res.json({
     success: true,
-    recommendations
+    recommendations,
   });
 });
 
 // Get learning path
 app.get('/api/users/:userId/learning-path', (req, res) => {
   const { userId } = req.params;
-  
+
   console.log(`[API] Getting learning path for user ${userId}`);
-  
+
   res.json({
     success: true,
-    learningPath: mockData.learningPath
+    learningPath: mockData.learningPath,
   });
 });
 
@@ -172,7 +172,7 @@ app.get('/api/users/:userId/learning-path', (req, res) => {
 app.get('/api/users/current', (req, res) => {
   res.json({
     success: true,
-    data: mockData.user
+    data: mockData.user,
   });
 });
 
@@ -181,7 +181,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '1.0.0',
   });
 });
 
@@ -192,21 +192,21 @@ app.use((req, res) => {
     error: {
       code: 'NOT_FOUND',
       message: 'The requested endpoint does not exist',
-      path: req.path
-    }
+      path: req.path,
+    },
   });
 });
 
 // Error handler
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
   console.error('Server error:', err);
   res.status(500).json({
     success: false,
     error: {
       code: 'INTERNAL_ERROR',
       message: 'An internal server error occurred',
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined
-    }
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    },
   });
 });
 

@@ -3,7 +3,7 @@
  * JSON file-based storage for event logs and transactions (Episodic Memory)
  * DuckDB for querying JSON files across spaces
  * Logs are stored in each space's folder
- * 
+ *
  * Uses unified pricing from pricing-config.js
  * Delegates to BudgetManager for centralized cost tracking
  */
@@ -15,7 +15,7 @@ const { calculateCost, formatCost, resolveModelName } = require('./pricing-confi
 let DuckDB;
 try {
   DuckDB = require('@duckdb/node-api');
-} catch (e) {
+} catch (_e) {
   console.warn('[EventDB] @duckdb/node-api not installed');
   DuckDB = null;
 }
@@ -126,7 +126,7 @@ class EventDB {
         source: event.source || null,
         userAction: event.userAction || null,
         filePath: event.filePath || null,
-        errorStack: event.errorStack || null
+        errorStack: event.errorStack || null,
       };
 
       events.unshift(newEvent); // Add to beginning
@@ -147,7 +147,7 @@ class EventDB {
 
   async getEventLogs(options = {}) {
     const spaceId = options.spaceId;
-    
+
     if (spaceId) {
       // Get logs for specific space
       const filePath = this.getEventLogFile(spaceId);
@@ -155,13 +155,13 @@ class EventDB {
 
       // Apply filters
       if (options.level) {
-        events = events.filter(e => e.level === options.level);
+        events = events.filter((e) => e.level === options.level);
       }
       if (options.category) {
-        events = events.filter(e => e.category === options.category);
+        events = events.filter((e) => e.category === options.category);
       }
       if (options.since) {
-        events = events.filter(e => new Date(e.timestamp) >= new Date(options.since));
+        events = events.filter((e) => new Date(e.timestamp) >= new Date(options.since));
       }
       if (options.limit) {
         events = events.slice(0, parseInt(options.limit));
@@ -181,20 +181,20 @@ class EventDB {
     try {
       const globPattern = path.join(this.spacesPath, '*', 'logs', 'events.json').replace(/\\/g, '/');
       let query = `SELECT * FROM read_json_auto('${globPattern}')`;
-      
+
       const conditions = [];
       if (options.level) conditions.push(`level = '${options.level}'`);
       if (options.category) conditions.push(`category = '${options.category}'`);
-      
+
       if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');
       }
-      
+
       query += ' ORDER BY timestamp DESC';
       if (options.limit) query += ` LIMIT ${parseInt(options.limit)}`;
 
       const result = await this.connection.run(query);
-      return await result.getRows() || [];
+      return (await result.getRows()) || [];
     } catch (e) {
       console.error('[EventDB] Query all events failed:', e);
       return [];
@@ -223,10 +223,10 @@ class EventDB {
       const inputTokens = tx.inputTokens || 0;
       const outputTokens = tx.outputTokens || 0;
       const model = tx.model || 'claude-sonnet-4-5-20250929';
-      
+
       let cost = tx.cost;
       let costBreakdown = null;
-      
+
       // If we have tokens and no cost, or if we want to verify the cost
       if ((inputTokens > 0 || outputTokens > 0) && (!cost || tx.recalculateCost)) {
         const costResult = calculateCost(model, inputTokens, outputTokens);
@@ -250,7 +250,7 @@ class EventDB {
         durationMs: tx.durationMs || null,
         feature: tx.feature || tx.type || 'other',
         metadata: tx.metadata || null,
-        costBreakdown
+        costBreakdown,
       };
 
       transactions.unshift(newTx);
@@ -261,17 +261,17 @@ class EventDB {
       }
 
       this.writeJsonFile(filePath, transactions);
-      
+
       // Delegate to BudgetManager for centralized tracking
       this._delegateToBudgetManager(newTx, spaceId);
-      
+
       return true;
     } catch (e) {
       console.error('[EventDB] Failed to log transaction:', e);
       return false;
     }
   }
-  
+
   /**
    * Delegate transaction to BudgetManager for centralized cost tracking
    */
@@ -279,7 +279,7 @@ class EventDB {
     try {
       const { getBudgetManager } = require('./budget-manager');
       const budgetManager = getBudgetManager();
-      
+
       // Only track if we have meaningful data
       if (tx.inputTokens > 0 || tx.outputTokens > 0 || tx.cost > 0) {
         budgetManager.trackUsage({
@@ -291,7 +291,7 @@ class EventDB {
           spaceId: spaceId,
           feature: tx.feature || 'gsx-create',
           operation: tx.type || 'api_call',
-          success: tx.status === 'success'
+          success: tx.status === 'success',
         });
       }
     } catch (error) {
@@ -302,16 +302,16 @@ class EventDB {
 
   async getTransactions(options = {}) {
     const spaceId = options.spaceId;
-    
+
     if (spaceId) {
       const filePath = this.getTransactionLogFile(spaceId);
       let transactions = this.readJsonFile(filePath);
 
       if (options.model) {
-        transactions = transactions.filter(t => t.model === options.model);
+        transactions = transactions.filter((t) => t.model === options.model);
       }
       if (options.since) {
-        transactions = transactions.filter(t => new Date(t.timestamp) >= new Date(options.since));
+        transactions = transactions.filter((t) => new Date(t.timestamp) >= new Date(options.since));
       }
       if (options.limit) {
         transactions = transactions.slice(0, parseInt(options.limit));
@@ -328,13 +328,13 @@ class EventDB {
     try {
       const globPattern = path.join(this.spacesPath, '*', 'logs', 'transactions.json').replace(/\\/g, '/');
       let query = `SELECT * FROM read_json_auto('${globPattern}')`;
-      
+
       if (options.model) query += ` WHERE model = '${options.model}'`;
       query += ' ORDER BY timestamp DESC';
       if (options.limit) query += ` LIMIT ${parseInt(options.limit)}`;
 
       const result = await this.connection.run(query);
-      return await result.getRows() || [];
+      return (await result.getRows()) || [];
     } catch (e) {
       console.error('[EventDB] Query all transactions failed:', e);
       return [];
@@ -352,7 +352,7 @@ class EventDB {
         totalInputTokens: transactions.reduce((sum, t) => sum + (t.inputTokens || 0), 0),
         totalOutputTokens: transactions.reduce((sum, t) => sum + (t.outputTokens || 0), 0),
         totalCost,
-        totalCostFormatted: formatCost(totalCost)
+        totalCostFormatted: formatCost(totalCost),
       };
     }
 
@@ -376,7 +376,7 @@ class EventDB {
             totalCalls: row.total_calls || 0,
             totalInputTokens: row.total_input_tokens || 0,
             totalOutputTokens: row.total_output_tokens || 0,
-            totalCost: row.total_cost || 0
+            totalCost: row.total_cost || 0,
           };
         }
         return null;
@@ -388,9 +388,11 @@ class EventDB {
   }
 
   async getCostByModel(spaceId = null) {
-    const transactions = spaceId 
+    const transactions = spaceId
       ? await this.getTransactions({ spaceId })
-      : (this.duckdbReady ? await this._queryAllTransactions({}) : []);
+      : this.duckdbReady
+        ? await this._queryAllTransactions({})
+        : [];
 
     const byModel = {};
     for (const tx of transactions) {
@@ -413,7 +415,9 @@ class EventDB {
 
     const transactions = spaceId
       ? await this.getTransactions({ spaceId, since: since.toISOString() })
-      : (this.duckdbReady ? await this._queryAllTransactions({ since: since.toISOString() }) : []);
+      : this.duckdbReady
+        ? await this._queryAllTransactions({ since: since.toISOString() })
+        : [];
 
     const byDay = {};
     for (const tx of transactions) {
@@ -442,7 +446,7 @@ class EventDB {
         SELECT * FROM read_json_auto('${globPattern}')
         ${whereClause ? 'WHERE ' + whereClause : ''}
       `);
-      return await result.getRows() || [];
+      return (await result.getRows()) || [];
     } catch (e) {
       console.error('[EventDB] Query space metadata failed:', e);
       return [];
@@ -463,7 +467,7 @@ class EventDB {
         WHERE name ILIKE '%${searchTerm}%' 
            OR projectConfig.description ILIKE '%${searchTerm}%'
       `);
-      return await result.getRows() || [];
+      return (await result.getRows()) || [];
     } catch (e) {
       console.error('[EventDB] Search spaces failed:', e);
       return [];
@@ -480,7 +484,7 @@ class EventDB {
 
     try {
       const result = await this.connection.run(sql);
-      return await result.getRows() || [];
+      return (await result.getRows()) || [];
     } catch (e) {
       console.error('[EventDB] Query failed:', e);
       return [];

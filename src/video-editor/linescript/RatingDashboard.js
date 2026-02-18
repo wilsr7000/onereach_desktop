@@ -1,6 +1,6 @@
 /**
  * RatingDashboard - Visual display panel for project ratings
- * 
+ *
  * Features:
  * - Overall score with trend indicator
  * - Per-criterion breakdown with progress bars
@@ -15,7 +15,7 @@ export class RatingDashboard {
     this.app = appContext;
     this.panelElement = null;
     this.isVisible = false;
-    
+
     // Current rating data
     this.currentRating = null;
     this.history = [];
@@ -35,14 +35,14 @@ export class RatingDashboard {
   _createPanel() {
     // Check if panel exists
     this.panelElement = document.getElementById('ratingDashboardPanel');
-    
+
     if (!this.panelElement) {
       this.panelElement = document.createElement('div');
       this.panelElement.id = 'ratingDashboardPanel';
       this.panelElement.className = 'rating-dashboard-overlay';
       document.body.appendChild(this.panelElement);
     }
-    
+
     this._setupEventListeners();
   }
 
@@ -51,7 +51,7 @@ export class RatingDashboard {
    */
   _addStyles() {
     if (document.getElementById('ratingDashboardStyles')) return;
-    
+
     const styles = document.createElement('style');
     styles.id = 'ratingDashboardStyles';
     styles.textContent = `
@@ -464,7 +464,7 @@ export class RatingDashboard {
         this.hide();
       }
     });
-    
+
     // Escape to close
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.isVisible) {
@@ -481,14 +481,14 @@ export class RatingDashboard {
   show(rating = null, history = []) {
     this.currentRating = rating || this.app.projectRating?.currentRating;
     this.history = history;
-    
+
     // Load history if not provided
     if (history.length === 0 && this.app.projectRating?.storage) {
       this._loadHistory();
     }
-    
+
     this.render();
-    
+
     this.panelElement.classList.add('visible');
     this.isVisible = true;
   }
@@ -507,7 +507,7 @@ export class RatingDashboard {
   async _loadHistory() {
     try {
       const templateId = this.currentRating?.templateId || 'generic';
-      this.history = await this.app.projectRating?.getProjectHistory?.(templateId) || [];
+      this.history = (await this.app.projectRating?.getProjectHistory?.(templateId)) || [];
     } catch (error) {
       log.error('video', '[RatingDashboard] Failed to load history', { error: error });
       this.history = [];
@@ -519,14 +519,14 @@ export class RatingDashboard {
    */
   render() {
     if (!this.panelElement) return;
-    
+
     if (!this.currentRating) {
       this.panelElement.innerHTML = this._renderEmptyState();
       return;
     }
-    
+
     const { overallScore, criteriaScores, trend, improvements, nextTime, projectName } = this.currentRating;
-    
+
     this.panelElement.innerHTML = `
       <div class="rating-dashboard">
         <div class="rating-dashboard-header">
@@ -594,13 +594,13 @@ export class RatingDashboard {
     const circumference = 2 * Math.PI * 54; // r=54
     const progress = (score / 10) * circumference;
     const dashoffset = circumference - progress;
-    
+
     const trendIcon = trend > 0 ? '↑' : trend < 0 ? '↓' : '→';
     const trendClass = trend > 0 ? 'trend-up' : trend < 0 ? 'trend-down' : 'trend-flat';
     const trendText = trend !== 0 ? `${Math.abs(trend).toFixed(1)} from last` : 'No change';
-    
+
     const grade = this._scoreToGrade(score);
-    
+
     return `
       <div class="rating-overall-section">
         <div class="rating-score-display">
@@ -633,7 +633,7 @@ export class RatingDashboard {
     if (!criteriaScores || criteriaScores.length === 0) {
       return '';
     }
-    
+
     return `
       <div class="rating-criteria-section">
         <div class="rating-section-title">
@@ -642,11 +642,12 @@ export class RatingDashboard {
         </div>
         
         <div class="rating-criteria-list">
-          ${criteriaScores.map(criterion => {
-            const scoreColor = this._getScoreColor(criterion.score);
-            const percentage = (criterion.score / 10) * 100;
-            
-            return `
+          ${criteriaScores
+            .map((criterion) => {
+              const scoreColor = this._getScoreColor(criterion.score);
+              const percentage = (criterion.score / 10) * 100;
+
+              return `
               <div class="rating-criterion">
                 <div class="criterion-header">
                   <span class="criterion-name">
@@ -658,12 +659,17 @@ export class RatingDashboard {
                 <div class="criterion-bar">
                   <div class="criterion-bar-fill" style="width: ${percentage}%; background: ${scoreColor}"></div>
                 </div>
-                ${criterion.description ? `
+                ${
+                  criterion.description
+                    ? `
                   <div class="criterion-description">${this._escapeHtml(criterion.description)}</div>
-                ` : ''}
+                `
+                    : ''
+                }
               </div>
             `;
-          }).join('')}
+            })
+            .join('')}
         </div>
       </div>
     `;
@@ -676,12 +682,12 @@ export class RatingDashboard {
     if ((!improvements || improvements.length === 0) && (!nextTime || nextTime.length === 0)) {
       return '';
     }
-    
+
     const allItems = [
-      ...(improvements || []).map(i => ({ ...i, category: i.type || 'content' })),
-      ...(nextTime || []).map(n => ({ ...n, category: 'next-time' }))
+      ...(improvements || []).map((i) => ({ ...i, category: i.type || 'content' })),
+      ...(nextTime || []).map((n) => ({ ...n, category: 'next-time' })),
     ];
-    
+
     return `
       <div class="rating-improvements-section">
         <div class="rating-section-title">
@@ -689,7 +695,9 @@ export class RatingDashboard {
           <span>Suggestions & Improvements</span>
         </div>
         
-        ${allItems.map(item => `
+        ${allItems
+          .map(
+            (item) => `
           <div class="improvement-item ${item.category}">
             <div class="improvement-icon">${this._getImprovementIcon(item.category)}</div>
             <div class="improvement-content">
@@ -698,7 +706,9 @@ export class RatingDashboard {
               <div class="improvement-description">${this._escapeHtml(item.suggestion || item.description || '')}</div>
             </div>
           </div>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
     `;
   }
@@ -710,11 +720,11 @@ export class RatingDashboard {
     if (!this.history || this.history.length === 0) {
       return '';
     }
-    
+
     // Get last 8 ratings
     const recentHistory = this.history.slice(-8);
     const maxScore = 10;
-    
+
     return `
       <div class="rating-history-section">
         <div class="rating-section-title">
@@ -724,13 +734,14 @@ export class RatingDashboard {
         
         <div class="history-chart">
           <div class="history-chart-bars">
-            ${recentHistory.map((item, index) => {
-              const height = (item.overallScore / maxScore) * 100;
-              const color = this._getScoreColor(item.overallScore);
-              const isCurrent = index === recentHistory.length - 1 && 
-                               item.projectId === this.currentRating?.projectId;
-              
-              return `
+            ${recentHistory
+              .map((item, index) => {
+                const height = (item.overallScore / maxScore) * 100;
+                const color = this._getScoreColor(item.overallScore);
+                const isCurrent =
+                  index === recentHistory.length - 1 && item.projectId === this.currentRating?.projectId;
+
+                return `
                 <div class="history-bar ${isCurrent ? 'current' : ''}"
                      style="height: ${height}%; background: ${color};"
                      title="${item.projectName}: ${item.overallScore.toFixed(1)}">
@@ -738,7 +749,8 @@ export class RatingDashboard {
                   <span class="history-bar-label">${this._formatDate(item.ratedAt)}</span>
                 </div>
               `;
-            }).join('')}
+              })
+              .join('')}
           </div>
         </div>
       </div>
@@ -749,10 +761,10 @@ export class RatingDashboard {
    * Get color for score
    */
   _getScoreColor(score) {
-    if (score >= 8) return '#10b981';      // Green - Excellent
-    if (score >= 6) return '#f59e0b';      // Yellow - Good
-    if (score >= 4) return '#f97316';      // Orange - Needs work
-    return '#ef4444';                       // Red - Poor
+    if (score >= 8) return '#10b981'; // Green - Excellent
+    if (score >= 6) return '#f59e0b'; // Yellow - Good
+    if (score >= 4) return '#f97316'; // Orange - Needs work
+    return '#ef4444'; // Red - Poor
   }
 
   /**
@@ -779,10 +791,14 @@ export class RatingDashboard {
    */
   _getImprovementIcon(category) {
     switch (category) {
-      case 'immediate': return '🚨';
-      case 'content': return '✏️';
-      case 'next-time': return '💡';
-      default: return '📌';
+      case 'immediate':
+        return '🚨';
+      case 'content':
+        return '✏️';
+      case 'next-time':
+        return '💡';
+      default:
+        return '📌';
     }
   }
 
@@ -791,10 +807,14 @@ export class RatingDashboard {
    */
   _getImprovementLabel(category) {
     switch (category) {
-      case 'immediate': return 'Fix Now';
-      case 'content': return 'Content';
-      case 'next-time': return 'Next Time';
-      default: return 'Suggestion';
+      case 'immediate':
+        return 'Fix Now';
+      case 'content':
+        return 'Content';
+      case 'next-time':
+        return 'Next Time';
+      default:
+        return 'Suggestion';
     }
   }
 
@@ -814,16 +834,16 @@ export class RatingDashboard {
       this.app.showToast?.('error', 'No rating to export');
       return;
     }
-    
+
     const json = JSON.stringify(this.currentRating, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    
+
     const a = document.createElement('a');
     a.href = url;
     a.download = `rating_${this.currentRating.projectName || 'project'}_${Date.now()}.json`;
     a.click();
-    
+
     URL.revokeObjectURL(url);
     this.app.showToast?.('success', 'Rating exported');
   }
@@ -833,7 +853,7 @@ export class RatingDashboard {
    */
   async reRate() {
     this.hide();
-    
+
     // Open rating modal
     if (this.app.projectRating?.openRatingModal) {
       await this.app.projectRating.openRatingModal();
@@ -853,14 +873,3 @@ export class RatingDashboard {
 }
 
 export default RatingDashboard;
-
-
-
-
-
-
-
-
-
-
-

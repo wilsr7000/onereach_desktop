@@ -13,20 +13,100 @@
     "appAiCostBaseline": 0,
     "appAiCostCurrent": 0,
     "appAiCostDelta": 0,
-    "appAiCostWarnAt": 1.00,
-    "appAiCostPauseAt": 5.00
+    "appAiCostWarnAt": 1.0,
+    "appAiCostPauseAt": 5.0
   },
   "areas": {
-    "spaces-manager": { "status": "untested", "testedAt": null, "errorCount": 0, "fixAttempts": 0, "maxFixAttempts": 3, "fixes": [], "notes": "" },
-    "settings": { "status": "untested", "testedAt": null, "errorCount": 0, "fixAttempts": 0, "maxFixAttempts": 3, "fixes": [], "notes": "" },
-    "agent-manager": { "status": "untested", "testedAt": null, "errorCount": 0, "fixAttempts": 0, "maxFixAttempts": 3, "fixes": [], "notes": "" },
-    "voice-orb": { "status": "passed", "testedAt": "2026-02-08T21:58:00Z", "errorCount": 0, "fixAttempts": 2, "maxFixAttempts": 3, "fixes": ["fix-001"], "notes": "Fixed preload-hud-api require path. onDisambiguation error resolved." },
-    "video-editor": { "status": "untested", "testedAt": null, "errorCount": 0, "fixAttempts": 0, "maxFixAttempts": 3, "fixes": [], "notes": "" },
-    "gsx-create": { "status": "untested", "testedAt": null, "errorCount": 0, "fixAttempts": 0, "maxFixAttempts": 3, "fixes": [], "notes": "" },
-    "dashboard": { "status": "untested", "testedAt": null, "errorCount": 0, "fixAttempts": 0, "maxFixAttempts": 3, "fixes": [], "notes": "" },
-    "black-hole": { "status": "untested", "testedAt": null, "errorCount": 0, "fixAttempts": 0, "maxFixAttempts": 3, "fixes": [], "notes": "" },
-    "api-log-server": { "status": "passed", "testedAt": "2026-02-08T21:55:00Z", "errorCount": 0, "fixAttempts": 0, "maxFixAttempts": 3, "fixes": [], "notes": "12/12 API tests passing" },
-    "api-spaces": { "status": "passed", "testedAt": "2026-02-08T21:55:00Z", "errorCount": 0, "fixAttempts": 0, "maxFixAttempts": 3, "fixes": [], "notes": "CRUD operations verified via REST" }
+    "spaces-manager": {
+      "status": "untested",
+      "testedAt": null,
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": ""
+    },
+    "settings": {
+      "status": "untested",
+      "testedAt": null,
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": ""
+    },
+    "agent-manager": {
+      "status": "untested",
+      "testedAt": null,
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": ""
+    },
+    "voice-orb": {
+      "status": "passed",
+      "testedAt": "2026-02-08T21:58:00Z",
+      "errorCount": 0,
+      "fixAttempts": 2,
+      "maxFixAttempts": 3,
+      "fixes": ["fix-001"],
+      "notes": "Fixed preload-hud-api require path. onDisambiguation error resolved."
+    },
+    "video-editor": {
+      "status": "untested",
+      "testedAt": null,
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": ""
+    },
+    "gsx-create": {
+      "status": "untested",
+      "testedAt": null,
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": ""
+    },
+    "dashboard": {
+      "status": "untested",
+      "testedAt": null,
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": ""
+    },
+    "black-hole": {
+      "status": "untested",
+      "testedAt": null,
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": ""
+    },
+    "api-log-server": {
+      "status": "passed",
+      "testedAt": "2026-02-08T21:55:00Z",
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": "12/12 API tests passing"
+    },
+    "api-spaces": {
+      "status": "passed",
+      "testedAt": "2026-02-08T21:55:00Z",
+      "errorCount": 0,
+      "fixAttempts": 0,
+      "maxFixAttempts": 3,
+      "fixes": [],
+      "notes": "CRUD operations verified via REST"
+    }
   },
   "fixes": [
     {

@@ -3,16 +3,13 @@
  * Creates Markdown documents from space assets
  */
 
-const fs = require('fs');
-const path = require('path');
-
 class MarkdownGenerator {
   constructor() {
     this.defaultOptions = {
       includeImages: true,
       includeMetadata: true,
       includeTableOfContents: true,
-      useGitHubFlavor: true
+      useGitHubFlavor: true,
     };
   }
 
@@ -55,7 +52,7 @@ class MarkdownGenerator {
       // Footer
       sections.push(this.generateFooter(space));
 
-      const content = sections.filter(s => s).join('\n');
+      const content = sections.filter((s) => s).join('\n');
 
       return {
         success: true,
@@ -63,14 +60,13 @@ class MarkdownGenerator {
         buffer: Buffer.from(content, 'utf-8'),
         mimeType: 'text/markdown',
         extension: 'md',
-        filename: `${this.sanitizeFilename(space.name)}.md`
+        filename: `${this.sanitizeFilename(space.name)}.md`,
       };
-
     } catch (error) {
       console.error('[MarkdownGenerator] Error generating markdown:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -103,7 +99,7 @@ generator: Onereach.ai Smart Export
     const date = new Date().toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
-      day: 'numeric'
+      day: 'numeric',
     });
 
     const typeGroups = this.groupItemsByType(items);
@@ -127,7 +123,7 @@ generator: Onereach.ai Smart Export
   generateTableOfContents(items) {
     const typeGroups = this.groupItemsByType(items);
     const tocEntries = Object.keys(typeGroups)
-      .map(type => {
+      .map((type) => {
         const anchor = this.formatTypeName(type).toLowerCase().replace(/\s+/g, '-');
         return `- [${this.formatTypeName(type)}](#${anchor})`;
       })
@@ -184,13 +180,13 @@ ${tocEntries}
         if (includeImages) {
           const imagePath = item.filePath || item.url || '';
           const altText = item.fileName || item.metadata?.filename || 'Image';
-          
+
           if (imagePath) {
             md += `![${this.escapeMarkdown(altText)}](${imagePath})\n\n`;
           } else {
             md += `*[Image: ${this.escapeMarkdown(altText)}]*\n\n`;
           }
-          
+
           // Add caption
           if (item.metadata?.description) {
             md += `*${this.escapeMarkdown(item.metadata.description)}*\n\n`;
@@ -233,13 +229,13 @@ ${tocEntries}
     // Metadata footer
     if (includeMetadata) {
       const metaParts = [];
-      
+
       if (item.timestamp) {
         metaParts.push(`📅 ${new Date(item.timestamp).toLocaleString()}`);
       }
-      
+
       if (item.tags?.length) {
-        metaParts.push(`🏷️ ${item.tags.map(t => `\`${t}\``).join(' ')}`);
+        metaParts.push(`🏷️ ${item.tags.map((t) => `\`${t}\``).join(' ')}`);
       }
 
       if (item.source) {
@@ -263,45 +259,49 @@ ${tocEntries}
 
     // Split into paragraphs
     const paragraphs = content.split(/\n\n+/);
-    
-    return paragraphs
-      .map(p => {
-        // Check if it looks like a list
-        if (p.match(/^[\-\*\•]\s/m)) {
-          return p.split('\n')
-            .map(line => {
-              const listMatch = line.match(/^[\-\*\•]\s*(.+)/);
-              if (listMatch) {
-                return `- ${listMatch[1]}`;
-              }
-              return line;
-            })
-            .join('\n');
-        }
-        
-        // Check if it looks like a numbered list
-        if (p.match(/^\d+[\.\)]\s/m)) {
-          return p.split('\n')
-            .map((line, i) => {
-              const numMatch = line.match(/^\d+[\.\)]\s*(.+)/);
-              if (numMatch) {
-                return `${i + 1}. ${numMatch[1]}`;
-              }
-              return line;
-            })
-            .join('\n');
-        }
 
-        return p.trim();
-      })
-      .filter(p => p)
-      .join('\n\n') + '\n\n';
+    return (
+      paragraphs
+        .map((p) => {
+          // Check if it looks like a list
+          if (p.match(/^[\-\*\•]\s/m)) {
+            return p
+              .split('\n')
+              .map((line) => {
+                const listMatch = line.match(/^[\-\*\•]\s*(.+)/);
+                if (listMatch) {
+                  return `- ${listMatch[1]}`;
+                }
+                return line;
+              })
+              .join('\n');
+          }
+
+          // Check if it looks like a numbered list
+          if (p.match(/^\d+[\.\)]\s/m)) {
+            return p
+              .split('\n')
+              .map((line, i) => {
+                const numMatch = line.match(/^\d+[\.\)]\s*(.+)/);
+                if (numMatch) {
+                  return `${i + 1}. ${numMatch[1]}`;
+                }
+                return line;
+              })
+              .join('\n');
+          }
+
+          return p.trim();
+        })
+        .filter((p) => p)
+        .join('\n\n') + '\n\n'
+    );
   }
 
   /**
    * Generate footer
    */
-  generateFooter(space) {
+  generateFooter(_space) {
     const date = new Date().toISOString();
     return `
 ---
@@ -316,7 +316,7 @@ ${tocEntries}
   groupItemsByType(items) {
     const groups = {};
     const typeOrder = ['text', 'html', 'image', 'file', 'url', 'link', 'code', 'other'];
-    
+
     for (const item of items) {
       const type = item.type || 'other';
       if (!groups[type]) {
@@ -332,7 +332,7 @@ ${tocEntries}
         sortedGroups[type] = groups[type];
       }
     }
-    
+
     // Add remaining types
     for (const [type, items] of Object.entries(groups)) {
       if (!sortedGroups[type]) {
@@ -355,7 +355,7 @@ ${tocEntries}
       url: 'Links',
       link: 'Links',
       code: 'Code Snippets',
-      other: 'Other Items'
+      other: 'Other Items',
     };
     return names[type] || type.charAt(0).toUpperCase() + type.slice(1);
   }
@@ -387,7 +387,7 @@ ${tocEntries}
     if (!bytes) return 'Unknown size';
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
   }
 
   /**
@@ -399,7 +399,3 @@ ${tocEntries}
 }
 
 module.exports = MarkdownGenerator;
-
-
-
-

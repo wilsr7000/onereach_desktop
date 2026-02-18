@@ -13,18 +13,20 @@ function setupChatGPTInterceptor() {
   if (chatGPTInterceptorInstalled) {
     return;
   }
-  
+
   const currentUrl = window.location?.href || '';
-  
+
   // Only set up for ChatGPT
   if (!currentUrl.includes('chatgpt.com') && !currentUrl.includes('openai.com')) {
     return;
   }
-  
+
   chatGPTInterceptorInstalled = true;
   console.log('[ChatGPT Preload] Detected ChatGPT, setting up fetch interceptor...');
-  
-  webFrame.executeJavaScript(`
+
+  webFrame
+    .executeJavaScript(
+      `
     (function() {
       // Prevent duplicate installation
       if (window.__chatgptInterceptorInstalled) {
@@ -183,12 +185,15 @@ function setupChatGPTInterceptor() {
       
       console.log('[ChatGPT Interceptor] Fetch interceptor installed');
     })();
-  `).then(() => {
-    console.log('[ChatGPT Preload] Fetch interceptor injected successfully');
-  }).catch(err => {
-    console.error('[ChatGPT Preload] Failed to inject fetch interceptor:', err);
-  });
-  
+  `
+    )
+    .then(() => {
+      console.log('[ChatGPT Preload] Fetch interceptor injected successfully');
+    })
+    .catch((err) => {
+      console.error('[ChatGPT Preload] Failed to inject fetch interceptor:', err);
+    });
+
   // Listen for postMessage from the page context
   window.addEventListener('message', (event) => {
     if (event.data && event.data.type === '__CHATGPT_RESPONSE__') {
@@ -199,7 +204,7 @@ function setupChatGPTInterceptor() {
         ipcRenderer.send('chatgpt-response-captured', {
           conversationId,
           message,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
       }
     }
@@ -212,18 +217,20 @@ function setupGrokInterceptor() {
   if (grokInterceptorInstalled) {
     return;
   }
-  
+
   const currentUrl = window.location?.href || '';
-  
+
   // Only set up for Grok (x.ai, grok.x.com, or grok.com)
   if (!currentUrl.includes('x.ai') && !currentUrl.includes('grok.x.com') && !currentUrl.includes('grok.com')) {
     return;
   }
-  
+
   grokInterceptorInstalled = true;
   console.log('[Grok Preload] Detected Grok, setting up fetch interceptor...');
-  
-  webFrame.executeJavaScript(`
+
+  webFrame
+    .executeJavaScript(
+      `
     (function() {
       // Prevent duplicate installation
       if (window.__grokInterceptorInstalled) {
@@ -365,12 +372,15 @@ function setupGrokInterceptor() {
       
       console.log('[Grok Interceptor] Fetch interceptor installed');
     })();
-  `).then(() => {
-    console.log('[Grok Preload] Fetch interceptor injected successfully');
-  }).catch(err => {
-    console.error('[Grok Preload] Failed to inject fetch interceptor:', err);
-  });
-  
+  `
+    )
+    .then(() => {
+      console.log('[Grok Preload] Fetch interceptor injected successfully');
+    })
+    .catch((err) => {
+      console.error('[Grok Preload] Failed to inject fetch interceptor:', err);
+    });
+
   // Listen for postMessage from the page context
   window.addEventListener('message', (event) => {
     if (event.data && event.data.type === '__GROK_RESPONSE__') {
@@ -381,7 +391,7 @@ function setupGrokInterceptor() {
         ipcRenderer.send('grok-response-captured', {
           conversationId,
           message,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
       }
     }
@@ -394,18 +404,20 @@ function setupGeminiInterceptor() {
   if (geminiInterceptorInstalled) {
     return;
   }
-  
+
   const currentUrl = window.location?.href || '';
-  
+
   // Only set up for Gemini
   if (!currentUrl.includes('gemini.google.com') && !currentUrl.includes('bard.google.com')) {
     return;
   }
-  
+
   geminiInterceptorInstalled = true;
   console.log('[Gemini Preload] Detected Gemini, setting up fetch interceptor...');
-  
-  webFrame.executeJavaScript(`
+
+  webFrame
+    .executeJavaScript(
+      `
     (function() {
       // Prevent duplicate installation
       if (window.__geminiInterceptorInstalled) {
@@ -857,12 +869,15 @@ function setupGeminiInterceptor() {
       
       console.log('[Gemini Interceptor] Fetch interceptor installed');
     })();
-  `).then(() => {
-    console.log('[Gemini Preload] Fetch interceptor injected successfully');
-  }).catch(err => {
-    console.error('[Gemini Preload] Failed to inject fetch interceptor:', err);
-  });
-  
+  `
+    )
+    .then(() => {
+      console.log('[Gemini Preload] Fetch interceptor injected successfully');
+    })
+    .catch((err) => {
+      console.error('[Gemini Preload] Failed to inject fetch interceptor:', err);
+    });
+
   // Listen for postMessage from the page context
   window.addEventListener('message', (event) => {
     if (event.data && event.data.type === '__GEMINI_RESPONSE__') {
@@ -873,7 +888,7 @@ function setupGeminiInterceptor() {
         ipcRenderer.send('gemini-response-captured', {
           conversationId,
           message,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
       }
     }
@@ -886,19 +901,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeWindow: () => {
     ipcRenderer.send('close-content-window');
   },
-  
+
   // Method to get window info
   getWindowInfo: () => {
     return {
       isElectron: true,
-      platform: process.platform
+      platform: process.platform,
     };
   },
-  
+
   // Method to open Spaces picker for file uploads
   openSpacesPicker: () => {
     return ipcRenderer.invoke('open-spaces-picker');
-  }
+  },
 });
 
 // Expose clipboard API for external AI windows
@@ -907,22 +922,22 @@ contextBridge.exposeInMainWorld('clipboard', {
   getHistory: () => ipcRenderer.invoke('clipboard:get-history'),
   addItem: (item) => ipcRenderer.invoke('clipboard:add-item', item),
   pasteItem: (id) => ipcRenderer.invoke('clipboard:paste-item', id),
-  
+
   // Spaces functionality
   getSpaces: () => ipcRenderer.invoke('clipboard:get-spaces'),
   getSpacesEnabled: () => ipcRenderer.invoke('clipboard:get-spaces-enabled'),
   getCurrentSpace: () => ipcRenderer.invoke('clipboard:get-active-space'),
-  
+
   // Text/content capture
   captureText: (text) => ipcRenderer.invoke('clipboard:capture-text', text),
   captureHTML: (html) => ipcRenderer.invoke('clipboard:capture-html', html),
-  
+
   // Event listeners
   onHistoryUpdate: (callback) => {
     ipcRenderer.on('clipboard:history-updated', (event, history) => {
       callback(history);
     });
-  }
+  },
 });
 
 // Also expose the standard API that the main app uses
@@ -933,29 +948,29 @@ contextBridge.exposeInMainWorld('api', {
       'show-notification',
       'open-clipboard-viewer',
       'open-black-hole-widget',
-      'chatgpt-response-captured',  // For ChatGPT fetch interceptor
-      'grok-response-captured',     // For Grok fetch interceptor
-      'gemini-response-captured'    // For Gemini fetch interceptor
+      'chatgpt-response-captured', // For ChatGPT fetch interceptor
+      'grok-response-captured', // For Grok fetch interceptor
+      'gemini-response-captured', // For Gemini fetch interceptor
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.send(channel, data);
     }
   },
-  
+
   // Show notifications
   showNotification: (options) => {
     // Ensure options has valid title and body
     const notification = {
       title: options?.title || options?.message || 'Notification',
       body: options?.body || options?.text || '',
-      type: options?.type || 'info'
+      type: options?.type || 'info',
     };
     ipcRenderer.send('show-notification', notification);
   },
-  
+
   // Get overlay script content
   getOverlayScript: () => ipcRenderer.invoke('get-overlay-script'),
-  
+
   // Conversation capture API
   conversation: {
     isEnabled: () => ipcRenderer.invoke('conversation:isEnabled'),
@@ -965,8 +980,9 @@ contextBridge.exposeInMainWorld('api', {
     isMarkedDoNotSave: (serviceId) => ipcRenderer.invoke('conversation:isMarkedDoNotSave', serviceId),
     getCurrent: (serviceId) => ipcRenderer.invoke('conversation:getCurrent', serviceId),
     undoSave: (itemId) => ipcRenderer.invoke('conversation:undoSave', itemId),
-    copyToSpace: (conversationId, targetSpaceId) => ipcRenderer.invoke('conversation:copyToSpace', conversationId, targetSpaceId)
-  }
+    copyToSpace: (conversationId, targetSpaceId) =>
+      ipcRenderer.invoke('conversation:copyToSpace', conversationId, targetSpaceId),
+  },
 });
 
 // Listen for close events from the main process

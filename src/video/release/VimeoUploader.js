@@ -21,7 +21,7 @@ export const VIMEO_PRIVACY = {
   ONLY_ME: 'nobody',
   PASSWORD: 'password',
   UNLISTED: 'unlisted',
-  DISABLE: 'disable'
+  DISABLE: 'disable',
 };
 
 /**
@@ -31,12 +31,12 @@ export class VimeoUploader {
   constructor() {
     this.settingsPath = path.join(app.getPath('userData'), 'vimeo-auth.json');
     this.credentials = this.loadCredentials();
-    
+
     // OAuth endpoints
     this.authEndpoint = 'https://api.vimeo.com/oauth/authorize';
     this.tokenEndpoint = 'https://api.vimeo.com/oauth/access_token';
     this.apiEndpoint = 'https://api.vimeo.com';
-    
+
     // Required scopes
     this.scopes = ['public', 'private', 'upload', 'edit'];
   }
@@ -87,12 +87,12 @@ export class VimeoUploader {
    */
   async isAuthenticated() {
     if (!this.credentials.accessToken) return false;
-    
+
     // Verify token is still valid
     try {
       await this.getUserInfo();
       return true;
-    } catch (e) {
+    } catch (_e) {
       return false;
     }
   }
@@ -108,7 +108,7 @@ export class VimeoUploader {
 
     // Generate state for CSRF protection
     const state = Math.random().toString(36).substring(2);
-    
+
     // Build auth URL
     const redirectUri = 'http://localhost:8090/oauth/callback';
     const authUrl = new URL(this.authEndpoint);
@@ -129,7 +129,7 @@ export class VimeoUploader {
 
       server = http.createServer(async (req, res) => {
         const url = new URL(req.url, `http://localhost:8090`);
-        
+
         if (url.pathname === '/oauth/callback') {
           const code = url.searchParams.get('code');
           const returnedState = url.searchParams.get('state');
@@ -155,13 +155,15 @@ export class VimeoUploader {
 
           try {
             await this.exchangeCodeForTokens(code, redirectUri);
-            
+
             res.writeHead(200, { 'Content-Type': 'text/html' });
-            res.end('<html><body><h1>Authentication Successful!</h1><p>You can close this window.</p><script>window.close()</script></body></html>');
-            
+            res.end(
+              '<html><body><h1>Authentication Successful!</h1><p>You can close this window.</p><script>window.close()</script></body></html>'
+            );
+
             clearTimeout(timeout);
             server.close();
-            
+
             const userInfo = await this.getUserInfo();
             resolve({ success: true, user: userInfo });
           } catch (e) {
@@ -194,25 +196,28 @@ export class VimeoUploader {
     const postData = new URLSearchParams({
       grant_type: 'authorization_code',
       code: code,
-      redirect_uri: redirectUri
+      redirect_uri: redirectUri,
     }).toString();
 
     const auth = Buffer.from(`${this.credentials.clientId}:${this.credentials.clientSecret}`).toString('base64');
 
-    const response = await this._httpRequest({
-      hostname: 'api.vimeo.com',
-      path: '/oauth/access_token',
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${auth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/vnd.vimeo.*+json;version=3.4',
-        'Content-Length': Buffer.byteLength(postData)
-      }
-    }, postData);
+    const response = await this._httpRequest(
+      {
+        hostname: 'api.vimeo.com',
+        path: '/oauth/access_token',
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/vnd.vimeo.*+json;version=3.4',
+          'Content-Length': Buffer.byteLength(postData),
+        },
+      },
+      postData
+    );
 
     const tokens = JSON.parse(response);
-    
+
     if (tokens.error) {
       throw new Error(tokens.error_description || tokens.error);
     }
@@ -239,18 +244,18 @@ export class VimeoUploader {
       path: '/me',
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${this.credentials.accessToken}`,
-        'Accept': 'application/vnd.vimeo.*+json;version=3.4'
-      }
+        Authorization: `Bearer ${this.credentials.accessToken}`,
+        Accept: 'application/vnd.vimeo.*+json;version=3.4',
+      },
     });
 
     const data = JSON.parse(response);
-    
+
     return {
       uri: data.uri,
       name: data.name,
       link: data.link,
-      picture: data.pictures?.sizes?.[0]?.link
+      picture: data.pictures?.sizes?.[0]?.link,
     };
   }
 
@@ -262,7 +267,7 @@ export class VimeoUploader {
    * @returns {Promise<Object>} Upload result
    */
   async upload(videoPath, metadata = {}, progressCallback = null) {
-    if (!await this.isAuthenticated()) {
+    if (!(await this.isAuthenticated())) {
       throw new Error('Not authenticated. Please connect your Vimeo account first.');
     }
 
@@ -274,11 +279,11 @@ export class VimeoUploader {
       title = path.basename(videoPath, path.extname(videoPath)),
       description = '',
       privacy = VIMEO_PRIVACY.ANYBODY,
-      password = null
+      password = null,
     } = metadata;
 
     const fileSize = fs.statSync(videoPath).size;
-    
+
     log.info('video', '[VimeoUploader] Starting upload: ( MB)', { v0: title, v1: (fileSize / 1024 / 1024).toFixed(2) });
 
     // Create video with tus upload
@@ -287,12 +292,12 @@ export class VimeoUploader {
       description: description,
       privacy: {
         view: privacy,
-        ...(privacy === 'password' ? { password: password } : {})
+        ...(privacy === 'password' ? { password: password } : {}),
       },
       upload: {
         approach: 'tus',
-        size: fileSize
-      }
+        size: fileSize,
+      },
     });
 
     const uploadLink = uploadData.upload?.upload_link;
@@ -304,7 +309,7 @@ export class VimeoUploader {
     await this._tusUpload(uploadLink, videoPath, fileSize, progressCallback);
 
     log.info('video', '[VimeoUploader] Upload complete');
-    
+
     // Get video info
     const videoUri = uploadData.uri;
     const videoId = videoUri.split('/').pop();
@@ -314,7 +319,7 @@ export class VimeoUploader {
       videoId: videoId,
       uri: videoUri,
       url: uploadData.link,
-      title: title
+      title: title,
     };
   }
 
@@ -325,20 +330,23 @@ export class VimeoUploader {
   async _createVideo(videoData) {
     const postData = JSON.stringify(videoData);
 
-    const response = await this._httpRequest({
-      hostname: 'api.vimeo.com',
-      path: '/me/videos',
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.credentials.accessToken}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/vnd.vimeo.*+json;version=3.4',
-        'Content-Length': Buffer.byteLength(postData)
-      }
-    }, postData);
+    const response = await this._httpRequest(
+      {
+        hostname: 'api.vimeo.com',
+        path: '/me/videos',
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.credentials.accessToken}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/vnd.vimeo.*+json;version=3.4',
+          'Content-Length': Buffer.byteLength(postData),
+        },
+      },
+      postData
+    );
 
     const data = JSON.parse(response);
-    
+
     if (data.error) {
       throw new Error(data.error || 'Failed to create video');
     }
@@ -353,35 +361,35 @@ export class VimeoUploader {
   async _tusUpload(uploadLink, videoPath, fileSize, progressCallback) {
     const url = new URL(uploadLink);
     const fileStream = fs.createReadStream(videoPath);
-    
+
     let uploadedBytes = 0;
     const chunkSize = 128 * 1024 * 1024; // 128MB chunks
-    
+
     return new Promise((resolve, reject) => {
       const chunks = [];
       let currentChunk = Buffer.alloc(0);
-      
+
       fileStream.on('data', (data) => {
         currentChunk = Buffer.concat([currentChunk, data]);
-        
+
         while (currentChunk.length >= chunkSize) {
           chunks.push(currentChunk.slice(0, chunkSize));
           currentChunk = currentChunk.slice(chunkSize);
         }
       });
-      
+
       fileStream.on('end', async () => {
         if (currentChunk.length > 0) {
           chunks.push(currentChunk);
         }
-        
+
         try {
           for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
             const offset = i * chunkSize;
-            
+
             await this._uploadChunk(url, chunk, offset, fileSize);
-            
+
             uploadedBytes += chunk.length;
             if (progressCallback) {
               const percent = Math.round((uploadedBytes / fileSize) * 100);
@@ -393,7 +401,7 @@ export class VimeoUploader {
           reject(e);
         }
       });
-      
+
       fileStream.on('error', reject);
     });
   }
@@ -402,30 +410,33 @@ export class VimeoUploader {
    * Upload a single chunk via PATCH
    * @private
    */
-  _uploadChunk(url, chunk, offset, totalSize) {
+  _uploadChunk(url, chunk, offset, _totalSize) {
     return new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: url.hostname,
-        path: url.pathname + url.search,
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${this.credentials.accessToken}`,
-          'Tus-Resumable': '1.0.0',
-          'Upload-Offset': offset.toString(),
-          'Content-Type': 'application/offset+octet-stream',
-          'Content-Length': chunk.length
+      const req = https.request(
+        {
+          hostname: url.hostname,
+          path: url.pathname + url.search,
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${this.credentials.accessToken}`,
+            'Tus-Resumable': '1.0.0',
+            'Upload-Offset': offset.toString(),
+            'Content-Type': 'application/offset+octet-stream',
+            'Content-Length': chunk.length,
+          },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (d) => (data += d));
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(data);
+            } else {
+              reject(new Error(`Upload chunk failed: ${res.statusCode} - ${data}`));
+            }
+          });
         }
-      }, (res) => {
-        let data = '';
-        res.on('data', d => data += d);
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve(data);
-          } else {
-            reject(new Error(`Upload chunk failed: ${res.statusCode} - ${data}`));
-          }
-        });
-      });
+      );
 
       req.on('error', reject);
       req.write(chunk);
@@ -441,12 +452,12 @@ export class VimeoUploader {
     return new Promise((resolve, reject) => {
       const req = https.request(options, (res) => {
         let data = '';
-        res.on('data', chunk => data += chunk);
+        res.on('data', (chunk) => (data += chunk));
         res.on('end', () => resolve(data));
       });
-      
+
       req.on('error', reject);
-      
+
       if (postData) {
         req.write(postData);
       }
@@ -472,7 +483,7 @@ export class VimeoUploader {
   async getConnectionStatus() {
     const hasCredentials = this.hasClientCredentials();
     const isAuth = await this.isAuthenticated();
-    
+
     let userInfo = null;
     if (isAuth) {
       try {
@@ -485,7 +496,7 @@ export class VimeoUploader {
     return {
       configured: hasCredentials,
       authenticated: isAuth,
-      user: userInfo
+      user: userInfo,
     };
   }
 
@@ -497,22 +508,11 @@ export class VimeoUploader {
     const { clipboard } = require('electron');
     clipboard.writeText(videoPath);
     await shell.openExternal('https://vimeo.com/upload');
-    
+
     return {
       method: 'browser',
       videoPath: videoPath,
-      message: 'Video path copied to clipboard. Upload manually on Vimeo.'
+      message: 'Video path copied to clipboard. Upload manually on Vimeo.',
     };
   }
 }
-
-
-
-
-
-
-
-
-
-
-

@@ -1,12 +1,12 @@
 /**
  * Error Agent - System Agent for Graceful Failure Handling
- * 
+ *
  * This agent does NOT participate in auctions. It is invoked directly by the
  * exchange when tasks fail all execution attempts, time out, or hit dead-letter.
- * 
+ *
  * Its job is to produce a clear, helpful, user-facing message explaining what
  * happened and suggesting alternatives.
- * 
+ *
  * bidExcluded: true -- this agent is never shown to the unified bidder.
  * See .cursorrules "Classification Approach" -- no keyword/regex classification.
  */
@@ -17,19 +17,20 @@ const log = getLogQueue();
 const errorAgent = {
   id: 'error-agent',
   name: 'Error Handler',
-  description: 'System agent that provides graceful error messages when tasks fail, time out, or exhaust all retries. Not user-facing in normal operation.',
-  voice: 'sage',  // Calm, reassuring -- see VOICE-GUIDE.md
+  description:
+    'System agent that provides graceful error messages when tasks fail, time out, or exhaust all retries. Not user-facing in normal operation.',
+  voice: 'sage', // Calm, reassuring -- see VOICE-GUIDE.md
   categories: ['system', 'error'],
   keywords: [],
   executionType: 'system',
-  bidExcluded: true,  // Never participates in auctions
+  bidExcluded: true, // Never participates in auctions
 
   // No bid() method. Routing is 100% LLM-based via unified-bidder.js. NEVER add keyword/regex bidding here. See .cursorrules.
 
   /**
    * Execute error handling for a failed task.
    * Called directly by exchange-bridge when task:route_to_error_agent fires.
-   * 
+   *
    * @param {Object} task - The failed task
    * @returns {Object} Result with user-facing error message
    */
@@ -55,7 +56,7 @@ const errorAgent = {
     }
 
     return {
-      success: true,  // The error agent itself succeeded
+      success: true, // The error agent itself succeeded
       output: message,
       data: {
         errorAgent: true,

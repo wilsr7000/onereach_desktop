@@ -1,6 +1,6 @@
 /**
  * Task Decomposer
- * 
+ *
  * Uses LLM to analyze user phrase with conversation history,
  * decompose into discrete tasks, and place them on the queue.
  */
@@ -14,9 +14,8 @@ const log = getLogQueue();
 const openaiCircuit = getCircuit('openai-decomposer', {
   failureThreshold: 3,
   resetTimeout: 30000,
-  windowMs: 60000
+  windowMs: 60000,
 });
-
 
 /**
  * Decompose user phrase into discrete tasks
@@ -32,16 +31,18 @@ async function decomposeTasks(phrase, history = []) {
   // Check for system commands first (these bypass decomposition)
   const systemCommands = ['cancel', 'stop', 'nevermind', 'undo', 'repeat'];
   const lowerPhrase = phrase.toLowerCase().trim();
-  if (systemCommands.some(cmd => lowerPhrase === cmd || lowerPhrase.startsWith(cmd + ' '))) {
+  if (systemCommands.some((cmd) => lowerPhrase === cmd || lowerPhrase.startsWith(cmd + ' '))) {
     return {
-      tasks: [{ 
-        id: `task_${Date.now()}`,
-        type: 'system',
-        command: lowerPhrase.split(' ')[0],
-        content: phrase,
-        priority: 'immediate'
-      }],
-      acknowledgment: null // System commands don't need acknowledgment
+      tasks: [
+        {
+          id: `task_${Date.now()}`,
+          type: 'system',
+          command: lowerPhrase.split(' ')[0],
+          content: phrase,
+          priority: 'immediate',
+        },
+      ],
+      acknowledgment: null, // System commands don't need acknowledgment
     };
   }
 
@@ -51,47 +52,45 @@ async function decomposeTasks(phrase, history = []) {
       return await ai.chat({
         profile: 'fast',
         system: buildDecomposerPrompt(),
-        messages: [
-          ...formatHistory(history),
-          { role: 'user', content: phrase }
-        ],
+        messages: [...formatHistory(history), { role: 'user', content: phrase }],
         temperature: 0,
         maxTokens: 500,
         jsonMode: true,
-        feature: 'task-decomposer'
+        feature: 'task-decomposer',
       });
     });
 
     const content = result.content;
-    
+
     if (!content) {
       throw new Error('Empty response from OpenAI');
     }
 
     const parsed = typeof content === 'string' ? JSON.parse(content) : content;
-    
+
     // Add IDs to tasks
     const tasks = (parsed.tasks || []).map((task, i) => ({
       id: `task_${Date.now()}_${i}`,
-      ...task
+      ...task,
     }));
 
     return {
       tasks,
-      acknowledgment: parsed.acknowledgment || null
+      acknowledgment: parsed.acknowledgment || null,
     };
-
   } catch (error) {
     log.error('agent', 'Error', { error: error.message });
     return {
-      tasks: [{
-        id: `task_${Date.now()}`,
-        type: 'error',
-        content: phrase,
-        error: error.message
-      }],
+      tasks: [
+        {
+          id: `task_${Date.now()}`,
+          type: 'error',
+          content: phrase,
+          error: error.message,
+        },
+      ],
       acknowledgment: null,
-      error: error.message
+      error: error.message,
     };
   }
 }
@@ -153,15 +152,14 @@ Examples:
  */
 function formatHistory(history) {
   if (!history || history.length === 0) return [];
-  
+
   // Keep last 5 exchanges
-  return history.slice(-10).map(h => ({
+  return history.slice(-10).map((h) => ({
     role: h.role === 'assistant' ? 'assistant' : 'user',
-    content: h.content
+    content: h.content,
   }));
 }
 
-
 module.exports = {
-  decomposeTasks
+  decomposeTasks,
 };

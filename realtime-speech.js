@@ -1,11 +1,11 @@
 /**
  * Realtime Speech - Backward Compatibility Wrapper
- * 
+ *
  * This file maintains backward compatibility with existing code.
  * Actual functionality is delegated to:
  * - voice-listener.js: Speech-to-text transcription
  * - voice-speaker.js: Text-to-speech
- * 
+ *
  * New code should import from voice-listener.js or voice-speaker.js directly.
  */
 
@@ -19,24 +19,24 @@ class RealtimeSpeech {
     // Delegate to specialized modules
     this.listener = getVoiceListener();
     this.speaker = getVoiceSpeaker();
-    
+
     console.log('[RealtimeSpeech] Initialized (compatibility wrapper)');
   }
 
   // ==================== LISTENER DELEGATION ====================
-  
+
   get isConnected() {
     return this.listener.isConnected;
   }
-  
+
   get sessionId() {
     return this.listener.sessionId;
   }
-  
+
   get subscribers() {
     return this.listener.subscribers;
   }
-  
+
   get hasActiveResponse() {
     return this.listener.hasActiveResponse;
   }
@@ -89,12 +89,31 @@ class RealtimeSpeech {
   respondToFunctionCall(callId, result, options = {}) {
     // Acknowledge the function call
     this.listener.respondToFunctionCall(callId, '');
-    
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location: 'realtime-speech.js:respondToFunctionCall',
+        message: 'respondToFunctionCall called',
+        data: {
+          callId,
+          hasResult: !!(result && result.trim()),
+          resultPreview: (result || '').slice(0, 80),
+          voice: options.voice,
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'DOUBLE-A',
+      }),
+    }).catch((err) => console.warn('[realtime-speech] respondToFunctionCall agent-log:', err.message));
+    // #endregion
+
     // Speak the result via voice-speaker
     if (result && result.trim()) {
       this.speaker.speak(result, { voice: options.voice });
     }
-    
+
     return true;
   }
 
@@ -103,7 +122,7 @@ class RealtimeSpeech {
   get speechQueue() {
     return this.speaker.speechQueue;
   }
-  
+
   get isTTSSpeaking() {
     return this.speaker.isSpeaking;
   }
@@ -113,25 +132,37 @@ class RealtimeSpeech {
   }
 
   // ==================== IPC HANDLERS ====================
-  
+
   setupIPC() {
     // Set up listener IPC
     this.listener.setupIPC();
-    
+
     // Legacy IPC handlers that delegate to new modules
     // These maintain backward compatibility with existing preload scripts
-    
+
     ipcMain.handle('realtime-speech:connect', async (event) => {
       try {
         await this.connect();
-        
+
         const webContentsId = event.sender.id;
+        // Subscribe to voice-listener events (transcripts, lifecycle)
         this.subscribe(webContentsId, (speechEvent) => {
           if (!event.sender.isDestroyed()) {
             event.sender.send('realtime-speech:event', speechEvent);
           }
         });
-        
+
+        // Also subscribe to voice-speaker events (TTS audio) for this session.
+        // This replaces the old _ensureOrbSubscribed() auto-subscribe that would
+        // re-subscribe even after the orb explicitly disconnected.
+        if (!this.speaker.subscribers.has(webContentsId)) {
+          this.speaker.subscribe(webContentsId, (speechEvent) => {
+            if (!event.sender.isDestroyed()) {
+              event.sender.send('realtime-speech:event', speechEvent);
+            }
+          });
+        }
+
         return { success: true, sessionId: this.sessionId };
       } catch (err) {
         return { success: false, error: err.message };
@@ -152,7 +183,14 @@ class RealtimeSpeech {
 
     ipcMain.handle('realtime-speech:disconnect', async (event) => {
       const webContentsId = event.sender.id;
-      this.unsubscribe(webContentsId);
+      this.listener.unsubscribe(webContentsId);
+      // Also unsubscribe from voice-speaker so stale audio doesn't play
+      // on the orb after the session ends (fixes phantom audio bug).
+      this.speaker.unsubscribe(webContentsId);
+      // Close the WebSocket to stop OpenAI Realtime billing.
+      if (this.listener.subscribers.size === 0) {
+        this.listener.disconnect();
+      }
       return { success: true };
     });
 
@@ -166,11 +204,11 @@ class RealtimeSpeech {
       } catch {
         hasApiKey = false;
       }
-      
+
       return {
         connected: this.isConnected,
         sessionId: this.sessionId,
-        hasApiKey
+        hasApiKey,
       };
     });
 
@@ -184,7 +222,7 @@ class RealtimeSpeech {
             }
           });
         }
-        
+
         const result = await this.speak(text, options);
         return { success: result };
       } catch (err) {
@@ -195,16 +233,16 @@ class RealtimeSpeech {
     ipcMain.handle('realtime-speech:cancel-response', async (event, cancelQueue = false) => {
       return { success: this.cancelResponse(cancelQueue) };
     });
-    
+
     ipcMain.handle('realtime-speech:cancel-all', async () => {
       await this.speaker.cancel();
       return { success: true };
     });
-    
+
     ipcMain.handle('realtime-speech:queue-status', async () => {
       return this.speaker.getStatus();
     });
-    
+
     ipcMain.handle('realtime-speech:respond-to-function', async (event, callId, result) => {
       try {
         const success = this.respondToFunctionCall(callId, result);

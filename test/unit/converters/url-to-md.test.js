@@ -6,7 +6,11 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 const mockFetchResponse = {
   ok: true,
   status: 200,
-  text: vi.fn().mockResolvedValue('<!DOCTYPE html><html><body><article><h1>Article Title</h1><p>Article content here</p></article></body></html>'),
+  text: vi
+    .fn()
+    .mockResolvedValue(
+      '<!DOCTYPE html><html><body><article><h1>Article Title</h1><p>Article content here</p></article></body></html>'
+    ),
   json: vi.fn().mockResolvedValue({}),
   headers: { get: vi.fn().mockReturnValue('text/html') },
 };

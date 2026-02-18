@@ -9,7 +9,7 @@ import path from 'path';
 import https from 'https';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { app, shell, BrowserWindow } = require('electron');
+const { app, shell } = require('electron');
 const { getLogQueue } = require('../../../lib/log-event-queue');
 const log = getLogQueue();
 
@@ -19,7 +19,7 @@ const log = getLogQueue();
 export const YOUTUBE_PRIVACY = {
   PUBLIC: 'public',
   UNLISTED: 'unlisted',
-  PRIVATE: 'private'
+  PRIVATE: 'private',
 };
 
 /**
@@ -40,7 +40,7 @@ export const YOUTUBE_CATEGORIES = {
   HOWTO_STYLE: '26',
   EDUCATION: '27',
   SCIENCE_TECH: '28',
-  NONPROFITS: '29'
+  NONPROFITS: '29',
 };
 
 /**
@@ -50,17 +50,17 @@ export class YouTubeUploader {
   constructor() {
     this.settingsPath = path.join(app.getPath('userData'), 'youtube-auth.json');
     this.credentials = this.loadCredentials();
-    
+
     // OAuth endpoints
     this.authEndpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
     this.tokenEndpoint = 'https://oauth2.googleapis.com/token';
     this.uploadEndpoint = 'https://www.googleapis.com/upload/youtube/v3/videos';
     this.apiEndpoint = 'https://www.googleapis.com/youtube/v3';
-    
+
     // Required scopes
     this.scopes = [
       'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube.readonly'
+      'https://www.googleapis.com/auth/youtube.readonly',
     ];
   }
 
@@ -110,7 +110,7 @@ export class YouTubeUploader {
    */
   async isAuthenticated() {
     if (!this.credentials.accessToken) return false;
-    
+
     // Check if token is expired
     if (this.credentials.expiresAt && Date.now() >= this.credentials.expiresAt) {
       // Try to refresh
@@ -118,13 +118,13 @@ export class YouTubeUploader {
         try {
           await this.refreshAccessToken();
           return true;
-        } catch (e) {
+        } catch (_e) {
           return false;
         }
       }
       return false;
     }
-    
+
     return true;
   }
 
@@ -139,7 +139,7 @@ export class YouTubeUploader {
 
     // Generate state for CSRF protection
     const state = Math.random().toString(36).substring(2);
-    
+
     // Build auth URL
     const redirectUri = 'http://localhost:8089/oauth/callback';
     const authUrl = new URL(this.authEndpoint);
@@ -163,7 +163,7 @@ export class YouTubeUploader {
 
       server = http.createServer(async (req, res) => {
         const url = new URL(req.url, `http://localhost:8089`);
-        
+
         if (url.pathname === '/oauth/callback') {
           const code = url.searchParams.get('code');
           const returnedState = url.searchParams.get('state');
@@ -180,7 +180,9 @@ export class YouTubeUploader {
 
           if (returnedState !== state) {
             res.writeHead(400, { 'Content-Type': 'text/html' });
-            res.end('<html><body><h1>Authentication Failed</h1><p>Invalid state. You can close this window.</p></body></html>');
+            res.end(
+              '<html><body><h1>Authentication Failed</h1><p>Invalid state. You can close this window.</p></body></html>'
+            );
             clearTimeout(timeout);
             server.close();
             reject(new Error('Invalid state - possible CSRF attack'));
@@ -190,13 +192,15 @@ export class YouTubeUploader {
           try {
             // Exchange code for tokens
             await this.exchangeCodeForTokens(code, redirectUri);
-            
+
             res.writeHead(200, { 'Content-Type': 'text/html' });
-            res.end('<html><body><h1>Authentication Successful!</h1><p>You can close this window and return to the app.</p><script>window.close()</script></body></html>');
-            
+            res.end(
+              '<html><body><h1>Authentication Successful!</h1><p>You can close this window and return to the app.</p><script>window.close()</script></body></html>'
+            );
+
             clearTimeout(timeout);
             server.close();
-            
+
             // Get channel info
             const channelInfo = await this.getChannelInfo();
             resolve({ success: true, channel: channelInfo });
@@ -233,28 +237,31 @@ export class YouTubeUploader {
       client_secret: this.credentials.clientSecret,
       code: code,
       grant_type: 'authorization_code',
-      redirect_uri: redirectUri
+      redirect_uri: redirectUri,
     }).toString();
 
-    const response = await this._httpRequest({
-      hostname: 'oauth2.googleapis.com',
-      path: '/token',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(postData)
-      }
-    }, postData);
+    const response = await this._httpRequest(
+      {
+        hostname: 'oauth2.googleapis.com',
+        path: '/token',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData),
+        },
+      },
+      postData
+    );
 
     const tokens = JSON.parse(response);
-    
+
     if (tokens.error) {
       throw new Error(tokens.error_description || tokens.error);
     }
 
     this.credentials.accessToken = tokens.access_token;
     this.credentials.refreshToken = tokens.refresh_token || this.credentials.refreshToken;
-    this.credentials.expiresAt = Date.now() + (tokens.expires_in * 1000);
+    this.credentials.expiresAt = Date.now() + tokens.expires_in * 1000;
     this.saveCredentials();
 
     log.info('video', '[YouTubeUploader] Tokens saved');
@@ -272,27 +279,30 @@ export class YouTubeUploader {
       client_id: this.credentials.clientId,
       client_secret: this.credentials.clientSecret,
       refresh_token: this.credentials.refreshToken,
-      grant_type: 'refresh_token'
+      grant_type: 'refresh_token',
     }).toString();
 
-    const response = await this._httpRequest({
-      hostname: 'oauth2.googleapis.com',
-      path: '/token',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(postData)
-      }
-    }, postData);
+    const response = await this._httpRequest(
+      {
+        hostname: 'oauth2.googleapis.com',
+        path: '/token',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData),
+        },
+      },
+      postData
+    );
 
     const tokens = JSON.parse(response);
-    
+
     if (tokens.error) {
       throw new Error(tokens.error_description || tokens.error);
     }
 
     this.credentials.accessToken = tokens.access_token;
-    this.credentials.expiresAt = Date.now() + (tokens.expires_in * 1000);
+    this.credentials.expiresAt = Date.now() + tokens.expires_in * 1000;
     this.saveCredentials();
 
     log.info('video', '[YouTubeUploader] Access token refreshed');
@@ -303,7 +313,7 @@ export class YouTubeUploader {
    * @returns {Promise<Object>} Channel info
    */
   async getChannelInfo() {
-    if (!await this.isAuthenticated()) {
+    if (!(await this.isAuthenticated())) {
       throw new Error('Not authenticated');
     }
 
@@ -312,19 +322,19 @@ export class YouTubeUploader {
       path: '/youtube/v3/channels?part=snippet&mine=true',
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${this.credentials.accessToken}`
-      }
+        Authorization: `Bearer ${this.credentials.accessToken}`,
+      },
     });
 
     const data = JSON.parse(response);
-    
+
     if (data.items && data.items.length > 0) {
       const channel = data.items[0];
       return {
         id: channel.id,
         title: channel.snippet.title,
         description: channel.snippet.description,
-        thumbnail: channel.snippet.thumbnails?.default?.url
+        thumbnail: channel.snippet.thumbnails?.default?.url,
       };
     }
 
@@ -339,7 +349,7 @@ export class YouTubeUploader {
    * @returns {Promise<Object>} Upload result
    */
   async upload(videoPath, metadata = {}, progressCallback = null) {
-    if (!await this.isAuthenticated()) {
+    if (!(await this.isAuthenticated())) {
       throw new Error('Not authenticated. Please connect your YouTube account first.');
     }
 
@@ -353,12 +363,15 @@ export class YouTubeUploader {
       tags = [],
       categoryId = YOUTUBE_CATEGORIES.ENTERTAINMENT,
       privacyStatus = YOUTUBE_PRIVACY.PRIVATE,
-      madeForKids = false
+      madeForKids = false,
     } = metadata;
 
     const fileSize = fs.statSync(videoPath).size;
-    
-    log.info('video', '[YouTubeUploader] Starting upload: ( MB)', { v0: title, v1: (fileSize / 1024 / 1024).toFixed(2) });
+
+    log.info('video', '[YouTubeUploader] Starting upload: ( MB)', {
+      v0: title,
+      v1: (fileSize / 1024 / 1024).toFixed(2),
+    });
 
     // Build video resource
     const videoResource = {
@@ -366,28 +379,28 @@ export class YouTubeUploader {
         title: title,
         description: description,
         tags: tags,
-        categoryId: categoryId
+        categoryId: categoryId,
       },
       status: {
         privacyStatus: privacyStatus,
-        selfDeclaredMadeForKids: madeForKids
-      }
+        selfDeclaredMadeForKids: madeForKids,
+      },
     };
 
     // Start resumable upload
     const uploadUrl = await this._initResumableUpload(videoResource, fileSize);
-    
+
     // Upload the file
     const result = await this._uploadFile(uploadUrl, videoPath, fileSize, progressCallback);
-    
+
     log.info('video', '[YouTubeUploader] Upload complete', { data: result.id });
-    
+
     return {
       success: true,
       videoId: result.id,
       url: `https://youtube.com/watch?v=${result.id}`,
       title: result.snippet?.title,
-      status: result.status?.uploadStatus
+      status: result.status?.uploadStatus,
     };
   }
 
@@ -397,19 +410,22 @@ export class YouTubeUploader {
    */
   async _initResumableUpload(videoResource, fileSize) {
     const metadataJson = JSON.stringify(videoResource);
-    
-    const response = await this._httpRequestRaw({
-      hostname: 'www.googleapis.com',
-      path: '/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.credentials.accessToken}`,
-        'Content-Type': 'application/json; charset=UTF-8',
-        'Content-Length': Buffer.byteLength(metadataJson),
-        'X-Upload-Content-Length': fileSize,
-        'X-Upload-Content-Type': 'video/*'
-      }
-    }, metadataJson);
+
+    const response = await this._httpRequestRaw(
+      {
+        hostname: 'www.googleapis.com',
+        path: '/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.credentials.accessToken}`,
+          'Content-Type': 'application/json; charset=UTF-8',
+          'Content-Length': Buffer.byteLength(metadataJson),
+          'X-Upload-Content-Length': fileSize,
+          'X-Upload-Content-Type': 'video/*',
+        },
+      },
+      metadataJson
+    );
 
     if (response.statusCode !== 200) {
       throw new Error(`Failed to initialize upload: ${response.statusCode}`);
@@ -431,33 +447,36 @@ export class YouTubeUploader {
     return new Promise((resolve, reject) => {
       const url = new URL(uploadUrl);
       const fileStream = fs.createReadStream(videoPath);
-      
+
       let uploadedBytes = 0;
 
-      const req = https.request({
-        hostname: url.hostname,
-        path: url.pathname + url.search,
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${this.credentials.accessToken}`,
-          'Content-Length': fileSize,
-          'Content-Type': 'video/*'
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            try {
-              resolve(JSON.parse(data));
-            } catch (e) {
-              resolve({ id: 'unknown', status: { uploadStatus: 'complete' } });
+      const req = https.request(
+        {
+          hostname: url.hostname,
+          path: url.pathname + url.search,
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${this.credentials.accessToken}`,
+            'Content-Length': fileSize,
+            'Content-Type': 'video/*',
+          },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              try {
+                resolve(JSON.parse(data));
+              } catch (_e) {
+                resolve({ id: 'unknown', status: { uploadStatus: 'complete' } });
+              }
+            } else {
+              reject(new Error(`Upload failed: ${res.statusCode} - ${data}`));
             }
-          } else {
-            reject(new Error(`Upload failed: ${res.statusCode} - ${data}`));
-          }
-        });
-      });
+          });
+        }
+      );
 
       req.on('error', reject);
 
@@ -481,12 +500,12 @@ export class YouTubeUploader {
     return new Promise((resolve, reject) => {
       const req = https.request(options, (res) => {
         let data = '';
-        res.on('data', chunk => data += chunk);
+        res.on('data', (chunk) => (data += chunk));
         res.on('end', () => resolve(data));
       });
-      
+
       req.on('error', reject);
-      
+
       if (postData) {
         req.write(postData);
       }
@@ -502,18 +521,18 @@ export class YouTubeUploader {
     return new Promise((resolve, reject) => {
       const req = https.request(options, (res) => {
         let data = '';
-        res.on('data', chunk => data += chunk);
+        res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
           resolve({
             statusCode: res.statusCode,
             headers: res.headers,
-            body: data
+            body: data,
           });
         });
       });
-      
+
       req.on('error', reject);
-      
+
       if (postData) {
         req.write(postData);
       }
@@ -539,7 +558,7 @@ export class YouTubeUploader {
   async getConnectionStatus() {
     const hasCredentials = this.hasClientCredentials();
     const isAuth = await this.isAuthenticated();
-    
+
     let channelInfo = null;
     if (isAuth) {
       try {
@@ -552,7 +571,7 @@ export class YouTubeUploader {
     return {
       configured: hasCredentials,
       authenticated: isAuth,
-      channel: channelInfo
+      channel: channelInfo,
     };
   }
 
@@ -564,22 +583,11 @@ export class YouTubeUploader {
     const { clipboard } = require('electron');
     clipboard.writeText(videoPath);
     await shell.openExternal('https://studio.youtube.com/channel/UC/videos/upload');
-    
+
     return {
       method: 'browser',
       videoPath: videoPath,
-      message: 'Video path copied to clipboard. Upload manually in YouTube Studio.'
+      message: 'Video path copied to clipboard. Upload manually in YouTube Studio.',
     };
   }
 }
-
-
-
-
-
-
-
-
-
-
-

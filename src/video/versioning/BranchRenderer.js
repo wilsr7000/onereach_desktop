@@ -30,7 +30,7 @@ export class BranchRenderer {
     this.outputDir = path.join(app.getPath('userData'), 'video-exports');
     this.tempDir = path.join(app.getPath('userData'), 'video-temp');
     this.activeJobs = new Map();
-    
+
     this.ensureDirectories();
   }
 
@@ -38,7 +38,7 @@ export class BranchRenderer {
    * Ensure required directories exist
    */
   ensureDirectories() {
-    [this.outputDir, this.tempDir].forEach(dir => {
+    [this.outputDir, this.tempDir].forEach((dir) => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
@@ -54,27 +54,22 @@ export class BranchRenderer {
    * @returns {Promise<Object>} Render result with output path
    */
   async renderBranch(projectPath, edl, options = {}, progressCallback = null) {
-    const {
-      outputPath = null,
-      format = 'mp4',
-      quality = 'high',
-      resolution = null
-    } = options;
+    const { outputPath = null, format = 'mp4', quality = 'high', resolution = null } = options;
 
     const sourceVideoPath = path.join(projectPath, edl.sourceVideo);
-    
+
     if (!fs.existsSync(sourceVideoPath)) {
       throw new Error(`Source video not found: ${sourceVideoPath}`);
     }
 
-    const jobId = `render_${Date.now()}`;
+    const _jobId = `render_${Date.now()}`;
     const baseName = path.basename(sourceVideoPath, path.extname(sourceVideoPath));
     const output = outputPath || path.join(this.outputDir, `${baseName}_rendered_${Date.now()}.${format}`);
 
     // Get include segments
-    const segments = (edl.segments || []).filter(
-      seg => seg.type === SEGMENT_TYPES.INCLUDE
-    ).sort((a, b) => a.startTime - b.startTime);
+    const segments = (edl.segments || [])
+      .filter((seg) => seg.type === SEGMENT_TYPES.INCLUDE)
+      .sort((a, b) => a.startTime - b.startTime);
 
     if (segments.length === 0) {
       throw new Error('No segments to render');
@@ -90,9 +85,9 @@ export class BranchRenderer {
       // If single segment with no effects, do simple trim
       if (segments.length === 1 && !this._hasEffects(edl)) {
         return await this._renderSimpleTrim(
-          sourceVideoPath, 
-          segments[0], 
-          output, 
+          sourceVideoPath,
+          segments[0],
+          output,
           { format, quality, resolution },
           progressCallback
         );
@@ -107,7 +102,6 @@ export class BranchRenderer {
         { format, quality, resolution },
         progressCallback
       );
-
     } catch (error) {
       log.error('video', '[BranchRenderer] Render failed', { error: error });
       throw error;
@@ -122,8 +116,7 @@ export class BranchRenderer {
     const { format, quality, resolution } = options;
 
     return new Promise((resolve, reject) => {
-      let command = ffmpegLib(sourcePath)
-        .setStartTime(segment.startTime);
+      let command = ffmpegLib(sourcePath).setStartTime(segment.startTime);
 
       if (segment.endTime) {
         command = command.setDuration(segment.endTime - segment.startTime);
@@ -139,14 +132,14 @@ export class BranchRenderer {
 
       command
         .output(outputPath)
-        .on('start', (cmd) => {
+        .on('start', (_cmd) => {
           log.info('video', '[BranchRenderer] Simple trim started');
         })
         .on('progress', (progress) => {
           if (progressCallback) {
             progressCallback({
               status: 'Rendering...',
-              percent: Math.min(95, progress.percent || 0)
+              percent: Math.min(95, progress.percent || 0),
             });
           }
         })
@@ -158,7 +151,7 @@ export class BranchRenderer {
           resolve({
             success: true,
             outputPath: outputPath,
-            duration: segment.endTime - segment.startTime
+            duration: segment.endTime - segment.startTime,
           });
         })
         .on('error', (err) => {
@@ -175,7 +168,7 @@ export class BranchRenderer {
   async _renderConcatenation(sourcePath, segments, edl, outputPath, options, progressCallback) {
     const { format, quality, resolution } = options;
     const tempDir = path.join(this.tempDir, `render_${Date.now()}`);
-    
+
     fs.mkdirSync(tempDir, { recursive: true });
 
     try {
@@ -191,7 +184,7 @@ export class BranchRenderer {
           const basePercent = (i / totalSegments) * 70;
           progressCallback({
             status: `Extracting segment ${i + 1}/${totalSegments}...`,
-            percent: basePercent
+            percent: basePercent,
           });
         }
 
@@ -205,7 +198,7 @@ export class BranchRenderer {
 
       // Create concat list file
       const listPath = path.join(tempDir, 'concat_list.txt');
-      const listContent = segmentFiles.map(f => `file '${f}'`).join('\n');
+      const listContent = segmentFiles.map((f) => `file '${f}'`).join('\n');
       fs.writeFileSync(listPath, listContent);
 
       // Concatenate all segments
@@ -219,7 +212,7 @@ export class BranchRenderer {
             if (progressCallback) {
               progressCallback({
                 status: 'Finalizing...',
-                percent: 75 + (progress.percent || 0) * 0.2
+                percent: 75 + (progress.percent || 0) * 0.2,
               });
             }
           })
@@ -249,14 +242,13 @@ export class BranchRenderer {
       }, 0);
 
       log.info('video', '[BranchRenderer] Concatenation complete', { data: outputPath });
-      
+
       return {
         success: true,
         outputPath: outputPath,
         segmentCount: segments.length,
-        duration: totalDuration
+        duration: totalDuration,
       };
-
     } catch (error) {
       this._cleanupTempDir(tempDir);
       throw error;
@@ -271,8 +263,7 @@ export class BranchRenderer {
     const { quality, resolution } = options;
 
     return new Promise((resolve, reject) => {
-      let command = ffmpegLib(sourcePath)
-        .setStartTime(segment.startTime);
+      let command = ffmpegLib(sourcePath).setStartTime(segment.startTime);
 
       if (segment.endTime) {
         command = command.setDuration(segment.endTime - segment.startTime);
@@ -286,11 +277,7 @@ export class BranchRenderer {
         command = command.size(resolution);
       }
 
-      command
-        .output(outputPath)
-        .on('end', resolve)
-        .on('error', reject)
-        .run();
+      command.output(outputPath).on('end', resolve).on('error', reject).run();
     });
   }
 
@@ -302,26 +289,36 @@ export class BranchRenderer {
     const settings = {
       high: { crf: 18, preset: 'slow', audioBitrate: '320k' },
       medium: { crf: 23, preset: 'medium', audioBitrate: '192k' },
-      low: { crf: 28, preset: 'fast', audioBitrate: '128k' }
+      low: { crf: 28, preset: 'fast', audioBitrate: '128k' },
     };
 
     const s = settings[quality] || settings.medium;
 
     if (format === 'mp4' || format === 'mov') {
       return command.outputOptions([
-        '-c:v', 'libx264',
-        '-crf', String(s.crf),
-        '-preset', s.preset,
-        '-c:a', 'aac',
-        '-b:a', s.audioBitrate
+        '-c:v',
+        'libx264',
+        '-crf',
+        String(s.crf),
+        '-preset',
+        s.preset,
+        '-c:a',
+        'aac',
+        '-b:a',
+        s.audioBitrate,
       ]);
     } else if (format === 'webm') {
       return command.outputOptions([
-        '-c:v', 'libvpx-vp9',
-        '-crf', String(s.crf),
-        '-b:v', '0',
-        '-c:a', 'libopus',
-        '-b:a', s.audioBitrate
+        '-c:v',
+        'libvpx-vp9',
+        '-crf',
+        String(s.crf),
+        '-b:v',
+        '0',
+        '-c:a',
+        'libopus',
+        '-b:a',
+        s.audioBitrate,
       ]);
     }
 
@@ -334,11 +331,13 @@ export class BranchRenderer {
    */
   _hasEffects(edl) {
     if (!edl.effects) return false;
-    
-    return edl.effects.fadeIn || 
-           edl.effects.fadeOut || 
-           (edl.effects.speed && edl.effects.speed !== 1.0) ||
-           edl.effects.reversed;
+
+    return (
+      edl.effects.fadeIn ||
+      edl.effects.fadeOut ||
+      (edl.effects.speed && edl.effects.speed !== 1.0) ||
+      edl.effects.reversed
+    );
   }
 
   /**
@@ -349,7 +348,7 @@ export class BranchRenderer {
     if (!effects) return;
 
     const tempOutput = videoPath.replace(/(\.\w+)$/, '_temp$1');
-    
+
     // Build filter chain
     const videoFilters = [];
     const audioFilters = [];
@@ -368,7 +367,7 @@ export class BranchRenderer {
     }
 
     if (effects.speed && effects.speed !== 1.0) {
-      videoFilters.push(`setpts=${1/effects.speed}*PTS`);
+      videoFilters.push(`setpts=${1 / effects.speed}*PTS`);
       audioFilters.push(`atempo=${effects.speed}`);
     }
 
@@ -463,9 +462,7 @@ export class BranchRenderer {
    * @returns {Object} Preview info
    */
   previewRender(edl, options = {}) {
-    const segments = (edl.segments || []).filter(
-      seg => seg.type === SEGMENT_TYPES.INCLUDE
-    );
+    const segments = (edl.segments || []).filter((seg) => seg.type === SEGMENT_TYPES.INCLUDE);
 
     const totalDuration = segments.reduce((sum, seg) => {
       return sum + ((seg.endTime || 0) - (seg.startTime || 0));
@@ -480,7 +477,7 @@ export class BranchRenderer {
       hasEffects: this._hasEffects(edl),
       effects: edl.effects || {},
       estimatedSize: estimatedSize,
-      estimatedSizeFormatted: this._formatFileSize(estimatedSize)
+      estimatedSizeFormatted: this._formatFileSize(estimatedSize),
     };
   }
 
@@ -491,9 +488,9 @@ export class BranchRenderer {
   _estimateFileSize(duration, quality) {
     // Rough estimates in bytes per second
     const bitrateByQuality = {
-      high: 5000000,   // ~5 Mbps
+      high: 5000000, // ~5 Mbps
       medium: 2500000, // ~2.5 Mbps
-      low: 1000000     // ~1 Mbps
+      low: 1000000, // ~1 Mbps
     };
 
     const bitrate = bitrateByQuality[quality] || bitrateByQuality.medium;
@@ -508,7 +505,7 @@ export class BranchRenderer {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    
+
     if (hrs > 0) {
       return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     }
@@ -523,23 +520,12 @@ export class BranchRenderer {
     const units = ['B', 'KB', 'MB', 'GB'];
     let size = bytes;
     let unitIndex = 0;
-    
+
     while (size >= 1024 && unitIndex < units.length - 1) {
       size /= 1024;
       unitIndex++;
     }
-    
+
     return `${size.toFixed(1)} ${units[unitIndex]}`;
   }
 }
-
-
-
-
-
-
-
-
-
-
-

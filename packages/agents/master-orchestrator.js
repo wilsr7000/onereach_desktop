@@ -1,6 +1,6 @@
 /**
  * Master Orchestrator Agent
- * 
+ *
  * Supervises all agent bidding and makes intelligent decisions:
  * - Evaluates ALL bids together (not just highest score)
  * - Selects one or multiple winners
@@ -18,11 +18,13 @@ const log = getLogQueue();
  * Build the evaluation prompt for the Master Orchestrator
  */
 function buildEvaluationPrompt(task, bids) {
-  const bidsText = bids.map((bid, i) => {
-    return `${i + 1}. ${bid.agentName || bid.agentId} (confidence: ${bid.confidence.toFixed(2)})
+  const bidsText = bids
+    .map((bid, i) => {
+      return `${i + 1}. ${bid.agentName || bid.agentId} (confidence: ${bid.confidence.toFixed(2)})
    Reasoning: ${bid.reasoning || 'No reasoning provided'}
    Score: ${bid.score?.toFixed(3) || 'N/A'}`;
-  }).join('\n\n');
+    })
+    .join('\n\n');
 
   return `You are the Master Orchestrator - the supervisor that evaluates all agent bids and makes intelligent routing decisions.
 
@@ -71,18 +73,18 @@ Respond with JSON only:
 const masterOrchestrator = {
   id: 'master-orchestrator-internal',
   name: 'Master Orchestrator',
-  
+
   /**
    * Evaluate all bids and select winner(s)
    * This is called by the Exchange after collecting all bids
-   * 
+   *
    * @param {Object} task - The user's task
    * @param {Array} bids - All submitted bids with reasoning (already ranked by score)
    * @returns {Promise<Object>} - { winners, executionMode, rejectedBids, agentFeedback, reasoning }
    */
   async evaluate(task, bids) {
     log.info('agent', `Evaluating ${bids.length} bids for: "${(task.content || task).substring(0, 50)}..."`);
-    
+
     // If no bids or only one bid, skip LLM evaluation
     if (!bids || bids.length === 0) {
       log.info('agent', 'No bids to evaluate');
@@ -91,10 +93,10 @@ const masterOrchestrator = {
         executionMode: 'single',
         reasoning: 'No bids received',
         rejectedBids: [],
-        agentFeedback: []
+        agentFeedback: [],
       };
     }
-    
+
     if (bids.length === 1) {
       log.info('agent', 'Single bid, selecting as winner');
       return {
@@ -102,15 +104,36 @@ const masterOrchestrator = {
         executionMode: 'single',
         reasoning: 'Only one agent bid',
         rejectedBids: [],
-        agentFeedback: []
+        agentFeedback: [],
       };
     }
-    
+
     // Cost guard: if the top bid is dominant (gap > 0.3 from second),
     // skip the LLM call and just select the winner directly.
     const sortedBids = [...bids].sort((a, b) => (b.score || b.confidence) - (a.score || a.confidence));
     const topScore = sortedBids[0]?.score || sortedBids[0]?.confidence || 0;
     const secondScore = sortedBids[1]?.score || sortedBids[1]?.confidence || 0;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location: 'master-orchestrator.js:winner',
+        message: 'Orchestrator evaluating bids',
+        data: {
+          taskContent: (task.content || task.phrase || '').substring(0, 80),
+          topAgent: sortedBids[0]?.agentId,
+          topScore,
+          secondAgent: sortedBids[1]?.agentId,
+          secondScore,
+          gap: (topScore - secondScore).toFixed(2),
+          totalBids: bids.length,
+          allBids: sortedBids.map((b) => ({ id: b.agentId, score: b.score || b.confidence })),
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'WINNER',
+      }),
+    }).catch((err) => console.warn('[master-orchestrator] ingest fetch:', err.message));
     if (topScore - secondScore > 0.3) {
       log.info('agent', `Dominant top bid (gap ${(topScore - secondScore).toFixed(2)}), skipping LLM`);
       return {
@@ -118,13 +141,13 @@ const masterOrchestrator = {
         executionMode: 'single',
         reasoning: `Clear winner by ${(topScore - secondScore).toFixed(2)} confidence gap`,
         rejectedBids: [],
-        agentFeedback: []
+        agentFeedback: [],
       };
     }
-    
+
     // Build and send LLM request
     const prompt = buildEvaluationPrompt(task, bids);
-    
+
     try {
       const result = await ai.chat({
         profile: 'fast',
@@ -133,39 +156,37 @@ const masterOrchestrator = {
         temperature: 0,
         maxTokens: 500,
         jsonMode: true,
-        feature: 'master-orchestrator'
+        feature: 'master-orchestrator',
       });
-      
+
       const content = result.content;
-      
+
       if (!content) {
         throw new Error('Empty LLM response');
       }
-      
+
       const evaluation = JSON.parse(content);
-      
+
       // Validate winners exist in bids
-      const validWinners = (evaluation.winners || []).filter(winnerId => 
-        bids.some(b => b.agentId === winnerId)
-      );
-      
+      const validWinners = (evaluation.winners || []).filter((winnerId) => bids.some((b) => b.agentId === winnerId));
+
       if (validWinners.length === 0) {
         log.warn('agent', 'LLM selected no valid winners, falling back');
         return this._fallbackSelection(bids);
       }
-      
+
       log.info('agent', `Selected ${validWinners.length} winner(s)`, { validWinners });
       log.info('agent', `Reasoning: ${evaluation.reasoning}`);
-      
+
       if (evaluation.rejectedBids?.length > 0) {
         log.info('agent', `Rejected ${evaluation.rejectedBids.length} bad bids`);
       }
-      
+
       // Safeguard: force single mode if LLM chose parallel/series
       // but only selected 1 winner, or if the task is simple (no "and"/"then" combining domains).
       let executionMode = evaluation.executionMode || 'single';
       let finalWinners = validWinners;
-      
+
       if (finalWinners.length > 1) {
         // Only allow multi-winner if the task clearly requires it
         const taskText = (task.content || String(task)).toLowerCase();
@@ -179,21 +200,20 @@ const masterOrchestrator = {
       if (finalWinners.length === 1) {
         executionMode = 'single';
       }
-      
+
       return {
         winners: finalWinners,
         executionMode,
         reasoning: evaluation.reasoning || '',
         rejectedBids: evaluation.rejectedBids || [],
-        agentFeedback: evaluation.agentFeedback || []
+        agentFeedback: evaluation.agentFeedback || [],
       };
-      
     } catch (error) {
       log.error('agent', 'Evaluation failed', { error: error.message });
       return this._fallbackSelection(bids);
     }
   },
-  
+
   /**
    * Fallback selection when LLM is unavailable
    * Uses the pre-ranked scores
@@ -205,14 +225,14 @@ const masterOrchestrator = {
       executionMode: 'single',
       reasoning: 'Fallback: selected highest scoring bid',
       rejectedBids: [],
-      agentFeedback: []
+      agentFeedback: [],
     };
   },
-  
+
   /**
    * Provide feedback after task execution
    * Updates reputation and optionally edits agent memory
-   * 
+   *
    * @param {Object} task - The completed task
    * @param {Object} result - Execution result { success, message }
    * @param {Object} winner - The agent that executed
@@ -220,12 +240,12 @@ const masterOrchestrator = {
    */
   async provideFeedback(task, result, winner, evaluation) {
     log.info('agent', `Providing feedback for ${winner.agentId}`);
-    
+
     // Update reputation based on success/failure
     try {
       const { getReputationStore } = require('../../packages/task-exchange/src/reputation/store');
       const repStore = getReputationStore();
-      
+
       if (result.success) {
         await repStore.recordSuccess(winner.agentId, winner.agentVersion || '1.0.0');
       } else {
@@ -234,70 +254,66 @@ const masterOrchestrator = {
     } catch (e) {
       log.warn('agent', 'Could not update reputation', { error: e.message });
     }
-    
+
     // Apply agent feedback from evaluation
     if (evaluation?.agentFeedback?.length > 0) {
       for (const feedback of evaluation.agentFeedback) {
         await this.updateAgentMemory(feedback.agentId, feedback.feedback);
       }
     }
-    
+
     // If task failed, add learning note to the agent
     if (!result.success && winner.agentId) {
       const failureNote = `Task failed: "${(task.content || '').substring(0, 50)}..." - ${result.message || 'Unknown error'}`;
       await this.updateAgentMemory(winner.agentId, failureNote);
     }
   },
-  
+
   /**
    * Update an agent's memory file with feedback/learning notes
-   * 
+   *
    * @param {string} agentId - Agent to update
    * @param {string} feedback - What to add to their memory
    */
   async updateAgentMemory(agentId, feedback) {
     if (!agentId || !feedback) return;
-    
+
     try {
       const memory = getAgentMemory(agentId);
       await memory.load();
-      
+
       // Ensure "Learning Notes" section exists
       const sections = memory.getSectionNames();
       if (!sections.includes('Learning Notes')) {
         memory.updateSection('Learning Notes', '*Notes from Master Orchestrator to help improve*');
       }
-      
+
       // Add timestamped feedback
       const timestamp = new Date().toISOString().split('T')[0];
       const entry = `- ${timestamp}: ${feedback}`;
       memory.appendToSection('Learning Notes', entry, 20); // Keep last 20 entries
-      
+
       await memory.save();
       log.info('agent', `Updated memory for ${agentId}: ${feedback.substring(0, 50)}...`);
-      
     } catch (error) {
       log.warn('agent', `Could not update memory for ${agentId}`, { error: error.message });
     }
   },
-  
+
   /**
    * Process rejected bids - apply reputation penalty
-   * 
+   *
    * @param {Array} rejectedBids - Bids that were flagged as bad
    */
   async processRejectedBids(rejectedBids) {
     if (!rejectedBids || rejectedBids.length === 0) return;
-    
+
     for (const rejected of rejectedBids) {
       log.info('agent', `Processing rejected bid: ${rejected.agentId} - ${rejected.reason}`);
-      
+
       // Add to agent's learning notes
-      await this.updateAgentMemory(
-        rejected.agentId, 
-        `Bid rejected by Master Orchestrator: ${rejected.reason}`
-      );
-      
+      await this.updateAgentMemory(rejected.agentId, `Bid rejected by Master Orchestrator: ${rejected.reason}`);
+
       // Apply reputation penalty
       try {
         const { getReputationStore } = require('../../packages/task-exchange/src/reputation/store');
@@ -307,7 +323,7 @@ const masterOrchestrator = {
         log.warn('agent', 'Could not apply reputation penalty', { error: e.message });
       }
     }
-  }
+  },
 };
 
 module.exports = masterOrchestrator;

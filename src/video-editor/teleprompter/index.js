@@ -18,31 +18,13 @@ export function initTeleprompterModules(appContext) {
   const teleprompter = new TeleprompterUI(appContext);
   const transcriptSync = new TranscriptSync(appContext);
   const teleprompterMarkers = new TeleprompterMarkers(appContext);
-  
+
   // Setup ESC key handler for markers
   teleprompterMarkers.setupKeyHandler();
-  
+
   return {
     teleprompter,
     transcriptSync,
-    teleprompterMarkers
+    teleprompterMarkers,
   };
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

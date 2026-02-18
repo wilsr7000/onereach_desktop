@@ -4,12 +4,16 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 
 // Mock exceljs before importing agent
 const mockRow = {
-  eachCell: vi.fn((opts, fn) => { fn({ value: 'test' }, 1); }),
+  eachCell: vi.fn((opts, fn) => {
+    fn({ value: 'test' }, 1);
+  }),
 };
 const mockSheet = {
   name: 'Sheet1',
   addRow: vi.fn().mockReturnValue(mockRow),
-  eachRow: vi.fn((opts, fn) => { fn(mockRow, 1); }),
+  eachRow: vi.fn((opts, fn) => {
+    fn(mockRow, 1);
+  }),
   columns: [],
   views: [],
 };
@@ -21,7 +25,7 @@ vi.mock('exceljs', () => ({
       addWorksheet: vi.fn().mockReturnValue(mockSheet),
       worksheets: [mockSheet],
       xlsx: {
-        writeBuffer: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)])),
+        writeBuffer: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)])),
         load: vi.fn().mockResolvedValue(undefined),
       },
     })),

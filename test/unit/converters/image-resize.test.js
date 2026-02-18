@@ -19,7 +19,7 @@ const { ImageResizeAgent } = require('../../../lib/converters/image-resize.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(ImageResizeAgent, {
-  sampleInput: Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+  sampleInput: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   expectedFromFormats: ['png', 'jpg', 'webp'],
   expectedToFormats: ['png', 'jpg', 'webp'],
   expectedStrategies: ['exact', 'fit', 'smart-crop'],
@@ -36,14 +36,14 @@ describe('ImageResizeAgent (specific)', () => {
   });
 
   it('rejects non-Buffer input in execute', async () => {
-    await expect(agent.execute('not-a-buffer', 'fit', { width: 100 }))
-      .rejects.toThrow('Input must be a Buffer');
+    await expect(agent.execute('not-a-buffer', 'fit', { width: 100 })).rejects.toThrow('Input must be a Buffer');
   });
 
   it('requires at least width or height', async () => {
-    const buf = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
-    await expect(agent.execute(buf, 'fit', {}))
-      .rejects.toThrow('At least one of options.width or options.height is required');
+    const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    await expect(agent.execute(buf, 'fit', {})).rejects.toThrow(
+      'At least one of options.width or options.height is required'
+    );
   });
 
   it('builds correct resize options for each strategy', () => {

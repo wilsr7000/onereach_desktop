@@ -1,6 +1,6 @@
 /**
  * Agent Statistics Tracker
- * 
+ *
  * Tracks performance metrics for agents:
  * - Total bids
  * - Wins (selected as winner)
@@ -27,36 +27,36 @@ class AgentStatsTracker {
     this.maxHistorySize = 100; // Keep last 100 bid events
     this.initialized = false;
   }
-  
+
   /**
    * Initialize the stats tracker
    */
   async init() {
     if (this.initialized) return;
-    
+
     try {
       const userDataPath = app?.getPath('userData') || path.join(process.env.HOME, '.gsx-power-user');
       this.statsDir = path.join(userDataPath, 'agents');
       this.statsFile = path.join(this.statsDir, 'agent-stats.json');
       this.historyFile = path.join(this.statsDir, 'bid-history.json');
-      
+
       // Ensure directory exists
       if (!fs.existsSync(this.statsDir)) {
         fs.mkdirSync(this.statsDir, { recursive: true });
       }
-      
+
       // Load existing stats
       if (fs.existsSync(this.statsFile)) {
         const data = fs.readFileSync(this.statsFile, 'utf8');
         this.stats = JSON.parse(data);
       }
-      
+
       // Load existing history
       if (fs.existsSync(this.historyFile)) {
         const data = fs.readFileSync(this.historyFile, 'utf8');
         this.bidHistory = JSON.parse(data);
       }
-      
+
       this.initialized = true;
       log.info('voice', '[AgentStats] Initialized', { agentCount: Object.keys(this.stats).length });
     } catch (error) {
@@ -66,7 +66,7 @@ class AgentStatsTracker {
       this.initialized = true;
     }
   }
-  
+
   /**
    * Save stats to disk
    */
@@ -78,7 +78,7 @@ class AgentStatsTracker {
       log.error('voice', '[AgentStats] Save error', { error: error });
     }
   }
-  
+
   /**
    * Get or create stats for an agent
    */
@@ -108,18 +108,18 @@ class AgentStatsTracker {
     }
     return this.stats[agentId];
   }
-  
+
   /**
    * Record a bid
    */
-  recordBid(agentId, confidence, taskContent) {
+  recordBid(agentId, confidence, _taskContent) {
     const stats = this.getOrCreate(agentId);
     stats.totalBids++;
     stats.totalConfidence += confidence;
     stats.lastActive = new Date().toISOString();
     this.save();
   }
-  
+
   /**
    * Record a win (agent was selected)
    */
@@ -129,7 +129,7 @@ class AgentStatsTracker {
     stats.lastActive = new Date().toISOString();
     this.save();
   }
-  
+
   /**
    * Record an execution start
    */
@@ -139,22 +139,22 @@ class AgentStatsTracker {
     stats.lastActive = new Date().toISOString();
     this.save();
   }
-  
+
   /**
    * Record a successful execution with optional duration
-   * @param {string} agentId 
+   * @param {string} agentId
    * @param {number} [durationMs] - Execution time in milliseconds
    */
   recordSuccess(agentId, durationMs) {
     const stats = this.getOrCreate(agentId);
     stats.successes++;
     stats.lastActive = new Date().toISOString();
-    
+
     // Track execution time if provided
     if (typeof durationMs === 'number' && durationMs >= 0) {
       stats.totalExecutionTimeMs += durationMs;
       stats.lastExecutionTimeMs = durationMs;
-      
+
       if (stats.minExecutionTimeMs === null || durationMs < stats.minExecutionTimeMs) {
         stats.minExecutionTimeMs = durationMs;
       }
@@ -162,14 +162,14 @@ class AgentStatsTracker {
         stats.maxExecutionTimeMs = durationMs;
       }
     }
-    
+
     this.save();
   }
-  
+
   /**
    * Record a failed execution with optional duration
-   * @param {string} agentId 
-   * @param {string} error 
+   * @param {string} agentId
+   * @param {string} error
    * @param {number} [durationMs] - Execution time in milliseconds
    */
   recordFailure(agentId, error, durationMs) {
@@ -178,12 +178,12 @@ class AgentStatsTracker {
     stats.lastActive = new Date().toISOString();
     stats.lastError = error;
     stats.lastErrorAt = new Date().toISOString();
-    
+
     // Track execution time even for failures
     if (typeof durationMs === 'number' && durationMs >= 0) {
       stats.totalExecutionTimeMs += durationMs;
       stats.lastExecutionTimeMs = durationMs;
-      
+
       if (stats.minExecutionTimeMs === null || durationMs < stats.minExecutionTimeMs) {
         stats.minExecutionTimeMs = durationMs;
       }
@@ -191,21 +191,21 @@ class AgentStatsTracker {
         stats.maxExecutionTimeMs = durationMs;
       }
     }
-    
+
     this.save();
   }
-  
+
   /**
    * Record a complete bid event (for debugging)
    */
   recordBidEvent(event) {
     const { taskId, taskContent, bids, winner } = event;
-    
+
     const bidEvent = {
       taskId,
       taskContent: taskContent?.substring(0, 100),
       timestamp: new Date().toISOString(),
-      bids: bids.map(b => ({
+      bids: bids.map((b) => ({
         agentId: b.agentId,
         agentName: b.agentName,
         confidence: b.confidence,
@@ -215,26 +215,26 @@ class AgentStatsTracker {
       winnerId: winner?.agentId,
       winnerConfidence: winner?.confidence,
     };
-    
+
     this.bidHistory.unshift(bidEvent);
-    
+
     // Trim history
     if (this.bidHistory.length > this.maxHistorySize) {
       this.bidHistory = this.bidHistory.slice(0, this.maxHistorySize);
     }
-    
+
     this.save();
   }
-  
+
   /**
    * Get stats for an agent
    */
   getStats(agentId) {
     const stats = this.stats[agentId];
     if (!stats) return null;
-    
+
     const completedExecutions = (stats.successes || 0) + (stats.failures || 0);
-    
+
     return {
       ...stats,
       avgConfidence: stats.totalBids > 0 ? stats.totalConfidence / stats.totalBids : 0,
@@ -243,7 +243,7 @@ class AgentStatsTracker {
       avgExecutionTimeMs: completedExecutions > 0 ? Math.round(stats.totalExecutionTimeMs / completedExecutions) : null,
     };
   }
-  
+
   /**
    * Get stats for all agents
    */
@@ -254,23 +254,21 @@ class AgentStatsTracker {
     }
     return result;
   }
-  
+
   /**
    * Get recent bid history
    */
   getBidHistory(limit = 50) {
     return this.bidHistory.slice(0, limit);
   }
-  
+
   /**
    * Get bid history for a specific agent
    */
   getAgentBidHistory(agentId, limit = 20) {
-    return this.bidHistory
-      .filter(event => event.bids.some(b => b.agentId === agentId))
-      .slice(0, limit);
+    return this.bidHistory.filter((event) => event.bids.some((b) => b.agentId === agentId)).slice(0, limit);
   }
-  
+
   /**
    * Clear stats for an agent
    */
@@ -278,7 +276,7 @@ class AgentStatsTracker {
     delete this.stats[agentId];
     this.save();
   }
-  
+
   /**
    * Clear all stats
    */

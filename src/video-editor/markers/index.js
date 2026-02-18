@@ -20,28 +20,10 @@ export function initMarkerModules(appContext) {
   const markerManager = new MarkerManager(appContext);
   const markerRenderer = new MarkerRenderer(appContext);
   const markerModal = new MarkerModal(appContext);
-  
+
   return {
     markerManager,
     markerRenderer,
-    markerModal
+    markerModal,
   };
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

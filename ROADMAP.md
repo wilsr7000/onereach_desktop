@@ -49,7 +49,7 @@
 - [ ] **Collaborative mode** - Share sessions with team members
 
 #### Q2 2026
-- [ ] **Custom agent personalities** - Define agent behavior/style
+- [x] **Custom agent personalities** - Define agent behavior/style (voice, memory, briefing, multi-turn)
 - [ ] **Code review mode** - AI-assisted code review workflow
 - [ ] **Test generation** - Auto-generate tests from code
 - [ ] **Documentation generation** - Auto-generate docs from code
@@ -61,7 +61,7 @@
 
 ---
 
-## 🎥 GSX Capture
+## 🎥 WISER Meeting
 
 *Screen and camera recording with P2P dual recording sessions*
 
@@ -75,12 +75,17 @@
 
 #### Q1 2026
 - [x] **UI Redesign** - Modern glassmorphism design with mode tabs, countdown, keyboard shortcuts
-- [ ] **P2P Dual Recording** - Riverside-style sessions (Phase 1: connection + split-view)
+- [x] **P2P Dual Recording (Phase 1)** - Riverside-style sessions (connection + split-view)
   - Single-word session codes (say "join falcon" on a call)
-  - Native WebRTC with GSX OmniGraph signaling (no third-party deps)
+  - Native WebRTC with local HTTP signaling (no third-party deps)
   - Each participant records locally at full quality
-- [ ] **Track Transfer** - Guest sends recording to host via WebRTC data channel (Phase 2)
-- [ ] **Post-Processing** - FFmpeg merge with side-by-side, PiP, speaker-view layouts (Phase 3)
+  - Synchronized recording start/stop via data channel
+- [x] **Track Transfer (Phase 2)** - Guest sends recording to host via WebRTC data channel
+  - Chunked binary transfer with progress overlay and backpressure handling
+  - Both tracks saved to Space with role metadata (host/guest)
+- [x] **Post-Processing (Phase 3)** - FFmpeg merge with layout options
+  - Side-by-side, PiP (host main), PiP (guest main) layouts
+  - Visual layout picker, real-time merge progress, audio mix from both tracks
 
 #### Q2 2026
 - [ ] **Multi-participant** - Support 3+ people in a session
@@ -154,6 +159,7 @@
 - [x] **Version history** - Track item changes (via content hash versioning)
 - [x] **SPACE Framework metadata schema** - Extensible v2.0 schema with S/P/A/C/E namespaces, AI context extraction, auto-migration
 - [x] **Data Source asset type** - MCP, API, and web-scraping source configs as first-class items with REST API for external agent discovery
+- [x] **Remote Space Discovery** - Discover and import spaces from OmniGraph by email (owned + shared), auto-polling + manual refresh
 - [ ] **Collections** - Curated item groups
 
 #### Q2 2026
@@ -231,6 +237,7 @@
 - ✅ GSX link configuration
 - ✅ Environment handling
 - ✅ Agent explorer
+- ✅ IDW Store powered by OmniGraph (graph DB)
 
 ### Roadmap
 
@@ -271,6 +278,9 @@
 - ✅ Create your own voice-activated agents
 - ✅ Undo/revert when editing agents
 - ✅ New agents work immediately (no restart needed)
+- ✅ First-class custom agents: voice personality, memory, daily briefing, multi-turn
+- ✅ Agent Composer v2: voice picker, memory/briefing toggles, test suite runner
+- ✅ AI-powered test scenario generation with result persistence
 
 **Task Exchange (v3.13.x):**
 - ✅ 100% LLM-based agent routing (no keyword/regex bidding)
@@ -290,13 +300,16 @@
 - [x] **Full API Migration** - Unified LLM calls via ai-service.js (8 files migrated), HUD API completion (disambiguation, multi-turn, agent-specific submission), Spaces v3 Git versioning for agent spaces
 - [x] **Documentation Agent** - RAG-grounded agent that answers app questions from official docs without hallucination, with eval tests for answer quality and hallucination detection
 - [x] **Calendar Agent v2** - Full calendar engine with local persistent storage, recurring events (daily/weekdays/weekly/biweekly/monthly/yearly), morning brief with conflict detection and back-to-back warnings, free-slot finder with alternative time suggestions, week summary, exception handling for recurring events
+- [x] **Calendar Agent v3 (Refactor)** - Monolithic calendar-agent.js (4800 lines) replaced with specialized agents: calendar-query-agent (read schedule, join meeting), calendar-create-agent (verified create with guest resolution), calendar-edit-agent (delete+recreate), calendar-delete-agent (verified delete with disambiguation). Three-layer architecture: calendar-data.js (pure analysis, 65 tests), calendar-fetch.js (async API + verified mutations), calendar-format.js (UI rendering + TTS). All date resolution in JavaScript (no LLM date guessing).
 - [ ] **Multi-window** - Same agent in multiple windows
 - [ ] **Keyboard shortcuts** - Quick agent switching
 - [ ] **Context sharing** - Share Spaces content with AI agents
 
 #### Q2 2026
+- [x] **Browser Automation Agent** - Autonomous browser control via Playwright. AI agent navigates websites, fills forms, clicks buttons, extracts data, takes screenshots. Ref-based accessibility snapshot interaction. Configurable safety guardrails (max actions, domain blocklist, execution timeout). Settings UI, IPC bridge, web-scraper consolidation.
 - [ ] **Agent chaining** - Connect agents to work together
 - [ ] **Agent marketplace** - Share/discover community agents (built on Agent Spaces)
+- [x] **Custom agent personalities** - Voice, memory, briefing, multi-turn for generated agents (delivered in First-Class Custom Agents)
 - [ ] **Prompt library** - Save and reuse your best prompts
 - [ ] **Cost tracking** - See how much you're spending
 

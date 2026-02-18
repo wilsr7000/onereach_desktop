@@ -1,16 +1,15 @@
 /**
  * Test Suite: Centralized HUD API + Agent Spaces
- * 
+ *
  * Validates:
  * 1. Agent Space Registry: create, assign, filter, default spaces
  * 2. Meeting Agents: loading, structured extraction
  * 3. Remote Agent Client: bid/execute protocol, circuit breaker
  * 4. HUD API: submit with space, items, events
- * 
+ *
  * Run: node test-hud-api.js
  */
 
-const path = require('path');
 const http = require('http');
 
 // Track results
@@ -51,7 +50,10 @@ async function testAgentRegistry() {
   assert(actionItem !== null, 'action-item-agent loaded');
   assert(actionItem && actionItem.name === 'Action Item Agent', 'action-item-agent has correct name');
   assert(actionItem && Array.isArray(actionItem.defaultSpaces), 'action-item-agent has defaultSpaces');
-  assert(actionItem && actionItem.defaultSpaces?.includes('meeting-agents'), 'action-item-agent in meeting-agents space');
+  assert(
+    actionItem && actionItem.defaultSpaces?.includes('meeting-agents'),
+    'action-item-agent in meeting-agents space'
+  );
 
   const decision = registry.getAgent('decision-agent');
   assert(decision !== null, 'decision-agent loaded');
@@ -75,7 +77,10 @@ async function testAgentRegistry() {
   // Check BUILT_IN_AGENT_IDS includes new agents
   assert(registry.BUILT_IN_AGENT_IDS.includes('action-item-agent'), 'BUILT_IN_AGENT_IDS includes action-item-agent');
   assert(registry.BUILT_IN_AGENT_IDS.includes('decision-agent'), 'BUILT_IN_AGENT_IDS includes decision-agent');
-  assert(registry.BUILT_IN_AGENT_IDS.includes('meeting-notes-agent'), 'BUILT_IN_AGENT_IDS includes meeting-notes-agent');
+  assert(
+    registry.BUILT_IN_AGENT_IDS.includes('meeting-notes-agent'),
+    'BUILT_IN_AGENT_IDS includes meeting-notes-agent'
+  );
 
   // Optional: defaultSpaces is in OPTIONAL_PROPERTIES
   assert(registry.OPTIONAL_PROPERTIES.includes('defaultSpaces'), 'defaultSpaces in OPTIONAL_PROPERTIES');
@@ -93,11 +98,17 @@ async function testAgentSpaceRegistry() {
   assert(DEFAULT_SPACES['general-agents'] !== undefined, 'general-agents default space defined');
   assert(DEFAULT_SPACES['meeting-agents'] !== undefined, 'meeting-agents default space defined');
   assert(DEFAULT_SPACES['general-agents'].agentIds.length > 5, 'general-agents has multiple agent IDs');
-  assert(DEFAULT_SPACES['meeting-agents'].agentIds.includes('action-item-agent'), 'meeting-agents includes action-item-agent');
+  assert(
+    DEFAULT_SPACES['meeting-agents'].agentIds.includes('action-item-agent'),
+    'meeting-agents includes action-item-agent'
+  );
 
   // Test default space for tools
   assert(DEFAULT_SPACES['general-agents'].defaultForTools.includes('orb'), 'orb defaults to general-agents');
-  assert(DEFAULT_SPACES['general-agents'].defaultForTools.includes('command-hud'), 'command-hud defaults to general-agents');
+  assert(
+    DEFAULT_SPACES['general-agents'].defaultForTools.includes('command-hud'),
+    'command-hud defaults to general-agents'
+  );
   assert(DEFAULT_SPACES['meeting-agents'].defaultForTools.includes('recorder'), 'recorder defaults to meeting-agents');
 
   // Test the registry object has all expected methods
@@ -116,7 +127,13 @@ async function testAgentSpaceRegistry() {
 async function testRemoteAgentClient() {
   section('Remote Agent Client');
 
-  const { callRemoteBid, callRemoteExecute, checkRemoteHealth, getCircuitStatus, resetCircuit } = require('./lib/remote-agent-client');
+  const {
+    callRemoteBid,
+    callRemoteExecute,
+    checkRemoteHealth,
+    getCircuitStatus,
+    resetCircuit,
+  } = require('./lib/remote-agent-client');
 
   // Test exports exist
   assert(typeof callRemoteBid === 'function', 'callRemoteBid exists');
@@ -135,22 +152,26 @@ async function testRemoteAgentClient() {
   // Create mock server
   const mockServer = http.createServer((req, res) => {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
       res.setHeader('Content-Type', 'application/json');
 
       if (req.url === '/bid' && req.method === 'POST') {
-        res.end(JSON.stringify({
-          confidence: 0.85,
-          plan: 'Test plan',
-          reasoning: 'Mock bid',
-        }));
+        res.end(
+          JSON.stringify({
+            confidence: 0.85,
+            plan: 'Test plan',
+            reasoning: 'Mock bid',
+          })
+        );
       } else if (req.url === '/execute' && req.method === 'POST') {
-        res.end(JSON.stringify({
-          success: true,
-          message: 'Mock execution complete',
-          data: { result: 'test' },
-        }));
+        res.end(
+          JSON.stringify({
+            success: true,
+            message: 'Mock execution complete',
+            data: { result: 'test' },
+          })
+        );
       } else if (req.url === '/health') {
         res.end(JSON.stringify({ status: 'ok', version: '1.0.0' }));
       } else {
@@ -160,7 +181,9 @@ async function testRemoteAgentClient() {
     });
   });
 
-  await new Promise(resolve => mockServer.listen(48299, resolve));
+  await new Promise((resolve) => {
+    mockServer.listen(48299, resolve);
+  });
 
   try {
     // Test bid
@@ -247,7 +270,9 @@ async function testHudAPI() {
 
   // Test event subscription
   let receivedEvent = null;
-  hudApi.onLifecycle('test-tool', (event) => { receivedEvent = event; });
+  hudApi.onLifecycle('test-tool', (event) => {
+    receivedEvent = event;
+  });
   hudApi.emitLifecycle({ type: 'task:queued', taskId: 'test-123' });
   assert(receivedEvent !== null, 'Lifecycle event received');
   assert(receivedEvent?.type === 'task:queued', 'Lifecycle event type correct');
@@ -344,13 +369,15 @@ async function testHudAPIPhase2() {
   assert(typeof hudApi.cancelDisambiguation === 'function', 'HUD API has cancelDisambiguation()');
 
   // Test disambiguation event emission
-  let disambigReceived = null;
-  hudApi.onDisambiguation('test-phase2', (state) => { disambigReceived = state; });
+  let _disambigReceived = null;
+  hudApi.onDisambiguation('test-phase2', (state) => {
+    disambigReceived = state;
+  });
 
   // We need to set up the task-tool mapping so the event routes correctly
   // Simulate a task submission tracking
   hudApi.addHUDItem('test-phase2', { text: 'placeholder' }); // ensure tool exists in subscribers
-  
+
   const disambigState = hudApi.emitDisambiguation({
     taskId: 'test-disambig-1',
     question: 'Did you mean...?',
@@ -372,8 +399,10 @@ async function testHudAPIPhase2() {
   assert(typeof hudApi.onNeedsInput === 'function', 'HUD API has onNeedsInput()');
   assert(typeof hudApi.respondToInput === 'function', 'HUD API has respondToInput()');
 
-  let needsInputReceived = null;
-  hudApi.onNeedsInput('test-phase2', (req) => { needsInputReceived = req; });
+  let _needsInputReceived = null;
+  hudApi.onNeedsInput('test-phase2', (req) => {
+    needsInputReceived = req;
+  });
 
   const inputReq = hudApi.emitNeedsInput({
     taskId: 'test-input-1',
@@ -424,7 +453,7 @@ async function testGitIntegration() {
   try {
     const spacesGitModule = require('./lib/spaces-git');
     assert(typeof spacesGitModule.getSpacesGit === 'function', 'spaces-git module loads');
-    
+
     const spacesGit = spacesGitModule.getSpacesGit();
     assert(typeof spacesGit.commit === 'function', 'spacesGit has commit()');
     assert(typeof spacesGit.commitAll === 'function', 'spacesGit has commitAll()');
@@ -498,13 +527,13 @@ async function runAll() {
 
   if (failed > 0) {
     console.log('\nFailed tests:');
-    results.filter(r => r.status === 'FAIL').forEach(r => console.log(`  - ${r.label}`));
+    results.filter((r) => r.status === 'FAIL').forEach((r) => console.log(`  - ${r.label}`));
   }
 
   process.exit(failed > 0 ? 1 : 0);
 }
 
-runAll().catch(err => {
+runAll().catch((err) => {
   console.error('Test runner error:', err);
   process.exit(1);
 });

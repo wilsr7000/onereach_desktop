@@ -1,4 +1,4 @@
-const { app, ipcMain, Tray, Menu, MenuItem, BrowserWindow, desktopCapturer, globalShortcut, screen } = require('electron');
+const { app, ipcMain, Tray, Menu, BrowserWindow, desktopCapturer, globalShortcut, screen } = require('electron');
 const dialog = require('./wrapped-dialog'); // Use wrapped dialog for Spaces integration
 const path = require('path');
 const fs = require('fs');
@@ -6,10 +6,10 @@ const { pathToFileURL } = require('url');
 const { registerTestMenuShortcut, closeAllGSXWindows } = require('./menu');
 const { shell } = require('electron');
 const browserWindow = require('./browserWindow');
+const screenService = require('./lib/screen-service');
 const log = require('electron-log');
 const ClipboardManager = require('./clipboard-manager-v2-adapter');
 const rollbackManager = require('./rollback-manager');
-const { SnapshotStorage } = require('./src/state-manager/SnapshotStorage');
 const ModuleManager = require('./module-manager');
 const getLogger = require('./event-logger');
 let logger = getLogger(); // This might be a stub initially
@@ -24,6 +24,7 @@ const { getRecorder } = require('./recorder');
 const { getBudgetManager } = require('./budget-manager');
 const AuthManager = require('./auth-manager');
 const { getConversationCapture } = require('./src/ai-conversation-capture');
+const windowRegistry = require('./lib/window-registry');
 
 // Global conversation capture instance
 let conversationCapture = null;
@@ -43,23 +44,25 @@ let commandHUDWindow = null;
 // Global Intro Wizard window instance
 let introWizardWindow = null;
 
+// Expose window registry globally for cross-module access
+global.windowRegistry = windowRegistry;
+
 // Enable Speech Recognition API in Electron
 // These must be set before app.whenReady()
 app.commandLine.appendSwitch('enable-speech-dispatcher');
 app.commandLine.appendSwitch('enable-experimental-web-platform-features');
+// Allow media playback without user gesture (must be set before app.whenReady())
+// This is needed for LiveKit remote audio tracks, detached video, and TTS playback
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 // Enable native system audio loopback capture (macOS 12.3+, Windows, Linux)
 // Uses ScreenCaptureKit on macOS 13+ — no virtual audio drivers needed
-// #region agent log
 try {
   const { initMain: initAudioLoopback } = require('electron-audio-loopback');
-  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:51',message:'initMain imported successfully',data:{type:typeof initAudioLoopback},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
   initAudioLoopback();
-  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:53',message:'initAudioLoopback() completed',data:{success:true},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-} catch(e) {
-  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:55',message:'initAudioLoopback FAILED',data:{error:e.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+} catch (_e) {
+  // electron-audio-loopback is optional; app works without it
 }
-// #endregion
 
 // Global Aider Bridge instance (main/shared)
 let aiderBridge = null;
@@ -71,35 +74,35 @@ class BranchAiderManager {
     this.logsDir = null;
     this.orchestrationLogFile = null;
   }
-  
+
   async initialize(spacePath) {
     // Validate spacePath before any path operations
     if (!spacePath || typeof spacePath !== 'string') {
       throw new Error(`[BranchManager] Invalid spacePath: ${JSON.stringify(spacePath)} (type: ${typeof spacePath})`);
     }
-    
+
     const fs = require('fs');
     const path = require('path');
-    
+
     this.logsDir = path.join(spacePath, 'logs');
     const branchLogsDir = path.join(this.logsDir, 'branches');
-    
+
     // Create log directories
     if (!fs.existsSync(branchLogsDir)) {
       fs.mkdirSync(branchLogsDir, { recursive: true });
     }
-    
+
     this.orchestrationLogFile = path.join(this.logsDir, 'orchestration.log');
     this.logOrchestration('SESSION', 'Branch Aider Manager initialized');
   }
-  
+
   logOrchestration(level, message, data = {}) {
     const fs = require('fs');
     if (!this.orchestrationLogFile) return;
-    
+
     const timestamp = new Date().toISOString();
     const logLine = `[${timestamp}] ${level}: ${message}${Object.keys(data).length ? ' ' + JSON.stringify(data) : ''}\n`;
-    
+
     try {
       fs.appendFileSync(this.orchestrationLogFile, logLine);
     } catch (e) {
@@ -107,23 +110,23 @@ class BranchAiderManager {
     }
     console.log(`[BranchManager] ${level}: ${message}`);
   }
-  
+
   logBranch(branchId, level, message, data = {}) {
     const fs = require('fs');
     const path = require('path');
     if (!this.logsDir) return;
-    
+
     const logFile = path.join(this.logsDir, 'branches', `${branchId}.log`);
     const timestamp = new Date().toISOString();
     const logLine = `[${timestamp}] ${level}: ${message}${Object.keys(data).length ? ' ' + JSON.stringify(data) : ''}\n`;
-    
+
     try {
       fs.appendFileSync(logFile, logLine);
     } catch (e) {
       console.error(`[BranchManager] Failed to write branch log ${branchId}:`, e);
     }
   }
-  
+
   async initBranch(branchPath, branchId, model, readOnlyFiles = []) {
     // Validate required paths before any operations
     if (!branchPath || typeof branchPath !== 'string') {
@@ -135,160 +138,164 @@ class BranchAiderManager {
     if (!this.logsDir) {
       throw new Error('[BranchManager] logsDir is not set. Call initialize() first before initBranch().');
     }
-    
+
     const { AiderBridgeClient } = require('./aider-bridge-client');
     const { getSettingsManager } = require('./settings-manager');
     const path = require('path');
-    
+
     this.logOrchestration('BRANCH', `Initializing ${branchId}`, { model, branchPath });
-    
+
     // Check if branch already has an Aider instance
     if (this.branches.has(branchId)) {
       this.logOrchestration('WARN', `Branch ${branchId} already initialized, cleaning up first`);
       await this.cleanupBranch(branchId);
     }
-    
+
     const settings = getSettingsManager();
     const apiKey = settings.getLLMApiKey();
     const provider = settings.getLLMProvider();
-    
+
     // Get Python path dynamically using DependencyManager
     const { getDependencyManager } = require('./dependency-manager');
     const depManager = getDependencyManager();
     const aiderPythonPath = depManager.getAiderPythonPath();
-    
+
     this.logOrchestration('BRANCH', `Using Python path: ${aiderPythonPath}`);
-    
+
     const aider = new AiderBridgeClient(aiderPythonPath, apiKey, provider);
     await aider.start();
-    
+
     // Initialize with branch path as root
     const initResult = await aider.initialize(branchPath, model || 'claude-opus-4-5-20251101');
-    
+
     if (!initResult.success) {
       throw new Error(`Failed to initialize branch Aider: ${initResult.error}`);
     }
-    
+
     // Set sandbox restrictions
     const sandboxResult = await aider.sendRequest('set_sandbox', {
       sandbox_root: branchPath,
       read_only_files: readOnlyFiles,
-      branch_id: branchId
+      branch_id: branchId,
     });
-    
+
     if (!sandboxResult.success) {
       console.warn(`[BranchManager] Warning: Sandbox setup returned: ${JSON.stringify(sandboxResult)}`);
     }
-    
+
     // Add branch files to Aider context
     const fs = require('fs');
     try {
       const branchFiles = fs.readdirSync(branchPath);
       const editableFiles = branchFiles
-        .filter(f => {
+        .filter((f) => {
           const filePath = path.join(branchPath, f);
           const stat = fs.statSync(filePath);
           // Only include files (not directories), and exclude metadata files
           return stat.isFile() && !f.startsWith('.') && !f.endsWith('.json');
         })
-        .map(f => path.join(branchPath, f));
-      
+        .map((f) => path.join(branchPath, f));
+
       if (editableFiles.length > 0) {
-        this.logOrchestration('BRANCH', `Adding ${editableFiles.length} files to ${branchId} context`, { files: editableFiles.map(f => path.basename(f)) });
+        this.logOrchestration('BRANCH', `Adding ${editableFiles.length} files to ${branchId} context`, {
+          files: editableFiles.map((f) => path.basename(f)),
+        });
         const addResult = await aider.sendRequest('add_files', { file_paths: editableFiles });
-        
+
         if (!addResult.success) {
           console.warn(`[BranchManager] Warning: Failed to add files to branch context:`, addResult);
         } else {
-          this.logBranch(branchId, 'FILES', `Added ${editableFiles.length} files to context`, { files: editableFiles.map(f => path.basename(f)) });
+          this.logBranch(branchId, 'FILES', `Added ${editableFiles.length} files to context`, {
+            files: editableFiles.map((f) => path.basename(f)),
+          });
         }
       }
     } catch (fileError) {
       console.warn(`[BranchManager] Warning: Could not list branch files:`, fileError.message);
     }
-    
+
     // Store branch info
     this.branches.set(branchId, {
       aider,
       branchPath,
       logFile: path.join(this.logsDir, 'branches', `${branchId}.log`),
       startTime: new Date(),
-      model
+      model,
     });
-    
+
     this.logOrchestration('BRANCH', `${branchId} started`, { model });
     this.logBranch(branchId, 'INIT', `Aider initialized`, { branchPath, model, sandbox: true });
-    
+
     return { success: true, branchId };
   }
-  
+
   async runBranchPrompt(branchId, prompt, streamCallback = null) {
     const branch = this.branches.get(branchId);
     if (!branch) {
       throw new Error(`Branch ${branchId} not initialized`);
     }
-    
+
     this.logBranch(branchId, 'PROMPT', prompt.substring(0, 200) + '...');
     this.logOrchestration('BRANCH', `${branchId} executing prompt`, { promptLength: prompt.length });
-    
+
     let result;
     if (streamCallback) {
       result = await branch.aider.runPromptStreaming(prompt, streamCallback);
     } else {
       result = await branch.aider.runPrompt(prompt);
     }
-    
+
     this.logBranch(branchId, 'RESPONSE', `Success: ${result.success}`, {
       modifiedFiles: result.modified_files?.length || 0,
-      newFiles: result.new_files?.length || 0
+      newFiles: result.new_files?.length || 0,
     });
-    
+
     if (result.file_details) {
       for (const file of result.file_details) {
         this.logBranch(branchId, 'EDIT', `${file.action}: ${file.name}`);
       }
     }
-    
+
     return result;
   }
-  
+
   async cleanupBranch(branchId) {
     const branch = this.branches.get(branchId);
     if (!branch) {
       return { success: true, message: 'Branch not found (already cleaned up)' };
     }
-    
+
     this.logOrchestration('BRANCH', `${branchId} cleaning up`);
     this.logBranch(branchId, 'CLEANUP', 'Shutting down Aider instance');
-    
+
     try {
       await branch.aider.shutdown();
     } catch (e) {
       console.error(`[BranchManager] Error shutting down branch ${branchId}:`, e);
     }
-    
+
     this.branches.delete(branchId);
-    
+
     this.logOrchestration('BRANCH', `${branchId} cleaned up`);
     return { success: true };
   }
-  
+
   async cleanupAll() {
     this.logOrchestration('SESSION', 'Cleaning up all branches');
-    
+
     for (const branchId of this.branches.keys()) {
       await this.cleanupBranch(branchId);
     }
-    
+
     this.logOrchestration('SESSION', 'All branches cleaned up');
   }
-  
+
   getBranchLog(branchId) {
     const fs = require('fs');
     const path = require('path');
-    
+
     if (!this.logsDir) return null;
-    
+
     const logFile = path.join(this.logsDir, 'branches', `${branchId}.log`);
     try {
       if (fs.existsSync(logFile)) {
@@ -299,12 +306,12 @@ class BranchAiderManager {
     }
     return null;
   }
-  
+
   getOrchestrationLog() {
     const fs = require('fs');
-    
+
     if (!this.orchestrationLogFile) return null;
-    
+
     try {
       if (fs.existsSync(this.orchestrationLogFile)) {
         return fs.readFileSync(this.orchestrationLogFile, 'utf-8');
@@ -314,13 +321,13 @@ class BranchAiderManager {
     }
     return null;
   }
-  
+
   getActiveBranches() {
     return Array.from(this.branches.entries()).map(([id, info]) => ({
       branchId: id,
       branchPath: info.branchPath,
       model: info.model,
-      startTime: info.startTime.toISOString()
+      startTime: info.startTime.toISOString(),
     }));
   }
 }
@@ -329,7 +336,7 @@ class BranchAiderManager {
 let branchAiderManager = null;
 
 // Global Snapshot Storage instance (for state manager)
-let snapshotStorage = null;
+let _snapshotStorage = null;
 
 // Global Video Editor instance
 let videoEditor = null;
@@ -354,7 +361,6 @@ function getIdwConfigPath() {
 
 // Keep global references to prevent garbage collection
 let tray;
-let testWindow = null;
 let clipboardManager = null;
 let moduleManager = null;
 let registeredShortcuts = []; // Track our registered shortcuts
@@ -366,17 +372,19 @@ function setupShellOverride() {
   const originalOpenExternal = shell.openExternal;
   shell.openExternal = (url, options) => {
     console.log('shell.openExternal intercepted URL:', url);
-    
+
     // Check if it's a GSX URL that should be handled in an Electron window
-    if (url.includes('.onereach.ai/') &&
-        (url.includes('actiondesk.') || 
-         url.includes('studio.') || 
-         url.includes('hitl.') || 
-         url.includes('tickets.') || 
-         url.includes('calendar.') || 
-         url.includes('docs.'))) {
+    if (
+      url.includes('.onereach.ai/') &&
+      (url.includes('actiondesk.') ||
+        url.includes('studio.') ||
+        url.includes('hitl.') ||
+        url.includes('tickets.') ||
+        url.includes('calendar.') ||
+        url.includes('docs.'))
+    ) {
       console.log('Intercepted GSX URL in shell.openExternal, opening in Electron window:', url);
-      
+
       // Extract the GSX app name from the URL
       let label = 'GSX';
       if (url.includes('actiondesk.')) label = 'Action Desk';
@@ -385,12 +393,12 @@ function setupShellOverride() {
       else if (url.includes('tickets.')) label = 'Tickets';
       else if (url.includes('calendar.')) label = 'Calendar';
       else if (url.includes('docs.')) label = 'Developer';
-      
+
       // Open the GSX URL in an Electron window
       browserWindow.openGSXWindow(url, label);
       return Promise.resolve();
     }
-    
+
     // For all other URLs, use the original implementation
     return originalOpenExternal(url, options);
   };
@@ -402,18 +410,11 @@ global.openSetupWizardGlobal = () => {
   openSetupWizard();
 };
 
-// ---- Browser command-line tweaks ----
-// NOTE: These are now set inside app.whenReady() to avoid "app undefined" errors
-// The switches still work when set early in the ready handler
-
 // Configure default session for better OAuth support
 app.whenReady().then(() => {
-  // Allow detached/remote-controlled media playback (Chromium blocks play() without a user gesture by default).
-  // This matters for the detached video window, which is driven via IPC.
-  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
   // Set up shell.openExternal override
   setupShellOverride();
-  
+
   // Load and configure autoUpdater (must be done after app is ready)
   try {
     autoUpdater = require('electron-updater').autoUpdater;
@@ -423,10 +424,10 @@ app.whenReady().then(() => {
   } catch (e) {
     console.log('AutoUpdater not available:', e.message);
   }
-  
+
   const { session } = require('electron');
   const defaultSession = session.defaultSession;
-  
+
   // Configure session for better OAuth support
   defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const { requestHeaders } = details;
@@ -449,8 +450,8 @@ app.whenReady().then(() => {
 
 function createWindow() {
   // Create the main window using our browser window module
-  const mainWindow = browserWindow.createMainWindow(app);
-  
+  const _mainWindow = browserWindow.createMainWindow(app);
+
   // Create tray icon
   createTray();
 }
@@ -461,7 +462,7 @@ function createTray() {
   const { nativeImage } = require('electron');
   const templateIconPath = path.join(__dirname, 'assets/tray-iconTemplate.png');
   const fallbackIconPath = path.join(__dirname, 'assets/tray-icon.png');
-  
+
   // Use template icon if it exists, otherwise fall back to regular icon
   let trayIconPath;
   if (fs.existsSync(templateIconPath)) {
@@ -471,36 +472,44 @@ function createTray() {
     trayIconPath = fallbackIconPath;
     console.log('Template icon not found, using fallback:', fallbackIconPath);
   }
-  
+
   // Get main window reference
-  const mainWindow = browserWindow.getMainWindow();
-  
+  const _mainWindow = browserWindow.getMainWindow();
+
   // Create the tray icon using nativeImage and set as template for proper macOS rendering
   let trayIcon = nativeImage.createFromPath(trayIconPath);
-  
+
   // On macOS, explicitly mark as template image for proper menu bar rendering
   if (process.platform === 'darwin') {
     trayIcon.setTemplateImage(true);
     console.log('Set tray icon as template image for macOS');
   }
-  
+
   tray = new Tray(trayIcon);
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Show App', click: () => { 
-      const mainWindow = browserWindow.getMainWindow();
-      if (mainWindow) mainWindow.show(); 
-    }},
-    { label: 'Quit', click: () => { app.quit(); } }
+    {
+      label: 'Show App',
+      click: () => {
+        const mainWindow = browserWindow.getMainWindow();
+        if (mainWindow) mainWindow.show();
+      },
+    },
+    {
+      label: 'Quit',
+      click: () => {
+        app.quit();
+      },
+    },
   ]);
-  
+
   tray.setToolTip('GSX Power User');
   tray.setContextMenu(contextMenu);
-  
+
   // Show window when tray icon is clicked
   tray.on('click', () => {
     const mainWindow = browserWindow.getMainWindow();
     if (!mainWindow) return;
-    
+
     mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
   });
 }
@@ -508,7 +517,7 @@ function createTray() {
 // Add a function to update the application menu with IDW environments
 function updateApplicationMenu(environments = []) {
   console.log('Updating application menu with IDW environments:', environments.length);
-  
+
   // Parse environments if it's a string
   let idwEnvironments = environments;
   if (typeof environments === 'string') {
@@ -519,7 +528,7 @@ function updateApplicationMenu(environments = []) {
       idwEnvironments = [];
     }
   }
-  
+
   // Update the application menu via MenuDataManager
   if (global.menuDataManager) {
     global.menuDataManager.rebuild(idwEnvironments);
@@ -527,238 +536,6 @@ function updateApplicationMenu(environments = []) {
     const { setApplicationMenu } = require('./menu');
     setApplicationMenu(idwEnvironments);
   }
-}
-
-// Function to create a window for external content with proper security
-function secureContentWindow(parentWindow) {
-  // Create a window with more restrictive security settings for external content
-  const contentWindow = new BrowserWindow({
-    width: parentWindow.getSize()[0],
-    height: parentWindow.getSize()[1],
-    parent: parentWindow,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-      sandbox: true, // Enable sandbox for external content
-      enableRemoteModule: false, // Disable remote module
-      preload: path.join(__dirname, 'preload-minimal.js') // Use a minimal preload script
-    }
-  });
-
-  // Setup security monitoring for external content
-  contentWindow.webContents.on('will-navigate', (event, url) => {
-    // Log navigation attempts
-    console.log('Content window navigation attempted to:', url);
-    
-    // Allow navigation within the same window for IDW and chat URLs
-    if (url.startsWith('https://idw.edison.onereach.ai/') || 
-        url.startsWith('https://flow-desc.chat.edison.onereach.ai/') || 
-        url.includes('/chat/')) {
-      console.log('Navigation to IDW/chat URL allowed in same window:', url);
-      return;
-    }
-    
-    // Block navigation to unexpected URLs
-    console.log('Blocking navigation to non-IDW URL:', url);
-    event.preventDefault();
-    
-    // Open external URLs in default browser instead
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      shell.openExternal(url).catch(err => {
-        console.error('Failed to open external URL:', err);
-      });
-    }
-  });
-
-  // Handle redirect attempts within the page
-  contentWindow.webContents.on('will-redirect', (event, url) => {
-    console.log('Content window redirect attempted to:', url);
-    
-    // Allow redirects to IDW and chat URLs in the same window
-    if (url.startsWith('https://idw.edison.onereach.ai/') || 
-        url.startsWith('https://flow-desc.chat.edison.onereach.ai/') || 
-        url.includes('/chat/')) {
-      console.log('Redirect to IDW/chat URL allowed in same window:', url);
-      return;
-    }
-    
-    // Block redirects to unexpected URLs
-    console.log('Blocking redirect to non-IDW URL:', url);
-    event.preventDefault();
-    
-    // Open external URLs in default browser instead
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      shell.openExternal(url).catch(err => {
-        console.error('Failed to open external URL:', err);
-      });
-    }
-  });
-
-  // Set Content Security Policy for external content
-  contentWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-    // Note: We're using 'unsafe-eval' here because the IDW application requires it to function properly.
-    // This is a calculated security risk since we're only loading trusted content from onereach.ai domains.
-    // For a production app, consider:
-    // 1. Working with the IDW team to remove the need for eval() in their code
-    // 2. Implementing additional security measures like CORS checks
-    // 3. Using a more restrictive CSP and handling any functionality issues
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          "default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; " +
-          "style-src 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " + 
-          "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai https://fonts.googleapis.com; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; " +
-          "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; " +
-          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
-          "font-src 'self' data: * https://*.onereach.ai https://fonts.gstatic.com; " +
-          "media-src 'self' * https://*.onereach.ai; " +
-          "object-src 'none'; " +
-          "base-uri 'self'"
-        ]
-      }
-    });
-  });
-
-  // Inject custom scrollbar CSS when content loads
-  contentWindow.webContents.on('did-finish-load', () => {
-    // First check if the page uses Material Symbols before preloading
-    contentWindow.webContents.executeJavaScript(`
-      (function() {
-        // Check if the page contains any Material Symbols elements
-        const hasSymbols = document.querySelector('.material-symbols-outlined') !== null || 
-                          document.querySelector('[class*="material-symbols"]') !== null;
-        
-        // Only preload if the page actually uses the font
-        if (hasSymbols) {
-          try {
-            const fontPreload = document.createElement('link');
-            fontPreload.rel = 'preload';
-            fontPreload.href = 'https://fonts.gstatic.com/s/materialsymbolsoutlined/v232/kJESBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oDMzBwG-RpA6RzaxHMO1WwbppMw.woff2';
-            fontPreload.as = 'font';
-            fontPreload.type = 'font/woff2';
-            fontPreload.crossOrigin = 'anonymous';
-            document.head.appendChild(fontPreload);
-            console.log('Material Symbols font preloaded - elements found on page');
-          } catch (err) {
-            console.error('Failed to preload font:', err);
-          }
-        } else {
-          console.log('No Material Symbols elements found on page, skipping preload');
-        }
-        return hasSymbols;
-      })();
-    `).then(hasSymbols => {
-      // Only inject the font-face if the page uses Material Symbols
-      if (hasSymbols) {
-        contentWindow.webContents.insertCSS(`
-          /* Font optimization */
-          @font-face {
-            font-family: 'Material Symbols Outlined';
-            font-style: normal;
-            font-weight: 400;
-            font-display: swap; /* Use 'swap' instead of 'block' for better performance */
-            src: url(https://fonts.gstatic.com/s/materialsymbolsoutlined/v232/kJESBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oDMzBwG-RpA6RzaxHMO1WwbppMw.woff2) format('woff2');
-          }
-        `).catch(err => console.error('Failed to inject font CSS:', err));
-      }
-    }).catch(err => console.error('Error executing font detection script:', err));
-    
-    // Inject script to intercept link clicks for chat URLs
-    contentWindow.webContents.executeJavaScript(`
-      (function() {
-        // Function to handle clicks on all links
-        document.addEventListener('click', function(e) {
-          // Find clicked link
-          let target = e.target;
-          while(target && target.tagName !== 'A') {
-            target = target.parentElement;
-          }
-          
-          // If a link was clicked
-          if (target && target.tagName === 'A') {
-            const href = target.getAttribute('href');
-            if (href) {
-              // For chat links, let the event pass through normally
-              // The will-navigate handler will handle it
-              if (href.includes('/chat/') || 
-                  href.startsWith('https://flow-desc.chat.edison.onereach.ai/')) {
-                console.log('Chat link clicked:', href);
-                // We don't need to do anything here - just log
-              }
-            }
-          }
-        }, true);
-        
-        console.log('Link click interceptor installed');
-        return true;
-      })();
-    `).catch(err => console.error('Failed to inject link handler script:', err));
-    
-    contentWindow.webContents.insertCSS(`
-      ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-      }
-      
-      ::-webkit-scrollbar-track {
-        background: rgba(0, 0, 0, 0.2);
-        border-radius: 3px;
-      }
-      
-      ::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 3px;
-      }
-      
-      ::-webkit-scrollbar-thumb:hover {
-        background: rgba(255, 255, 255, 0.2);
-      }
-    `).catch(err => console.error('Failed to inject scrollbar CSS:', err));
-  });
-
-  // Monitor for unexpected new windows
-  contentWindow.webContents.setWindowOpenHandler(({ url }) => {
-    console.log('External content attempted to open new window:', url);
-    
-    // For chat URLs, navigate the current window instead of opening a new one
-    if (url.includes('/chat/') || 
-        url.startsWith('https://flow-desc.chat.edison.onereach.ai/')) {
-      console.log('Chat URL detected, navigating current window to:', url);
-      
-      // Handle this URL manually by loading it in the current window
-      setTimeout(() => {
-        contentWindow.loadURL(url).catch(err => {
-          console.error('Failed to load chat URL in current window:', err);
-        });
-      }, 0);
-      
-      // Prevent default window creation
-      return { action: 'deny' };
-    }
-    
-    // Only allow URLs that match our expected domains for external browser
-    if (url.startsWith('https://idw.edison.onereach.ai/')) {
-      // Open non-chat IDW URLs in the default browser
-      shell.openExternal(url).catch(err => {
-        console.error('Failed to open external URL:', err);
-      });
-    }
-    
-    // Prevent the app from opening the window directly
-    return { action: 'deny' };
-  });
-
-  return contentWindow;
-}
-
-// Function to open a URL in the main window
-function openURLInMainWindow(url) {
-  // Use the browserWindow module to open the URL
-  browserWindow.openURLInMainWindow(url);
 }
 
 // Log app launch (before app is ready)
@@ -770,22 +547,20 @@ app.on('will-finish-launching', () => {
 app.whenReady().then(() => {
   // Re-initialize logger now that app is ready
   logger = getLogger();
-  
+
   // Initialize central logging event queue + REST/WebSocket server
   const logQueue = getLogQueue();
   const logServer = getLogServer(logQueue);
 
   // Apply persisted diagnostic logging level
-  const diagnosticLevel = global.settingsManager
-    ? global.settingsManager.get('diagnosticLogging') || 'info'
-    : 'info';
+  const diagnosticLevel = global.settingsManager ? global.settingsManager.get('diagnosticLogging') || 'info' : 'info';
 
   if (diagnosticLevel === 'off') {
     logQueue.setMinLevel('error'); // Still capture crashes internally
     console.log('[Startup] Diagnostic logging is OFF (errors still captured)');
   } else {
     logQueue.setMinLevel(diagnosticLevel);
-    logServer.start().catch(err => {
+    logServer.start().catch((err) => {
       console.error('[LogServer] Failed to start:', err.message);
     });
     console.log(`[Startup] Diagnostic logging at level "${diagnosticLevel}", log server starting`);
@@ -810,16 +585,14 @@ app.whenReady().then(() => {
         logQueue.setMinLevel(level);
         // Start log server if it wasn't running
         if (!logServer._started) {
-          logServer.start().catch(err => console.error('[LogServer] Failed to start:', err.message));
+          logServer.start().catch((err) => console.error('[LogServer] Failed to start:', err.message));
         }
       }
       logQueue.info('settings', `Diagnostic logging level changed to "${level}"`, { level });
       return { success: true, level };
     });
     ipcMain.handle('logging:get-level', async () => {
-      const persisted = global.settingsManager
-        ? global.settingsManager.get('diagnosticLogging') || 'info'
-        : 'info';
+      const persisted = global.settingsManager ? global.settingsManager.get('diagnosticLogging') || 'info' : 'info';
       return { level: logQueue._minLevel, persisted };
     });
     ipcMain._loggingSetLevelRegistered = true;
@@ -828,25 +601,25 @@ app.whenReady().then(() => {
   // Log app ready
   logger.logAppReady();
   logQueue.info('app', 'App is ready', { loggerIsStub: logger._isStub, diagnosticLevel });
-  
+
   // STARTUP RECOVERY: Check for and restore any missing config files from backups
   const userDataPath = app.getPath('userData');
   const protectedFiles = [
     'external-bots.json',
     'image-creators.json',
-    'video-creators.json', 
+    'video-creators.json',
     'audio-generators.json',
     'ui-design-tools.json',
     'web-tools.json',
     'idw-entries.json',
-    'gsx-links.json'
+    'gsx-links.json',
   ];
-  
+
   for (const filename of protectedFiles) {
     const filePath = path.join(userDataPath, filename);
     const backupPath = path.join(userDataPath, filename + '.backup');
     const protectBackupPath = path.join(userDataPath, filename + '.protect-backup');
-    
+
     // If main file is missing or empty, try to restore from backups
     let needsRestore = false;
     try {
@@ -859,10 +632,10 @@ app.whenReady().then(() => {
           needsRestore = true;
         }
       }
-    } catch (e) {
+    } catch (_e) {
       needsRestore = true;
     }
-    
+
     if (needsRestore) {
       // Try protect-backup first (most recent), then regular backup
       const backupSources = [protectBackupPath, backupPath];
@@ -883,7 +656,7 @@ app.whenReady().then(() => {
     }
   }
   console.log('[Startup Recovery] Config file check complete');
-  
+
   // Forward renderer logs to main process console
   ipcMain.on('log-message', (event, message) => {
     console.log(message);
@@ -905,20 +678,20 @@ app.whenReady().then(() => {
       console.error('[debug:log] failed to write', err?.message || err);
     }
   });
-  
+
   // Initialize AI log analyzer
   const getLogAIAnalyzer = require('./log-ai-analyzer');
-  const logAIAnalyzer = getLogAIAnalyzer();
+  const _logAIAnalyzer = getLogAIAnalyzer();
   console.log('AI log analyzer initialized');
-  
+
   // Initialize Spaces upload handler and register IPC handlers
   const { registerIPCHandlers } = require('./spaces-upload-handler');
   registerIPCHandlers();
   console.log('[Spaces Upload] IPC handlers registered');
-  
+
   // Register Claude Terminal IPC handlers
   registerClaudeTerminalHandlers();
-  
+
   // Initialize test audit orchestrator IPC bridge
   try {
     const { registerAuditIPC } = require('./test/audit/ipc-bridge');
@@ -929,25 +702,25 @@ app.whenReady().then(() => {
 
   // Initialize test context manager
   const testContextManager = require('./test-context-manager');
-  
+
   // Set up test context IPC handlers
   ipcMain.on('test:set-context', (event, context) => {
     testContextManager.setContext(context);
   });
-  
-  ipcMain.on('test:clear-context', (event) => {
+
+  ipcMain.on('test:clear-context', (_event) => {
     testContextManager.clearContext();
   });
-  
+
   // Disable the CSP warning in development mode since we're intentionally using unsafe-eval
   // for the IDW application which requires it for proper functioning
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
-  
+
   // Explicitly set the application icon
   try {
     // Use the tray icon for all platforms as it's consistently available
     const iconPath = path.join(__dirname, 'assets/tray-icon.png');
-    
+
     console.log(`Setting application icon from: ${iconPath}`);
     // On macOS, set the dock icon
     if (process.platform === 'darwin' && app.dock) {
@@ -956,22 +729,22 @@ app.whenReady().then(() => {
   } catch (err) {
     console.error('Failed to set application icon:', err);
   }
-  
+
   // Set up console interceptor for main process
-  createConsoleInterceptor(logger, { 
+  createConsoleInterceptor(logger, {
     process: 'main',
-    pid: process.pid 
+    pid: process.pid,
   });
   logger.info('Console interceptor initialized for main process');
-  
+
   // Set up module manager IPC handlers
   setupModuleManagerIPC();
-  
+
   // Initialize Auth Manager for IDW credential management
   authManager = new AuthManager(app);
   global.authManager = authManager;
   console.log('[Main] Auth Manager initialized for IDW credential management');
-  
+
   // CRITICAL: Register menu-action handler EARLY (before menu is created)
   console.log('[Main] Registering menu-action handler early...');
   // REMOVED: Early menu-action handler for IDW URLs
@@ -984,20 +757,20 @@ app.whenReady().then(() => {
     startTime: new Date().toISOString(),
     workingDirectory: process.cwd(),
     execPath: app.getPath('exe'),
-    userDataPath: app.getPath('userData')
+    userDataPath: app.getPath('userData'),
   });
-  
+
   // Add test logs to verify logging works
   logger.info('Test log message 1 - This is a test info log');
   logger.warn('Test log message 2 - This is a test warning');
   logger.error('Test log message 3 - This is a test error');
   logger.debug('Test log message 4 - This is a test debug log');
-  
+
   // Force flush logs
   if (logger.flush) {
     logger.flush();
   }
-  
+
   // Log the log directory path
   console.log('Logger directory:', logger.logDir);
   console.log('Current log file:', logger.currentLogFile);
@@ -1006,14 +779,14 @@ app.whenReady().then(() => {
   createWindow();
   logger.logWindowCreated('main', 1, {
     bounds: { width: 1400, height: 900 },
-    url: 'index.html'
+    url: 'index.html',
   });
-  
-// Initialize settings manager EARLY (needed for other managers)
+
+  // Initialize settings manager EARLY (needed for other managers)
   const { getSettingsManager } = require('./settings-manager');
   global.settingsManager = getSettingsManager();
   console.log('Settings manager initialized');
-  
+
   // Initialize Menu Data Manager - SINGLE SOURCE OF TRUTH for all menu data
   // This handles: IDW environments, external bots, creators, GSX links, etc.
   // It provides: atomic saves, validation, debounced updates, event-driven architecture
@@ -1021,14 +794,14 @@ app.whenReady().then(() => {
   global.menuDataManager = getMenuDataManager();
   global.menuDataManager.initialize();
   console.log('Menu Data Manager initialized');
-  
+
   // Ensure dock is visible before setting menu (macOS requires dock for menu bar)
   if (process.platform === 'darwin' && app.dock) {
-    app.dock.show().catch(err => {
+    app.dock.show().catch((err) => {
       console.log('[Dock] Could not show dock:', err.message);
     });
   }
-  
+
   // Early menu initialization - runs immediately after MDM, before heavyweight deferred init.
   // This ensures the menu appears even if clipboard/video/recorder init stalls.
   // moduleManager isn't ready yet so Tools menu will be empty until the deferred rebuild.
@@ -1045,16 +818,19 @@ app.whenReady().then(() => {
   } catch (menuError) {
     console.error('[Startup] Error initializing application menu:', menuError);
   }
-  
+
   // Initialize Spaces API Server for browser extension communication
   const { getSpacesAPIServer } = require('./spaces-api-server');
   global.spacesAPIServer = getSpacesAPIServer();
-  global.spacesAPIServer.start().then(() => {
-    console.log('Spaces API Server started');
-  }).catch(err => {
-    console.error('Failed to start Spaces API Server:', err);
-  });
-  
+  global.spacesAPIServer
+    .start()
+    .then(() => {
+      console.log('Spaces API Server started');
+    })
+    .catch((err) => {
+      console.error('Failed to start Spaces API Server:', err);
+    });
+
   // Initialize clipboard manager after app is ready (from Josh)
   try {
     clipboardManager = new ClipboardManager();
@@ -1063,24 +839,40 @@ app.whenReady().then(() => {
     console.log('Clipboard manager initialized (shortcut disabled)');
     logger.logFeatureUsed('clipboard-manager', {
       status: 'initialized',
-      shortcutRegistered: false
+      shortcutRegistered: false,
     });
   } catch (clipErr) {
     console.error('[Startup] Clipboard manager init error:', clipErr.message);
   }
-  
+
   // Set up Tab Picker IPC handlers
-  try { setupTabPickerIPC(); } catch (e) { console.error('[Startup] TabPicker IPC error:', e.message); }
-  
+  try {
+    setupTabPickerIPC();
+  } catch (e) {
+    console.error('[Startup] TabPicker IPC error:', e.message);
+  }
+
   // Set up Intro Wizard IPC handlers
-  try { setupIntroWizardIPC(); } catch (e) { console.error('[Startup] IntroWizard IPC error:', e.message); }
-  
+  try {
+    setupIntroWizardIPC();
+  } catch (e) {
+    console.error('[Startup] IntroWizard IPC error:', e.message);
+  }
+
   // Set up Agent Manager IPC handlers
-  try { setupAgentManagerIPC(); } catch (e) { console.error('[Startup] AgentManager IPC error:', e.message); }
-  
+  try {
+    setupAgentManagerIPC();
+  } catch (e) {
+    console.error('[Startup] AgentManager IPC error:', e.message);
+  }
+
   // Set up Claude Code IPC handlers
-  try { setupClaudeCodeIPC(); } catch (e) { console.error('[Startup] ClaudeCode IPC error:', e.message); }
-  
+  try {
+    setupClaudeCodeIPC();
+  } catch (e) {
+    console.error('[Startup] ClaudeCode IPC error:', e.message);
+  }
+
   // Add keyboard shortcuts to open dev tools (enabled in both dev and production)
   const openDevTools = () => {
     console.log('Opening Developer Tools via shortcut');
@@ -1094,19 +886,23 @@ app.whenReady().then(() => {
       }
     }
   };
-  
+
   globalShortcut.register('CommandOrControl+Shift+I', openDevTools);
   globalShortcut.register('F12', openDevTools);
   console.log('Registered Cmd+Shift+I and F12 shortcuts for Developer Tools');
-  
+
   // PERFORMANCE: Defer heavyweight manager initializations until after window shows
   // Uses setTimeout(0) instead of setImmediate because Electron's event loop
   // does not reliably fire setImmediate callbacks in the main process.
   setTimeout(async () => {
     console.log('[Startup] Initializing deferred managers...');
     // Diagnostic marker to verify this callback fires
-    try { require('fs').writeFileSync('/tmp/gsx-deferred-init-ran.txt', new Date().toISOString()); } catch (_) {}
-    
+    try {
+      require('fs').writeFileSync('/tmp/gsx-deferred-init-ran.txt', new Date().toISOString());
+    } catch (_ignored) {
+      /* diagnostic marker write failed */
+    }
+
     // Note: Clipboard manager is already initialized earlier (around line 954)
     // Just initialize App Health Dashboard components here
     try {
@@ -1119,53 +915,53 @@ app.whenReady().then(() => {
         const { getThumbnailPipeline } = require('./thumbnail-pipeline');
         const { getAppManagerAgent } = require('./app-manager-agent');
         const MetadataGenerator = require('./metadata-generator');
-        
+
         // Initialize LLM tracker
         const llmTracker = getLLMUsageTracker();
         global.llmUsageTracker = llmTracker;
-        
+
         // Initialize Dashboard API
         const dashboardAPI = getDashboardAPI();
         global.dashboardAPI = dashboardAPI;
-        
+
         // Initialize pipeline components
         const thumbnailPipeline = getThumbnailPipeline();
         const pipelineVerifier = getPipelineVerifier(clipboardManager.storage);
         const metadataGenerator = new MetadataGenerator(clipboardManager);
-        
+
         // Initialize asset pipeline with dependencies
         const assetPipeline = getAssetPipeline({
           clipboardManager,
           thumbnailPipeline,
           metadataGenerator,
           verifier: pipelineVerifier,
-          dashboardAPI
+          dashboardAPI,
         });
         global.assetPipeline = assetPipeline;
-        
+
         // Initialize App Manager Agent
         const agent = getAppManagerAgent({
           dashboardAPI,
           clipboardManager,
           pipelineVerifier,
           metadataGenerator,
-          thumbnailPipeline
+          thumbnailPipeline,
         });
         global.appManagerAgent = agent;
-        
+
         // Set up Dashboard IPC handlers
         dashboardAPI.setupIPC({
           clipboardManager,
           llmTracker,
-          agent
+          agent,
         });
-        
+
         // Start agent (delayed to allow app to fully initialize)
         setTimeout(() => {
           agent.start();
           console.log('[App] App Manager Agent started');
         }, 5000);
-        
+
         // Set up Agent Escalation IPC handlers
         ipcMain.handle('agent:respond-to-escalation', async (event, escalationId, action, details) => {
           if (!global.appManagerAgent) {
@@ -1178,7 +974,7 @@ app.whenReady().then(() => {
             return { success: false, error: error.message };
           }
         });
-        
+
         ipcMain.handle('agent:get-pending-escalations', async () => {
           if (!global.appManagerAgent) {
             return [];
@@ -1190,7 +986,7 @@ app.whenReady().then(() => {
             return [];
           }
         });
-        
+
         console.log('[App] Dashboard API and components initialized');
       } catch (dashboardError) {
         console.error('[App] Error initializing dashboard components:', dashboardError);
@@ -1198,7 +994,7 @@ app.whenReady().then(() => {
     } catch (error) {
       console.error('[Startup] Error initializing clipboard manager:', error);
     }
-    
+
     // Initialize video editor
     try {
       videoEditor = new VideoEditor();
@@ -1217,7 +1013,7 @@ app.whenReady().then(() => {
     } catch (error) {
       console.error('[Startup] Error initializing recorder:', error);
     }
-    
+
     // Initialize module manager
     try {
       moduleManager = new ModuleManager();
@@ -1228,15 +1024,15 @@ app.whenReady().then(() => {
     } catch (error) {
       console.error('[Startup] Error initializing module manager:', error);
     }
-    
+
     // Ensure dock is visible on macOS (fixes mysterious menu disappearance)
     if (process.platform === 'darwin' && app.dock) {
-      app.dock.show().catch(err => {
+      app.dock.show().catch((err) => {
         console.log('[Dock] Could not show dock:', err.message);
       });
       console.log('[Startup] Ensured dock visibility on macOS');
     }
-    
+
     // Rebuild menu now that moduleManager is ready (populates Tools menu with installed modules)
     try {
       if (global.menuDataManager) {
@@ -1248,7 +1044,7 @@ app.whenReady().then(() => {
     } catch (menuRebuildError) {
       console.error('[Startup] Error rebuilding menu after moduleManager:', menuRebuildError);
     }
-    
+
     // Initialize Speech Recognition Bridge (Whisper-based, for web apps)
     try {
       const { getSpeechBridge } = require('./speech-recognition-bridge');
@@ -1278,16 +1074,16 @@ app.whenReady().then(() => {
     initializeVoiceOrb();
 
     console.log('[Startup] Deferred managers initialized');
-    
+
     // Check if intro wizard should be shown (first run or update)
     checkAndShowIntroWizard();
   });
-  
+
   // MIGRATION: Migrate idw-entries.json to settings manager if needed
   try {
     const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
     const currentIDWs = global.settingsManager.get('idwEnvironments');
-    
+
     if (!currentIDWs || currentIDWs.length === 0) {
       // No IDWs in settings, check if file exists
       if (fs.existsSync(idwConfigPath)) {
@@ -1305,17 +1101,17 @@ app.whenReady().then(() => {
   } catch (error) {
     console.error('[Migration] Error during IDW migration:', error);
   }
-  
+
   // Make logger globally available
   global.logger = logger;
-  
+
   // Initialize module API bridge
   const { getModuleAPIBridge } = require('./module-api-bridge');
-  const moduleAPIBridge = getModuleAPIBridge();
+  const _moduleAPIBridge = getModuleAPIBridge();
   console.log('Module API bridge initialized');
   logger.info('Module API bridge initialized');
-  
-  // Create and setup IPC handlers  
+
+  // Create and setup IPC handlers
   console.log('[Main] About to call setupIPC');
   try {
     setupIPC();
@@ -1323,7 +1119,7 @@ app.whenReady().then(() => {
   } catch (error) {
     console.error('[Main] Error in setupIPC:', error);
   }
-  
+
   // Setup unified Spaces API
   try {
     setupSpacesAPI();
@@ -1331,7 +1127,7 @@ app.whenReady().then(() => {
   } catch (error) {
     console.error('[Main] Error setting up Spaces API:', error);
   }
-  
+
   // Setup App Actions IPC (for voice-controlled app navigation)
   try {
     setupAppActionsIPC();
@@ -1339,7 +1135,7 @@ app.whenReady().then(() => {
   } catch (error) {
     console.error('[Main] Error setting up App Actions IPC:', error);
   }
-  
+
   // Setup Evaluation and Meta-Learning IPC handlers
   try {
     const { setupEvaluationIPC } = require('./lib/ipc');
@@ -1348,53 +1144,239 @@ app.whenReady().then(() => {
   } catch (error) {
     console.error('[Main] Error setting up Evaluation IPC:', error);
   }
-  
+
   // --- Conversion API IPC Handlers ---
   try {
     const conversionService = require('./lib/conversion-service');
-    
+
     ipcMain.handle('convert:run', async (event, params) => {
       return conversionService.convert(params);
     });
-    
+
     ipcMain.handle('convert:capabilities', async () => {
       return conversionService.capabilities();
     });
-    
+
     ipcMain.handle('convert:pipeline', async (event, params) => {
       return conversionService.pipeline(params);
     });
-    
+
     ipcMain.handle('convert:graph', async () => {
       return conversionService.graph();
     });
-    
+
     ipcMain.handle('convert:status', async (event, jobId) => {
       return conversionService.jobStatus(jobId);
     });
-    
+
     ipcMain.handle('convert:validate-playbook', async (event, data) => {
       const validator = require('./lib/converters/playbook-validator');
       return validator.validate ? validator.validate(data) : { error: 'Validator not available' };
     });
-    
+
     ipcMain.handle('convert:diagnose-playbook', async (event, data) => {
       const diagnostics = require('./lib/converters/playbook-diagnostics');
       return diagnostics.diagnose ? diagnostics.diagnose(data) : { error: 'Diagnostics not available' };
     });
-    
+
     console.log('[Main] Conversion API IPC handlers registered');
   } catch (err) {
     console.warn('[Main] Failed to register conversion IPC handlers:', err.message);
   }
 
+  // --- Browser Automation IPC Handlers ---
+  try {
+    const browserAutomation = require('./lib/browser-automation');
+
+    ipcMain.handle('browser-automation:start', async (event, opts) => {
+      return browserAutomation.start(opts);
+    });
+    ipcMain.handle('browser-automation:stop', async () => {
+      return browserAutomation.stop();
+    });
+    ipcMain.handle('browser-automation:status', async () => {
+      return browserAutomation.status();
+    });
+    ipcMain.handle('browser-automation:configure', async (event, cfg) => {
+      browserAutomation.configure(cfg);
+      return { success: true };
+    });
+    ipcMain.handle('browser-automation:navigate', async (event, url, opts) => {
+      return browserAutomation.navigate(url, opts);
+    });
+    ipcMain.handle('browser-automation:snapshot', async (event, opts) => {
+      return browserAutomation.snapshot(opts);
+    });
+    ipcMain.handle('browser-automation:screenshot', async (event, opts) => {
+      return browserAutomation.screenshot(opts);
+    });
+    ipcMain.handle('browser-automation:act', async (event, ref, action, value) => {
+      return browserAutomation.act(ref, action, value);
+    });
+    ipcMain.handle('browser-automation:scroll', async (event, direction, amount) => {
+      return browserAutomation.scroll(direction, amount);
+    });
+    ipcMain.handle('browser-automation:evaluate', async (event, script) => {
+      return browserAutomation.evaluate(script);
+    });
+    ipcMain.handle('browser-automation:extractText', async (event, selector) => {
+      return browserAutomation.extractText(selector);
+    });
+    ipcMain.handle('browser-automation:extractLinks', async () => {
+      return browserAutomation.extractLinks();
+    });
+    ipcMain.handle('browser-automation:waitFor', async (event, condition) => {
+      return browserAutomation.waitFor(condition);
+    });
+    ipcMain.handle('browser-automation:tabs', async () => {
+      return browserAutomation.tabs();
+    });
+    ipcMain.handle('browser-automation:openTab', async (event, url) => {
+      return browserAutomation.openTab(url);
+    });
+    ipcMain.handle('browser-automation:closeTab', async (event, tabId) => {
+      return browserAutomation.closeTab(tabId);
+    });
+    ipcMain.handle('browser-automation:focusTab', async (event, tabId) => {
+      return browserAutomation.focusTab(tabId);
+    });
+    ipcMain.handle('browser-automation:cookies', async () => {
+      return browserAutomation.cookies();
+    });
+    ipcMain.handle('browser-automation:setCookie', async (event, cookie) => {
+      return browserAutomation.setCookie(cookie);
+    });
+    ipcMain.handle('browser-automation:clearCookies', async () => {
+      return browserAutomation.clearCookies();
+    });
+    ipcMain.handle('browser-automation:setViewport', async (event, width, height) => {
+      return browserAutomation.setViewport(width, height);
+    });
+    ipcMain.handle('browser-automation:pdf', async (event, opts) => {
+      return browserAutomation.pdf(opts);
+    });
+
+    // Dialog handling
+    ipcMain.handle('browser-automation:handleDialog', async (event, opts) => {
+      return browserAutomation.handleDialog(opts);
+    });
+    ipcMain.handle('browser-automation:getLastDialog', async () => {
+      return browserAutomation.getLastDialog();
+    });
+
+    // File upload
+    ipcMain.handle('browser-automation:upload', async (event, ref, filePaths) => {
+      return browserAutomation.upload(ref, filePaths);
+    });
+    ipcMain.handle('browser-automation:uploadViaChooser', async (event, triggerRef, filePaths) => {
+      return browserAutomation.uploadViaChooser(triggerRef, filePaths);
+    });
+
+    // Download
+    ipcMain.handle('browser-automation:download', async (event, triggerRef, saveAs) => {
+      return browserAutomation.download(triggerRef, saveAs);
+    });
+    ipcMain.handle('browser-automation:getDownloadDir', async () => {
+      return browserAutomation.getDownloadDir();
+    });
+
+    // Storage
+    ipcMain.handle('browser-automation:storageGet', async (event, type, key) => {
+      return browserAutomation.storageGet(type, key);
+    });
+    ipcMain.handle('browser-automation:storageSet', async (event, type, key, value) => {
+      return browserAutomation.storageSet(type, key, value);
+    });
+    ipcMain.handle('browser-automation:storageClear', async (event, type) => {
+      return browserAutomation.storageClear(type);
+    });
+
+    // Network inspection
+    ipcMain.handle('browser-automation:networkStart', async () => {
+      return browserAutomation.networkStart();
+    });
+    ipcMain.handle('browser-automation:networkStop', async () => {
+      return browserAutomation.networkStop();
+    });
+    ipcMain.handle('browser-automation:getConsole', async (event, opts) => {
+      return browserAutomation.getConsole(opts);
+    });
+    ipcMain.handle('browser-automation:getErrors', async (event, opts) => {
+      return browserAutomation.getErrors(opts);
+    });
+    ipcMain.handle('browser-automation:getRequests', async (event, opts) => {
+      return browserAutomation.getRequests(opts);
+    });
+    ipcMain.handle('browser-automation:getResponseBody', async (event, urlPattern, timeout) => {
+      return browserAutomation.getResponseBody(urlPattern, timeout);
+    });
+
+    // Element screenshot + drag
+    ipcMain.handle('browser-automation:screenshotElement', async (event, ref, opts) => {
+      return browserAutomation.screenshotElement(ref, opts);
+    });
+    ipcMain.handle('browser-automation:drag', async (event, sourceRef, targetRef) => {
+      return browserAutomation.drag(sourceRef, targetRef);
+    });
+
+    // Environment spoofing
+    ipcMain.handle('browser-automation:setDevice', async (event, deviceName) => {
+      return browserAutomation.setDevice(deviceName);
+    });
+    ipcMain.handle('browser-automation:setGeolocation', async (event, lat, lon, accuracy) => {
+      return browserAutomation.setGeolocation(lat, lon, accuracy);
+    });
+    ipcMain.handle('browser-automation:clearGeolocation', async () => {
+      return browserAutomation.clearGeolocation();
+    });
+    ipcMain.handle('browser-automation:setTimezone', async (event, tz) => {
+      return browserAutomation.setTimezone(tz);
+    });
+    ipcMain.handle('browser-automation:setLocale', async (event, locale) => {
+      return browserAutomation.setLocale(locale);
+    });
+    ipcMain.handle('browser-automation:setOffline', async (event, offline) => {
+      return browserAutomation.setOffline(offline);
+    });
+    ipcMain.handle('browser-automation:setExtraHeaders', async (event, headers) => {
+      return browserAutomation.setExtraHeaders(headers);
+    });
+    ipcMain.handle('browser-automation:setCredentials', async (event, username, password) => {
+      return browserAutomation.setCredentials(username, password);
+    });
+    ipcMain.handle('browser-automation:setMedia', async (event, colorScheme) => {
+      return browserAutomation.setMedia(colorScheme);
+    });
+
+    // Trace recording
+    ipcMain.handle('browser-automation:traceStart', async (event, opts) => {
+      return browserAutomation.traceStart(opts);
+    });
+    ipcMain.handle('browser-automation:traceStop', async (event, savePath) => {
+      return browserAutomation.traceStop(savePath);
+    });
+
+    // Highlight + waitForFunction
+    ipcMain.handle('browser-automation:highlight', async (event, ref, opts) => {
+      return browserAutomation.highlight(ref, opts);
+    });
+    ipcMain.handle('browser-automation:waitForFunction', async (event, expression, timeout) => {
+      return browserAutomation.waitForFunction(expression, timeout);
+    });
+
+    console.log('[Main] Browser Automation IPC handlers registered');
+  } catch (err) {
+    console.warn('[Main] Failed to register browser automation IPC handlers:', err.message);
+  }
+
   // Register test menu shortcut
   console.log('[Main] Registering test menu shortcut');
   registerTestMenuShortcut();
-  
+
   // Set up auto updater
   setupAutoUpdater();
-  
+
+  // TIMING: Defer update check until after startup settles; prevents blocking app ready and lets main window load first.
   // Check for updates in the background (non-blocking)
   setTimeout(() => {
     if (app.isPackaged) {
@@ -1422,8 +1404,12 @@ app.on('before-quit', (event) => {
   // Close audit orchestrator session gracefully
   try {
     const { closeAuditOrchestrator } = require('./test/audit/ipc-bridge');
-    closeAuditOrchestrator().catch(() => {});
-  } catch (_) {}
+    closeAuditOrchestrator().catch((_ignored) => {
+      /* audit orchestrator close is best-effort during shutdown */
+    });
+  } catch (_ignored) {
+    /* audit orchestrator not loaded or close failed */
+  }
 
   // Skip cleanup if we're installing an update - let the updater handle everything
   if (global.isUpdatingApp) {
@@ -1459,7 +1445,10 @@ app.on('before-quit', (event) => {
         if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
           console.log('[App] Sending save-tabs-state to main window');
           mainWindow.webContents.send('save-tabs-state');
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // TIMING: Give renderer time to process IPC and persist tab state before shutdown continues.
+          await new Promise((resolve) => {
+            setTimeout(resolve, 100);
+          });
         }
       } catch (error) {
         console.error('[App] Error saving tab state:', error);
@@ -1479,7 +1468,9 @@ app.on('before-quit', (event) => {
         const { saveConversationState } = require('./src/voice-task-sdk/exchange-bridge');
         await Promise.race([
           saveConversationState(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('timeout')), 2000);
+          }),
         ]);
       } catch (error) {
         console.warn('[App] Error saving conversation state:', error.message);
@@ -1490,7 +1481,9 @@ app.on('before-quit', (event) => {
         try {
           await Promise.race([
             stopBuiltInAgents(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('timeout')), 2000);
+            }),
           ]);
         } catch (error) {
           console.error('[App] Error stopping built-in agents:', error);
@@ -1513,9 +1506,11 @@ app.on('before-quit', (event) => {
         const { shutdown } = require('./src/voice-task-sdk/exchange-bridge');
         await Promise.race([
           shutdown(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('timeout')), 2000);
+          }),
         ]);
-      } catch (error) {
+      } catch (_error) {
         // Exchange may not be initialized
       }
 
@@ -1553,7 +1548,6 @@ app.on('before-quit', (event) => {
           }
         }
       });
-
     } catch (error) {
       console.error('[App] Unexpected error during shutdown:', error);
     } finally {
@@ -1580,15 +1574,15 @@ app.on('window-all-closed', () => {
 });
 
 // Final cleanup before process exits
-app.on('will-quit', (event) => {
+app.on('will-quit', (_event) => {
   console.log('[App] will-quit event - final cleanup');
-  
+
   // Skip cleanup if we're installing an update
   if (global.isUpdatingApp) {
     console.log('[App] Skipping final cleanup - app is updating');
     return;
   }
-  
+
   // Last chance to save orb position
   if (typeof saveOrbPosition === 'function') {
     try {
@@ -1597,7 +1591,7 @@ app.on('will-quit', (event) => {
       console.error('[App] Error saving orb position:', error);
     }
   }
-  
+
   // Clean up Spaces upload temp files
   try {
     const { cleanupTempFiles } = require('./spaces-upload-handler');
@@ -1606,22 +1600,20 @@ app.on('will-quit', (event) => {
   } catch (err) {
     console.error('[App] Error cleaning up Spaces temp files:', err);
   }
-  
+
   // Shutdown Aider Bridge
   if (aiderBridge) {
     console.log('[App] Shutting down Aider Bridge...');
     try {
-      aiderBridge.shutdown().catch(err => 
-        console.error('[App] Error shutting down Aider:', err)
-      );
+      aiderBridge.shutdown().catch((err) => console.error('[App] Error shutting down Aider:', err));
     } catch (error) {
       console.error('[App] Error in Aider shutdown:', error);
     }
   }
-  
+
   // Unregister global shortcuts
   if (registeredShortcuts && registeredShortcuts.length > 0) {
-    registeredShortcuts.forEach(shortcut => {
+    registeredShortcuts.forEach((shortcut) => {
       try {
         globalShortcut.unregister(shortcut);
       } catch (e) {
@@ -1630,7 +1622,7 @@ app.on('will-quit', (event) => {
     });
     console.log(`[App] Unregistered ${registeredShortcuts.length} shortcuts`);
   }
-  
+
   // Final log flush
   if (logger && logger.flush) {
     try {
@@ -1640,7 +1632,7 @@ app.on('will-quit', (event) => {
       console.error('[App] Error flushing logger:', error);
     }
   }
-  
+
   console.log('[App] Final cleanup complete - app will now quit');
 });
 
@@ -1654,29 +1646,26 @@ app.on('will-quit', (event) => {
  */
 function setupSpacesAPI() {
   console.log('[SpacesAPI] Setting up IPC handlers...');
-  
+
   const { getSpacesAPI } = require('./spaces-api');
   const spacesAPI = getSpacesAPI();
-  
+
   // Initialize conversation capture
   try {
-    
     const { getSettingsManager } = require('./settings-manager');
     const settingsManager = getSettingsManager();
-    
-    
+
     conversationCapture = getConversationCapture(spacesAPI, settingsManager);
-    
-    
+
     console.log('[ConversationCapture] ✅ Initialized');
   } catch (error) {
     console.error('[ConversationCapture] Failed to initialize:', error);
   }
-  
+
   // Set up broadcast handler to notify all windows of changes
   spacesAPI.setBroadcastHandler((event, data) => {
     try {
-      BrowserWindow.getAllWindows().forEach(win => {
+      BrowserWindow.getAllWindows().forEach((win) => {
         if (!win.isDestroyed()) {
           win.webContents.send('spaces:event', { type: event, ...data });
         }
@@ -1685,148 +1674,342 @@ function setupSpacesAPI() {
       console.error('[SpacesAPI] Broadcast error:', error);
     }
   });
-  
+
+  // Start discovery polling (check graph for new remote spaces)
+  const _discoveryBroadcast = (eventData) => {
+    try {
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('spaces:event', eventData);
+        }
+      });
+    } catch (err) {
+      console.error('[Discovery] Broadcast error:', err);
+    }
+  };
+
+  const _tryStartDiscoveryPolling = () => {
+    try {
+      const { getOmniGraphClient } = require('./omnigraph-client');
+      const client = getOmniGraphClient();
+      if (client.isReady() && client.currentUser && client.currentUser.includes('@')) {
+        const { startDiscoveryPolling } = require('./lib/spaces-sync');
+        startDiscoveryPolling({ intervalMs: 60000, broadcastFn: _discoveryBroadcast });
+        console.log('[Discovery] Polling started');
+        return true;
+      }
+    } catch (err) {
+      console.warn('[Discovery] Could not start polling:', err.message);
+    }
+    return false;
+  };
+
+  if (!_tryStartDiscoveryPolling()) {
+    console.log('[Discovery] OmniGraph not ready or no email -- will retry in 30s');
+    setTimeout(() => {
+      if (!_tryStartDiscoveryPolling()) {
+        console.log('[Discovery] OmniGraph still not ready after retry -- polling disabled');
+      }
+    }, 30000);
+  }
+
   // ---- SPACE MANAGEMENT ----
-  
+
   // List all spaces
   ipcMain.handle('spaces:list', async () => {
     try {
       return await spacesAPI.list();
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:list:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:list failed', { error: error.message });
+      throw error;
     }
   });
-  
+
   // Get a single space
   ipcMain.handle('spaces:get', async (event, spaceId) => {
     try {
       return await spacesAPI.get(spaceId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:get:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:get failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Create a new space
   ipcMain.handle('spaces:create', async (event, name, options = {}) => {
     try {
       return await spacesAPI.create(name, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:create:', error);
+      log.error('spaces', 'IPC spaces:create failed', { name, error: error.message });
       throw error;
     }
   });
-  
+
   // Update a space
   ipcMain.handle('spaces:update', async (event, spaceId, data) => {
     try {
       return await spacesAPI.update(spaceId, data);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:update:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:update failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Delete a space
   ipcMain.handle('spaces:delete', async (event, spaceId) => {
     try {
       return await spacesAPI.delete(spaceId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:delete:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:delete failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
+  // ---- DISCOVERY (remote graph -> local) ----
+
+  ipcMain.handle('spaces:discover', async () => {
+    try {
+      return await spacesAPI.discovery.discoverRemoteSpaces();
+    } catch (error) {
+      log.error('spaces', 'IPC spaces:discover failed', { error: error.message });
+      return { spaces: [], error: error.message };
+    }
+  });
+
+  ipcMain.handle('spaces:discover:import', async (event, remoteSpaces) => {
+    try {
+      if (!Array.isArray(remoteSpaces)) {
+        return { imported: [], skipped: [], failed: [{ error: 'Expected an array of remote spaces' }] };
+      }
+      return await spacesAPI.discovery.importAll(remoteSpaces);
+    } catch (error) {
+      log.error('spaces', 'IPC spaces:discover:import failed', { error: error.message });
+      return { imported: [], skipped: [], failed: [{ error: error.message }] };
+    }
+  });
+
   // ---- ITEM MANAGEMENT ----
-  
+
   // List items in a space
   ipcMain.handle('spaces:items:list', async (event, spaceId, options = {}) => {
     try {
       return await spacesAPI.items.list(spaceId, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:list:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:items:list failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Get a single item
   ipcMain.handle('spaces:items:get', async (event, spaceId, itemId) => {
     try {
       return await spacesAPI.items.get(spaceId, itemId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:get:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:items:get failed', { spaceId, itemId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Add an item to a space
   ipcMain.handle('spaces:items:add', async (event, spaceId, item) => {
     try {
       return await spacesAPI.items.add(spaceId, item);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:add:', error);
+      log.error('spaces', 'IPC spaces:items:add failed', { spaceId, error: error.message });
       throw error;
     }
   });
-  
+
   // Update an item
   ipcMain.handle('spaces:items:update', async (event, spaceId, itemId, data) => {
     try {
       return await spacesAPI.items.update(spaceId, itemId, data);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:update:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:items:update failed', { spaceId, itemId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Delete an item
   ipcMain.handle('spaces:items:delete', async (event, spaceId, itemId) => {
     try {
       return await spacesAPI.items.delete(spaceId, itemId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:delete:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:items:delete failed', { spaceId, itemId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Move an item to a different space
   ipcMain.handle('spaces:items:move', async (event, itemId, fromSpaceId, toSpaceId) => {
     try {
       return await spacesAPI.items.move(itemId, fromSpaceId, toSpaceId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:move:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:items:move failed', { itemId, fromSpaceId, toSpaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Toggle item pin
   ipcMain.handle('spaces:items:togglePin', async (event, spaceId, itemId) => {
     try {
       return await spacesAPI.items.togglePin(spaceId, itemId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:togglePin:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:items:togglePin failed', { spaceId, itemId, error: error.message });
+      throw error;
     }
   });
-  
+
   // ---- SEARCH ----
-  
+
   // Search across spaces
   ipcMain.handle('spaces:search', async (event, query, options = {}) => {
     try {
       return await spacesAPI.search(query, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:search:', error);
+      log.error('spaces', 'IPC spaces:search failed', { query, error: error.message });
+      throw error;
+    }
+  });
+
+  // ---- CONTACTS ----
+
+  const { getContactStore } = require('./lib/contact-store');
+
+  ipcMain.handle('contacts:list', async (_event, opts = {}) => {
+    try {
+      return getContactStore().getAllContacts(opts);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:list:', error);
       return [];
     }
   });
-  
+
+  ipcMain.handle('contacts:search', async (_event, query, opts = {}) => {
+    try {
+      return getContactStore()
+        .search(query, opts)
+        .map((r) => r.contact);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:search:', error);
+      return [];
+    }
+  });
+
+  ipcMain.handle('contacts:suggest', async (_event, partial, opts = {}) => {
+    try {
+      return getContactStore().suggest(partial, opts);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:suggest:', error);
+      return [];
+    }
+  });
+
+  ipcMain.handle('contacts:add', async (_event, data) => {
+    try {
+      return getContactStore().addContact(data);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:add:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('contacts:update', async (_event, id, changes) => {
+    try {
+      return getContactStore().updateContact(id, changes);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:update:', error);
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('contacts:delete', async (_event, id) => {
+    try {
+      return getContactStore().deleteContact(id);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:delete:', error);
+      return false;
+    }
+  });
+
+  ipcMain.handle('contacts:resolve', async (_event, guests) => {
+    try {
+      return getContactStore().resolveGuests(guests);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:resolve:', error);
+      return { resolved: [], unresolved: [], ambiguous: [] };
+    }
+  });
+
+  ipcMain.handle('contacts:stats', async () => {
+    try {
+      return getContactStore().getStats();
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:stats:', error);
+      return { total: 0, withCalendar: 0, sources: {} };
+    }
+  });
+
+  ipcMain.handle('contacts:learn-from-events', async () => {
+    try {
+      const { getCalendarStore } = require('./lib/calendar-store');
+      const calStore = getCalendarStore();
+      const events = calStore.getAllEvents();
+      // Dual: update in-memory store AND ingest into DuckDB for meeting attendance
+      const memResult = getContactStore().learnFromEvents(events);
+      const dbResult = await getContactStore().ingestCalendarEvents(events);
+      return {
+        learned: memResult.learned,
+        existing: memResult.existing,
+        meetings: dbResult.attendance || 0,
+      };
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:learn-from-events:', error);
+      return { learned: 0, existing: 0, meetings: 0 };
+    }
+  });
+
+  ipcMain.handle('contacts:frequent', async (_event, opts = {}) => {
+    try {
+      return await getContactStore().getFrequentContacts(opts);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:frequent:', error);
+      return [];
+    }
+  });
+
+  ipcMain.handle('contacts:meetings', async (_event, contactEmailOrId, opts = {}) => {
+    try {
+      return await getContactStore().getContactMeetings(contactEmailOrId, opts);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:meetings:', error);
+      return [];
+    }
+  });
+
+  ipcMain.handle('contacts:co-attendees', async (_event, contactEmail, limit) => {
+    try {
+      return await getContactStore().getCoAttendees(contactEmail, limit);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:co-attendees:', error);
+      return [];
+    }
+  });
+
+  ipcMain.handle('contacts:ingest-events', async (_event, events) => {
+    try {
+      return await getContactStore().ingestCalendarEvents(events);
+    } catch (error) {
+      console.error('[Contacts] Error in contacts:ingest-events:', error);
+      return { processed: 0, contacts: 0, attendance: 0 };
+    }
+  });
+
   // ---- GENERATIVE SEARCH ----
-  
+
   // Generative search engine instance
   let generativeSearchEngine = null;
-  
+
   // Initialize generative search engine
   function getGenerativeSearchEngine() {
     if (!generativeSearchEngine) {
@@ -1837,10 +2020,10 @@ function setupSpacesAPI() {
           batchSize: 8,
           onProgress: (progress) => {
             // Broadcast progress to all windows
-            BrowserWindow.getAllWindows().forEach(win => {
+            BrowserWindow.getAllWindows().forEach((win) => {
               win.webContents.send('generative-search:progress', progress);
             });
-          }
+          },
         });
         console.log('[GenerativeSearch] Engine initialized');
       } catch (error) {
@@ -1849,7 +2032,7 @@ function setupSpacesAPI() {
     }
     return generativeSearchEngine;
   }
-  
+
   // Run generative search
   ipcMain.handle('generative-search:search', async (event, options) => {
     try {
@@ -1857,25 +2040,25 @@ function setupSpacesAPI() {
       if (!engine) {
         throw new Error('Generative search engine not available');
       }
-      
+
       // Get API key from settings
       const apiKey = settingsManager.get('openaiApiKey');
       if (!apiKey) {
         throw new Error('OpenAI API key not configured. Please add it in Settings.');
       }
-      
+
       const results = await engine.search({
         ...options,
-        apiKey
+        apiKey,
       });
-      
+
       return results;
     } catch (error) {
       console.error('[GenerativeSearch] Search error:', error);
       throw error;
     }
   });
-  
+
   // Estimate search cost
   ipcMain.handle('generative-search:estimate-cost', async (event, options) => {
     try {
@@ -1883,24 +2066,20 @@ function setupSpacesAPI() {
       if (!engine) {
         return { formatted: 'Engine not available' };
       }
-      
+
       // Get item count for the space
       let items = spacesAPI.storage.getAllItems();
       if (options.spaceId) {
-        items = items.filter(item => item.spaceId === options.spaceId);
+        items = items.filter((item) => item.spaceId === options.spaceId);
       }
-      
-      return engine.estimateCost(
-        items.length,
-        options.filters || [],
-        options.mode || 'quick'
-      );
+
+      return engine.estimateCost(items.length, options.filters || [], options.mode || 'quick');
     } catch (error) {
       console.error('[GenerativeSearch] Cost estimation error:', error);
       return { formatted: 'Unable to estimate' };
     }
   });
-  
+
   // Cancel ongoing search
   ipcMain.handle('generative-search:cancel', async () => {
     try {
@@ -1914,7 +2093,7 @@ function setupSpacesAPI() {
       return false;
     }
   });
-  
+
   // Get filter types
   ipcMain.handle('generative-search:get-filter-types', async () => {
     try {
@@ -1925,7 +2104,7 @@ function setupSpacesAPI() {
       return { filterTypes: {}, categories: {} };
     }
   });
-  
+
   // Clear search cache
   ipcMain.handle('generative-search:clear-cache', async () => {
     try {
@@ -1939,547 +2118,632 @@ function setupSpacesAPI() {
       return false;
     }
   });
-  
+
   // ---- METADATA ----
-  
+
   // Get space metadata
   ipcMain.handle('spaces:metadata:get', async (event, spaceId) => {
     try {
       return await spacesAPI.metadata.getSpace(spaceId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:metadata:get:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:metadata:get failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Update space metadata
   ipcMain.handle('spaces:metadata:update', async (event, spaceId, data) => {
     try {
       return await spacesAPI.metadata.updateSpace(spaceId, data);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:metadata:update:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:metadata:update failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Get file metadata
   ipcMain.handle('spaces:metadata:getFile', async (event, spaceId, filePath) => {
     try {
       return await spacesAPI.metadata.getFile(spaceId, filePath);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:metadata:getFile:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:metadata:getFile failed', { spaceId, filePath, error: error.message });
+      throw error;
     }
   });
-  
+
   // Set file metadata
   ipcMain.handle('spaces:metadata:setFile', async (event, spaceId, filePath, data) => {
     try {
       return await spacesAPI.metadata.setFile(spaceId, filePath, data);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:metadata:setFile:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:metadata:setFile failed', { spaceId, filePath, error: error.message });
+      throw error;
     }
   });
-  
+
   // Set asset metadata
   ipcMain.handle('spaces:metadata:setAsset', async (event, spaceId, assetType, data) => {
     try {
       return await spacesAPI.metadata.setAsset(spaceId, assetType, data);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:metadata:setAsset:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:metadata:setAsset failed', { spaceId, assetType, error: error.message });
+      throw error;
     }
   });
-  
+
   // Set approval
   ipcMain.handle('spaces:metadata:setApproval', async (event, spaceId, itemType, itemId, approved) => {
     try {
       return await spacesAPI.metadata.setApproval(spaceId, itemType, itemId, approved);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:metadata:setApproval:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:metadata:setApproval failed', {
+        spaceId,
+        itemType,
+        itemId,
+        error: error.message,
+      });
+      throw error;
     }
   });
-  
+
   // Add version
   ipcMain.handle('spaces:metadata:addVersion', async (event, spaceId, versionData) => {
     try {
       return await spacesAPI.metadata.addVersion(spaceId, versionData);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:metadata:addVersion:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:metadata:addVersion failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Update project config
   ipcMain.handle('spaces:metadata:updateProjectConfig', async (event, spaceId, config) => {
     try {
       return await spacesAPI.metadata.updateProjectConfig(spaceId, config);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:metadata:updateProjectConfig:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:metadata:updateProjectConfig failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // ---- FILE SYSTEM ----
-  
+
   // Get space path
   ipcMain.handle('spaces:files:getPath', async (event, spaceId) => {
     try {
       return await spacesAPI.files.getSpacePath(spaceId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:files:getPath:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:files:getPath failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // List files in space
   ipcMain.handle('spaces:files:list', async (event, spaceId, subPath = '') => {
     try {
       return await spacesAPI.files.list(spaceId, subPath);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:files:list:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:files:list failed', { spaceId, subPath, error: error.message });
+      throw error;
     }
   });
-  
+
   // Read file from space
   ipcMain.handle('spaces:files:read', async (event, spaceId, filePath) => {
     try {
       return await spacesAPI.files.read(spaceId, filePath);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:files:read:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:files:read failed', { spaceId, filePath, error: error.message });
+      throw error;
     }
   });
-  
+
   // Write file to space
   ipcMain.handle('spaces:files:write', async (event, spaceId, filePath, content) => {
     try {
       return await spacesAPI.files.write(spaceId, filePath, content);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:files:write:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:files:write failed', { spaceId, filePath, error: error.message });
+      throw error;
     }
   });
-  
+
   // Delete file from space
   ipcMain.handle('spaces:files:delete', async (event, spaceId, filePath) => {
     try {
       return await spacesAPI.files.delete(spaceId, filePath);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:files:delete:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:files:delete failed', { spaceId, filePath, error: error.message });
+      throw error;
     }
   });
-  
+
   // Get storage root path
   ipcMain.handle('spaces:getStorageRoot', async () => {
     try {
       return spacesAPI.getStorageRoot();
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:getStorageRoot:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:getStorageRoot failed', { error: error.message });
+      throw error;
     }
   });
-  
+
   // ---- TAG MANAGEMENT ----
-  
+
   // Get tags for an item
   ipcMain.handle('spaces:items:getTags', async (event, spaceId, itemId) => {
     try {
       return await spacesAPI.items.getTags(spaceId, itemId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:getTags:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:items:getTags failed', { spaceId, itemId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Set tags for an item
   ipcMain.handle('spaces:items:setTags', async (event, spaceId, itemId, tags) => {
     try {
       return await spacesAPI.items.setTags(spaceId, itemId, tags);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:setTags:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:items:setTags failed', { spaceId, itemId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Add a tag to an item
   ipcMain.handle('spaces:items:addTag', async (event, spaceId, itemId, tag) => {
     try {
       return await spacesAPI.items.addTag(spaceId, itemId, tag);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:addTag:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:items:addTag failed', { spaceId, itemId, tag, error: error.message });
+      throw error;
     }
   });
-  
+
   // Remove a tag from an item
   ipcMain.handle('spaces:items:removeTag', async (event, spaceId, itemId, tag) => {
     try {
       return await spacesAPI.items.removeTag(spaceId, itemId, tag);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:removeTag:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:items:removeTag failed', { spaceId, itemId, tag, error: error.message });
+      throw error;
     }
   });
-  
+
   // Generate metadata for an item
   ipcMain.handle('spaces:items:generateMetadata', async (event, spaceId, itemId, options = {}) => {
     try {
       return await spacesAPI.items.generateMetadata(spaceId, itemId, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:items:generateMetadata:', error);
-      return { success: false, error: error.message };
+      log.error('spaces', 'IPC spaces:items:generateMetadata failed', { spaceId, itemId, error: error.message });
+      throw error;
     }
   });
-  
+
   // List all tags in a space
   ipcMain.handle('spaces:tags:list', async (event, spaceId) => {
     try {
       return await spacesAPI.tags.list(spaceId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:tags:list:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:tags:list failed', { spaceId, error: error.message });
+      throw error;
     }
   });
-  
+
   // List all tags across all spaces
   ipcMain.handle('spaces:tags:listAll', async () => {
     try {
       return await spacesAPI.tags.listAll();
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:tags:listAll:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:tags:listAll failed', { error: error.message });
+      throw error;
     }
   });
-  
+
   // Find items by tags
   ipcMain.handle('spaces:tags:findItems', async (event, tags, options = {}) => {
     try {
       return await spacesAPI.tags.findItems(tags, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:tags:findItems:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:tags:findItems failed', { tags, error: error.message });
+      throw error;
     }
   });
-  
+
   // Rename a tag in a space
   ipcMain.handle('spaces:tags:rename', async (event, spaceId, oldTag, newTag) => {
     try {
       return await spacesAPI.tags.rename(spaceId, oldTag, newTag);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:tags:rename:', error);
-      return 0;
+      log.error('spaces', 'IPC spaces:tags:rename failed', { spaceId, oldTag, newTag, error: error.message });
+      throw error;
     }
   });
-  
+
   // Delete a tag from a space
   ipcMain.handle('spaces:tags:deleteFromSpace', async (event, spaceId, tag) => {
     try {
       return await spacesAPI.tags.deleteFromSpace(spaceId, tag);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:tags:deleteFromSpace:', error);
-      return 0;
+      log.error('spaces', 'IPC spaces:tags:deleteFromSpace failed', { spaceId, tag, error: error.message });
+      throw error;
     }
   });
-  
+
   // ---- SMART FOLDERS ----
-  
+
   // List all smart folders
   ipcMain.handle('spaces:smartFolders:list', async () => {
     try {
       return await spacesAPI.smartFolders.list();
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:smartFolders:list:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:smartFolders:list failed', { error: error.message });
+      throw error;
     }
   });
-  
+
   // Get a single smart folder
   ipcMain.handle('spaces:smartFolders:get', async (event, folderId) => {
     try {
       return await spacesAPI.smartFolders.get(folderId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:smartFolders:get:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:smartFolders:get failed', { folderId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Create a smart folder
   ipcMain.handle('spaces:smartFolders:create', async (event, name, criteria, options = {}) => {
     try {
       return await spacesAPI.smartFolders.create(name, criteria, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:smartFolders:create:', error);
+      log.error('spaces', 'IPC spaces:smartFolders:create failed', { name, error: error.message });
       throw error;
     }
   });
-  
+
   // Update a smart folder
   ipcMain.handle('spaces:smartFolders:update', async (event, folderId, updates) => {
     try {
       return await spacesAPI.smartFolders.update(folderId, updates);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:smartFolders:update:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:smartFolders:update failed', { folderId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Delete a smart folder
   ipcMain.handle('spaces:smartFolders:delete', async (event, folderId) => {
     try {
       return await spacesAPI.smartFolders.delete(folderId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:smartFolders:delete:', error);
-      return false;
+      log.error('spaces', 'IPC spaces:smartFolders:delete failed', { folderId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Get items matching a smart folder
   ipcMain.handle('spaces:smartFolders:getItems', async (event, folderId, options = {}) => {
     try {
       return await spacesAPI.smartFolders.getItems(folderId, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:smartFolders:getItems:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:smartFolders:getItems failed', { folderId, error: error.message });
+      throw error;
     }
   });
-  
+
   // Preview items for criteria without saving
   ipcMain.handle('spaces:smartFolders:preview', async (event, criteria, options = {}) => {
     try {
       return await spacesAPI.smartFolders.preview(criteria, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:smartFolders:preview:', error);
-      return [];
+      log.error('spaces', 'IPC spaces:smartFolders:preview failed', { error: error.message });
+      throw error;
     }
   });
-  
+
   // ---- GSX PUSH API ----
-  
+
   // Initialize GSX Push with endpoint, auth, and current user
   ipcMain.handle('spaces:gsx:initialize', async (event, endpoint, currentUser) => {
     try {
       spacesAPI.gsx.initialize(endpoint, null, currentUser);
       return { success: true };
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:initialize:', error);
+      log.error('spaces', 'IPC spaces:gsx:initialize failed', { error: error.message });
       return { success: false, error: error.message };
     }
   });
-  
+
   // Set current user for provenance tracking (Temporal Graph Honor System)
   ipcMain.handle('spaces:gsx:setCurrentUser', async (event, user) => {
     try {
       spacesAPI.gsx.setCurrentUser(user);
       return { success: true };
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:setCurrentUser:', error);
-      return { success: false, error: error.message };
+      log.error('spaces', 'IPC spaces:gsx:setCurrentUser failed', { error: error.message });
+      throw error;
     }
   });
-  
+
   // Get the GSX auth token from settings
   ipcMain.handle('spaces:gsx:getToken', async () => {
     try {
       const settingsManager = getSettingsManager();
       return settingsManager.get('gsxToken') || null;
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:getToken:', error);
-      return null;
+      log.error('spaces', 'IPC spaces:gsx:getToken failed', { error: error.message });
+      throw error;
     }
   });
-  
+
   // Push a single asset to GSX
   ipcMain.handle('spaces:gsx:pushAsset', async (event, itemId, options = {}) => {
     try {
       return await spacesAPI.gsx.pushAsset(itemId, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:pushAsset:', error);
-      return { success: false, error: 'UNKNOWN', message: error.message };
+      log.error('spaces', 'IPC spaces:gsx:pushAsset failed', { itemId, error: error.message });
+      return { success: false, error: 'PUSH_FAILED', message: error.message };
     }
   });
-  
+
   // Push multiple assets to GSX
   ipcMain.handle('spaces:gsx:pushAssets', async (event, itemIds, options = {}) => {
     try {
       return await spacesAPI.gsx.pushAssets(itemIds, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:pushAssets:', error);
+      log.error('spaces', 'IPC spaces:gsx:pushAssets failed', { error: error.message });
       return { success: false, pushed: [], skipped: [], failed: [{ error: error.message }] };
     }
   });
-  
+
   // Push a space to GSX
   ipcMain.handle('spaces:gsx:pushSpace', async (event, spaceId, options = {}) => {
     try {
       return await spacesAPI.gsx.pushSpace(spaceId, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:pushSpace:', error);
-      return { success: false, error: 'UNKNOWN', message: error.message };
+      log.error('spaces', 'IPC spaces:gsx:pushSpace failed', { spaceId, error: error.message });
+      return { success: false, error: 'PUSH_FAILED', message: error.message };
     }
   });
-  
+
   // Unpush an asset
   ipcMain.handle('spaces:gsx:unpushAsset', async (event, itemId) => {
     try {
       return await spacesAPI.gsx.unpushAsset(itemId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:unpushAsset:', error);
-      return { success: false, error: 'UNKNOWN', message: error.message };
+      log.error('spaces', 'IPC spaces:gsx:unpushAsset failed', { itemId, error: error.message });
+      return { success: false, error: 'UNPUSH_FAILED', message: error.message };
     }
   });
-  
+
   // Unpush multiple assets
   ipcMain.handle('spaces:gsx:unpushAssets', async (event, itemIds) => {
     try {
       return await spacesAPI.gsx.unpushAssets(itemIds);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:unpushAssets:', error);
+      log.error('spaces', 'IPC spaces:gsx:unpushAssets failed', { error: error.message });
       return { success: false, unpushed: [], failed: [{ error: error.message }] };
     }
   });
-  
+
   // Unpush a space
   ipcMain.handle('spaces:gsx:unpushSpace', async (event, spaceId, options = {}) => {
     try {
       return await spacesAPI.gsx.unpushSpace(spaceId, options);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:unpushSpace:', error);
-      return { success: false, error: 'UNKNOWN', message: error.message };
+      log.error('spaces', 'IPC spaces:gsx:unpushSpace failed', { spaceId, error: error.message });
+      return { success: false, error: 'UNPUSH_FAILED', message: error.message };
     }
   });
-  
+
   // Change visibility of an asset
   ipcMain.handle('spaces:gsx:changeVisibility', async (event, itemId, isPublic) => {
     try {
       return await spacesAPI.gsx.changeVisibility(itemId, isPublic);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:changeVisibility:', error);
-      return { success: false, error: 'UNKNOWN', message: error.message };
+      log.error('spaces', 'IPC spaces:gsx:changeVisibility failed', { itemId, isPublic, error: error.message });
+      return { success: false, error: 'VISIBILITY_FAILED', message: error.message };
     }
   });
-  
+
   // Change visibility for multiple assets
   ipcMain.handle('spaces:gsx:changeVisibilityBulk', async (event, itemIds, isPublic) => {
     try {
       return await spacesAPI.gsx.changeVisibilityBulk(itemIds, isPublic);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:changeVisibilityBulk:', error);
+      log.error('spaces', 'IPC spaces:gsx:changeVisibilityBulk failed', { isPublic, error: error.message });
       return { success: false, changed: [], failed: [{ error: error.message }] };
     }
   });
-  
+
   // Get push status for an item
   ipcMain.handle('spaces:gsx:getPushStatus', async (event, itemId) => {
     try {
       return await spacesAPI.gsx.getPushStatus(itemId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:getPushStatus:', error);
+      log.error('spaces', 'IPC spaces:gsx:getPushStatus failed', { itemId, error: error.message });
       return { status: 'error', error: error.message };
     }
   });
-  
+
   // Get push statuses for multiple items
   ipcMain.handle('spaces:gsx:getPushStatuses', async (event, itemIds) => {
     try {
       return await spacesAPI.gsx.getPushStatuses(itemIds);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:getPushStatuses:', error);
+      log.error('spaces', 'IPC spaces:gsx:getPushStatuses failed', { error: error.message });
       return {};
     }
   });
-  
+
   // Update push status (for external sources)
   ipcMain.handle('spaces:gsx:updatePushStatus', async (event, itemId, pushData) => {
     try {
       return await spacesAPI.gsx.updatePushStatus(itemId, pushData);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:updatePushStatus:', error);
+      log.error('spaces', 'IPC spaces:gsx:updatePushStatus failed', { itemId, error: error.message });
       return { success: false, error: error.message };
     }
   });
-  
+
   // Check which items have local changes
   ipcMain.handle('spaces:gsx:checkLocalChanges', async (event, itemIds) => {
     try {
       return await spacesAPI.gsx.checkLocalChanges(itemIds);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:checkLocalChanges:', error);
+      log.error('spaces', 'IPC spaces:gsx:checkLocalChanges failed', { error: error.message });
       return { changed: [], unchanged: [], notPushed: [] };
     }
   });
-  
+
   // Get all links for an item
   ipcMain.handle('spaces:gsx:getLinks', async (event, itemId) => {
     try {
       return await spacesAPI.gsx.getLinks(itemId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:getLinks:', error);
+      log.error('spaces', 'IPC spaces:gsx:getLinks failed', { itemId, error: error.message });
       return { error: error.message };
     }
   });
-  
+
   // Get share link for an item
   ipcMain.handle('spaces:gsx:getShareLink', async (event, itemId) => {
     try {
       return await spacesAPI.gsx.getShareLink(itemId);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:getShareLink:', error);
+      log.error('spaces', 'IPC spaces:gsx:getShareLink failed', { itemId, error: error.message });
       return { error: error.message };
     }
   });
-  
+
   // Get specific link type for an item
   ipcMain.handle('spaces:gsx:getLink', async (event, itemId, linkType) => {
     try {
       return await spacesAPI.gsx.getLink(itemId, linkType);
     } catch (error) {
-      console.error('[SpacesAPI] Error in spaces:gsx:getLink:', error);
+      log.error('spaces', 'IPC spaces:gsx:getLink failed', { itemId, linkType, error: error.message });
       return { error: error.message };
     }
   });
-  
+
   console.log('[SpacesAPI] ✅ All IPC handlers registered (including tags, smart folders, and GSX push)');
-  
+
+  // ---- PLAYBOOK EXECUTOR IPC HANDLERS ----
+
+  ipcMain.handle('playbook:execute', async (event, opts) => {
+    try {
+      const executor = require('./lib/playbook-executor');
+      const job = await executor.startJob(opts);
+      return job;
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('playbook:status', async (event, jobId) => {
+    try {
+      return require('./lib/playbook-executor').getJob(jobId);
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('playbook:respond', async (event, jobId, questionId, answer) => {
+    try {
+      return await require('./lib/playbook-executor').respond(jobId, questionId, answer);
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('playbook:cancel', async (event, jobId) => {
+    try {
+      return require('./lib/playbook-executor').cancel(jobId);
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('playbook:find', async (event, spaceId) => {
+    try {
+      return await require('./lib/playbook-executor').findPlaybooks(spaceId);
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('playbook:jobs', async (event, filters) => {
+    try {
+      return require('./lib/playbook-executor').listJobs(filters);
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  // ---- SYNC LAYER IPC HANDLERS ----
+
+  ipcMain.handle('sync:push', async (event, spaceId, opts) => {
+    try {
+      return await require('./lib/spaces-sync').push(spaceId, opts);
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('sync:pull', async (event, spaceId) => {
+    try {
+      return await require('./lib/spaces-sync').pull(spaceId);
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('sync:status', async (event, spaceId) => {
+    try {
+      return await require('./lib/spaces-sync').status(spaceId);
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  console.log('[Playbook] ✅ Playbook executor + sync IPC handlers registered');
+
   // ---- MULTI-TENANT TOKEN IPC HANDLERS ----
   const { session } = require('electron');
   const multiTenantStore = require('./multi-tenant-store');
-  
+
   // Get multi-tenant token for environment (returns metadata only, NOT the value)
   ipcMain.handle('multi-tenant:get-token', async (event, environment) => {
     const token = multiTenantStore.getToken(environment);
     if (!token) return null;
-    
+
     // Return metadata only, NOT the value (security)
     return {
       environment,
       domain: token.domain,
       expiresAt: token.expiresAt,
       capturedAt: token.capturedAt,
-      isValid: multiTenantStore.hasValidToken(environment)
+      isValid: multiTenantStore.hasValidToken(environment),
     };
   });
-  
+
   // Check if multi-tenant token exists AND is not expired
   ipcMain.handle('multi-tenant:has-token', async (event, environment) => {
     return multiTenantStore.hasValidToken(environment);
   });
-  
+
   // Inject token into a specific partition
   ipcMain.handle('multi-tenant:inject-token', async (event, { environment, partition }) => {
     // SECURITY: Validate partition format
     const validTabPattern = /^persist:tab-\d+-[a-z0-9]+$/;
     const validGsxPattern = /^persist:gsx-(edison|staging|production|dev)$/;
-    
+
     if (!validTabPattern.test(partition) && !validGsxPattern.test(partition)) {
       console.warn(`[MultiTenant] Rejected invalid partition: ${partition}`);
       return { success: false, error: 'Invalid partition format' };
     }
-    
+
     // SECURITY: For GSX partitions, verify environment matches
     if (partition.startsWith('persist:gsx-')) {
       const expectedPartition = `persist:gsx-${environment}`;
@@ -2488,31 +2752,31 @@ function setupSpacesAPI() {
         return { success: false, error: 'Environment/partition mismatch' };
       }
     }
-    
+
     const token = multiTenantStore.getToken(environment);
-    
+
     // Validate token exists
     if (!token) {
       return { success: false, error: 'No token available' };
     }
-    
+
     // Check expiration
     if (token.expiresAt && token.expiresAt * 1000 < Date.now()) {
       console.log(`[MultiTenant] Token for ${environment} expired, clearing`);
       multiTenantStore.clearToken(environment);
       return { success: false, error: 'Token expired' };
     }
-    
+
     // Validate token value
     if (!token.value || token.value.length < 10) {
       return { success: false, error: 'Invalid token value' };
     }
-    
+
     try {
       const ses = session.fromPartition(partition);
       // Use broader domain to cover all subdomains (auth, idw, chat, api)
       const broaderDomain = multiTenantStore.getBroaderDomain(environment);
-      
+
       // Log token details for debugging
       console.log(`[MultiTenant] Token details for ${environment}:`, {
         hasValue: !!token.value,
@@ -2521,35 +2785,38 @@ function setupSpacesAPI() {
         targetDomain: broaderDomain,
         expiresAt: token.expiresAt,
         expiresDate: token.expiresAt ? new Date(token.expiresAt * 1000).toISOString() : 'none',
-        isExpired: token.expiresAt ? (token.expiresAt * 1000 < Date.now()) : false
+        isExpired: token.expiresAt ? token.expiresAt * 1000 < Date.now() : false,
       });
-      
+
       // CRITICAL: Set cookie on BROADER domain first so it's sent to all subdomains
       // The original domain (e.g., .edison.api.onereach.ai) is too narrow -
       // it won't be sent to auth.edison.onereach.ai or idw.edison.onereach.ai
-      
+
       // First, set the BROADER domain cookie (this is the one auth server will see)
       await ses.cookies.set({
-        url: `https://auth${broaderDomain}`,  // e.g., https://auth.edison.onereach.ai
+        url: `https://auth${broaderDomain}`, // e.g., https://auth.edison.onereach.ai
         name: 'mult',
         value: token.value,
-        domain: broaderDomain,               // e.g., .edison.onereach.ai (covers ALL subdomains)
+        domain: broaderDomain, // e.g., .edison.onereach.ai (covers ALL subdomains)
         path: '/',
         secure: true,
         httpOnly: true,
-        sameSite: 'no_restriction',          // Allow cross-site requests (needed for SSO)
-        expirationDate: token.expiresAt
+        sameSite: 'no_restriction', // Allow cross-site requests (needed for SSO)
+        expirationDate: token.expiresAt,
       });
-      
+
       console.log(`[MultiTenant] Injected ${environment} mult token with BROADER domain ${broaderDomain}`);
-      
+
       // Verify the broader domain cookie was set
       const broadCookies = await ses.cookies.get({ name: 'mult', domain: broaderDomain });
-      console.log(`[MultiTenant] Broader domain cookies:`, broadCookies.map(c => ({
-        domain: c.domain,
-        path: c.path
-      })));
-      
+      console.log(
+        `[MultiTenant] Broader domain cookies:`,
+        broadCookies.map((c) => ({
+          domain: c.domain,
+          path: c.path,
+        }))
+      );
+
       // CRITICAL: Also set on API domain (e.g., .edison.api.onereach.ai)
       // The UI domain (.edison.onereach.ai) doesn't cover the API domain tree
       const apiDomain = multiTenantStore.getApiDomain(environment);
@@ -2564,14 +2831,14 @@ function setupSpacesAPI() {
             secure: true,
             httpOnly: true,
             sameSite: 'no_restriction',
-            expirationDate: token.expiresAt
+            expirationDate: token.expiresAt,
           });
           console.log(`[MultiTenant] Also set API domain cookie: ${apiDomain}`);
         } catch (e) {
           console.log(`[MultiTenant] Could not set API domain cookie: ${e.message}`);
         }
       }
-      
+
       // Also set on original domain if different from both (for legacy compatibility)
       const originalDomain = token.domain;
       if (originalDomain && originalDomain !== broaderDomain && originalDomain !== apiDomain) {
@@ -2585,58 +2852,63 @@ function setupSpacesAPI() {
             secure: token.secure !== false,
             httpOnly: token.httpOnly !== false,
             sameSite: 'no_restriction',
-            expirationDate: token.expiresAt
+            expirationDate: token.expiresAt,
           });
           console.log(`[MultiTenant] Also set original domain cookie: ${originalDomain}`);
         } catch (e) {
           console.log(`[MultiTenant] Could not set original domain cookie: ${e.message}`);
         }
       }
-      
+
       // Final verification - show ALL mult cookies in this session with full details
       const allCookies = await ses.cookies.get({ name: 'mult' });
-      console.log(`[MultiTenant] ALL mult cookies in ${partition}:`, allCookies.map(c => ({
-        domain: c.domain,
-        path: c.path,
-        secure: c.secure,
-        httpOnly: c.httpOnly,
-        sameSite: c.sameSite,
-        expirationDate: c.expirationDate ? new Date(c.expirationDate * 1000).toISOString() : 'session'
-      })));
-      
+      console.log(
+        `[MultiTenant] ALL mult cookies in ${partition}:`,
+        allCookies.map((c) => ({
+          domain: c.domain,
+          path: c.path,
+          secure: c.secure,
+          httpOnly: c.httpOnly,
+          sameSite: c.sameSite,
+          expirationDate: c.expirationDate ? new Date(c.expirationDate * 1000).toISOString() : 'session',
+        }))
+      );
+
       // CRITICAL: Flush cookie store to ensure cookies are persisted before navigation
       // Without this, the first request may not include the cookie due to timing
       await ses.cookies.flushStore();
-      
+
       // Post-flush verification - confirm cookies are still present
       const postFlushCookies = await ses.cookies.get({ name: 'mult' });
-      console.log(`[MultiTenant] Cookie store flushed. ${postFlushCookies.length} mult cookies confirmed in ${partition}`);
-      
+      console.log(
+        `[MultiTenant] Cookie store flushed. ${postFlushCookies.length} mult cookies confirmed in ${partition}`
+      );
+
       // NOTE: We intentionally do NOT inject the 'or' token here.
       // The 'or' cookie is ACCOUNT-SPECIFIC - it only works for the account it was created for.
       // If we inject an 'or' token for Account A into a tab loading Account B, it will fail.
       // Each tab should establish its own 'or' session when authenticating.
       // The 'mult' cookie alone enables SSO (skip password, just confirm account).
-      
+
       return { success: true };
     } catch (err) {
       console.error(`[MultiTenant] Failed to inject token:`, err.message);
       return { success: false, error: err.message };
     }
   });
-  
+
   // Attach cookie listener to a partition
   ipcMain.handle('multi-tenant:attach-listener', async (event, { partition }) => {
     multiTenantStore.attachCookieListener(partition);
     return { success: true };
   });
-  
+
   // Remove cookie listener (for tab partitions only)
   ipcMain.handle('multi-tenant:remove-listener', async (event, { partition }) => {
     multiTenantStore.removeCookieListener(partition);
     return { success: true };
   });
-  
+
   // Diagnostic: Get cookies from a partition (for SSO debugging)
   ipcMain.handle('multi-tenant:get-cookies', async (event, { partition, name, domain }) => {
     try {
@@ -2651,75 +2923,93 @@ function setupSpacesAPI() {
       return [];
     }
   });
-  
+
   // Register partition for refresh propagation
   ipcMain.handle('multi-tenant:register-partition', async (event, { environment, partition }) => {
     multiTenantStore.registerPartition(environment, partition);
     return { success: true };
   });
-  
+
   // Unregister partition when tab closes
   ipcMain.handle('multi-tenant:unregister-partition', async (event, { environment, partition }) => {
     multiTenantStore.unregisterPartition(environment, partition);
     return { success: true };
   });
-  
+
   // Get all environments with valid tokens (for debugging/UI)
   ipcMain.handle('multi-tenant:get-environments', async () => {
     return multiTenantStore.getEnvironmentsWithTokens();
   });
-  
+
   // Get full diagnostic info about tokens (for debugging)
   ipcMain.handle('multi-tenant:get-diagnostics', async () => {
     const diagnostics = multiTenantStore.getDiagnostics();
     console.log('[MultiTenant] Diagnostics requested:', JSON.stringify(diagnostics, null, 2));
     return diagnostics;
   });
-  
+
   // Get user data for localStorage injection (enables SSO) - async version
   ipcMain.handle('multi-tenant:get-user-data', async (event, environment) => {
     const userData = multiTenantStore.getOrTokenUserData(environment);
     return userData;
   });
-  
+
   // Get user data SYNCHRONOUSLY for preload scripts (critical for SSO timing)
   ipcMain.on('multi-tenant:get-user-data-sync', (event, environment) => {
     const userData = multiTenantStore.getOrTokenUserData(environment);
     event.returnValue = userData;
   });
-  
+
   console.log('[MultiTenant] ✅ All IPC handlers registered');
-  
+
   // ---- ONEREACH AUTO-LOGIN IPC HANDLERS ----
   const credentialManager = require('./credential-manager');
   const { getTOTPManager } = require('./lib/totp-manager');
   const { getQRScanner } = require('./lib/qr-scanner');
-  
+
   // Get OneReach credentials
   ipcMain.handle('onereach:get-credentials', async () => {
     try {
       const creds = await credentialManager.getOneReachCredentials();
       const summary = creds ? { email: creds.email, has2FA: creds.has2FA } : null;
-      logger.info('[Auth] Credentials requested', { event: 'auth:credentials-fetch', found: !!creds, ...summary, feature: 'auto-login' });
+      logger.info('[Auth] Credentials requested', {
+        event: 'auth:credentials-fetch',
+        found: !!creds,
+        ...summary,
+        feature: 'auto-login',
+      });
       return creds;
     } catch (error) {
-      logger.error('[Auth] Credential fetch failed', { event: 'auth:credentials-error', error: error.message, feature: 'auto-login' });
+      logger.error('[Auth] Credential fetch failed', {
+        event: 'auth:credentials-error',
+        error: error.message,
+        feature: 'auto-login',
+      });
       return null;
     }
   });
-  
+
   // Save OneReach credentials
   ipcMain.handle('onereach:save-credentials', async (event, { email, password }) => {
     try {
       const success = await credentialManager.saveOneReachCredentials(email, password);
-      logger.info('[Auth] Credentials saved', { event: 'auth:credentials-saved', email, success, feature: 'auto-login' });
+      logger.info('[Auth] Credentials saved', {
+        event: 'auth:credentials-saved',
+        email,
+        success,
+        feature: 'auto-login',
+      });
       return { success };
     } catch (error) {
-      logger.error('[Auth] Credential save failed', { event: 'auth:credentials-save-error', error: error.message, feature: 'auto-login' });
+      logger.error('[Auth] Credential save failed', {
+        event: 'auth:credentials-save-error',
+        error: error.message,
+        feature: 'auto-login',
+      });
       return { success: false, error: error.message };
     }
   });
-  
+
   // Delete OneReach credentials
   ipcMain.handle('onereach:delete-credentials', async () => {
     try {
@@ -2727,31 +3017,42 @@ function setupSpacesAPI() {
       logger.info('[Auth] Credentials deleted', { event: 'auth:credentials-deleted', success, feature: 'auto-login' });
       return { success };
     } catch (error) {
-      logger.error('[Auth] Credential delete failed', { event: 'auth:credentials-delete-error', error: error.message, feature: 'auto-login' });
+      logger.error('[Auth] Credential delete failed', {
+        event: 'auth:credentials-delete-error',
+        error: error.message,
+        feature: 'auto-login',
+      });
       return { success: false, error: error.message };
     }
   });
-  
+
   // Save TOTP secret
   ipcMain.handle('onereach:save-totp', async (event, { secret }) => {
     try {
       const totpManager = getTOTPManager();
-      
+
       // Validate the secret by trying to generate a code
       if (!totpManager.isValidSecret(secret)) {
-        logger.warn('[Auth] Invalid TOTP secret rejected', { event: 'auth:totp-invalid-secret', feature: 'auto-login' });
+        logger.warn('[Auth] Invalid TOTP secret rejected', {
+          event: 'auth:totp-invalid-secret',
+          feature: 'auto-login',
+        });
         return { success: false, error: 'Invalid TOTP secret' };
       }
-      
+
       const success = await credentialManager.saveTOTPSecret(secret);
       logger.info('[Auth] TOTP secret saved', { event: 'auth:totp-saved', success, feature: 'auto-login' });
       return { success };
     } catch (error) {
-      logger.error('[Auth] TOTP save failed', { event: 'auth:totp-save-error', error: error.message, feature: 'auto-login' });
+      logger.error('[Auth] TOTP save failed', {
+        event: 'auth:totp-save-error',
+        error: error.message,
+        feature: 'auto-login',
+      });
       return { success: false, error: error.message };
     }
   });
-  
+
   // Delete TOTP secret
   ipcMain.handle('onereach:delete-totp', async () => {
     try {
@@ -2762,64 +3063,75 @@ function setupSpacesAPI() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Scan QR code from screen
   ipcMain.handle('totp:scan-qr-screen', async () => {
     try {
       const qrScanner = getQRScanner();
       const totpManager = getTOTPManager();
-      
+
       const qrData = await qrScanner.scanFromScreen();
-      
+
       if (!qrData) {
         return { success: false, error: 'No QR code found' };
       }
-      
+
       if (!qrScanner.isOTPAuthURI(qrData)) {
         return { success: false, error: 'QR code is not an authenticator setup code' };
       }
-      
+
       const parsed = totpManager.parseOTPAuthURI(qrData);
-      
+
       return {
         success: true,
         secret: parsed.secret,
         issuer: parsed.issuer,
-        account: parsed.account
+        account: parsed.account,
       };
     } catch (error) {
       console.error('[TOTP] QR scan error:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get current TOTP code
   ipcMain.handle('totp:get-current-code', async () => {
     try {
       const totpSecret = await credentialManager.getTOTPSecret();
-      
+
       if (!totpSecret) {
-        logger.warn('[Auth] TOTP code requested but no secret configured', { event: 'auth:totp-no-secret', feature: 'auto-login' });
+        logger.warn('[Auth] TOTP code requested but no secret configured', {
+          event: 'auth:totp-no-secret',
+          feature: 'auto-login',
+        });
         return { success: false, error: 'No TOTP secret configured' };
       }
-      
+
       const totpManager = getTOTPManager();
       const codeInfo = totpManager.getCurrentCodeInfo(totpSecret);
-      
-      logger.info('[Auth] TOTP code generated', { event: 'auth:totp-generated', timeRemaining: codeInfo.timeRemaining, feature: 'auto-login' });
-      
+
+      logger.info('[Auth] TOTP code generated', {
+        event: 'auth:totp-generated',
+        timeRemaining: codeInfo.timeRemaining,
+        feature: 'auto-login',
+      });
+
       return {
         success: true,
         code: codeInfo.code,
         formattedCode: codeInfo.formattedCode,
-        timeRemaining: codeInfo.timeRemaining
+        timeRemaining: codeInfo.timeRemaining,
       };
     } catch (error) {
-      logger.error('[Auth] TOTP code generation failed', { event: 'auth:totp-error', error: error.message, feature: 'auto-login' });
+      logger.error('[Auth] TOTP code generation failed', {
+        event: 'auth:totp-error',
+        error: error.message,
+        feature: 'auto-login',
+      });
       return { success: false, error: error.message };
     }
   });
-  
+
   // Test login (opens a test window)
   ipcMain.handle('onereach:test-login', async () => {
     try {
@@ -2833,25 +3145,34 @@ function setupSpacesAPI() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Execute JavaScript in webview iframe (for cross-origin auth frames)
   ipcMain.handle('onereach:execute-in-frame', async (event, { webContentsId, urlPattern, script }) => {
     try {
-      const { webContents, webFrameMain } = require('electron');
-      
+      const { webContents } = require('electron');
+
       // Get the webContents by ID
       const wc = webContents.fromId(webContentsId);
       if (!wc) {
-        logger.warn('[Auth] Frame execute: WebContents not found', { event: 'auth:frame-missing', webContentsId, feature: 'auto-login' });
+        logger.warn('[Auth] Frame execute: WebContents not found', {
+          event: 'auth:frame-missing',
+          webContentsId,
+          feature: 'auto-login',
+        });
         return { success: false, error: 'WebContents not found' };
       }
-      
+
       // Get all frames in the webContents
       const mainFrame = wc.mainFrame;
       const allFrames = [mainFrame, ...mainFrame.framesInSubtree];
-      
-      logger.debug('[Auth] Searching frames for auth iframe', { event: 'auth:frame-search', urlPattern, frameCount: allFrames.length, feature: 'auto-login' });
-      
+
+      logger.debug('[Auth] Searching frames for auth iframe', {
+        event: 'auth:frame-search',
+        urlPattern,
+        frameCount: allFrames.length,
+        feature: 'auto-login',
+      });
+
       // Find frame matching the URL pattern
       let targetFrame = null;
       for (const frame of allFrames) {
@@ -2861,27 +3182,42 @@ function setupSpacesAPI() {
           break;
         }
       }
-      
+
       if (!targetFrame) {
-        logger.info('[Auth] No matching auth frame found', { event: 'auth:frame-not-found', urlPattern, frameCount: allFrames.length, feature: 'auto-login' });
+        logger.info('[Auth] No matching auth frame found', {
+          event: 'auth:frame-not-found',
+          urlPattern,
+          frameCount: allFrames.length,
+          feature: 'auto-login',
+        });
         return { success: false, error: 'No matching frame found' };
       }
-      
+
       // Execute script in the frame
       const result = await targetFrame.executeJavaScript(script);
-      logger.debug('[Auth] Frame script executed', { event: 'auth:frame-executed', urlPattern, success: true, feature: 'auto-login' });
-      
+      logger.debug('[Auth] Frame script executed', {
+        event: 'auth:frame-executed',
+        urlPattern,
+        success: true,
+        feature: 'auto-login',
+      });
+
       return { success: true, result };
     } catch (error) {
-      logger.error('[Auth] Frame script execution failed', { event: 'auth:frame-error', urlPattern, error: error.message, feature: 'auto-login' });
+      logger.error('[Auth] Frame script execution failed', {
+        event: 'auth:frame-error',
+        urlPattern,
+        error: error.message,
+        feature: 'auto-login',
+      });
       return { success: false, error: error.message };
     }
   });
-  
+
   console.log('[OneReach] ✅ Auto-login IPC handlers registered');
-  
+
   // ---- CONVERSATION CAPTURE IPC HANDLERS ----
-  
+
   // Get overlay script content
   ipcMain.handle('get-overlay-script', () => {
     try {
@@ -2893,7 +3229,7 @@ function setupSpacesAPI() {
       return '';
     }
   });
-  
+
   // Check if conversation capture is enabled
   ipcMain.handle('conversation:isEnabled', () => {
     try {
@@ -2903,7 +3239,7 @@ function setupSpacesAPI() {
       return false;
     }
   });
-  
+
   // Check if paused
   ipcMain.handle('conversation:isPaused', () => {
     try {
@@ -2913,7 +3249,7 @@ function setupSpacesAPI() {
       return false;
     }
   });
-  
+
   // Set pause state
   ipcMain.handle('conversation:setPaused', (event, paused) => {
     try {
@@ -2927,7 +3263,7 @@ function setupSpacesAPI() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Mark current conversation as do not save
   ipcMain.handle('conversation:markDoNotSave', (event, serviceId) => {
     try {
@@ -2941,7 +3277,7 @@ function setupSpacesAPI() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Check if current conversation is marked do not save
   ipcMain.handle('conversation:isMarkedDoNotSave', (event, serviceId) => {
     try {
@@ -2951,7 +3287,7 @@ function setupSpacesAPI() {
       return false;
     }
   });
-  
+
   // Get current conversation
   ipcMain.handle('conversation:getCurrent', (event, serviceId) => {
     try {
@@ -2961,7 +3297,7 @@ function setupSpacesAPI() {
       return null;
     }
   });
-  
+
   // Undo save
   ipcMain.handle('conversation:undoSave', async (event, itemId) => {
     try {
@@ -2974,7 +3310,7 @@ function setupSpacesAPI() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Copy conversation to another space
   ipcMain.handle('conversation:copyToSpace', async (event, conversationId, targetSpaceId) => {
     try {
@@ -2987,19 +3323,19 @@ function setupSpacesAPI() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Handle ChatGPT response captured from fetch interceptor
   ipcMain.on('chatgpt-response-captured', async (event, data) => {
     console.log('[ConversationCapture] Received ChatGPT response from interceptor');
     console.log('[ConversationCapture] Conversation ID:', data.conversationId);
     console.log('[ConversationCapture] Message length:', data.message?.length || 0);
-    
+
     try {
       if (conversationCapture && data.message) {
         await conversationCapture.captureResponse('ChatGPT', {
           message: data.message,
           externalConversationId: data.conversationId,
-          timestamp: data.timestamp || new Date().toISOString()
+          timestamp: data.timestamp || new Date().toISOString(),
         });
         console.log('[ConversationCapture] ✅ ChatGPT response captured successfully');
       }
@@ -3007,19 +3343,19 @@ function setupSpacesAPI() {
       console.error('[ConversationCapture] Error capturing ChatGPT response:', error);
     }
   });
-  
+
   // Handle Grok response captured from fetch interceptor
   ipcMain.on('grok-response-captured', async (event, data) => {
     console.log('[ConversationCapture] Received Grok response from interceptor');
     console.log('[ConversationCapture] Conversation ID:', data.conversationId);
     console.log('[ConversationCapture] Message length:', data.message?.length || 0);
-    
+
     try {
       if (conversationCapture && data.message) {
         await conversationCapture.captureResponse('Grok', {
           message: data.message,
           externalConversationId: data.conversationId,
-          timestamp: data.timestamp || new Date().toISOString()
+          timestamp: data.timestamp || new Date().toISOString(),
         });
         console.log('[ConversationCapture] ✅ Grok response captured successfully');
       }
@@ -3027,19 +3363,19 @@ function setupSpacesAPI() {
       console.error('[ConversationCapture] Error capturing Grok response:', error);
     }
   });
-  
+
   // Handle Gemini response captured from fetch interceptor
   ipcMain.on('gemini-response-captured', async (event, data) => {
     console.log('[ConversationCapture] Received Gemini response from interceptor');
     console.log('[ConversationCapture] Conversation ID:', data.conversationId);
     console.log('[ConversationCapture] Message length:', data.message?.length || 0);
-    
+
     try {
       if (conversationCapture && data.message) {
         await conversationCapture.captureResponse('Gemini', {
           message: data.message,
           externalConversationId: data.conversationId,
-          timestamp: data.timestamp || new Date().toISOString()
+          timestamp: data.timestamp || new Date().toISOString(),
         });
         console.log('[ConversationCapture] ✅ Gemini response captured successfully');
       }
@@ -3047,7 +3383,7 @@ function setupSpacesAPI() {
       console.error('[ConversationCapture] Error capturing Gemini response:', error);
     }
   });
-  
+
   // Get media items for a conversation
   ipcMain.handle('conversation:getMedia', async (event, spaceId, conversationId) => {
     try {
@@ -3060,7 +3396,7 @@ function setupSpacesAPI() {
       return [];
     }
   });
-  
+
   // Headless Claude prompt - Run a prompt in a hidden window
   ipcMain.handle('claude:runHeadlessPrompt', async (event, prompt, options = {}) => {
     try {
@@ -3074,7 +3410,7 @@ function setupSpacesAPI() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Legacy Unified Claude handlers — redirected through centralized ai-service
   ipcMain.handle('claude:unified-complete', async (event, prompt, options = {}) => {
     try {
@@ -3092,8 +3428,8 @@ function setupSpacesAPI() {
       return { success: false, error: error.message };
     }
   });
-  
-  ipcMain.handle('claude:unified-status', async (event) => {
+
+  ipcMain.handle('claude:unified-status', async (_event) => {
     try {
       const { getAIService } = require('./lib/ai-service');
       const status = getAIService().getStatus();
@@ -3103,8 +3439,8 @@ function setupSpacesAPI() {
       return { error: error.message };
     }
   });
-  
-  ipcMain.handle('claude:unified-update-settings', async (event, settings) => {
+
+  ipcMain.handle('claude:unified-update-settings', async (_event, _settings) => {
     try {
       // Settings are now managed through ai-service model profiles
       console.log('[IPC] claude:unified-update-settings is a no-op — use ai:setProfile instead');
@@ -3114,7 +3450,7 @@ function setupSpacesAPI() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // =========================================================================
   // Centralized AI Service IPC Handlers
   // All renderer processes use these instead of direct API calls.
@@ -3181,7 +3517,7 @@ function setupSpacesAPI() {
   // Streaming chat via IPC event channels
   ipcMain.handle('ai:chatStream', async (event, opts) => {
     const requestId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    
+
     try {
       const ai = require('./lib/ai-service');
       const stream = ai.chatStream(opts);
@@ -3275,16 +3611,16 @@ function setupSpacesAPI() {
   // Test support - Only available in test mode
   if (process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true') {
     console.log('[ConversationCapture] Registering test-only IPC handlers');
-    
+
     // Test capture - Simulate conversation capture for automated testing
     ipcMain.handle('conversation:test-capture', async (event, data) => {
       try {
         if (!conversationCapture) {
           return { success: false, error: 'ConversationCapture not initialized' };
         }
-        
+
         const { serviceId, conversation } = data;
-        
+
         // Create a new conversation if needed
         if (!conversationCapture.activeConversations.has(serviceId)) {
           conversationCapture.activeConversations.set(serviceId, {
@@ -3300,25 +3636,25 @@ function setupSpacesAPI() {
             hasFiles: false,
             hasCode: false,
             doNotSave: false,
-            savedItemId: null
+            savedItemId: null,
           });
         }
-        
+
         // Get the active conversation
         const activeConv = conversationCapture.activeConversations.get(serviceId);
-        
+
         // Add messages
         activeConv.messages.push(...conversation.messages);
         activeConv.exchangeCount = conversation.exchangeCount || Math.floor(conversation.messages.length / 2);
         activeConv.lastActivity = Date.now();
-        
+
         // Save the conversation
         await conversationCapture._saveConversation(serviceId, activeConv);
-        
-        return { 
-          success: true, 
+
+        return {
+          success: true,
           itemId: activeConv.savedItemId,
-          conversationId: activeConv.id 
+          conversationId: activeConv.id,
         };
       } catch (error) {
         console.error('[ConversationCapture] Test capture error:', error);
@@ -3326,7 +3662,7 @@ function setupSpacesAPI() {
       }
     });
   }
-  
+
   console.log('[ConversationCapture] ✅ IPC handlers registered');
 }
 
@@ -3344,23 +3680,23 @@ let tabPickerCallback = null;
  */
 function setupAppActionsIPC() {
   console.log('[AppActions] Setting up IPC handlers (delegating to action-executor)...');
-  
+
   const { executeAction, listActions, setupActionIPC } = require('./action-executor');
-  
+
   // Set up the action executor's IPC handlers
   setupActionIPC();
-  
+
   // Legacy IPC handler for backward compatibility
   ipcMain.handle('app:execute-action', async (event, action) => {
     console.log('[AppActions] Executing action:', action);
     return executeAction(action.type, action);
   });
-  
+
   // Legacy list actions handler
   ipcMain.handle('app:list-actions', async () => {
     return listActions();
   });
-  
+
   console.log('[AppActions] IPC handlers registered');
 }
 
@@ -3371,7 +3707,7 @@ function setupTabPickerIPC() {
     const server = global.spacesAPIServer;
     return {
       extensionConnected: server ? server.isExtensionConnected() : false,
-      serverRunning: !!server
+      serverRunning: !!server,
     };
   });
 
@@ -3421,7 +3757,7 @@ function setupTabPickerIPC() {
   });
 
   // Handler to open tab picker (called from renderer)
-  ipcMain.handle('open-tab-picker', async (event) => {
+  ipcMain.handle('open-tab-picker', async (_event) => {
     return new Promise((resolve) => {
       tabPickerCallback = resolve;
       createTabPickerWindow();
@@ -3457,11 +3793,12 @@ function createTabPickerWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload-tab-picker.js')
-    }
+      preload: path.join(__dirname, 'preload-tab-picker.js'),
+    },
   });
 
   tabPickerWindow.loadFile('tab-picker.html');
+  windowRegistry.register('tab-picker', tabPickerWindow);
 
   tabPickerWindow.on('closed', () => {
     tabPickerWindow = null;
@@ -3481,8 +3818,8 @@ function openExtensionSetupGuide() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload-minimal.js')
-    }
+      preload: path.join(__dirname, 'preload-minimal.js'),
+    },
   });
 
   setupWindow.loadFile('extension-setup.html');
@@ -3499,8 +3836,8 @@ async function fetchUrlContent(url) {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        offscreen: true
-      }
+        offscreen: true,
+      },
     });
 
     let resolved = false;
@@ -3522,10 +3859,13 @@ async function fetchUrlContent(url) {
 
     captureWindow.webContents.on('did-finish-load', async () => {
       if (resolved) return;
-      
+
       try {
+        // TIMING: Wait for dynamic content/SPA to render; did-finish-load fires before JS-driven content is visible.
         // Wait a bit for dynamic content
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise((r) => {
+          setTimeout(r, 1000);
+        });
 
         // Capture screenshot
         const image = await captureWindow.webContents.capturePage();
@@ -3561,7 +3901,7 @@ async function fetchUrlContent(url) {
           title,
           screenshot,
           textContent,
-          capturedAt: Date.now()
+          capturedAt: Date.now(),
         });
       } catch (error) {
         resolved = true;
@@ -3588,7 +3928,7 @@ async function fetchUrlContent(url) {
 function setupModuleManagerIPC() {
   const ModuleEvaluator = require('./module-evaluator');
   const evaluator = new ModuleEvaluator();
-  
+
   // Get installed modules
   ipcMain.handle('module:get-installed', async () => {
     if (!global.moduleManager) {
@@ -3596,7 +3936,7 @@ function setupModuleManagerIPC() {
     }
     return global.moduleManager.getInstalledModules();
   });
-  
+
   // Open module
   ipcMain.handle('module:open', async (event, moduleId) => {
     try {
@@ -3609,7 +3949,7 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Uninstall module
   ipcMain.handle('module:uninstall', async (event, moduleId) => {
     try {
@@ -3622,7 +3962,7 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Install from URL
   ipcMain.handle('module:install-from-url', async (event, url) => {
     try {
@@ -3635,7 +3975,7 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Install from file
   ipcMain.handle('module:install-from-file', async (event, filePath) => {
     try {
@@ -3648,7 +3988,7 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Evaluate module
   ipcMain.handle('module:evaluate', async (event, zipPath) => {
     try {
@@ -3658,7 +3998,7 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // AI Review module
   ipcMain.handle('module:ai-review', async (event, zipPath) => {
     try {
@@ -3670,23 +4010,23 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Check if Claude API is configured
   ipcMain.handle('module:check-claude-api', async () => {
     const { getSettingsManager } = require('./settings-manager');
     const settingsManager = getSettingsManager();
-    
+
     // Check for new llmConfig structure first
     const llmConfig = settingsManager.get('llmConfig');
     if (llmConfig && llmConfig.anthropic && llmConfig.anthropic.apiKey) {
       return true;
     }
-    
+
     // Fallback to legacy structure
     const apiKey = settingsManager.get('llmApiKey');
     return !!apiKey;
   });
-  
+
   // Generate AI review report
   ipcMain.handle('module:generate-ai-report', async (event, result) => {
     try {
@@ -3697,12 +4037,12 @@ function setupModuleManagerIPC() {
       throw error;
     }
   });
-  
+
   // Refresh menu
   ipcMain.on('refresh-menu', () => {
     updateApplicationMenu();
   });
-  
+
   // Download module to temp location for validation
   ipcMain.handle('module:download-temp', async (event, url) => {
     try {
@@ -3710,118 +4050,101 @@ function setupModuleManagerIPC() {
       const http = require('http');
       const tempDir = app.getPath('temp');
       const tempFile = path.join(tempDir, `module-${Date.now()}.zip`);
-      
+
       return new Promise((resolve, reject) => {
         const file = fs.createWriteStream(tempFile);
         const protocol = url.startsWith('https') ? https : http;
-        
-        protocol.get(url, (response) => {
-          if (response.statusCode !== 200) {
-            reject(new Error(`Failed to download: ${response.statusCode}`));
-            return;
-          }
-          
-          response.pipe(file);
-          
-          file.on('finish', () => {
-            file.close();
-            resolve({ success: true, path: tempFile });
+
+        protocol
+          .get(url, (response) => {
+            if (response.statusCode !== 200) {
+              reject(new Error(`Failed to download: ${response.statusCode}`));
+              return;
+            }
+
+            response.pipe(file);
+
+            file.on('finish', () => {
+              file.close();
+              resolve({ success: true, path: tempFile });
+            });
+          })
+          .on('error', (err) => {
+            fs.unlink(tempFile, () => {});
+            reject(err);
           });
-        }).on('error', (err) => {
-          fs.unlink(tempFile, () => {});
-          reject(err);
-        });
       });
     } catch (error) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // IDW Store handlers
   console.log('[setupModuleManagerIPC] Registering IDW Store handlers');
-  
-  // Fetch IDW directory from API
+
+  // Fetch IDW directory from OmniGraph (graph DB)
   ipcMain.handle('idw-store:fetch-directory', async () => {
     try {
-      console.log('[IDW Store] Fetching directory from API...');
-      const https = require('https');
-      
-      const options = {
-        hostname: 'em.staging.api.onereach.ai',
-        port: 443,
-        path: '/http/48cc49ef-ab05-4d51-acc6-559c7ff22150/idw_directory',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        timeout: 10000
-      };
-      
-      return new Promise((resolve, reject) => {
-        const req = https.request(options, (res) => {
-          console.log('[IDW Store] Response status:', res.statusCode);
-          
-          let data = '';
-          
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          
-          res.on('end', () => {
-            console.log('[IDW Store] Response received, length:', data.length);
-            
-            try {
-              const jsonData = JSON.parse(data);
-              console.log('[IDW Store] Successfully parsed JSON');
-              resolve(jsonData);
-            } catch (error) {
-              console.error('[IDW Store] Failed to parse response:', error);
-              reject(new Error('Invalid JSON response from API'));
-            }
-          });
-        });
-        
-        req.on('error', (error) => {
-          console.error('[IDW Store] API request failed:', error);
-          reject(error);
-        });
-        
-        req.on('timeout', () => {
-          console.error('[IDW Store] Request timeout');
-          req.destroy();
-          reject(new Error('Request timeout'));
-        });
-        
-        req.write(JSON.stringify({}));
-        req.end();
-      });
+      console.log('[IDW Store] Fetching directory from OmniGraph...');
+      const { getOmniGraphClient } = require('./omnigraph-client');
+      const client = getOmniGraphClient();
+
+      // Auto-initialize OmniGraph if not already configured
+      if (!client.isReady()) {
+        console.log('[IDW Store] OmniGraph not ready, attempting auto-init...');
+        try {
+          const { getSettingsManager } = require('./settings-manager');
+          const settings = getSettingsManager();
+          const refreshUrl = settings.get('gsxRefreshUrl');
+          if (refreshUrl) {
+            const endpoint = refreshUrl.replace('/refresh_token', '/omnigraph');
+            client.setEndpoint(endpoint);
+            client.setCurrentUser(settings.get('userEmail') || 'system');
+            console.log('[IDW Store] Auto-initialized OmniGraph with endpoint:', endpoint);
+          }
+        } catch (initErr) {
+          console.warn('[IDW Store] Could not auto-init OmniGraph:', initErr.message);
+        }
+      }
+
+      if (!client.isReady()) {
+        throw new Error('OmniGraph is not configured. Please set up your account in Settings.');
+      }
+
+      // Gather installed IDW IDs from settings to mark them in the directory
+      const settingsManager = global.settingsManager;
+      const idwEnvironments = settingsManager ? settingsManager.get('idwEnvironments') || [] : [];
+      const installedIds = idwEnvironments.filter((env) => env.storeData?.idwId).map((env) => env.storeData.idwId);
+
+      const directory = await client.getIDWDirectory(installedIds);
+      console.log('[IDW Store] Loaded', directory.availableIDWs.all.length, 'IDWs from graph');
+      return directory;
     } catch (error) {
-      console.error('[IDW Store] Error fetching directory:', error);
+      console.error('[IDW Store] Error fetching directory from graph:', error);
       return { success: false, error: { message: error.message } };
     }
   });
-  
+
   // Add IDW to menu from store
   ipcMain.handle('idw-store:add-to-menu', async (event, idw) => {
     try {
       console.log('[IDW Store] Adding IDW to menu:', idw.name);
-      
+
       // Get from settings manager (single source of truth)
       const settingsManager = global.settingsManager;
       let idwEnvironments = settingsManager.get('idwEnvironments') || [];
       console.log('[IDW Store] Current IDWs in settings:', idwEnvironments.length);
-      
+
       // Check if this IDW is already installed
       const storeIdwId = `store-${idw.id}`;
-      const existingIndex = idwEnvironments.findIndex(env => {
+      const existingIndex = idwEnvironments.findIndex((env) => {
         if (env.id === storeIdwId) return true;
         if (env.storeData && env.storeData.idwId === idw.id) return true;
         if (env.chatUrl === idw.url) return true;
         if (env.label === idw.name && env.storeData && env.storeData.developer === idw.developer) return true;
         return false;
       });
-      
+
       if (existingIndex !== -1) {
         console.log('[IDW Store] IDW already exists, updating...');
         idwEnvironments[existingIndex] = {
@@ -3836,27 +4159,31 @@ function setupModuleManagerIPC() {
             developer: idw.developer,
             version: idw.version,
             installedAt: idwEnvironments[existingIndex].storeData?.installedAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          }
+            updatedAt: new Date().toISOString(),
+          },
         };
-        
+
         // Save to settings
         settingsManager.set('idwEnvironments', idwEnvironments);
         console.log('[IDW Store] ✅ Saved update to settings');
-        
+
         // CRITICAL: Also sync to idw-entries.json for menu
         const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
         fs.writeFileSync(idwConfigPath, JSON.stringify(idwEnvironments, null, 2));
         console.log('[IDW Store] ✅ Synced to idw-entries.json');
-        
+
         // Refresh menu
-        if (global.menuDataManager) { global.menuDataManager.refresh(); }
-        else { const { refreshApplicationMenu } = require('./menu'); refreshApplicationMenu(); }
+        if (global.menuDataManager) {
+          global.menuDataManager.refresh();
+        } else {
+          const { refreshApplicationMenu } = require('./menu');
+          refreshApplicationMenu();
+        }
         console.log('[IDW Store] Menu refreshed');
-        
+
         return { success: true, updated: true };
       }
-      
+
       // Add new IDW
       const newEntry = {
         id: storeIdwId,
@@ -3869,35 +4196,39 @@ function setupModuleManagerIPC() {
           idwId: idw.id,
           developer: idw.developer,
           version: idw.version,
-          installedAt: new Date().toISOString()
-        }
+          installedAt: new Date().toISOString(),
+        },
       };
-      
+
       idwEnvironments.push(newEntry);
-      
+
       // Save to settings
       settingsManager.set('idwEnvironments', idwEnvironments);
       console.log('[IDW Store] ✅ Saved to settings, total:', idwEnvironments.length);
-      
+
       // CRITICAL: Also sync to idw-entries.json for menu
       const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
       fs.writeFileSync(idwConfigPath, JSON.stringify(idwEnvironments, null, 2));
       console.log('[IDW Store] ✅ Synced to idw-entries.json');
-      
+
       // Refresh menu
-      if (global.menuDataManager) { global.menuDataManager.refresh(); }
-      else { const { refreshApplicationMenu } = require('./menu'); refreshApplicationMenu(); }
+      if (global.menuDataManager) {
+        global.menuDataManager.refresh();
+      } else {
+        const { refreshApplicationMenu } = require('./menu');
+        refreshApplicationMenu();
+      }
       console.log('[IDW Store] Menu refreshed');
-      
+
       return { success: true, updated: false };
     } catch (error) {
       console.error('[IDW Store] Failed to add IDW to menu:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Web Tools handlers
-  
+
   // Get all web tools
   ipcMain.handle('module:get-web-tools', async () => {
     if (!global.moduleManager) {
@@ -3905,7 +4236,7 @@ function setupModuleManagerIPC() {
     }
     return global.moduleManager.getWebTools();
   });
-  
+
   // Add web tool
   ipcMain.handle('module:add-web-tool', async (event, tool) => {
     try {
@@ -3918,7 +4249,7 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Open web tool
   ipcMain.handle('module:open-web-tool', async (event, toolId) => {
     try {
@@ -3931,7 +4262,7 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Delete web tool
   ipcMain.handle('module:delete-web-tool', async (event, toolId) => {
     try {
@@ -3944,63 +4275,66 @@ function setupModuleManagerIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   console.log('[setupModuleManagerIPC] All handlers registered');
 }
 
 // Set up Dependency Management IPC handlers
 function setupDependencyIPC() {
   console.log('[setupDependencyIPC] Setting up Dependency Management handlers');
-  
+
   const { getDependencyManager } = require('./dependency-manager');
-  
+
   // Check all dependencies
   ipcMain.handle('deps:check-all', async () => {
     try {
       const depManager = getDependencyManager();
       const status = depManager.checkAllDependencies();
-      console.log('[DependencyManager] Check result:', status.allInstalled ? 'All installed' : `Missing: ${status.missing.map(d => d.name).join(', ')}`);
+      console.log(
+        '[DependencyManager] Check result:',
+        status.allInstalled ? 'All installed' : `Missing: ${status.missing.map((d) => d.name).join(', ')}`
+      );
       return { success: true, ...status };
     } catch (error) {
       console.error('[DependencyManager] Check failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Install a specific dependency
   ipcMain.handle('deps:install', async (event, depName) => {
     try {
       const depManager = getDependencyManager();
-      
+
       // Stream output back to renderer
       const result = await depManager.installDependency(depName, (output) => {
         event.sender.send('deps:install-output', { depName, ...output });
       });
-      
+
       return { success: true, ...result };
     } catch (error) {
       console.error('[DependencyManager] Install failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Install all missing dependencies
   ipcMain.handle('deps:install-all', async (event) => {
     try {
       const depManager = getDependencyManager();
-      
+
       // Stream output back to renderer
       const result = await depManager.installAllMissing((output) => {
         event.sender.send('deps:install-output', output);
       });
-      
+
       return { success: result.allSuccessful, ...result };
     } catch (error) {
       console.error('[DependencyManager] Install all failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Cancel an ongoing installation
   ipcMain.handle('deps:cancel-install', async (event, depName) => {
     try {
@@ -4011,7 +4345,7 @@ function setupDependencyIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get the aider Python path
   ipcMain.handle('deps:get-aider-python', async () => {
     try {
@@ -4022,14 +4356,14 @@ function setupDependencyIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   console.log('[setupDependencyIPC] All handlers registered');
 }
 
 // Set up Aider Bridge IPC handlers
 function setupAiderIPC() {
   console.log('[setupAiderIPC] Setting up Aider Bridge handlers');
-  
+
   // Start Aider
   ipcMain.handle('aider:start', async () => {
     try {
@@ -4039,14 +4373,14 @@ function setupAiderIPC() {
         const settings = getSettingsManager();
         const apiKey = settings.getLLMApiKey();
         const provider = settings.getLLMProvider();
-        
+
         console.log(`[Aider] Starting with provider: ${provider}, API key present: ${!!apiKey}`);
-        
+
         // Find the correct Python path - check pipx first, then system python
         const { execSync } = require('child_process');
         const os = require('os');
         let pythonPath = 'python3';
-        
+
         // Check for pipx aider installation
         const pipxAiderPython = path.join(os.homedir(), '.local', 'pipx', 'venvs', 'aider-chat', 'bin', 'python');
         if (fs.existsSync(pipxAiderPython)) {
@@ -4057,7 +4391,7 @@ function setupAiderIPC() {
           try {
             execSync('python3 -c "import aider"', { encoding: 'utf-8', stdio: 'pipe' });
             console.log('[Aider] Using system python3 with aider');
-          } catch (e) {
+          } catch (_e) {
             // Try to find aider command and extract its Python
             try {
               const aiderPath = execSync('which aider', { encoding: 'utf-8' }).trim();
@@ -4072,12 +4406,12 @@ function setupAiderIPC() {
                   }
                 }
               }
-            } catch (e2) {
+            } catch (_e2) {
               console.log('[Aider] Could not find aider command, using python3');
             }
           }
         }
-        
+
         console.log('[Aider] Using Python path:', pythonPath);
         aiderBridge = new AiderBridgeClient(pythonPath, apiKey, provider);
         await aiderBridge.start();
@@ -4089,7 +4423,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Initialize with repo
   ipcMain.handle('aider:initialize', async (event, repoPath, modelName) => {
     try {
@@ -4105,7 +4439,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Run prompt
   ipcMain.handle('aider:run-prompt', async (event, message) => {
     try {
@@ -4121,21 +4455,21 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // ========== HUD ACTIVITY BROADCASTING ==========
   // Helper to broadcast HUD activity updates to all windows
   function broadcastHUDActivity(data) {
     const { BrowserWindow } = require('electron');
-    BrowserWindow.getAllWindows().forEach(win => {
+    BrowserWindow.getAllWindows().forEach((win) => {
       if (win && win.webContents && !win.webContents.isDestroyed()) {
         win.webContents.send('hud:activity', data);
       }
     });
   }
-  
+
   // Expose broadcast function globally for Agent to use
   global.broadcastHUDActivity = broadcastHUDActivity;
-  
+
   // Run prompt with streaming
   ipcMain.handle('aider:run-prompt-streaming', async (event, message, channel) => {
     try {
@@ -4143,24 +4477,24 @@ function setupAiderIPC() {
         throw new Error('Aider not started');
       }
       console.log('[Aider] Running streaming prompt:', message.substring(0, 100) + '...');
-      
+
       // Broadcast HUD: stream starting
       broadcastHUDActivity({
         type: 'aider',
         phase: 'Execute',
         action: 'Processing prompt...',
-        task: message.substring(0, 60) + (message.length > 60 ? '...' : '')
+        task: message.substring(0, 60) + (message.length > 60 ? '...' : ''),
       });
-      
+
       let currentFile = null;
       let tokenBuffer = '';
-      
+
       const result = await aiderBridge.runPromptStreaming(message, (token) => {
         event.sender.send(channel, { type: 'token', token });
-        
+
         // Accumulate tokens to detect patterns
         tokenBuffer += token;
-        
+
         // Detect file being edited from SEARCH/REPLACE blocks
         const fileMatch = tokenBuffer.match(/(?:<<<<<<< SEARCH|SEARCH\/REPLACE)\s*(?:in\s+)?([^\n]+\.[a-zA-Z]+)/i);
         if (fileMatch && fileMatch[1] !== currentFile) {
@@ -4168,10 +4502,10 @@ function setupAiderIPC() {
           broadcastHUDActivity({
             type: 'aider',
             action: 'Writing code...',
-            file: currentFile
+            file: currentFile,
           });
         }
-        
+
         // Detect file writes
         const wroteMatch = token.match(/(?:Wrote|Applied edit to)\s+([^\s\n]+)/);
         if (wroteMatch) {
@@ -4179,40 +4513,40 @@ function setupAiderIPC() {
             type: 'aider',
             action: 'File saved',
             file: wroteMatch[1],
-            recent: `Updated ${wroteMatch[1].split('/').pop()}`
+            recent: `Updated ${wroteMatch[1].split('/').pop()}`,
           });
         }
-        
+
         // Keep buffer manageable
         if (tokenBuffer.length > 2000) {
           tokenBuffer = tokenBuffer.slice(-1000);
         }
       });
-      
+
       // Broadcast HUD: complete
       broadcastHUDActivity({
         type: 'aider',
         action: 'Complete!',
-        phase: 'Execute'
+        phase: 'Execute',
       });
-      
+
       event.sender.send(channel, { type: 'done', result });
       return result;
     } catch (error) {
       console.error('[Aider] Streaming prompt failed:', error);
-      
+
       // Broadcast HUD: error
       broadcastHUDActivity({
         type: 'aider',
         action: 'Error: ' + error.message.substring(0, 40),
-        phase: 'Execute'
+        phase: 'Execute',
       });
-      
+
       event.sender.send(channel, { type: 'error', error: error.message });
       return { success: false, error: error.message };
     }
   });
-  
+
   // Add files
   ipcMain.handle('aider:add-files', async (event, filePaths) => {
     try {
@@ -4227,7 +4561,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Remove files
   ipcMain.handle('aider:remove-files', async (event, filePaths) => {
     try {
@@ -4242,7 +4576,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get repo map
   ipcMain.handle('aider:get-repo-map', async () => {
     try {
@@ -4257,7 +4591,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Set test command
   ipcMain.handle('aider:set-test-cmd', async (event, command) => {
     try {
@@ -4272,7 +4606,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Set lint command
   ipcMain.handle('aider:set-lint-cmd', async (event, command) => {
     try {
@@ -4287,7 +4621,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Shutdown Aider
   ipcMain.handle('aider:shutdown', async () => {
     try {
@@ -4302,32 +4636,32 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get app path
   ipcMain.handle('aider:get-app-path', async () => {
     return app.getAppPath();
   });
-  
+
   // Select folder dialog
   ipcMain.handle('aider:select-folder', async () => {
     const { dialog } = require('electron');
     const result = await dialog.showOpenDialog({
-      properties: ['openDirectory']
+      properties: ['openDirectory'],
     });
     if (result.canceled) {
       return null;
     }
     return result.filePaths[0];
   });
-  
+
   // Create a new space (via centralized Spaces API)
   ipcMain.handle('aider:create-space', async (event, name) => {
     try {
       const { getSpacesAPI } = require('./spaces-api');
       const spacesAPI = getSpacesAPI();
-      
+
       const space = await spacesAPI.create(name || 'New Space');
-      
+
       console.log('[Aider] Created space:', space.id);
       return { success: true, spaceId: space.id, spacePath: space.path };
     } catch (error) {
@@ -4335,16 +4669,16 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Initialize the Branch Aider Manager for parallel exploration
   ipcMain.handle('aider:init-branch-manager', async (event, spacePath) => {
     try {
       // Create the branch manager instance
       branchAiderManager = new BranchAiderManager();
-      
+
       // Call initialize() to set up the logs directory
       await branchAiderManager.initialize(spacePath);
-      
+
       console.log('[BranchManager] Initialized for space:', spacePath);
       return { success: true, logsDir: branchAiderManager.logsDir };
     } catch (error) {
@@ -4352,7 +4686,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Initialize a branch-specific Aider instance
   ipcMain.handle('aider:init-branch', async (event, branchPath, branchId, model, readOnlyFiles) => {
     try {
@@ -4360,13 +4694,13 @@ function setupAiderIPC() {
         branchPath: branchPath || '<null>',
         branchId: branchId || '<null>',
         model: model || '<null>',
-        readOnlyFiles: readOnlyFiles?.length || 0
+        readOnlyFiles: readOnlyFiles?.length || 0,
       });
-      
+
       if (!branchAiderManager) {
         throw new Error('Branch manager not initialized. Call init-branch-manager first.');
       }
-      
+
       const result = await branchAiderManager.initBranch(branchPath, branchId, model, readOnlyFiles);
       return result;
     } catch (error) {
@@ -4375,14 +4709,14 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Run prompt on a specific branch's Aider (with streaming)
   ipcMain.handle('aider:branch-prompt', async (event, branchId, prompt, channel) => {
     try {
       if (!branchAiderManager) {
         throw new Error('Branch manager not initialized');
       }
-      
+
       let result;
       if (channel) {
         // Streaming mode
@@ -4394,7 +4728,7 @@ function setupAiderIPC() {
         // Non-streaming mode
         result = await branchAiderManager.runBranchPrompt(branchId, prompt);
       }
-      
+
       return result;
     } catch (error) {
       console.error('[BranchAider] Prompt failed:', error);
@@ -4404,14 +4738,14 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Cleanup a branch's Aider instance
   ipcMain.handle('aider:cleanup-branch', async (event, branchId) => {
     try {
       if (!branchAiderManager) {
         return { success: true, message: 'No branch manager' };
       }
-      
+
       const result = await branchAiderManager.cleanupBranch(branchId);
       return result;
     } catch (error) {
@@ -4419,7 +4753,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Cleanup all branch Aider instances
   ipcMain.handle('aider:cleanup-all-branches', async () => {
     try {
@@ -4432,7 +4766,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get branch log
   ipcMain.handle('aider:get-branch-log', async (event, branchId) => {
     try {
@@ -4446,7 +4780,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get orchestration log
   ipcMain.handle('aider:get-orchestration-log', async () => {
     try {
@@ -4460,7 +4794,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get active branches
   ipcMain.handle('aider:get-active-branches', async () => {
     try {
@@ -4474,30 +4808,26 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Dialog handlers for Video Editor and other tools
   ipcMain.handle('dialog:open-file', async (event, options = {}) => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
-      filters: options.filters || [
-        { name: 'All Files', extensions: ['*'] }
-      ],
-      title: options.title || 'Select File'
+      filters: options.filters || [{ name: 'All Files', extensions: ['*'] }],
+      title: options.title || 'Select File',
     });
     return result;
   });
-  
+
   ipcMain.handle('dialog:save-file', async (event, options = {}) => {
     const result = await dialog.showSaveDialog({
       defaultPath: options.defaultPath,
-      filters: options.filters || [
-        { name: 'All Files', extensions: ['*'] }
-      ],
-      title: options.title || 'Save File'
+      filters: options.filters || [{ name: 'All Files', extensions: ['*'] }],
+      title: options.title || 'Save File',
     });
     return result;
   });
-  
+
   // ==================== VIDEO PROJECT PERSISTENCE ====================
   // Save video project to file (alongside video file)
   ipcMain.handle('save-video-project', async (event, { videoPath, projectData }) => {
@@ -4524,14 +4854,14 @@ function setupAiderIPC() {
       }
       // Create project file path: video.mp4 -> video.onereach-project.json
       const projectPath = videoPath.replace(/\.[^.]+$/, '.onereach-project.json');
-      
+
       // Check if project file exists
       try {
         await fs.promises.access(projectPath);
       } catch {
         return { success: false, error: 'No project file found' };
       }
-      
+
       const data = await fs.promises.readFile(projectPath, 'utf-8');
       const projectData = JSON.parse(data);
       console.log('[VideoProject] Loaded project from:', projectPath);
@@ -4565,22 +4895,22 @@ function setupAiderIPC() {
   ipcMain.handle('aider:get-api-config', async () => {
     const { getSettingsManager } = require('./settings-manager');
     const settings = getSettingsManager();
-    
+
     const apiKey = settings.getLLMApiKey();
     const provider = settings.getLLMProvider();
-    
+
     return {
       hasApiKey: !!apiKey,
       provider: provider || 'anthropic',
       // Don't expose the actual key, just whether it exists
     };
   });
-  
+
   // Evaluate content using LLM (runs in main process with access to API key)
   ipcMain.handle('aider:evaluate', async (event, arg1, arg2, arg3) => {
     // Support both old style (systemPrompt, userPrompt, model) and new style ({ systemPrompt, userPrompt, image, model, maxTokens })
     let systemPrompt, userPrompt, modelName, imageBase64, maxTokens;
-    
+
     if (typeof arg1 === 'object' && arg1 !== null) {
       // New object-style call
       systemPrompt = arg1.systemPrompt;
@@ -4595,25 +4925,26 @@ function setupAiderIPC() {
       modelName = arg3;
       maxTokens = 4096;
     }
-    
+
     console.log('[GSX Create] Evaluation request received, model:', modelName, 'hasImage:', !!imageBase64);
     try {
       const ai = require('./lib/ai-service');
-      
+
       // Determine provider from model name to select appropriate profile
-      const isOpenAI = modelName && (modelName.startsWith('gpt-') || modelName.startsWith('o1') || modelName.startsWith('o3'));
+      const isOpenAI =
+        modelName && (modelName.startsWith('gpt-') || modelName.startsWith('o1') || modelName.startsWith('o3'));
       const isAnthropic = modelName && modelName.startsWith('claude');
-      
+
       // Use the passed model, or fall back to Claude 4.5 - GSX Create prefers Claude 4.5 models
       let model = modelName || 'claude-opus-4-5-20251101';
-      
+
       // Validate Claude model is 4.5 (if Anthropic)
       if (isAnthropic && !model.includes('4-5') && !model.includes('4.5')) {
         console.warn('[GSX Create] WARNING: Non-4.5 model requested:', model);
         console.warn('[GSX Create] Forcing to claude-opus-4-5-20251101');
         model = 'claude-opus-4-5-20251101';
       }
-      
+
       // Select profile based on provider and capabilities
       // For OpenAI: use 'fast' profile (gpt-4o-mini) or 'standard' for more capable models
       // For Anthropic: use 'standard' (Sonnet 4.5) or 'powerful' (Opus 4.5) based on model
@@ -4623,22 +4954,22 @@ function setupAiderIPC() {
       } else if (isAnthropic) {
         profile = model.includes('opus') ? 'powerful' : 'standard';
       }
-      
+
       console.log('[GSX Create] Using profile:', profile, 'model:', model);
-      
+
       let result;
-      
+
       if (imageBase64) {
         // Vision request - use ai.vision()
         console.log('[GSX Create] Including image in request (vision mode)');
-        
+
         // Prepare image data (ai-service handles data URL parsing)
         let imageData = imageBase64;
         if (!imageBase64.startsWith('data:')) {
           // If raw base64, wrap in data URL
           imageData = `data:image/png;base64,${imageBase64}`;
         }
-        
+
         result = await ai.vision(imageData, userPrompt || 'Analyze this image.', {
           profile: 'vision', // Use vision profile
           system: systemPrompt || 'You are a helpful assistant.',
@@ -4657,15 +4988,14 @@ function setupAiderIPC() {
           feature: 'gsx-create',
         });
       }
-      
+
       console.log('[GSX Create] API success, response length:', result.content?.length || 0);
-      return { 
-        success: true, 
+      return {
+        success: true,
         content: result.content,
         model: result.model || model,
-        usage: result.usage
+        usage: result.usage,
       };
-      
     } catch (error) {
       console.error('[GSX Create] Evaluation error:', error);
       return { success: false, error: error.message };
@@ -4679,24 +5009,26 @@ function setupAiderIPC() {
   // Generate 4 design mockup choices using DALL-E 3 (via centralized ai-service)
   ipcMain.handle('design:generate-choices', async (event, { objective, approaches }) => {
     console.log('[Design] Generating design choices for:', objective?.substring(0, 50));
-    
+
     try {
       const ai = require('./lib/ai-service');
-      
+
       // Generate images with staggered requests to avoid rate limits
       console.log(`[Design] Generating ${approaches.length} design images with DALL-E 3 via ai-service...`);
       const startTime = Date.now();
-      
+
       const results = [];
       for (let i = 0; i < approaches.length; i++) {
         // Stagger requests to reduce rate limit issues
         if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => {
+            setTimeout(resolve, 1000);
+          });
         }
-        
+
         const approach = approaches[i];
         console.log(`[Design] Generating design ${i + 1}/${approaches.length}: ${approach.id}`);
-        
+
         try {
           const genResult = await ai.imageGenerate(approach.prompt, {
             model: 'dall-e-3',
@@ -4705,7 +5037,7 @@ function setupAiderIPC() {
             responseFormat: 'b64_json',
             feature: 'design-generation',
           });
-          
+
           const img = genResult.images?.[0];
           if (img?.b64_json) {
             console.log(`[Design] Successfully generated image for ${approach.id}`);
@@ -4729,11 +5061,11 @@ function setupAiderIPC() {
           results.push({ status: 'rejected', reason: error });
         }
       }
-      
+
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      const successCount = results.filter((r) => r.status === 'fulfilled').length;
       console.log(`[Design] Generated ${successCount}/${approaches.length} images in ${elapsed}s`);
-      
+
       // Return successful generations, with placeholders for failures
       const designs = results.map((result, index) => {
         if (result.status === 'fulfilled') {
@@ -4749,9 +5081,8 @@ function setupAiderIPC() {
           };
         }
       });
-      
+
       return { success: true, designs };
-      
     } catch (error) {
       console.error('[Design] Generation failed:', error);
       return { success: false, error: error.message };
@@ -4761,10 +5092,10 @@ function setupAiderIPC() {
   // Regenerate a single design mockup (via centralized ai-service)
   ipcMain.handle('design:regenerate-single', async (event, { approach }) => {
     console.log('[Design] Regenerating single design:', approach.id);
-    
+
     try {
       const ai = require('./lib/ai-service');
-      
+
       const genResult = await ai.imageGenerate(approach.prompt, {
         model: 'dall-e-3',
         size: '1024x1024',
@@ -4772,12 +5103,12 @@ function setupAiderIPC() {
         responseFormat: 'b64_json',
         feature: 'design-generation',
       });
-      
+
       const img = genResult.images?.[0];
       if (!img?.b64_json) {
         throw new Error('No image data in response');
       }
-      
+
       const design = {
         id: approach.id,
         name: approach.name,
@@ -4787,9 +5118,8 @@ function setupAiderIPC() {
         prompt: approach.prompt,
         revisedPrompt: img.revised_prompt,
       };
-      
+
       return { success: true, design };
-      
     } catch (error) {
       console.error('[Design] Regeneration failed:', error);
       return { success: false, error: error.message };
@@ -4799,38 +5129,37 @@ function setupAiderIPC() {
   // Extract design tokens from selected mockup image (two-pass approach)
   ipcMain.handle('design:extract-tokens', async (event, { imageData }) => {
     console.log('[Design] Extracting design tokens from mockup...');
-    
+
     try {
       const { getAIService } = require('./lib/ai-service');
       const aiService = getAIService();
       const { getStylePromptGenerator } = require('./style-prompt-generator');
       const styleGen = getStylePromptGenerator();
-      
+
       // Get the extraction prompt
       const extractionPrompt = styleGen.getDesignTokenExtractionPrompt();
-      
+
       const result = await aiService.vision(imageData, extractionPrompt, {
         profile: 'vision',
         maxTokens: 2000,
         feature: 'design-token-extraction',
       });
-      
+
       const content = result.content;
       if (!content) {
         throw new Error('No content in response');
       }
-      
+
       // Parse the JSON tokens
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('Could not find JSON in response');
       }
-      
+
       const tokens = JSON.parse(jsonMatch[0]);
       console.log('[Design] Extracted design tokens:', Object.keys(tokens));
-      
+
       return { success: true, tokens };
-      
     } catch (error) {
       console.error('[Design] Token extraction failed:', error);
       return { success: false, error: error.message };
@@ -4840,32 +5169,32 @@ function setupAiderIPC() {
   // Generate code from design using two-pass approach
   ipcMain.handle('design:generate-code', async (event, { objective, imageData, tokens, options = {} }) => {
     console.log('[Design] Generating code from design mockup...');
-    
+
     try {
       const { getAIService } = require('./lib/ai-service');
       const aiService = getAIService();
       const { getStylePromptGenerator } = require('./style-prompt-generator');
       const styleGen = getStylePromptGenerator();
-      
+
       // Get the code generation prompt with tokens
       const codePrompt = styleGen.getCodeFromDesignPrompt(objective, tokens, options);
-      
+
       console.log('[Design] Calling ai-service for code generation...');
-      
+
       const result = await aiService.vision(imageData, codePrompt, {
         profile: 'powerful',
         maxTokens: 8000,
         feature: 'design-code-generation',
       });
-      
+
       const content = result.content;
       if (!content) {
         throw new Error('No content in response');
       }
-      
+
       // Extract HTML code from response
       let code = content;
-      
+
       // Try to extract just the HTML if it's wrapped in markdown
       const htmlMatch = content.match(/```html\s*([\s\S]*?)```/);
       if (htmlMatch) {
@@ -4877,11 +5206,10 @@ function setupAiderIPC() {
           code = docMatch[1].trim();
         }
       }
-      
+
       console.log('[Design] Code generated, length:', code.length);
-      
+
       return { success: true, code };
-      
     } catch (error) {
       console.error('[Design] Code generation failed:', error);
       return { success: false, error: error.message };
@@ -4900,28 +5228,28 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // ========== MULTI-AGENT DIRECT API CALL ==========
   // Direct AI call for parallel Q&A and agent operations — routed through ai-service
   ipcMain.handle('ai:direct-call', async (event, { model, messages, max_tokens, response_format }) => {
     console.log('[MultiAgent] Direct API call via ai-service:', model, 'messages:', messages?.length);
-    
+
     try {
       const { getAIService } = require('./lib/ai-service');
       const aiService = getAIService();
-      
+
       // Determine profile from model name
       let profile = 'fast';
       if (model?.startsWith('claude-') && model.includes('opus')) profile = 'powerful';
       else if (model?.startsWith('claude-')) profile = 'standard';
       else if (model?.includes('gpt-5')) profile = 'large';
-      
+
       // Extract system message
-      const systemMsg = messages?.find(m => m.role === 'system');
-      const chatMessages = messages?.filter(m => m.role !== 'system') || [];
-      
+      const systemMsg = messages?.find((m) => m.role === 'system');
+      const chatMessages = messages?.filter((m) => m.role !== 'system') || [];
+
       const isJson = response_format?.type === 'json_object';
-      
+
       const result = await aiService.chat({
         profile,
         provider: model?.startsWith('gpt-') ? 'openai' : model?.startsWith('claude') ? 'anthropic' : undefined,
@@ -4932,39 +5260,38 @@ function setupAiderIPC() {
         jsonMode: isJson,
         feature: 'multi-agent-direct',
       });
-      
+
       return {
         success: true,
         content: result.content,
         usage: result.usage,
-        model: result.model
+        model: result.model,
       };
-      
     } catch (error) {
       console.error('[MultiAgent] Direct API call error:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get spaces with folder paths for GSX Create
   ipcMain.handle('aider:get-spaces', async () => {
     try {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
       const spaces = storage.index.spaces || [];
-      
+
       // Map spaces to include their folder paths and item counts
-      const result = spaces.map(space => {
+      const result = spaces.map((space) => {
         // Calculate item count for this space from index items
-        const itemCount = (storage.index.items || []).filter(item => item.spaceId === space.id).length;
-        
+        const itemCount = (storage.index.items || []).filter((item) => item.spaceId === space.id).length;
+
         return {
           id: space.id,
           name: space.name,
           icon: space.icon,
           color: space.color,
           path: path.join(storage.spacesDir, space.id),
-          itemCount: itemCount
+          itemCount: itemCount,
         };
       });
       return result;
@@ -4973,7 +5300,7 @@ function setupAiderIPC() {
       return [];
     }
   });
-  
+
   // Get space metadata (unified metadata file)
   ipcMain.handle('aider:get-space-metadata', async (event, spaceId) => {
     try {
@@ -4986,7 +5313,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Update space metadata
   ipcMain.handle('aider:update-space-metadata', async (event, spaceId, updates) => {
     try {
@@ -4999,7 +5326,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Set file metadata
   ipcMain.handle('aider:set-file-metadata', async (event, spaceId, filePath, fileMetadata) => {
     try {
@@ -5012,7 +5339,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get file metadata
   ipcMain.handle('aider:get-file-metadata', async (event, spaceId, filePath) => {
     try {
@@ -5025,7 +5352,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Set asset metadata (journey map, style guide, etc.)
   ipcMain.handle('aider:set-asset-metadata', async (event, spaceId, assetType, assetMetadata) => {
     try {
@@ -5038,7 +5365,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Set approval status
   ipcMain.handle('aider:set-approval', async (event, spaceId, itemType, itemId, approved) => {
     try {
@@ -5051,7 +5378,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Add version to history
   ipcMain.handle('aider:add-version', async (event, spaceId, versionData) => {
     try {
@@ -5064,7 +5391,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Update project config
   ipcMain.handle('aider:update-project-config', async (event, spaceId, configUpdates) => {
     try {
@@ -5077,7 +5404,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Migrate all spaces to unified metadata
   ipcMain.handle('aider:migrate-spaces', async () => {
     try {
@@ -5090,7 +5417,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Search across all spaces (uses DuckDB)
   ipcMain.handle('aider:search-all-spaces', async (event, searchTerm) => {
     try {
@@ -5103,7 +5430,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Query spaces with custom conditions (uses DuckDB)
   ipcMain.handle('aider:query-spaces', async (event, whereClause) => {
     try {
@@ -5116,7 +5443,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get all spaces with metadata
   ipcMain.handle('aider:get-all-spaces-with-metadata', async () => {
     try {
@@ -5129,7 +5456,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get space files from metadata
   ipcMain.handle('aider:get-space-files', async (event, spaceId) => {
     try {
@@ -5142,7 +5469,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get space directory path
   ipcMain.handle('aider:get-space-path', async (event, spaceId) => {
     try {
@@ -5155,44 +5482,44 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // List files in a project directory (for GSX Create)
   ipcMain.handle('aider:list-project-files', async (event, dirPath) => {
     try {
       const fs = require('fs').promises;
       const files = await fs.readdir(dirPath, { withFileTypes: true });
-      
+
       const projectFiles = [];
       for (const file of files) {
         // Skip hidden files and common non-code directories
         if (file.name.startsWith('.')) continue;
         if (['node_modules', '__pycache__', 'venv', '.git'].includes(file.name)) continue;
-        
+
         const filePath = path.join(dirPath, file.name);
         const stat = await fs.stat(filePath);
-        
+
         projectFiles.push({
           name: file.name,
           path: filePath,
           isDirectory: file.isDirectory(),
           size: stat.size,
-          modified: stat.mtime.toISOString()
+          modified: stat.mtime.toISOString(),
         });
       }
-      
+
       // Sort: directories first, then by name
       projectFiles.sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
-      
+
       return { success: true, files: projectFiles };
     } catch (error) {
       console.error('[GSX Create] Failed to list project files:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Read a file
   ipcMain.handle('aider:read-file', async (event, filePath) => {
     try {
@@ -5212,7 +5539,7 @@ function setupAiderIPC() {
       return null;
     }
   });
-  
+
   // Write a file
   ipcMain.handle('aider:write-file', async (event, filePath, content) => {
     try {
@@ -5231,27 +5558,27 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Delete a file from the project
   ipcMain.handle('aider:delete-file', async (event, filePath) => {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       // Security check - only allow deletion within spaces directory (via Spaces API)
       const { getSpacesAPI } = require('./spaces-api');
       const spacesRoot = getSpacesAPI().storage.spacesDir;
       const resolvedPath = path.resolve(filePath);
-      
+
       if (!resolvedPath.startsWith(spacesRoot)) {
         console.error('[GSX Create] Security: Attempted to delete file outside spaces directory:', filePath);
         return { success: false, error: 'Can only delete files within the project space' };
       }
-      
+
       if (!fs.existsSync(filePath)) {
         return { success: false, error: 'File does not exist' };
       }
-      
+
       const stat = fs.statSync(filePath);
       if (stat.isDirectory()) {
         // For directories, use recursive deletion
@@ -5259,7 +5586,7 @@ function setupAiderIPC() {
       } else {
         fs.unlinkSync(filePath);
       }
-      
+
       console.log('[GSX Create] File deleted:', filePath);
       return { success: true };
     } catch (error) {
@@ -5267,47 +5594,47 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // ========== Version Backup/Restore System ==========
-  
+
   // Backup current version to backups folder
   ipcMain.handle('aider:backup-version', async (event, spacePath, version, metadata = {}) => {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       if (!spacePath || !version) {
         return { success: false, error: 'Space path and version required' };
       }
-      
+
       const backupsDir = path.join(spacePath, 'backups');
       const versionDir = path.join(backupsDir, `v${version}`);
-      
+
       // Create backups directory if needed
       if (!fs.existsSync(backupsDir)) {
         fs.mkdirSync(backupsDir, { recursive: true });
       }
-      
+
       // If version backup exists, skip (don't overwrite)
       if (fs.existsSync(versionDir)) {
         console.log('[GSX Create] Version backup already exists:', versionDir);
         return { success: true, alreadyExists: true, path: versionDir };
       }
-      
+
       fs.mkdirSync(versionDir, { recursive: true });
-      
+
       // Get all files in space (excluding backups and branches folders)
       const files = fs.readdirSync(spacePath);
       const excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
       const backedUpFiles = [];
-      
+
       for (const file of files) {
         if (excludeDirs.includes(file)) continue;
-        
+
         const srcPath = path.join(spacePath, file);
         const destPath = path.join(versionDir, file);
         const stat = fs.statSync(srcPath);
-        
+
         if (stat.isDirectory()) {
           // Recursively copy directory
           copyDirSync(srcPath, destPath);
@@ -5317,7 +5644,7 @@ function setupAiderIPC() {
           backedUpFiles.push(file);
         }
       }
-      
+
       // Save version metadata
       const versionInfo = {
         version: version,
@@ -5327,35 +5654,31 @@ function setupAiderIPC() {
         approach: metadata.approach || '',
         model: metadata.model || '',
         files: backedUpFiles,
-        ...metadata
+        ...metadata,
       };
-      
-      fs.writeFileSync(
-        path.join(versionDir, 'version-info.json'),
-        JSON.stringify(versionInfo, null, 2)
-      );
-      
+
+      fs.writeFileSync(path.join(versionDir, 'version-info.json'), JSON.stringify(versionInfo, null, 2));
+
       console.log('[GSX Create] Version backup created:', versionDir, 'Files:', backedUpFiles.length);
       return { success: true, path: versionDir, files: backedUpFiles };
-      
     } catch (error) {
       console.error('[GSX Create] Backup version failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Helper function to copy directory recursively
   function copyDirSync(src, dest) {
     const fs = require('fs');
     const path = require('path');
-    
+
     fs.mkdirSync(dest, { recursive: true });
     const entries = fs.readdirSync(src, { withFileTypes: true });
-    
+
     for (const entry of entries) {
       const srcPath = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
-      
+
       if (entry.isDirectory()) {
         copyDirSync(srcPath, destPath);
       } else {
@@ -5363,42 +5686,42 @@ function setupAiderIPC() {
       }
     }
   }
-  
+
   // Restore version from backup
-  ipcMain.handle('aider:restore-version', async (event, spacePath, version, createBackupFirst = true) => {
+  ipcMain.handle('aider:restore-version', async (event, spacePath, version, _createBackupFirst = true) => {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       if (!spacePath || !version) {
         return { success: false, error: 'Space path and version required' };
       }
-      
+
       const backupsDir = path.join(spacePath, 'backups');
       const versionDir = path.join(backupsDir, `v${version}`);
-      
+
       if (!fs.existsSync(versionDir)) {
         return { success: false, error: `Version v${version} backup not found` };
       }
-      
+
       // Read version info
       const versionInfoPath = path.join(versionDir, 'version-info.json');
       let versionInfo = {};
       if (fs.existsSync(versionInfoPath)) {
         versionInfo = JSON.parse(fs.readFileSync(versionInfoPath, 'utf-8'));
       }
-      
+
       // Get files from backup (excluding version-info.json)
-      const backupFiles = fs.readdirSync(versionDir).filter(f => f !== 'version-info.json');
-      const excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
-      
+      const backupFiles = fs.readdirSync(versionDir).filter((f) => f !== 'version-info.json');
+      const _excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
+
       // Restore files
       const restoredFiles = [];
       for (const file of backupFiles) {
         const srcPath = path.join(versionDir, file);
         const destPath = path.join(spacePath, file);
         const stat = fs.statSync(srcPath);
-        
+
         if (stat.isDirectory()) {
           // Remove existing directory first
           if (fs.existsSync(destPath)) {
@@ -5411,44 +5734,44 @@ function setupAiderIPC() {
           restoredFiles.push(file);
         }
       }
-      
+
       console.log('[GSX Create] Version restored:', version, 'Files:', restoredFiles.length);
-      return { 
-        success: true, 
+      return {
+        success: true,
         version: version,
         files: restoredFiles,
-        versionInfo: versionInfo
+        versionInfo: versionInfo,
       };
-      
     } catch (error) {
       console.error('[GSX Create] Restore version failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // List available version backups
   ipcMain.handle('aider:list-backups', async (event, spacePath) => {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       if (!spacePath) {
         return { success: false, error: 'Space path required' };
       }
-      
+
       const backupsDir = path.join(spacePath, 'backups');
-      
+
       if (!fs.existsSync(backupsDir)) {
         return { success: true, backups: [] };
       }
-      
-      const versions = fs.readdirSync(backupsDir)
-        .filter(d => d.startsWith('v') && fs.statSync(path.join(backupsDir, d)).isDirectory())
-        .map(d => {
+
+      const versions = fs
+        .readdirSync(backupsDir)
+        .filter((d) => d.startsWith('v') && fs.statSync(path.join(backupsDir, d)).isDirectory())
+        .map((d) => {
           const versionDir = path.join(backupsDir, d);
           const infoPath = path.join(versionDir, 'version-info.json');
           let info = { version: d.replace('v', '') };
-          
+
           if (fs.existsSync(infoPath)) {
             try {
               info = { ...info, ...JSON.parse(fs.readFileSync(infoPath, 'utf-8')) };
@@ -5456,54 +5779,53 @@ function setupAiderIPC() {
               console.error('[GSX Create] Error reading version info:', e);
             }
           }
-          
+
           return info;
         })
         .sort((a, b) => Number(b.version) - Number(a.version));
-      
+
       return { success: true, backups: versions };
-      
     } catch (error) {
       console.error('[GSX Create] List backups failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // ========== Branch System for Parallel Versions ==========
-  
+
   // Create a new branch from current state
   ipcMain.handle('aider:create-branch', async (event, spacePath, branchId, metadata = {}) => {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       if (!spacePath || !branchId) {
         return { success: false, error: 'Space path and branch ID required' };
       }
-      
+
       const branchesDir = path.join(spacePath, 'branches');
       const branchDir = path.join(branchesDir, branchId);
-      
+
       // Create branches directory if needed
       if (!fs.existsSync(branchesDir)) {
         fs.mkdirSync(branchesDir, { recursive: true });
       }
-      
+
       // Create branch directory
       fs.mkdirSync(branchDir, { recursive: true });
-      
+
       // Copy current files to branch
       const files = fs.readdirSync(spacePath);
       const excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
       const branchFiles = [];
-      
+
       for (const file of files) {
         if (excludeDirs.includes(file)) continue;
-        
+
         const srcPath = path.join(spacePath, file);
         const destPath = path.join(branchDir, file);
         const stat = fs.statSync(srcPath);
-        
+
         if (stat.isDirectory()) {
           copyDirSync(srcPath, destPath);
           branchFiles.push(file + '/');
@@ -5512,7 +5834,7 @@ function setupAiderIPC() {
           branchFiles.push(file);
         }
       }
-      
+
       // Save branch metadata
       const branchInfo = {
         branchId: branchId,
@@ -5524,46 +5846,43 @@ function setupAiderIPC() {
         score: 0,
         cost: 0,
         files: branchFiles,
-        ...metadata
+        ...metadata,
       };
-      
-      fs.writeFileSync(
-        path.join(branchDir, 'branch-info.json'),
-        JSON.stringify(branchInfo, null, 2)
-      );
-      
+
+      fs.writeFileSync(path.join(branchDir, 'branch-info.json'), JSON.stringify(branchInfo, null, 2));
+
       console.log('[GSX Create] Branch created:', branchId);
       return { success: true, branchId: branchId, path: branchDir, files: branchFiles };
-      
     } catch (error) {
       console.error('[GSX Create] Create branch failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // List branches
   ipcMain.handle('aider:list-branches', async (event, spacePath) => {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       if (!spacePath) {
         return { success: false, error: 'Space path required' };
       }
-      
+
       const branchesDir = path.join(spacePath, 'branches');
-      
+
       if (!fs.existsSync(branchesDir)) {
         return { success: true, branches: [] };
       }
-      
-      const branches = fs.readdirSync(branchesDir)
-        .filter(d => fs.statSync(path.join(branchesDir, d)).isDirectory())
-        .map(d => {
+
+      const branches = fs
+        .readdirSync(branchesDir)
+        .filter((d) => fs.statSync(path.join(branchesDir, d)).isDirectory())
+        .map((d) => {
           const branchDir = path.join(branchesDir, d);
           const infoPath = path.join(branchDir, 'branch-info.json');
           let info = { branchId: d };
-          
+
           if (fs.existsSync(infoPath)) {
             try {
               info = { ...info, ...JSON.parse(fs.readFileSync(infoPath, 'utf-8')) };
@@ -5571,70 +5890,68 @@ function setupAiderIPC() {
               console.error('[GSX Create] Error reading branch info:', e);
             }
           }
-          
+
           return info;
         });
-      
+
       return { success: true, branches: branches };
-      
     } catch (error) {
       console.error('[GSX Create] List branches failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Update branch info
   ipcMain.handle('aider:update-branch', async (event, spacePath, branchId, updates) => {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       const branchDir = path.join(spacePath, 'branches', branchId);
       const infoPath = path.join(branchDir, 'branch-info.json');
-      
+
       if (!fs.existsSync(branchDir)) {
         return { success: false, error: 'Branch not found' };
       }
-      
+
       let info = { branchId: branchId };
       if (fs.existsSync(infoPath)) {
         info = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
       }
-      
+
       info = { ...info, ...updates, updatedAt: new Date().toISOString() };
       fs.writeFileSync(infoPath, JSON.stringify(info, null, 2));
-      
+
       return { success: true, branchInfo: info };
-      
     } catch (error) {
       console.error('[GSX Create] Update branch failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Promote branch to main (copy branch files to space root)
   ipcMain.handle('aider:promote-branch', async (event, spacePath, branchId) => {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       const branchDir = path.join(spacePath, 'branches', branchId);
-      
+
       if (!fs.existsSync(branchDir)) {
         return { success: false, error: 'Branch not found' };
       }
-      
+
       // Get files from branch
-      const branchFiles = fs.readdirSync(branchDir).filter(f => f !== 'branch-info.json');
-      const excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
-      
+      const branchFiles = fs.readdirSync(branchDir).filter((f) => f !== 'branch-info.json');
+      const _excludeDirs = ['backups', 'branches', 'node_modules', '.git'];
+
       // Copy branch files to space root
       const promotedFiles = [];
       for (const file of branchFiles) {
         const srcPath = path.join(branchDir, file);
         const destPath = path.join(spacePath, file);
         const stat = fs.statSync(srcPath);
-        
+
         if (stat.isDirectory()) {
           if (fs.existsSync(destPath)) {
             fs.rmSync(destPath, { recursive: true, force: true });
@@ -5646,101 +5963,97 @@ function setupAiderIPC() {
           promotedFiles.push(file);
         }
       }
-      
+
       console.log('[GSX Create] Branch promoted:', branchId, 'Files:', promotedFiles.length);
       return { success: true, branchId: branchId, files: promotedFiles };
-      
     } catch (error) {
       console.error('[GSX Create] Promote branch failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Delete branch
   ipcMain.handle('aider:delete-branch', async (event, spacePath, branchId) => {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       const branchDir = path.join(spacePath, 'branches', branchId);
-      
+
       if (!fs.existsSync(branchDir)) {
         return { success: true }; // Already deleted
       }
-      
+
       fs.rmSync(branchDir, { recursive: true, force: true });
       console.log('[GSX Create] Branch deleted:', branchId);
       return { success: true };
-      
     } catch (error) {
       console.error('[GSX Create] Delete branch failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // ========== Git Branch Operations for Tabbed UI ==========
-  
+
   // Create a new git branch
   ipcMain.handle('aider:git-create-branch', async (event, repoPath, branchName, baseBranch = 'main') => {
     try {
       const { execSync } = require('child_process');
       const fs = require('fs');
-      
+
       if (!repoPath || !branchName) {
         return { success: false, error: 'Missing required parameters' };
       }
-      
+
       // Check if directory exists and is a git repo
       const gitDir = require('path').join(repoPath, '.git');
-      const isGitRepo = fs.existsSync(gitDir);
-      
+      const _isGitRepo = fs.existsSync(gitDir);
+
       // Sanitize branch name - replace spaces and special chars with dashes
       const safeBranchName = branchName.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
       const safeBaseBranch = baseBranch.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
-      
-      
+
       // Create and switch to new branch (using quotes for safety)
-      execSync(`git checkout -b "${safeBranchName}" "${safeBaseBranch}"`, { 
+      execSync(`git checkout -b "${safeBranchName}" "${safeBaseBranch}"`, {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
-      
+
       console.log('[GSX Create] Git branch created:', branchName, 'from', baseBranch);
       return { success: true, branch: branchName };
-      
     } catch (error) {
       console.error('[GSX Create] Git create branch failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Create an orphan branch (starts from scratch with no files)
   ipcMain.handle('aider:git-create-orphan-branch', async (event, repoPath, branchName) => {
     try {
       const { execSync } = require('child_process');
       const fs = require('fs');
       const path = require('path');
-      
+
       if (!repoPath || !branchName) {
         return { success: false, error: 'Missing required parameters' };
       }
-      
+
       // Sanitize branch name
       const safeBranchName = branchName.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
-      
+
       // Create orphan branch (no parent commits, empty tree)
-      execSync(`git checkout --orphan "${safeBranchName}"`, { 
-        cwd: repoPath,
-        encoding: 'utf-8'
-      });
-      
-      // Remove all files from the index (but not .git)
-      execSync('git rm -rf --cached .', { 
+      execSync(`git checkout --orphan "${safeBranchName}"`, {
         cwd: repoPath,
         encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'] // Suppress errors if no files
       });
-      
+
+      // Remove all files from the index (but not .git)
+      execSync('git rm -rf --cached .', {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'], // Suppress errors if no files
+      });
+
       // Remove all files from working directory except .git
       const files = fs.readdirSync(repoPath);
       for (const file of files) {
@@ -5748,212 +6061,205 @@ function setupAiderIPC() {
         const filePath = path.join(repoPath, file);
         fs.rmSync(filePath, { recursive: true, force: true });
       }
-      
+
       // Create initial commit so the branch is valid
-      execSync('git commit --allow-empty -m "Initial empty branch"', { 
+      execSync('git commit --allow-empty -m "Initial empty branch"', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
-      
+
       console.log('[GSX Create] Orphan branch created:', branchName);
       return { success: true, branch: branchName };
-      
     } catch (error) {
       console.error('[GSX Create] Git create orphan branch failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Switch to a git branch
   ipcMain.handle('aider:git-switch-branch', async (event, repoPath, branchName) => {
     try {
       const { execSync } = require('child_process');
-      
+
       if (!repoPath || !branchName) {
         return { success: false, error: 'Missing required parameters' };
       }
-      
-      execSync(`git checkout ${branchName}`, { 
+
+      execSync(`git checkout ${branchName}`, {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
-      
+
       console.log('[GSX Create] Switched to git branch:', branchName);
       return { success: true, branch: branchName };
-      
     } catch (error) {
       console.error('[GSX Create] Git switch branch failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Delete a git branch
   ipcMain.handle('aider:git-delete-branch', async (event, repoPath, branchName) => {
     try {
       const { execSync } = require('child_process');
-      
+
       if (!repoPath || !branchName) {
         return { success: false, error: 'Missing required parameters' };
       }
-      
+
       // Switch to main first if on the branch being deleted
-      const currentBranch = execSync('git branch --show-current', { 
+      const currentBranch = execSync('git branch --show-current', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       }).trim();
-      
+
       if (currentBranch === branchName) {
         execSync('git checkout main', { cwd: repoPath, encoding: 'utf-8' });
       }
-      
+
       // Delete the branch
-      execSync(`git branch -D ${branchName}`, { 
+      execSync(`git branch -D ${branchName}`, {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
-      
+
       console.log('[GSX Create] Git branch deleted:', branchName);
       return { success: true };
-      
     } catch (error) {
       console.error('[GSX Create] Git delete branch failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Initialize git repository in a directory
   ipcMain.handle('aider:git-init', async (event, repoPath) => {
-    const http = require('http');
     try {
       const { execSync } = require('child_process');
       const fs = require('fs');
-      
+
       if (!repoPath || !fs.existsSync(repoPath)) {
         return { success: false, error: 'Invalid or missing repoPath' };
       }
-      
+
       // Check if already a git repo
       const gitDir = path.join(repoPath, '.git');
       if (fs.existsSync(gitDir)) {
         return { success: true, alreadyInitialized: true };
       }
-      
+
       // Initialize git repository
       execSync('git init', { cwd: repoPath, encoding: 'utf-8' });
-      
+
       // Create initial commit with all existing files
       execSync('git add -A', { cwd: repoPath, encoding: 'utf-8' });
       try {
         execSync('git commit -m "Initial commit from GSX Create"', { cwd: repoPath, encoding: 'utf-8' });
-      } catch (e) {
+      } catch (_e) {
         // Ignore if nothing to commit
       }
-      
-      
+
       console.log('[GSX Create] Git repository initialized at:', repoPath);
       return { success: true, initialized: true };
-      
     } catch (error) {
       console.error('[GSX Create] Git init failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // List git branches
   ipcMain.handle('aider:git-list-branches', async (event, repoPath) => {
     try {
       const { execSync } = require('child_process');
       const fs = require('fs');
-      
+
       if (!repoPath) {
         return { success: false, error: 'Missing repoPath' };
       }
-      
+
       // Check if the directory exists and is a git repo
       const gitDir = path.join(repoPath, '.git');
       const isGitRepo = fs.existsSync(gitDir);
-      
+
       if (!isGitRepo) {
         return { success: false, error: 'Not a git repository', notGitRepo: true };
       }
-      
-      const output = execSync('git branch -a', { 
+
+      const output = execSync('git branch -a', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
-      
-      const branches = output.split('\n')
-        .map(b => b.trim().replace('* ', ''))
-        .filter(b => b && !b.startsWith('remotes/'));
-      
-      const currentBranch = execSync('git branch --show-current', { 
+
+      const branches = output
+        .split('\n')
+        .map((b) => b.trim().replace('* ', ''))
+        .filter((b) => b && !b.startsWith('remotes/'));
+
+      const currentBranch = execSync('git branch --show-current', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       }).trim();
-      
+
       console.log('[GSX Create] Listed git branches:', branches.length);
       return { success: true, branches, currentBranch };
-      
     } catch (error) {
       console.error('[GSX Create] Git list branches failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get diff between branches
   ipcMain.handle('aider:git-diff-branches', async (event, repoPath, branchA, branchB) => {
     try {
       const { execSync } = require('child_process');
-      
+
       if (!repoPath || !branchA || !branchB) {
         return { success: false, error: 'Missing required parameters' };
       }
-      
-      const diff = execSync(`git diff ${branchA}..${branchB}`, { 
+
+      const diff = execSync(`git diff ${branchA}..${branchB}`, {
         cwd: repoPath,
         encoding: 'utf-8',
-        maxBuffer: 10 * 1024 * 1024 // 10MB buffer for large diffs
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large diffs
       });
-      
+
       console.log('[GSX Create] Got diff between', branchA, 'and', branchB);
       return { success: true, diff };
-      
     } catch (error) {
       console.error('[GSX Create] Git diff failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Merge a branch into target branch (typically main)
   ipcMain.handle('aider:git-merge-branch', async (event, repoPath, sourceBranch, targetBranch = 'main') => {
     try {
       const { execSync } = require('child_process');
-      
+
       if (!repoPath || !sourceBranch) {
         return { success: false, error: 'Missing required parameters' };
       }
-      
+
       // Sanitize branch names
       const safeSourceBranch = sourceBranch.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
       const safeTargetBranch = targetBranch.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
-      
+
       // Get current branch to restore later if needed
-      const currentBranch = execSync('git branch --show-current', { 
+      const currentBranch = execSync('git branch --show-current', {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       }).trim();
-      
+
       // Switch to target branch
-      execSync(`git checkout "${safeTargetBranch}"`, { 
+      execSync(`git checkout "${safeTargetBranch}"`, {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       });
-      
+
       // Merge source branch into target
       try {
-        execSync(`git merge "${safeSourceBranch}" -m "Merge branch '${safeSourceBranch}' into ${safeTargetBranch}"`, { 
+        execSync(`git merge "${safeSourceBranch}" -m "Merge branch '${safeSourceBranch}' into ${safeTargetBranch}"`, {
           cwd: repoPath,
-          encoding: 'utf-8'
+          encoding: 'utf-8',
         });
       } catch (mergeError) {
         // Check if it's a merge conflict
@@ -5964,65 +6270,66 @@ function setupAiderIPC() {
           if (currentBranch && currentBranch !== safeTargetBranch) {
             execSync(`git checkout "${currentBranch}"`, { cwd: repoPath, encoding: 'utf-8' });
           }
-          return { 
-            success: false, 
+          return {
+            success: false,
             error: 'Merge conflict detected. Please resolve conflicts manually or use a different merge strategy.',
-            hasConflict: true 
+            hasConflict: true,
           };
         }
         throw mergeError;
       }
-      
+
       console.log('[GSX Create] Merged branch:', sourceBranch, 'into', targetBranch);
       return { success: true, sourceBranch, targetBranch };
-      
     } catch (error) {
       console.error('[GSX Create] Git merge failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get merge preview (files that will change)
   ipcMain.handle('aider:git-merge-preview', async (event, repoPath, sourceBranch, targetBranch = 'main') => {
     try {
       const { execSync } = require('child_process');
-      
+
       if (!repoPath || !sourceBranch) {
         return { success: false, error: 'Missing required parameters' };
       }
-      
+
       // Get list of files that differ between branches
-      const diffStat = execSync(`git diff --stat ${targetBranch}..${sourceBranch}`, { 
+      const diffStat = execSync(`git diff --stat ${targetBranch}..${sourceBranch}`, {
         cwd: repoPath,
         encoding: 'utf-8',
-        maxBuffer: 10 * 1024 * 1024
+        maxBuffer: 10 * 1024 * 1024,
       });
-      
+
       // Get commit count difference
-      const commitCount = execSync(`git rev-list --count ${targetBranch}..${sourceBranch}`, { 
+      const commitCount = execSync(`git rev-list --count ${targetBranch}..${sourceBranch}`, {
         cwd: repoPath,
-        encoding: 'utf-8'
+        encoding: 'utf-8',
       }).trim();
-      
+
       // Get list of changed files
-      const changedFiles = execSync(`git diff --name-only ${targetBranch}..${sourceBranch}`, { 
+      const changedFiles = execSync(`git diff --name-only ${targetBranch}..${sourceBranch}`, {
         cwd: repoPath,
-        encoding: 'utf-8'
-      }).trim().split('\n').filter(f => f);
-      
-      return { 
-        success: true, 
-        diffStat, 
+        encoding: 'utf-8',
+      })
+        .trim()
+        .split('\n')
+        .filter((f) => f);
+
+      return {
+        success: true,
+        diffStat,
         commitCount: parseInt(commitCount) || 0,
-        changedFiles 
+        changedFiles,
       };
-      
     } catch (error) {
       console.error('[GSX Create] Git merge preview failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Open a file in default application
   ipcMain.handle('aider:open-file', async (event, filePath) => {
     try {
@@ -6034,24 +6341,28 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // ========== DuckDB Event/Transaction Handlers ==========
-  
+
   ipcMain.handle('txdb:get-summary', async (event, spaceId) => {
     try {
       const { getEventDB } = require('./event-db');
       const eventDb = getEventDB(app.getPath('userData'));
       const summary = await eventDb.getCostSummary(spaceId);
-      return { 
-        success: true, 
-        summary: summary || { totalCost: 0, totalCalls: 0, totalInputTokens: 0, totalOutputTokens: 0 } 
+      return {
+        success: true,
+        summary: summary || { totalCost: 0, totalCalls: 0, totalInputTokens: 0, totalOutputTokens: 0 },
       };
     } catch (error) {
       console.error('[EventDB] Failed to get summary:', error);
-      return { success: false, error: error.message, summary: { totalCost: 0, totalCalls: 0, totalInputTokens: 0, totalOutputTokens: 0 } };
+      return {
+        success: false,
+        error: error.message,
+        summary: { totalCost: 0, totalCalls: 0, totalInputTokens: 0, totalOutputTokens: 0 },
+      };
     }
   });
-  
+
   ipcMain.handle('txdb:record-transaction', async (event, data) => {
     try {
       const { getEventDB } = require('./event-db');
@@ -6069,7 +6380,7 @@ function setupAiderIPC() {
         responsePreview: data.responsePreview,
         errorMessage: data.errorMessage,
         durationMs: data.durationMs,
-        metadata: data.metadata
+        metadata: data.metadata,
       });
       return { success: true };
     } catch (error) {
@@ -6077,7 +6388,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   ipcMain.handle('txdb:get-transactions', async (event, spaceId, limit = 50) => {
     try {
       const { getEventDB } = require('./event-db');
@@ -6089,14 +6400,14 @@ function setupAiderIPC() {
       return { success: false, error: error.message, transactions: [] };
     }
   });
-  
+
   // Event logging
   ipcMain.handle('txdb:log-event', async (event, data) => {
     try {
       // Use new DuckDB-based EventDB
       const { getEventDB } = require('./event-db');
       const eventDb = getEventDB(app.getPath('userData'));
-      
+
       await eventDb.logEvent({
         level: data.type || 'info',
         category: data.category || 'user-log',
@@ -6105,14 +6416,14 @@ function setupAiderIPC() {
         details: {
           aiSummary: data.aiSummary,
           userNotes: data.userNotes,
-          context: data.context
+          context: data.context,
         },
         source: data.source || 'app',
         userAction: data.userAction || null,
         filePath: data.filePath || null,
-        errorStack: data.stack || null
+        errorStack: data.stack || null,
       });
-      
+
       console.log('[EventDB] Event logged:', data.type, (data.message || '').substring(0, 50));
       return { success: true };
     } catch (error) {
@@ -6120,15 +6431,15 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   ipcMain.handle('txdb:get-event-logs', async (event, options = {}) => {
     try {
       const { getEventDB } = require('./event-db');
       const eventDb = getEventDB(app.getPath('userData'));
       const rawLogs = await eventDb.getEventLogs(options);
-      
+
       // Transform logs to match UI expectations
-      const logs = rawLogs.map(log => ({
+      const logs = rawLogs.map((log) => ({
         id: log.id,
         type: log.level,
         summary: log.message,
@@ -6138,16 +6449,16 @@ function setupAiderIPC() {
         context: log.details?.context,
         stack: log.error_stack,
         timestamp: log.timestamp,
-        category: log.category
+        category: log.category,
       }));
-      
+
       return { success: true, logs };
     } catch (error) {
       console.error('[EventDB] Failed to get event logs:', error);
       return { success: false, error: error.message, logs: [] };
     }
   });
-  
+
   // DuckDB Analytics - Cost by model
   ipcMain.handle('eventdb:cost-by-model', async (event, spaceId) => {
     try {
@@ -6162,7 +6473,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // DuckDB Analytics - Daily costs
   ipcMain.handle('eventdb:daily-costs', async (event, spaceId, days = 30) => {
     try {
@@ -6177,7 +6488,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // DuckDB - Query space metadata across all spaces
   ipcMain.handle('eventdb:query-spaces', async (event, whereClause) => {
     try {
@@ -6192,7 +6503,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // DuckDB - Search across spaces
   ipcMain.handle('eventdb:search-spaces', async (event, searchTerm) => {
     try {
@@ -6207,7 +6518,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // DuckDB - Raw query (for advanced use)
   ipcMain.handle('eventdb:query', async (event, sql) => {
     try {
@@ -6220,11 +6531,11 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Style Guides - placeholder handlers (store in memory for now)
   const styleGuides = new Map();
   const journeyMaps = new Map();
-  
+
   ipcMain.handle('aider:get-style-guides', async (event, spaceId) => {
     try {
       const guides = styleGuides.get(spaceId) || [];
@@ -6234,12 +6545,12 @@ function setupAiderIPC() {
       return { success: false, error: error.message, styleGuides: [] };
     }
   });
-  
+
   ipcMain.handle('aider:save-style-guide', async (event, data) => {
     try {
       const spaceId = data.spaceId;
       const guides = styleGuides.get(spaceId) || [];
-      const existingIndex = guides.findIndex(g => g.id === data.id);
+      const existingIndex = guides.findIndex((g) => g.id === data.id);
       if (existingIndex >= 0) {
         guides[existingIndex] = data;
       } else {
@@ -6253,11 +6564,11 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   ipcMain.handle('aider:delete-style-guide', async (event, id) => {
     try {
       for (const [spaceId, guides] of styleGuides) {
-        const index = guides.findIndex(g => g.id === id);
+        const index = guides.findIndex((g) => g.id === id);
         if (index >= 0) {
           guides.splice(index, 1);
           styleGuides.set(spaceId, guides);
@@ -6270,7 +6581,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   ipcMain.handle('aider:get-journey-maps', async (event, spaceId) => {
     try {
       const maps = journeyMaps.get(spaceId) || [];
@@ -6280,12 +6591,12 @@ function setupAiderIPC() {
       return { success: false, error: error.message, journeyMaps: [] };
     }
   });
-  
+
   ipcMain.handle('aider:save-journey-map', async (event, data) => {
     try {
       const spaceId = data.spaceId;
       const maps = journeyMaps.get(spaceId) || [];
-      const existingIndex = maps.findIndex(m => m.id === data.id);
+      const existingIndex = maps.findIndex((m) => m.id === data.id);
       if (existingIndex >= 0) {
         maps[existingIndex] = data;
       } else {
@@ -6299,11 +6610,11 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   ipcMain.handle('aider:delete-journey-map', async (event, id) => {
     try {
       for (const [spaceId, maps] of journeyMaps) {
-        const index = maps.findIndex(m => m.id === id);
+        const index = maps.findIndex((m) => m.id === id);
         if (index >= 0) {
           maps.splice(index, 1);
           journeyMaps.set(spaceId, maps);
@@ -6316,22 +6627,44 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Register a file created by GSX Create as a clipboard item in the Space
   ipcMain.handle('aider:register-created-file', async (event, { spaceId, filePath, description, aiModel }) => {
     try {
       const fs = require('fs');
-      
+
       // Read the file content
       const content = fs.readFileSync(filePath, 'utf-8');
       const fileName = path.basename(filePath);
       const ext = path.extname(fileName).toLowerCase();
       const stat = fs.statSync(filePath);
-      
+
       // Determine file type based on extension
-      const codeExtensions = ['.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.css', '.scss', '.html', '.json', '.yaml', '.yml', '.sh', '.bash'];
+      const codeExtensions = [
+        '.js',
+        '.ts',
+        '.jsx',
+        '.tsx',
+        '.py',
+        '.rb',
+        '.go',
+        '.rs',
+        '.java',
+        '.c',
+        '.cpp',
+        '.h',
+        '.hpp',
+        '.css',
+        '.scss',
+        '.html',
+        '.json',
+        '.yaml',
+        '.yml',
+        '.sh',
+        '.bash',
+      ];
       const isCode = codeExtensions.includes(ext);
-      
+
       // Create clipboard item
       const item = {
         type: isCode ? 'code' : 'text',
@@ -6348,11 +6681,11 @@ function setupAiderIPC() {
           createdAt: new Date().toISOString(),
           lastModified: stat.mtime.toISOString(),
           fileSize: stat.size,
-          language: ext.replace('.', '') || 'text'
+          language: ext.replace('.', '') || 'text',
         },
-        tags: ['ai-generated', 'gsx-create']
+        tags: ['ai-generated', 'gsx-create'],
       };
-      
+
       // Use global clipboard manager to ensure both storage and in-memory history are updated
       if (global.clipboardManager) {
         await global.clipboardManager.addToHistory(item);
@@ -6366,30 +6699,30 @@ function setupAiderIPC() {
         storage.addItem(item);
         console.log(`[GSX Create] Registered file via direct storage: ${fileName} in space ${spaceId}`);
       }
-      
+
       return { success: true, fileName, spaceId };
     } catch (error) {
       console.error('[GSX Create] Failed to register file:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Update an existing file's metadata in the Space after edits (via Spaces API)
   ipcMain.handle('aider:update-file-metadata', async (event, { spaceId, filePath, description }) => {
     try {
       const fs = require('fs');
       const { getSpacesAPI } = require('./spaces-api');
       const spacesAPI = getSpacesAPI();
-      
+
       const fileName = path.basename(filePath);
       const stat = fs.statSync(filePath);
       const content = fs.readFileSync(filePath, 'utf-8');
-      
+
       // Find existing item by filePath via Spaces API
       let existingItem = null;
       if (spaceId) {
         const items = await spacesAPI.items.list(spaceId);
-        for (const item of (items || [])) {
+        for (const item of items || []) {
           const fullItem = await spacesAPI.items.get(spaceId, item.id);
           if (fullItem?.metadata?.filePath === filePath) {
             existingItem = fullItem;
@@ -6397,7 +6730,7 @@ function setupAiderIPC() {
           }
         }
       }
-      
+
       if (existingItem) {
         // Update the existing item via Spaces API
         await spacesAPI.items.update(spaceId, existingItem.id, {
@@ -6407,18 +6740,40 @@ function setupAiderIPC() {
             ...(existingItem.metadata || {}),
             lastModified: stat.mtime.toISOString(),
             description: description || existingItem.metadata?.description,
-            editCount: ((existingItem.metadata?.editCount) || 0) + 1
-          }
+            editCount: (existingItem.metadata?.editCount || 0) + 1,
+          },
         });
-        
+
         console.log(`[GSX Create] Updated file metadata: ${fileName}`);
         return { success: true, updated: true, fileName };
       } else {
         // File not in clipboard yet, register it as new
         const ext = path.extname(fileName).toLowerCase();
-        const codeExtensions = ['.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.css', '.scss', '.html', '.json', '.yaml', '.yml', '.sh', '.bash'];
+        const codeExtensions = [
+          '.js',
+          '.ts',
+          '.jsx',
+          '.tsx',
+          '.py',
+          '.rb',
+          '.go',
+          '.rs',
+          '.java',
+          '.c',
+          '.cpp',
+          '.h',
+          '.hpp',
+          '.css',
+          '.scss',
+          '.html',
+          '.json',
+          '.yaml',
+          '.yml',
+          '.sh',
+          '.bash',
+        ];
         const isCode = codeExtensions.includes(ext);
-        
+
         const item = {
           type: isCode ? 'code' : 'text',
           spaceId: spaceId,
@@ -6433,11 +6788,11 @@ function setupAiderIPC() {
             createdAt: new Date().toISOString(),
             lastModified: stat.mtime.toISOString(),
             fileSize: stat.size,
-            language: ext.replace('.', '') || 'text'
+            language: ext.replace('.', '') || 'text',
           },
-          tags: ['ai-generated', 'gsx-create']
+          tags: ['ai-generated', 'gsx-create'],
         };
-        
+
         // Use global clipboard manager to ensure both storage and in-memory history are updated
         if (global.clipboardManager) {
           await global.clipboardManager.addToHistory(item);
@@ -6454,7 +6809,7 @@ function setupAiderIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Get space items
   ipcMain.handle('aider:get-space-items', async (event, spaceId) => {
     try {
@@ -6481,7 +6836,7 @@ function setupAiderIPC() {
             if (event.sender && !event.sender.isDestroyed()) {
               event.sender.send('aider:file-changed', filePath);
             }
-          } catch (e) {
+          } catch (_e) {
             // Window closed, stop watching
             watcher.close();
             fileWatchers.delete(filePath);
@@ -6515,28 +6870,28 @@ function setupAiderIPC() {
     try {
       console.log('[Screenshot] Capturing screenshot for:', filePath);
       const { chromium } = require('playwright');
-      
+
       const browser = await chromium.launch({ headless: true });
       const context = await browser.newContext({
-        viewport: { width: 1280, height: 800 }
+        viewport: { width: 1280, height: 800 },
       });
       const page = await context.newPage();
-      
+
       // Navigate to the file (cross-platform compatible)
       const fileUrl = filePath.startsWith('file://') ? filePath : pathToFileURL(filePath).href;
       console.log('[Screenshot] Navigating to:', fileUrl);
       await page.goto(fileUrl, { waitUntil: 'networkidle', timeout: 30000 });
-      
+
       // Capture full page screenshot
       const buffer = await page.screenshot({ fullPage: true });
-      
+
       await browser.close();
-      
+
       console.log('[Screenshot] Capture successful, size:', buffer.length);
-      return { 
-        success: true, 
+      return {
+        success: true,
         screenshot: buffer.toString('base64'),
-        size: buffer.length
+        size: buffer.length,
       };
     } catch (error) {
       console.error('[Screenshot] Capture error:', error);
@@ -6548,13 +6903,13 @@ function setupAiderIPC() {
   ipcMain.handle('aider:analyze-screenshot', async (event, screenshotBase64, prompt) => {
     try {
       console.log('[Analyze] Analyzing with AI...');
-      
+
       const { getAIService } = require('./lib/ai-service');
       const ai = getAIService();
-      
+
       let analysis;
       let usedProfile;
-      
+
       // Check if we have valid screenshot data
       if (screenshotBase64 && typeof screenshotBase64 === 'string' && screenshotBase64.length > 100) {
         // Remove data URL prefix if present
@@ -6562,13 +6917,14 @@ function setupAiderIPC() {
         if (base64Data.startsWith('data:')) {
           base64Data = base64Data.split(',')[1] || base64Data;
         }
-        
+
         console.log('[Analyze] With image, data length:', base64Data.length);
-        
+
         // Image + text analysis via centralized AI service
         const result = await ai.vision(
           base64Data,
-          prompt || 'Analyze this screenshot and describe what you see. Identify any UI issues, bugs, or improvements that could be made.',
+          prompt ||
+            'Analyze this screenshot and describe what you see. Identify any UI issues, bugs, or improvements that could be made.',
           { maxTokens: 4096, feature: 'aider-analyze-screenshot' }
         );
         analysis = result.content;
@@ -6576,27 +6932,27 @@ function setupAiderIPC() {
       } else {
         // Text-only analysis (no image)
         console.log('[Analyze] Text-only analysis (no image)');
-        
+
         if (!prompt) {
           return { success: false, error: 'No prompt provided for text-only analysis' };
         }
-        
+
         // Text-only via centralized AI service
         analysis = await ai.complete(prompt, {
           profile: 'standard',
           maxTokens: 4096,
-          feature: 'aider-analyze-screenshot'
+          feature: 'aider-analyze-screenshot',
         });
         usedProfile = 'standard';
       }
-      
+
       console.log('[Analyze] Analysis complete');
-      
-      return { 
-        success: true, 
+
+      return {
+        success: true,
         analysis: analysis || 'No analysis available',
         model: usedProfile,
-        usage: response.usage
+        usage: response.usage,
       };
     } catch (error) {
       const errorMessage = error.message || error.toString() || 'Unknown error';
@@ -6611,13 +6967,13 @@ function setupAiderIPC() {
 // Set up IPC handlers for communication with renderer process
 function setupIPC() {
   console.log('[setupIPC] Function called');
-  
+
   // Initialize Dependency Management handlers (before Aider so we can check deps first)
   setupDependencyIPC();
-  
+
   // Initialize Aider Bridge handlers
   setupAiderIPC();
-  
+
   // Initialize GSX File Sync handlers
   try {
     const gsxFileSync = getGSXFileSync();
@@ -6628,7 +6984,7 @@ function setupIPC() {
   } catch (error) {
     console.error('[setupIPC] Failed to setup GSX File Sync:', error);
   }
-  
+
   // Initialize Video Editor handlers
   try {
     if (global.videoEditor) {
@@ -6639,7 +6995,7 @@ function setupIPC() {
   } catch (error) {
     console.error('[setupIPC] Failed to setup Video Editor:', error);
   }
-  
+
   // Initialize Project Manager handlers
   try {
     const { setupProjectManagerIPC } = require('./src/project-manager/ProjectManagerIPC');
@@ -6648,68 +7004,65 @@ function setupIPC() {
   } catch (error) {
     console.error('[setupIPC] Failed to setup Project Manager:', error);
   }
-  
+
   // Web search for error diagnosis - provides up-to-date info on AI models, software versions, etc.
   ipcMain.handle('aider:web-search', async (event, query, options = {}) => {
     try {
       console.log('[WebSearch] Searching for:', query);
       const maxResults = options.maxResults || 5;
-      
+
       // Use DuckDuckGo HTML search (no API key required)
       // This fetches the lite version which is easier to parse
       const searchUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
-      
+
       const response = await fetch(searchUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        }
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        },
       });
-      
+
       if (!response.ok) {
         throw new Error(`Search failed: ${response.status}`);
       }
-      
+
       const html = await response.text();
-      
+
       // Parse results from DuckDuckGo lite HTML
       const results = [];
-      
+
       // Extract result snippets and links using regex
       // DuckDuckGo lite uses simple table structure
-      const linkRegex = /<a[^>]+class="result-link"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
-      const snippetRegex = /<td[^>]*class="result-snippet"[^>]*>([^<]+)<\/td>/gi;
-      
       // Simpler parsing for lite.duckduckgo.com
       const resultBlocks = html.split(/<tr[^>]*class="result-link"/i);
-      
+
       for (let i = 1; i < resultBlocks.length && results.length < maxResults; i++) {
         const block = resultBlocks[i];
-        
+
         // Extract URL
         const urlMatch = block.match(/href="([^"]+)"/i);
         const titleMatch = block.match(/>([^<]+)<\/a>/i);
-        
+
         // Find the next snippet
         const snippetMatch = block.match(/class="result-snippet"[^>]*>([^<]*)</i);
-        
+
         if (urlMatch && titleMatch) {
           results.push({
             title: titleMatch[1].trim(),
             url: urlMatch[1],
-            snippet: snippetMatch ? snippetMatch[1].trim() : ''
+            snippet: snippetMatch ? snippetMatch[1].trim() : '',
           });
         }
       }
-      
+
       // If regex parsing didn't work well, try a simpler approach
       if (results.length === 0) {
         // Alternative: look for any href patterns that look like search results
         const allLinks = html.match(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([^<]+)<\/a>/gi) || [];
-        
+
         for (const link of allLinks.slice(0, maxResults)) {
           const urlMatch = link.match(/href="(https?:\/\/[^"]+)"/i);
           const textMatch = link.match(/>([^<]+)<\/a>/i);
-          
+
           if (urlMatch && textMatch) {
             const url = urlMatch[1];
             // Filter out DuckDuckGo internal links
@@ -6717,43 +7070,42 @@ function setupIPC() {
               results.push({
                 title: textMatch[1].trim(),
                 url: url,
-                snippet: ''
+                snippet: '',
               });
             }
           }
         }
       }
-      
+
       console.log('[WebSearch] Found', results.length, 'results');
-      
+
       return {
         success: true,
         query: query,
         results: results,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
-      
     } catch (error) {
       console.error('[WebSearch] Error:', error.message);
       return {
         success: false,
         error: error.message,
         query: query,
-        results: []
+        results: [],
       };
     }
   });
-  
+
   // Settings IPC handlers
   console.log('[setupIPC] Setting up settings handlers');
-  
+
   // Mission Control trigger for GSX toolbar
   ipcMain.on('trigger-mission-control', () => {
     const { exec } = require('child_process');
     exec('open -a "Mission Control"');
     console.log('[IPC] Mission Control triggered from GSX toolbar');
   });
-  
+
   // Clear cache and reload for GSX toolbar refresh button
   // If options.clearStorage is true, also clear site storage for the current page before reloading.
   // PROTECTION: We backup important JSON config files before clearing storage
@@ -6768,15 +7120,15 @@ function setupIPC() {
           const userDataPath = app.getPath('userData');
           const filesToProtect = [
             'external-bots.json',
-            'image-creators.json', 
+            'image-creators.json',
             'video-creators.json',
             'audio-generators.json',
             'ui-design-tools.json',
             'web-tools.json',
             'idw-entries.json',
-            'gsx-links.json'
+            'gsx-links.json',
           ];
-          
+
           for (const filename of filesToProtect) {
             const filePath = path.join(userDataPath, filename);
             const backupPath = path.join(userDataPath, filename + '.protect-backup');
@@ -6789,26 +7141,26 @@ function setupIPC() {
               }
             }
           }
-          
+
           // Best-effort clear of per-page web storage before reload.
           // Note: we intentionally do NOT clear cookies by default, to avoid forced logouts.
           try {
             await win.webContents.executeJavaScript(
-              "try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}",
+              'try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}',
               true
             );
-          } catch (e) {
+          } catch (_e) {
             // ignore - may fail on some origins / CSP
           }
           try {
             await win.webContents.session.clearStorageData({
-              storages: ['localstorage', 'indexdb', 'cachestorage', 'serviceworkers']
+              storages: ['localstorage', 'indexdb', 'cachestorage', 'serviceworkers'],
             });
             console.log('[IPC] Storage cleared for window (localstorage/indexdb/cachestorage/serviceworkers)');
           } catch (e) {
             console.error('[IPC] Error clearing storage data:', e);
           }
-          
+
           // PROTECTION: Restore backups if original files were affected
           for (const filename of filesToProtect) {
             const filePath = path.join(userDataPath, filename);
@@ -6823,7 +7175,11 @@ function setupIPC() {
             }
             // Clean up backup
             if (fs.existsSync(backupPath)) {
-              try { fs.unlinkSync(backupPath); } catch (e) {}
+              try {
+                fs.unlinkSync(backupPath);
+              } catch (_ignored) {
+                /* backup cleanup failed */
+              }
             }
           }
         }
@@ -6860,25 +7216,23 @@ function setupIPC() {
     const allSettings = settingsManager.getAll();
     return allSettings;
   });
-  
+
   ipcMain.handle('settings:save', async (event, settings) => {
     const settingsManager = global.settingsManager;
     if (!settingsManager) {
       console.error('Settings manager not initialized');
       return false;
     }
-    
-    
+
     // Log settings change (without sensitive values)
     logger.logSettingsChanged('multiple-settings', 'updated', 'updated');
     logger.info('Settings saved', {
       event: 'settings:saved',
-      settingsCount: Object.keys(settings).length
+      settingsCount: Object.keys(settings).length,
     });
-    
+
     const saved = settingsManager.update(settings);
-    
-    
+
     // If idwEnvironments was updated, also write to idw-entries.json for menu compatibility
     if (settings.idwEnvironments) {
       console.log('[Settings] idwEnvironments updated, syncing to idw-entries.json...');
@@ -6886,19 +7240,23 @@ function setupIPC() {
         const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
         fs.writeFileSync(idwConfigPath, JSON.stringify(settings.idwEnvironments, null, 2));
         console.log('[Settings] ✅ Synced', settings.idwEnvironments.length, 'IDW environments to file');
-        
+
         // Refresh menu with new data
-        if (global.menuDataManager) { global.menuDataManager.refresh(); }
-        else { const { refreshApplicationMenu } = require('./menu'); refreshApplicationMenu(); }
+        if (global.menuDataManager) {
+          global.menuDataManager.refresh();
+        } else {
+          const { refreshApplicationMenu } = require('./menu');
+          refreshApplicationMenu();
+        }
         console.log('[Settings] Menu refreshed');
       } catch (error) {
         console.error('[Settings] Error syncing idwEnvironments to file:', error);
       }
     }
-    
+
     return saved;
   });
-  
+
   ipcMain.handle('settings:test-llm', async (event, config) => {
     // Test LLM connection
     try {
@@ -6907,7 +7265,7 @@ function setupIPC() {
       if (!config.apiKey) {
         return { success: false, error: 'API key is required' };
       }
-      
+
       // Basic validation for different providers
       switch (config.provider) {
         case 'openai':
@@ -6922,7 +7280,7 @@ function setupIPC() {
           break;
         // Add more provider validations as needed
       }
-      
+
       // If we get here, assume the key is valid
       // In production, make an actual API call to test
       return { success: true };
@@ -6931,14 +7289,14 @@ function setupIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // ==================== VIDEO RELEASE - YOUTUBE/VIMEO AUTH ====================
-  
+
   ipcMain.handle('release:authenticate-youtube', async () => {
     try {
       const { YouTubeUploader } = await import('./src/video/release/YouTubeUploader.js');
       const uploader = new YouTubeUploader();
-      
+
       // Get credentials from settings
       const settingsManager = global.settingsManager;
       if (settingsManager) {
@@ -6948,19 +7306,19 @@ function setupIPC() {
           uploader.setClientCredentials(clientId, clientSecret);
         }
       }
-      
+
       return await uploader.authenticate();
     } catch (error) {
       console.error('[Release] YouTube authentication error:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   ipcMain.handle('release:authenticate-vimeo', async () => {
     try {
       const { VimeoUploader } = await import('./src/video/release/VimeoUploader.js');
       const uploader = new VimeoUploader();
-      
+
       // Get credentials from settings
       const settingsManager = global.settingsManager;
       if (settingsManager) {
@@ -6970,19 +7328,19 @@ function setupIPC() {
           uploader.setClientCredentials(clientId, clientSecret);
         }
       }
-      
+
       return await uploader.authenticate();
     } catch (error) {
       console.error('[Release] Vimeo authentication error:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   ipcMain.handle('release:get-youtube-status', async () => {
     try {
       const { YouTubeUploader } = await import('./src/video/release/YouTubeUploader.js');
       const uploader = new YouTubeUploader();
-      
+
       // Get credentials from settings
       const settingsManager = global.settingsManager;
       if (settingsManager) {
@@ -6992,19 +7350,19 @@ function setupIPC() {
           uploader.setClientCredentials(clientId, clientSecret);
         }
       }
-      
+
       return await uploader.getConnectionStatus();
     } catch (error) {
       console.error('[Release] Get YouTube status error:', error);
       return { configured: false, authenticated: false, error: error.message };
     }
   });
-  
+
   ipcMain.handle('release:get-vimeo-status', async () => {
     try {
       const { VimeoUploader } = await import('./src/video/release/VimeoUploader.js');
       const uploader = new VimeoUploader();
-      
+
       // Get credentials from settings
       const settingsManager = global.settingsManager;
       if (settingsManager) {
@@ -7014,16 +7372,16 @@ function setupIPC() {
           uploader.setClientCredentials(clientId, clientSecret);
         }
       }
-      
+
       return await uploader.getConnectionStatus();
     } catch (error) {
       console.error('[Release] Get Vimeo status error:', error);
       return { configured: false, authenticated: false, error: error.message };
     }
   });
-  
+
   // ==================== END VIDEO RELEASE AUTH ====================
-  
+
   // GSX sync-all handler (for sync now button)
   ipcMain.handle('gsx:sync-all', async () => {
     try {
@@ -7035,38 +7393,38 @@ function setupIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Event logging IPC handlers
   ipcMain.handle('log:event', async (event, eventType, eventData) => {
     logger.logEvent(eventType, eventData);
     return { success: true };
   });
-  
+
   ipcMain.handle('log:tab-created', async (event, tabId, url, metadata) => {
     logger.logTabCreated(tabId, url, metadata);
     return { success: true };
   });
-  
+
   ipcMain.handle('log:tab-closed', async (event, tabId, url) => {
     logger.logTabClosed(tabId, url);
     return { success: true };
   });
-  
+
   ipcMain.handle('log:tab-switched', async (event, fromTab, toTab) => {
     logger.logTabSwitched(fromTab, toTab);
     return { success: true };
   });
-  
+
   ipcMain.handle('log:window-navigation', async (event, windowId, url, from) => {
     logger.logWindowNavigation(windowId, url, from);
     return { success: true };
   });
-  
+
   ipcMain.handle('log:feature-used', async (event, featureName, metadata) => {
     logger.logFeatureUsed(featureName, metadata);
     return { success: true };
   });
-  
+
   // GSX test connection handler with token from settings
   // Wrapped in try-catch to skip if already registered by GSX File Sync
   try {
@@ -7076,148 +7434,169 @@ function setupIPC() {
           hasToken: !!config.token,
           tokenLength: config.token ? config.token.length : 0,
           environment: config.environment,
-        hasAccountId: !!config.accountId
-      });
-      
-      const settingsManager = global.settingsManager;
-      if (config.token) {
-        // Temporarily save the token to test it
-        console.log('[Main] Saving token to settings (length:', config.token.length, ')');
-        settingsManager.set('gsxToken', config.token);
-        settingsManager.set('gsxEnvironment', config.environment || 'production');
-        
-        if (config.accountId) {
-          console.log('[Main] Saving account ID:', config.accountId);
-          settingsManager.set('gsxAccountId', config.accountId);
+          hasAccountId: !!config.accountId,
+        });
+
+        const settingsManager = global.settingsManager;
+        if (config.token) {
+          // Temporarily save the token to test it
+          console.log('[Main] Saving token to settings (length:', config.token.length, ')');
+          settingsManager.set('gsxToken', config.token);
+          settingsManager.set('gsxEnvironment', config.environment || 'production');
+
+          if (config.accountId) {
+            console.log('[Main] Saving account ID:', config.accountId);
+            settingsManager.set('gsxAccountId', config.accountId);
+
+            // Also sync to user-preferences.json for consistency
+            try {
+              const prefsPath = path.join(app.getPath('userData'), 'user-preferences.json');
+              let prefs = {};
+              if (fs.existsSync(prefsPath)) {
+                prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+              }
+              if (prefs.gsxAccountId !== config.accountId) {
+                prefs.gsxAccountId = config.accountId;
+                fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
+                console.log('[Main] Synced gsxAccountId to user-preferences.json');
+              }
+            } catch (syncErr) {
+              console.warn('[Main] Could not sync accountId to preferences file:', syncErr.message);
+            }
+          }
         }
-      }
-      
-      // Verify token was saved
-      const savedToken = settingsManager.get('gsxToken');
-      console.log('[Main] Token after save - Type:', typeof savedToken, 'Length:', savedToken ? savedToken.length : 0);
-      
-      const gsxFileSync = getGSXFileSync();
-      const result = await gsxFileSync.testConnection();
-      
-      console.log('[Main] Test connection result:', result);
-      
-      if (!result.success && config.token) {
-        // If test failed, clear the temporary token
-        console.log('[Main] Test failed, clearing token');
-        settingsManager.set('gsxToken', '');
-      }
-      
-      return result;
+
+        // Verify token was saved
+        const savedToken = settingsManager.get('gsxToken');
+        console.log(
+          '[Main] Token after save - Type:',
+          typeof savedToken,
+          'Length:',
+          savedToken ? savedToken.length : 0
+        );
+
+        const gsxFileSync = getGSXFileSync();
+        const result = await gsxFileSync.testConnection();
+
+        console.log('[Main] Test connection result:', result);
+
+        if (!result.success && config.token) {
+          // If test failed, clear the temporary token
+          console.log('[Main] Test failed, clearing token');
+          settingsManager.set('gsxToken', '');
+        }
+
+        return result;
       } catch (error) {
         console.error('[Main] GSX connection test failed:', error);
         return { success: false, error: error.message };
       }
     });
-  } catch (error) {
+  } catch (_error) {
     console.log('[setupIPC] Skipping gsx:test-connection (already registered by GSX File Sync)');
   }
-  
+
   // ============================================
   // GSX CREATE - Cost Tracking Handlers
   // ============================================
-  
+
   // Note: Style guides, journey maps, txdb, and file handlers are registered in setupAiderIPC
-  
+
   // Smart export IPC handlers
   ipcMain.handle('get-smart-export-data', async () => {
     console.log('[Main] get-smart-export-data called, returning:', global.smartExportData ? 'data exists' : 'null');
     return global.smartExportData || null;
   });
-  
+
   ipcMain.handle('generate-smart-export', async (event, data) => {
     try {
       // Use the global smartExport instance
       const result = await global.smartExport.generateSmartExport(data.space, data.items, data.options || {});
-      
+
       // Store spaceData in the result for regeneration
       result.spaceData = data;
-      
+
       return result;
     } catch (error) {
       console.error('Error generating smart export:', error);
       throw error;
     }
   });
-  
+
   ipcMain.handle('generate-basic-export', async (event, data) => {
     try {
       const PDFGenerator = require('./pdf-generator');
       const generator = new PDFGenerator();
-      
+
       const html = generator.generateSpaceHTML(data.space, data.items, {
         includeMetadata: true,
         includeTimestamps: true,
-        includeTags: true
+        includeTags: true,
       });
-      
+
       return {
         html,
         metadata: {
           model: 'basic',
           timestamp: new Date().toISOString(),
           itemCount: data.items.length,
-          spaceName: data.space.name
+          spaceName: data.space.name,
         },
-        spaceData: data
+        spaceData: data,
       };
     } catch (error) {
       console.error('Error generating basic export:', error);
       throw error;
     }
   });
-  
+
   ipcMain.handle('save-smart-export-html', async (event, html, metadata) => {
     try {
       const { dialog } = require('electron');
       const fs = require('fs');
-      
+
       const result = await dialog.showSaveDialog({
         title: 'Save Smart Export as HTML',
         defaultPath: `${metadata.spaceName}_export.html`,
         filters: [
           { name: 'HTML Files', extensions: ['html'] },
-          { name: 'All Files', extensions: ['*'] }
-        ]
+          { name: 'All Files', extensions: ['*'] },
+        ],
       });
-      
+
       if (!result.canceled) {
         fs.writeFileSync(result.filePath, html, 'utf8');
         shell.showItemInFolder(result.filePath);
         return true;
       }
-      
+
       return false;
     } catch (error) {
       console.error('Error saving HTML:', error);
       throw error;
     }
   });
-  
+
   // Template handlers
   ipcMain.handle('get-export-templates', async () => {
     const { getTemplateManager } = require('./template-manager');
     const templateManager = getTemplateManager();
     return templateManager.getAllTemplates();
   });
-  
+
   ipcMain.handle('get-export-template', async (event, templateId) => {
     const { getTemplateManager } = require('./template-manager');
     const templateManager = getTemplateManager();
     return templateManager.getTemplate(templateId);
   });
-  
+
   ipcMain.handle('save-export-template', async (event, template) => {
     const { getTemplateManager } = require('./template-manager');
     const templateManager = getTemplateManager();
     templateManager.saveTemplate(template);
     return { success: true };
   });
-  
+
   // Helper function to generate HTML preview thumbnail
   function generateHTMLPreviewThumbnail(title) {
     // Create an SVG that looks like an HTML document preview
@@ -7242,14 +7621,14 @@ function setupIPC() {
   ipcMain.handle('save-to-space', async (event, content) => {
     try {
       console.log('[Main] save-to-space called with content:', content.type, content.spaceId);
-      
+
       // Get the clipboard manager instance
       if (!global.clipboardManager) {
         throw new Error('Clipboard manager not initialized');
       }
-      
+
       const clipboardManager = global.clipboardManager;
-      
+
       // Create the item to save
       const item = {
         type: 'html',
@@ -7266,36 +7645,34 @@ function setupIPC() {
           ...content.metadata,
           type: 'generated-document',
           isGenerated: true,
-          title: content.title || 'Generated Document'
+          title: content.title || 'Generated Document',
         },
         tags: ['generated', 'ai-document'],
         // Add a thumbnail that shows it's an HTML document
-        thumbnail: generateHTMLPreviewThumbnail(content.title || 'Generated Document')
+        thumbnail: generateHTMLPreviewThumbnail(content.title || 'Generated Document'),
       };
-      
+
       console.log('[Main] Adding item to clipboard history');
-      
+
       // Add to clipboard history
       clipboardManager.addToHistory(item);
-      
+
       // Notify all clipboard viewers to refresh
       const allWindows = BrowserWindow.getAllWindows();
-      const clipboardWindows = allWindows.filter(win => 
-        win.webContents.getURL().includes('clipboard-viewer.html')
-      );
-      
-      clipboardWindows.forEach(win => {
+      const clipboardWindows = allWindows.filter((win) => win.webContents.getURL().includes('clipboard-viewer.html'));
+
+      clipboardWindows.forEach((win) => {
         win.webContents.send('clipboard:history-updated');
       });
-      
+
       return true;
     } catch (error) {
       console.error('[Main] Error saving to space:', error);
       return false;
     }
   });
-  
-  ipcMain.handle('get-spaces', async (event) => {
+
+  ipcMain.handle('get-spaces', async (_event) => {
     try {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
@@ -7308,8 +7685,8 @@ function setupIPC() {
     }
   });
 
-  // NOTE: Space management handlers (clipboard:get-spaces, clipboard:create-space, 
-  // clipboard:update-space, clipboard:delete-space, clipboard:set-current-space, 
+  // NOTE: Space management handlers (clipboard:get-spaces, clipboard:create-space,
+  // clipboard:update-space, clipboard:delete-space, clipboard:set-current-space,
   // clipboard:move-to-space) are registered in clipboard-manager-v2-adapter.js
   // Using the singleton ClipboardManagerV2 instance ensures consistent in-memory state
   // and prevents issues with multiple ClipboardStorage instances causing stale data
@@ -7321,9 +7698,8 @@ function setupIPC() {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
       const items = storage.getSpaceItems(spaceId) || [];
-      return items.filter(item => 
-        item.fileType === 'audio' || 
-        /\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff)$/i.test(item.content || '')
+      return items.filter(
+        (item) => item.fileType === 'audio' || /\.(mp3|wav|m4a|aac|ogg|flac|wma|aiff)$/i.test(item.content || '')
       );
     } catch (error) {
       console.error('[Clipboard] Error getting space audio:', error);
@@ -7337,9 +7713,8 @@ function setupIPC() {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
       const items = storage.getSpaceItems(spaceId) || [];
-      return items.filter(item => 
-        item.fileType === 'video' || 
-        /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(item.content || '')
+      return items.filter(
+        (item) => item.fileType === 'video' || /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(item.content || '')
       );
     } catch (error) {
       console.error('[Clipboard] Error getting space videos:', error);
@@ -7377,15 +7752,15 @@ function setupIPC() {
   // ============================================
   // UNIVERSAL SPACES API IPC HANDLERS
   // ============================================
-  
+
   // Convenience method for video paths (wraps existing implementation)
   ipcMain.handle('spaces-api:getVideoPath', async (event, itemId) => {
     try {
       const ClipboardStorage = require('./clipboard-storage-v2');
       const storage = new ClipboardStorage();
-      
+
       console.log('[SpacesAPI] Getting video path for item:', itemId);
-      
+
       // Helper to load scenes from metadata
       const loadScenes = (itemId) => {
         try {
@@ -7394,16 +7769,16 @@ function setupIPC() {
             const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
             return metadata.scenes || [];
           }
-        } catch (e) {
+        } catch (_e) {
           // Ignore metadata errors
         }
         return [];
       };
-      
+
       // First, try to load item via storage
       try {
         const item = storage.loadItem(itemId);
-        
+
         if (item && item.content) {
           let filePath;
           if (path.isAbsolute(item.content)) {
@@ -7411,192 +7786,192 @@ function setupIPC() {
           } else {
             filePath = path.join(storage.storageRoot, item.content);
           }
-          
+
           if (fs.existsSync(filePath)) {
             console.log('[SpacesAPI] Found video via loadItem:', filePath);
-            return { 
-              success: true, 
+            return {
+              success: true,
               filePath: filePath,
               fileName: item.fileName || path.basename(filePath),
-              scenes: loadScenes(itemId)
+              scenes: loadScenes(itemId),
             };
           }
         }
       } catch (loadError) {
         console.log('[SpacesAPI] loadItem failed, trying fallback:', loadError.message);
       }
-      
+
       // Fallback: Scan the item directory for video files directly
       const itemDir = path.join(storage.itemsDir, itemId);
       console.log('[SpacesAPI] Checking item directory:', itemDir);
-      
+
       if (fs.existsSync(itemDir)) {
         const files = fs.readdirSync(itemDir);
         console.log('[SpacesAPI] Files in item dir:', files);
-        
+
         // Filter for video files
         const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.mpg', '.mpeg'];
-        const videoFile = files.find(f => {
+        const videoFile = files.find((f) => {
           const lower = f.toLowerCase();
           if (f.startsWith('.')) return false;
-          return videoExtensions.some(ext => lower.endsWith(ext));
+          return videoExtensions.some((ext) => lower.endsWith(ext));
         });
-        
+
         if (videoFile) {
           const videoPath = path.join(itemDir, videoFile);
           console.log('[SpacesAPI] Found video file in item dir:', videoPath);
-          
-          const indexEntry = storage.index.items.find(i => i.id === itemId);
-          
-          return { 
-            success: true, 
+
+          const indexEntry = storage.index.items.find((i) => i.id === itemId);
+
+          return {
+            success: true,
             filePath: videoPath,
             fileName: indexEntry?.fileName || videoFile,
-            scenes: loadScenes(itemId)
+            scenes: loadScenes(itemId),
           };
         }
       }
-      
+
       // File not found
-      const indexEntry = storage.index.items.find(i => i.id === itemId);
+      const indexEntry = storage.index.items.find((i) => i.id === itemId);
       console.error('[SpacesAPI] Video file not found. Expected:', indexEntry?.contentPath);
-      return { 
-        success: false, 
-        error: `Video file is missing from storage. The file may have been deleted or moved. Expected: ${indexEntry?.fileName || 'unknown'}`
+      return {
+        success: false,
+        error: `Video file is missing from storage. The file may have been deleted or moved. Expected: ${indexEntry?.fileName || 'unknown'}`,
       };
     } catch (error) {
       console.error('[SpacesAPI] Error getting video path:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Space management
   ipcMain.handle('spaces-api:list', async () => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.list();
   });
-  
+
   ipcMain.handle('spaces-api:get', async (event, spaceId) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.get(spaceId);
   });
-  
+
   ipcMain.handle('spaces-api:create', async (event, name, options) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.create(name, options);
   });
-  
+
   ipcMain.handle('spaces-api:update', async (event, spaceId, data) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.update(spaceId, data);
   });
-  
+
   ipcMain.handle('spaces-api:delete', async (event, spaceId) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.delete(spaceId);
   });
-  
+
   // Item management
   ipcMain.handle('spaces-api:items:list', async (event, spaceId, options) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.items.list(spaceId, options);
   });
-  
+
   ipcMain.handle('spaces-api:items:get', async (event, spaceId, itemId) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.items.get(spaceId, itemId);
   });
-  
+
   ipcMain.handle('spaces-api:items:add', async (event, spaceId, item) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.items.add(spaceId, item);
   });
-  
+
   ipcMain.handle('spaces-api:items:update', async (event, spaceId, itemId, data) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.items.update(spaceId, itemId, data);
   });
-  
+
   ipcMain.handle('spaces-api:items:delete', async (event, spaceId, itemId) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.items.delete(spaceId, itemId);
   });
-  
+
   ipcMain.handle('spaces-api:items:move', async (event, itemId, fromSpaceId, toSpaceId) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.items.move(itemId, fromSpaceId, toSpaceId);
   });
-  
+
   // File access
   ipcMain.handle('spaces-api:files:getSpacePath', async (event, spaceId) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.files.getSpacePath(spaceId);
   });
-  
+
   ipcMain.handle('spaces-api:files:list', async (event, spaceId, subPath) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.files.list(spaceId, subPath);
   });
-  
+
   ipcMain.handle('spaces-api:files:read', async (event, spaceId, filePath) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.files.read(spaceId, filePath);
   });
-  
+
   ipcMain.handle('spaces-api:files:write', async (event, spaceId, filePath, content) => {
     const { getSpacesAPI } = require('./spaces-api');
     const api = getSpacesAPI();
     return await api.files.write(spaceId, filePath, content);
   });
-  
+
   ipcMain.handle('save-smart-export-pdf', async (event, html, metadata) => {
     try {
       const { dialog } = require('electron');
       const PDFGenerator = require('./pdf-generator');
-      
+
       const result = await dialog.showSaveDialog({
         title: 'Export Smart Export as PDF',
         defaultPath: `${metadata.spaceName}_export.pdf`,
         filters: [
           { name: 'PDF Files', extensions: ['pdf'] },
-          { name: 'All Files', extensions: ['*'] }
-        ]
+          { name: 'All Files', extensions: ['*'] },
+        ],
       });
-      
+
       if (!result.canceled) {
         const generator = new PDFGenerator();
         await generator.generatePDFFromHTML(html, result.filePath);
         await generator.cleanup();
-        
+
         shell.showItemInFolder(result.filePath);
         return true;
       }
-      
+
       return false;
     } catch (error) {
       console.error('Error saving PDF:', error);
       throw error;
     }
   });
-  
+
   // ============================================
   // MULTI-FORMAT SMART EXPORT HANDLERS
   // ============================================
-  
+
   // Get available export formats
   ipcMain.handle('smart-export:get-formats', async () => {
     try {
@@ -7612,27 +7987,27 @@ function setupIPC() {
   ipcMain.handle('smart-export:generate', async (event, { format, spaceId, options = {} }) => {
     try {
       console.log(`[SmartExport] Generating ${format} export for space:`, spaceId);
-      
+
       // Get space and items
       const spacesAPI = require('./spaces-api');
       const api = spacesAPI.getSpacesAPI();
-      
+
       const space = await api.get(spaceId);
       if (!space) {
         return { success: false, error: 'Space not found' };
       }
-      
+
       const items = await api.items.list(spaceId, { includeContent: true });
-      
+
       // Route to appropriate generator
       let result;
-      
+
       switch (format) {
         case 'pdf': {
           // Use existing PDF generator with smart export
           const PDFGenerator = require('./pdf-generator');
           const generator = new PDFGenerator();
-          
+
           // Generate HTML first using SmartExport if AI-enhanced
           let html;
           if (options.aiEnhanced) {
@@ -7645,242 +8020,241 @@ function setupIPC() {
               includeMetadata: options.includeMetadata !== false,
               includeTimestamps: true,
               includeTags: true,
-              embedStyles: true
+              embedStyles: true,
             });
           }
-          
+
           // Save dialog
           const { dialog } = require('electron');
           const saveResult = await dialog.showSaveDialog({
             title: 'Export as PDF',
             defaultPath: `${space.name.replace(/[^a-z0-9]/gi, '_')}.pdf`,
-            filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
+            filters: [{ name: 'PDF Files', extensions: ['pdf'] }],
           });
-          
+
           if (saveResult.canceled) {
             return { success: false, canceled: true };
           }
-          
+
           await generator.generatePDFFromHTML(html, saveResult.filePath);
           await generator.cleanup();
-          
+
           shell.showItemInFolder(saveResult.filePath);
           result = { success: true, path: saveResult.filePath };
           break;
         }
-        
+
         case 'docx': {
           const { DocxGenerator } = require('./format-generators');
           const generator = new DocxGenerator();
           const genResult = await generator.generate(space, items, options);
-          
+
           if (!genResult.success) {
             return genResult;
           }
-          
+
           // Save dialog
           const { dialog } = require('electron');
           const saveResult = await dialog.showSaveDialog({
             title: 'Export as Word Document',
             defaultPath: genResult.filename,
-            filters: [{ name: 'Word Documents', extensions: ['docx'] }]
+            filters: [{ name: 'Word Documents', extensions: ['docx'] }],
           });
-          
+
           if (saveResult.canceled) {
             return { success: false, canceled: true };
           }
-          
+
           fs.writeFileSync(saveResult.filePath, genResult.buffer);
           shell.showItemInFolder(saveResult.filePath);
           result = { success: true, path: saveResult.filePath };
           break;
         }
-        
+
         case 'pptx': {
           const { PptxGenerator } = require('./format-generators');
           const generator = new PptxGenerator();
           const genResult = await generator.generate(space, items, options);
-          
+
           if (!genResult.success) {
             return genResult;
           }
-          
+
           const { dialog } = require('electron');
           const saveResult = await dialog.showSaveDialog({
             title: 'Export as PowerPoint',
             defaultPath: genResult.filename,
-            filters: [{ name: 'PowerPoint Presentations', extensions: ['pptx'] }]
+            filters: [{ name: 'PowerPoint Presentations', extensions: ['pptx'] }],
           });
-          
+
           if (saveResult.canceled) {
             return { success: false, canceled: true };
           }
-          
+
           fs.writeFileSync(saveResult.filePath, genResult.buffer);
           shell.showItemInFolder(saveResult.filePath);
           result = { success: true, path: saveResult.filePath };
           break;
         }
-        
+
         case 'xlsx': {
           const { XlsxGenerator } = require('./format-generators');
           const generator = new XlsxGenerator();
           const genResult = await generator.generate(space, items, options);
-          
+
           if (!genResult.success) {
             return genResult;
           }
-          
+
           const { dialog } = require('electron');
           const saveResult = await dialog.showSaveDialog({
             title: 'Export as Excel Spreadsheet',
             defaultPath: genResult.filename,
-            filters: [{ name: 'Excel Spreadsheets', extensions: ['xlsx'] }]
+            filters: [{ name: 'Excel Spreadsheets', extensions: ['xlsx'] }],
           });
-          
+
           if (saveResult.canceled) {
             return { success: false, canceled: true };
           }
-          
+
           fs.writeFileSync(saveResult.filePath, genResult.buffer);
           shell.showItemInFolder(saveResult.filePath);
           result = { success: true, path: saveResult.filePath };
           break;
         }
-        
+
         case 'markdown': {
           const { MarkdownGenerator } = require('./format-generators');
           const generator = new MarkdownGenerator();
           const genResult = await generator.generate(space, items, options);
-          
+
           if (!genResult.success) {
             return genResult;
           }
-          
+
           const { dialog } = require('electron');
           const saveResult = await dialog.showSaveDialog({
             title: 'Export as Markdown',
             defaultPath: genResult.filename,
-            filters: [{ name: 'Markdown Files', extensions: ['md'] }]
+            filters: [{ name: 'Markdown Files', extensions: ['md'] }],
           });
-          
+
           if (saveResult.canceled) {
             return { success: false, canceled: true };
           }
-          
+
           fs.writeFileSync(saveResult.filePath, genResult.content, 'utf8');
           shell.showItemInFolder(saveResult.filePath);
           result = { success: true, path: saveResult.filePath };
           break;
         }
-        
+
         case 'csv': {
           const { CsvGenerator } = require('./format-generators');
           const generator = new CsvGenerator();
           const genResult = await generator.generate(space, items, options);
-          
+
           if (!genResult.success) {
             return genResult;
           }
-          
+
           const { dialog } = require('electron');
           const saveResult = await dialog.showSaveDialog({
             title: 'Export as CSV',
             defaultPath: genResult.filename,
-            filters: [{ name: 'CSV Files', extensions: ['csv'] }]
+            filters: [{ name: 'CSV Files', extensions: ['csv'] }],
           });
-          
+
           if (saveResult.canceled) {
             return { success: false, canceled: true };
           }
-          
+
           fs.writeFileSync(saveResult.filePath, genResult.content, 'utf8');
           shell.showItemInFolder(saveResult.filePath);
           result = { success: true, path: saveResult.filePath };
           break;
         }
-        
+
         case 'txt': {
           const { TxtGenerator } = require('./format-generators');
           const generator = new TxtGenerator();
           const genResult = await generator.generate(space, items, options);
-          
+
           if (!genResult.success) {
             return genResult;
           }
-          
+
           const { dialog } = require('electron');
           const saveResult = await dialog.showSaveDialog({
             title: 'Export as Plain Text',
             defaultPath: genResult.filename,
-            filters: [{ name: 'Text Files', extensions: ['txt'] }]
+            filters: [{ name: 'Text Files', extensions: ['txt'] }],
           });
-          
+
           if (saveResult.canceled) {
             return { success: false, canceled: true };
           }
-          
+
           fs.writeFileSync(saveResult.filePath, genResult.content, 'utf8');
           shell.showItemInFolder(saveResult.filePath);
           result = { success: true, path: saveResult.filePath };
           break;
         }
-        
+
         case 'slides': {
           const { SlidesGenerator } = require('./format-generators');
           const generator = new SlidesGenerator();
           const genResult = await generator.generate(space, items, options);
-          
+
           if (!genResult.success) {
             return genResult;
           }
-          
+
           const { dialog } = require('electron');
           const saveResult = await dialog.showSaveDialog({
             title: 'Export as Web Slides',
             defaultPath: genResult.filename,
-            filters: [{ name: 'HTML Files', extensions: ['html'] }]
+            filters: [{ name: 'HTML Files', extensions: ['html'] }],
           });
-          
+
           if (saveResult.canceled) {
             return { success: false, canceled: true };
           }
-          
+
           fs.writeFileSync(saveResult.filePath, genResult.content, 'utf8');
           shell.showItemInFolder(saveResult.filePath);
           result = { success: true, path: saveResult.filePath };
           break;
         }
-        
+
         case 'html': {
           // Use existing smart export for HTML
           const SmartExport = require('./smart-export');
           const smartExport = new SmartExport();
           const exportResult = await smartExport.generateSmartExport(space, items, options);
-          
+
           const { dialog } = require('electron');
           const saveResult = await dialog.showSaveDialog({
             title: 'Export as HTML',
             defaultPath: `${space.name.replace(/[^a-z0-9]/gi, '_')}.html`,
-            filters: [{ name: 'HTML Files', extensions: ['html'] }]
+            filters: [{ name: 'HTML Files', extensions: ['html'] }],
           });
-          
+
           if (saveResult.canceled) {
             return { success: false, canceled: true };
           }
-          
+
           fs.writeFileSync(saveResult.filePath, exportResult.html, 'utf8');
           shell.showItemInFolder(saveResult.filePath);
           result = { success: true, path: saveResult.filePath };
           break;
         }
-        
+
         default:
           return { success: false, error: `Unsupported format: ${format}` };
       }
-      
+
       return result;
-      
     } catch (error) {
       console.error('[SmartExport] Error generating export:', error);
       return { success: false, error: error.message };
@@ -7893,10 +8267,10 @@ function setupIPC() {
       // Get space data for the modal
       const spacesAPI = require('./spaces-api');
       const api = spacesAPI.getSpacesAPI();
-      
+
       const space = await api.get(spaceId);
       const items = await api.items.list(spaceId);
-      
+
       // Create modal window
       const modalWindow = new BrowserWindow({
         width: 780,
@@ -7908,22 +8282,22 @@ function setupIPC() {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          preload: path.join(__dirname, 'preload-smart-export.js')
-        }
+          preload: path.join(__dirname, 'preload-smart-export.js'),
+        },
       });
-      
+
       modalWindow.loadFile('smart-export-format-modal.html');
-      
+
       modalWindow.once('ready-to-show', () => {
         modalWindow.show();
         // Send space data to modal
         modalWindow.webContents.send('space-data', {
           id: spaceId,
           name: space?.name || 'Unnamed Space',
-          itemCount: items?.length || 0
+          itemCount: items?.length || 0,
         });
       });
-      
+
       return { success: true };
     } catch (error) {
       console.error('[SmartExport] Error opening modal:', error);
@@ -7943,25 +8317,25 @@ function setupIPC() {
   ipcMain.handle('analyze-website-styles', async (event, urls, options) => {
     try {
       console.log('Analyzing website styles for URLs:', urls);
-      
+
       const WebStyleAnalyzer = require('./web-style-analyzer');
       const analyzer = new WebStyleAnalyzer();
-      
+
       const result = await analyzer.analyzeStyles(urls, options);
-      
+
       return result;
     } catch (error) {
       console.error('Error analyzing website styles:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   });
-  
+
   // Style guide management
   const styleGuidesPath = path.join(app.getPath('userData'), 'style-guides.json');
-  
+
   ipcMain.handle('get-style-guides', async () => {
     try {
       if (fs.existsSync(styleGuidesPath)) {
@@ -7974,7 +8348,7 @@ function setupIPC() {
       return {};
     }
   });
-  
+
   ipcMain.handle('save-style-guide', async (event, guide) => {
     try {
       let guides = {};
@@ -7982,18 +8356,18 @@ function setupIPC() {
         const data = fs.readFileSync(styleGuidesPath, 'utf8');
         guides = JSON.parse(data);
       }
-      
+
       guides[guide.id] = guide;
-      
+
       fs.writeFileSync(styleGuidesPath, JSON.stringify(guides, null, 2), 'utf8');
-      
+
       return { success: true };
     } catch (error) {
       console.error('Error saving style guide:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   ipcMain.handle('delete-style-guide', async (event, id) => {
     try {
       let guides = {};
@@ -8001,31 +8375,31 @@ function setupIPC() {
         const data = fs.readFileSync(styleGuidesPath, 'utf8');
         guides = JSON.parse(data);
       }
-      
+
       delete guides[id];
-      
+
       fs.writeFileSync(styleGuidesPath, JSON.stringify(guides, null, 2), 'utf8');
-      
+
       return { success: true };
     } catch (error) {
       console.error('Error deleting style guide:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Add handler for desktop sources (screen capture)
   ipcMain.handle('get-desktop-sources', async () => {
     try {
       console.log('Getting desktop sources for screen capture...');
       const sources = await desktopCapturer.getSources({
         types: ['screen', 'window'],
-        thumbnailSize: { width: 150, height: 150 }
+        thumbnailSize: { width: 150, height: 150 },
       });
       console.log(`Found ${sources.length} desktop sources`);
-      return sources.map(source => ({
+      return sources.map((source) => ({
         id: source.id,
         name: source.name,
-        thumbnail: source.thumbnail.toDataURL()
+        thumbnail: source.thumbnail.toDataURL(),
       }));
     } catch (error) {
       console.error('Error getting desktop sources:', error);
@@ -8085,27 +8459,63 @@ function setupIPC() {
   });
 
   ipcMain.on('logger:info', (event, { message, data }) => {
-    _logQueue.enqueue({ level: 'info', category: 'app', message, data: { ...data, source: 'renderer' }, source: 'renderer' });
+    _logQueue.enqueue({
+      level: 'info',
+      category: 'app',
+      message,
+      data: { ...data, source: 'renderer' },
+      source: 'renderer',
+    });
   });
 
   ipcMain.on('logger:warn', (event, { message, data }) => {
-    _logQueue.enqueue({ level: 'warn', category: 'app', message, data: { ...data, source: 'renderer' }, source: 'renderer' });
+    _logQueue.enqueue({
+      level: 'warn',
+      category: 'app',
+      message,
+      data: { ...data, source: 'renderer' },
+      source: 'renderer',
+    });
   });
 
   ipcMain.on('logger:error', (event, { message, data }) => {
-    _logQueue.enqueue({ level: 'error', category: 'app', message, data: { ...data, source: 'renderer' }, source: 'renderer' });
+    _logQueue.enqueue({
+      level: 'error',
+      category: 'app',
+      message,
+      data: { ...data, source: 'renderer' },
+      source: 'renderer',
+    });
   });
 
   ipcMain.on('logger:debug', (event, { message, data }) => {
-    _logQueue.enqueue({ level: 'debug', category: 'app', message, data: { ...data, source: 'renderer' }, source: 'renderer' });
+    _logQueue.enqueue({
+      level: 'debug',
+      category: 'app',
+      message,
+      data: { ...data, source: 'renderer' },
+      source: 'renderer',
+    });
   });
 
   ipcMain.on('logger:event', (event, { eventType, eventData }) => {
-    _logQueue.enqueue({ level: 'info', category: 'app', message: `Event: ${eventType}`, data: { ...eventData, source: 'renderer' }, source: 'renderer' });
+    _logQueue.enqueue({
+      level: 'info',
+      category: 'app',
+      message: `Event: ${eventType}`,
+      data: { ...eventData, source: 'renderer' },
+      source: 'renderer',
+    });
   });
 
   ipcMain.on('logger:user-action', (event, { action, details }) => {
-    _logQueue.enqueue({ level: 'info', category: 'user-action', message: action, data: { ...details, source: 'renderer' }, source: 'renderer' });
+    _logQueue.enqueue({
+      level: 'info',
+      category: 'user-action',
+      message: action,
+      data: { ...details, source: 'renderer' },
+      source: 'renderer',
+    });
   });
 
   // Batched logs from renderer console interceptor
@@ -8117,7 +8527,7 @@ function setupIPC() {
         category: 'app',
         message: entry.message || '',
         data: { ...entry.data, source: 'renderer' },
-        source: 'renderer'
+        source: 'renderer',
       });
     }
   });
@@ -8130,7 +8540,7 @@ function setupIPC() {
       ...stats,
       currentFile: currentFile?.name,
       fileSize: currentFile?.size || 0,
-      totalFiles: files.length
+      totalFiles: files.length,
     };
   });
 
@@ -8151,7 +8561,7 @@ function setupIPC() {
       const logs = await _logQueue.export({
         since: startDate,
         until: endDate,
-        format: options.format || 'json'
+        format: options.format || 'json',
       });
 
       // Save to file
@@ -8162,8 +8572,8 @@ function setupIPC() {
         defaultPath: `onereach-logs-${new Date().toISOString().split('T')[0]}.${extension}`,
         filters: [
           { name: options.format === 'json' ? 'JSON Files' : 'Text Files', extensions: [extension] },
-          { name: 'All Files', extensions: ['*'] }
-        ]
+          { name: 'All Files', extensions: ['*'] },
+        ],
       });
 
       if (!result.canceled) {
@@ -8205,12 +8615,12 @@ function setupIPC() {
       }
     }
   });
-  
+
   // Handle user actions from the renderer
   ipcMain.on('user-action', (event, data) => {
     console.log('Received user action:', data);
     logger.logUserAction(data.action || 'unknown', data);
-    
+
     // Handle settings window opening
     if (data && data.action === 'open-settings') {
       console.log('Opening settings window from user action');
@@ -8218,15 +8628,19 @@ function setupIPC() {
       openSettingsWindow();
       return;
     }
-    
+
     // Handle IDW menu update
     if (data && data.action === 'update-idw-menu' && data.environments) {
       console.log(`Updating IDW menu with environments: ${data.environments.length}`);
-      if (global.menuDataManager) { global.menuDataManager.rebuild(data.environments); }
-      else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(data.environments); }
+      if (global.menuDataManager) {
+        global.menuDataManager.rebuild(data.environments);
+      } else {
+        const { setApplicationMenu } = require('./menu');
+        setApplicationMenu(data.environments);
+      }
       console.log('IDW menu updated with ' + data.environments.length + ' environments');
     }
-    
+
     // Handle GSX links refresh specifically
     if (data && data.action === 'refresh-gsx-links') {
       console.log('Refreshing GSX links in menu by request from renderer process');
@@ -8241,31 +8655,35 @@ function setupIPC() {
           success = refreshGSXLinks();
         }
         console.log(`GSX links refresh: ${success ? 'succeeded' : 'failed'}`);
-        
+
         // Also set the application menu again with the current environments
         // This provides a double-refresh mechanism to ensure the menu updates
         let idwEnvironments = [];
         try {
           const userDataPath = app.getPath('userData');
           const idwConfigPath = path.join(userDataPath, 'idw-entries.json');
-          
+
           if (fs.existsSync(idwConfigPath)) {
             const idwData = fs.readFileSync(idwConfigPath, 'utf8');
             idwEnvironments = JSON.parse(idwData);
             console.log(`Loaded ${idwEnvironments.length} IDW environments for menu refresh`);
-            
+
             // Set the menu again with the loaded environments
-            if (global.menuDataManager) { global.menuDataManager.rebuild(idwEnvironments); }
-            else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(idwEnvironments); }
+            if (global.menuDataManager) {
+              global.menuDataManager.rebuild(idwEnvironments);
+            } else {
+              const { setApplicationMenu } = require('./menu');
+              setApplicationMenu(idwEnvironments);
+            }
           }
         } catch (error) {
           console.error('Error loading IDW environments for menu refresh:', error);
         }
-        
+
         // Get a reference to the main window
         const { getMainWindow } = require('./browserWindow');
         const mainWindow = getMainWindow();
-        
+
         // If we have a main window, let it know the menu was refreshed
         if (mainWindow) {
           mainWindow.webContents.send('menu-refreshed', { success, timestamp: new Date().toISOString() });
@@ -8274,7 +8692,7 @@ function setupIPC() {
         console.error('Error refreshing GSX links menu:', error);
       }
     }
-    
+
     // Handle other custom actions here
     // NOTE: 'open-idw-url' is handled below at line ~8171 - DO NOT add a duplicate handler here
     // The previous handler here used mainWindow.loadURL() which broke the tabbed browser
@@ -8282,7 +8700,7 @@ function setupIPC() {
       // Handle external bot opening in separate windows
       openExternalAIWindow(data.url, data.label || 'External AI', {
         width: 1400,
-        height: 900
+        height: 900,
       });
       return;
     } else if (data.action === 'close-setup-wizard') {
@@ -8294,23 +8712,21 @@ function setupIPC() {
       }
       return;
     }
-    
+
     // Handle IDW URL opening
     if (data.action === 'open-idw-url' && data.url) {
       console.log(`Opening IDW URL in new tab: ${data.label} (${data.url})`);
-      
+
       // Extract environment from URL
       let environment = 'unknown';
       try {
         const urlObj = new URL(data.url);
         const hostParts = urlObj.hostname.split('.');
-        environment = hostParts.find(part => 
-          ['staging', 'edison', 'production'].includes(part)
-        ) || 'unknown';
+        environment = hostParts.find((part) => ['staging', 'edison', 'production'].includes(part)) || 'unknown';
       } catch (err) {
         console.error('Error extracting environment from URL:', err);
       }
-      
+
       // Log IDW environment opening
       logger.info('IDW Environment Opened', {
         event: 'idw:opened',
@@ -8318,47 +8734,47 @@ function setupIPC() {
         url: data.url,
         label: data.label || 'IDW',
         openedIn: 'tab',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
-      
+
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
       if (mainWindow) {
         // Send to main window to open in a new tab
         mainWindow.webContents.send('open-in-new-tab', {
           url: data.url,
-          label: data.label || 'IDW'
+          label: data.label || 'IDW',
         });
       } else {
         console.error('Main window not found, cannot open IDW URL');
       }
       return;
     }
-    
-        // Handle image creator opening - open in separate window
+
+    // Handle image creator opening - open in separate window
     if (data.action === 'open-image-creator' && data.url) {
       console.log('Opening image creator in separate window:', data.label, data.url);
       openExternalAIWindow(data.url, data.label || 'Image Creator', {
         width: 1400,
-        height: 900
+        height: 900,
       });
       return;
     }
-    
+
     // Handle video creator opening - open in separate window (removed duplicate tab handler)
     if (data.action === 'open-video-creator' && data.url) {
       console.log('Opening video creator in separate window:', data.label, data.url);
       openExternalAIWindow(data.url, data.label || 'Video Creator', {
         width: 1400,
-        height: 900
+        height: 900,
       });
       return;
     }
-    
+
     // Handle audio generator opening
     if (data.action === 'open-audio-generator' && data.url) {
       console.log('Opening audio generator in new tab:', data.label, data.url);
-      
+
       // Log the AI tab opening
       logger.info('Personal AI Opened in Tab', {
         event: 'ai:opened',
@@ -8367,9 +8783,9 @@ function setupIPC() {
         url: data.url,
         category: data.category,
         openedIn: 'tab',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
-      
+
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
       if (mainWindow) {
@@ -8378,54 +8794,54 @@ function setupIPC() {
           url: data.url,
           label: data.label || 'Audio Generator',
           isAudioGenerator: true,
-          category: data.category
+          category: data.category,
         });
       } else {
         console.error('Main window not found, cannot open audio generator URL');
       }
       return;
     }
-    
+
     // Handle UI design tool opening - open in separate window
     if (data.action === 'open-ui-design-tool' && data.url) {
       console.log('Opening UI design tool in separate window:', data.label, data.url);
       openExternalAIWindow(data.url, data.label || 'UI Design Tool', {
         width: 1400,
-        height: 900
+        height: 900,
       });
       return;
     }
-    
+
     // Pass all other menu actions to the main window to handle
     const mainWindow = browserWindow.getMainWindow();
     if (mainWindow && mainWindow.webContents) {
       mainWindow.webContents.send('menu-action', data);
     }
   });
-  
+
   // Direct handler for opening the setup wizard
   ipcMain.on('open-setup-wizard', () => {
     console.log('Received direct request to open setup wizard');
     openSetupWizard();
   });
-  
+
   // Handler for closing wizard windows
   ipcMain.on('close-wizard', () => {
     console.log('Received request to close wizard');
     const windows = BrowserWindow.getAllWindows();
-    windows.forEach(win => {
+    windows.forEach((win) => {
       if (win.getTitle().includes('Welcome') || win.getTitle().includes('Wizard')) {
         win.close();
       }
     });
   });
-  
+
   // Direct handler for opening the settings window
   ipcMain.on('open-settings', () => {
     console.log('Received direct request to open settings window');
     openSettingsWindow();
   });
-  
+
   // Add notification handler
   ipcMain.on('show-notification', (event, data) => {
     const mainWindow = browserWindow.getMainWindow();
@@ -8433,7 +8849,7 @@ function setupIPC() {
       mainWindow.webContents.send('show-notification', data);
     }
   });
-  
+
   // Handle context menu requests
   ipcMain.on('show-context-menu', (event, data) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -8441,26 +8857,27 @@ function setupIPC() {
       // Check if this is a webview context menu request
       if (data.webviewId !== undefined) {
         console.log('[Main] Showing context menu for webview:', data.webviewId);
-        
+
         // Create context menu with "Paste to Black Hole" option
         const contextMenu = Menu.buildFromTemplate([
           {
             label: 'Paste to Black Hole',
             click: () => {
               console.log('[Main] Paste to Black Hole clicked from webview context menu');
-              
+
               // Get clipboard manager from global
               if (global.clipboardManager) {
                 // Get window bounds to position the black hole widget
                 const bounds = win.getBounds();
                 const position = {
                   x: bounds.x + data.x,
-                  y: bounds.y + data.y
+                  y: bounds.y + data.y,
                 };
-                
+
                 // Pass true as second parameter to show in expanded mode with space chooser
                 global.clipboardManager.createBlackHoleWindow(position, true);
-                
+
+                // TIMING: Wait for Black Hole window webContents to be ready to receive IPC before sending paste-content.
                 // Send clipboard content after a delay
                 setTimeout(() => {
                   const { clipboard } = require('electron');
@@ -8468,19 +8885,19 @@ function setupIPC() {
                   if (text && global.clipboardManager && global.clipboardManager.blackHoleWindow) {
                     global.clipboardManager.blackHoleWindow.webContents.send('paste-content', {
                       type: 'text',
-                      content: text
+                      content: text,
                     });
                   }
                 }, 300);
               }
-            }
-          }
+            },
+          },
         ]);
-        
+
         contextMenu.popup({
           window: win,
           x: data.x,
-          y: data.y
+          y: data.y,
         });
       } else {
         // Original template-based context menu
@@ -8489,7 +8906,7 @@ function setupIPC() {
       }
     }
   });
-  
+
   // Handle opening recorder window
   ipcMain.on('open-recorder', (event, options = {}) => {
     console.log('Received request to open recorder');
@@ -8506,22 +8923,22 @@ function setupIPC() {
     }
     return { success: false, error: 'Recorder not initialized' };
   });
-  
+
   // Handle opening clipboard viewer from widgets
   ipcMain.on('open-clipboard-viewer', async () => {
     console.log('Received request to open clipboard viewer');
-    
+
     // Ensure clipboard manager is initialized
     const ensureClipboardManager = async () => {
       if (global.clipboardManager) {
         return true;
       }
-      
+
       if (!app.isReady()) {
         console.log('App not ready, waiting...');
         await app.whenReady();
       }
-      
+
       try {
         console.log('Initializing clipboard manager on demand');
         const ClipboardManager = require('./clipboard-manager-v2-adapter');
@@ -8534,7 +8951,7 @@ function setupIPC() {
         return false;
       }
     };
-    
+
     // Try to ensure clipboard manager is ready
     const isReady = await ensureClipboardManager();
     if (isReady && global.clipboardManager) {
@@ -8555,23 +8972,23 @@ function setupIPC() {
       shell.openExternal(url);
     }
   });
-  
+
   // Handle fetching user lessons
   ipcMain.handle('fetch-user-lessons', async (event, userId) => {
     try {
       console.log(`[Main] Fetching lessons for user: ${userId}`);
-      
+
       // Create a new instance to ensure settings are reloaded
       delete require.cache[require.resolve('./lessons-api')];
       const lessonsAPI = require('./lessons-api');
-      
+
       // If no userId provided, try to get from settings
       if (!userId) {
         userId = global.settingsManager?.get('userId') || 'default-user';
       }
-      
+
       const lessons = await lessonsAPI.fetchUserLessons(userId);
-      
+
       // The API already returns { success: true, ... data ... }
       // So if it has a success field, return it directly
       if (lessons && typeof lessons.success !== 'undefined') {
@@ -8583,7 +9000,7 @@ function setupIPC() {
         // Return the API response but ensure it has the expected structure
         return { success: true, data: lessons };
       }
-      
+
       // Otherwise wrap it (for mock data or different format)
       return { success: true, data: lessons };
     } catch (error) {
@@ -8591,7 +9008,7 @@ function setupIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Handle updating lesson progress
   ipcMain.handle('update-lesson-progress', async (event, lessonId, progress) => {
     try {
@@ -8599,10 +9016,6 @@ function setupIPC() {
       // Store progress locally
       const progressKey = `lessonProgress_${lessonId}`;
       global.settingsManager?.set(progressKey, progress);
-      
-      // In future, also sync with API
-      // const lessonsAPI = require('./lessons-api');
-      // await lessonsAPI.updateProgress(lessonId, progress);
 
       return { success: true };
     } catch (error) {
@@ -8610,7 +9023,7 @@ function setupIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Handle logging lesson clicks
   ipcMain.handle('log-lesson-click', async (event, logData) => {
     try {
@@ -8626,59 +9039,59 @@ function setupIPC() {
           url: logData.url,
           userProgress: logData.userProgress,
           userLevel: logData.userLevel,
-          timestamp: logData.timestamp
+          timestamp: logData.timestamp,
         });
       }
-      
+
       // Also log to console for immediate visibility
       console.log('[Main] Lesson clicked:', {
         title: logData.title,
         category: logData.category,
         lessonId: logData.lessonId,
-        url: logData.url
+        url: logData.url,
       });
-      
+
       // Store lesson view history
       const viewHistoryKey = 'lessonViewHistory';
       const viewHistory = global.settingsManager?.get(viewHistoryKey) || [];
       viewHistory.unshift({
         lessonId: logData.lessonId,
         title: logData.title,
-        viewedAt: logData.timestamp
+        viewedAt: logData.timestamp,
       });
       // Keep only last 50 viewed lessons
       if (viewHistory.length > 50) {
         viewHistory.splice(50);
       }
       global.settingsManager?.set(viewHistoryKey, viewHistory);
-      
+
       // Track analytics if needed (future enhancement)
       // await analyticsService.track('lesson_click', logData);
-      
+
       return { success: true };
     } catch (error) {
       console.error('[Main] Error logging lesson click:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Handle getting current user ID
   ipcMain.handle('get-current-user', async () => {
     try {
       // Get user ID from settings or use default
       const userId = global.settingsManager?.get('userId') || 'default-user';
       const userName = global.settingsManager?.get('userName') || 'User';
-      
-      return { 
-        success: true, 
-        data: { id: userId, name: userName }
+
+      return {
+        success: true,
+        data: { id: userId, name: userName },
       };
     } catch (error) {
       console.error('[Main] Error getting current user:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Handle opening black hole widget
   ipcMain.on('open-black-hole-widget', (event, data) => {
     // data can include { x, y, startExpanded }
@@ -8717,26 +9130,25 @@ function setupIPC() {
       // 1. Has meaningful structure (multiple block elements or semantic content)
       // 2. Not just simple wrapping (like <span> or single <div>)
       // 3. HTML is significantly different from plain text
-      
+
       const hasBlocks = /<(div|p|br|table|ul|ol|li|h[1-6])\b/i.test(html);
       const hasLinks = /<a\s+[^>]*href\s*=/i.test(html);
       const hasImages = /<img\s+[^>]*src\s*=/i.test(html);
       const hasFormatting = /<(strong|em|b|i|u)\b/i.test(html);
       const hasStructure = /<(section|article|header|footer|nav|aside)\b/i.test(html);
-      
+
       // Count total HTML tags
       const tagCount = (html.match(/<[a-z]+[\s>]/gi) || []).length;
-      
+
       // Check if HTML is just wrapping plain text (common for password managers, etc.)
       const strippedHtml = html.replace(/<[^>]*>/g, '').trim();
       const textSimilarity = strippedHtml === text.trim();
-      
+
       // Only treat as HTML if it has meaningful structure AND is not just wrapped text
-      isRealHtml = (hasLinks || hasImages || hasStructure || 
-                   (hasBlocks && tagCount > 3) || 
-                   (hasFormatting && tagCount > 2)) &&
-                   !textSimilarity;
-      
+      isRealHtml =
+        (hasLinks || hasImages || hasStructure || (hasBlocks && tagCount > 3) || (hasFormatting && tagCount > 2)) &&
+        !textSimilarity;
+
       // Additional check: If text is short and matches HTML content exactly, it's just text
       if (text.length < 100 && textSimilarity) {
         isRealHtml = false;
@@ -8748,7 +9160,7 @@ function setupIPC() {
       hasHtml: isRealHtml,
       hasImage: !image.isEmpty(),
       text: text,
-      html: isRealHtml ? html : null
+      html: isRealHtml ? html : null,
     };
 
     if (!image.isEmpty()) {
@@ -8763,16 +9175,16 @@ function setupIPC() {
   ipcMain.handle('get-clipboard-files', () => {
     const { clipboard } = require('electron');
     const fs = require('fs');
-    
+
     // Try to read file paths from clipboard
     // Note: Different platforms store file paths differently
     let filePaths = [];
-    
+
     try {
       // macOS: Files are stored in clipboard as file:// URLs or paths
       const text = clipboard.readText();
       const buffer = clipboard.readBuffer('public.file-url');
-      
+
       // Try buffer first (macOS file paths)
       if (buffer && buffer.length > 0) {
         const fileUrl = buffer.toString('utf8');
@@ -8781,18 +9193,18 @@ function setupIPC() {
           filePaths.push(cleanPath);
         }
       }
-      
+
       // Try reading as NSFilenamesPboardType (macOS)
       try {
         const nsFiles = clipboard.read('NSFilenamesPboardType');
         if (nsFiles) {
-          const paths = nsFiles.split('\n').filter(p => p && fs.existsSync(p));
+          const paths = nsFiles.split('\n').filter((p) => p && fs.existsSync(p));
           filePaths.push(...paths);
         }
-      } catch (e) {
+      } catch (_e) {
         // Not available on this platform
       }
-      
+
       // Check if text looks like file paths
       if (text && !filePaths.length) {
         const lines = text.split('\n');
@@ -8804,26 +9216,25 @@ function setupIPC() {
           }
         }
       }
-      
+
       console.log('[get-clipboard-files] Found', filePaths.length, 'file(s)');
-      
+
       return {
         success: true,
         files: filePaths,
-        count: filePaths.length
+        count: filePaths.length,
       };
-      
     } catch (error) {
       console.error('[get-clipboard-files] Error:', error);
       return {
         success: false,
         files: [],
         count: 0,
-        error: error.message
+        error: error.message,
       };
     }
   });
-  
+
   // Handle closing black hole widget
   ipcMain.on('close-black-hole-widget', () => {
     console.log('Received request to close black hole widget');
@@ -8843,17 +9254,17 @@ function setupIPC() {
     console.log('╚══════════════════════════════════════════════════════════════╝');
     console.log('[BlackHole-Debug]', JSON.stringify(data, null, 2));
   });
-  
+
   // Allow renderer to request pending clipboard data
   ipcMain.handle('black-hole:get-pending-data', async () => {
     console.log('[BlackHole] Renderer requesting pending data');
-    
+
     // Read current clipboard
-    const { clipboard, nativeImage } = require('electron');
+    const { clipboard } = require('electron');
     const text = clipboard.readText();
     const html = clipboard.readHTML();
     const image = clipboard.readImage();
-    
+
     let isRealHtml = false;
     if (html && text) {
       const hasBlocks = /<(div|p|br|table|ul|ol|li|h[1-6])\b/i.test(html);
@@ -8862,27 +9273,31 @@ function setupIPC() {
       const hasFormatting = /<(strong|em|b|i|u)\b/i.test(html);
       isRealHtml = hasBlocks || hasLinks || hasImages || hasFormatting;
     }
-    
+
     const clipboardData = {
       hasText: !!text,
       hasHtml: isRealHtml,
       hasImage: !image.isEmpty(),
       text: text,
-      html: isRealHtml ? html : null
+      html: isRealHtml ? html : null,
     };
-    
+
     if (!image.isEmpty()) {
       clipboardData.imageDataUrl = image.toDataURL();
     }
-    
-    console.log('[BlackHole] Returning clipboard data:', { hasText: !!text, hasHtml: isRealHtml, hasImage: !image.isEmpty() });
+
+    console.log('[BlackHole] Returning clipboard data:', {
+      hasText: !!text,
+      hasHtml: isRealHtml,
+      hasImage: !image.isEmpty(),
+    });
     return clipboardData;
   });
-  
+
   ipcMain.on('black-hole:active', () => {
     console.log('Black hole widget is active (space chooser open)');
     // Notify all browser windows that black hole is active
-    BrowserWindow.getAllWindows().forEach(window => {
+    BrowserWindow.getAllWindows().forEach((window) => {
       window.webContents.send('black-hole-active');
     });
   });
@@ -8891,10 +9306,10 @@ function setupIPC() {
   ipcMain.on('black-hole:inactive', (event, options = {}) => {
     console.log('Black hole widget is inactive (space chooser closed)', options);
     // Notify all browser windows that black hole is inactive
-    BrowserWindow.getAllWindows().forEach(window => {
+    BrowserWindow.getAllWindows().forEach((window) => {
       window.webContents.send('black-hole-inactive');
     });
-    
+
     // If this was from a download operation, close the black hole window
     // to prevent the transparent bubble from lingering
     if (options.closeWindow || options.fromDownload) {
@@ -8909,7 +9324,7 @@ function setupIPC() {
   });
 
   // Handle create space from black hole
-  ipcMain.handle('black-hole:create-space', async (event) => {
+  ipcMain.handle('black-hole:create-space', async (_event) => {
     // Use a simpler approach - create a small input dialog window
     const inputWindow = new BrowserWindow({
       width: 400,
@@ -8922,11 +9337,12 @@ function setupIPC() {
       backgroundColor: '#1e1e1e',
       webPreferences: {
         nodeIntegration: true,
-        contextIsolation: false
-      }
+        contextIsolation: false,
+      },
     });
-    
-    inputWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+
+    inputWindow.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(`
       <!DOCTYPE html>
       <html>
       <head>
@@ -8998,29 +9414,30 @@ function setupIPC() {
         </script>
       </body>
       </html>
-    `)}`);
-    
+    `)}`
+    );
+
     inputWindow.once('ready-to-show', () => {
       inputWindow.show();
     });
-    
+
     // Wait for response
     return new Promise((resolve) => {
       ipcMain.once('input-dialog-response', async (evt, spaceName) => {
         inputWindow.close();
-        
+
         if (!spaceName) {
           resolve({ success: false });
           return;
         }
-        
+
         // Create the space using the unified SpacesAPI
         try {
           const newSpace = await spacesAPI.create(spaceName, {
             icon: '📁',
-            color: '#6366f1'
+            color: '#6366f1',
           });
-          
+
           if (newSpace) {
             resolve({ success: true, space: newSpace });
           } else {
@@ -9035,7 +9452,7 @@ function setupIPC() {
   });
 
   // Handle show black hole request
-  ipcMain.on('show-black-hole', (event) => {
+  ipcMain.on('show-black-hole', (_event) => {
     console.log('Received request to show black hole');
     if (global.clipboardManager) {
       // Get the main window position
@@ -9044,7 +9461,7 @@ function setupIPC() {
         const bounds = mainWindow.getBounds();
         const position = {
           x: bounds.x + bounds.width - 100,
-          y: bounds.y + 100
+          y: bounds.y + 100,
         };
         global.clipboardManager.createBlackHoleWindow(position);
       } else {
@@ -9062,24 +9479,24 @@ function setupIPC() {
       global.clipboardManager.blackHoleWindow.webContents.send('paste-content', data);
     }
   });
-  
+
   // Handle trigger paste in black hole widget
   ipcMain.on('black-hole:trigger-paste', () => {
     console.log('Received request to trigger paste in black hole widget');
     if (global.clipboardManager && global.clipboardManager.blackHoleWindow) {
       if (!global.clipboardManager.blackHoleWindow.isDestroyed()) {
-        const { clipboard, nativeImage } = require('electron');
-        
+        const { clipboard } = require('electron');
+
         // Read clipboard content
         const text = clipboard.readText();
         const html = clipboard.readHTML();
         const image = clipboard.readImage();
-        
+
         console.log('Clipboard content - Text:', !!text, 'HTML:', !!html, 'Image:', !image.isEmpty());
-        
+
         // Focus the window first
         global.clipboardManager.blackHoleWindow.focus();
-        
+
         // Check if the HTML is really just plain text wrapped in tags
         // Many apps put both text/plain and text/html in clipboard even for plain text
         let isRealHtml = false;
@@ -9088,20 +9505,21 @@ function setupIPC() {
           const strippedHtml = html
             .replace(/<[^>]*>/g, '') // Remove all HTML tags
             .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
-            .replace(/&amp;/g, '&')  // Decode common entities
+            .replace(/&amp;/g, '&') // Decode common entities
             .replace(/&lt;/g, '<')
             .replace(/&gt;/g, '>')
             .replace(/&quot;/g, '"')
             .replace(/&#39;/g, "'")
             .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(num)) // Decode numeric entities
-            .replace(/\s+/g, ' ')    // Normalize whitespace
+            .replace(/\s+/g, ' ') // Normalize whitespace
             .trim();
-          
+
           const normalizedText = text.replace(/\s+/g, ' ').trim();
-          
+
           // Check for MEANINGFUL HTML elements that indicate intentional formatting
           // Structural elements (blocks, containers)
-          const hasBlocks = /<(div|p|br|table|ul|ol|li|h[1-6]|article|section|header|footer|blockquote|pre|code)\b/i.test(html);
+          const hasBlocks =
+            /<(div|p|br|table|ul|ol|li|h[1-6]|article|section|header|footer|blockquote|pre|code)\b/i.test(html);
           // Links with actual href
           const hasLinks = /<a\s+[^>]*href\s*=/i.test(html);
           // Images
@@ -9111,39 +9529,54 @@ function setupIPC() {
           // Has a full style block (not just inline)
           const hasStyleBlock = /<style\b/i.test(html);
           // Has multiple line breaks indicating structured content
-          const hasMultipleBreaks = (html.match(/<br\s*\/?>/gi) || []).length >= 2 || (html.match(/<\/p>/gi) || []).length >= 2;
-          
+          const hasMultipleBreaks =
+            (html.match(/<br\s*\/?>/gi) || []).length >= 2 || (html.match(/<\/p>/gi) || []).length >= 2;
+
           // Content differs significantly (not just wrapper noise)
-          const contentDiffers = strippedHtml !== normalizedText && 
-            Math.abs(strippedHtml.length - normalizedText.length) > 10;
-          
+          const contentDiffers =
+            strippedHtml !== normalizedText && Math.abs(strippedHtml.length - normalizedText.length) > 10;
+
           // It's ONLY real HTML if it has meaningful formatting elements
           // Simple span/font wrappers with styles are NOT considered real HTML
-          isRealHtml = hasBlocks || hasLinks || hasImages || hasFormatting || hasStyleBlock || hasMultipleBreaks || contentDiffers;
-          
-          console.log('HTML check - Blocks:', hasBlocks, 'Links:', hasLinks, 'Images:', hasImages, 
-            'Formatting:', hasFormatting, 'Breaks:', hasMultipleBreaks, 'ContentDiffers:', contentDiffers, 
-            'IsRealHtml:', isRealHtml);
+          isRealHtml =
+            hasBlocks || hasLinks || hasImages || hasFormatting || hasStyleBlock || hasMultipleBreaks || contentDiffers;
+
+          console.log(
+            'HTML check - Blocks:',
+            hasBlocks,
+            'Links:',
+            hasLinks,
+            'Images:',
+            hasImages,
+            'Formatting:',
+            hasFormatting,
+            'Breaks:',
+            hasMultipleBreaks,
+            'ContentDiffers:',
+            contentDiffers,
+            'IsRealHtml:',
+            isRealHtml
+          );
         } else if (html && !text) {
           // Only HTML, no plain text - check if it has actual content
           const hasActualContent = /<(div|p|br|table|ul|ol|li|h[1-6]|a|img|strong|em|b|i)\b/i.test(html);
           isRealHtml = hasActualContent;
         }
-        
+
         // Prepare clipboard data to send
         const clipboardData = {
           hasText: !!text,
           hasHtml: isRealHtml,
           hasImage: !image.isEmpty(),
           text: text,
-          html: isRealHtml ? html : null
+          html: isRealHtml ? html : null,
         };
-        
+
         // If there's an image, convert it to data URL
         if (!image.isEmpty()) {
           clipboardData.imageDataUrl = image.toDataURL();
         }
-        
+
         // Send clipboard data to the widget
         global.clipboardManager.blackHoleWindow.webContents.send('paste-clipboard-data', clipboardData);
         console.log('Sent clipboard data to black hole widget - isRealHtml:', isRealHtml);
@@ -9165,7 +9598,9 @@ function setupIPC() {
         if (event.sender && !event.sender.isDestroyed()) {
           event.sender.send('clipboard-text-result', '');
         }
-      } catch (e) { /* ignore */ }
+      } catch (_e) {
+        /* ignore */
+      }
     }
   });
 
@@ -9178,11 +9613,11 @@ function setupIPC() {
       win.close();
     }
   });
-  
+
   // Handle tab actions
   ipcMain.on('tab-action', (event, data) => {
     console.log('Received tab action:', data);
-    
+
     if (data.action === 'open-url') {
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
@@ -9192,43 +9627,49 @@ function setupIPC() {
       }
     }
   });
-  
+
   // Handle webContents setup for direct control of window opening
   ipcMain.on('setup-webcontents-handlers', (event, data) => {
     console.log('Received setup-webcontents-handlers with data:', data);
-    
+
     if (!data.webContentsId) {
       console.error('No webContentsId provided in setup-webcontents-handlers');
       return;
     }
-    
+
     try {
       // Get a reference to the webContents
       const { webContents } = require('electron');
       const contents = webContents.fromId(data.webContentsId);
-      
+
       if (!contents) {
         console.error('Could not find webContents with ID:', data.webContentsId);
         return;
       }
-      
+
       // Add context menu handler for this webview with standard editing options and "Send to Space"
       console.log(`[Main] Adding context menu handler for webview ${data.tabId}`);
       contents.on('context-menu', (event, params) => {
-        console.log(`[Webview ${data.tabId}] Context menu requested at:`, params.x, params.y, 'selectionText:', params.selectionText);
-        
+        console.log(
+          `[Webview ${data.tabId}] Context menu requested at:`,
+          params.x,
+          params.y,
+          'selectionText:',
+          params.selectionText
+        );
+
         // Allow native DevTools context menu to work (only when right-clicking IN DevTools)
         const url = contents.getURL();
         if (url.startsWith('devtools://') || url.startsWith('chrome-devtools://')) {
           console.log(`[Webview ${data.tabId}] DevTools panel detected, allowing native context menu`);
           return; // Don't prevent default, let DevTools handle it
         }
-        
+
         event.preventDefault();
-        
+
         // Build context menu template with standard editing options
         const menuTemplate = [];
-        
+
         // Add Cut option if text is selected and editable
         if (params.editFlags.canCut) {
           menuTemplate.push({
@@ -9236,10 +9677,10 @@ function setupIPC() {
             accelerator: 'CmdOrCtrl+X',
             click: () => {
               contents.cut();
-            }
+            },
           });
         }
-        
+
         // Add Copy option if text is selected
         if (params.editFlags.canCopy) {
           menuTemplate.push({
@@ -9247,10 +9688,10 @@ function setupIPC() {
             accelerator: 'CmdOrCtrl+C',
             click: () => {
               contents.copy();
-            }
+            },
           });
         }
-        
+
         // Add Paste option if paste is available
         if (params.editFlags.canPaste) {
           menuTemplate.push({
@@ -9258,10 +9699,10 @@ function setupIPC() {
             accelerator: 'CmdOrCtrl+V',
             click: () => {
               contents.paste();
-            }
+            },
           });
         }
-        
+
         // Add Select All option
         if (params.editFlags.canSelectAll) {
           menuTemplate.push({
@@ -9269,92 +9710,100 @@ function setupIPC() {
             accelerator: 'CmdOrCtrl+A',
             click: () => {
               contents.selectAll();
-            }
+            },
           });
         }
-        
+
         // Add separator if we have any standard options
-        if (params.editFlags.canCut || params.editFlags.canCopy || params.editFlags.canPaste || params.editFlags.canSelectAll) {
+        if (
+          params.editFlags.canCut ||
+          params.editFlags.canCopy ||
+          params.editFlags.canPaste ||
+          params.editFlags.canSelectAll
+        ) {
           menuTemplate.push({ type: 'separator' });
         }
-        
+
         // Add "Send to Space" option if text is selected
         if (params.selectionText && params.selectionText.trim().length > 0) {
           menuTemplate.push({
             label: 'Send to Space',
             click: () => {
-              console.log(`[Webview ${data.tabId}] Send to Space clicked with selection:`, params.selectionText.substring(0, 50));
-              
+              console.log(
+                `[Webview ${data.tabId}] Send to Space clicked with selection:`,
+                params.selectionText.substring(0, 50)
+              );
+
               if (global.clipboardManager) {
                 const win = BrowserWindow.fromWebContents(event.sender);
                 if (win) {
                   const bounds = win.getBounds();
                   const position = {
                     x: bounds.x + params.x,
-                    y: bounds.y + params.y
+                    y: bounds.y + params.y,
                   };
-                  
+
                   const selectionData = {
                     hasText: true,
                     hasHtml: false,
                     hasImage: false,
                     text: params.selectionText,
-                    html: null
+                    html: null,
                   };
-                  
+
                   // Create window with selection data - will show modal directly
                   global.clipboardManager.createBlackHoleWindow(position, true, selectionData);
                 }
               }
-            }
+            },
           });
         }
-        
+
         // Add "Send Image to Space" option if right-clicking on an image
         if (params.mediaType === 'image' && params.srcURL) {
           menuTemplate.push({
             label: 'Send Image to Space',
             click: async () => {
               console.log(`[Webview ${data.tabId}] Send Image to Space clicked:`, params.srcURL);
-              
+
               if (global.clipboardManager) {
                 const win = BrowserWindow.fromWebContents(event.sender);
                 if (win) {
                   try {
                     const { net } = require('electron');
-                    
+
                     // Download the image
                     const imageData = await new Promise((resolve, reject) => {
                       const request = net.request(params.srcURL);
                       const chunks = [];
-                      
+
                       request.on('response', (response) => {
                         const contentType = response.headers['content-type'] || 'image/png';
-                        
+
                         response.on('data', (chunk) => {
                           chunks.push(chunk);
                         });
-                        
+
                         response.on('end', () => {
                           const buffer = Buffer.concat(chunks);
                           const base64 = buffer.toString('base64');
                           const mimeType = Array.isArray(contentType) ? contentType[0] : contentType;
                           resolve(`data:${mimeType};base64,${base64}`);
                         });
-                        
+
                         response.on('error', reject);
                       });
-                      
+
                       request.on('error', reject);
                       request.end();
                     });
-                    
+
                     const bounds = win.getBounds();
                     const position = {
                       x: bounds.x + params.x,
-                      y: bounds.y + params.y
+                      y: bounds.y + params.y,
                     };
-                    
+
                     const imageDataObj = {
                       hasText: false,
                       hasHtml: false,
@@ -9362,9 +9811,9 @@ function setupIPC() {
                       text: null,
                       html: null,
                       imageDataUrl: imageData,
-                      sourceUrl: params.srcURL
+                      sourceUrl: params.srcURL,
                     };
-                    
+
                     console.log(`[Webview ${data.tabId}] Image data ready from:`, params.srcURL);
                     global.clipboardManager.createBlackHoleWindow(position, true, imageDataObj);
                   } catch (error) {
@@ -9373,39 +9822,39 @@ function setupIPC() {
                     const bounds = win.getBounds();
                     const position = {
                       x: bounds.x + params.x,
-                      y: bounds.y + params.y
+                      y: bounds.y + params.y,
                     };
-                    
+
                     const fallbackData = {
                       hasText: true,
                       hasHtml: false,
                       hasImage: false,
                       text: params.srcURL,
-                      html: null
+                      html: null,
                     };
-                    
+
                     global.clipboardManager.createBlackHoleWindow(position, true, fallbackData);
                   }
                 }
               }
-            }
+            },
           });
-          
+
           // Also add "Copy Image" option for convenience
           menuTemplate.push({
             label: 'Copy Image',
             click: () => {
               contents.copyImageAt(params.x, params.y);
-            }
+            },
           });
         }
-        
+
         // Add "Paste to Space" option (for clipboard content)
         menuTemplate.push({
           label: 'Paste to Space',
           click: () => {
             console.log(`[Webview ${data.tabId}] Paste to Space clicked`);
-            
+
             // Get clipboard manager from global
             if (global.clipboardManager) {
               // Get the browser window that contains this webview
@@ -9414,14 +9863,14 @@ function setupIPC() {
                 const bounds = win.getBounds();
                 const position = {
                   x: bounds.x + params.x,
-                  y: bounds.y + params.y
+                  y: bounds.y + params.y,
                 };
-                
+
                 const { clipboard } = require('electron');
                 const text = clipboard.readText();
                 const html = clipboard.readHTML();
                 const image = clipboard.readImage();
-                
+
                 // Check if HTML is really meaningful
                 let isRealHtml = false;
                 if (html && text) {
@@ -9431,28 +9880,28 @@ function setupIPC() {
                   const hasFormatting = /<(strong|em|b|i|u)\b/i.test(html);
                   isRealHtml = hasBlocks || hasLinks || hasImages || hasFormatting;
                 }
-                
+
                 const clipboardData = {
                   hasText: !!text,
                   hasHtml: isRealHtml,
                   hasImage: !image.isEmpty(),
                   text: text,
-                  html: isRealHtml ? html : null
+                  html: isRealHtml ? html : null,
                 };
-                
+
                 if (!image.isEmpty()) {
                   clipboardData.imageDataUrl = image.toDataURL();
                 }
-                
+
                 // Create window with clipboard data - will show modal directly
                 global.clipboardManager.createBlackHoleWindow(position, true, clipboardData);
               }
             }
-          }
+          },
         });
-        
+
         const contextMenu = Menu.buildFromTemplate(menuTemplate);
-        
+
         // Use setImmediate to ensure the menu shows after all other handlers
         setImmediate(() => {
           const win = BrowserWindow.fromWebContents(event.sender);
@@ -9460,31 +9909,33 @@ function setupIPC() {
             contextMenu.popup({
               window: win,
               x: params.x,
-              y: params.y
+              y: params.y,
             });
           }
         });
       });
-      
+
       // Set up handlers directly on the webContents
       console.log('Setting up window.open handler for webContents ID:', data.webContentsId);
-      
+
       // If this is a ChatGPT webview, set up enhanced permissions
       if (data.isChatGPT) {
         console.log('[ChatGPT] Setting up enhanced permissions for webContents ID:', data.webContentsId);
-        
+
         // Set permission request handler for this specific webContents session
         contents.session.setPermissionRequestHandler((webContents, permission, callback) => {
           console.log(`[ChatGPT webview] Permission requested: ${permission}`);
-          
+
           // Auto-allow all permissions for ChatGPT
-          if (permission === 'media' || 
-              permission === 'audioCapture' || 
-              permission === 'microphone' ||
-              permission === 'camera' ||
-              permission === 'notifications' ||
-              permission === 'clipboard-read' ||
-              permission === 'clipboard-write') {
+          if (
+            permission === 'media' ||
+            permission === 'audioCapture' ||
+            permission === 'microphone' ||
+            permission === 'camera' ||
+            permission === 'notifications' ||
+            permission === 'clipboard-read' ||
+            permission === 'clipboard-write'
+          ) {
             console.log(`[ChatGPT webview] Auto-allowing ${permission} permission`);
             callback(true);
           } else {
@@ -9492,67 +9943,71 @@ function setupIPC() {
             callback(false);
           }
         });
-        
+
         // Also set permission check handler
         contents.session.setPermissionCheckHandler((webContents, permission) => {
           console.log(`[ChatGPT webview] Permission check: ${permission}`);
-          
-          if (permission === 'media' || 
-              permission === 'audioCapture' || 
-              permission === 'microphone' ||
-              permission === 'camera' ||
-              permission === 'notifications' ||
-              permission === 'clipboard-read' ||
-              permission === 'clipboard-write') {
+
+          if (
+            permission === 'media' ||
+            permission === 'audioCapture' ||
+            permission === 'microphone' ||
+            permission === 'camera' ||
+            permission === 'notifications' ||
+            permission === 'clipboard-read' ||
+            permission === 'clipboard-write'
+          ) {
             return true;
           }
-          
+
           return false;
         });
-        
+
         // Set user agent to match Chrome
         const chromeVersion = process.versions.chrome;
         const userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
         contents.setUserAgent(userAgent);
-        
+
         // Modify request headers to avoid Electron detection
         contents.session.webRequest.onBeforeSendHeaders((details, callback) => {
           // Remove or modify headers that might reveal Electron
           const headers = { ...details.requestHeaders };
-          
+
           // Ensure proper user agent
           headers['User-Agent'] = userAgent;
-          
+
           // Remove any Electron-specific headers
           delete headers['X-Electron'];
-          
+
           // Add headers that Chrome would send
           if (!headers['Accept-Language']) {
             headers['Accept-Language'] = 'en-US,en;q=0.9';
           }
-          
+
           if (!headers['Accept-Encoding']) {
             headers['Accept-Encoding'] = 'gzip, deflate, br';
           }
-          
+
           callback({ requestHeaders: headers });
         });
       }
-      
+
       // Set up window open handler
-      contents.setWindowOpenHandler(({ url, frameName, features, disposition }) => {
+      contents.setWindowOpenHandler(({ url, frameName: _frameName, features: _features, disposition }) => {
         console.log('WebContents window open handler intercepted URL:', url, 'disposition:', disposition);
-        
+
         // For authentication URLs, allow popup windows
-        if (url.includes('accounts.google.com') || 
-            url.includes('sso.global.api.onereach.ai') || 
-            url.includes('auth.edison.onereach.ai') ||
-            url.includes('login.onereach.ai') ||
-            url.includes('login.edison.onereach.ai') ||
-            url.includes('oauth') ||
-            url.includes('/auth/') ||
-            url.includes('firebase') ||
-            url.includes('elevenlabs.io')) {
+        if (
+          url.includes('accounts.google.com') ||
+          url.includes('sso.global.api.onereach.ai') ||
+          url.includes('auth.edison.onereach.ai') ||
+          url.includes('login.onereach.ai') ||
+          url.includes('login.edison.onereach.ai') ||
+          url.includes('oauth') ||
+          url.includes('/auth/') ||
+          url.includes('firebase') ||
+          url.includes('elevenlabs.io')
+        ) {
           console.log('Auth URL detected in webContents, allowing popup window:', url);
           console.log('Using parent session partition:', contents.session.partition);
           return {
@@ -9563,82 +10018,84 @@ function setupIPC() {
               webPreferences: {
                 nodeIntegration: false,
                 contextIsolation: true,
-                partition: contents.session.partition // Use same session/partition as parent
-              }
-            }
+                partition: contents.session.partition, // Use same session/partition as parent
+              },
+            },
           };
         }
-        
+
         // For non-chat and non-auth URLs, send a message to open in a new tab
         const mainWindow = browserWindow.getMainWindow();
         if (mainWindow) {
+          // TIMING: Defer IPC until after setWindowOpenHandler returns; handler must resolve synchronously.
           setTimeout(() => {
             mainWindow.webContents.send('open-in-new-tab', url);
           }, 0);
         }
-        
+
         // Deny other popup attempts
         return { action: 'deny' };
       });
-      
+
       // Set up download handler for this webview
       console.log('Setting up download handler for webContents ID:', data.webContentsId);
-      contents.session.on('will-download', (event, item, webContents) => {
+      contents.session.on('will-download', (event, item, _webContents) => {
         console.log(`[Webview] Download detected in tab ${data.tabId}`);
         // Use the handleDownloadWithSpaceOption function from browserWindow
         browserWindow.handleDownloadWithSpaceOption(item, `Tab ${data.tabId}`);
       });
-      
+
       // Listen for will-navigate events
       contents.on('will-navigate', (event, url) => {
         console.log('WebContents will-navigate event for URL:', url);
-        
+
         // Check if it's a chat URL
         const isChatUrl = url.includes('/chat/') || url.startsWith('https://flow-desc.chat.edison.onereach.ai/');
-        
+
         // Check if it's an auth URL
-        const isAuthUrl = url.includes('accounts.google.com') || 
-                         url.includes('sso.global.api.onereach.ai') || 
-                         url.includes('auth.edison.onereach.ai') ||
-                         url.includes('login.onereach.ai') ||
-                         url.includes('login.edison.onereach.ai');
-        
+        const isAuthUrl =
+          url.includes('accounts.google.com') ||
+          url.includes('sso.global.api.onereach.ai') ||
+          url.includes('auth.edison.onereach.ai') ||
+          url.includes('login.onereach.ai') ||
+          url.includes('login.edison.onereach.ai');
+
         // Check if it's a callback URL after authentication
         const isCallbackUrl = url.includes('/callback') && url.includes('sso.global.api.onereach.ai');
-        
+
         // Handle chat URLs specially
         if (isChatUrl) {
           console.log('Allowing navigation to chat URL in same webContents:', url);
           return; // Allow the navigation
         }
-        
+
         // For auth URLs, allow navigation in current tab
         if (isAuthUrl) {
           console.log('Allowing auth navigation in current tab:', url);
           return; // Allow the navigation
         }
-        
+
         // Handle callback URLs
         if (isCallbackUrl) {
           console.log('Detected SSO callback URL, allowing navigation:', url);
           return; // Allow the navigation
         }
-        
+
         // For all other URLs, allow the navigation by default
       });
-      
+
       // Add a handler for postMessage events
       contents.on('ipc-message', (event, channel, ...args) => {
         console.log('Received IPC message:', channel, args);
-        
+
         if (channel === 'postMessage') {
           const message = args[0];
           console.log('Processing postMessage:', message);
-          
+
           // Handle auth-popup messages
           if (message && message.type === 'auth-popup') {
             console.log('Creating auth popup window for URL:', message.url);
-            
+
             // Create a popup window for authentication
             const authWindow = new BrowserWindow({
               width: 800,
@@ -9648,13 +10105,13 @@ function setupIPC() {
                 contextIsolation: true,
                 webSecurity: true,
                 webviewTag: true,
-                preload: path.join(__dirname, 'preload.js')
-              }
+                preload: path.join(__dirname, 'preload.js'),
+              },
             });
-            
+
             // Load the authentication URL
             authWindow.loadURL(message.url);
-            
+
             // Handle successful authentication
             authWindow.webContents.on('will-navigate', (event, url) => {
               if (url.includes('/callback') && url.includes('sso.global.api.onereach.ai')) {
@@ -9665,7 +10122,7 @@ function setupIPC() {
                   mainWindow.webContents.send('sso-success', {
                     type: 'sso',
                     action: 'success',
-                    redirectUrl: 'https://idw.edison.onereach.ai/idw-marvin-dev'
+                    redirectUrl: 'https://idw.edison.onereach.ai/idw-marvin-dev',
                   });
                 }
                 // Close the popup window
@@ -9673,7 +10130,7 @@ function setupIPC() {
               }
             });
           }
-          
+
           // Handle SSO messages
           if (message && message.type === 'sso') {
             console.log('Processing SSO message:', message);
@@ -9684,14 +10141,14 @@ function setupIPC() {
                 mainWindow.webContents.send('sso-success', {
                   type: 'sso',
                   action: 'success',
-                  redirectUrl: 'https://my.onereach.ai/'
+                  redirectUrl: 'https://my.onereach.ai/',
                 });
               }
             }
           }
         }
       });
-      
+
       console.log('Successfully set up handlers for webContents ID:', data.webContentsId);
     } catch (error) {
       console.error('Error setting up webContents handlers:', error);
@@ -9760,7 +10217,7 @@ function setupIPC() {
       event.reply('get-image-creators', []);
     }
   });
-  
+
   // Module manager handlers are now in setupModuleManagerIPC()
 
   // Handle get-video-creators request
@@ -9804,11 +10261,11 @@ function setupIPC() {
   // Direct handler for GSX links
   ipcMain.on('open-gsx-link', async (event, data) => {
     const multiTenantStore = require('./multi-tenant-store');
-    
+
     console.log('[GSX IPC] Received direct request to open GSX link:', data);
     if (data && data.url) {
       console.log(`[GSX IPC] Opening GSX link directly: ${data.url}`);
-      
+
       // Extract environment from URL using multi-tenant store for consistency
       let environment = data.environment;
       if (!environment) {
@@ -9820,15 +10277,15 @@ function setupIPC() {
           environment = 'production';
         }
       }
-      
+
       // Log token status before opening window
       const hasToken = multiTenantStore.hasValidToken(environment);
       console.log(`[GSX IPC] Token status for ${environment}: hasValidToken=${hasToken}`);
-      
+
       if (!hasToken) {
         console.warn(`[GSX IPC] No valid token for ${environment} - user will need to login`);
       }
-      
+
       try {
         await browserWindow.openGSXWindow(data.url, data.title || 'GSX', environment);
         console.log('[GSX IPC] GSX window opened successfully');
@@ -9862,10 +10319,14 @@ function setupIPC() {
       const linksJson = JSON.stringify(links, null, 2);
       fs.writeFileSync(path.join(app.getPath('userData'), 'gsx-links.json'), linksJson);
       console.log('GSX links saved to file');
-      
+
       // After saving, refresh the menu
-      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
-      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
+      if (global.menuDataManager) {
+        global.menuDataManager.refreshGSXLinks();
+      } else {
+        const { refreshGSXLinks } = require('./menu');
+        refreshGSXLinks();
+      }
       console.log('Menu refreshed after saving GSX links');
     } catch (error) {
       console.error('Error saving GSX links:', error);
@@ -9921,17 +10382,17 @@ function setupIPC() {
   ipcMain.handle('article:save-tts', async (event, options) => {
     try {
       const { articleId, audioData } = options;
-      
+
       if (!audioData || !articleId) {
         return { success: false, error: 'Missing audio data or article ID' };
       }
-      
+
       const sanitizedId = articleId.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
       const audioPath = path.join(articleTTSDir, `${sanitizedId}.mp3`);
-      
+
       const audioBuffer = Buffer.from(audioData, 'base64');
       fs.writeFileSync(audioPath, audioBuffer);
-      
+
       console.log(`[Article TTS] Saved audio: ${audioPath} (${audioBuffer.length} bytes)`);
       return { success: true, audioPath };
     } catch (error) {
@@ -9944,17 +10405,17 @@ function setupIPC() {
     try {
       const sanitizedId = articleId.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
       const audioPath = path.join(articleTTSDir, `${sanitizedId}.mp3`);
-      
+
       if (fs.existsSync(audioPath)) {
         const audioData = fs.readFileSync(audioPath);
         const base64Audio = audioData.toString('base64');
-        return { 
-          success: true, 
+        return {
+          success: true,
           audioData: base64Audio,
-          hasAudio: true
+          hasAudio: true,
         };
       }
-      
+
       return { success: true, hasAudio: false };
     } catch (error) {
       console.error('[Article TTS] Error getting audio:', error);
@@ -9998,18 +10459,21 @@ function setupIPC() {
   // Handle RSS feed requests
   ipcMain.handle('fetch-rss', async (event, url) => {
     const { net } = require('electron');
-    
+
     return new Promise((resolve, reject) => {
       console.log('Fetching RSS content using Electron net module:', url);
-      
+
       try {
         const request = net.request({
           method: 'GET',
-          url: url
+          url: url,
         });
 
         // Set appropriate headers
-        request.setHeader('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        request.setHeader(
+          'User-Agent',
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        );
         request.setHeader('Accept', 'application/rss+xml, application/xml, text/xml, */*');
         request.setHeader('Accept-Language', 'en-US,en;q=0.9');
         request.setHeader('Cache-Control', 'no-cache');
@@ -10039,47 +10503,50 @@ function setupIPC() {
             redirectCount++;
             const redirectUrl = new URL(response.headers.location, url).href;
             console.log(`Following redirect ${redirectCount}/${maxRedirects} to:`, redirectUrl);
-            
+
             clearTimeout(timeout);
-            
+
             // Make a new request for the redirect
             const redirectRequest = net.request({
               method: 'GET',
-              url: redirectUrl
+              url: redirectUrl,
             });
-            
+
             // Set the same headers for redirect
-            redirectRequest.setHeader('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            redirectRequest.setHeader(
+              'User-Agent',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            );
             redirectRequest.setHeader('Accept', 'application/rss+xml, application/xml, text/xml, */*');
             redirectRequest.setHeader('Accept-Language', 'en-US,en;q=0.9');
             redirectRequest.setHeader('Cache-Control', 'no-cache');
-            
+
             // Handle the redirect response
             redirectRequest.on('response', (redirectResponse) => {
               if (redirectResponse.statusCode !== 200) {
                 reject(new Error(`HTTP ${redirectResponse.statusCode}: ${redirectResponse.statusMessage}`));
                 return;
               }
-              
+
               let redirectData = '';
               redirectResponse.on('data', (chunk) => {
                 redirectData += chunk.toString();
               });
-              
+
               redirectResponse.on('end', () => {
                 console.log('Redirect fetch completed, data length:', redirectData.length);
                 resolve(redirectData);
               });
-              
+
               redirectResponse.on('error', (error) => {
                 reject(error);
               });
             });
-            
+
             redirectRequest.on('error', (error) => {
               reject(error);
             });
-            
+
             redirectRequest.end();
             return;
           }
@@ -10137,11 +10604,11 @@ function setupIPC() {
     try {
       const fs = require('fs');
       const path = require('path');
-      
+
       // Create a safe filename from the URL
       const filename = url.replace(/[^a-z0-9]/gi, '_').substring(0, 50) + '.html';
       const filepath = path.join(app.getPath('userData'), 'debug_' + filename);
-      
+
       fs.writeFileSync(filepath, content, 'utf8');
       console.log('Debug content saved to:', filepath);
       return filepath;
@@ -10156,19 +10623,22 @@ function setupIPC() {
     const { net } = require('electron');
     const maxRetries = 3;
     const retryDelay = 1000; // 1 second between retries
-    
+
     const fetchWithRetry = (attemptNumber = 1) => {
       return new Promise((resolve, reject) => {
         console.log(`[Fetch] Attempt ${attemptNumber}/${maxRetries} for: ${url}`);
-        
+
         try {
           const request = net.request({
             method: 'GET',
-            url: url
+            url: url,
           });
 
           // Set appropriate headers for HTML pages
-          request.setHeader('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+          request.setHeader(
+            'User-Agent',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          );
           request.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
           request.setHeader('Accept-Language', 'en-US,en;q=0.9');
           request.setHeader('Cache-Control', 'no-cache');
@@ -10184,137 +10654,143 @@ function setupIPC() {
             reject(new Error(`Request timeout after ${timeoutMs}ms`));
           }, timeoutMs);
 
-        request.on('response', (response) => {
-          console.log('Article response status:', response.statusCode);
+          request.on('response', (response) => {
+            console.log('Article response status:', response.statusCode);
 
-          // Handle redirects
-          if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-            if (redirectCount >= maxRedirects) {
+            // Handle redirects
+            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+              if (redirectCount >= maxRedirects) {
+                clearTimeout(timeout);
+                reject(new Error('Too many redirects'));
+                return;
+              }
+
+              redirectCount++;
+              const redirectUrl = new URL(response.headers.location, url).href;
+              console.log(`Following article redirect ${redirectCount}/${maxRedirects} to:`, redirectUrl);
+
               clearTimeout(timeout);
-              reject(new Error('Too many redirects'));
+
+              // Make a new request for the redirect
+              const redirectRequest = net.request({
+                method: 'GET',
+                url: redirectUrl,
+              });
+
+              // Set the same headers for redirect
+              redirectRequest.setHeader(
+                'User-Agent',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+              );
+              redirectRequest.setHeader(
+                'Accept',
+                'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+              );
+              redirectRequest.setHeader('Accept-Language', 'en-US,en;q=0.9');
+              redirectRequest.setHeader('Cache-Control', 'no-cache');
+
+              // Handle the redirect response
+              redirectRequest.on('response', (redirectResponse) => {
+                if (redirectResponse.statusCode !== 200) {
+                  reject(new Error(`HTTP ${redirectResponse.statusCode}: ${redirectResponse.statusMessage}`));
+                  return;
+                }
+
+                let redirectData = '';
+                redirectResponse.on('data', (chunk) => {
+                  redirectData += chunk.toString();
+                });
+
+                redirectResponse.on('end', () => {
+                  console.log('Article redirect fetch completed, data length:', redirectData.length);
+                  resolve(redirectData);
+                });
+
+                redirectResponse.on('error', (error) => {
+                  reject(error);
+                });
+              });
+
+              redirectRequest.on('error', (error) => {
+                reject(error);
+              });
+
+              redirectRequest.end();
               return;
             }
 
-            redirectCount++;
-            const redirectUrl = new URL(response.headers.location, url).href;
-            console.log(`Following article redirect ${redirectCount}/${maxRedirects} to:`, redirectUrl);
-            
-            clearTimeout(timeout);
-            
-            // Make a new request for the redirect
-            const redirectRequest = net.request({
-              method: 'GET',
-              url: redirectUrl
+            if (response.statusCode !== 200) {
+              clearTimeout(timeout);
+              reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+              return;
+            }
+
+            response.on('data', (chunk) => {
+              responseData += chunk.toString();
             });
-            
-            // Set the same headers for redirect
-            redirectRequest.setHeader('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-            redirectRequest.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
-            redirectRequest.setHeader('Accept-Language', 'en-US,en;q=0.9');
-            redirectRequest.setHeader('Cache-Control', 'no-cache');
-            
-            // Handle the redirect response
-            redirectRequest.on('response', (redirectResponse) => {
-              if (redirectResponse.statusCode !== 200) {
-                reject(new Error(`HTTP ${redirectResponse.statusCode}: ${redirectResponse.statusMessage}`));
-                return;
-              }
-              
-              let redirectData = '';
-              redirectResponse.on('data', (chunk) => {
-                redirectData += chunk.toString();
+
+            response.on('end', () => {
+              clearTimeout(timeout);
+              console.log('Article fetch completed, data length:', responseData.length);
+
+              // Calculate reading time from the fetched HTML content
+              const readingTime = calculateReadingTimeFromHTML(responseData);
+              console.log('🔥 CALCULATED READING TIME FROM MAIN PROCESS:', readingTime);
+
+              // Return both content and reading time
+              const result = {
+                content: responseData,
+                readingTime: readingTime,
+                wordCount: getWordCount(responseData),
+              };
+
+              // Also send the reading time to all windows (including AI Run Times window)
+              console.log('📤 SENDING READING TIME TO ALL WINDOWS:', {
+                url: url,
+                readingTime: readingTime,
+                wordCount: getWordCount(responseData),
               });
-              
-              redirectResponse.on('end', () => {
-                console.log('Article redirect fetch completed, data length:', redirectData.length);
-                resolve(redirectData);
+
+              // Send to all windows to ensure AI Run Times window receives it
+              const { BrowserWindow } = require('electron');
+              const allWindows = BrowserWindow.getAllWindows();
+              console.log(`📤 Found ${allWindows.length} windows to send reading time to`);
+
+              allWindows.forEach((window, index) => {
+                if (window && !window.isDestroyed()) {
+                  console.log(`📤 Sending reading time to window ${index + 1}`);
+                  window.webContents.send('article-reading-time', {
+                    url: url,
+                    readingTime: readingTime,
+                    wordCount: getWordCount(responseData),
+                  });
+                }
               });
-              
-              redirectResponse.on('error', (error) => {
-                reject(error);
-              });
+
+              resolve(result);
             });
-            
-            redirectRequest.on('error', (error) => {
+
+            response.on('error', (error) => {
+              clearTimeout(timeout);
+              console.error('Article response error:', error);
               reject(error);
             });
-            
-            redirectRequest.end();
-            return;
-          }
-
-          if (response.statusCode !== 200) {
-            clearTimeout(timeout);
-            reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
-            return;
-          }
-
-          response.on('data', (chunk) => {
-            responseData += chunk.toString();
           });
 
-          response.on('end', () => {
+          request.on('error', (error) => {
             clearTimeout(timeout);
-            console.log('Article fetch completed, data length:', responseData.length);
-            
-            // Calculate reading time from the fetched HTML content
-            const readingTime = calculateReadingTimeFromHTML(responseData);
-            console.log('🔥 CALCULATED READING TIME FROM MAIN PROCESS:', readingTime);
-            
-            // Return both content and reading time
-            const result = {
-              content: responseData,
-              readingTime: readingTime,
-              wordCount: getWordCount(responseData)
-            };
-            
-            // Also send the reading time to all windows (including AI Run Times window)
-            console.log('📤 SENDING READING TIME TO ALL WINDOWS:', {
-              url: url,
-              readingTime: readingTime,
-              wordCount: getWordCount(responseData)
-            });
-            
-            // Send to all windows to ensure AI Run Times window receives it
-            const { BrowserWindow } = require('electron');
-            const allWindows = BrowserWindow.getAllWindows();
-            console.log(`📤 Found ${allWindows.length} windows to send reading time to`);
-            
-            allWindows.forEach((window, index) => {
-              if (window && !window.isDestroyed()) {
-                console.log(`📤 Sending reading time to window ${index + 1}`);
-                window.webContents.send('article-reading-time', {
-                  url: url,
-                  readingTime: readingTime,
-                  wordCount: getWordCount(responseData)
-                });
-              }
-            });
-            
-            resolve(result);
-          });
-
-          response.on('error', (error) => {
-            clearTimeout(timeout);
-            console.error('Article response error:', error);
+            console.error('Article request error:', error);
             reject(error);
           });
-        });
 
-        request.on('error', (error) => {
-          clearTimeout(timeout);
-          console.error('Article request error:', error);
+          request.end();
+        } catch (error) {
+          console.error('Error creating article request:', error);
           reject(error);
-        });
-
-        request.end();
-      } catch (error) {
-        console.error('Error creating article request:', error);
-        reject(error);
-      }
-    });
+        }
+      });
     };
-    
+
     // Execute with retries
     let lastError;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -10325,7 +10801,9 @@ function setupIPC() {
         console.log(`[Fetch] Attempt ${attempt} failed: ${error.message}`);
         if (attempt < maxRetries) {
           console.log(`[Fetch] Retrying in ${retryDelay}ms...`);
-          await new Promise(r => setTimeout(r, retryDelay));
+          await new Promise((r) => {
+            setTimeout(r, retryDelay);
+          });
         }
       }
     }
@@ -10340,36 +10818,46 @@ function setupIPC() {
       const prefsPath = path.join(app.getPath('userData'), 'user-preferences.json');
       fs.writeFileSync(prefsPath, JSON.stringify(preferences, null, 2));
       console.log('User preferences saved successfully');
-      
+
+      // Sync gsxAccountId to settingsManager so both storage locations stay consistent.
+      // This ensures browser-renderer's resolveAccountId() fallback finds the value.
+      if (preferences.gsxAccountId && global.settingsManager) {
+        const currentStored = global.settingsManager.get('gsxAccountId');
+        if (currentStored !== preferences.gsxAccountId) {
+          global.settingsManager.set('gsxAccountId', preferences.gsxAccountId);
+          console.log('[Main] Synced gsxAccountId to settingsManager:', preferences.gsxAccountId);
+        }
+      }
+
       // If GSX account ID is provided, update existing GSX links
       if (preferences.gsxAccountId) {
         const gsxLinksPath = path.join(app.getPath('userData'), 'gsx-links.json');
-        
+
         if (fs.existsSync(gsxLinksPath)) {
           console.log('Updating existing GSX links with account ID');
           try {
             const gsxLinksData = fs.readFileSync(gsxLinksPath, 'utf8');
             const gsxLinks = JSON.parse(gsxLinksData);
-            
+
             // Update each non-custom link with the account ID
-            const updatedLinks = gsxLinks.map(link => {
+            const updatedLinks = gsxLinks.map((link) => {
               // Skip custom links - they should manage their own account IDs
               if (link.custom) {
                 return link;
               }
-              
+
               // Update the URL to include the account ID
               try {
                 const url = new URL(link.url);
                 const params = new URLSearchParams(url.search);
-                
+
                 // Update or add the accountId parameter
                 params.set('accountId', preferences.gsxAccountId);
                 url.search = params.toString();
-                
+
                 return {
                   ...link,
-                  url: url.toString()
+                  url: url.toString(),
                 };
               } catch (e) {
                 console.error(`Error updating URL for link ${link.label}:`, e);
@@ -10377,15 +10865,15 @@ function setupIPC() {
                 const separator = link.url.includes('?') ? '&' : '?';
                 return {
                   ...link,
-                  url: `${link.url}${separator}accountId=${preferences.gsxAccountId}`
+                  url: `${link.url}${separator}accountId=${preferences.gsxAccountId}`,
                 };
               }
             });
-            
+
             // Save the updated links back to file
             fs.writeFileSync(gsxLinksPath, JSON.stringify(updatedLinks, null, 2));
             console.log('GSX links updated with account ID successfully');
-            
+
             // Refresh the menu to reflect the changes
             refreshGSXLinks();
           } catch (error) {
@@ -10393,7 +10881,7 @@ function setupIPC() {
           }
         }
       }
-      
+
       event.reply('user-preferences-saved', true);
     } catch (error) {
       console.error('Error saving user preferences:', error);
@@ -10412,35 +10900,35 @@ function setupIPC() {
         fs.writeFileSync(botsPath, JSON.stringify(bots, null, 2));
       }
       console.log('External bots saved successfully');
-      
+
       // Create Conversations spaces for known AI services
       const aiServiceSpaceConfig = {
-        'chatgpt': { name: 'ChatGPT Conversations', icon: '💬', color: '#10a37f' },
-        'claude': { name: 'Claude Conversations', icon: '🤖', color: '#ff6b35' },
-        'gemini': { name: 'Gemini Conversations', icon: '✨', color: '#4285f4' },
-        'perplexity': { name: 'Perplexity Conversations', icon: '🔍', color: '#8b5cf6' },
-        'grok': { name: 'Grok Conversations', icon: '🚀', color: '#6b7280' }
+        chatgpt: { name: 'ChatGPT Conversations', icon: '💬', color: '#10a37f' },
+        claude: { name: 'Claude Conversations', icon: '🤖', color: '#ff6b35' },
+        gemini: { name: 'Gemini Conversations', icon: '✨', color: '#4285f4' },
+        perplexity: { name: 'Perplexity Conversations', icon: '🔍', color: '#8b5cf6' },
+        grok: { name: 'Grok Conversations', icon: '🚀', color: '#6b7280' },
       };
-      
+
       // Check each bot and create spaces for AI services
       for (const bot of bots) {
         const botType = bot.botType?.toLowerCase();
         const spaceConfig = aiServiceSpaceConfig[botType];
-        
+
         if (spaceConfig) {
           try {
             const { getSpacesAPI } = require('./spaces-api');
             const spacesAPI = getSpacesAPI();
-            
+
             // Check if space already exists
             const existingSpaces = await spacesAPI.list();
-            const spaceExists = existingSpaces.some(s => s.name === spaceConfig.name);
-            
+            const spaceExists = existingSpaces.some((s) => s.name === spaceConfig.name);
+
             if (!spaceExists) {
               console.log(`[ExternalBots] Creating space for ${botType}: ${spaceConfig.name}`);
               await spacesAPI.create(spaceConfig.name, {
                 icon: spaceConfig.icon,
-                color: spaceConfig.color
+                color: spaceConfig.color,
               });
               console.log(`[ExternalBots] Created space: ${spaceConfig.name}`);
             } else {
@@ -10452,21 +10940,25 @@ function setupIPC() {
           }
         }
       }
-      
+
       // Refresh the menu to show new bots
-      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
-      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
-      
+      if (global.menuDataManager) {
+        global.menuDataManager.refreshGSXLinks();
+      } else {
+        const { refreshGSXLinks } = require('./menu');
+        refreshGSXLinks();
+      }
+
       // Re-register global shortcuts
       registerGlobalShortcuts();
-      
+
       event.reply('external-bots-saved', true);
     } catch (error) {
       console.error('Error saving external bots:', error);
       event.reply('external-bots-saved', false);
     }
   });
-  
+
   // Handle saving image creators
   ipcMain.on('save-image-creators', (event, creators) => {
     console.log(`Saving ${creators.length} image creators`);
@@ -10474,18 +10966,22 @@ function setupIPC() {
       const creatorsPath = path.join(app.getPath('userData'), 'image-creators.json');
       fs.writeFileSync(creatorsPath, JSON.stringify(creators, null, 2));
       console.log('Image creators saved successfully');
-      
+
       // Refresh the menu to show new image creators
-      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
-      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
-      
+      if (global.menuDataManager) {
+        global.menuDataManager.refreshGSXLinks();
+      } else {
+        const { refreshGSXLinks } = require('./menu');
+        refreshGSXLinks();
+      }
+
       event.reply('image-creators-saved', true);
     } catch (error) {
       console.error('Error saving image creators:', error);
       event.reply('image-creators-saved', false);
     }
   });
-  
+
   // Handle saving video creators
   ipcMain.on('save-video-creators', (event, creators) => {
     console.log(`Saving ${creators.length} video creators`);
@@ -10493,18 +10989,22 @@ function setupIPC() {
       const creatorsPath = path.join(app.getPath('userData'), 'video-creators.json');
       fs.writeFileSync(creatorsPath, JSON.stringify(creators, null, 2));
       console.log('Video creators saved successfully');
-      
+
       // Refresh the menu to show new video creators
-      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
-      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
-      
+      if (global.menuDataManager) {
+        global.menuDataManager.refreshGSXLinks();
+      } else {
+        const { refreshGSXLinks } = require('./menu');
+        refreshGSXLinks();
+      }
+
       event.reply('video-creators-saved', true);
     } catch (error) {
       console.error('Error saving video creators:', error);
       event.reply('video-creators-saved', false);
     }
   });
-  
+
   // Handle saving audio generators
   ipcMain.on('save-audio-generators', (event, generators) => {
     console.log(`Saving ${generators.length} audio generators`);
@@ -10512,18 +11012,22 @@ function setupIPC() {
       const generatorsPath = path.join(app.getPath('userData'), 'audio-generators.json');
       fs.writeFileSync(generatorsPath, JSON.stringify(generators, null, 2));
       console.log('Audio generators saved successfully');
-      
+
       // Refresh the menu to show new audio generators
-      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
-      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
-      
+      if (global.menuDataManager) {
+        global.menuDataManager.refreshGSXLinks();
+      } else {
+        const { refreshGSXLinks } = require('./menu');
+        refreshGSXLinks();
+      }
+
       event.reply('audio-generators-saved', true);
     } catch (error) {
       console.error('Error saving audio generators:', error);
       event.reply('audio-generators-saved', false);
     }
   });
-  
+
   // Handle saving UI design tools
   ipcMain.on('save-ui-design-tools', (event, tools) => {
     console.log(`Saving ${tools.length} UI design tools`);
@@ -10531,102 +11035,114 @@ function setupIPC() {
       const toolsPath = path.join(app.getPath('userData'), 'ui-design-tools.json');
       fs.writeFileSync(toolsPath, JSON.stringify(tools, null, 2));
       console.log('UI design tools saved successfully');
-      
+
       // Refresh the menu to show new UI design tools
-      if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
-      else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
-      
+      if (global.menuDataManager) {
+        global.menuDataManager.refreshGSXLinks();
+      } else {
+        const { refreshGSXLinks } = require('./menu');
+        refreshGSXLinks();
+      }
+
       event.reply('ui-design-tools-saved', true);
     } catch (error) {
       console.error('Error saving UI design tools:', error);
       event.reply('ui-design-tools-saved', false);
     }
   });
-  
+
   // Handle saving IDW entries
   ipcMain.on('save-idw-entries', (event, entries) => {
     console.log(`[IDW] Saving ${entries.length} IDW entries`);
     try {
       const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
-      
+
       // Create backup of existing file
       if (fs.existsSync(idwConfigPath)) {
         const backupPath = idwConfigPath + '.backup';
         fs.copyFileSync(idwConfigPath, backupPath);
         console.log('[IDW] Created backup of existing entries');
       }
-      
+
       // Save the new entries
       fs.writeFileSync(idwConfigPath, JSON.stringify(entries, null, 2));
       console.log('[IDW] IDW entries saved successfully to:', idwConfigPath);
-      
+
       // Refresh the menu to show new IDW entries
-      if (global.menuDataManager) { global.menuDataManager.rebuild(entries); }
-      else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(entries); }
-      
+      if (global.menuDataManager) {
+        global.menuDataManager.rebuild(entries);
+      } else {
+        const { setApplicationMenu } = require('./menu');
+        setApplicationMenu(entries);
+      }
+
       event.reply('idw-entries-saved', true);
     } catch (error) {
       console.error('[IDW] Error saving IDW entries:', error);
       event.reply('idw-entries-saved', false);
     }
   });
-  
+
   // NEW: Handle wizard save using invoke (returns promise)
   ipcMain.handle('wizard:save-idw-environments', async (event, environments) => {
     console.log('='.repeat(60));
     console.log('[WIZARD SAVE] 🔵 INVOKE Handler called!');
     console.log(`[WIZARD SAVE] Saving ${environments.length} IDW environments`);
-    console.log('[WIZARD SAVE] Environment IDs:', environments.map(e => e.id).join(', '));
-    
+    console.log('[WIZARD SAVE] Environment IDs:', environments.map((e) => e.id).join(', '));
+
     try {
       const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
       console.log('[WIZARD SAVE] File path:', idwConfigPath);
-      
+
       // Create backup
       if (fs.existsSync(idwConfigPath)) {
         const backupPath = idwConfigPath + '.backup';
         fs.copyFileSync(idwConfigPath, backupPath);
         console.log('[WIZARD SAVE] ✅ Backup created');
       }
-      
+
       // Write file
       fs.writeFileSync(idwConfigPath, JSON.stringify(environments, null, 2));
       console.log('[WIZARD SAVE] ✅ File written');
-      
+
       // Verify
       const savedData = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
       console.log('[WIZARD SAVE] ✅ Verified:', savedData.length, 'in file');
-      
+
       // Update the settings manager with the new environments
       console.log('[WIZARD SAVE] Updating settings manager...');
       global.settingsManager.set('idwEnvironments', environments);
       console.log('[WIZARD SAVE] ✅ Settings manager updated');
-      
+
       // Update menu
-      if (global.menuDataManager) { global.menuDataManager.rebuild(environments); }
-      else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(environments); }
+      if (global.menuDataManager) {
+        global.menuDataManager.rebuild(environments);
+      } else {
+        const { setApplicationMenu } = require('./menu');
+        setApplicationMenu(environments);
+      }
       console.log('[WIZARD SAVE] Menu updated');
-      
+
       // Re-register shortcuts
       registerGlobalShortcuts();
       console.log('[WIZARD SAVE] ✅ Shortcuts registered');
-      
+
       console.log('[WIZARD SAVE] ✅ SUCCESS!');
       console.log('='.repeat(60));
-      
+
       return { success: true, count: environments.length };
     } catch (error) {
       console.error('[WIZARD SAVE] ❌ ERROR:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Handle saving IDW environments (from setup wizard). Use MenuDataManager when available so cache stays in sync.
   ipcMain.on('save-idw-environments', async (event, environments) => {
     console.log('='.repeat(60));
     console.log('[IDW SAVE] IPC Handler called');
     console.log(`[IDW SAVE] Saving ${environments.length} IDW environments from setup wizard`);
-    
+
     try {
       if (global.menuDataManager) {
         await global.menuDataManager.setIDWEnvironments(environments, { source: 'setup-wizard' });
@@ -10642,8 +11158,12 @@ function setupIPC() {
         if (global.settingsManager) {
           global.settingsManager.set('idwEnvironments', environments);
         }
-        if (global.menuDataManager) { global.menuDataManager.rebuild(environments); }
-        else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(environments); }
+        if (global.menuDataManager) {
+          global.menuDataManager.rebuild(environments);
+        } else {
+          const { setApplicationMenu } = require('./menu');
+          setApplicationMenu(environments);
+        }
         registerGlobalShortcuts();
         event.reply('idw-environments-saved', true);
         console.log('[IDW SAVE] Done via legacy path');
@@ -10658,9 +11178,9 @@ function setupIPC() {
   // Function to register global shortcuts for environments and bots
   function registerGlobalShortcuts() {
     console.log('[Shortcuts] Registering global shortcuts...');
-    
+
     // Unregister only our previously registered shortcuts
-    registeredShortcuts.forEach(shortcut => {
+    registeredShortcuts.forEach((shortcut) => {
       try {
         globalShortcut.unregister(shortcut);
       } catch (e) {
@@ -10668,13 +11188,13 @@ function setupIPC() {
       }
     });
     registeredShortcuts = [];
-    
+
     try {
       // Load IDW environments
       const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
       if (fs.existsSync(idwConfigPath)) {
         const idwEnvironments = JSON.parse(fs.readFileSync(idwConfigPath, 'utf8'));
-        idwEnvironments.forEach(env => {
+        idwEnvironments.forEach((env) => {
           if (env.globalShortcut) {
             const success = globalShortcut.register(env.globalShortcut, () => {
               console.log(`[Shortcuts] Global shortcut triggered for IDW: ${env.label}`);
@@ -10689,12 +11209,12 @@ function setupIPC() {
           }
         });
       }
-      
+
       // Load external bots
       const botsConfigPath = path.join(app.getPath('userData'), 'external-bots.json');
       if (fs.existsSync(botsConfigPath)) {
         const externalBots = JSON.parse(fs.readFileSync(botsConfigPath, 'utf8'));
-        externalBots.forEach(bot => {
+        externalBots.forEach((bot) => {
           if (bot.globalShortcut) {
             const success = globalShortcut.register(bot.globalShortcut, () => {
               console.log(`[Shortcuts] Global shortcut triggered for bot: ${bot.name}`);
@@ -10709,7 +11229,6 @@ function setupIPC() {
           }
         });
       }
-      
     } catch (error) {
       console.error('[Shortcuts] Error registering global shortcuts:', error);
     }
@@ -10718,67 +11237,66 @@ function setupIPC() {
   // Expose shortcut registration to module-scope callers (e.g. app.whenReady)
   // so we don't crash with "registerGlobalShortcuts is not defined".
   global.registerGlobalShortcuts = registerGlobalShortcuts;
-  
+
   // NOTE: refresh-menu handler is now managed by MenuDataManager (menu-data-manager.js)
   // This provides single source of truth and prevents duplicate handler registration
   // See: getMenuDataManager().forceRefresh() for programmatic refresh
-  
+
   // Handle menu actions from the menu.js
   ipcMain.on('menu-action', (event, data) => {
     console.log('='.repeat(70));
     console.log('[MENU-ACTION] 🔵 Handler called!');
     console.log('[MENU-ACTION] Received from menu.js:', data);
     console.log('='.repeat(70));
-    
+
     // Handle specific menu actions
     if (data.action === 'open-external-bot' && data.url) {
       // Use the existing user-action handler logic for external bots
       // This ensures ChatGPT opens in a dedicated window with proper permissions
       console.log('Redirecting external bot menu action to user-action handler');
-      
+
       // Emit to the existing user-action handler
       ipcMain.emit('user-action', event, data);
       return;
     }
-    
-        // Handle image creator opening - open in separate window
+
+    // Handle image creator opening - open in separate window
     if (data.action === 'open-image-creator' && data.url) {
       console.log('Opening image creator in separate window:', data.label, data.url);
       openExternalAIWindow(data.url, data.label || 'Image Creator', {
         width: 1400,
-        height: 900
+        height: 900,
       });
       return;
     }
-    
-    
+
     // Handle video creator opening - open in separate window
     if (data.action === 'open-video-creator' && data.url) {
       console.log('Opening video creator in separate window:', data.label, data.url);
       openExternalAIWindow(data.url, data.label || 'Video Creator', {
         width: 1400,
-        height: 900
+        height: 900,
       });
       return;
     }
-    
+
     // Handle audio generator opening - open in separate window
     if (data.action === 'open-audio-generator' && data.url) {
       console.log('Opening audio generator in separate window:', data.label, data.url);
       openExternalAIWindow(data.url, data.label || 'Audio Generator', {
         width: 1400,
-        height: 900
+        height: 900,
       });
       return;
     }
-    
+
     // Handle UI design tool opening - open in separate window
     if (data.action === 'open-ui-design-tool' && data.url) {
       console.log(`[UI Design] Opening ${data.label} in separate window: ${data.url}`);
       openExternalAIWindow(data.url, data.label || 'UI Design Tool', { width: 1400, height: 900 });
       return;
     }
-    
+
     // ==================== APP FEATURE ACTIONS (delegated to action-executor) ====================
     // These actions are handled by action-executor.js for centralized management
     if (data.action && data.action.startsWith('open-') && !data.url) {
@@ -10789,7 +11307,7 @@ function setupIPC() {
         return;
       }
     }
-    
+
     // Handle IDW URL opening
     if (data.action === 'open-idw-url' && data.url) {
       // Validate and clean the URL
@@ -10809,23 +11327,23 @@ function setupIPC() {
           }
         }
       }
-      
+
       console.log(`Opening IDW URL in new tab: ${data.label} (${cleanUrl})`);
-      
+
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
       if (mainWindow) {
         // Send to main window to open in a new tab
         mainWindow.webContents.send('open-in-new-tab', {
           url: cleanUrl,
-          label: data.label || 'IDW'
+          label: data.label || 'IDW',
         });
       } else {
         console.error('Main window not found, cannot open IDW URL');
       }
       return;
     }
-    
+
     // Pass all other menu actions to the main window to handle
     const mainWindow = browserWindow.getMainWindow();
     if (mainWindow && mainWindow.webContents) {
@@ -10839,7 +11357,7 @@ function setupIPC() {
    */
   function extractFileMetadata(obj) {
     const files = [];
-    
+
     function processObject(data, path = '') {
       if (Array.isArray(data)) {
         return data.map((item, index) => processObject(item, `${path}[${index}]`));
@@ -10847,14 +11365,15 @@ function setupIPC() {
         const processed = {};
         for (const [key, value] of Object.entries(data)) {
           // Detect base64 image/file data
-          if ((key === 'data' || key === 'content' || key === 'image_url') && 
-              typeof value === 'string' && 
-              (value.startsWith('data:') || value.startsWith('/9j/') || value.startsWith('iVBOR') || value.length > 1000)) {
-            
+          if (
+            (key === 'data' || key === 'content' || key === 'image_url') &&
+            typeof value === 'string' &&
+            (value.startsWith('data:') || value.startsWith('/9j/') || value.startsWith('iVBOR') || value.length > 1000)
+          ) {
             // Extract metadata
             let fileType = 'unknown';
             let sizeKB = Math.round(value.length / 1024);
-            
+
             if (value.startsWith('data:')) {
               const match = value.match(/^data:([^;]+);/);
               if (match) fileType = match[1];
@@ -10863,14 +11382,14 @@ function setupIPC() {
             } else if (value.startsWith('iVBOR')) {
               fileType = 'image/png';
             }
-            
+
             files.push({
               field: `${path}.${key}`,
               type: fileType,
               sizeKB: sizeKB,
-              base64Length: value.length
+              base64Length: value.length,
             });
-            
+
             processed[key] = `[FILE_DATA_REMOVED: ${fileType}, ${sizeKB}KB]`;
           } else {
             processed[key] = processObject(value, `${path}.${key}`);
@@ -10880,46 +11399,46 @@ function setupIPC() {
       }
       return data;
     }
-    
+
     const processedPayload = processObject(obj);
     return { payload: processedPayload, files: files.length > 0 ? files : undefined };
   }
-  
+
   /**
    * Helper function to extract file metadata from multipart form data
    */
   function extractMultipartFileMetadata(data, contentType) {
     const files = [];
-    
+
     try {
       // Extract boundary from content-type
       const boundaryMatch = contentType.match(/boundary=([^;]+)/);
       if (!boundaryMatch) return files;
-      
+
       const boundary = boundaryMatch[1].replace(/^["']|["']$/g, '');
       const parts = data.split(`--${boundary}`);
-      
+
       for (const part of parts) {
         // Look for Content-Disposition with filename
         const filenameMatch = part.match(/filename="([^"]+)"/);
         const contentTypeMatch = part.match(/Content-Type:\s*([^\r\n]+)/i);
-        
+
         if (filenameMatch) {
           const filename = filenameMatch[1];
           const fileType = contentTypeMatch ? contentTypeMatch[1].trim() : 'unknown';
           const sizeKB = Math.round(part.length / 1024);
-          
+
           files.push({
             filename: filename,
             type: fileType,
-            sizeKB: sizeKB
+            sizeKB: sizeKB,
           });
         }
       }
     } catch (err) {
       console.error('Error extracting multipart file metadata:', err);
     }
-    
+
     return files;
   }
 
@@ -10931,11 +11450,11 @@ function setupIPC() {
    */
   function openExternalAIWindow(url, label, options = {}) {
     console.log(`Opening external AI service in separate window: ${label} (${url})`);
-    
+
     // Determine AI type based on URL and label
     let aiType = 'unknown';
     let aiService = label;
-    
+
     if (url.includes('chatgpt.com') || url.includes('openai.com')) {
       aiType = 'chat';
       aiService = 'ChatGPT';
@@ -10960,7 +11479,7 @@ function setupIPC() {
     } else if (label.toLowerCase().includes('ui') || label.toLowerCase().includes('design')) {
       aiType = 'ui-design';
     }
-    
+
     // Log the AI window opening
     logger.logWindowCreated('external-ai', aiService, {
       aiType: aiType,
@@ -10968,17 +11487,17 @@ function setupIPC() {
       url: url,
       windowTitle: label,
       windowSize: `${options.width || 1400}x${options.height || 900}`,
-      partition: `persist:${label.toLowerCase().replace(/\s/g, '-')}`
+      partition: `persist:${label.toLowerCase().replace(/\s/g, '-')}`,
     });
-    
+
     logger.info('Personal AI Opened', {
       event: 'ai:opened',
       service: aiService,
       type: aiType,
       url: url,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
-    
+
     // Create window configuration
     const windowConfig = {
       width: options.width || 1400,
@@ -10990,39 +11509,39 @@ function setupIPC() {
         contextIsolation: true,
         webSecurity: true,
         partition: `persist:${label.toLowerCase().replace(/\s/g, '-')}`, // Separate session for each AI
-        preload: path.join(__dirname, 'preload-external-ai.js')
-      }
+        preload: path.join(__dirname, 'preload-external-ai.js'),
+      },
     };
 
     // Create the window
     const aiWindow = new BrowserWindow(windowConfig);
-    
+
     // Set up network traffic logging using Chrome DevTools Protocol
     try {
       aiWindow.webContents.debugger.attach('1.3');
       console.log(`[${label}] Debugger attached for network monitoring`);
-      
+
       // Enable Network domain to capture all network traffic
       aiWindow.webContents.debugger.sendCommand('Network.enable');
-      
+
       // Track streaming responses (SSE/text-event-stream)
       const streamingResponses = new Map(); // requestId -> { url, chunks: [], complete: false }
-      
+
       // Listen for network requests
       aiWindow.webContents.debugger.on('message', (event, method, params) => {
         if (method === 'Network.requestWillBeSent') {
           // Log outgoing request
           const request = params.request;
-          
+
           // Console log artifact-related URLs for debugging
           if (request.url.includes('artifacts') || request.url.includes('/files/')) {
             console.log(`[${label}] 🔍 Artifact URL detected: ${request.url}`);
             console.log(`[${label}]    Method: ${request.method}`);
-            
+
             // Don't try to download - Claude's artifact endpoints return 404
             // The artifact content is embedded in the SSE completion response
           }
-          
+
           logger.info('LLM Network Request', {
             event: 'llm:network:request',
             aiService: aiService,
@@ -11031,63 +11550,73 @@ function setupIPC() {
             method: request.method,
             headers: request.headers,
             postData: request.postData,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
           });
-          
+
           // Log detailed payload if it's an API call
           // Exclude telemetry/analytics URLs
-          const isTelemetryUrl = request.url.includes('/ces/') || 
-                                 request.url.includes('/telemetry/') || 
-                                 request.url.includes('/analytics/') ||
-                                 request.url.includes('/v1/t') ||
-                                 request.url.includes('ddforward=');
-          
+          const isTelemetryUrl =
+            request.url.includes('/ces/') ||
+            request.url.includes('/telemetry/') ||
+            request.url.includes('/analytics/') ||
+            request.url.includes('/v1/t') ||
+            request.url.includes('ddforward=');
+
           // Grok-specific: only capture actual conversation endpoints (new and follow-up responses)
-          const isGrokConversationRequest = aiService === 'Grok' && 
-                                            (request.url.includes('/app-chat/conversations/new') || 
-                                             request.url.includes('/responses') ||
-                                             request.url.includes('/conversations_v2/'));
-          
+          const isGrokConversationRequest =
+            aiService === 'Grok' &&
+            (request.url.includes('/app-chat/conversations/new') ||
+              request.url.includes('/responses') ||
+              request.url.includes('/conversations_v2/'));
+
           // Gemini-specific: capture conversation-related endpoints (exclude CSP reports)
           // Focus on StreamGenerate which is the actual conversation endpoint
-          const isGeminiConversationRequest = aiService === 'Gemini' && 
-                                              !request.url.includes('cspreport') &&
-                                              !request.url.includes('/csp/') &&
-                                              request.url.includes('StreamGenerate');
-          
+          const isGeminiConversationRequest =
+            aiService === 'Gemini' &&
+            !request.url.includes('cspreport') &&
+            !request.url.includes('/csp/') &&
+            request.url.includes('StreamGenerate');
+
           if (aiService === 'Gemini' && request.url.includes('StreamGenerate')) {
             console.log('[Gemini DEBUG] StreamGenerate request detected');
           }
-          
-          if (request.postData && !isTelemetryUrl &&
-              (request.url.includes('/api/') || 
-               request.url.includes('/v1/') ||
-               request.url.includes('chat') ||
-               request.url.includes('completion') ||
-               request.url.includes('claude') ||
-               request.url.includes('messages') ||
-               request.url.includes('/backend-api/conversation') ||
-               aiService === 'Claude' ||
-               isGrokConversationRequest ||
-               isGeminiConversationRequest)) {  // Grok/Gemini: specific conversation endpoints
+
+          if (
+            request.postData &&
+            !isTelemetryUrl &&
+            (request.url.includes('/api/') ||
+              request.url.includes('/v1/') ||
+              request.url.includes('chat') ||
+              request.url.includes('completion') ||
+              request.url.includes('claude') ||
+              request.url.includes('messages') ||
+              request.url.includes('/backend-api/conversation') ||
+              aiService === 'Claude' ||
+              isGrokConversationRequest ||
+              isGeminiConversationRequest)
+          ) {
+            // Grok/Gemini: specific conversation endpoints
             try {
               let payload;
-              
+
               // Gemini uses URL-encoded form data, not JSON
-              if (aiService === 'Gemini' && (request.url.includes('batchexecute') || request.url.includes('StreamGenerate'))) {
+              if (
+                aiService === 'Gemini' &&
+                (request.url.includes('batchexecute') || request.url.includes('StreamGenerate'))
+              ) {
                 // Parse URL-encoded form data
                 const formData = new URLSearchParams(request.postData);
                 const fReq = formData.get('f.req');
-                
+
                 if (fReq) {
                   console.log('[Gemini DEBUG] Found f.req in batchexecute');
-                  
+
                   // fReq is a nested JSON string
                   // Format: [[["rpcName","[[\"message\",...]]",null,"generic"]]]
                   try {
                     const parsed = JSON.parse(fReq);
                     console.log('[Gemini DEBUG] Parsed f.req, outer array length:', parsed?.length);
-                    
+
                     // Extract user message from the nested structure
                     // The message is typically in parsed[0][0][1] which is itself a JSON string
                     if (Array.isArray(parsed) && parsed[0] && parsed[0][0]) {
@@ -11095,13 +11624,22 @@ function setupIPC() {
                       if (typeof innerJson === 'string') {
                         try {
                           const innerParsed = JSON.parse(innerJson);
-                          console.log('[Gemini DEBUG] Inner parsed type:', typeof innerParsed, Array.isArray(innerParsed) ? 'array' : '');
-                          
+                          console.log(
+                            '[Gemini DEBUG] Inner parsed type:',
+                            typeof innerParsed,
+                            Array.isArray(innerParsed) ? 'array' : ''
+                          );
+
                           // The user message is usually in the first string element
                           const extractUserMessage = (arr) => {
                             if (!Array.isArray(arr)) return null;
                             for (const item of arr) {
-                              if (typeof item === 'string' && item.length > 0 && item.length < 5000 && !item.match(/^[a-f0-9-]{30,}$/i)) {
+                              if (
+                                typeof item === 'string' &&
+                                item.length > 0 &&
+                                item.length < 5000 &&
+                                !item.match(/^[a-f0-9-]{30,}$/i)
+                              ) {
                                 return item;
                               }
                               if (Array.isArray(item)) {
@@ -11111,7 +11649,7 @@ function setupIPC() {
                             }
                             return null;
                           };
-                          
+
                           const userMessage = extractUserMessage(innerParsed);
                           if (userMessage) {
                             console.log('[Gemini DEBUG] Extracted user message:', userMessage.substring(0, 100));
@@ -11140,10 +11678,10 @@ function setupIPC() {
               } else {
                 payload = JSON.parse(request.postData);
               }
-              
+
               // Check if payload contains file/image data and extract metadata
               const processedPayload = extractFileMetadata(payload);
-              
+
               logger.info('LLM API Call Payload', {
                 event: 'llm:api:request',
                 aiService: aiService,
@@ -11151,15 +11689,15 @@ function setupIPC() {
                 url: request.url,
                 payload: processedPayload.payload,
                 filesDetected: processedPayload.files,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
               });
-              
+
               // Capture prompt for conversation history
               if (conversationCapture && aiType === 'chat') {
                 try {
                   // Extract conversation ID from URL
                   let externalConversationId = null;
-                  
+
                   if (aiService === 'Claude') {
                     // Claude: /api/organizations/.../chat_conversations/UUID/completion
                     const match = request.url.match(/chat_conversations\/([a-f0-9\-]+)/i);
@@ -11168,85 +11706,112 @@ function setupIPC() {
                       console.log(`[ConversationCapture] Extracted Claude conversation ID: ${externalConversationId}`);
                     }
                   } else if (aiService === 'ChatGPT') {
-                    // Only capture actual conversation requests 
+                    // Only capture actual conversation requests
                     // ChatGPT uses various paths: /backend-api/conversation, /backend-api/f/conversation, etc.
-                    const isConversationEndpoint = request.url.includes('/conversation') && 
-                                                   request.url.includes('backend-api');
-                    
+                    const isConversationEndpoint =
+                      request.url.includes('/conversation') && request.url.includes('backend-api');
+
                     if (!isConversationEndpoint) {
-                      console.log(`[ConversationCapture] Skipping non-conversation ChatGPT request: ${request.url.substring(0, 100)}`);
+                      console.log(
+                        `[ConversationCapture] Skipping non-conversation ChatGPT request: ${request.url.substring(0, 100)}`
+                      );
                       return;
                     }
-                    
+
                     // Skip init requests - they have no user message
                     if (request.url.includes('/conversation/init')) {
                       console.log(`[ConversationCapture] Skipping ChatGPT init request (no user message)`);
                       return;
                     }
-                    
-                    console.log(`[ConversationCapture] ✅ Detected ChatGPT conversation request: ${request.url.substring(0, 100)}`);
-                    
+
+                    console.log(
+                      `[ConversationCapture] ✅ Detected ChatGPT conversation request: ${request.url.substring(0, 100)}`
+                    );
+
                     // ChatGPT: /backend-api/conversation/{conversation_id}
                     // OR: May be in request body as conversation_id
                     const urlMatch = request.url.match(/\/conversation\/([a-f0-9\-]+)/i);
                     if (urlMatch) {
                       externalConversationId = urlMatch[1];
-                      console.log(`[ConversationCapture] Extracted ChatGPT conversation ID from URL: ${externalConversationId}`);
+                      console.log(
+                        `[ConversationCapture] Extracted ChatGPT conversation ID from URL: ${externalConversationId}`
+                      );
                     } else if (payload && payload.conversation_id) {
                       externalConversationId = payload.conversation_id;
-                      console.log(`[ConversationCapture] Extracted ChatGPT conversation ID from payload: ${externalConversationId}`);
+                      console.log(
+                        `[ConversationCapture] Extracted ChatGPT conversation ID from payload: ${externalConversationId}`
+                      );
                     } else if (payload && payload.parent_message_id) {
                       // Fallback: use parent message ID to group related messages
                       externalConversationId = payload.parent_message_id;
-                      console.log(`[ConversationCapture] Using ChatGPT parent message ID as conversation ID: ${externalConversationId}`);
+                      console.log(
+                        `[ConversationCapture] Using ChatGPT parent message ID as conversation ID: ${externalConversationId}`
+                      );
                     }
-                    
+
                     // Diagnostic logging for ChatGPT payload structure
                     console.log('[ChatGPT DEBUG] Request URL:', request.url);
                     console.log('[ChatGPT DEBUG] Payload keys:', Object.keys(payload));
                     if (payload.messages && Array.isArray(payload.messages)) {
                       console.log('[ChatGPT DEBUG] Message count:', payload.messages.length);
                       const lastMsg = payload.messages[payload.messages.length - 1];
-                      console.log('[ChatGPT DEBUG] Last message structure:', JSON.stringify(lastMsg, null, 2).substring(0, 500));
+                      console.log(
+                        '[ChatGPT DEBUG] Last message structure:',
+                        JSON.stringify(lastMsg, null, 2).substring(0, 500)
+                      );
                     }
                   } else if (aiService === 'Grok') {
                     // Grok: Only capture actual conversation requests
                     // Skip non-conversation endpoints
-                    const isGrokConversation = request.url.includes('/app-chat/') || 
-                                               request.url.includes('/conversations');
-                    
+                    const isGrokConversation =
+                      request.url.includes('/app-chat/') || request.url.includes('/conversations');
+
                     if (!isGrokConversation) {
-                      console.log(`[ConversationCapture] Skipping non-conversation Grok request: ${request.url.substring(0, 80)}`);
+                      console.log(
+                        `[ConversationCapture] Skipping non-conversation Grok request: ${request.url.substring(0, 80)}`
+                      );
                       return;
                     }
-                    
+
                     console.log('[Grok DEBUG] Request URL:', request.url);
                     console.log('[Grok DEBUG] Payload keys:', JSON.stringify(Object.keys(payload)));
                     console.log('[Grok DEBUG] Payload sample:', JSON.stringify(payload).substring(0, 500));
-                    
+
                     // Try to extract conversation ID from URL
                     const urlMatch = request.url.match(/\/conversation[s]?\/([a-f0-9\-]+)/i);
                     if (urlMatch) {
                       externalConversationId = urlMatch[1];
-                      console.log(`[ConversationCapture] Extracted Grok conversation ID from URL: ${externalConversationId}`);
+                      console.log(
+                        `[ConversationCapture] Extracted Grok conversation ID from URL: ${externalConversationId}`
+                      );
                     } else if (payload.conversation_id || payload.conversationId) {
                       externalConversationId = payload.conversation_id || payload.conversationId;
-                      console.log(`[ConversationCapture] Extracted Grok conversation ID from payload: ${externalConversationId}`);
+                      console.log(
+                        `[ConversationCapture] Extracted Grok conversation ID from payload: ${externalConversationId}`
+                      );
                     } else if (payload.session_id || payload.sessionId) {
                       externalConversationId = payload.session_id || payload.sessionId;
-                      console.log(`[ConversationCapture] Using Grok session ID as conversation ID: ${externalConversationId}`);
+                      console.log(
+                        `[ConversationCapture] Using Grok session ID as conversation ID: ${externalConversationId}`
+                      );
                     }
-                    
+
                     // Extract Grok message - Grok uses 'message' field directly or nested structures
-                    let grokMessage = payload.message || payload.query || payload.text || payload.content || payload.input;
+                    let grokMessage =
+                      payload.message || payload.query || payload.text || payload.content || payload.input;
                     if (!grokMessage && payload.messages && Array.isArray(payload.messages)) {
                       // If messages array exists, get last user message
-                      const userMsg = payload.messages.filter(m => m.role === 'user' || m.sender === 'human').pop();
+                      const userMsg = payload.messages.filter((m) => m.role === 'user' || m.sender === 'human').pop();
                       grokMessage = userMsg?.content || userMsg?.message || userMsg?.text;
                     }
-                    
+
                     if (grokMessage) {
-                      console.log('[Grok DEBUG] Found message:', typeof grokMessage === 'string' ? grokMessage.substring(0, 100) : JSON.stringify(grokMessage).substring(0, 100));
+                      console.log(
+                        '[Grok DEBUG] Found message:',
+                        typeof grokMessage === 'string'
+                          ? grokMessage.substring(0, 100)
+                          : JSON.stringify(grokMessage).substring(0, 100)
+                      );
                       // Store in payload for extraction
                       payload._grokMessage = grokMessage;
                     }
@@ -11254,68 +11819,80 @@ function setupIPC() {
                     // Gemini: Extract conversation from various possible formats
                     // Gemini web uses batchexecute and other endpoints
                     // Exclude CSP reports and other non-conversation requests
-                    const isGeminiConversation = !request.url.includes('cspreport') &&
-                                                 !request.url.includes('/csp/') &&
-                                                 (request.url.includes('batchexecute') || 
-                                                  request.url.includes('StreamGenerate') ||
-                                                  request.url.includes('/generate') ||
-                                                  request.url.includes('/chat'));
-                    
+                    const isGeminiConversation =
+                      !request.url.includes('cspreport') &&
+                      !request.url.includes('/csp/') &&
+                      (request.url.includes('batchexecute') ||
+                        request.url.includes('StreamGenerate') ||
+                        request.url.includes('/generate') ||
+                        request.url.includes('/chat'));
+
                     if (!isGeminiConversation) {
-                      console.log(`[ConversationCapture] Skipping non-conversation Gemini request: ${request.url.substring(0, 80)}`);
+                      console.log(
+                        `[ConversationCapture] Skipping non-conversation Gemini request: ${request.url.substring(0, 80)}`
+                      );
                       return;
                     }
-                    
+
                     console.log('[Gemini DEBUG] Request URL:', request.url);
                     console.log('[Gemini DEBUG] Payload keys:', JSON.stringify(Object.keys(payload)));
                     console.log('[Gemini DEBUG] Payload sample:', JSON.stringify(payload).substring(0, 500));
-                    
+
                     // Try to extract conversation ID from URL or payload
                     const urlMatch = request.url.match(/conversation[s]?\/([a-zA-Z0-9_-]+)/i);
                     if (urlMatch) {
                       externalConversationId = urlMatch[1];
-                      console.log(`[ConversationCapture] Extracted Gemini conversation ID from URL: ${externalConversationId}`);
+                      console.log(
+                        `[ConversationCapture] Extracted Gemini conversation ID from URL: ${externalConversationId}`
+                      );
                     } else if (payload.conversationId || payload.conversation_id) {
                       externalConversationId = payload.conversationId || payload.conversation_id;
-                      console.log(`[ConversationCapture] Extracted Gemini conversation ID from payload: ${externalConversationId}`);
+                      console.log(
+                        `[ConversationCapture] Extracted Gemini conversation ID from payload: ${externalConversationId}`
+                      );
                     }
-                    
+
                     // Extract Gemini message - Gemini uses various field names
                     // Common fields: contents, prompt, text, message, query
                     let geminiMessage = null;
-                    
+
                     // Gemini API format: contents[].parts[].text
                     if (payload.contents && Array.isArray(payload.contents)) {
-                      const userContent = payload.contents.filter(c => c.role === 'user').pop();
+                      const userContent = payload.contents.filter((c) => c.role === 'user').pop();
                       if (userContent?.parts) {
-                        geminiMessage = userContent.parts.map(p => p.text || '').join('');
+                        geminiMessage = userContent.parts.map((p) => p.text || '').join('');
                       }
                     }
-                    
+
                     // Alternative formats
                     if (!geminiMessage) {
-                      geminiMessage = payload.prompt || payload.text || payload.message || payload.query || payload.input;
+                      geminiMessage =
+                        payload.prompt || payload.text || payload.message || payload.query || payload.input;
                     }
-                    
+
                     // Nested messages array
                     if (!geminiMessage && payload.messages && Array.isArray(payload.messages)) {
-                      const userMsg = payload.messages.filter(m => m.role === 'user').pop();
+                      const userMsg = payload.messages.filter((m) => m.role === 'user').pop();
                       geminiMessage = userMsg?.content || userMsg?.text || userMsg?.message;
                     }
-                    
+
                     if (geminiMessage) {
-                      console.log('[Gemini DEBUG] Found message:', typeof geminiMessage === 'string' ? geminiMessage.substring(0, 100) : JSON.stringify(geminiMessage).substring(0, 100));
+                      console.log(
+                        '[Gemini DEBUG] Found message:',
+                        typeof geminiMessage === 'string'
+                          ? geminiMessage.substring(0, 100)
+                          : JSON.stringify(geminiMessage).substring(0, 100)
+                      );
                       // Store in payload for extraction
                       payload._geminiMessage = geminiMessage;
                     }
-                    
+
                     // If message was already extracted from batchexecute parsing, use it
                     if (!payload._geminiMessage && payload._isGeminiBatchexecute) {
                       console.log('[Gemini DEBUG] No message found in batchexecute - may be metadata request');
                     }
                   }
-                  
-                  
+
                   // Build message based on service
                   let messageToCapture = payload.messages || payload.prompt;
                   if (aiService === 'Grok' && payload._grokMessage) {
@@ -11323,26 +11900,33 @@ function setupIPC() {
                   } else if (aiService === 'Gemini' && payload._geminiMessage) {
                     messageToCapture = payload._geminiMessage;
                   }
-                  
-                  conversationCapture.capturePrompt(aiService, {
-                    message: messageToCapture,
-                    model: payload.model,
-                    timestamp: new Date().toISOString(),
-                    externalConversationId  // Pass the conversation ID
-                  }).catch(err => {
-                    console.error('[ConversationCapture] Error capturing prompt:', err);
-                  });
+
+                  conversationCapture
+                    .capturePrompt(aiService, {
+                      message: messageToCapture,
+                      model: payload.model,
+                      timestamp: new Date().toISOString(),
+                      externalConversationId, // Pass the conversation ID
+                    })
+                    .catch((err) => {
+                      console.error('[ConversationCapture] Error capturing prompt:', err);
+                    });
                 } catch (err) {
                   console.error('[ConversationCapture] Error in capturePrompt:', err);
                 }
               }
-              
+
               // Capture media files
-              if (conversationCapture && aiType === 'chat' && processedPayload.files && processedPayload.files.length > 0) {
+              if (
+                conversationCapture &&
+                aiType === 'chat' &&
+                processedPayload.files &&
+                processedPayload.files.length > 0
+              ) {
                 try {
                   // Extract conversation ID from URL
                   let externalConversationId = null;
-                  
+
                   if (aiService === 'Claude') {
                     // Claude: /api/organizations/.../chat_conversations/UUID/completion
                     const match = request.url.match(/chat_conversations\/([a-f0-9\-]+)/i);
@@ -11360,16 +11944,16 @@ function setupIPC() {
                       externalConversationId = payload.parent_message_id;
                     }
                   }
-                  
+
                   conversationCapture.captureMedia(aiService, processedPayload.files, externalConversationId);
                 } catch (err) {
                   console.error('[ConversationCapture] Error capturing media:', err);
                 }
               }
-            } catch (err) {
+            } catch (_err) {
               // Not JSON, check if it's multipart form data (file upload)
               const contentType = request.headers['content-type'] || request.headers['Content-Type'] || '';
-              
+
               if (contentType.includes('multipart/form-data')) {
                 // Extract file metadata from multipart data
                 const fileMetadata = extractMultipartFileMetadata(request.postData, contentType);
@@ -11379,21 +11963,23 @@ function setupIPC() {
                   requestId: params.requestId,
                   url: request.url,
                   files: fileMetadata,
-                  timestamp: new Date().toISOString()
+                  timestamp: new Date().toISOString(),
                 });
               } else {
                 // Log as text (but truncate if too large)
-                const truncatedData = request.postData.length > 1000 
-                  ? request.postData.substring(0, 1000) + `... [truncated, total size: ${request.postData.length} bytes]`
-                  : request.postData;
-                  
+                const truncatedData =
+                  request.postData.length > 1000
+                    ? request.postData.substring(0, 1000) +
+                      `... [truncated, total size: ${request.postData.length} bytes]`
+                    : request.postData;
+
                 logger.info('LLM API Call Payload (Text)', {
                   event: 'llm:api:request',
                   aiService: aiService,
                   requestId: params.requestId,
                   url: request.url,
                   payload: truncatedData,
-                  timestamp: new Date().toISOString()
+                  timestamp: new Date().toISOString(),
                 });
               }
             }
@@ -11410,361 +11996,392 @@ function setupIPC() {
             statusText: response.statusText,
             headers: response.headers,
             mimeType: response.mimeType,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
           });
-          
+
           // Check if this is a streaming response (SSE)
           const contentType = response.headers['content-type'] || response.headers['Content-Type'] || '';
-          const isStreaming = contentType.includes('text/event-stream') || 
-                            contentType.includes('application/stream') ||
-                            contentType.includes('text/stream');
-          
+          const isStreaming =
+            contentType.includes('text/event-stream') ||
+            contentType.includes('application/stream') ||
+            contentType.includes('text/stream');
+
           // Initialize streaming tracker for SSE responses
-          if (isStreaming && 
-              (response.url.includes('/conversation') || 
-               response.url.includes('/chat') ||
-               response.url.includes('/completions'))) {
+          if (
+            isStreaming &&
+            (response.url.includes('/conversation') ||
+              response.url.includes('/chat') ||
+              response.url.includes('/completions'))
+          ) {
             console.log(`[${label}] Detected streaming response for request ${params.requestId}`);
             streamingResponses.set(params.requestId, {
               url: response.url,
               chunks: [],
               complete: false,
-              startTime: Date.now()
+              startTime: Date.now(),
             });
           }
-          
+
           // Get response body if it's an API response OR artifact endpoint
-          if (response.url.includes('/api/') || 
-              response.url.includes('/v1/') ||
-              response.url.includes('chat') ||
-              response.url.includes('completions') ||
-              response.url.includes('artifacts')) {  // Add artifacts
-            aiWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
-              requestId: params.requestId
-            }).then(responseBody => {
-              try {
-                const body = responseBody.base64Encoded 
-                  ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
-                  : responseBody.body;
-                
-                // Special handling for artifact responses
-                if (response.url.includes('artifacts')) {
-                  console.log(`[${label}] 📄 Artifact content received: ${response.url}`);
-                  console.log(`[${label}]    Content length: ${body.length}`);
-                  
+          if (
+            response.url.includes('/api/') ||
+            response.url.includes('/v1/') ||
+            response.url.includes('chat') ||
+            response.url.includes('completions') ||
+            response.url.includes('artifacts')
+          ) {
+            // Add artifacts
+            aiWindow.webContents.debugger
+              .sendCommand('Network.getResponseBody', {
+                requestId: params.requestId,
+              })
+              .then((responseBody) => {
+                try {
+                  const body = responseBody.base64Encoded
+                    ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
+                    : responseBody.body;
+
+                  // Special handling for artifact responses
+                  if (response.url.includes('artifacts')) {
+                    console.log(`[${label}] 📄 Artifact content received: ${response.url}`);
+                    console.log(`[${label}]    Content length: ${body.length}`);
+
+                    // Try to parse as JSON
+                    try {
+                      const artifactData = JSON.parse(body);
+                      console.log(
+                        `[${label}]    Artifact data:`,
+                        JSON.stringify(artifactData, null, 2).substring(0, 500)
+                      );
+
+                      // TODO: Store artifact content and associate with conversation
+                      // For now, just log it
+                    } catch (_e) {
+                      // Might be raw content (SVG, HTML, etc.)
+                      console.log(`[${label}]    Raw artifact content:`, body.substring(0, 500));
+                    }
+                  }
+
                   // Try to parse as JSON
                   try {
-                    const artifactData = JSON.parse(body);
-                    console.log(`[${label}]    Artifact data:`, JSON.stringify(artifactData, null, 2).substring(0, 500));
-                    
-                    // TODO: Store artifact content and associate with conversation
-                    // For now, just log it
-                  } catch (e) {
-                    // Might be raw content (SVG, HTML, etc.)
-                    console.log(`[${label}]    Raw artifact content:`, body.substring(0, 500));
+                    const jsonBody = JSON.parse(body);
+
+                    // Check if response contains file/image data and extract metadata
+                    const processedResponse = extractFileMetadata(jsonBody);
+
+                    logger.info('LLM API Response Payload', {
+                      event: 'llm:api:response',
+                      aiService: aiService,
+                      requestId: params.requestId,
+                      url: response.url,
+                      status: response.status,
+                      payload: processedResponse.payload,
+                      filesDetected: processedResponse.files,
+                      timestamp: new Date().toISOString(),
+                    });
+                  } catch (_e) {
+                    // Not JSON, truncate if too large
+                    const truncatedBody =
+                      body.length > 1000
+                        ? body.substring(0, 1000) + `... [truncated, total size: ${body.length} bytes]`
+                        : body;
+
+                    logger.info('LLM API Response Payload (Text)', {
+                      event: 'llm:api:response',
+                      aiService: aiService,
+                      requestId: params.requestId,
+                      url: response.url,
+                      status: response.status,
+                      payload: truncatedBody,
+                      timestamp: new Date().toISOString(),
+                    });
                   }
+                } catch (err) {
+                  console.error(`[${label}] Error getting response body:`, err);
                 }
-                
-                // Try to parse as JSON
-                try {
-                  const jsonBody = JSON.parse(body);
-                  
-                  // Check if response contains file/image data and extract metadata
-                  const processedResponse = extractFileMetadata(jsonBody);
-                  
-                  logger.info('LLM API Response Payload', {
-                    event: 'llm:api:response',
-                    aiService: aiService,
-                    requestId: params.requestId,
-                    url: response.url,
-                    status: response.status,
-                    payload: processedResponse.payload,
-                    filesDetected: processedResponse.files,
-                    timestamp: new Date().toISOString()
-                  });
-                } catch (e) {
-                  // Not JSON, truncate if too large
-                  const truncatedBody = body.length > 1000 
-                    ? body.substring(0, 1000) + `... [truncated, total size: ${body.length} bytes]`
-                    : body;
-                    
-                  logger.info('LLM API Response Payload (Text)', {
-                    event: 'llm:api:response',
-                    aiService: aiService,
-                    requestId: params.requestId,
-                    url: response.url,
-                    status: response.status,
-                    payload: truncatedBody,
-                    timestamp: new Date().toISOString()
-                  });
+              })
+              .catch((err) => {
+                // Some responses can't be retrieved, that's okay
+                // Only log unexpected errors, not common DevTools protocol failures
+                const errMsg = err?.message || '';
+                if (errMsg && !errMsg.includes('No resource') && !errMsg.includes('No data found')) {
+                  console.debug(`[${label}] Response body unavailable:`, errMsg || 'unknown');
                 }
-              } catch (err) {
-                console.error(`[${label}] Error getting response body:`, err);
-              }
-            }).catch(err => {
-              // Some responses can't be retrieved, that's okay
-              // Only log unexpected errors, not common DevTools protocol failures
-              const errMsg = err?.message || '';
-              if (errMsg && !errMsg.includes('No resource') && !errMsg.includes('No data found')) {
-                console.debug(`[${label}] Response body unavailable:`, errMsg || 'unknown');
-              }
-            });
+              });
           }
         } else if (method === 'Network.dataReceived') {
           // Capture streaming data chunks (SSE)
           if (streamingResponses.has(params.requestId)) {
             const streamData = streamingResponses.get(params.requestId);
             // Removed verbose logging for streaming data chunks
-            
+
             // Get the actual chunk data
-            aiWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
-              requestId: params.requestId
-            }).then(responseBody => {
-              const body = responseBody.base64Encoded 
-                ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
-                : responseBody.body;
-              
-              // Store the cumulative response
-              streamData.chunks.push(body);
-              streamData.lastUpdate = Date.now();
-              
-              // Removed verbose logging - only log errors
-            }).catch(err => {
-              // Might not be available yet, that's okay
-            });
+            aiWindow.webContents.debugger
+              .sendCommand('Network.getResponseBody', {
+                requestId: params.requestId,
+              })
+              .then((responseBody) => {
+                const body = responseBody.base64Encoded
+                  ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
+                  : responseBody.body;
+
+                // Store the cumulative response
+                streamData.chunks.push(body);
+                streamData.lastUpdate = Date.now();
+
+                // Removed verbose logging - only log errors
+              })
+              .catch((_err) => {
+                // Might not be available yet, that's okay
+              });
           }
         } else if (method === 'Network.loadingFinished') {
           // Stream completed - process all chunks
           if (streamingResponses.has(params.requestId)) {
             const streamData = streamingResponses.get(params.requestId);
             streamData.complete = true;
-            
+
             // Stream finished - logging reduced to avoid terminal spam
-            
+
             // Get the final complete response
-            aiWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
-              requestId: params.requestId
-            }).then(responseBody => {
-              try {
-                const body = responseBody.base64Encoded 
-                  ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
-                  : responseBody.body;
-                
-                // Reduced logging - only log to structured logger, not console
-                
-                // Parse SSE format (data: ... \n\n)
-                const sseEvents = [];
-                const lines = body.split('\n');
-                let currentEvent = {};
-                let hasToolUse = false;
-                
-                for (const line of lines) {
-                  if (line.startsWith('data: ')) {
-                    const data = line.substring(6);
-                    if (data === '[DONE]') {
-                      break;
-                    }
-                    try {
-                      const parsed = JSON.parse(data);
-                      sseEvents.push(parsed);
-                      
-                      // Check for tool_use (artifacts)
-                      if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
-                        hasToolUse = true;
-                        console.log(`[${label}] 🔧 TOOL_USE DETECTED:`, parsed.content_block.name);
+            aiWindow.webContents.debugger
+              .sendCommand('Network.getResponseBody', {
+                requestId: params.requestId,
+              })
+              .then((responseBody) => {
+                try {
+                  const body = responseBody.base64Encoded
+                    ? Buffer.from(responseBody.body, 'base64').toString('utf-8')
+                    : responseBody.body;
+
+                  // Reduced logging - only log to structured logger, not console
+
+                  // Parse SSE format (data: ... \n\n)
+                  const sseEvents = [];
+                  const lines = body.split('\n');
+                  let currentEvent = {};
+                  let hasToolUse = false;
+
+                  for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                      const data = line.substring(6);
+                      if (data === '[DONE]') {
+                        break;
                       }
-                      
-                      // Extract the actual message content
-                      if (parsed.message && parsed.message.content) {
-                        currentEvent.content = parsed.message.content;
+                      try {
+                        const parsed = JSON.parse(data);
+                        sseEvents.push(parsed);
+
+                        // Check for tool_use (artifacts)
+                        if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
+                          hasToolUse = true;
+                          console.log(`[${label}] 🔧 TOOL_USE DETECTED:`, parsed.content_block.name);
+                        }
+
+                        // Extract the actual message content
+                        if (parsed.message && parsed.message.content) {
+                          currentEvent.content = parsed.message.content;
+                        }
+                        if (parsed.message && parsed.message.content && parsed.message.content.parts) {
+                          currentEvent.parts = parsed.message.content.parts;
+                        }
+                      } catch (_e) {
+                        // Not JSON, might be plain text
                       }
-                      if (parsed.message && parsed.message.content && parsed.message.content.parts) {
-                        currentEvent.parts = parsed.message.content.parts;
-                      }
-                    } catch (e) {
-                      // Not JSON, might be plain text
                     }
                   }
-                }
-                
-                if (hasToolUse) {
-                  console.log(`[${label}] 📄 Artifact detected in stream, dumping full SSE events...`);
-                  console.log(JSON.stringify(sseEvents, null, 2).substring(0, 5000));
-                }
-                
-                // Log the complete streaming response
-                logger.info('LLM Streaming Response Complete', {
-                  event: 'llm:stream:complete',
-                  aiService: aiService,
-                  requestId: params.requestId,
-                  url: streamData.url,
-                  eventCount: sseEvents.length,
-                  events: sseEvents,
-                  extractedContent: currentEvent,
-                  duration: Date.now() - streamData.startTime,
-                  timestamp: new Date().toISOString()
-                });
-                
-                // Extract and log just the final message text for easy reading
-                if (sseEvents.length > 0) {
-                  // Find the content delta events and accumulate text
-                  let fullText = '';
-                  let artifacts = []; // Collect artifacts
-                  let artifactInputs = new Map(); // Track artifact inputs by block index
-                  let currentBlockIndex = -1;
-                  let currentBlockId = null;
-                  
-                  for (const event of sseEvents) {
-                    // Track content block index
-                    if (event.type === 'content_block_start') {
-                      currentBlockIndex = event.index !== undefined ? event.index : currentBlockIndex + 1;
-                      currentBlockId = event.content_block?.id;
-                    }
-                    
-                    if (event.type === 'content_block_delta' && event.delta?.text) {
-                      fullText += event.delta.text;
-                    } else if (event.delta?.text) {
-                      fullText += event.delta.text;
-                    } else if (event.message?.content) {
-                      // Fallback for other formats (ChatGPT, Gemini, etc.)
-                      if (typeof event.message.content === 'string') {
-                        fullText += event.message.content;
-                      } else if (Array.isArray(event.message.content)) {
-                        fullText += event.message.content.map(c => c.text || '').join('');
+
+                  if (hasToolUse) {
+                    console.log(`[${label}] 📄 Artifact detected in stream, dumping full SSE events...`);
+                    console.log(JSON.stringify(sseEvents, null, 2).substring(0, 5000));
+                  }
+
+                  // Log the complete streaming response
+                  logger.info('LLM Streaming Response Complete', {
+                    event: 'llm:stream:complete',
+                    aiService: aiService,
+                    requestId: params.requestId,
+                    url: streamData.url,
+                    eventCount: sseEvents.length,
+                    events: sseEvents,
+                    extractedContent: currentEvent,
+                    duration: Date.now() - streamData.startTime,
+                    timestamp: new Date().toISOString(),
+                  });
+
+                  // Extract and log just the final message text for easy reading
+                  if (sseEvents.length > 0) {
+                    // Find the content delta events and accumulate text
+                    let fullText = '';
+                    let artifacts = []; // Collect artifacts
+                    let artifactInputs = new Map(); // Track artifact inputs by block index
+                    let currentBlockIndex = -1;
+                    let currentBlockId = null;
+
+                    for (const event of sseEvents) {
+                      // Track content block index
+                      if (event.type === 'content_block_start') {
+                        currentBlockIndex = event.index !== undefined ? event.index : currentBlockIndex + 1;
+                        currentBlockId = event.content_block?.id;
+                      }
+
+                      if (event.type === 'content_block_delta' && event.delta?.text) {
+                        fullText += event.delta.text;
+                      } else if (event.delta?.text) {
+                        fullText += event.delta.text;
+                      } else if (event.message?.content) {
+                        // Fallback for other formats (ChatGPT, Gemini, etc.)
+                        if (typeof event.message.content === 'string') {
+                          fullText += event.message.content;
+                        } else if (Array.isArray(event.message.content)) {
+                          fullText += event.message.content.map((c) => c.text || '').join('');
+                        }
+                      }
+
+                      // Accumulate input_json_delta chunks for artifacts
+                      if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+                        const blockKey = currentBlockId || currentBlockIndex;
+                        if (!artifactInputs.has(blockKey)) {
+                          artifactInputs.set(blockKey, '');
+                        }
+                        artifactInputs.set(blockKey, artifactInputs.get(blockKey) + event.delta.partial_json);
+                      }
+
+                      // Check for artifacts in the event
+                      if (event.type === 'content_block_start' && event.content_block) {
+                        const block = event.content_block;
+                        // Claude artifacts have type 'tool_use'
+                        if (block.type === 'tool_use') {
+                          artifacts.push({
+                            ...block,
+                            _blockKey: block.id || currentBlockIndex, // Track for later input reconstruction
+                          });
+                        }
+                      }
+
+                      // Also check message.content array for artifacts
+                      if (event.message?.content && Array.isArray(event.message.content)) {
+                        for (const contentBlock of event.message.content) {
+                          if (
+                            contentBlock.type === 'tool_use' ||
+                            (contentBlock.type && contentBlock.type !== 'text' && contentBlock.content)
+                          ) {
+                            artifacts.push(contentBlock);
+                          }
+                        }
                       }
                     }
-                    
-                    // Accumulate input_json_delta chunks for artifacts
-                    if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
-                      const blockKey = currentBlockId || currentBlockIndex;
-                      if (!artifactInputs.has(blockKey)) {
-                        artifactInputs.set(blockKey, '');
+
+                    // Reconstruct artifact inputs from accumulated JSON deltas
+                    for (const artifact of artifacts) {
+                      const blockKey = artifact._blockKey;
+                      if (blockKey && artifactInputs.has(blockKey)) {
+                        try {
+                          const inputJson = artifactInputs.get(blockKey);
+                          artifact.input = JSON.parse(inputJson);
+                          console.log(
+                            `[${label}] 🔧 Reconstructed input for ${artifact.name}:`,
+                            JSON.stringify(artifact.input).substring(0, 300)
+                          );
+                        } catch (e) {
+                          console.log(`[${label}] ⚠️ Failed to parse input JSON for ${artifact.name}:`, e.message);
+                        }
                       }
-                      artifactInputs.set(blockKey, artifactInputs.get(blockKey) + event.delta.partial_json);
+                      delete artifact._blockKey; // Clean up temporary key
                     }
-                    
-                    // Check for artifacts in the event
-                    if (event.type === 'content_block_start' && event.content_block) {
-                      const block = event.content_block;
-                      // Claude artifacts have type 'tool_use'
-                      if (block.type === 'tool_use') {
-                        artifacts.push({
-                          ...block,
-                          _blockKey: block.id || currentBlockIndex  // Track for later input reconstruction
-                        });
+
+                    if (artifacts.length > 0) {
+                      console.log(`[${label}] ✅ Total artifacts captured: ${artifacts.length}`);
+                    }
+
+                    // Add downloaded artifacts to the artifacts array
+                    if (global.pendingArtifacts && global.pendingArtifacts.length > 0) {
+                      console.log(
+                        `[${label}] 📦 Adding ${global.pendingArtifacts.length} downloaded artifacts to response`
+                      );
+                      artifacts.push(...global.pendingArtifacts);
+                      global.pendingArtifacts = []; // Clear pending artifacts
+                    }
+
+                    const lastEvent = sseEvents[sseEvents.length - 1];
+                    let messageText = fullText || null;
+
+                    // Legacy extraction for other AI services
+                    if (!messageText && lastEvent.message && lastEvent.message.content) {
+                      if (typeof lastEvent.message.content === 'string') {
+                        messageText = lastEvent.message.content;
+                      } else if (lastEvent.message.content.parts) {
+                        messageText = lastEvent.message.content.parts.join('\n');
                       }
                     }
-                    
-                    // Also check message.content array for artifacts
-                    if (event.message?.content && Array.isArray(event.message.content)) {
-                      for (const contentBlock of event.message.content) {
-                        if (contentBlock.type === 'tool_use' || (contentBlock.type && contentBlock.type !== 'text' && contentBlock.content)) {
-                          artifacts.push(contentBlock);
+
+                    if (messageText) {
+                      logger.info('LLM Final Response Text', {
+                        event: 'llm:response:final',
+                        aiService: aiService,
+                        requestId: params.requestId,
+                        responseText: messageText,
+                        timestamp: new Date().toISOString(),
+                      });
+
+                      // Capture response for conversation history
+                      if (conversationCapture && aiType === 'chat') {
+                        try {
+                          // Extract conversation ID from URL
+                          let externalConversationId = null;
+
+                          if (aiService === 'Claude') {
+                            // Claude: /api/organizations/.../chat_conversations/UUID/completion
+                            const match = streamData.url.match(/chat_conversations\/([a-f0-9\-]+)/i);
+                            if (match) {
+                              externalConversationId = match[1];
+                              console.log(
+                                `[ConversationCapture] Extracted Claude conversation ID from response: ${externalConversationId}`
+                              );
+                            }
+                          } else if (aiService === 'ChatGPT') {
+                            // ChatGPT: /backend-api/conversation/{conversation_id}
+                            const urlMatch = streamData.url.match(/\/conversation\/([a-f0-9\-]+)/i);
+                            if (urlMatch) {
+                              externalConversationId = urlMatch[1];
+                              console.log(
+                                `[ConversationCapture] Extracted ChatGPT conversation ID from response URL: ${externalConversationId}`
+                              );
+                            }
+                            // Note: For responses, we typically don't have access to the payload,
+                            // so we rely on URL matching or the ID carried over from the request
+                          }
+
+                          conversationCapture
+                            .captureResponse(aiService, {
+                              message: messageText,
+                              events: sseEvents,
+                              artifacts: artifacts, // Pass artifacts
+                              requestId: params.requestId,
+                              timestamp: new Date().toISOString(),
+                              externalConversationId, // Pass the conversation ID
+                            })
+                            .catch((err) => {
+                              console.error('[ConversationCapture] Error capturing response:', err);
+                            });
+                        } catch (err) {
+                          console.error('[ConversationCapture] Error in captureResponse:', err);
                         }
                       }
                     }
                   }
-                  
-                  // Reconstruct artifact inputs from accumulated JSON deltas
-                  for (const artifact of artifacts) {
-                    const blockKey = artifact._blockKey;
-                    if (blockKey && artifactInputs.has(blockKey)) {
-                      try {
-                        const inputJson = artifactInputs.get(blockKey);
-                        artifact.input = JSON.parse(inputJson);
-                        console.log(`[${label}] 🔧 Reconstructed input for ${artifact.name}:`, JSON.stringify(artifact.input).substring(0, 300));
-                      } catch (e) {
-                        console.log(`[${label}] ⚠️ Failed to parse input JSON for ${artifact.name}:`, e.message);
-                      }
-                    }
-                    delete artifact._blockKey; // Clean up temporary key
-                  }
-                  
-                  if (artifacts.length > 0) {
-                    console.log(`[${label}] ✅ Total artifacts captured: ${artifacts.length}`);
-                  }
-                  
-                  // Add downloaded artifacts to the artifacts array
-                  if (global.pendingArtifacts && global.pendingArtifacts.length > 0) {
-                    console.log(`[${label}] 📦 Adding ${global.pendingArtifacts.length} downloaded artifacts to response`);
-                    artifacts.push(...global.pendingArtifacts);
-                    global.pendingArtifacts = []; // Clear pending artifacts
-                  }
-                  
-                  const lastEvent = sseEvents[sseEvents.length - 1];
-                  let messageText = fullText || null;
-                  
-                  // Legacy extraction for other AI services
-                  if (!messageText && lastEvent.message && lastEvent.message.content) {
-                    if (typeof lastEvent.message.content === 'string') {
-                      messageText = lastEvent.message.content;
-                    } else if (lastEvent.message.content.parts) {
-                      messageText = lastEvent.message.content.parts.join('\n');
-                    }
-                  }
-                  
-                  if (messageText) {
-                    logger.info('LLM Final Response Text', {
-                      event: 'llm:response:final',
-                      aiService: aiService,
-                      requestId: params.requestId,
-                      responseText: messageText,
-                      timestamp: new Date().toISOString()
-                    });
-                    
-                    // Capture response for conversation history
-                    if (conversationCapture && aiType === 'chat') {
-                      try {
-                        // Extract conversation ID from URL
-                        let externalConversationId = null;
-                        
-                        if (aiService === 'Claude') {
-                          // Claude: /api/organizations/.../chat_conversations/UUID/completion
-                          const match = streamData.url.match(/chat_conversations\/([a-f0-9\-]+)/i);
-                          if (match) {
-                            externalConversationId = match[1];
-                            console.log(`[ConversationCapture] Extracted Claude conversation ID from response: ${externalConversationId}`);
-                          }
-                        } else if (aiService === 'ChatGPT') {
-                          // ChatGPT: /backend-api/conversation/{conversation_id}
-                          const urlMatch = streamData.url.match(/\/conversation\/([a-f0-9\-]+)/i);
-                          if (urlMatch) {
-                            externalConversationId = urlMatch[1];
-                            console.log(`[ConversationCapture] Extracted ChatGPT conversation ID from response URL: ${externalConversationId}`);
-                          }
-                          // Note: For responses, we typically don't have access to the payload,
-                          // so we rely on URL matching or the ID carried over from the request
-                        }
-                        
-                        
-                        conversationCapture.captureResponse(aiService, {
-                          message: messageText,
-                          events: sseEvents,
-                          artifacts: artifacts, // Pass artifacts
-                          requestId: params.requestId,
-                          timestamp: new Date().toISOString(),
-                          externalConversationId  // Pass the conversation ID
-                        }).catch(err => {
-                          console.error('[ConversationCapture] Error capturing response:', err);
-                        });
-                      } catch (err) {
-                        console.error('[ConversationCapture] Error in captureResponse:', err);
-                      }
-                    }
-                  }
+                } catch (err) {
+                  console.error(`[${label}] Error parsing streaming response:`, err);
                 }
-                
-              } catch (err) {
-                console.error(`[${label}] Error parsing streaming response:`, err);
-              }
-            }).catch(err => {
-              // Only log unexpected errors
-              const errMsg = err?.message || '';
-              if (errMsg && !errMsg.includes('No resource') && !errMsg.includes('No data found')) {
-                console.debug(`[${label}] Streaming response body unavailable:`, errMsg || 'unknown');
-              }
-            });
-            
+              })
+              .catch((err) => {
+                // Only log unexpected errors
+                const errMsg = err?.message || '';
+                if (errMsg && !errMsg.includes('No resource') && !errMsg.includes('No data found')) {
+                  console.debug(`[${label}] Streaming response body unavailable:`, errMsg || 'unknown');
+                }
+              });
+
             // Clean up after logging
             setTimeout(() => streamingResponses.delete(params.requestId), 5000);
           }
@@ -11775,7 +12392,7 @@ function setupIPC() {
             aiService: aiService,
             requestId: params.requestId,
             url: params.url,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
           });
         } else if (method === 'Network.webSocketFrameSent') {
           // Log WebSocket messages sent (streaming requests)
@@ -11784,7 +12401,7 @@ function setupIPC() {
             aiService: aiService,
             requestId: params.requestId,
             message: params.response.payloadData,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
           });
         } else if (method === 'Network.webSocketFrameReceived') {
           // Log WebSocket messages received (streaming responses)
@@ -11793,11 +12410,11 @@ function setupIPC() {
             aiService: aiService,
             requestId: params.requestId,
             message: params.response.payloadData,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
           });
         }
       });
-      
+
       // Handle debugger detach
       aiWindow.webContents.debugger.on('detach', (event, reason) => {
         console.log(`[${label}] Debugger detached:`, reason);
@@ -11805,19 +12422,21 @@ function setupIPC() {
     } catch (err) {
       console.error(`[${label}] Error setting up network monitoring:`, err);
     }
-    
+
     // Set up authentication handling
     aiWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
       console.log(`[${label}] Permission requested: ${permission}`);
-      
+
       // Allow necessary permissions for AI services
-      if (permission === 'media' || 
-          permission === 'microphone' ||
-          permission === 'camera' ||
-          permission === 'notifications' ||
-          permission === 'clipboard-read' ||
-          permission === 'clipboard-write' ||
-          permission === 'clipboard-sanitized-write') {
+      if (
+        permission === 'media' ||
+        permission === 'microphone' ||
+        permission === 'camera' ||
+        permission === 'notifications' ||
+        permission === 'clipboard-read' ||
+        permission === 'clipboard-write' ||
+        permission === 'clipboard-sanitized-write'
+      ) {
         console.log(`[${label}] Allowing ${permission} permission`);
         callback(true);
       } else {
@@ -11825,15 +12444,17 @@ function setupIPC() {
         callback(false);
       }
     });
-    
+
     // Also set permission check handler for clipboard
     aiWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
-      if (permission === 'clipboard-read' || 
-          permission === 'clipboard-write' ||
-          permission === 'clipboard-sanitized-write' ||
-          permission === 'media' ||
-          permission === 'microphone' ||
-          permission === 'camera') {
+      if (
+        permission === 'clipboard-read' ||
+        permission === 'clipboard-write' ||
+        permission === 'clipboard-sanitized-write' ||
+        permission === 'media' ||
+        permission === 'microphone' ||
+        permission === 'camera'
+      ) {
         return true;
       }
       return false;
@@ -11842,17 +12463,19 @@ function setupIPC() {
     // Handle new window requests (for authentication popups)
     aiWindow.webContents.setWindowOpenHandler(({ url: newUrl, disposition }) => {
       console.log(`[${label}] Window open request:`, newUrl, disposition);
-      
+
       // Allow authentication popups
-      if (newUrl.includes('accounts.google.com') ||
-          newUrl.includes('login.microsoftonline.com') ||
-          newUrl.includes('adobe.com/auth') ||
-          newUrl.includes('firefly.adobe.com') ||
-          newUrl.includes('auth.services.adobe.com') ||
-          newUrl.includes('ims-na1.adobelogin.com') ||
-          newUrl.includes('oauth') ||
-          newUrl.includes('/auth/') ||
-          newUrl.includes('/login')) {
+      if (
+        newUrl.includes('accounts.google.com') ||
+        newUrl.includes('login.microsoftonline.com') ||
+        newUrl.includes('adobe.com/auth') ||
+        newUrl.includes('firefly.adobe.com') ||
+        newUrl.includes('auth.services.adobe.com') ||
+        newUrl.includes('ims-na1.adobelogin.com') ||
+        newUrl.includes('oauth') ||
+        newUrl.includes('/auth/') ||
+        newUrl.includes('/login')
+      ) {
         console.log(`[${label}] Allowing authentication popup`);
         return {
           action: 'allow',
@@ -11864,12 +12487,12 @@ function setupIPC() {
             webPreferences: {
               nodeIntegration: false,
               contextIsolation: true,
-              partition: aiWindow.webContents.session.partition
-            }
-          }
+              partition: aiWindow.webContents.session.partition,
+            },
+          },
         };
       }
-      
+
       // Deny other popups
       return { action: 'deny' };
     });
@@ -11877,45 +12500,49 @@ function setupIPC() {
     // Handle Adobe-specific headers for Firefly
     if (url.includes('firefly.adobe.com')) {
       console.log(`[${label}] Setting up Adobe Firefly specific headers`);
-      
+
       aiWindow.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
         const headers = { ...details.requestHeaders };
-        
+
         // Set proper user agent
-        headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' + process.versions.chrome + ' Safari/537.36';
-        
+        headers['User-Agent'] =
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' +
+          process.versions.chrome +
+          ' Safari/537.36';
+
         // Add necessary headers for Adobe services
         if (!headers['Accept']) {
           headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8';
         }
-        
+
         if (!headers['Accept-Language']) {
           headers['Accept-Language'] = 'en-US,en;q=0.9';
         }
-        
+
         callback({ requestHeaders: headers });
       });
     }
 
     // Handle download requests
-    aiWindow.webContents.session.on('will-download', (event, item, webContents) => {
+    aiWindow.webContents.session.on('will-download', (event, item, _webContents) => {
       const filename = item.getFilename();
       console.log(`[${label}] Download detected:`, filename);
-      
+
       // Check if this is an artifact download from Claude
-      const isArtifact = label === 'Claude' && 
-                         (filename.endsWith('.docx') || 
-                          filename.endsWith('.pdf') || 
-                          filename.endsWith('.xlsx') || 
-                          filename.endsWith('.pptx') ||
-                          filename.endsWith('.zip') ||
-                          filename.endsWith('.html') ||
-                          filename.endsWith('.csv') ||
-                          filename.endsWith('.txt'));
-      
+      const isArtifact =
+        label === 'Claude' &&
+        (filename.endsWith('.docx') ||
+          filename.endsWith('.pdf') ||
+          filename.endsWith('.xlsx') ||
+          filename.endsWith('.pptx') ||
+          filename.endsWith('.zip') ||
+          filename.endsWith('.html') ||
+          filename.endsWith('.csv') ||
+          filename.endsWith('.txt'));
+
       if (isArtifact && conversationCapture) {
         console.log(`[${label}] 📦 Artifact download detected: ${filename}`);
-        
+
         // Hook into the 'done' event to capture after download completes
         // We let handleDownloadWithSpaceOption manage the save path
         item.once('done', (event, state) => {
@@ -11923,39 +12550,41 @@ function setupIPC() {
             // Get the actual save path (set by handleDownloadWithSpaceOption)
             const savePath = item.getSavePath();
             console.log(`[${label}] ✅ Artifact downloaded, capturing from: ${savePath}`);
-            
+
             // Small delay to ensure file is fully written
             setTimeout(() => {
-              conversationCapture.captureDownloadedArtifact(label, {
-                filename: filename,
-                path: savePath,
-                size: item.getTotalBytes(),
-                mimeType: item.getMimeType(),
-                url: item.getURL()
-              }).catch(err => {
-                console.error(`[${label}] Failed to capture downloaded artifact:`, err);
-              });
+              conversationCapture
+                .captureDownloadedArtifact(label, {
+                  filename: filename,
+                  path: savePath,
+                  size: item.getTotalBytes(),
+                  mimeType: item.getMimeType(),
+                  url: item.getURL(),
+                })
+                .catch((err) => {
+                  console.error(`[${label}] Failed to capture downloaded artifact:`, err);
+                });
             }, 100);
           } else {
             console.warn(`[${label}] Download ${state} for: ${filename}`);
           }
         });
       }
-      
+
       // Use normal download handler for user (it will set the save path)
       browserWindow.handleDownloadWithSpaceOption(item, label);
     });
-    
+
     // Load the URL
     aiWindow.loadURL(url);
-    
+
     // Inject initialization script after page loads
     aiWindow.webContents.on('did-finish-load', async () => {
       try {
         const fs = require('fs');
         const overlayPath = path.join(__dirname, 'src', 'ai-window-overlay.js');
-        const overlayContent = fs.readFileSync(overlayPath, 'utf8');
-        
+        const _overlayContent = fs.readFileSync(overlayPath, 'utf8');
+
         // Inject the initialization script
         await aiWindow.webContents.executeJavaScript(`
           (async function() {
@@ -11984,7 +12613,7 @@ function setupIPC() {
             }
           })();
         `);
-        
+
         // Inject Spaces upload enhancer
         try {
           const enhancerPath = path.join(__dirname, 'browser-file-input-enhancer.js');
@@ -11995,13 +12624,13 @@ function setupIPC() {
         } catch (error) {
           console.error(`[${label}] Error injecting spaces upload enhancer:`, error);
         }
-        
+
         console.log(`[${label}] Conversation capture initialized`);
       } catch (error) {
         console.error(`[${label}] Error initializing conversation capture:`, error);
       }
     });
-    
+
     // Show window when ready
     aiWindow.once('ready-to-show', () => {
       aiWindow.show();
@@ -12010,29 +12639,29 @@ function setupIPC() {
     // Clean up on close
     aiWindow.on('closed', () => {
       console.log(`[${label}] Window closed`);
-      
+
       // Detach debugger if attached
       try {
         if (aiWindow.webContents.debugger.isAttached()) {
           aiWindow.webContents.debugger.detach();
           console.log(`[${label}] Debugger detached on window close`);
         }
-      } catch (err) {
+      } catch (_err) {
         // Ignore errors during cleanup
       }
-      
+
       // Log the AI window closing
       logger.logWindowClosed('external-ai', aiService, {
         aiType: aiType,
         aiService: aiService,
-        windowTitle: label
+        windowTitle: label,
       });
-      
+
       logger.info('Personal AI Closed', {
         event: 'ai:closed',
         service: aiService,
         type: aiType,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
     });
 
@@ -12050,15 +12679,15 @@ function setupIPC() {
   async function runHeadlessClaudePrompt(prompt, options = {}) {
     const timeout = options.timeout || 120000;
     const saveToSpaces = options.saveToSpaces !== false;
-    
+
     console.log('[Headless Claude] Starting headless prompt...');
     console.log('[Headless Claude] Prompt:', prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''));
-    
+
     return new Promise((resolve, reject) => {
       let resolved = false;
       let hiddenWindow = null;
       let timeoutId = null;
-      
+
       const cleanup = () => {
         if (timeoutId) {
           clearTimeout(timeoutId);
@@ -12069,11 +12698,13 @@ function setupIPC() {
             if (hiddenWindow.webContents.debugger.isAttached()) {
               hiddenWindow.webContents.debugger.detach();
             }
-          } catch (e) { /* ignore */ }
+          } catch (_e) {
+            /* ignore */
+          }
           hiddenWindow.close();
         }
       };
-      
+
       const finish = (result) => {
         if (resolved) return;
         resolved = true;
@@ -12084,13 +12715,13 @@ function setupIPC() {
           reject(new Error(result.error || 'Unknown error'));
         }
       };
-      
+
       // Timeout handling
       timeoutId = setTimeout(() => {
         console.log('[Headless Claude] Timeout reached');
-        finish({ success: false, error: 'Claude prompt timed out after ' + (timeout / 1000) + ' seconds' });
+        finish({ success: false, error: 'Claude prompt timed out after ' + timeout / 1000 + ' seconds' });
       }, timeout);
-      
+
       try {
         // Create hidden window
         const windowConfig = {
@@ -12102,24 +12733,24 @@ function setupIPC() {
             contextIsolation: true,
             webSecurity: true,
             partition: 'persist:claude', // Use existing Claude session
-            preload: path.join(__dirname, 'preload-external-ai.js')
-          }
+            preload: path.join(__dirname, 'preload-external-ai.js'),
+          },
         };
-        
+
         hiddenWindow = new BrowserWindow(windowConfig);
         console.log('[Headless Claude] Hidden window created');
-        
+
         // Track streaming responses
         const streamingResponses = new Map();
         let responseText = '';
         let conversationId = null;
-        
+
         // Set up network interception via Chrome DevTools Protocol
         try {
           hiddenWindow.webContents.debugger.attach('1.3');
           hiddenWindow.webContents.debugger.sendCommand('Network.enable');
           console.log('[Headless Claude] Network debugger attached');
-          
+
           hiddenWindow.webContents.debugger.on('message', (event, method, params) => {
             // Track request to completion endpoint
             if (method === 'Network.requestWillBeSent') {
@@ -12129,9 +12760,9 @@ function setupIPC() {
                 streamingResponses.set(params.requestId, {
                   url: request.url,
                   chunks: [],
-                  complete: false
+                  complete: false,
                 });
-                
+
                 // Extract conversation ID
                 const match = request.url.match(/chat_conversations\/([a-f0-9\-]+)/i);
                 if (match) {
@@ -12140,7 +12771,7 @@ function setupIPC() {
                 }
               }
             }
-            
+
             // Collect response data
             if (method === 'Network.dataReceived') {
               const streamData = streamingResponses.get(params.requestId);
@@ -12148,83 +12779,86 @@ function setupIPC() {
                 // Data received event - we'll get actual content on loadingFinished
               }
             }
-            
+
             // Response complete - get body
             if (method === 'Network.loadingFinished') {
               const streamData = streamingResponses.get(params.requestId);
               if (streamData && !streamData.complete) {
                 streamData.complete = true;
                 console.log('[Headless Claude] Response complete, fetching body...');
-                
+
                 // Get response body
-                hiddenWindow.webContents.debugger.sendCommand('Network.getResponseBody', {
-                  requestId: params.requestId
-                }).then(response => {
-                  const body = response.body;
-                  console.log('[Headless Claude] Response body length:', body?.length || 0);
-                  
-                  if (body) {
-                    // Parse SSE events
-                    const lines = body.split('\n');
-                    let fullText = '';
-                    
-                    for (const line of lines) {
-                      if (line.startsWith('data: ')) {
-                        const data = line.substring(6).trim();
-                        if (!data || data === '[DONE]') continue;
-                        
-                        try {
-                          const event = JSON.parse(data);
-                          
-                          // Claude content_block_delta format
-                          if (event.type === 'content_block_delta' && event.delta?.text) {
-                            fullText += event.delta.text;
-                          } else if (event.delta?.text) {
-                            fullText += event.delta.text;
+                hiddenWindow.webContents.debugger
+                  .sendCommand('Network.getResponseBody', {
+                    requestId: params.requestId,
+                  })
+                  .then((response) => {
+                    const body = response.body;
+                    console.log('[Headless Claude] Response body length:', body?.length || 0);
+
+                    if (body) {
+                      // Parse SSE events
+                      const lines = body.split('\n');
+                      let fullText = '';
+
+                      for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                          const data = line.substring(6).trim();
+                          if (!data || data === '[DONE]') continue;
+
+                          try {
+                            const event = JSON.parse(data);
+
+                            // Claude content_block_delta format
+                            if (event.type === 'content_block_delta' && event.delta?.text) {
+                              fullText += event.delta.text;
+                            } else if (event.delta?.text) {
+                              fullText += event.delta.text;
+                            }
+                          } catch (_e) {
+                            // Skip non-JSON lines
                           }
-                        } catch (e) {
-                          // Skip non-JSON lines
                         }
                       }
-                    }
-                    
-                    if (fullText) {
-                      responseText = fullText;
-                      console.log('[Headless Claude] Captured response:', fullText.substring(0, 200) + '...');
-                      
-                      // Optionally save to Spaces via conversation capture
-                      if (saveToSpaces && conversationCapture) {
-                        try {
-                          conversationCapture.capturePrompt('Claude', {
-                            message: prompt,
-                            timestamp: new Date().toISOString(),
-                            externalConversationId: conversationId
-                          });
-                          
-                          conversationCapture.captureResponse('Claude', {
-                            message: responseText,
-                            timestamp: new Date().toISOString(),
-                            externalConversationId: conversationId
-                          });
-                        } catch (err) {
-                          console.error('[Headless Claude] Error saving to Spaces:', err);
+
+                      if (fullText) {
+                        responseText = fullText;
+                        console.log('[Headless Claude] Captured response:', fullText.substring(0, 200) + '...');
+
+                        // Optionally save to Spaces via conversation capture
+                        if (saveToSpaces && conversationCapture) {
+                          try {
+                            conversationCapture.capturePrompt('Claude', {
+                              message: prompt,
+                              timestamp: new Date().toISOString(),
+                              externalConversationId: conversationId,
+                            });
+
+                            conversationCapture.captureResponse('Claude', {
+                              message: responseText,
+                              timestamp: new Date().toISOString(),
+                              externalConversationId: conversationId,
+                            });
+                          } catch (err) {
+                            console.error('[Headless Claude] Error saving to Spaces:', err);
+                          }
                         }
+
+                        finish({
+                          success: true,
+                          response: responseText,
+                          conversationId: conversationId,
+                        });
                       }
-                      
-                      finish({
-                        success: true,
-                        response: responseText,
-                        conversationId: conversationId
-                      });
                     }
-                  }
-                }).catch(err => {
-                  // Only log unexpected errors
-                  const errMsg = err?.message || '';
-                  if (errMsg && !errMsg.includes('No resource') && !errMsg.includes('No data found')) {
-                    console.debug('[Headless Claude] Response body unavailable:', errMsg || 'unknown');
-                  }
-                });
+                  })
+                  .catch((err) => {
+                    // Only log unexpected errors
+                    const errMsg = err?.message || '';
+                    if (errMsg && !errMsg.includes('No resource') && !errMsg.includes('No data found')) {
+                      console.debug('[Headless Claude] Response body unavailable:', errMsg || 'unknown');
+                    }
+                  });
               }
             }
           });
@@ -12233,26 +12867,32 @@ function setupIPC() {
           finish({ success: false, error: 'Failed to attach network debugger' });
           return;
         }
-        
+
         // Check for login redirect
         hiddenWindow.webContents.on('did-navigate', (event, url) => {
           console.log('[Headless Claude] Navigated to:', url);
           if (url.includes('login') || url.includes('sign-in') || url.includes('oauth')) {
-            finish({ success: false, error: 'Not logged in to Claude. Please log in first by opening Claude normally.' });
+            finish({
+              success: false,
+              error: 'Not logged in to Claude. Please log in first by opening Claude normally.',
+            });
           }
         });
-        
+
         // Load Claude new conversation page
         hiddenWindow.loadURL('https://claude.ai/new');
         console.log('[Headless Claude] Loading claude.ai/new...');
-        
+
         // Inject prompt after page loads
         hiddenWindow.webContents.on('did-finish-load', async () => {
           console.log('[Headless Claude] Page loaded, waiting for DOM...');
-          
+
+          // TIMING: SPA (claude.ai) renders after did-finish-load; wait for DOM/React to be interactive.
           // Wait for the page to be fully interactive
-          await new Promise(r => setTimeout(r, 3000));
-          
+          await new Promise((r) => {
+            setTimeout(r, 3000);
+          });
+
           try {
             // Inject the prompt
             const injectionResult = await hiddenWindow.webContents.executeJavaScript(`
@@ -12268,6 +12908,7 @@ function setupIPC() {
                           document.querySelector('div.ProseMirror') ||
                           document.querySelector('[data-placeholder]');
                   if (!input) {
+                    // TIMING: Poll for input element; SPA may render it asynchronously.
                     await new Promise(r => setTimeout(r, 500));
                     retries--;
                   }
@@ -12297,6 +12938,7 @@ function setupIPC() {
                 
                 console.log('[Headless Claude Injection] Content set, looking for send button...');
                 
+                // TIMING: Allow contenteditable/ProseMirror to flush before clicking send.
                 // Wait a moment for UI to update
                 await new Promise(r => setTimeout(r, 500));
                 
@@ -12332,40 +12974,38 @@ function setupIPC() {
                 }
               })();
             `);
-            
+
             console.log('[Headless Claude] Injection result:', injectionResult);
-            
+
             if (injectionResult && !injectionResult.success) {
               finish({ success: false, error: injectionResult.error || 'Failed to inject prompt' });
             }
             // Otherwise wait for network response via debugger
-            
           } catch (err) {
             console.error('[Headless Claude] Error injecting prompt:', err);
             finish({ success: false, error: 'Failed to inject prompt: ' + err.message });
           }
         });
-        
+
         // Handle window errors
         hiddenWindow.on('unresponsive', () => {
           console.log('[Headless Claude] Window unresponsive');
           finish({ success: false, error: 'Claude window became unresponsive' });
         });
-        
       } catch (err) {
         console.error('[Headless Claude] Error:', err);
         finish({ success: false, error: err.message });
       }
     });
   }
-  
+
   // Expose runHeadlessClaudePrompt globally for testing and IPC
   global.runHeadlessClaudePrompt = runHeadlessClaudePrompt;
 
   // Handle tab actions
   ipcMain.on('tab-action', (event, data) => {
     console.log('Received tab action:', data);
-    
+
     if (data.action === 'open-url') {
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
@@ -12377,22 +13017,22 @@ function setupIPC() {
   });
 
   // Handle reading time update requests
-  ipcMain.handle('update-reading-times', async (event) => {
+  ipcMain.handle('update-reading-times', async (_event) => {
     log.info('[RSS] Received update-reading-times request');
     return readingTimeManager.updateAllReadingTimes();
   });
 
   // Handle wipe-all-partitions request
-  ipcMain.on('wipe-all-partitions', async (event) => {
+  ipcMain.on('wipe-all-partitions', async (_event) => {
     console.log('[Main] Wiping all partition data...');
-    
+
     try {
       // Get all partitions that start with "persist:"
-      const partitions = [];
+      const _partitions = [];
       const appDataPath = app.getPath('userData');
       const fs = require('fs');
       const path = require('path');
-      
+
       // List all directories in Partitions folder
       const partitionsPath = path.join(appDataPath, 'Partitions');
       if (fs.existsSync(partitionsPath)) {
@@ -12405,17 +13045,17 @@ function setupIPC() {
           }
         }
       }
-      
+
       console.log('[Main] All partition data wiped successfully');
     } catch (error) {
       console.error('[Main] Error wiping partitions:', error);
     }
   });
-  
+
   // Handle open-external request
   ipcMain.on('open-external', (event, url) => {
     console.log('[Main] Opening URL in external browser:', url);
-    shell.openExternal(url).catch(err => {
+    shell.openExternal(url).catch((err) => {
       console.error('[Main] Error opening external URL:', err);
     });
   });
@@ -12443,14 +13083,18 @@ function setupIPC() {
       fs.writeFileSync(toolsPath, JSON.stringify(tools, null, 2));
       event.reply('ui-design-tools-saved', true);
       // Refresh full application menu so IDW section picks up the new tools
-      if (global.menuDataManager) { global.menuDataManager.refresh(); }
-      else { const { refreshApplicationMenu } = require('./menu'); refreshApplicationMenu(); }
+      if (global.menuDataManager) {
+        global.menuDataManager.refresh();
+      } else {
+        const { refreshApplicationMenu } = require('./menu');
+        refreshApplicationMenu();
+      }
     } catch (err) {
       console.error('[UI Design] Failed to save ui-design-tools.json:', err);
       event.reply('ui-design-tools-saved', false);
     }
   });
-  
+
   // Rollback manager handlers
   ipcMain.handle('rollback:get-backups', async () => {
     try {
@@ -12461,7 +13105,7 @@ function setupIPC() {
       return [];
     }
   });
-  
+
   ipcMain.handle('rollback:open-folder', async () => {
     try {
       await rollbackManager.openBackupsFolder();
@@ -12471,7 +13115,7 @@ function setupIPC() {
       return false;
     }
   });
-  
+
   ipcMain.handle('rollback:create-restore-script', async (event, version) => {
     try {
       const scriptPath = await rollbackManager.createRestoreScript(version);
@@ -12481,19 +13125,19 @@ function setupIPC() {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Test Runner handlers
   ipcMain.handle('get-memory-info', () => {
     return process.memoryUsage();
   });
-  
+
   // Clipboard write handler for tests
   ipcMain.handle('clipboard:write-text', async (event, text) => {
     const { clipboard } = require('electron');
     clipboard.writeText(text);
     return true;
   });
-  
+
   // Settings handlers for tests
   ipcMain.handle('save-settings', async (event, settings) => {
     try {
@@ -12505,7 +13149,7 @@ function setupIPC() {
       return false;
     }
   });
-  
+
   ipcMain.handle('get-settings', async () => {
     try {
       const settingsPath = path.join(app.getPath('userData'), 'settings.json');
@@ -12518,23 +13162,23 @@ function setupIPC() {
       return {};
     }
   });
-  
+
   ipcMain.handle('save-test-results', async (event, results) => {
     try {
       const testResultsPath = path.join(app.getPath('userData'), 'test-results.json');
       let existingResults = [];
-      
+
       if (fs.existsSync(testResultsPath)) {
         existingResults = JSON.parse(fs.readFileSync(testResultsPath, 'utf8'));
       }
-      
+
       existingResults.push(results);
-      
+
       // Keep only last 50 test runs
       if (existingResults.length > 50) {
         existingResults = existingResults.slice(-50);
       }
-      
+
       fs.writeFileSync(testResultsPath, JSON.stringify(existingResults, null, 2));
       return true;
     } catch (error) {
@@ -12542,7 +13186,7 @@ function setupIPC() {
       return false;
     }
   });
-  
+
   ipcMain.handle('export-test-report', async (event, report) => {
     try {
       const result = await dialog.showSaveDialog({
@@ -12550,10 +13194,10 @@ function setupIPC() {
         defaultPath: `test-report-${Date.now()}.md`,
         filters: [
           { name: 'Markdown', extensions: ['md'] },
-          { name: 'Text', extensions: ['txt'] }
-        ]
+          { name: 'Text', extensions: ['txt'] },
+        ],
       });
-      
+
       if (!result.canceled && result.filePath) {
         fs.writeFileSync(result.filePath, report);
         return true;
@@ -12564,7 +13208,7 @@ function setupIPC() {
       return false;
     }
   });
-  
+
   ipcMain.handle('get-test-history', () => {
     try {
       const testResultsPath = path.join(app.getPath('userData'), 'test-results.json');
@@ -12577,26 +13221,26 @@ function setupIPC() {
       return [];
     }
   });
-  
+
   ipcMain.handle('add-test-history', async (event, run) => {
     try {
       const historyPath = path.join(app.getPath('userData'), 'test-history.json');
       let history = [];
-      
+
       if (fs.existsSync(historyPath)) {
         history = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
       }
-      
+
       history.push({
         timestamp: Date.now(),
-        ...run
+        ...run,
       });
-      
+
       // Keep only last 100 runs
       if (history.length > 100) {
         history = history.slice(-100);
       }
-      
+
       fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));
       return true;
     } catch (error) {
@@ -12604,7 +13248,7 @@ function setupIPC() {
       return false;
     }
   });
-  
+
   // Manual test handlers
   ipcMain.handle('get-manual-test-notes', (event, testId) => {
     try {
@@ -12619,18 +13263,18 @@ function setupIPC() {
       return '';
     }
   });
-  
+
   ipcMain.handle('save-manual-test-notes', async (event, testId, notes) => {
     try {
       const notesPath = path.join(app.getPath('userData'), 'manual-test-notes.json');
       let allNotes = {};
-      
+
       if (fs.existsSync(notesPath)) {
         allNotes = JSON.parse(fs.readFileSync(notesPath, 'utf8'));
       }
-      
+
       allNotes[testId] = notes;
-      
+
       fs.writeFileSync(notesPath, JSON.stringify(allNotes, null, 2));
       return true;
     } catch (error) {
@@ -12638,7 +13282,7 @@ function setupIPC() {
       return false;
     }
   });
-  
+
   ipcMain.handle('get-manual-test-statuses', () => {
     try {
       const statusPath = path.join(app.getPath('userData'), 'manual-test-status.json');
@@ -12651,21 +13295,21 @@ function setupIPC() {
       return {};
     }
   });
-  
+
   ipcMain.handle('save-manual-test-status', async (event, testId, checked) => {
     try {
       const statusPath = path.join(app.getPath('userData'), 'manual-test-status.json');
       let statuses = {};
-      
+
       if (fs.existsSync(statusPath)) {
         statuses = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
       }
-      
+
       statuses[testId] = {
         checked,
-        lastUpdated: Date.now()
+        lastUpdated: Date.now(),
       };
-      
+
       fs.writeFileSync(statusPath, JSON.stringify(statuses, null, 2));
       return true;
     } catch (error) {
@@ -12692,38 +13336,38 @@ function setupIPC() {
     return false;
   });
 
-  ipcMain.handle('test-claude-connection', async (event) => {
+  ipcMain.handle('test-claude-connection', async (_event) => {
     try {
       const ai = require('./lib/ai-service');
-      
+
       // Test the connection with a simple request
       // Using Claude 4.5 Sonnet for consistency - only 4.5 models allowed
-      const result = await ai.chat({
+      const _result = await ai.chat({
         profile: 'standard', // Uses claude-sonnet-4-5-20250929 by default
         messages: [{ role: 'user', content: 'Hello' }],
         maxTokens: 10,
         feature: 'connection-test',
       });
-      
+
       return { success: true };
     } catch (error) {
       return { error: error.message };
     }
   });
 
-  ipcMain.handle('test-openai-connection', async (event) => {
+  ipcMain.handle('test-openai-connection', async (_event) => {
     try {
       const ai = require('./lib/ai-service');
-      
+
       // Test the connection with a minimal chat request via ai-service
-      const result = await ai.chat({
+      const _result = await ai.chat({
         profile: 'fast', // Uses gpt-4o-mini by default
         messages: [{ role: 'user', content: 'Hello' }],
         maxTokens: 10,
         feature: 'connection-test',
         noFallback: true, // Don't fall back to Anthropic -- we're testing OpenAI specifically
       });
-      
+
       return { success: true };
     } catch (error) {
       return { error: error.message };
@@ -12750,14 +13394,14 @@ function setupIPC() {
       if (process.env.NODE_ENV === 'development') {
         return { message: 'Update check not available in development mode' };
       }
-      
+
       // In production, this would check for actual updates
       // autoUpdater loaded lazily in app.whenReady()
-let autoUpdater = null;
+      let autoUpdater = null;
       const result = await autoUpdater.checkForUpdates();
-      return { 
+      return {
         message: result.updateInfo ? `Update available: ${result.updateInfo.version}` : 'Up to date',
-        updateAvailable: !!result.updateInfo
+        updateAvailable: !!result.updateInfo,
       };
     } catch (error) {
       return { message: 'Update check not available', error: error.message };
@@ -12770,22 +13414,22 @@ let autoUpdater = null;
       if (!fs.existsSync(backupsPath)) {
         return [];
       }
-      
+
       const files = fs.readdirSync(backupsPath);
       const backups = files
-        .filter(file => file.startsWith('backup_') && file.endsWith('.json'))
-        .map(file => {
+        .filter((file) => file.startsWith('backup_') && file.endsWith('.json'))
+        .map((file) => {
           const stats = fs.statSync(path.join(backupsPath, file));
           const timestamp = file.match(/backup_(\d+)\.json/)?.[1];
           return {
             filename: file,
             timestamp: parseInt(timestamp),
             date: new Date(parseInt(timestamp)).toLocaleString(),
-            size: stats.size
+            size: stats.size,
           };
         })
         .sort((a, b) => b.timestamp - a.timestamp);
-      
+
       return backups;
     } catch (error) {
       console.error('Error getting rollback versions:', error);
@@ -12823,13 +13467,13 @@ let autoUpdater = null;
       if (!fs.existsSync(reportsPath)) {
         fs.mkdirSync(reportsPath, { recursive: true });
       }
-      
+
       const timestamp = Date.now();
       const filename = `report_${timestamp}.json`;
       const filepath = path.join(reportsPath, filename);
-      
+
       fs.writeFileSync(filepath, JSON.stringify(report, null, 2));
-      
+
       console.log(`Test report saved to: ${filepath}`);
       return { success: true, filepath };
     } catch (error) {
@@ -12856,24 +13500,24 @@ function calculateReadingTimeFromHTML(htmlContent) {
     // Remove HTML tags and get plain text
     const textContent = htmlContent
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '') // Remove script tags
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')   // Remove style tags
-      .replace(/<[^>]*>/g, ' ')                          // Remove all HTML tags
-      .replace(/\s+/g, ' ')                              // Normalize whitespace
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '') // Remove style tags
+      .replace(/<[^>]*>/g, ' ') // Remove all HTML tags
+      .replace(/\s+/g, ' ') // Normalize whitespace
       .trim();
-    
+
     if (!textContent || textContent.length < 50) {
       return '1 min read'; // Default for very short content
     }
-    
+
     // Count words
-    const words = textContent.split(/\s+/).filter(word => word.length > 0).length;
-    
+    const words = textContent.split(/\s+/).filter((word) => word.length > 0).length;
+
     // Calculate reading time (average 200 words per minute)
     const wordsPerMinute = 200;
     const minutes = Math.ceil(words / wordsPerMinute);
-    
+
     console.log(`📊 Reading time calculation: ${words} words = ${minutes} min read`);
-    
+
     return `${minutes} min read`;
   } catch (error) {
     console.error('Error calculating reading time:', error);
@@ -12890,9 +13534,9 @@ function getWordCount(htmlContent) {
       .replace(/<[^>]*>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    
-    return textContent.split(/\s+/).filter(word => word.length > 0).length;
-  } catch (error) {
+
+    return textContent.split(/\s+/).filter((word) => word.length > 0).length;
+  } catch (_error) {
     return 0;
   }
 }
@@ -12903,7 +13547,7 @@ let settingsWindow = null;
 // Function to open the settings window
 function openSettingsWindow() {
   console.log('Opening settings window...');
-  
+
   // Check if settings window already exists and is not destroyed
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     console.log('Settings window exists, focusing it');
@@ -12911,7 +13555,7 @@ function openSettingsWindow() {
     settingsWindow.focus();
     return;
   }
-  
+
   console.log('Creating new settings window');
   // Create the settings window
   settingsWindow = new BrowserWindow({
@@ -12924,10 +13568,10 @@ function openSettingsWindow() {
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: true,
       enableRemoteModule: false,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
-  
+
   // Attach structured log forwarding
   browserWindow.attachLogForwarder(settingsWindow, 'settings');
 
@@ -12936,21 +13580,22 @@ function openSettingsWindow() {
     console.log('Settings window closed');
     settingsWindow = null;
   });
-  
+
   // Handle any load errors
   settingsWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     console.error('Failed to load settings window:', errorCode, errorDescription);
   });
-  
+
   // Log when the window successfully loads
   settingsWindow.webContents.on('did-finish-load', () => {
     console.log('Settings window loaded successfully');
   });
-  
+
   // Load the settings HTML file
-  settingsWindow.loadFile('settings.html').catch(err => {
+  settingsWindow.loadFile('settings.html').catch((err) => {
     console.error('Error loading settings.html:', err);
   });
+  windowRegistry.register('settings', settingsWindow);
 }
 
 // Make settings window globally accessible
@@ -12962,7 +13607,7 @@ let dashboardWindow = null;
 // Function to open the App Health Dashboard
 function openDashboardWindow() {
   console.log('[Dashboard] Opening App Health Dashboard...');
-  
+
   // Check if dashboard window already exists and is not destroyed
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     console.log('[Dashboard] Window exists, focusing it');
@@ -12970,7 +13615,7 @@ function openDashboardWindow() {
     dashboardWindow.focus();
     return;
   }
-  
+
   console.log('[Dashboard] Creating new dashboard window');
   dashboardWindow = new BrowserWindow({
     width: 1400,
@@ -12985,10 +13630,10 @@ function openDashboardWindow() {
       preload: path.join(__dirname, 'preload-health-dashboard.js'),
       webSecurity: true,
       enableRemoteModule: false,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
-  
+
   // Attach structured log forwarding
   browserWindow.attachLogForwarder(dashboardWindow, 'app');
 
@@ -12997,16 +13642,17 @@ function openDashboardWindow() {
     console.log('[Dashboard] Window closed');
     dashboardWindow = null;
   });
-  
+
   // Log when the window successfully loads
   dashboardWindow.webContents.on('did-finish-load', () => {
     console.log('[Dashboard] Window loaded successfully');
   });
-  
+
   // Load the dashboard HTML file
-  dashboardWindow.loadFile('app-health-dashboard.html').catch(err => {
+  dashboardWindow.loadFile('app-health-dashboard.html').catch((err) => {
     console.error('[Dashboard] Error loading dashboard:', err);
   });
+  windowRegistry.register('dashboard', dashboardWindow);
 }
 
 // Make dashboard window globally accessible
@@ -13057,7 +13703,7 @@ let budgetDashboardWindow = null;
 // Function to open the budget dashboard window
 function openBudgetDashboard() {
   console.log('Opening budget dashboard window...');
-  
+
   // Check if budget dashboard window already exists and is not destroyed
   if (budgetDashboardWindow && !budgetDashboardWindow.isDestroyed()) {
     console.log('Budget dashboard window exists, focusing it');
@@ -13065,7 +13711,7 @@ function openBudgetDashboard() {
     budgetDashboardWindow.focus();
     return;
   }
-  
+
   console.log('Creating new budget dashboard window');
   // Create the budget dashboard window
   budgetDashboardWindow = new BrowserWindow({
@@ -13078,30 +13724,31 @@ function openBudgetDashboard() {
       preload: path.join(__dirname, 'preload-budget.js'),
       webSecurity: true,
       enableRemoteModule: false,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
-  
+
   // Clear the reference when the window is closed
   budgetDashboardWindow.on('closed', () => {
     console.log('Budget dashboard window closed');
     budgetDashboardWindow = null;
   });
-  
+
   // Handle any load errors
   budgetDashboardWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     console.error('Failed to load budget dashboard window:', errorCode, errorDescription);
   });
-  
+
   // Log when the window successfully loads
   budgetDashboardWindow.webContents.on('did-finish-load', () => {
     console.log('Budget dashboard window loaded successfully');
   });
-  
+
   // Load the budget dashboard HTML file
-  budgetDashboardWindow.loadFile('budget-dashboard.html').catch(err => {
+  budgetDashboardWindow.loadFile('budget-dashboard.html').catch((err) => {
     console.error('Error loading budget-dashboard.html:', err);
   });
+  windowRegistry.register('budget-dashboard', budgetDashboardWindow);
 }
 
 // Make budget dashboard globally accessible
@@ -13113,7 +13760,7 @@ let budgetEstimatorWindow = null;
 // Function to open the budget estimator window
 function openBudgetEstimator() {
   console.log('Opening budget estimator window...');
-  
+
   // Check if budget estimator window already exists and is not destroyed
   if (budgetEstimatorWindow && !budgetEstimatorWindow.isDestroyed()) {
     console.log('Budget estimator window exists, focusing it');
@@ -13121,7 +13768,7 @@ function openBudgetEstimator() {
     budgetEstimatorWindow.focus();
     return;
   }
-  
+
   console.log('Creating new budget estimator window');
   // Create the budget estimator window
   budgetEstimatorWindow = new BrowserWindow({
@@ -13134,28 +13781,29 @@ function openBudgetEstimator() {
       preload: path.join(__dirname, 'preload-budget-estimator.js'),
       webSecurity: true,
       enableRemoteModule: false,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
-  
+
   // Clear the reference when the window is closed
   budgetEstimatorWindow.on('closed', () => {
     console.log('Budget estimator window closed');
     budgetEstimatorWindow = null;
   });
-  
+  windowRegistry.register('budget-estimator', budgetEstimatorWindow);
+
   // Handle any load errors
   budgetEstimatorWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     console.error('Failed to load budget estimator window:', errorCode, errorDescription);
   });
-  
+
   // Log when the window successfully loads
   budgetEstimatorWindow.webContents.on('did-finish-load', () => {
     console.log('Budget estimator window loaded successfully');
   });
-  
+
   // Load the budget estimator HTML file
-  budgetEstimatorWindow.loadFile('budget-estimator.html').catch(err => {
+  budgetEstimatorWindow.loadFile('budget-estimator.html').catch((err) => {
     console.error('Error loading budget-estimator.html:', err);
   });
 }
@@ -13163,35 +13811,10 @@ function openBudgetEstimator() {
 // Make budget estimator globally accessible
 global.openBudgetEstimatorGlobal = openBudgetEstimator;
 
-// Function to open the new onboarding wizard (from Josh)
-function openOnboardingWizard() {
-  console.log('Opening onboarding wizard window...');
-  
-  const wizardWindow = new BrowserWindow({
-    width: 700,
-    height: 800,
-    center: true,
-    resizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
-    }
-  });
-  
-  wizardWindow.loadFile('onboarding-wizard.html');
-  
-  wizardWindow.on('closed', () => {
-    console.log('Onboarding wizard closed');
-  });
-}
-
 // Function to open the setup wizard modal
 function openSetupWizard() {
   console.log('Opening setup wizard window...');
-  
+
   // Debug existing configuration
   const configPath = getIdwConfigPath();
   console.log('Configuration path:', configPath);
@@ -13208,15 +13831,15 @@ function openSetupWizard() {
   } catch (error) {
     console.error('Error reading config:', error);
   }
-  
+
   // Get the main window reference
-  const mainWindow = browserWindow.getMainWindow();
-  
+  const _mainWindow = browserWindow.getMainWindow();
+
   // Create the setup wizard window using our module
   let wizardWindow = browserWindow.createSetupWizardWindow({
     width: 1000,
     height: 800,
-    show: false  // Don't show until content is loaded
+    show: false, // Don't show until content is loaded
   });
 
   // Set Content Security Policy for wizard window
@@ -13226,17 +13849,17 @@ function openSetupWizard() {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; " +
-          "style-src 'self' 'unsafe-inline' * https://*.onereach.ai; " + 
-          "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; " +
-          "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; " +
-          "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
-          "font-src 'self' data: * https://*.onereach.ai; " +
-          "media-src 'self' * https://*.onereach.ai; " +
-          "object-src 'none'; " +
-          "base-uri 'self'"
-        ]
-      }
+            "style-src 'self' 'unsafe-inline' * https://*.onereach.ai; " +
+            "style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; " +
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; " +
+            "connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; " +
+            "img-src 'self' data: blob: spaces: * https://*.onereach.ai; " +
+            "font-src 'self' data: * https://*.onereach.ai; " +
+            "media-src 'self' * https://*.onereach.ai; " +
+            "object-src 'none'; " +
+            "base-uri 'self'",
+        ],
+      },
     });
   });
 
@@ -13268,9 +13891,11 @@ function openSetupWizard() {
   // Event when content has loaded
   wizardWindow.webContents.on('did-finish-load', () => {
     console.log('Setup wizard content loaded, injecting data');
-    
+
     // Use a simple executeJavaScript that directly uses the data inside the script
-    wizardWindow.webContents.executeJavaScript(`
+    wizardWindow.webContents
+      .executeJavaScript(
+        `
       (function() {
         try {
           // This is a safer approach - we're embedding the actual array data
@@ -13293,14 +13918,19 @@ function openSetupWizard() {
           return false;
         }
       })();
-    `).then(result => {
-      console.log('Initialization completed successfully:', result);
-    }).catch(err => {
-      console.error('Error running initialization script:', err);
-    });
-    
+    `
+      )
+      .then((result) => {
+        console.log('Initialization completed successfully:', result);
+      })
+      .catch((err) => {
+        console.error('Error running initialization script:', err);
+      });
+
     // Inject custom scrollbar CSS
-    wizardWindow.webContents.insertCSS(`
+    wizardWindow.webContents
+      .insertCSS(
+        `
       ::-webkit-scrollbar {
         width: 6px;
         height: 6px;
@@ -13319,11 +13949,16 @@ function openSetupWizard() {
       ::-webkit-scrollbar-thumb:hover {
         background: rgba(255, 255, 255, 0.2);
       }
-    `).catch(err => console.error('Failed to inject scrollbar CSS:', err));
-    
+    `
+      )
+      .catch((err) => console.error('Failed to inject scrollbar CSS:', err));
+
+    // TIMING: Wait for wizard DOM and localStorage to populate before running diagnostic executeJavaScript.
     // Trigger a check for the loaded data
     setTimeout(() => {
-      wizardWindow.webContents.executeJavaScript(`
+      wizardWindow.webContents
+        .executeJavaScript(
+          `
         // Log the current state of the form
         const homeUrlEl = document.getElementById('idw-home-url');
         const chatUrlEl = document.getElementById('idw-chat-url');
@@ -13344,11 +13979,13 @@ function openSetupWizard() {
         } catch (e) {
           console.error('[Delayed check] Error parsing environments:', e);
         }
-      `).catch(err => {
-        console.error('Error running delayed check:', err);
-      });
+      `
+        )
+        .catch((err) => {
+          console.error('Error running delayed check:', err);
+        });
     }, 1000);
-    
+
     // Now show the window after everything is ready
     wizardWindow.show();
   });
@@ -13363,22 +14000,30 @@ function openSetupWizard() {
 // Function to update the IDW menu dynamically
 function updateIDWMenu(environments) {
   if (!Array.isArray(environments) || environments.length === 0) return;
-  
+
   // FIXED: Use the proper menu system from menu.js which includes the Share menu
   // Route through MenuDataManager for consistent menu updates
-  if (global.menuDataManager) { global.menuDataManager.rebuild(environments); }
-  else { const { setApplicationMenu } = require('./menu'); setApplicationMenu(environments); }
+  if (global.menuDataManager) {
+    global.menuDataManager.rebuild(environments);
+  } else {
+    const { setApplicationMenu } = require('./menu');
+    setApplicationMenu(environments);
+  }
   console.log(`IDW menu updated with ${environments.length} environments`);
 }
 
 // Function to update the GSX menu dynamically
 function updateGSXMenu(links) {
   if (!Array.isArray(links) || links.length === 0) return;
-  
+
   // FIXED: Use the proper menu system from menu.js which includes the Share menu
   // Route through MenuDataManager for consistent menu updates
-  if (global.menuDataManager) { global.menuDataManager.refreshGSXLinks(); }
-  else { const { refreshGSXLinks } = require('./menu'); refreshGSXLinks(); }
+  if (global.menuDataManager) {
+    global.menuDataManager.refreshGSXLinks();
+  } else {
+    const { refreshGSXLinks } = require('./menu');
+    refreshGSXLinks();
+  }
   console.log(`GSX menu updated with ${links.length} links`);
 }
 
@@ -13387,7 +14032,7 @@ function openIDWEnvironment(url, label) {
   // Here you would implement the logic to open the IDW environment
   // This could be opening a new window, a new tab, or navigating an existing view
   console.log(`Opening IDW environment: ${label} (${url})`);
-  
+
   // Example: Open in a new browser window
   const idwWindow = new BrowserWindow({
     width: 1200,
@@ -13397,174 +14042,19 @@ function openIDWEnvironment(url, label) {
       nodeIntegration: false,
       contextIsolation: true,
       webviewTag: true,
-      preload: path.join(__dirname, 'preload.js')
-    }
+      preload: path.join(__dirname, 'preload.js'),
+    },
   });
-  
+
   // Load the URL
   idwWindow.loadURL(url);
-}
-
-// Function to open the data test page
-function openDataTestPage() {
-  console.log('openDataTestPage function called');
-  
-  // Don't open multiple test windows
-  if (testWindow) {
-    console.log('Test window already exists, bringing to front');
-    testWindow.focus();
-    return;
-  }
-  
-  console.log('Creating new test window');
-  
-  try {
-    // Create a new test window using our module
-    testWindow = browserWindow.createTestWindow();
-    
-    // Check if data-test.html exists
-    const testFilePath = path.join(__dirname, 'data-test.html');
-    console.log('Looking for test file at:', testFilePath);
-    if (!fs.existsSync(testFilePath)) {
-      console.error('data-test.html file not found at:', testFilePath);
-      const mainWindow = browserWindow.getMainWindow();
-      if (mainWindow) {
-        mainWindow.webContents.send('show-notification', {
-          title: 'Error',
-          body: 'Test page file not found. Please check the console for details.'
-        });
-      }
-      return;
-    }
-    
-    // Load the data test HTML file
-    console.log('Loading data-test.html');
-    testWindow.loadFile('data-test.html');
-    
-    // Show window when content has loaded
-    testWindow.once('ready-to-show', () => {
-      console.log('Test window ready to show');
-      testWindow.show();
-    });
-    
-    // Handle window closed event
-    testWindow.on('closed', () => {
-      console.log('Test window closed');
-      testWindow = null;
-    });
-  } catch (error) {
-    console.error('Error creating test window:', error);
-    const mainWindow = browserWindow.getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send('show-notification', {
-        title: 'Error',
-        body: `Error creating test window: ${error.message}`
-      });
-    }
-  }
-}
-
-// Add a function to open the CSP test page
-function openCSPTestPage() {
-  console.log('Opening CSP test page');
-  
-  try {
-    // Create a new test window using our browser window module
-    const testWindow = browserWindow.createTestWindow();
-    
-    // Check if csp-test.html exists
-    const testFilePath = path.join(__dirname, 'csp-test.html');
-    console.log('Looking for CSP test file at:', testFilePath);
-    if (!fs.existsSync(testFilePath)) {
-      console.error('csp-test.html file not found at:', testFilePath);
-      const mainWindow = browserWindow.getMainWindow();
-      if (mainWindow) {
-        mainWindow.webContents.send('show-notification', {
-          title: 'Error',
-          body: 'CSP test file not found. Please check the console for details.'
-        });
-      }
-      return;
-    }
-    
-    // Load the CSP test HTML file
-    console.log('Loading csp-test.html');
-    testWindow.loadFile('csp-test.html');
-    
-    // Show window when content has loaded
-    testWindow.once('ready-to-show', () => {
-      console.log('CSP test window ready to show');
-      testWindow.show();
-    });
-    
-    // Handle window closed event (memory leak prevention)
-    testWindow.on('closed', () => {
-      console.log('CSP test window closed');
-    });
-  } catch (error) {
-    console.error('Error creating CSP test window:', error);
-    const mainWindow = browserWindow.getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send('show-notification', {
-        title: 'Error',
-        body: `Error creating CSP test window: ${error.message}`
-      });
-    }
-  }
-}
-
-// Add a function to debug IDW environments
-function debugIDWEnvironments() {
-  try {
-    console.log('Checking IDW environments in configuration file');
-    const idwConfigPath = path.join(app.getPath('userData'), 'idw-entries.json');
-    
-    if (fs.existsSync(idwConfigPath)) {
-      const data = fs.readFileSync(idwConfigPath, 'utf8');
-      try {
-        const idwEnvironments = JSON.parse(data);
-        console.log(`Found ${idwEnvironments.length} IDW environments in config file:`);
-        console.log(JSON.stringify(idwEnvironments, null, 2));
-      } catch (error) {
-        console.error('Error parsing IDW environments from file:', error);
-      }
-    } else {
-      console.log('No IDW environments config file found at:', idwConfigPath);
-    }
-    
-    // Check if main window exists to get localStorage data
-    const mainWindow = browserWindow.getMainWindow();
-    if (mainWindow && mainWindow.webContents) {
-      console.log('Requesting localStorage data from renderer process');
-      mainWindow.webContents.executeJavaScript(`
-        (function() {
-          const envs = localStorage.getItem('idwEnvironments');
-          const links = localStorage.getItem('gsxLinks');
-          const prefs = localStorage.getItem('userPreferences');
-          
-          return {
-            idwEnvironments: envs ? JSON.parse(envs) : null,
-            gsxLinks: links ? JSON.parse(links) : null,
-            userPreferences: prefs ? JSON.parse(prefs) : null
-          };
-        })()
-      `).then(data => {
-        console.log('LocalStorage data:');
-        console.log(JSON.stringify(data, null, 2));
-      }).catch(error => {
-        console.error('Error getting localStorage data:', error);
-      });
-    }
-  } catch (error) {
-    console.error('Error in debugIDWEnvironments:', error);
-  }
 }
 
 // Add a test function to manually load an IDW environment
 function testLoadIDWEnvironment() {
   const testUrl = 'https://idw.edison.onereach.ai/marvin-2';
   console.log('Manually testing IDW environment loading with URL:', testUrl);
-  
+
   try {
     // Call openURLInMainWindow to load the test URL
     browserWindow.openURLInMainWindow(testUrl);
@@ -13584,10 +14074,10 @@ ipcMain.on('test-idw-load', () => {
 // Setup Auto Updater handlers
 function setupAutoUpdater() {
   log.info('Setting up auto updater');
-  
+
   // Check if we're in development mode
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-  
+
   if (isDev) {
     // In development, use the dev-app-update.yml file
     const devUpdateConfigPath = path.join(__dirname, 'dev-app-update.yml');
@@ -13596,50 +14086,52 @@ function setupAutoUpdater() {
       autoUpdater.updateConfigPath = devUpdateConfigPath;
     }
   }
-  
+
   autoUpdater.on('checking-for-update', () => {
     log.info('Checking for updates...');
     sendUpdateStatus('checking');
-    
+
     // Show notification that we're checking
     const { Notification } = require('electron');
     if (Notification.isSupported()) {
       const notification = new Notification({
         title: 'Checking for Updates',
         body: 'Looking for new versions...',
-        silent: true
+        silent: true,
       });
       notification.show();
     }
   });
-  
+
   autoUpdater.on('update-available', (info) => {
     log.info('Update available:', info);
     sendUpdateStatus('available', info);
     isCheckingForUpdates = false;
-    
+
     // Show dialog to user
     const { dialog } = require('electron');
     const focusedWindow = BrowserWindow.getFocusedWindow();
-    dialog.showMessageBox(focusedWindow, {
-      type: 'info',
-      title: 'Update Available!',
-      message: `A new version (${info.version}) is available!`,
-      detail: `Current version: ${app.getVersion()}\nNew version: ${info.version}\n\nWould you like to download it now?`,
-      buttons: ['Download', 'Later'],
-      defaultId: 0
-    }).then(result => {
-      if (result.response === 0) {
-        downloadUpdate();
-      }
-    });
+    dialog
+      .showMessageBox(focusedWindow, {
+        type: 'info',
+        title: 'Update Available!',
+        message: `A new version (${info.version}) is available!`,
+        detail: `Current version: ${app.getVersion()}\nNew version: ${info.version}\n\nWould you like to download it now?`,
+        buttons: ['Download', 'Later'],
+        defaultId: 0,
+      })
+      .then((result) => {
+        if (result.response === 0) {
+          downloadUpdate();
+        }
+      });
   });
-  
+
   autoUpdater.on('update-not-available', (info) => {
     log.info('Update not available:', info);
     sendUpdateStatus('not-available', info);
     isCheckingForUpdates = false;
-    
+
     // Show dialog to user
     const { dialog } = require('electron');
     const focusedWindow = BrowserWindow.getFocusedWindow();
@@ -13648,64 +14140,64 @@ function setupAutoUpdater() {
       title: 'No Updates Available',
       message: 'You are running the latest version!',
       detail: `Current version: ${app.getVersion()}\n\nYour app is up to date.`,
-      buttons: ['OK']
+      buttons: ['OK'],
     });
   });
-  
-      autoUpdater.on('error', (err) => {
-      log.error('Error in auto-updater:', err);
-      
-      // Provide more helpful error messages
-      let errorMessage = err.message;
-      if (err.message.includes('ERR_CONNECTION_REFUSED') || err.message.includes('ENOTFOUND')) {
-        errorMessage = 'Cannot connect to update server. Please check your internet connection.';
-      } else if (err.message.includes('404')) {
-        errorMessage = 'Update information not found on server.';
-      } else if (err.message.includes('net::ERR_INTERNET_DISCONNECTED')) {
-        errorMessage = 'No internet connection available.';
-      }
-      
-      sendUpdateStatus('error', { error: errorMessage });
-      isCheckingForUpdates = false;
-    });
-  
+
+  autoUpdater.on('error', (err) => {
+    log.error('Error in auto-updater:', err);
+
+    // Provide more helpful error messages
+    let errorMessage = err.message;
+    if (err.message.includes('ERR_CONNECTION_REFUSED') || err.message.includes('ENOTFOUND')) {
+      errorMessage = 'Cannot connect to update server. Please check your internet connection.';
+    } else if (err.message.includes('404')) {
+      errorMessage = 'Update information not found on server.';
+    } else if (err.message.includes('net::ERR_INTERNET_DISCONNECTED')) {
+      errorMessage = 'No internet connection available.';
+    }
+
+    sendUpdateStatus('error', { error: errorMessage });
+    isCheckingForUpdates = false;
+  });
+
   autoUpdater.on('download-progress', (progressObj) => {
     log.info(`Download progress: ${progressObj.percent}%`);
     sendUpdateStatus('progress', progressObj);
-    
+
     // Show progress in the dock icon (macOS)
     if (process.platform === 'darwin') {
       app.dock.setBadge(`${Math.round(progressObj.percent)}%`);
     }
   });
-  
+
   autoUpdater.on('update-downloaded', async (info) => {
     log.info('Update downloaded:', info);
-    
+
     // Clear the dock badge
     if (process.platform === 'darwin') {
       app.dock.setBadge('');
     }
-    
+
     // Create backup of current version before installing update
     try {
       const currentVersion = app.getVersion();
       log.info(`Creating backup of current version v${currentVersion} before update...`);
-      
+
       const backupSuccess = await rollbackManager.createBackup(currentVersion);
       if (backupSuccess) {
         log.info('Backup created successfully');
-        sendUpdateStatus('downloaded', { 
-          ...info, 
+        sendUpdateStatus('downloaded', {
+          ...info,
           backupCreated: true,
-          currentVersion: currentVersion 
+          currentVersion: currentVersion,
         });
       } else {
         log.warn('Failed to create backup, but update can still proceed');
-        sendUpdateStatus('downloaded', { 
-          ...info, 
+        sendUpdateStatus('downloaded', {
+          ...info,
           backupCreated: false,
-          currentVersion: currentVersion 
+          currentVersion: currentVersion,
         });
       }
     } catch (error) {
@@ -13713,7 +14205,7 @@ function setupAutoUpdater() {
       // Still allow update to proceed even if backup fails
       sendUpdateStatus('downloaded', info);
     }
-    
+
     // Show dialog to user
     const focusedWindow = BrowserWindow.getFocusedWindow();
     const dialogOptions = {
@@ -13723,9 +14215,9 @@ function setupAutoUpdater() {
       detail: 'The application will restart to apply the update. Your settings and data will be preserved.',
       buttons: ['Install and Restart', 'Install Later'],
       defaultId: 0,
-      cancelId: 1
+      cancelId: 1,
     };
-    
+
     dialog.showMessageBox(focusedWindow, dialogOptions).then((result) => {
       if (result.response === 0) {
         // User chose to install and restart
@@ -13744,7 +14236,7 @@ function setupAutoUpdater() {
           type: 'info',
           title: 'Update Postponed',
           message: 'The update will be installed when you restart the application.',
-          buttons: ['OK']
+          buttons: ['OK'],
         });
       }
     });
@@ -13767,35 +14259,40 @@ function checkForUpdates() {
     log.info('Update check already in progress, ignoring duplicate request');
     return;
   }
-  
+
   log.info('Manually checking for updates...');
   isCheckingForUpdates = true;
-  
+
   try {
-    autoUpdater.checkForUpdates().then(() => {
-      // Reset flag when check completes (success or failure)
-      setTimeout(() => {
+    autoUpdater
+      .checkForUpdates()
+      .then(() => {
+        // TIMING: Brief delay so update-dialog flow can settle before allowing another check.
+        // Reset flag when check completes (success or failure)
+        setTimeout(() => {
+          isCheckingForUpdates = false;
+        }, 1000);
+      })
+      .catch((err) => {
+        log.error('Failed to check for updates:', err);
+
+        // Show user-friendly error if repository doesn't exist
+        const { dialog } = require('electron');
+        const focusedWindow = BrowserWindow.getFocusedWindow();
+        if (err.message && (err.message.includes('404') || err.message.includes('Not Found'))) {
+          dialog.showMessageBox(focusedWindow, {
+            type: 'info',
+            title: 'No Updates Available',
+            message: 'Could not check for updates',
+            detail:
+              'Unable to reach the update server. This could be due to:\n\n• No internet connection\n• GitHub is temporarily unavailable\n• No releases published yet\n\nPlease try again later.',
+            buttons: ['OK'],
+          });
+        }
+
+        sendUpdateStatus('error', { error: err.message });
         isCheckingForUpdates = false;
-      }, 1000);
-    }).catch(err => {
-      log.error('Failed to check for updates:', err);
-      
-      // Show user-friendly error if repository doesn't exist
-      const { dialog } = require('electron');
-      const focusedWindow = BrowserWindow.getFocusedWindow();
-      if (err.message && (err.message.includes('404') || err.message.includes('Not Found'))) {
-        dialog.showMessageBox(focusedWindow, {
-          type: 'info',
-          title: 'No Updates Available',
-          message: 'Could not check for updates',
-          detail: 'Unable to reach the update server. This could be due to:\n\n• No internet connection\n• GitHub is temporarily unavailable\n• No releases published yet\n\nPlease try again later.',
-          buttons: ['OK']
-        });
-      }
-      
-      sendUpdateStatus('error', { error: err.message });
-      isCheckingForUpdates = false;
-    });
+      });
   } catch (err) {
     log.error('Exception when checking for updates:', err);
     sendUpdateStatus('error', { error: err.message });
@@ -13809,52 +14306,53 @@ global.checkForUpdatesGlobal = checkForUpdates;
 // Function to download an available update
 function downloadUpdate() {
   log.info('Starting update download...');
-  
+
   // Show notification that download is starting
   const focusedWindow = BrowserWindow.getFocusedWindow();
   dialog.showMessageBox(focusedWindow, {
     type: 'info',
     title: 'Downloading Update',
     message: 'The update is now downloading in the background.',
-    detail: 'You can continue using the app. You\'ll be notified when the download is complete.\n\nProgress will be shown in the dock icon.',
-    buttons: ['OK']
+    detail:
+      "You can continue using the app. You'll be notified when the download is complete.\n\nProgress will be shown in the dock icon.",
+    buttons: ['OK'],
   });
-  
+
   try {
-    autoUpdater.downloadUpdate().catch(err => {
+    autoUpdater.downloadUpdate().catch((err) => {
       log.error('Failed to download update:', err);
       sendUpdateStatus('error', { error: err.message });
-      
+
       // Clear dock badge on error
       if (process.platform === 'darwin') {
         app.dock.setBadge('');
       }
-      
+
       // Show error dialog
       dialog.showMessageBox(focusedWindow, {
         type: 'error',
         title: 'Download Failed',
         message: 'Failed to download the update.',
         detail: err.message,
-        buttons: ['OK']
+        buttons: ['OK'],
       });
     });
   } catch (err) {
     log.error('Exception when downloading update:', err);
     sendUpdateStatus('error', { error: err.message });
-    
+
     // Clear dock badge on error
     if (process.platform === 'darwin') {
       app.dock.setBadge('');
     }
-    
+
     // Show error dialog
     dialog.showMessageBox(focusedWindow, {
       type: 'error',
       title: 'Download Failed',
       message: 'Failed to download the update.',
       detail: err.message,
-      buttons: ['OK']
+      buttons: ['OK'],
     });
   }
 }
@@ -13862,7 +14360,7 @@ function downloadUpdate() {
 // Function to install a downloaded update
 function installUpdate() {
   log.info('Installing update...');
-  
+
   try {
     autoUpdater.quitAndInstall(false, true);
   } catch (err) {
@@ -13882,21 +14380,21 @@ ipcMain.handle('test-agent:generate-plan', async (event, htmlFilePath, useAI = f
   console.log('[TestAgent] Generating test plan for:', htmlFilePath);
   try {
     let aiAnalyzer = null;
-    
+
     if (useAI) {
       // Use centralized AI service for analysis
       const { getAIService } = require('./lib/ai-service');
       const ai = getAIService();
-      
+
       aiAnalyzer = async (prompt) => {
         return await ai.complete(prompt, {
           profile: 'standard',
           maxTokens: 2000,
-          feature: 'test-agent-plan'
+          feature: 'test-agent-plan',
         });
       };
     }
-    
+
     const plan = await testAgent.generateTestPlan(htmlFilePath, aiAnalyzer);
     return { success: true, testPlan: plan };
   } catch (error) {
@@ -13917,10 +14415,10 @@ ipcMain.handle('test-agent:run-tests', async (event, htmlFilePath, options = {})
           if (event.sender && !event.sender.isDestroyed()) {
             event.sender.send('test-agent:progress', result);
           }
-        } catch (e) {
+        } catch (_e) {
           console.log('[TestAgent] Could not send progress - window may be closed');
         }
-      }
+      },
     });
     return results;
   } catch (error) {
@@ -13935,34 +14433,34 @@ ipcMain.handle('aider:run-playwright-tests', async (event, options = {}) => {
   try {
     const { spawn } = require('child_process');
     const path = require('path');
-    
+
     const testDir = options.testDir || process.cwd();
     const configPath = options.configPath || path.join(testDir, 'playwright.config.js');
     const project = options.project || 'api';
-    
+
     return new Promise((resolve) => {
       const args = ['playwright', 'test', '--project=' + project, '--reporter=json'];
-      
+
       if (options.configPath) {
         args.push('--config=' + configPath);
       }
-      
+
       const proc = spawn('npx', args, {
         cwd: testDir,
-        env: { ...process.env, API_BASE_URL: options.baseUrl || 'http://localhost:3000' }
+        env: { ...process.env, API_BASE_URL: options.baseUrl || 'http://localhost:3000' },
       });
-      
+
       let stdout = '';
       let stderr = '';
-      
+
       proc.stdout.on('data', (data) => {
         stdout += data.toString();
       });
-      
+
       proc.stderr.on('data', (data) => {
         stderr += data.toString();
       });
-      
+
       proc.on('close', (code) => {
         try {
           // Parse JSON output
@@ -13971,14 +14469,14 @@ ipcMain.handle('aider:run-playwright-tests', async (event, options = {}) => {
             const result = JSON.parse(jsonMatch[0]);
             const passed = result.stats?.expected || 0;
             const failed = (result.stats?.unexpected || 0) + (result.stats?.flaky || 0);
-            
+
             resolve({
               success: failed === 0,
               passed,
               failed,
               total: passed + failed,
               suites: result.suites || [],
-              raw: result
+              raw: result,
             });
           } else {
             resolve({
@@ -13986,7 +14484,7 @@ ipcMain.handle('aider:run-playwright-tests', async (event, options = {}) => {
               passed: code === 0 ? 1 : 0,
               failed: code === 0 ? 0 : 1,
               output: stdout,
-              error: stderr
+              error: stderr,
             });
           }
         } catch (e) {
@@ -13994,15 +14492,15 @@ ipcMain.handle('aider:run-playwright-tests', async (event, options = {}) => {
             success: false,
             error: e.message,
             output: stdout,
-            stderr: stderr
+            stderr: stderr,
           });
         }
       });
-      
+
       proc.on('error', (err) => {
         resolve({
           success: false,
-          error: 'Playwright not installed: ' + err.message
+          error: 'Playwright not installed: ' + err.message,
         });
       });
     });
@@ -14054,7 +14552,7 @@ ipcMain.handle('test-agent:interactive', async (event, htmlFilePath) => {
   try {
     const { getAIService } = require('./lib/ai-service');
     const ai = getAIService();
-    
+
     let aiAnalyzer = null;
     aiAnalyzer = async (data) => {
       const prompt = `Analyze this UI screenshot and the following data:
@@ -14070,11 +14568,11 @@ Please identify:
 
       const result = await ai.vision(data.screenshot, prompt, {
         maxTokens: 2000,
-        feature: 'test-agent-interactive'
+        feature: 'test-agent-interactive',
       });
       return result.content;
     };
-    
+
     const results = await testAgent.interactiveTest(htmlFilePath, aiAnalyzer);
     return results;
   } catch (error) {
@@ -14174,10 +14672,13 @@ ipcMain.handle('budget:trackUsage', async (event, provider, projectId, usage) =>
   try {
     const { getLLMUsageTracker } = require('./llm-usage-tracker');
     const llmTracker = getLLMUsageTracker();
-    
-    const feature = usage.operation?.includes('gsx') ? 'gsx-create' : 
-                    usage.operation?.includes('chat') ? 'chat' : 'other';
-    
+
+    const feature = usage.operation?.includes('gsx')
+      ? 'gsx-create'
+      : usage.operation?.includes('chat')
+        ? 'chat'
+        : 'other';
+
     let result;
     if (provider === 'anthropic' || provider === 'claude') {
       result = llmTracker.trackClaudeCall({
@@ -14188,7 +14689,7 @@ ipcMain.handle('budget:trackUsage', async (event, provider, projectId, usage) =>
         purpose: usage.operation || 'api-call',
         projectId,
         spaceId: projectId,
-        success: true
+        success: true,
       });
     } else if (provider === 'openai') {
       result = llmTracker.trackOpenAICall({
@@ -14199,7 +14700,7 @@ ipcMain.handle('budget:trackUsage', async (event, provider, projectId, usage) =>
         purpose: usage.operation || 'api-call',
         projectId,
         spaceId: projectId,
-        success: true
+        success: true,
       });
     } else {
       // Fallback for other providers - track directly to BudgetManager
@@ -14211,15 +14712,15 @@ ipcMain.handle('budget:trackUsage', async (event, provider, projectId, usage) =>
         projectId,
         feature,
         operation: usage.operation || 'api-call',
-        success: true
+        success: true,
       });
     }
-    
+
     // Notify budget dashboard if open
     if (budgetDashboardWindow && !budgetDashboardWindow.isDestroyed()) {
       budgetDashboardWindow.webContents.send('budget:updated', result);
     }
-    
+
     return result;
   } catch (trackingError) {
     console.error('[BudgetManager] Usage tracking failed:', trackingError.message);
@@ -14364,36 +14865,13 @@ ipcMain.handle('pricing:calculate', async (event, model, inputTokens, outputToke
 
 // ==================== BUDGET SETUP WIZARD ====================
 
-// Check if budget has been configured, show setup wizard if not
-function checkAndShowBudgetSetup() {
-  try {
-    if (!budgetManager) {
-      console.log('[Budget] Budget manager not initialized');
-      return;
-    }
-    
-    const isConfigured = budgetManager.isBudgetConfigured();
-    console.log('[Budget] Budget configured:', isConfigured);
-    
-    if (!isConfigured) {
-      console.log('[Budget] Budget not configured, showing setup wizard...');
-      // Small delay to let the main window fully initialize
-      setTimeout(() => {
-        openBudgetSetup();
-      }, 500);
-    }
-  } catch (error) {
-    console.error('[Budget] Error checking budget configuration:', error);
-  }
-}
-
 // Keep a reference to the budget setup window
 let budgetSetupWindow = null;
 
 // Function to open the budget setup wizard window
 function openBudgetSetup() {
   console.log('Opening budget setup window...');
-  
+
   // Check if budget setup window already exists and is not destroyed
   if (budgetSetupWindow && !budgetSetupWindow.isDestroyed()) {
     console.log('Budget setup window exists, focusing it');
@@ -14401,12 +14879,12 @@ function openBudgetSetup() {
     budgetSetupWindow.focus();
     return;
   }
-  
+
   console.log('Creating new budget setup window');
-  
+
   // Get the main window for modal parent
   const mainWindow = browserWindow.getMainWindow();
-  
+
   // Create the budget setup window
   budgetSetupWindow = new BrowserWindow({
     width: 650,
@@ -14423,28 +14901,29 @@ function openBudgetSetup() {
       preload: path.join(__dirname, 'preload-budget.js'),
       webSecurity: true,
       enableRemoteModule: false,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
-  
+
   // Clear the reference when the window is closed
   budgetSetupWindow.on('closed', () => {
     console.log('Budget setup window closed');
     budgetSetupWindow = null;
   });
-  
+  windowRegistry.register('budget-setup', budgetSetupWindow);
+
   // Handle any load errors
   budgetSetupWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     console.error('Failed to load budget setup window:', errorCode, errorDescription);
   });
-  
+
   // Log when the window successfully loads
   budgetSetupWindow.webContents.on('did-finish-load', () => {
     console.log('Budget setup window loaded successfully');
   });
-  
+
   // Load the budget setup HTML file
-  budgetSetupWindow.loadFile('budget-setup.html').catch(err => {
+  budgetSetupWindow.loadFile('budget-setup.html').catch((err) => {
     console.error('Error loading budget-setup.html:', err);
   });
 }
@@ -14461,12 +14940,12 @@ ipcMain.on('open-budget-setup', () => {
 // Register budget warning callback to broadcast to all budget windows
 budgetManager.onWarning((warningInfo) => {
   console.log('[main.js] Budget warning received:', warningInfo);
-  
+
   // Broadcast to budget dashboard if open
   if (budgetDashboardWindow && !budgetDashboardWindow.isDestroyed()) {
     budgetDashboardWindow.webContents.send('budget:warning', warningInfo);
   }
-  
+
   // Show system notification for exceeded budgets
   if (warningInfo.type === 'budget_exceeded') {
     const { Notification } = require('electron');
@@ -14474,7 +14953,7 @@ budgetManager.onWarning((warningInfo) => {
       const notification = new Notification({
         title: 'Budget Exceeded',
         body: warningInfo.message,
-        icon: path.join(__dirname, 'assets', 'icon.png')
+        icon: path.join(__dirname, 'assets', 'icon.png'),
       });
       notification.show();
     }
@@ -14505,59 +14984,58 @@ let builtInAgents = [];
  */
 async function startBuiltInAgents(exchangeUrl) {
   console.log('[VoiceOrb] Starting built-in agents...');
-  
+
   try {
     // Try to load and start the spelling agent
     const { createSpellingAgent } = require('./packages/agents/spelling-agent.js');
     const spellingAgent = createSpellingAgent(exchangeUrl);
     console.log('[VoiceOrb] Spelling agent created, connecting to', exchangeUrl);
-    
+
     spellingAgent.on('connected', () => {
       console.log('[VoiceOrb] Spelling agent connected');
     });
-    
+
     spellingAgent.on('disconnected', ({ reason }) => {
       console.log('[VoiceOrb] Spelling agent disconnected:', reason);
     });
-    
+
     spellingAgent.on('reconnecting', ({ attempt }) => {
       console.log('[VoiceOrb] Spelling agent reconnecting, attempt', attempt);
     });
-    
+
     spellingAgent.on('registered', ({ agentId }) => {
       console.log('[VoiceOrb] Spelling agent registered as:', agentId);
     });
-    
+
     spellingAgent.on('error', ({ error }) => {
       console.error('[VoiceOrb] Spelling agent error:', error.message);
     });
-    
+
     spellingAgent.on('bid:requested', ({ task }) => {
       console.log('[VoiceOrb] Spelling agent bid requested for:', task.content);
     });
-    
+
     spellingAgent.on('bid:submitted', ({ confidence }) => {
       console.log('[VoiceOrb] Spelling agent bid submitted:', confidence);
     });
-    
+
     spellingAgent.on('task:assigned', ({ task, isBackup }) => {
       console.log('[VoiceOrb] Spelling agent assigned task:', task.id, 'backup:', isBackup);
     });
-    
+
     spellingAgent.on('task:completed', ({ taskId, success }) => {
       console.log(`[VoiceOrb] Spelling agent completed task ${taskId}: ${success}`);
     });
-    
+
     await spellingAgent.start();
     builtInAgents.push(spellingAgent);
     console.log('[VoiceOrb] Spelling agent started');
-    
   } catch (error) {
     console.warn('[VoiceOrb] Could not start spelling agent:', error.message);
     console.error('[VoiceOrb] Full error:', error.stack);
     console.log('[VoiceOrb] Make sure packages are compiled: cd packages && npm run build');
   }
-  
+
   // Start user-defined dynamic agents
   try {
     const { startDynamicAgent } = require('./packages/agents/dynamic-agent');
@@ -14569,22 +15047,22 @@ async function startBuiltInAgents(exchangeUrl) {
   } catch (error) {
     console.warn('[VoiceOrb] Could not start dynamic agent:', error.message);
   }
-  
+
   // Start GSX/MCS connections
   try {
     const { getAgentStore } = require('./src/voice-task-sdk/agent-store');
     const { getMCSManager } = require('./src/voice-task-sdk/gsx-mcs-client');
-    
+
     const store = getAgentStore();
     await store.init();
-    
+
     const gsxConnections = store.getEnabledGSXConnections();
     if (gsxConnections.length > 0) {
       const manager = getMCSManager();
-      
+
       for (const conn of gsxConnections) {
         const client = manager.addClient(conn);
-        
+
         client.on('connected', async () => {
           console.log(`[VoiceOrb] GSX connected: ${conn.name}`);
           // Fetch agents when connected
@@ -14595,12 +15073,12 @@ async function startBuiltInAgents(exchangeUrl) {
             console.warn(`[VoiceOrb] Failed to fetch GSX agents:`, e.message);
           }
         });
-        
+
         client.on('disconnected', () => {
           console.log(`[VoiceOrb] GSX disconnected: ${conn.name}`);
         });
       }
-      
+
       // Connect all GSX clients
       await manager.connectAll();
       console.log(`[VoiceOrb] ${gsxConnections.length} GSX connections initiated`);
@@ -14608,7 +15086,7 @@ async function startBuiltInAgents(exchangeUrl) {
   } catch (error) {
     console.warn('[VoiceOrb] Could not start GSX connections:', error.message);
   }
-  
+
   console.log(`[VoiceOrb] ${builtInAgents.length} agents started`);
 }
 
@@ -14636,9 +15114,48 @@ async function initializeVoiceOrb() {
     if (!orbIPCInitialized) {
       setupOrbIPC();
       setupCommandHUDIPC();
+      setupOrbControlIPC();
       orbIPCInitialized = true;
+
+      // Listen for display configuration changes (monitor plug/unplug, resolution change)
+      screenService.listenForDisplayChanges((eventType, changedDisplay) => {
+        if (!orbWindow || orbWindow.isDestroyed()) return;
+
+        if (eventType === 'added') {
+          // A display was added -- check if we have a saved position for it ("welcome home")
+          const positionsMap = global.settingsManager?.get('voiceOrbPositions') || {};
+          const saved = screenService.getSavedPositionForDisplay(positionsMap, changedDisplay);
+          if (saved) {
+            // Validate the saved position is still within bounds
+            const [curW, curH] = orbWindow.getSize();
+            const clamped = screenService.clampToDisplay(
+              { x: saved.x, y: saved.y, width: curW, height: curH },
+              changedDisplay
+            );
+            orbWindow.setPosition(clamped.x, clamped.y);
+            console.log(
+              `[VoiceOrb] Welcome home -- moved to restored display: ${screenService.displayKey(changedDisplay)}`
+            );
+            saveOrbPosition();
+            return;
+          }
+        }
+
+        // For display-removed or metrics-changed: ensure orb is still on-screen
+        const [curX, curY] = orbWindow.getPosition();
+        const nearestDisplay = screenService.getDisplayForPoint({ x: curX, y: curY });
+        const [curW, curH] = orbWindow.getSize();
+        const clamped = screenService.clampToDisplay({ x: curX, y: curY, width: curW, height: curH }, nearestDisplay);
+        if (clamped.x !== curX || clamped.y !== curY) {
+          orbWindow.setPosition(clamped.x, clamped.y);
+          saveOrbPosition();
+          console.log(
+            `[VoiceOrb] Repositioned after display ${eventType}: (${curX},${curY}) -> (${clamped.x},${clamped.y})`
+          );
+        }
+      });
     }
-    
+
     // Always register the shortcut so it works even if orb starts disabled
     if (!orbShortcutRegistered) {
       const shortcut = process.platform === 'darwin' ? 'Command+Shift+O' : 'Ctrl+Shift+O';
@@ -14652,12 +15169,12 @@ async function initializeVoiceOrb() {
         console.error('[VoiceOrb] Failed to register shortcut:', shortcutError.message);
       }
     }
-    
+
     // ==================== EXCHANGE BRIDGE (always initialize) ====================
     // The exchange + agents must be available for ANY tool using the HUD API,
     // not just when the voice orb UI is visible.
     console.log('[VoiceOrb] Initializing Exchange Bridge and agents...');
-    
+
     // Initialize Voice Task SDK for classification
     try {
       const { initializeVoiceTaskSDK } = require('./src/voice-task-sdk/integration');
@@ -14676,10 +15193,14 @@ async function initializeVoiceOrb() {
         'voice-task-sdk:list-agents',
       ];
       for (const channel of stubHandlers) {
-        try { ipcMain.handle(channel, () => null); } catch (_) { /* already registered */ }
+        try {
+          ipcMain.handle(channel, () => null);
+        } catch (_) {
+          /* already registered */
+        }
       }
     }
-    
+
     // Initialize Exchange Bridge for auction-based task routing
     try {
       const { initializeExchangeBridge, getExchangeUrl } = require('./src/voice-task-sdk/exchange-bridge');
@@ -14687,7 +15208,10 @@ async function initializeVoiceOrb() {
       if (exchangeReady) {
         const url = getExchangeUrl();
         console.log('[VoiceOrb] Exchange Bridge initialized at', url);
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // TIMING: Let WebSocket/Exchange Bridge finish connecting before starting agents.
+        await new Promise((resolve) => {
+          setTimeout(resolve, 500);
+        });
         await startBuiltInAgents(url);
       } else {
         console.warn('[VoiceOrb] Exchange Bridge not available');
@@ -14696,20 +15220,19 @@ async function initializeVoiceOrb() {
       console.error('[VoiceOrb] Exchange Bridge init error:', exchangeError.message);
       console.error('[VoiceOrb] Full error:', exchangeError.stack);
     }
-    
+
     // Only auto-show orb UI at startup if enabled in settings
     const voiceOrbEnabled = global.settingsManager?.get('voiceOrbEnabled');
-    
+
     if (!voiceOrbEnabled) {
       console.log('[VoiceOrb] Orb UI disabled in settings (exchange + agents still active)');
       return;
     }
-    
+
     // Create the orb window
     createOrbWindow();
-    
+
     console.log('[VoiceOrb] Voice Orb initialized successfully');
-    
   } catch (error) {
     console.error('[VoiceOrb] Initialization error:', error);
   }
@@ -14725,19 +15248,19 @@ function setupOrbIPC() {
       orbWindow.show();
     }
   });
-  
+
   // Hide orb window
   ipcMain.handle('orb:hide', () => {
     if (orbWindow && !orbWindow.isDestroyed()) {
       orbWindow.hide();
     }
   });
-  
+
   // Toggle orb visibility
   ipcMain.handle('orb:toggle', () => {
     toggleOrbWindow();
   });
-  
+
   // Set orb position (for drag support) - debounced save
   let orbPositionSaveTimeout = null;
   ipcMain.handle('orb:position', (event, x, y) => {
@@ -14745,40 +15268,36 @@ function setupOrbIPC() {
       const posX = Math.round(x);
       const posY = Math.round(y);
       orbWindow.setPosition(posX, posY);
-      
+
       // Debounced save - only save after dragging stops for 500ms
       if (orbPositionSaveTimeout) {
         clearTimeout(orbPositionSaveTimeout);
       }
       orbPositionSaveTimeout = setTimeout(() => {
-        if (global.settingsManager && orbWindow && !orbWindow.isDestroyed()) {
-          // Get the actual position from Electron (may differ from what renderer sent)
-          const [actualX, actualY] = orbWindow.getPosition();
-          global.settingsManager.update({ voiceOrbPosition: { x: actualX, y: actualY } });
-          console.log(`[VoiceOrb] Position saved: ${actualX}, ${actualY}`);
-        }
+        // Delegate to saveOrbPosition which handles edge snap + per-display memory
+        saveOrbPosition();
       }, 500);
     }
   });
-  
+
   // Flip orb side within window (reposition so orb stays visually anchored)
   // Tracks which side the orb is on: 'right' (default) or 'left'
   let currentOrbSide = global.settingsManager?.get('voiceOrbSide') || 'right';
   ipcMain.handle('orb:flip-side', (event, side) => {
     if (!orbWindow || orbWindow.isDestroyed()) return;
-    
+
     if (side === currentOrbSide) return; // No change needed
-    
+
     const [winX, winY] = orbWindow.getPosition();
     const [winWidth] = orbWindow.getSize();
-    
+
     // The orb is 80px with 20px margin from the edge.
     // When flipping, the window needs to shift so the orb stays in the same screen position.
     // Offset = windowWidth - orbSize - (2 * margin) = 400 - 80 - 40 = 280
     const orbSize = 80;
     const orbMargin = 20;
-    const offset = winWidth - orbSize - (2 * orbMargin);
-    
+    const offset = winWidth - orbSize - 2 * orbMargin;
+
     let newX;
     if (side === 'left') {
       // Orb moving from bottom-right to bottom-left of window.
@@ -14789,77 +15308,121 @@ function setupOrbIPC() {
       // Window needs to shift LEFT so the orb (now at right edge) stays in place.
       newX = winX - offset;
     }
-    
+
     currentOrbSide = side;
     orbWindow.setPosition(Math.round(newX), winY);
-    
-    // Save side and position
+
+    // Save side and position (per-display map + legacy key + edge snap)
     if (global.settingsManager) {
-      global.settingsManager.update({
-        voiceOrbPosition: { x: Math.round(newX), y: winY },
-        voiceOrbSide: side
-      });
+      global.settingsManager.update({ voiceOrbSide: side });
+      saveOrbPosition(); // handles per-display map, edge snap, and backward compat
       console.log(`[VoiceOrb] Flipped to side: ${side}, new window X: ${newX}`);
     }
   });
-  
+
   // Handle orb click (could expand to panel in future)
   ipcMain.on('orb:clicked', () => {
     console.log('[VoiceOrb] Orb clicked');
     // Future: could show an expanded panel
   });
-  
+
+  // Get display info for the orb's current screen (multi-monitor awareness)
+  ipcMain.handle('orb:get-display', () => {
+    if (!orbWindow || orbWindow.isDestroyed()) {
+      const primary = screen.getPrimaryDisplay();
+      return {
+        x: primary.workArea.x,
+        y: primary.workArea.y,
+        width: primary.workArea.width,
+        height: primary.workArea.height,
+      };
+    }
+    const display = screenService.getDisplayForWindow(orbWindow);
+    return {
+      x: display.workArea.x,
+      y: display.workArea.y,
+      width: display.workArea.width,
+      height: display.workArea.height,
+    };
+  });
+
   // Relay voice input from Orb to Agent Composer
   ipcMain.handle('orb:relay-to-composer', (event, transcript) => {
     console.log('[VoiceOrb] Relaying to composer:', transcript.substring(0, 50));
     return relayVoiceToComposer(transcript);
   });
-  
+
   // Check if Agent Composer is in creation mode
   ipcMain.handle('orb:is-composer-active', () => {
     return global.agentCreationMode === true && claudeCodeWindow && !claudeCodeWindow.isDestroyed();
   });
-  
-  // Resize orb window for text chat
+
+  // Generic resize: renderer requests a specific size, anchored at the orb corner.
+  // anchor: 'bottom-right' (default) or 'bottom-left'
+  ipcMain.handle('orb:resize-window', (event, { width, height, anchor }) => {
+    if (!orbWindow || orbWindow.isDestroyed()) return;
+    const current = orbWindow.getBounds();
+    if (current.width === width && current.height === height) return;
+    let newX, newY;
+    if (anchor === 'bottom-left') {
+      newX = current.x;
+      newY = current.y + current.height - height;
+    } else {
+      // bottom-right (default)
+      newX = current.x + current.width - width;
+      newY = current.y + current.height - height;
+    }
+    orbWindow.setBounds({ x: newX, y: newY, width, height }, true);
+    console.log(`[VoiceOrb] Resized to ${width}x${height} (anchor: ${anchor || 'bottom-right'})`);
+    return { width, height };
+  });
+
+  // Resize orb window for text chat (calls generic resize)
   ipcMain.handle('orb:expand-for-chat', () => {
     if (orbWindow && !orbWindow.isDestroyed()) {
-      const currentBounds = orbWindow.getBounds();
+      const side = global.settingsManager?.get('voiceOrbSide') || 'right';
+      const anchor = side === 'left' ? 'bottom-left' : 'bottom-right';
+      const current = orbWindow.getBounds();
       const newWidth = 380;
       const newHeight = 520;
-      // Keep bottom-right corner anchored
-      const newX = currentBounds.x + currentBounds.width - newWidth;
-      const newY = currentBounds.y + currentBounds.height - newHeight;
+      let newX, newY;
+      if (anchor === 'bottom-left') {
+        newX = current.x;
+        newY = current.y + current.height - newHeight;
+      } else {
+        newX = current.x + current.width - newWidth;
+        newY = current.y + current.height - newHeight;
+      }
       orbWindow.setBounds({ x: newX, y: newY, width: newWidth, height: newHeight }, true);
       console.log('[VoiceOrb] Expanded for text chat:', newWidth, 'x', newHeight);
       return { width: newWidth, height: newHeight };
     }
   });
-  
+
   ipcMain.handle('orb:collapse-from-chat', () => {
     if (orbWindow && !orbWindow.isDestroyed()) {
-      const currentBounds = orbWindow.getBounds();
-      const newWidth = 350;
-      const newHeight = 250;
-      // Keep bottom-right corner anchored
-      const newX = currentBounds.x + currentBounds.width - newWidth;
-      const newY = currentBounds.y + currentBounds.height - newHeight;
+      const side = global.settingsManager?.get('voiceOrbSide') || 'right';
+      const anchor = side === 'left' ? 'bottom-left' : 'bottom-right';
+      const current = orbWindow.getBounds();
+      const newWidth = screenService.ORB_COLLAPSED_WIDTH;
+      const newHeight = screenService.ORB_COLLAPSED_HEIGHT;
+      let newX, newY;
+      if (anchor === 'bottom-left') {
+        newX = current.x;
+        newY = current.y + current.height - newHeight;
+      } else {
+        newX = current.x + current.width - newWidth;
+        newY = current.y + current.height - newHeight;
+      }
       orbWindow.setBounds({ x: newX, y: newY, width: newWidth, height: newHeight }, true);
       console.log('[VoiceOrb] Collapsed from text chat');
       return { width: newWidth, height: newHeight };
     }
   });
-  
-  // Toggle click-through for transparent areas (used by orb renderer mouseenter/mouseleave)
-  ipcMain.handle('orb:set-click-through', (event, clickThrough) => {
-    if (orbWindow && !orbWindow.isDestroyed()) {
-      if (clickThrough) {
-        orbWindow.setIgnoreMouseEvents(true, { forward: true });
-      } else {
-        orbWindow.setIgnoreMouseEvents(false);
-      }
-    }
-  });
-  
+
+  // Click-through IPC handler - kept as no-op for backward compatibility.
+  ipcMain.handle('orb:set-click-through', () => {});
+
   console.log('[VoiceOrb] IPC handlers registered');
 }
 
@@ -14871,85 +15434,99 @@ function createOrbWindow() {
     orbWindow.show();
     return orbWindow;
   }
-  
-  const display = screen.getPrimaryDisplay();
-  const { width: screenWidth, height: screenHeight } = display.workAreaSize;
-  
-  // Window dimensions - large enough for text chat panel above orb
-  const windowWidth = 400;
-  const windowHeight = 550;
-  
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+
+  // Window dimensions - collapsed to just the orb to avoid blocking clicks.
+  // Expands dynamically when tooltip or chat panel needs to be visible.
+  const windowWidth = screenService.ORB_COLLAPSED_WIDTH; // 130
+  const windowHeight = screenService.ORB_COLLAPSED_HEIGHT; // 130
+
   // Try to restore saved position and side, otherwise default to bottom-right
   let x, y;
-  const savedPosition = global.settingsManager?.get('voiceOrbPosition');
-  const savedWindowSize = global.settingsManager?.get('voiceOrbWindowSize');
   const savedSide = global.settingsManager?.get('voiceOrbSide') || 'right';
-  
+  const savedWindowSize = global.settingsManager?.get('voiceOrbWindowSize');
+
+  // Per-display position memory: try new map first, migrate old format if needed
+  let positionsMap = global.settingsManager?.get('voiceOrbPositions');
+  const oldSavedPosition = global.settingsManager?.get('voiceOrbPosition');
+
+  // Migrate from old flat voiceOrbPosition to new per-display map (one-time)
+  if (!positionsMap && oldSavedPosition && typeof oldSavedPosition.x === 'number') {
+    positionsMap = screenService.migrateOldPosition(oldSavedPosition, savedSide);
+    global.settingsManager?.update({ voiceOrbPositions: positionsMap });
+    console.log('[VoiceOrb] Migrated old position to per-display map:', JSON.stringify(positionsMap));
+  }
+
   // Check if window size changed (reset position if so)
   const currentWindowSize = { width: windowWidth, height: windowHeight };
-  
-  // Debug position restore
-  console.log('[VoiceOrb] Saved position:', JSON.stringify(savedPosition));
-  
-  // Only reset if window size actually changed, not on first run
-  const windowSizeChanged = savedWindowSize && (
-    savedWindowSize.width !== windowWidth || 
-    savedWindowSize.height !== windowHeight
-  );
-  
+  const windowSizeChanged =
+    savedWindowSize && (savedWindowSize.width !== windowWidth || savedWindowSize.height !== windowHeight);
+
   // Save window size if not saved yet (first run)
   if (!savedWindowSize) {
-    global.settingsManager?.update({
-      voiceOrbWindowSize: currentWindowSize
-    });
+    global.settingsManager?.update({ voiceOrbWindowSize: currentWindowSize });
     console.log('[VoiceOrb] First run, saved window size');
   } else if (windowSizeChanged) {
-    // Window size changed, reset position
+    // Window size changed, reset all saved positions
     global.settingsManager?.update({
       voiceOrbWindowSize: currentWindowSize,
-      voiceOrbPosition: null
+      voiceOrbPosition: null,
+      voiceOrbPositions: null,
     });
-    console.log('[VoiceOrb] Window size changed, resetting position');
+    positionsMap = null;
+    console.log('[VoiceOrb] Window size changed, resetting positions');
   }
-  
-  if (savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number' && !windowSizeChanged) {
-    // Validate position is still on screen
-    // Orb is 80px with 20px margin, positioned at bottom of window (height 550)
-    // Horizontal position depends on side:
-    //   'right': orb at right edge -> left edge at windowX + (400 - 20 - 80) = windowX + 300
-    //   'left':  orb at left edge  -> left edge at windowX + 20
-    const orbMargin = 20;
-    const orbSize = 80;
-    const orbLeftEdge = savedSide === 'left'
-      ? savedPosition.x + orbMargin
-      : savedPosition.x + (windowWidth - orbMargin - orbSize);
-    const orbRightEdge = orbLeftEdge + orbSize;
-    const orbTopEdge = savedPosition.y + (windowHeight - orbMargin - orbSize);
-    const orbBottomEdge = orbTopEdge + orbSize;
-    
-    const orbVisible = orbRightEdge > 50 && orbLeftEdge < screenWidth - 50 &&
-                       orbBottomEdge > 50 && orbTopEdge < screenHeight - 50;
-    
-    if (orbVisible) {
-      x = savedPosition.x;
-      y = savedPosition.y;
-      console.log(`[VoiceOrb] Restoring saved position: ${x}, ${y}`);
-    } else {
-      // Position off screen, use default
-      x = screenWidth - windowWidth - 20;
-      y = screenHeight - windowHeight - 20;
-      console.log(`[VoiceOrb] Saved position off screen (orb edges: L=${orbLeftEdge}, R=${orbRightEdge}, T=${orbTopEdge}, B=${orbBottomEdge}), using default`);
+
+  // Restore position: try per-display memory, then validate against correct display
+  let restored = false;
+  if (positionsMap && !windowSizeChanged) {
+    // Try each connected display -- prefer the one that has a saved position
+    const allDisplays = screenService.getAllDisplays();
+    for (const disp of allDisplays) {
+      const saved = screenService.getSavedPositionForDisplay(positionsMap, disp);
+      if (saved) {
+        // Validate the saved position is still visible on this display
+        const clamped = screenService.clampToDisplay(
+          { x: saved.x, y: saved.y, width: windowWidth, height: windowHeight },
+          disp
+        );
+        x = clamped.x;
+        y = clamped.y;
+        restored = true;
+        console.log(`[VoiceOrb] Restoring per-display position for ${screenService.displayKey(disp)}: ${x}, ${y}`);
+        break;
+      }
     }
-  } else {
-    // No saved position or window size changed, use default bottom-right
+  }
+
+  // Fallback to old flat position (if migration didn't happen yet or map has no match)
+  if (!restored && oldSavedPosition && typeof oldSavedPosition.x === 'number' && !windowSizeChanged) {
+    const targetDisplay = screenService.getDisplayForPoint(oldSavedPosition);
+    const clamped = screenService.clampToDisplay(
+      { x: oldSavedPosition.x, y: oldSavedPosition.y, width: windowWidth, height: windowHeight },
+      targetDisplay
+    );
+    x = clamped.x;
+    y = clamped.y;
+    restored = true;
+    console.log(
+      `[VoiceOrb] Restoring old saved position (clamped to ${screenService.displayKey(targetDisplay)}): ${x}, ${y}`
+    );
+  }
+
+  // Final fallback: bottom-right of primary display
+  if (!restored) {
     x = screenWidth - windowWidth - 20;
     y = screenHeight - windowHeight - 20;
+    console.log('[VoiceOrb] Using default bottom-right position');
   }
-  
+
   // Create window at default position first (Electron clamps negative values in constructor)
   const defaultX = screenWidth - windowWidth - 20;
   const defaultY = screenHeight - windowHeight - 20;
-  
+
   orbWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -14966,10 +15543,10 @@ function createOrbWindow() {
       preload: path.join(__dirname, 'preload-orb.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false  // Required for preload-hud-api.js require()
+      sandbox: false, // Required for preload-hud-api.js require()
     },
   });
-  
+
   // Attach structured log forwarding
   browserWindow.attachLogForwarder(orbWindow, 'voice');
 
@@ -14978,25 +15555,27 @@ function createOrbWindow() {
     orbWindow.setPosition(x, y);
     console.log(`[VoiceOrb] Moved to saved position: ${x}, ${y}`);
   }
-  
+
   // Set window level to float above everything
   orbWindow.setAlwaysOnTop(true, 'floating');
   orbWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  
+
   // Restore dock/menu visibility on macOS (setVisibleOnAllWorkspaces can hide it)
   if (process.platform === 'darwin' && app.dock) {
-    app.dock.show().catch(() => {});
+    app.dock
+      .show()
+      .catch((err) => log.warn('main', 'dock show after orb setVisibleOnAllWorkspaces', { error: err.message }));
   }
-  
-  // Make transparent areas click-through at the OS level.
-  // The { forward: true } option tracks mouse position so CSS :hover and
-  // mouseenter/mouseleave still fire on visible elements. The orb renderer
-  // toggles this off when the cursor enters interactive elements.
-  orbWindow.setIgnoreMouseEvents(true, { forward: true });
-  
+
+  // Click-through: native transparent-pixel and setIgnoreMouseEvents both
+  // fail on macOS with setAlwaysOnTop('floating') + setVisibleOnAllWorkspaces.
+  // Instead, the window is created at a small collapsed size (just the orb)
+  // and only expands when tooltip/chat content needs to be visible.
+
   // Load the orb UI
   orbWindow.loadFile(path.join(__dirname, 'orb.html'));
-  
+  windowRegistry.register('orb', orbWindow);
+
   // After the page loads, send the initial orb side so the renderer can
   // apply the correct orb-container class (bottom-left vs bottom-right)
   orbWindow.webContents.once('did-finish-load', () => {
@@ -15005,22 +15584,68 @@ function createOrbWindow() {
       console.log(`[VoiceOrb] Sent initial side to renderer: ${savedSide}`);
     }
   });
-  
+
   // Save position before closing
   orbWindow.on('close', () => {
     saveOrbPosition();
   });
-  
+
   // Handle window close
   orbWindow.on('closed', () => {
     orbWindow = null;
     global.orbWindow = null;
   });
-  
+
   // Make orbWindow globally accessible for testing and external access
   global.orbWindow = orbWindow;
-  
+
   console.log('[VoiceOrb] Orb window created');
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location: 'main.js:createOrbWindow',
+      message: 'Orb window created - config',
+      data: { bounds: orbWindow.getBounds(), transparent: true, hasShadow: false, alwaysOnTop: true },
+      timestamp: Date.now(),
+      hypothesisId: 'H3',
+    }),
+  }).catch((_ignored) => {
+    /* optional agent log ingest, service may not be running */
+  });
+  // #endregion
+
+  // #region agent log
+  setInterval(() => {
+    const d = {};
+    if (orbWindow && !orbWindow.isDestroyed()) {
+      d.orbVisible = orbWindow.isVisible();
+      d.orbBounds = orbWindow.getBounds();
+    }
+    if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+      d.hudVisible = commandHUDWindow.isVisible();
+      d.hudBounds = commandHUDWindow.getBounds();
+    } else {
+      d.hudExists = false;
+    }
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location: 'main.js:periodic',
+        message: 'Window visibility poll',
+        data: d,
+        timestamp: Date.now(),
+        hypothesisId: 'H1,H2,H3',
+      }),
+    }).catch((_ignored) => {
+      /* optional agent log ingest, service may not be running */
+    });
+  }, 5000);
+  // #endregion
+
   return orbWindow;
 }
 
@@ -15070,13 +15695,313 @@ function hideOrbWindow() {
 function saveOrbPosition() {
   if (orbWindow && !orbWindow.isDestroyed() && global.settingsManager) {
     try {
-      const [x, y] = orbWindow.getPosition();
+      const [rawX, rawY] = orbWindow.getPosition();
+      const [winW, winH] = orbWindow.getSize();
       const side = global.settingsManager.get('voiceOrbSide') || 'right';
-      global.settingsManager.update({ voiceOrbPosition: { x, y }, voiceOrbSide: side });
-      console.log(`[VoiceOrb] Position saved: ${x}, ${y} (side: ${side})`);
+
+      // Determine which display the orb is on
+      const display = screenService.getDisplayForWindow(orbWindow);
+
+      // Apply edge magnetism -- snap to edges/corners if close
+      const { x, y, snapped } = screenService.snapToEdge({ x: rawX, y: rawY, width: winW, height: winH }, display);
+
+      // If snapped, move the window to the snapped position
+      if (snapped) {
+        orbWindow.setPosition(x, y);
+        console.log(`[VoiceOrb] Edge-snapped from (${rawX},${rawY}) to (${x},${y})`);
+      }
+
+      // Save to per-display position map
+      const positionsMap = global.settingsManager.get('voiceOrbPositions') || {};
+      const updatedMap = screenService.setSavedPositionForDisplay(positionsMap, display, { x, y, side });
+
+      global.settingsManager.update({
+        voiceOrbPosition: { x, y }, // Keep old key for backward compat
+        voiceOrbPositions: updatedMap, // New per-display map
+        voiceOrbSide: side,
+      });
+      console.log(
+        `[VoiceOrb] Position saved: ${x}, ${y} (side: ${side}, display: ${screenService.displayKey(display)})`
+      );
     } catch (error) {
       console.error('[VoiceOrb] Error saving position:', error);
     }
+  }
+}
+
+// ==================== ORB CONTROL API (for external apps) ====================
+
+// Track which webContents IDs have requested the orb to be hidden.
+// When ALL hiders are gone (tab closed / navigated away / heartbeat timeout),
+// the orb auto-restores.
+const _orbHiders = new Set();
+
+// Per-hider heartbeat timeouts: webContents ID -> timeout handle.
+const _orbHiderTimeouts = new Map();
+
+// Per-hider lifecycle cleanup functions: webContents ID -> cleanup()
+// Ensures both destroyed + did-navigate listeners are removed together.
+const _orbHiderCleanups = new Map();
+
+const ORB_HEARTBEAT_TIMEOUT_MS = 10000; // 10 seconds
+const ORB_MAX_HIDERS = 50; // Cap to prevent unbounded growth
+const ORB_HEARTBEAT_MIN_INTERVAL = 1000; // Rate-limit: ignore pings faster than 1/s
+const _orbLastHeartbeat = new Map(); // webContents ID -> last ping timestamp
+
+/**
+ * Setup IPC handlers for the Orb Control API.
+ * These allow web apps loaded in webviews to control the desktop Voice Orb
+ * (hide, show, toggle, get status) and listen for visibility changes.
+ *
+ * Lifecycle safety (belt and suspenders):
+ *   1. Primary: webContents lifecycle events (destroyed, did-navigate)
+ *   2. Safety net: heartbeat timeout (preload pings every 5s, expires after 10s)
+ * Both are transparent to the app developer — just call hide() and show().
+ *
+ * HUD item operations (addHUDItem, removeHUDItem, etc.) reuse the existing
+ * hud-api:* IPC channels with toolId='external-app', so no new handlers needed.
+ */
+function setupOrbControlIPC() {
+  // Hide the orb (tracks the requesting webContents for auto-restore)
+  ipcMain.handle('orb-control:hide', (event) => {
+    try {
+      if (!event.sender || event.sender.isDestroyed()) {
+        return { success: false, error: 'sender destroyed' };
+      }
+      _trackOrbHider(event.sender);
+      hideOrbWindow();
+      _broadcastOrbVisibility(false);
+      return { success: true };
+    } catch (e) {
+      console.error('[OrbControl] hide error:', e.message);
+      return { success: false, error: e.message };
+    }
+  });
+
+  // Show the orb (releases the requesting webContents' hold)
+  ipcMain.handle('orb-control:show', (event) => {
+    try {
+      if (event.sender && !event.sender.isDestroyed()) {
+        _releaseOrbHider(event.sender.id);
+      }
+      showOrbWindow();
+      _broadcastOrbVisibility(true);
+      return { success: true };
+    } catch (e) {
+      console.error('[OrbControl] show error:', e.message);
+      return { success: false, error: e.message };
+    }
+  });
+
+  // Toggle the orb
+  ipcMain.handle('orb-control:toggle', (event) => {
+    try {
+      if (!event.sender || event.sender.isDestroyed()) {
+        return { success: false, error: 'sender destroyed' };
+      }
+      toggleOrbWindow();
+      const isNowVisible = !!(orbWindow && !orbWindow.isDestroyed() && orbWindow.isVisible());
+
+      if (!isNowVisible) {
+        _trackOrbHider(event.sender);
+      } else {
+        _releaseOrbHider(event.sender.id);
+      }
+
+      _broadcastOrbVisibility(isNowVisible);
+      return { success: true, visible: isNowVisible };
+    } catch (e) {
+      console.error('[OrbControl] toggle error:', e.message);
+      return { success: false, error: e.message };
+    }
+  });
+
+  // Check if the orb is visible
+  ipcMain.handle('orb-control:is-visible', () => {
+    return !!(orbWindow && !orbWindow.isDestroyed() && orbWindow.isVisible());
+  });
+
+  // Get full orb status (visibility + speech connection)
+  ipcMain.handle('orb-control:get-status', async () => {
+    const visible = !!(orbWindow && !orbWindow.isDestroyed() && orbWindow.isVisible());
+
+    let connected = false;
+    let listening = false;
+    try {
+      const realtimeSpeech = require('./realtime-speech');
+      if (realtimeSpeech && typeof realtimeSpeech.isConnected === 'function') {
+        connected = realtimeSpeech.isConnected();
+      }
+      listening = connected;
+    } catch (_e) {
+      // realtime-speech not available
+    }
+
+    return { visible, listening, connected };
+  });
+
+  // Heartbeat ping from preload (fire-and-forget, rate-limited)
+  ipcMain.on('orb-control:heartbeat', (event) => {
+    try {
+      if (!event.sender || event.sender.isDestroyed()) return;
+      const id = event.sender.id;
+      if (!_orbHiders.has(id)) return;
+
+      // Rate-limit: ignore pings arriving faster than 1 per second
+      const now = Date.now();
+      const last = _orbLastHeartbeat.get(id) || 0;
+      if (now - last < ORB_HEARTBEAT_MIN_INTERVAL) return;
+      _orbLastHeartbeat.set(id, now);
+
+      _resetHiderTimeout(id);
+    } catch (_e) {
+      // Heartbeat is best-effort — never throw
+    }
+  });
+
+  console.log('[OrbControl] IPC handlers registered (with heartbeat safety net)');
+}
+
+/**
+ * Start tracking a webContents that requested the orb to be hidden.
+ * Attaches two layers of safety:
+ *   1. Lifecycle listeners (destroyed, did-navigate) for instant response
+ *   2. Heartbeat timeout for crash/freeze resilience
+ * @param {Electron.WebContents} sender - The webContents that sent the IPC
+ */
+function _trackOrbHider(sender) {
+  const id = sender.id;
+
+  if (_orbHiders.has(id)) {
+    // Already tracking — just reset the heartbeat timeout
+    _resetHiderTimeout(id);
+    return;
+  }
+
+  // Cap max hiders to prevent unbounded growth from buggy apps
+  if (_orbHiders.size >= ORB_MAX_HIDERS) {
+    console.warn(`[OrbControl] Max hiders (${ORB_MAX_HIDERS}) reached, rejecting webContents ${id}`);
+    return;
+  }
+
+  _orbHiders.add(id);
+  console.log(`[OrbControl] Orb hidden by webContents ${id} (${_orbHiders.size} hider(s))`);
+
+  // Layer 1: Lifecycle events (instant response)
+  // Both listeners clean up each other to prevent leaks.
+
+  const cleanup = () => {
+    try {
+      sender.removeListener('destroyed', onDestroyed);
+    } catch (_ignored) {
+      /* listener already removed */
+    }
+    try {
+      sender.removeListener('did-navigate', onNavigate);
+    } catch (_ignored) {
+      /* listener already removed */
+    }
+    _orbHiderCleanups.delete(id);
+  };
+
+  const onDestroyed = () => {
+    console.log(`[OrbControl] webContents ${id} destroyed, releasing orb hold`);
+    cleanup();
+    _releaseOrbHider(id);
+    _autoRestoreOrb();
+  };
+
+  const onNavigate = () => {
+    console.log(`[OrbControl] webContents ${id} navigated, releasing orb hold`);
+    cleanup();
+    _releaseOrbHider(id);
+    _autoRestoreOrb();
+  };
+
+  sender.once('destroyed', onDestroyed);
+  sender.once('did-navigate', onNavigate);
+  _orbHiderCleanups.set(id, cleanup);
+
+  // Layer 2: Heartbeat timeout (safety net for crash/freeze)
+  _resetHiderTimeout(id);
+}
+
+/**
+ * Start or reset the heartbeat timeout for a hider.
+ * @param {number} id - webContents ID
+ */
+function _resetHiderTimeout(id) {
+  clearTimeout(_orbHiderTimeouts.get(id));
+  _orbHiderTimeouts.set(
+    id,
+    setTimeout(() => {
+      if (_orbHiders.has(id)) {
+        console.log(`[OrbControl] Heartbeat timeout for webContents ${id}, releasing orb hold`);
+        _releaseOrbHider(id);
+        _autoRestoreOrb();
+      }
+    }, ORB_HEARTBEAT_TIMEOUT_MS)
+  );
+}
+
+/**
+ * Release a webContents' hold on the orb.
+ * Clears heartbeat timeout, rate-limit state, and lifecycle listeners.
+ * @param {number} id - webContents ID to release
+ */
+function _releaseOrbHider(id) {
+  _orbHiders.delete(id);
+  clearTimeout(_orbHiderTimeouts.get(id));
+  _orbHiderTimeouts.delete(id);
+  _orbLastHeartbeat.delete(id);
+  // Run lifecycle cleanup if it hasn't fired yet
+  const cleanup = _orbHiderCleanups.get(id);
+  if (cleanup) {
+    try {
+      cleanup();
+    } catch (_ignored) {
+      /* cleanup already ran */
+    }
+  }
+}
+
+/**
+ * If no webContents are keeping the orb hidden, auto-restore it.
+ */
+function _autoRestoreOrb() {
+  if (_orbHiders.size === 0) {
+    console.log('[OrbControl] All hiders gone, auto-restoring orb');
+    try {
+      showOrbWindow();
+      _broadcastOrbVisibility(true);
+    } catch (e) {
+      console.error('[OrbControl] Auto-restore error:', e.message);
+    }
+  } else {
+    console.log(`[OrbControl] ${_orbHiders.size} hider(s) remaining, orb stays hidden`);
+  }
+}
+
+/**
+ * Broadcast orb visibility change to all renderer windows.
+ * Skips the orb and command HUD windows (they manage their own state).
+ * @param {boolean} visible - Whether the orb is now visible
+ */
+function _broadcastOrbVisibility(visible) {
+  try {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (win.isDestroyed()) continue;
+      // Skip orb and HUD windows — they don't need external visibility events
+      if (win === orbWindow || win === commandHUDWindow) continue;
+      try {
+        win.webContents.send('orb-control:visibility-change', { visible });
+      } catch (_e) {
+        // Window destroyed between check and send
+      }
+    }
+  } catch (_e) {
+    console.error('[OrbControl] Broadcast error:', _e.message);
   }
 }
 
@@ -15089,36 +16014,26 @@ function createCommandHUDWindow() {
   if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
     return commandHUDWindow;
   }
-  
-  const display = screen.getPrimaryDisplay();
-  const { width: screenWidth, height: screenHeight } = display.workAreaSize;
-  
+
   // HUD size - tall enough to show all content without scrollbars
   const windowWidth = 340;
   const windowHeight = 420;
-  
-  // Position: above the orb, centered
-  const orbWidth = 80;
-  const orbHeight = 80;
-  const spacing = 20;
-  
-  // Default position (bottom right, above where orb typically is)
-  let x = screenWidth - windowWidth - 40;
-  let y = screenHeight - windowHeight - orbHeight - spacing - 30;
-  
-  // If orb exists, position directly above it
+
+  // Position HUD relative to actual visible orb (accounts for left/right side and multi-monitor)
+  let x, y;
   if (orbWindow && !orbWindow.isDestroyed()) {
-    const [orbX, orbY] = orbWindow.getPosition();
-    
-    // Center HUD above orb
-    x = orbX + (orbWidth / 2) - (windowWidth / 2);
-    y = orbY - windowHeight - spacing;
-    
-    // Make sure it stays on screen
-    x = Math.max(10, Math.min(x, screenWidth - windowWidth - 10));
-    y = Math.max(10, Math.min(y, screenHeight - windowHeight - 10));
+    const orbSide = global.settingsManager?.get('voiceOrbSide') || 'right';
+    const pos = screenService.computeHUDPosition(orbWindow, orbSide, windowWidth, windowHeight);
+    x = pos.x;
+    y = pos.y;
+  } else {
+    // Fallback: bottom-right of primary display
+    const display = screen.getPrimaryDisplay();
+    const { width: screenWidth, height: screenHeight } = display.workAreaSize;
+    x = screenWidth - windowWidth - 40;
+    y = screenHeight - windowHeight - 80 - 20 - 30; // approximate orb height + spacing
   }
-  
+
   commandHUDWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -15135,30 +16050,33 @@ function createCommandHUDWindow() {
       preload: path.join(__dirname, 'preload-command-hud.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
-  
+
   // Attach structured log forwarding
   browserWindow.attachLogForwarder(commandHUDWindow, 'app');
 
   // Set window level to float above everything
   commandHUDWindow.setAlwaysOnTop(true, 'floating');
   commandHUDWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  
+
   // Restore dock/menu visibility on macOS (setVisibleOnAllWorkspaces can hide it)
   if (process.platform === 'darwin' && app.dock) {
-    app.dock.show().catch(() => {});
+    app.dock
+      .show()
+      .catch((err) => log.warn('main', 'dock show after HUD setVisibleOnAllWorkspaces', { error: err.message }));
   }
-  
+
   // Load the HUD UI
   commandHUDWindow.loadFile(path.join(__dirname, 'command-hud.html'));
-  
+  windowRegistry.register('command-hud', commandHUDWindow);
+
   // Handle window close
   commandHUDWindow.on('closed', () => {
     commandHUDWindow = null;
   });
-  
+
   console.log('[CommandHUD] HUD window created');
   return commandHUDWindow;
 }
@@ -15170,52 +16088,60 @@ function showCommandHUD(task) {
   if (!commandHUDWindow || commandHUDWindow.isDestroyed()) {
     createCommandHUDWindow();
   }
-  
-  // Reposition near orb but not overlapping
+
+  // Reposition HUD relative to actual visible orb (accounts for left/right side and multi-monitor)
   if (orbWindow && !orbWindow.isDestroyed()) {
-    const [orbX, orbY] = orbWindow.getPosition();
-    const display = screen.getPrimaryDisplay();
-    const { width: screenWidth, height: screenHeight } = display.workAreaSize;
-    
-    // HUD is 340x420, orb is 80x80
-    const hudWidth = 340;
-    const hudHeight = 420;
-    const orbWidth = 80;
-    const orbHeight = 80;
-    const spacing = 20; // Gap between HUD and orb
-    
-    // Position HUD directly above the orb, centered horizontally
-    let x = orbX + (orbWidth / 2) - (hudWidth / 2);
-    let y = orbY - hudHeight - spacing;
-    
-    // Make sure it stays on screen
-    x = Math.max(10, Math.min(x, screenWidth - hudWidth - 10));
-    y = Math.max(10, Math.min(y, screenHeight - hudHeight - 10));
-    
-    // If HUD would overlap orb vertically (not enough room above), check if there's room below
-    if (y + hudHeight + spacing > orbY) {
-      // Try below the orb
-      y = orbY + orbHeight + spacing;
-      if (y + hudHeight > screenHeight - 10) {
-        // Not enough room below either, just put it as high as possible
-        y = 10;
-      }
-    }
-    
-    commandHUDWindow.setPosition(Math.round(x), Math.round(y));
+    const orbSide = global.settingsManager?.get('voiceOrbSide') || 'right';
+    const { x, y } = screenService.computeHUDPosition(orbWindow, orbSide, 340, 420);
+    commandHUDWindow.setPosition(x, y);
   }
-  
+
   // Send task to HUD
   if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
     commandHUDWindow.webContents.send('hud:task', task);
     commandHUDWindow.show();
   }
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location: 'main.js:showCommandHUD',
+      message: 'HUD shown (OS-level)',
+      data: {
+        task: task?.action || task?.transcript?.substring(0, 50),
+        hudVisible: commandHUDWindow?.isVisible?.(),
+        hudBounds: commandHUDWindow?.getBounds?.(),
+      },
+      timestamp: Date.now(),
+      hypothesisId: 'H1',
+    }),
+  }).catch((_ignored) => {
+    /* optional agent log ingest, service may not be running */
+  });
+  // #endregion
 }
 
 /**
  * Hide the Command HUD
  */
 function hideCommandHUD() {
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location: 'main.js:hideCommandHUD',
+      message: 'HUD hidden (OS-level)',
+      data: { wasVisible: commandHUDWindow?.isVisible?.() },
+      timestamp: Date.now(),
+      hypothesisId: 'H1',
+    }),
+  }).catch((_ignored) => {
+    /* optional agent log ingest, service may not be running */
+  });
+  // #endregion
   if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
     commandHUDWindow.hide();
   }
@@ -15247,29 +16173,29 @@ function setupCommandHUDIPC() {
   ipcMain.handle('command-hud:show', (event, task) => {
     showCommandHUD(task);
   });
-  
+
   // Hide HUD
   ipcMain.handle('command-hud:hide', () => {
     hideCommandHUD();
   });
-  
+
   // Send task update
   ipcMain.handle('command-hud:task', (event, task) => {
     if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
       commandHUDWindow.webContents.send('hud:task', task);
     }
   });
-  
+
   // Send result
   ipcMain.handle('command-hud:result', (event, result) => {
     sendCommandHUDResult(result);
   });
-  
+
   // Dismiss from HUD
   ipcMain.on('hud:dismiss', () => {
     hideCommandHUD();
   });
-  
+
   // Retry from HUD
   ipcMain.on('hud:retry', (event, task) => {
     console.log('[CommandHUD] Retry requested for task:', task?.action);
@@ -15281,36 +16207,39 @@ function setupCommandHUDIPC() {
       }
     }
   });
-  
+
   // Position update
   ipcMain.handle('hud:position', (event, x, y) => {
     if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
       commandHUDWindow.setPosition(Math.round(x), Math.round(y));
     }
   });
-  
+
   // Resize HUD window (grows upward to keep bottom edge anchored)
   ipcMain.handle('command-hud:resize', (event, width, height) => {
     if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
       const currentBounds = commandHUDWindow.getBounds();
       const dy = currentBounds.height - height;
-      commandHUDWindow.setBounds({
-        x: currentBounds.x,
-        y: currentBounds.y + dy,
-        width,
-        height,
-      }, true);
+      commandHUDWindow.setBounds(
+        {
+          x: currentBounds.x,
+          y: currentBounds.y + dy,
+          width,
+          height,
+        },
+        true
+      );
     }
   });
-  
+
   // ==================== CONTEXT MENU ====================
-  
+
   // Show context menu on right-click
   ipcMain.on('hud:show-context-menu', async () => {
     if (!commandHUDWindow || commandHUDWindow.isDestroyed()) return;
-    
+
     const { Menu } = require('electron');
-    
+
     // Get available agents
     let agents = [];
     try {
@@ -15320,44 +16249,45 @@ function setupCommandHUDIPC() {
     } catch (e) {
       console.log('[CommandHUD] Could not load agents for context menu:', e.message);
     }
-    
+
     // Build agents submenu
-    const agentsSubmenu = agents.length > 0 
-      ? agents.map(agent => ({
-          label: agent.type === 'gsx' ? `[GSX] ${agent.name}` : agent.name,
-          click: () => {
-            commandHUDWindow.webContents.send('hud:action:trigger-agent', agent);
-          }
-        }))
-      : [{ label: 'No agents configured', enabled: false }];
-    
+    const agentsSubmenu =
+      agents.length > 0
+        ? agents.map((agent) => ({
+            label: agent.type === 'gsx' ? `[GSX] ${agent.name}` : agent.name,
+            click: () => {
+              commandHUDWindow.webContents.send('hud:action:trigger-agent', agent);
+            },
+          }))
+        : [{ label: 'No agents configured', enabled: false }];
+
     // Add "Manage Agents" at the end
     agentsSubmenu.push({ type: 'separator' });
     agentsSubmenu.push({
       label: 'Manage Agents...',
       click: () => {
         createAgentManagerWindow();
-      }
+      },
     });
-    
+
     const contextMenu = Menu.buildFromTemplate([
       {
         label: 'Switch to Text Input',
         click: () => {
           commandHUDWindow.webContents.send('hud:action:text-input');
-        }
+        },
       },
       { type: 'separator' },
       {
         label: 'Trigger Agent',
-        submenu: agentsSubmenu
+        submenu: agentsSubmenu,
       },
       { type: 'separator' },
       {
         label: 'Manage Agents...',
         click: () => {
           createAgentManagerWindow();
-        }
+        },
       },
       {
         label: 'Settings...',
@@ -15367,34 +16297,34 @@ function setupCommandHUDIPC() {
             openSettingsWindow();
           } else {
             // Fallback: send IPC to open settings
-            const mainWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed());
+            const mainWindow = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
             if (mainWindow) {
               mainWindow.webContents.send('menu-action', { action: 'settings' });
             }
           }
-        }
+        },
       },
       { type: 'separator' },
       {
         label: 'Dismiss',
         click: () => {
           hideCommandHUD();
-        }
-      }
+        },
+      },
     ]);
-    
+
     contextMenu.popup({ window: commandHUDWindow });
   });
-  
+
   // Trigger specific agent with transcript
   ipcMain.handle('hud:trigger-agent', async (event, { agentId, transcript }) => {
     console.log('[CommandHUD] Triggering agent:', agentId, 'with:', transcript);
-    
+
     try {
       // Submit with agent hint so exchange routes directly
       const { getExchange } = require('./src/voice-task-sdk/exchange-bridge');
       const exchange = getExchange();
-      
+
       if (exchange) {
         const result = await exchange.submit({
           content: transcript,
@@ -15405,14 +16335,14 @@ function setupCommandHUDIPC() {
         });
         return { success: true, taskId: result.taskId };
       }
-      
+
       return { success: false, error: 'Exchange not available' };
     } catch (error) {
       console.error('[CommandHUD] Trigger agent error:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   console.log('[CommandHUD] IPC handlers registered');
 }
 
@@ -15424,47 +16354,46 @@ global.resetCommandHUD = resetCommandHUD;
 
 // ==================== VOICE TTS (ElevenLabs) ====================
 
-let voiceTTSAudio = null;
+let _voiceTTSAudio = null;
 
 function setupVoiceTTS() {
   console.log('[VoiceTTS] Setting up voice TTS handlers...');
-  
+
   // Speak text using ElevenLabs TTS
   ipcMain.handle('voice:speak', async (event, text, voice = 'Rachel') => {
     try {
       // Import ElevenLabsService dynamically
       const { ElevenLabsService } = await import('./src/video/audio/ElevenLabsService.js');
       const elevenLabs = new ElevenLabsService();
-      
+
       // Check if API key is configured
       const apiKey = elevenLabs.getApiKey();
       if (!apiKey) {
         console.warn('[VoiceTTS] ElevenLabs API key not configured');
         return null;
       }
-      
+
       // Generate audio
       console.log('[VoiceTTS] Generating speech:', text.substring(0, 50) + '...');
       const audioPath = await elevenLabs.generateAudio(text, voice, {
         projectId: 'voice-mode',
-        operation: 'tts'
+        operation: 'tts',
       });
-      
+
       console.log('[VoiceTTS] Audio generated:', audioPath);
       return audioPath;
-      
     } catch (error) {
       console.error('[VoiceTTS] Error generating speech:', error);
       return null;
     }
   });
-  
+
   // Stop TTS playback (handled client-side, but we can track state)
   ipcMain.handle('voice:stop', async () => {
     console.log('[VoiceTTS] Stop requested');
     return true;
   });
-  
+
   // Check if TTS is available
   ipcMain.handle('voice:is-available', async () => {
     try {
@@ -15476,7 +16405,7 @@ function setupVoiceTTS() {
       return { available: false, error: e.message };
     }
   });
-  
+
   // List available voices
   ipcMain.handle('voice:list-voices', async () => {
     try {
@@ -15488,7 +16417,7 @@ function setupVoiceTTS() {
       return { success: false, error: e.message };
     }
   });
-  
+
   console.log('[VoiceTTS] Voice TTS handlers registered');
 }
 
@@ -15504,9 +16433,9 @@ function createAgentManagerWindow() {
     agentManagerWindow.focus();
     return agentManagerWindow;
   }
-  
+
   console.log('[AgentManager] Creating agent manager window...');
-  
+
   agentManagerWindow = new BrowserWindow({
     width: 900,
     height: 800,
@@ -15523,10 +16452,10 @@ function createAgentManagerWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload-agent-manager.js'),
       webSecurity: true,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
-  
+
   // Attach structured log forwarding
   browserWindow.attachLogForwarder(agentManagerWindow, 'agent');
 
@@ -15535,16 +16464,17 @@ function createAgentManagerWindow() {
     console.log('[AgentManager] Window closed');
     agentManagerWindow = null;
   });
-  
+
   // Load the agent manager HTML
-  agentManagerWindow.loadFile('agent-manager.html').catch(err => {
+  agentManagerWindow.loadFile('agent-manager.html').catch((err) => {
     console.error('[AgentManager] Error loading agent-manager.html:', err);
   });
-  
+  windowRegistry.register('agent-manager', agentManagerWindow);
+
   agentManagerWindow.webContents.on('did-finish-load', () => {
     console.log('[AgentManager] Window loaded successfully');
   });
-  
+
   return agentManagerWindow;
 }
 
@@ -15553,131 +16483,131 @@ function createAgentManagerWindow() {
  */
 function setupAgentManagerIPC() {
   const { getAgentStore, initAgentStore } = require('./src/voice-task-sdk/agent-store');
-  
+
   // Initialize agent store
-  initAgentStore().catch(err => {
+  initAgentStore().catch((err) => {
     console.error('[AgentManager] Failed to initialize agent store:', err);
   });
-  
+
   // Close window
   ipcMain.on('agent-manager:close', () => {
     if (agentManagerWindow && !agentManagerWindow.isDestroyed()) {
       agentManagerWindow.close();
     }
   });
-  
+
   // Open agent manager
   ipcMain.on('agents:open-manager', () => {
     createAgentManagerWindow();
   });
-  
+
   // ==================== LOCAL AGENTS ====================
-  
+
   // Get all local agents
   ipcMain.handle('agents:get-local', async () => {
     const store = getAgentStore();
     await store.init();
     return store.getLocalAgents();
   });
-  
+
   // Get all agents (local + GSX)
   ipcMain.handle('agents:list', async () => {
     const store = getAgentStore();
     await store.init();
     return store.getAllAgents();
   });
-  
+
   // Create agent
   ipcMain.handle('agents:create', async (event, agentData) => {
     const store = getAgentStore();
     return store.createAgent(agentData);
   });
-  
+
   // Update agent
   ipcMain.handle('agents:update', async (event, id, updates) => {
     const store = getAgentStore();
     return store.updateAgent(id, updates);
   });
-  
+
   // Delete agent
   ipcMain.handle('agents:delete', async (event, id) => {
     const store = getAgentStore();
     return store.deleteAgent(id);
   });
-  
+
   // ==================== AGENT VERSION HISTORY ====================
-  
+
   // Get version history for an agent
   ipcMain.handle('agents:get-versions', async (event, agentId) => {
     const store = getAgentStore();
     await store.init();
     return store.getVersionHistory(agentId);
   });
-  
+
   // Get a specific version
   ipcMain.handle('agents:get-version', async (event, agentId, versionNumber) => {
     const store = getAgentStore();
     await store.init();
     return store.getVersion(agentId, versionNumber);
   });
-  
+
   // Undo last change
   ipcMain.handle('agents:undo', async (event, agentId) => {
     const store = getAgentStore();
     await store.init();
     return store.undoAgent(agentId);
   });
-  
+
   // Revert to specific version
   ipcMain.handle('agents:revert', async (event, agentId, versionNumber) => {
     const store = getAgentStore();
     await store.init();
     return store.revertToVersion(agentId, versionNumber);
   });
-  
+
   // Compare two versions
   ipcMain.handle('agents:compare-versions', async (event, agentId, versionA, versionB) => {
     const store = getAgentStore();
     await store.init();
     return store.compareVersions(agentId, versionA, versionB);
   });
-  
+
   // ==================== GSX CONNECTIONS ====================
-  
+
   // Get GSX connections
   ipcMain.handle('gsx:get-connections', async () => {
     const store = getAgentStore();
     await store.init();
     return store.getGSXConnections();
   });
-  
+
   // Add GSX connection
   ipcMain.handle('gsx:add-connection', async (event, connData) => {
     const store = getAgentStore();
     return store.addGSXConnection(connData);
   });
-  
+
   // Update GSX connection
   ipcMain.handle('gsx:update-connection', async (event, id, updates) => {
     const store = getAgentStore();
     return store.updateGSXConnection(id, updates);
   });
-  
+
   // Delete GSX connection
   ipcMain.handle('gsx:delete-connection', async (event, id) => {
     const store = getAgentStore();
     return store.deleteGSXConnection(id);
   });
-  
+
   // ==================== BUILTIN AGENTS ====================
-  
+
   // Get all builtin agents from registry (single source of truth)
   ipcMain.handle('agents:get-builtin-list', async () => {
     try {
       const { getAllAgents } = require('./packages/agents/agent-registry');
       const agents = getAllAgents();
       // Return serializable agent info for frontend
-      return agents.map(a => ({
+      return agents.map((a) => ({
         id: a.id,
         name: a.name,
         description: a.description,
@@ -15691,7 +16621,7 @@ function setupAgentManagerIPC() {
       return [];
     }
   });
-  
+
   // Get enabled states for all builtin agents
   ipcMain.handle('agents:get-builtin-states', async () => {
     if (global.settingsManager) {
@@ -15699,7 +16629,7 @@ function setupAgentManagerIPC() {
     }
     return {};
   });
-  
+
   // Set enabled state for a builtin agent
   ipcMain.handle('agents:set-builtin-enabled', async (event, agentId, enabled) => {
     if (global.settingsManager) {
@@ -15710,9 +16640,9 @@ function setupAgentManagerIPC() {
     }
     return false;
   });
-  
+
   // ==================== AGENT TESTING ====================
-  
+
   // Test a single agent with a phrase
   ipcMain.handle('agents:test-phrase', async (event, agentId, phrase) => {
     try {
@@ -15720,19 +16650,19 @@ function setupAgentManagerIPC() {
       const { getAgent: getBuiltinAgent } = require('./packages/agents/agent-registry');
       const store = getAgentStore();
       await store.init();
-      
+
       // Get the agent - check custom agents first, then builtin registry
       let agent = store.getAgent(agentId);
-      
+
       // If not a custom agent, check builtin agents from registry
       if (!agent) {
         agent = getBuiltinAgent(agentId);
       }
-      
+
       if (!agent) {
         return { confidence: 0, plan: 'Agent not found', error: 'Agent not found' };
       }
-      
+
       const result = await evaluateAgentBid(agent, { content: phrase });
       return {
         agentId,
@@ -15746,7 +16676,7 @@ function setupAgentManagerIPC() {
       return { confidence: 0, plan: error.message, error: error.message };
     }
   });
-  
+
   // Test all enabled agents with a phrase
   ipcMain.handle('agents:test-phrase-all', async (event, phrase) => {
     try {
@@ -15754,16 +16684,16 @@ function setupAgentManagerIPC() {
       const { getAllAgents: getBuiltinAgents } = require('./packages/agents/agent-registry');
       const store = getAgentStore();
       await store.init();
-      
+
       // Get custom agents
-      const customAgents = store.getLocalAgents().filter(a => a.enabled);
-      
+      const customAgents = store.getLocalAgents().filter((a) => a.enabled);
+
       // Get enabled builtin agents from registry (single source of truth)
       const builtinStates = global.settingsManager?.get('builtinAgentStates') || {};
-      const builtinAgents = getBuiltinAgents().filter(a => builtinStates[a.id] !== false);
-      
+      const builtinAgents = getBuiltinAgents().filter((a) => builtinStates[a.id] !== false);
+
       const allAgents = [...customAgents, ...builtinAgents];
-      
+
       // Evaluate all agents in parallel
       const evaluations = await Promise.all(
         allAgents.map(async (agent) => {
@@ -15787,7 +16717,7 @@ function setupAgentManagerIPC() {
           }
         })
       );
-      
+
       return evaluations;
     } catch (error) {
       console.error('[AgentManager] Test all agents error:', error);
@@ -15869,44 +16799,44 @@ function setupAgentManagerIPC() {
   });
 
   // ==================== VERSION HISTORY (aliases) ====================
-  
+
   // Get version history (alias for agents:get-versions)
   ipcMain.handle('agents:get-version-history', async (event, agentId) => {
     const store = getAgentStore();
     await store.init();
     return store.getVersionHistory(agentId);
   });
-  
+
   // Revert to version (alias for agents:revert)
   ipcMain.handle('agents:revert-to-version', async (event, agentId, versionNumber) => {
     const store = getAgentStore();
     await store.init();
     return store.revertToVersion(agentId, versionNumber);
   });
-  
+
   // ==================== ENHANCE AGENT ====================
-  
+
   // Open Agent Composer in enhance mode
   ipcMain.handle('agents:enhance', async (event, agentId) => {
     const store = getAgentStore();
     await store.init();
     const agent = store.getAgent(agentId);
-    
+
     if (!agent) {
       throw new Error('Agent not found');
     }
-    
+
     // Open the composer with enhance mode and agent context
     createClaudeCodeWindow({
       mode: 'enhance',
-      existingAgent: agent
+      existingAgent: agent,
     });
-    
+
     return true;
   });
-  
+
   // ==================== AGENT STATISTICS ====================
-  
+
   // Get stats for a single agent
   ipcMain.handle('agents:get-stats', async (event, agentId) => {
     try {
@@ -15919,7 +16849,7 @@ function setupAgentManagerIPC() {
       return null;
     }
   });
-  
+
   // Get stats for all agents
   ipcMain.handle('agents:get-all-stats', async () => {
     try {
@@ -15932,7 +16862,7 @@ function setupAgentManagerIPC() {
       return {};
     }
   });
-  
+
   // Get bid history
   ipcMain.handle('agents:get-bid-history', async (event, limit) => {
     try {
@@ -15945,7 +16875,7 @@ function setupAgentManagerIPC() {
       return [];
     }
   });
-  
+
   // Get bid history for a specific agent
   ipcMain.handle('agents:get-agent-bid-history', async (event, agentId, limit) => {
     try {
@@ -15958,7 +16888,7 @@ function setupAgentManagerIPC() {
       return [];
     }
   });
-  
+
   console.log('[AgentManager] IPC handlers registered');
 }
 
@@ -15976,33 +16906,33 @@ let pendingComposerInit = null; // Store initial description while window loads
  */
 function createClaudeCodeWindow(options = {}) {
   const { initialDescription, mode, existingAgent } = options;
-  
+
   if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
     claudeCodeWindow.focus();
-    
+
     // If window already exists, send the appropriate init message
     if (mode === 'enhance' && existingAgent) {
-      claudeCodeWindow.webContents.send('agent-composer:init', { 
+      claudeCodeWindow.webContents.send('agent-composer:init', {
         mode: 'enhance',
-        existingAgent
+        existingAgent,
       });
     } else if (initialDescription) {
-      claudeCodeWindow.webContents.send('agent-composer:init', { 
-        description: initialDescription 
+      claudeCodeWindow.webContents.send('agent-composer:init', {
+        description: initialDescription,
       });
     }
     return claudeCodeWindow;
   }
-  
+
   console.log('[AgentComposer] Creating GSX Create window...');
-  
+
   // Store the init data to send after window loads
   if (mode === 'enhance' && existingAgent) {
     pendingComposerInit = { mode: 'enhance', existingAgent };
   } else {
     pendingComposerInit = initialDescription ? { description: initialDescription } : null;
   }
-  
+
   claudeCodeWindow = new BrowserWindow({
     width: 1100,
     height: 800,
@@ -16019,10 +16949,10 @@ function createClaudeCodeWindow(options = {}) {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload-claude-code.js'),
       webSecurity: true,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
-  
+
   // Clear the reference when closed
   claudeCodeWindow.on('closed', () => {
     console.log('[AgentComposer] Window closed');
@@ -16030,15 +16960,16 @@ function createClaudeCodeWindow(options = {}) {
     // Clear agent creation mode when composer closes
     global.agentCreationMode = false;
   });
-  
+
   // Load the GSX Create UI HTML
-  claudeCodeWindow.loadFile('claude-code-ui.html').catch(err => {
+  claudeCodeWindow.loadFile('claude-code-ui.html').catch((err) => {
     console.error('[AgentComposer] Error loading claude-code-ui.html:', err);
   });
-  
+  windowRegistry.register('claude-code', claudeCodeWindow);
+
   claudeCodeWindow.webContents.on('did-finish-load', () => {
     console.log('[AgentComposer] Window loaded successfully');
-    
+
     // Send the initial description if we have one
     if (pendingComposerInit) {
       console.log('[AgentComposer] Sending initial description:', pendingComposerInit.description);
@@ -16046,7 +16977,7 @@ function createClaudeCodeWindow(options = {}) {
       pendingComposerInit = null;
     }
   });
-  
+
   return claudeCodeWindow;
 }
 
@@ -16063,7 +16994,7 @@ function createClaudeTerminalWindow() {
     claudeTerminalWindow.focus();
     return;
   }
-  
+
   claudeTerminalWindow = new BrowserWindow({
     width: 800,
     height: 500,
@@ -16072,18 +17003,19 @@ function createClaudeTerminalWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload-claude-terminal.js'),
-    }
+    },
   });
-  
+
   claudeTerminalWindow.loadFile('claude-terminal.html');
-  
+  windowRegistry.register('claude-terminal', claudeTerminalWindow);
+
   claudeTerminalWindow.on('closed', () => {
     claudeTerminalWindow = null;
     // Kill PTY if still running
     if (claudePty) {
       try {
         claudePty.kill();
-      } catch (e) {
+      } catch (_e) {
         // Ignore
       }
       claudePty = null;
@@ -16102,17 +17034,17 @@ function registerClaudeTerminalHandlers() {
       if (claudePty) {
         try {
           claudePty.kill();
-        } catch (e) {
+        } catch (_e) {
           // Ignore
         }
       }
-      
+
       const pty = require('node-pty');
       const claudeCodeRunner = require('./lib/claude-code-runner');
       const claudePath = claudeCodeRunner.getClaudeCodePath();
-      
+
       console.log('[ClaudeTerminal] Starting PTY with claude at:', claudePath);
-      
+
       // Spawn claude in PTY
       claudePty = pty.spawn(claudePath, [], {
         name: 'xterm-256color',
@@ -16121,14 +17053,14 @@ function registerClaudeTerminalHandlers() {
         cwd: process.env.HOME,
         env: process.env,
       });
-      
+
       // Forward output to renderer
       claudePty.onData((data) => {
         if (claudeTerminalWindow && !claudeTerminalWindow.isDestroyed()) {
           claudeTerminalWindow.webContents.send('claude-terminal:output', data);
         }
       });
-      
+
       // Handle exit
       claudePty.onExit(({ exitCode }) => {
         console.log('[ClaudeTerminal] PTY exited with code:', exitCode);
@@ -16137,21 +17069,21 @@ function registerClaudeTerminalHandlers() {
         }
         claudePty = null;
       });
-      
+
       return { success: true };
     } catch (error) {
       console.error('[ClaudeTerminal] Failed to start PTY:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Write to PTY
   ipcMain.on('claude-terminal:write', (event, data) => {
     if (claudePty) {
       claudePty.write(data);
     }
   });
-  
+
   // Resize PTY
   ipcMain.on('claude-terminal:resize', (event, cols, rows) => {
     if (claudePty) {
@@ -16162,19 +17094,19 @@ function registerClaudeTerminalHandlers() {
       }
     }
   });
-  
+
   // Kill PTY
   ipcMain.on('claude-terminal:kill', () => {
     if (claudePty) {
       try {
         claudePty.kill();
-      } catch (e) {
+      } catch (_e) {
         // Ignore
       }
       claudePty = null;
     }
   });
-  
+
   console.log('[ClaudeTerminal] IPC handlers registered');
 }
 
@@ -16183,7 +17115,7 @@ function registerClaudeTerminalHandlers() {
  */
 function broadcastPlanSummary(summary) {
   const { BrowserWindow } = require('electron');
-  BrowserWindow.getAllWindows().forEach(win => {
+  BrowserWindow.getAllWindows().forEach((win) => {
     if (!win.isDestroyed()) {
       win.webContents.send('agent-composer:plan-summary', summary);
     }
@@ -16207,18 +17139,18 @@ function relayVoiceToComposer(transcript) {
 function setupClaudeCodeIPC() {
   const { getAgentStore } = require('./src/voice-task-sdk/agent-store');
   const { generateAgentFromDescription } = require('./lib/ai-agent-generator');
-  const { TEMPLATES, getTemplates, getTemplate } = require('./lib/claude-code-templates');
-  
+  const { TEMPLATES: _TEMPLATES, getTemplates, getTemplate } = require('./lib/claude-code-templates');
+
   // Get all templates
   ipcMain.handle('claude-code:templates', () => {
     return getTemplates();
   });
-  
+
   // Get a specific template
   ipcMain.handle('claude-code:template', (event, templateId) => {
     return getTemplate(templateId);
   });
-  
+
   // Get agent type templates
   ipcMain.handle('claude-code:agent-types', () => {
     try {
@@ -16229,7 +17161,7 @@ function setupClaudeCodeIPC() {
       return [];
     }
   });
-  
+
   // Score templates against description (for auto-highlighting)
   // DEPRECATED: Old keyword-based scoring - kept for compatibility
   ipcMain.handle('agent-composer:score-templates', (event, description) => {
@@ -16241,15 +17173,25 @@ function setupClaudeCodeIPC() {
       return [];
     }
   });
-  
+
+  // Get available voice personalities for the agent composer
+  ipcMain.handle('agent-composer:voices', async () => {
+    try {
+      const { getAvailableVoices } = require('./lib/ai-agent-generator');
+      return getAvailableVoices();
+    } catch (_error) {
+      return {};
+    }
+  });
+
   // LLM-based agent planning using Claude Code CLI (for full agentic capabilities)
   ipcMain.handle('agent-composer:plan', async (event, description) => {
     try {
       const claudeCode = require('./lib/claude-code-runner');
       const { getTemplates } = require('./lib/agent-templates');
-      
+
       const templates = getTemplates();
-      
+
       // Convert templates to a format the planner can use
       const templateInfo = {};
       for (const t of templates) {
@@ -16260,12 +17202,12 @@ function setupClaudeCodeIPC() {
           executionType: t.executionType,
         };
       }
-      
+
       console.log('[AgentComposer] Planning agent for:', description.substring(0, 50) + '...');
       console.log('[AgentComposer] Using Claude Code CLI for agentic features');
-      
+
       const result = await claudeCode.planAgent(description, templateInfo);
-      
+
       if (result.success) {
         console.log('[AgentComposer] Plan created via CLI:', result.plan.executionType, '-', result.plan.suggestedName);
       } else {
@@ -16275,29 +17217,34 @@ function setupClaudeCodeIPC() {
         const ai = require('./lib/ai-service');
         const fallbackResult = await ai.planAgent(description, templateInfo, { feature: 'agent-composer' });
         if (fallbackResult.success) {
-          console.log('[AgentComposer] Fallback plan created:', fallbackResult.plan.executionType, '-', fallbackResult.plan.suggestedName);
+          console.log(
+            '[AgentComposer] Fallback plan created:',
+            fallbackResult.plan.executionType,
+            '-',
+            fallbackResult.plan.suggestedName
+          );
         }
         return fallbackResult;
       }
-      
+
       return result;
     } catch (error) {
       console.error('[AgentComposer] Planning error:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Broadcast plan summary to Orb for TTS
   ipcMain.handle('agent-composer:broadcast-plan', async (event, planSummary) => {
     console.log('[AgentComposer] Broadcasting plan summary:', planSummary.substring(0, 50) + '...');
     broadcastPlanSummary({
       type: 'plan-ready',
       summary: planSummary,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
     return { success: true };
   });
-  
+
   // Notify that agent creation is complete
   ipcMain.handle('agent-composer:creation-complete', async (event, agentName) => {
     console.log('[AgentComposer] Agent creation complete:', agentName);
@@ -16305,11 +17252,11 @@ function setupClaudeCodeIPC() {
     broadcastPlanSummary({
       type: 'creation-complete',
       agentName,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
     return { success: true };
   });
-  
+
   // Generate agent from description (Phase 1)
   ipcMain.handle('claude-code:generate-agent', async (event, description, options = {}) => {
     try {
@@ -16317,26 +17264,26 @@ function setupClaudeCodeIPC() {
       if (options.templateId) {
         console.log('[AgentComposer] Using template:', options.templateId);
       }
-      
+
       // Generate agent config using Claude API
       const config = await generateAgentFromDescription(description, options);
-      
+
       // Save to agent store
       const store = getAgentStore();
       await store.init();
       const agent = await store.createAgent(config);
-      
+
       console.log('[AgentComposer] Agent created:', agent.name);
-      
+
       return { success: true, agent };
     } catch (error) {
       console.error('[AgentComposer] Agent generation failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // ==================== AGENT SELF-VERIFICATION SYSTEM ====================
-  
+
   /**
    * Verify if an action was successful based on execution type
    * Returns: { verified: boolean, method: string, details: string }
@@ -16346,265 +17293,299 @@ function setupClaudeCodeIPC() {
    * Supports multiple verification methods based on execution type and app
    */
   async function verifyAgentAction(execAsync, executionType, actionContext) {
-    const { appName, action, expectedResult, script, output } = actionContext;
-    
+    const { appName, action, expectedResult, script: _script, output } = actionContext;
+
     try {
       // ==================== APPLESCRIPT VERIFICATION ====================
       if (executionType === 'applescript' && appName) {
         // First verify app is running
-        const { stdout: runningApps } = await execAsync(`osascript -e 'tell application "System Events" to get name of every process'`);
+        const { stdout: runningApps } = await execAsync(
+          `osascript -e 'tell application "System Events" to get name of every process'`
+        );
         const isRunning = runningApps.toLowerCase().includes(appName.toLowerCase());
-        
+
         if (!isRunning) {
-          return { 
-            verified: false, 
-            method: 'process-check', 
+          return {
+            verified: false,
+            method: 'process-check',
             details: `${appName} is not running`,
-            suggestion: `Try opening ${appName} first with: open -a "${appName}"`
+            suggestion: `Try opening ${appName} first with: open -a "${appName}"`,
           };
         }
-        
+
         // ===== MUSIC APP =====
         if (appName.toLowerCase() === 'music') {
           const { stdout: state } = await execAsync(`osascript -e 'tell application "Music" to get player state'`);
           const playerState = state.trim();
-          
+
           if (action === 'play') {
             if (playerState === 'playing') {
-              const { stdout: track } = await execAsync(`osascript -e 'tell application "Music" to get name of current track'`).catch(() => ({ stdout: 'Unknown' }));
-              const { stdout: artist } = await execAsync(`osascript -e 'tell application "Music" to get artist of current track'`).catch(() => ({ stdout: '' }));
-              return { 
-                verified: true, 
-                method: 'state-check', 
-                details: `Playing: "${track.trim()}"${artist.trim() ? ` by ${artist.trim()}` : ''}` 
+              const { stdout: track } = await execAsync(
+                `osascript -e 'tell application "Music" to get name of current track'`
+              ).catch(() => ({ stdout: 'Unknown' }));
+              const { stdout: artist } = await execAsync(
+                `osascript -e 'tell application "Music" to get artist of current track'`
+              ).catch(() => ({ stdout: '' }));
+              return {
+                verified: true,
+                method: 'state-check',
+                details: `Playing: "${track.trim()}"${artist.trim() ? ` by ${artist.trim()}` : ''}`,
               };
             } else {
-              return { 
-                verified: false, 
-                method: 'state-check', 
+              return {
+                verified: false,
+                method: 'state-check',
                 details: `Player state: ${playerState}`,
-                suggestion: 'Select a track first with: play (some track of library playlist 1)'
+                suggestion: 'Select a track first with: play (some track of library playlist 1)',
               };
             }
           } else if (action === 'pause' || action === 'stop') {
-            return { 
-              verified: playerState === 'paused' || playerState === 'stopped', 
-              method: 'state-check', 
-              details: `Player state: ${playerState}` 
+            return {
+              verified: playerState === 'paused' || playerState === 'stopped',
+              method: 'state-check',
+              details: `Player state: ${playerState}`,
             };
           } else if (action === 'open') {
             return { verified: true, method: 'process-check', details: `Music is open (state: ${playerState})` };
           }
           return { verified: false, method: 'state-check', details: `Player state: ${playerState}` };
         }
-        
+
         // ===== SAFARI =====
         if (appName.toLowerCase() === 'safari') {
           try {
-            const { stdout: url } = await execAsync(`osascript -e 'tell application "Safari" to get URL of current tab of window 1'`);
-            const { stdout: title } = await execAsync(`osascript -e 'tell application "Safari" to get name of current tab of window 1'`).catch(() => ({ stdout: '' }));
-            
+            const { stdout: url } = await execAsync(
+              `osascript -e 'tell application "Safari" to get URL of current tab of window 1'`
+            );
+            const { stdout: title } = await execAsync(
+              `osascript -e 'tell application "Safari" to get name of current tab of window 1'`
+            ).catch(() => ({ stdout: '' }));
+
             if (action === 'open-url' && expectedResult?.url) {
               const urlMatches = url.includes(expectedResult.url);
-              return { 
-                verified: urlMatches, 
-                method: 'url-check', 
-                details: urlMatches ? `Opened: ${url.trim().substring(0, 60)}` : `Wrong URL: ${url.trim().substring(0, 60)}`
+              return {
+                verified: urlMatches,
+                method: 'url-check',
+                details: urlMatches
+                  ? `Opened: ${url.trim().substring(0, 60)}`
+                  : `Wrong URL: ${url.trim().substring(0, 60)}`,
               };
             }
-            return { 
-              verified: true, 
-              method: 'state-check', 
-              details: `${title.trim() || 'Safari'} - ${url.trim().substring(0, 50)}` 
+            return {
+              verified: true,
+              method: 'state-check',
+              details: `${title.trim() || 'Safari'} - ${url.trim().substring(0, 50)}`,
             };
-          } catch (e) {
+          } catch (_e) {
             return { verified: true, method: 'process-check', details: 'Safari is open (no tabs)' };
           }
         }
-        
+
         // ===== FINDER =====
         if (appName.toLowerCase() === 'finder') {
           try {
-            const { stdout: folder } = await execAsync(`osascript -e 'tell application "Finder" to get POSIX path of (target of front window as alias)'`);
-            return { 
-              verified: true, 
-              method: 'state-check', 
-              details: `Finder at: ${folder.trim()}` 
+            const { stdout: folder } = await execAsync(
+              `osascript -e 'tell application "Finder" to get POSIX path of (target of front window as alias)'`
+            );
+            return {
+              verified: true,
+              method: 'state-check',
+              details: `Finder at: ${folder.trim()}`,
             };
-          } catch (e) {
+          } catch (_e) {
             return { verified: true, method: 'process-check', details: 'Finder is open' };
           }
         }
-        
+
         // ===== MAIL =====
         if (appName.toLowerCase() === 'mail') {
           try {
-            const { stdout: count } = await execAsync(`osascript -e 'tell application "Mail" to get count of messages of inbox'`);
-            return { 
-              verified: true, 
-              method: 'state-check', 
-              details: `Mail open (${count.trim()} messages in inbox)` 
+            const { stdout: count } = await execAsync(
+              `osascript -e 'tell application "Mail" to get count of messages of inbox'`
+            );
+            return {
+              verified: true,
+              method: 'state-check',
+              details: `Mail open (${count.trim()} messages in inbox)`,
             };
-          } catch (e) {
+          } catch (_e) {
             return { verified: true, method: 'process-check', details: 'Mail is open' };
           }
         }
-        
+
         // ===== CALENDAR =====
         if (appName.toLowerCase() === 'calendar') {
           return { verified: true, method: 'process-check', details: 'Calendar is open' };
         }
-        
+
         // ===== NOTES =====
         if (appName.toLowerCase() === 'notes') {
           return { verified: true, method: 'process-check', details: 'Notes is open' };
         }
-        
+
         // ===== TERMINAL =====
         if (appName.toLowerCase() === 'terminal') {
           return { verified: true, method: 'process-check', details: 'Terminal is open' };
         }
-        
+
         // ===== SPOTIFY =====
         if (appName.toLowerCase() === 'spotify') {
           try {
             const { stdout: state } = await execAsync(`osascript -e 'tell application "Spotify" to get player state'`);
             if (action === 'play' && state.trim() === 'playing') {
-              const { stdout: track } = await execAsync(`osascript -e 'tell application "Spotify" to get name of current track'`).catch(() => ({ stdout: 'Unknown' }));
+              const { stdout: track } = await execAsync(
+                `osascript -e 'tell application "Spotify" to get name of current track'`
+              ).catch(() => ({ stdout: 'Unknown' }));
               return { verified: true, method: 'state-check', details: `Playing: ${track.trim()}` };
             }
             return { verified: true, method: 'process-check', details: `Spotify (${state.trim()})` };
-          } catch (e) {
+          } catch (_e) {
             return { verified: true, method: 'process-check', details: 'Spotify is open' };
           }
         }
-        
+
         // ===== GENERIC APP - check if frontmost =====
-        const { stdout: frontApp } = await execAsync(`osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`);
+        const { stdout: frontApp } = await execAsync(
+          `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`
+        );
         const isFront = frontApp.trim().toLowerCase().includes(appName.toLowerCase());
-        return { 
-          verified: isFront, 
-          method: 'frontmost-check', 
+        return {
+          verified: isFront,
+          method: 'frontmost-check',
           details: isFront ? `${appName} is active` : `Front app: ${frontApp.trim()}`,
-          suggestion: isFront ? null : `Try activating with: tell application "${appName}" to activate`
+          suggestion: isFront ? null : `Try activating with: tell application "${appName}" to activate`,
         };
       }
-      
+
       // ==================== SHELL COMMAND VERIFICATION ====================
       if (executionType === 'shell') {
         // Check if specific file should exist
         if (expectedResult?.fileExists) {
-          const { stdout } = await execAsync(`test -e "${expectedResult.fileExists}" && echo "exists" || echo "missing"`);
+          const { stdout } = await execAsync(
+            `test -e "${expectedResult.fileExists}" && echo "exists" || echo "missing"`
+          );
           const exists = stdout.trim() === 'exists';
-          return { 
-            verified: exists, 
-            method: 'file-check', 
-            details: exists ? `File exists: ${expectedResult.fileExists}` : `File not found: ${expectedResult.fileExists}` 
+          return {
+            verified: exists,
+            method: 'file-check',
+            details: exists
+              ? `File exists: ${expectedResult.fileExists}`
+              : `File not found: ${expectedResult.fileExists}`,
           };
         }
-        
+
         // Check if directory should exist
         if (expectedResult?.dirExists) {
-          const { stdout } = await execAsync(`test -d "${expectedResult.dirExists}" && echo "exists" || echo "missing"`);
+          const { stdout } = await execAsync(
+            `test -d "${expectedResult.dirExists}" && echo "exists" || echo "missing"`
+          );
           const exists = stdout.trim() === 'exists';
-          return { 
-            verified: exists, 
-            method: 'dir-check', 
-            details: exists ? `Directory exists: ${expectedResult.dirExists}` : `Directory not found: ${expectedResult.dirExists}` 
+          return {
+            verified: exists,
+            method: 'dir-check',
+            details: exists
+              ? `Directory exists: ${expectedResult.dirExists}`
+              : `Directory not found: ${expectedResult.dirExists}`,
           };
         }
-        
+
         // Check if output contains expected string
         if (expectedResult?.outputContains && output) {
           const contains = output.includes(expectedResult.outputContains);
-          return { 
-            verified: contains, 
-            method: 'output-check', 
-            details: contains ? `Output contains expected text` : `Expected text not found in output` 
+          return {
+            verified: contains,
+            method: 'output-check',
+            details: contains ? `Output contains expected text` : `Expected text not found in output`,
           };
         }
-        
+
         // Check command exit code
         if (expectedResult?.exitCode !== undefined) {
           // Already checked by execAsync - if we got here, exit code was 0
           return { verified: true, method: 'exit-code', details: 'Command completed with expected exit code' };
         }
-        
+
         // Generic shell - assume success if no error thrown
-        return { 
-          verified: true, 
-          method: 'exit-code', 
-          details: output ? `Output: ${output.substring(0, 100)}` : 'Command completed successfully' 
+        return {
+          verified: true,
+          method: 'exit-code',
+          details: output ? `Output: ${output.substring(0, 100)}` : 'Command completed successfully',
         };
       }
-      
+
       // ==================== BROWSER AUTOMATION VERIFICATION ====================
       if (executionType === 'browser') {
         // Could integrate with Puppeteer/Playwright for verification
         return { verified: null, method: 'browser-check', details: 'Browser verification not yet implemented' };
       }
-      
+
       // ==================== LLM (CONVERSATIONAL) VERIFICATION ====================
       if (executionType === 'llm') {
         // LLM agents can't self-verify - need user confirmation
-        return { 
-          verified: null, 
-          method: 'user-confirmation', 
+        return {
+          verified: null,
+          method: 'user-confirmation',
           details: 'Response generated - please confirm if it was helpful',
-          needsUserConfirmation: true
+          needsUserConfirmation: true,
         };
       }
-      
+
       // ==================== DEFAULT ====================
-      return { 
-        verified: null, 
-        method: 'none', 
-        details: `Automatic verification not available for ${executionType} execution type` 
+      return {
+        verified: null,
+        method: 'none',
+        details: `Automatic verification not available for ${executionType} execution type`,
       };
-      
     } catch (error) {
-      return { 
-        verified: false, 
-        method: 'error', 
+      return {
+        verified: false,
+        method: 'error',
         details: error.message,
-        suggestion: 'Check if the app/command is available on this system'
+        suggestion: 'Check if the app/command is available on this system',
       };
     }
   }
-  
+
   // Test an agent with a sample prompt - ACTUALLY EXECUTES the agent with SELF-VERIFICATION
   ipcMain.handle('claude-code:test-agent', async (event, agent, testPrompt) => {
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
-    
+
     try {
-      console.log('[AgentComposer] Testing agent:', agent.name, 'type:', agent.executionType, 'prompt:', testPrompt.substring(0, 50));
-      
+      console.log(
+        '[AgentComposer] Testing agent:',
+        agent.name,
+        'type:',
+        agent.executionType,
+        'prompt:',
+        testPrompt.substring(0, 50)
+      );
+
       // FAST PATH: If agent name contains a known app, just open it directly - skip Claude entirely
       const agentNameLower = agent.name?.toLowerCase() || '';
       const knownApps = {
-        'music': 'Music',
-        'safari': 'Safari', 
-        'finder': 'Finder',
-        'mail': 'Mail',
-        'calendar': 'Calendar',
-        'notes': 'Notes',
-        'photos': 'Photos',
-        'messages': 'Messages',
-        'facetime': 'FaceTime',
-        'maps': 'Maps',
-        'calculator': 'Calculator',
-        'preview': 'Preview',
-        'terminal': 'Terminal',
-        'chrome': 'Google Chrome',
-        'spotify': 'Spotify',
-        'slack': 'Slack',
-        'zoom': 'zoom.us',
-        'vscode': 'Visual Studio Code',
-        'code': 'Visual Studio Code',
+        music: 'Music',
+        safari: 'Safari',
+        finder: 'Finder',
+        mail: 'Mail',
+        calendar: 'Calendar',
+        notes: 'Notes',
+        photos: 'Photos',
+        messages: 'Messages',
+        facetime: 'FaceTime',
+        maps: 'Maps',
+        calculator: 'Calculator',
+        preview: 'Preview',
+        terminal: 'Terminal',
+        chrome: 'Google Chrome',
+        spotify: 'Spotify',
+        slack: 'Slack',
+        zoom: 'zoom.us',
+        vscode: 'Visual Studio Code',
+        code: 'Visual Studio Code',
       };
-      
+
       for (const [keyword, appName] of Object.entries(knownApps)) {
         if (agentNameLower.includes(keyword)) {
           console.log('[AgentComposer] Fast path: Opening', appName);
@@ -16613,11 +17594,18 @@ function setupClaudeCodeIPC() {
             await execAsync(`open -a "${appName}"`);
             // Force bring to front with AppleScript
             await execAsync(`osascript -e 'tell application "${appName}" to activate'`);
-            
+
             // For Music app, also start playing if the prompt suggests it
             const promptLower = testPrompt.toLowerCase();
-            console.log('[AgentComposer] Checking play condition:', { keyword, promptLower, hasPlay: promptLower.includes('play') });
-            if (keyword === 'music' && (promptLower.includes('play') || promptLower.includes('start') || promptLower.includes('go'))) {
+            console.log('[AgentComposer] Checking play condition:', {
+              keyword,
+              promptLower,
+              hasPlay: promptLower.includes('play'),
+            });
+            if (
+              keyword === 'music' &&
+              (promptLower.includes('play') || promptLower.includes('start') || promptLower.includes('go'))
+            ) {
               console.log('[AgentComposer] Starting music playback');
               // Must select a track first, then play - just "play" doesn't work without selection
               await execAsync(`osascript -e 'tell application "Music"
@@ -16627,31 +17615,33 @@ function setupClaudeCodeIPC() {
                 play
               end tell'`);
               console.log('[AgentComposer] Play command sent');
-              
+
               // VERIFY: Use the verification system
-              await new Promise(resolve => setTimeout(resolve, 500)); // Wait a moment
+              await new Promise((resolve) => {
+                setTimeout(resolve, 500);
+              }); // Wait a moment
               const verification = await verifyAgentAction(execAsync, 'applescript', {
                 appName: 'Music',
-                action: 'play'
+                action: 'play',
               });
-              
+
               console.log('[AgentComposer] Verification result:', verification);
-              
+
               if (verification.verified === true) {
-                return { 
-                  success: true, 
+                return {
+                  success: true,
                   response: `✓ VERIFIED: ${verification.details}`,
                   executed: true,
                   verified: true,
-                  verificationMethod: verification.method
+                  verificationMethod: verification.method,
                 };
               } else if (verification.verified === false) {
-                return { 
-                  success: false, 
+                return {
+                  success: false,
                   error: `Action executed but verification failed: ${verification.details}`,
                   executed: true,
                   verified: false,
-                  verificationMethod: verification.method
+                  verificationMethod: verification.method,
                 };
               } else {
                 // Can't auto-verify, ask user
@@ -16660,35 +17650,37 @@ function setupClaudeCodeIPC() {
                   response: `Action executed. ${verification.details}`,
                   executed: true,
                   verified: null,
-                  needsUserConfirmation: true
+                  needsUserConfirmation: true,
                 };
               }
             }
-            
+
             // VERIFY: Check if app actually opened
-            await new Promise(resolve => setTimeout(resolve, 300));
+            await new Promise((resolve) => {
+              setTimeout(resolve, 300);
+            });
             const verification = await verifyAgentAction(execAsync, 'applescript', {
               appName: appName,
-              action: 'open'
+              action: 'open',
             });
-            
+
             console.log('[AgentComposer] Verification result:', verification);
-            
+
             if (verification.verified === true) {
-              return { 
-                success: true, 
+              return {
+                success: true,
                 response: `✓ VERIFIED: ${appName} is now open and active`,
                 executed: true,
                 verified: true,
-                verificationMethod: verification.method
+                verificationMethod: verification.method,
               };
             } else {
-              return { 
-                success: true, 
+              return {
+                success: true,
                 response: `Opened ${appName}. ${verification.details}`,
                 executed: true,
                 verified: verification.verified,
-                verificationMethod: verification.method
+                verificationMethod: verification.method,
               };
             }
           } catch (err) {
@@ -16697,14 +17689,13 @@ function setupClaudeCodeIPC() {
           }
         }
       }
-      
+
       const claudeCodeRunner = require('./lib/claude-code-runner');
-      
+
       // For executable agent types, ask Claude Code to generate the command/script
       const executionType = agent.executionType || 'llm';
-      
+
       if (executionType === 'applescript') {
-        
         // Ask Claude Code to generate AppleScript for this task
         const scriptResponse = await claudeCodeRunner.complete(testPrompt, {
           systemPrompt: `${agent.prompt}
@@ -16726,80 +17717,80 @@ For this request "${testPrompt}", respond with the single AppleScript command:`,
           maxTokens: 200,
           temperature: 0.0,
         });
-        
-        
+
         if (!scriptResponse) {
           return { success: false, error: 'No script generated' };
         }
-        
+
         // Clean the script (remove any markdown or extra text)
         let script = scriptResponse.trim();
         script = script.replace(/^```applescript\n?/i, '').replace(/\n?```$/i, '');
         script = script.replace(/^```\n?/, '').replace(/\n?```$/, '');
-        
+
         // Fix common incomplete scripts
         // "tell application X" without action -> add "to activate"
         if (script.match(/^tell application\s+"[^"]+"\s*$/i)) {
           script = script.replace(/^(tell application\s+"[^"]+")\s*$/i, '$1 to activate');
           console.log('[AgentComposer] Fixed incomplete script, added "to activate"');
         }
-        
+
         // If script is just an app name, wrap it
         if (script.match(/^[A-Za-z\s]+$/)) {
           script = `tell application "${script}" to activate`;
           console.log('[AgentComposer] Wrapped app name in tell statement');
         }
-        
+
         // If user asked to "open" something but script uses "play", change to "activate"
         const wantsToOpen = testPrompt.toLowerCase().match(/\b(open|launch|start|show)\b/);
         if (wantsToOpen && script.includes('to play')) {
           script = script.replace('to play', 'to activate');
           console.log('[AgentComposer] Changed "to play" to "to activate" for open request');
         }
-        
+
         // For any "to play" on Music app, prepend activate to ensure app is visible
         if (script.includes('Music') && script.includes('to play')) {
           script = 'tell application "Music" to activate\n' + script;
           console.log('[AgentComposer] Prepended activate before play for Music app');
         }
-        
+
         // Simple app detection - if agent name contains app name, use shell open command (most reliable)
         const agentNameLower = agent.name?.toLowerCase() || '';
-        const appMatch = agentNameLower.match(/(music|safari|finder|mail|calendar|notes|photos|messages|facetime|maps|news|stocks|weather|calculator|preview)/i);
+        const appMatch = agentNameLower.match(
+          /(music|safari|finder|mail|calendar|notes|photos|messages|facetime|maps|news|stocks|weather|calculator|preview)/i
+        );
         if (appMatch) {
           const appName = appMatch[1].charAt(0).toUpperCase() + appMatch[1].slice(1);
           // Use shell open command - more reliable than AppleScript
           console.log('[AgentComposer] Using shell open for', appName);
           try {
-            const { stdout, stderr } = await execAsync(`open -a "${appName}"`);
+            const { stdout: _stdout, stderr: _stderr } = await execAsync(`open -a "${appName}"`);
             console.log('[AgentComposer] Shell open succeeded for', appName);
-            return { 
-              success: true, 
+            return {
+              success: true,
               response: `Opened ${appName} successfully!`,
-              executed: true
+              executed: true,
             };
           } catch (openError) {
             console.error('[AgentComposer] Shell open failed:', openError.message);
             // Fall through to try AppleScript
           }
         }
-        
+
         console.log('[AgentComposer] Executing AppleScript:', script.substring(0, 100));
-        
+
         // Execute the AppleScript
         try {
-          const { stdout, stderr } = await execAsync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`);
+          const { stdout, stderr: _stderr } = await execAsync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`);
           console.log('[AgentComposer] AppleScript executed successfully');
-          return { 
-            success: true, 
+          return {
+            success: true,
             response: `Executed successfully!\n\nScript: ${script}\n\n${stdout ? 'Output: ' + stdout : 'Action completed.'}`,
-            executed: true
+            executed: true,
           };
         } catch (execError) {
           console.error('[AgentComposer] AppleScript error:', execError.message);
           return { success: false, error: `Script execution failed: ${execError.message}` };
         }
-        
       } else if (executionType === 'shell') {
         // Ask Claude Code to generate shell command
         const cmdResponse = await claudeCodeRunner.complete(testPrompt, {
@@ -16809,54 +17800,52 @@ IMPORTANT: Respond with ONLY the shell command to execute, nothing else.
 Do not include explanations - just the raw command.
 For safety, prefer read-only or reversible commands.`,
         });
-        
+
         if (!cmdResponse) {
           return { success: false, error: 'No command generated' };
         }
-        
+
         let cmd = cmdResponse.trim();
         cmd = cmd.replace(/^```(bash|sh|shell)?\n?/i, '').replace(/\n?```$/i, '');
-        
+
         // Safety check - don't run dangerous commands
         const dangerousPatterns = ['rm -rf', 'sudo', 'mkfs', 'dd if=', '> /dev/', 'chmod -R 777'];
-        if (dangerousPatterns.some(p => cmd.includes(p))) {
+        if (dangerousPatterns.some((p) => cmd.includes(p))) {
           return { success: false, error: 'Command blocked for safety: ' + cmd };
         }
-        
+
         console.log('[AgentComposer] Executing shell command:', cmd);
-        
+
         try {
-          const { stdout, stderr } = await execAsync(cmd, { timeout: 10000 });
-          return { 
-            success: true, 
+          const { stdout, stderr: _stderr } = await execAsync(cmd, { timeout: 10000 });
+          return {
+            success: true,
             response: `Executed: ${cmd}\n\n${stdout || 'Command completed successfully.'}`,
-            executed: true
+            executed: true,
           };
         } catch (execError) {
           return { success: false, error: `Command failed: ${execError.message}` };
         }
-        
       } else {
         // LLM/conversational - just get a text response from Claude Code
         const response = await claudeCodeRunner.complete(testPrompt, {
           systemPrompt: agent.prompt,
         });
-        
+
         if (response) {
           return { success: true, response };
         } else {
           return { success: false, error: 'No response from agent' };
         }
       }
-      
     } catch (error) {
       console.error('[AgentComposer] Agent test failed:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // ==================== GSX Create Chat-Based Agent Building ====================
-  
+
   // Check Claude Code authentication status
   ipcMain.handle('claude-code:check-auth', async () => {
     try {
@@ -16866,28 +17855,29 @@ For safety, prefer read-only or reversible commands.`,
       return { authenticated: false, error: error.message };
     }
   });
-  
+
   // Trigger Claude Code login/setup
   ipcMain.handle('claude-code:login', async () => {
     try {
       const claudeCode = require('./lib/claude-code-runner');
       const authStatus = await claudeCode.isAuthenticated();
-      
+
       if (authStatus.authenticated) {
         return { success: true, message: 'Already authenticated! Your Anthropic API key is configured.' };
       }
-      
+
       // Not authenticated - open settings to add API key
-      const { dialog, shell } = require('electron');
+      const { dialog, shell: _shell } = require('electron');
       const result = await dialog.showMessageBox({
         type: 'info',
         title: 'Claude Code Setup',
         message: 'API Key Required',
-        detail: 'Claude Code uses your Anthropic API key from Settings.\n\nWould you like to open Settings to add your API key?',
+        detail:
+          'Claude Code uses your Anthropic API key from Settings.\n\nWould you like to open Settings to add your API key?',
         buttons: ['Open Settings', 'Cancel'],
         defaultId: 0,
       });
-      
+
       if (result.response === 0) {
         // Open settings window
         const main = require('./main');
@@ -16895,59 +17885,61 @@ For safety, prefer read-only or reversible commands.`,
           main.openSetupWizard();
         }
       }
-      
+
       return { success: false, error: 'API key not configured' };
     } catch (error) {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Claude Terminal IPC handlers are registered in registerClaudeTerminalHandlers()
-  
+
   // Chat message for iterative agent building
   ipcMain.handle('gsx-create:chat', async (event, message, context = {}) => {
     try {
       console.log('[AgentComposer] Chat message:', message.substring(0, 50) + '...');
-      
+
       const claudeCode = require('./lib/claude-code-runner');
       const { getTemplate: getAgentTemplate } = require('./lib/agent-templates');
-      
+
       // Check Claude Code authentication (API key)
       const authCheck = await claudeCode.isAuthenticated();
       if (!authCheck.authenticated) {
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: authCheck.error || 'Please add your Anthropic API key in Settings.',
-          needsLogin: true
+          needsLogin: true,
         };
       }
-      
+
       // Get agent type template for context
       const agentTemplate = getAgentTemplate(context.agentTypeId || 'conversational');
-      
+
       // Build matched types info
-      const matchedTypesInfo = context.matchedTypes?.length > 0
-        ? context.matchedTypes.map(t => `${t.id} (score: ${t.score}, keywords: ${t.matchedKeywords?.join(', ')})`).join('; ')
-        : 'none detected';
-      
-      const selectedTypesInfo = context.selectedTypes?.length > 0
-        ? context.selectedTypes.join(', ')
-        : 'none selected';
-      
+      const matchedTypesInfo =
+        context.matchedTypes?.length > 0
+          ? context.matchedTypes
+              .map((t) => `${t.id} (score: ${t.score}, keywords: ${t.matchedKeywords?.join(', ')})`)
+              .join('; ')
+          : 'none detected';
+
+      const selectedTypesInfo = context.selectedTypes?.length > 0 ? context.selectedTypes.join(', ') : 'none selected';
+
       // Build conversation history for context
-      const conversationHistory = (context.messageHistory || []).map(msg => ({
+      const conversationHistory = (context.messageHistory || []).map((msg) => ({
         role: msg.role,
         content: msg.content,
       }));
-      
+
       // Build plan context if available
-      const planContext = context.plan ? (() => {
-        const plan = context.plan;
-        const enabledFeatures = (plan.features || []).filter(f => f.enabled && f.feasible);
-        const disabledFeatures = (plan.features || []).filter(f => !f.enabled && f.feasible);
-        const infeasibleFeatures = (plan.features || []).filter(f => !f.feasible);
-        
-        return `
+      const planContext = context.plan
+        ? (() => {
+            const plan = context.plan;
+            const enabledFeatures = (plan.features || []).filter((f) => f.enabled && f.feasible);
+            const disabledFeatures = (plan.features || []).filter((f) => !f.enabled && f.feasible);
+            const infeasibleFeatures = (plan.features || []).filter((f) => !f.feasible);
+
+            return `
 APPROVED PLAN (User has approved this approach):
 - Understanding: ${plan.understanding}
 - Execution Type: ${plan.executionType}
@@ -16956,13 +17948,13 @@ APPROVED PLAN (User has approved this approach):
 - Suggested Keywords: ${plan.suggestedKeywords?.join(', ')}
 
 SELECTED FEATURES (MUST implement these):
-${enabledFeatures.map(f => `- ${f.name}: ${f.description}`).join('\n') || '- No specific features selected'}
+${enabledFeatures.map((f) => `- ${f.name}: ${f.description}`).join('\n') || '- No specific features selected'}
 
 EXCLUDED FEATURES (User chose NOT to include):
-${disabledFeatures.map(f => `- ${f.name}`).join('\n') || '- None excluded'}
+${disabledFeatures.map((f) => `- ${f.name}`).join('\n') || '- None excluded'}
 
 NOT FEASIBLE (Cannot be implemented):
-${infeasibleFeatures.map(f => `- ${f.name}: ${f.feasibilityReason}`).join('\n') || '- All features are feasible'}
+${infeasibleFeatures.map((f) => `- ${f.name}: ${f.feasibilityReason}`).join('\n') || '- All features are feasible'}
 
 APPROACH:
 ${plan.approach?.steps?.map((s, i) => `${i + 1}. ${s}`).join('\n')}
@@ -16976,7 +17968,8 @@ BUILD THE AGENT ACCORDING TO THIS PLAN. Use execution type "${plan.executionType
 Implement ALL selected features. Do NOT implement excluded or infeasible features.
 Ensure the agent will pass the test plan above.
 `;
-      })() : '';
+          })()
+        : '';
 
       // Build system prompt for agent creation chat
       const systemPrompt = `You are GSX Agent Composer, an AI assistant that helps users build voice agents through conversation.
@@ -17018,30 +18011,31 @@ Keep responses brief. Focus on building the agent.`;
 
       // Add the new user message
       conversationHistory.push({ role: 'user', content: message });
-      
+
       // Call Claude Code CLI (uses browser login, no API key needed)
       const response = await claudeCode.chat(conversationHistory, {
         system: systemPrompt,
       });
-      
+
       if (!response?.success || !response?.content) {
         return { success: false, error: response?.error || 'No response from Claude Code' };
       }
-      
+
       const responseText = response.content;
-      
+
       // Parse agent draft from response if present
       // Try multiple formats: ```agent, ```json, or raw JSON
       let agentDraft = context.currentDraft;
-      const agentMatch = responseText.match(/```agent\s*([\s\S]*?)\s*```/) ||
-                         responseText.match(/```json\s*([\s\S]*?)\s*```/) ||
-                         responseText.match(/```\s*(\{[\s\S]*?\})\s*```/);
-      
+      const agentMatch =
+        responseText.match(/```agent\s*([\s\S]*?)\s*```/) ||
+        responseText.match(/```json\s*([\s\S]*?)\s*```/) ||
+        responseText.match(/```\s*(\{[\s\S]*?\})\s*```/);
+
       // Also try to match raw JSON at the start or end of response
       const rawJsonMatch = !agentMatch && responseText.match(/(\{[\s\S]*"name"[\s\S]*"keywords"[\s\S]*\})/);
-      
-      const jsonToParse = agentMatch ? agentMatch[1] : (rawJsonMatch ? rawJsonMatch[1] : null);
-      
+
+      const jsonToParse = agentMatch ? agentMatch[1] : rawJsonMatch ? rawJsonMatch[1] : null;
+
       if (jsonToParse) {
         try {
           const parsedAgent = JSON.parse(jsonToParse);
@@ -17058,54 +18052,53 @@ Keep responses brief. Focus on building the agent.`;
           console.warn('[AgentComposer] Could not parse agent JSON:', parseError);
         }
       }
-      
+
       // Clean the response text (remove all code blocks and raw JSON for display)
       let cleanResponse = responseText
-        .replace(/```agent\s*[\s\S]*?\s*```/g, '')  // Remove ```agent blocks
-        .replace(/```json\s*[\s\S]*?\s*```/g, '')   // Remove ```json blocks
-        .replace(/```javascript\s*[\s\S]*?\s*```/g, '')  // Remove ```javascript blocks
-        .replace(/```\s*\{[\s\S]*?\}\s*```/g, '')   // Remove ``` blocks containing JSON objects
+        .replace(/```agent\s*[\s\S]*?\s*```/g, '') // Remove ```agent blocks
+        .replace(/```json\s*[\s\S]*?\s*```/g, '') // Remove ```json blocks
+        .replace(/```javascript\s*[\s\S]*?\s*```/g, '') // Remove ```javascript blocks
+        .replace(/```\s*\{[\s\S]*?\}\s*```/g, '') // Remove ``` blocks containing JSON objects
         .trim();
-      
+
       // If the remaining response looks like raw JSON, don't display it
       if (cleanResponse.startsWith('{') && cleanResponse.endsWith('}')) {
         cleanResponse = '';
       }
-      
+
       // If response is mostly JSON-like content, provide a friendly message
       if (!cleanResponse || cleanResponse.length < 20) {
         if (agentDraft) {
           cleanResponse = `I've created the **${agentDraft.name || 'agent'}** configuration. Check the preview on the right!`;
         } else {
-          cleanResponse = 'I\'ve updated the agent configuration. Check the preview!';
+          cleanResponse = "I've updated the agent configuration. Check the preview!";
         }
       }
-      
+
       return {
         success: true,
         response: cleanResponse,
         agentDraft,
       };
-      
     } catch (error) {
       console.error('[AgentComposer] Chat error:', error);
       return { success: false, error: error.message || String(error) };
     }
   });
-  
+
   // Save finalized agent
   ipcMain.handle('gsx-create:save-agent', async (event, agentDraft) => {
     try {
       console.log('[AgentComposer] Saving agent:', agentDraft.name);
-      
+
       const { getAgentStore } = require('./src/voice-task-sdk/agent-store');
       const store = getAgentStore();
       await store.init();
-      
+
       // Normalize and validate
       const agentConfig = {
         name: agentDraft.name?.trim() || 'Unnamed Agent',
-        keywords: (agentDraft.keywords || []).map(k => String(k).toLowerCase().trim()).filter(k => k),
+        keywords: (agentDraft.keywords || []).map((k) => String(k).toLowerCase().trim()).filter((k) => k),
         prompt: agentDraft.prompt?.trim() || '',
         categories: agentDraft.categories || ['general'],
         executionType: agentDraft.executionType || 'llm',
@@ -17116,68 +18109,95 @@ Keep responses brief. Focus on building the agent.`;
           maxConcurrent: 5,
         },
       };
-      
+
       if (!agentConfig.name || !agentConfig.prompt) {
         return { success: false, error: 'Agent must have a name and prompt' };
       }
-      
+
       if (agentConfig.keywords.length === 0) {
         return { success: false, error: 'Agent must have at least one keyword' };
       }
-      
+
       const agent = await store.createAgent(agentConfig);
       console.log('[AgentComposer] Agent saved:', agent.id);
-      
+
       return { success: true, agent };
-      
     } catch (error) {
       console.error('[AgentComposer] Save error:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // ==================== AUTONOMOUS AGENT TESTING ====================
-  
+
+  // V2: Generate test scenarios for an agent
+  ipcMain.handle('gsx-create:generate-scenarios', async (event, agent) => {
+    try {
+      const { generateTestScenarios } = require('./lib/agent-auto-tester');
+      return { success: true, scenarios: await generateTestScenarios(agent) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // V2: Run full test suite with scenario generation + persistence
+  ipcMain.handle('gsx-create:test-suite', async (event, agent) => {
+    try {
+      const { runTestSuite } = require('./lib/agent-auto-tester');
+
+      const onProgress = (update) => {
+        if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
+          claudeCodeWindow.webContents.send('auto-test:progress', update);
+        }
+      };
+
+      const results = await runTestSuite(agent, { persist: true, onProgress });
+      return { success: true, results };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Autonomous test - creates, tests, diagnoses, fixes, and iterates until success
   // Returns comprehensive feedback including state diffs, verification results, and timeline
   // Uses Claude Code CLI (browser login, no API key needed)
   ipcMain.handle('gsx-create:auto-test', async (event, agent, testPrompt) => {
     const { AgentAutoTester } = require('./lib/agent-auto-tester');
-    
+
     // AgentAutoTester now uses Claude Code internally
     const autoTester = new AgentAutoTester();
-    
+
     console.log('[AgentComposer] Starting autonomous test for:', agent.name);
-    
+
     // Progress callback to send updates to the UI
     const progressUpdates = [];
     const onProgress = (update) => {
       progressUpdates.push(update);
       console.log('[AgentComposer] Auto-test progress:', update.type, update.message);
-      
+
       // Include state diff info in progress updates
       if (update.stateDiff) {
         console.log('[AgentComposer] State changes:', update.stateDiff.changeCount || 0);
       }
-      
+
       // Send progress to renderer with full details
       if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
         claudeCodeWindow.webContents.send('auto-test:progress', {
           ...update,
           stateDiff: update.stateDiff,
-          verificationResults: update.verificationResults
+          verificationResults: update.verificationResults,
         });
       }
     };
-    
+
     try {
       const result = await autoTester.testUntilSuccess(agent, testPrompt, onProgress);
-      
+
       console.log('[AgentComposer] Autonomous test complete:', result.success ? 'SUCCESS' : 'FAILED');
       if (result.lastResult?.stateDiff) {
         console.log('[AgentComposer] Final state changes:', result.lastResult.stateDiff.changeCount || 0);
       }
-      
+
       // Return comprehensive result with all feedback
       return {
         success: result.success,
@@ -17188,43 +18208,45 @@ Keep responses brief. Focus on building the agent.`;
         recommendation: result.recommendation,
         history: result.history,
         progressLog: progressUpdates,
-        
+
         // New comprehensive feedback fields
-        lastResult: result.lastResult ? {
-          verified: result.lastResult.verified,
-          details: result.lastResult.details,
-          action: result.lastResult.action,
-          beforeState: result.lastResult.beforeState,
-          afterState: result.lastResult.afterState,
-          stateDiff: result.lastResult.stateDiff,
-          verificationResults: result.lastResult.verificationResults,
-          timeline: result.lastResult.timeline,
-          beforeStateFormatted: result.lastResult.beforeStateFormatted,
-          afterStateFormatted: result.lastResult.afterStateFormatted
-        } : null,
-        timeline: result.timeline
+        lastResult: result.lastResult
+          ? {
+              verified: result.lastResult.verified,
+              details: result.lastResult.details,
+              action: result.lastResult.action,
+              beforeState: result.lastResult.beforeState,
+              afterState: result.lastResult.afterState,
+              stateDiff: result.lastResult.stateDiff,
+              verificationResults: result.lastResult.verificationResults,
+              timeline: result.lastResult.timeline,
+              beforeStateFormatted: result.lastResult.beforeStateFormatted,
+              afterStateFormatted: result.lastResult.afterStateFormatted,
+            }
+          : null,
+        timeline: result.timeline,
       };
     } catch (error) {
       console.error('[AgentComposer] Autonomous test error:', error);
       return {
         success: false,
         error: error.message,
-        progressLog: progressUpdates
+        progressLog: progressUpdates,
       };
     }
   });
-  
+
   // Quick test endpoint - single attempt, returns immediately with full feedback
   // Uses Claude Code CLI (browser login, no API key needed)
   ipcMain.handle('gsx-create:quick-test', async (event, agent, testPrompt) => {
     const { AgentAutoTester } = require('./lib/agent-auto-tester');
-    
+
     // AgentAutoTester now uses Claude Code internally
     const autoTester = new AgentAutoTester();
-    
+
     try {
       const result = await autoTester.executeAndVerify(agent, testPrompt);
-      
+
       // Return comprehensive feedback
       return {
         success: result.verified === true,
@@ -17232,7 +18254,7 @@ Keep responses brief. Focus on building the agent.`;
         method: result.method,
         details: result.details,
         needsUserConfirmation: result.needsUserConfirmation || false,
-        
+
         // Full state information
         action: result.action,
         beforeState: result.beforeState,
@@ -17243,17 +18265,17 @@ Keep responses brief. Focus on building the agent.`;
         beforeStateFormatted: result.beforeStateFormatted,
         afterStateFormatted: result.afterStateFormatted,
         actualState: result.actualState,
-        expectedState: result.expectedState
+        expectedState: result.expectedState,
       };
     } catch (error) {
       return {
         success: false,
         verified: false,
-        error: error.message
+        error: error.message,
       };
     }
   });
-  
+
   // Check if Claude Code CLI is available (Phase 2)
   ipcMain.handle('claude-code:available', async () => {
     try {
@@ -17265,43 +18287,43 @@ Keep responses brief. Focus on building the agent.`;
       return false;
     }
   });
-  
+
   // Run Claude Code CLI (Phase 2)
   ipcMain.handle('claude-code:run', async (event, templateId, prompt, options = {}) => {
     try {
-      const { runClaudeCode, runTemplate } = require('./lib/claude-code-runner');
+      const { runClaudeCode: _runClaudeCode, runTemplate } = require('./lib/claude-code-runner');
       const template = getTemplate(templateId);
-      
+
       if (!template) {
         return { success: false, error: `Template "${templateId}" not found` };
       }
-      
+
       if (template.backend !== 'cli') {
         return { success: false, error: 'This template does not use Claude Code CLI' };
       }
-      
+
       console.log('[ClaudeCode] Running CLI template:', templateId);
-      
+
       // Send output events back to renderer
       const sendOutput = (data) => {
         if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
           claudeCodeWindow.webContents.send('claude-code:output', data);
         }
       };
-      
+
       const result = await runTemplate(template, prompt, {
         cwd: options.workingDir,
         onOutput: sendOutput,
         onError: sendOutput,
       });
-      
+
       return result;
     } catch (error) {
       console.error('[ClaudeCode] Run error:', error);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Cancel running process (Phase 2)
   ipcMain.handle('claude-code:cancel', async () => {
     try {
@@ -17312,28 +18334,28 @@ Keep responses brief. Focus on building the agent.`;
       return false;
     }
   });
-  
+
   // Browse for directory
   ipcMain.handle('claude-code:browse-directory', async () => {
     const { dialog } = require('electron');
     const result = await dialog.showOpenDialog(claudeCodeWindow, {
       properties: ['openDirectory'],
-      title: 'Select Working Directory'
+      title: 'Select Working Directory',
     });
-    
+
     if (!result.canceled && result.filePaths.length > 0) {
       return result.filePaths[0];
     }
     return null;
   });
-  
+
   // Close window
   ipcMain.on('claude-code:close', () => {
     if (claudeCodeWindow && !claudeCodeWindow.isDestroyed()) {
       claudeCodeWindow.close();
     }
   });
-  
+
   console.log('[AgentComposer] IPC handlers registered');
 }
 
@@ -17348,9 +18370,9 @@ function createIntroWizardWindow() {
     introWizardWindow.focus();
     return introWizardWindow;
   }
-  
+
   console.log('[IntroWizard] Creating intro wizard window...');
-  
+
   introWizardWindow = new BrowserWindow({
     width: 720,
     height: 600,
@@ -17367,25 +18389,26 @@ function createIntroWizardWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload-intro-wizard.js'),
       webSecurity: true,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
-  
+
   // Clear the reference when closed
   introWizardWindow.on('closed', () => {
     console.log('[IntroWizard] Window closed');
     introWizardWindow = null;
   });
-  
+  windowRegistry.register('intro-wizard', introWizardWindow);
+
   // Load the intro wizard HTML
-  introWizardWindow.loadFile('intro-wizard.html').catch(err => {
+  introWizardWindow.loadFile('intro-wizard.html').catch((err) => {
     console.error('[IntroWizard] Error loading intro-wizard.html:', err);
   });
-  
+
   introWizardWindow.webContents.on('did-finish-load', () => {
     console.log('[IntroWizard] Window loaded successfully');
   });
-  
+
   return introWizardWindow;
 }
 
@@ -17395,17 +18418,17 @@ function createIntroWizardWindow() {
 function setupIntroWizardIPC() {
   const { getSettingsManager } = require('./settings-manager');
   const packageJson = require('./package.json');
-  
+
   // Get initialization data for the wizard
   ipcMain.handle('intro-wizard:get-init-data', async () => {
     const settings = getSettingsManager();
     return {
       currentVersion: packageJson.version,
       lastSeenVersion: settings.getLastSeenVersion(),
-      isFirstRun: settings.isFirstRun()
+      isFirstRun: settings.isFirstRun(),
     };
   });
-  
+
   // Mark current version as seen
   ipcMain.handle('intro-wizard:mark-seen', async () => {
     const settings = getSettingsManager();
@@ -17413,7 +18436,7 @@ function setupIntroWizardIPC() {
     console.log('[IntroWizard] Marked version as seen:', packageJson.version);
     return true;
   });
-  
+
   // Close the wizard window
   ipcMain.handle('intro-wizard:close', async () => {
     if (introWizardWindow && !introWizardWindow.isDestroyed()) {
@@ -17421,7 +18444,7 @@ function setupIntroWizardIPC() {
     }
     return true;
   });
-  
+
   console.log('[IntroWizard] IPC handlers registered');
 }
 
@@ -17432,14 +18455,16 @@ function setupIntroWizardIPC() {
 function checkAndShowIntroWizard() {
   const { getSettingsManager } = require('./settings-manager');
   const packageJson = require('./package.json');
-  
+
   const settings = getSettingsManager();
   const currentVersion = packageJson.version;
-  
+
   if (settings.shouldShowIntroWizard(currentVersion)) {
     const isFirstRun = settings.isFirstRun();
-    console.log(`[IntroWizard] Showing wizard - ${isFirstRun ? 'First run' : 'Update from ' + settings.getLastSeenVersion()}`);
-    
+    console.log(
+      `[IntroWizard] Showing wizard - ${isFirstRun ? 'First run' : 'Update from ' + settings.getLastSeenVersion()}`
+    );
+
     // Delay slightly to let main window finish loading
     setTimeout(() => {
       createIntroWizardWindow();

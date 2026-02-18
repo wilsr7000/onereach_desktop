@@ -7,10 +7,18 @@ vi.mock('js-yaml', () => ({
   default: {
     load: vi.fn((str) => {
       // Attempt JSON parse first; fall back to a simple object for YAML-like input
-      try { return JSON.parse(str); } catch (e) { return { name: 'Alice', age: 30 }; }
+      try {
+        return JSON.parse(str);
+      } catch (_e) {
+        return { name: 'Alice', age: 30 };
+      }
     }),
-    dump: vi.fn((obj, opts) => {
-      return Object.entries(obj).map(([k, v]) => `${k}: ${v}`).join('\n') + '\n';
+    dump: vi.fn((obj, _opts) => {
+      return (
+        Object.entries(obj)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('\n') + '\n'
+      );
     }),
   },
 }));

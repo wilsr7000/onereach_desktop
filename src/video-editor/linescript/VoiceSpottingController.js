@@ -1,6 +1,6 @@
 /**
  * VoiceSpottingController.js - Voice-Activated Spotting
- * 
+ *
  * Features:
  * - Web Speech API integration
  * - Template-specific voice commands
@@ -17,29 +17,29 @@ export class VoiceSpottingController {
   constructor(lineScriptPanel) {
     this.panel = lineScriptPanel;
     this.app = lineScriptPanel.app;
-    
+
     // Speech recognition
     this.recognition = null;
     this.isListening = false;
     this.isSupported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
-    
+
     // Configuration
     this.templateId = 'podcast';
     this.voiceCommands = {};
     this.confidenceThreshold = 0.7;
-    
+
     // Command tracking
     this.lastCommand = null;
     this.lastCommandTime = 0;
     this.commandCooldown = 500; // ms
-    
+
     // Event listeners
     this.eventListeners = {};
-    
+
     // UI elements
     this.feedbackElement = null;
     this.statusElement = null;
-    
+
     // Initialize if supported
     if (this.isSupported) {
       this.initRecognition();
@@ -52,13 +52,13 @@ export class VoiceSpottingController {
   initRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     this.recognition = new SpeechRecognition();
-    
+
     // Configuration
     this.recognition.continuous = true;
     this.recognition.interimResults = true;
     this.recognition.lang = 'en-US';
     this.recognition.maxAlternatives = 3;
-    
+
     // Event handlers
     this.recognition.onstart = () => this.handleStart();
     this.recognition.onend = () => this.handleEnd();
@@ -74,7 +74,10 @@ export class VoiceSpottingController {
   setTemplate(templateId) {
     this.templateId = templateId;
     this.voiceCommands = getVoiceCommands(templateId);
-    window.logging.info('video', `VoiceSpotting Loaded ${Object.keys(this.voiceCommands).length} commands for ${templateId}`);
+    window.logging.info(
+      'video',
+      `VoiceSpotting Loaded ${Object.keys(this.voiceCommands).length} commands for ${templateId}`
+    );
   }
 
   /**
@@ -87,16 +90,16 @@ export class VoiceSpottingController {
       this.emit('error', { message: 'Speech recognition not supported in this browser' });
       return false;
     }
-    
+
     if (this.isListening) {
       window.logging.warn('video', 'VoiceSpotting Already listening');
       return true;
     }
-    
+
     try {
       // Load commands for current template
       this.setTemplate(this.panel.currentTemplateId || this.templateId);
-      
+
       this.recognition.start();
       return true;
     } catch (error) {
@@ -111,13 +114,13 @@ export class VoiceSpottingController {
    */
   stop() {
     if (!this.recognition || !this.isListening) return;
-    
+
     try {
       this.recognition.stop();
     } catch (error) {
       window.logging.error('video', 'VoiceSpotting Failed to stop', { error: error.message || error });
     }
-    
+
     this.isListening = false;
     this.updateStatus('stopped');
   }
@@ -153,7 +156,7 @@ export class VoiceSpottingController {
     this.updateStatus('stopped');
     this.emit('stopped');
     window.logging.info('video', 'VoiceSpotting Stopped listening');
-    
+
     // Auto-restart if still supposed to be listening
     if (this.shouldAutoRestart) {
       setTimeout(() => {
@@ -171,32 +174,32 @@ export class VoiceSpottingController {
   handleResult(event) {
     const results = event.results;
     const lastResult = results[results.length - 1];
-    
+
     if (!lastResult.isFinal) {
       // Show interim results
       this.updateStatus('hearing', lastResult[0].transcript);
       return;
     }
-    
+
     // Get best transcript
     const transcript = lastResult[0].transcript.toLowerCase().trim();
     const confidence = lastResult[0].confidence;
-    
+
     window.logging.info('video', `VoiceSpotting Heard: "${transcript}" (${(confidence * 100).toFixed(1)}%)`);
-    
+
     // Check confidence
     if (confidence < this.confidenceThreshold) {
       window.logging.info('video', 'VoiceSpotting Confidence too low, ignoring');
       return;
     }
-    
+
     // Check cooldown
     const now = Date.now();
     if (now - this.lastCommandTime < this.commandCooldown) {
       window.logging.info('video', 'VoiceSpotting Command cooldown, ignoring');
       return;
     }
-    
+
     // Process command
     this.processCommand(transcript);
   }
@@ -208,7 +211,7 @@ export class VoiceSpottingController {
   processCommand(transcript) {
     // Try exact match first
     let command = this.voiceCommands[transcript];
-    
+
     // Try partial match if no exact match
     if (!command) {
       for (const [phrase, cmd] of Object.entries(this.voiceCommands)) {
@@ -218,16 +221,16 @@ export class VoiceSpottingController {
         }
       }
     }
-    
+
     if (!command) {
       window.logging.info('video', `VoiceSpotting Unknown command: "${transcript}"`);
       this.updateStatus('unknown', transcript);
       return;
     }
-    
+
     // Execute command
     this.executeCommand(command, transcript);
-    
+
     // Update tracking
     this.lastCommand = command;
     this.lastCommandTime = Date.now();
@@ -240,13 +243,13 @@ export class VoiceSpottingController {
    */
   executeCommand(command, transcript) {
     window.logging.info('video', `VoiceSpotting Executing: ${command.action}`);
-    
+
     // Show feedback
     this.showFeedback(command.feedback);
-    
+
     // Get current time
     const currentTime = this.app.video?.currentTime || 0;
-    
+
     // Execute action through panel
     if (this.panel && typeof this.panel.executeAction === 'function') {
       this.panel.executeAction(command.action);
@@ -254,12 +257,12 @@ export class VoiceSpottingController {
       // Direct execution
       this.executeDirectAction(command, currentTime);
     }
-    
+
     // Emit event
-    this.emit('commandExecuted', { 
-      command, 
-      transcript, 
-      time: currentTime 
+    this.emit('commandExecuted', {
+      command,
+      transcript,
+      time: currentTime,
     });
   }
 
@@ -270,7 +273,7 @@ export class VoiceSpottingController {
    */
   executeDirectAction(command, time) {
     const markerManager = this.app.markerManager;
-    
+
     switch (command.action) {
       case 'addPointMarker':
       case 'addQuoteMarker':
@@ -281,23 +284,18 @@ export class VoiceSpottingController {
       case 'addChapterMarker':
       case 'addKeyPointMarker':
         if (markerManager) {
-          markerManager.addSpotMarker(
-            time,
-            command.feedback,
-            null,
-            { markerType: command.markerType || 'spot' }
-          );
+          markerManager.addSpotMarker(time, command.feedback, null, { markerType: command.markerType || 'spot' });
         }
         break;
-        
+
       case 'setInPoint':
         this.panel?.setInPoint(time);
         break;
-        
+
       case 'setOutPoint':
         this.panel?.setOutPoint(time);
         break;
-        
+
       case 'undoLastMarker':
         this.panel?.undoLastMarker();
         break;
@@ -310,9 +308,9 @@ export class VoiceSpottingController {
    */
   handleError(event) {
     window.logging.error('video', 'VoiceSpotting Error', { error: event.error });
-    
+
     let message = 'Voice recognition error';
-    
+
     switch (event.error) {
       case 'not-allowed':
         message = 'Microphone access denied';
@@ -328,7 +326,7 @@ export class VoiceSpottingController {
         message = 'Microphone not available';
         break;
     }
-    
+
     this.updateStatus('error', message);
     this.emit('error', { error: event.error, message });
   }
@@ -352,16 +350,16 @@ export class VoiceSpottingController {
       this.feedbackElement.className = 'voice-spotting-feedback';
       document.body.appendChild(this.feedbackElement);
     }
-    
+
     // Show feedback
     this.feedbackElement.textContent = feedback;
     this.feedbackElement.classList.add('visible');
-    
+
     // Animate
     this.feedbackElement.classList.remove('pulse');
     void this.feedbackElement.offsetWidth; // Trigger reflow
     this.feedbackElement.classList.add('pulse');
-    
+
     // Hide after delay
     setTimeout(() => {
       this.feedbackElement.classList.remove('visible');
@@ -376,30 +374,29 @@ export class VoiceSpottingController {
   updateStatus(status, text = '') {
     // Create status element if needed
     if (!this.statusElement) {
-      this.statusElement = document.querySelector('.voice-status') || 
-                           document.createElement('div');
+      this.statusElement = document.querySelector('.voice-status') || document.createElement('div');
       if (!this.statusElement.parentElement) {
         this.statusElement.className = 'voice-status';
         // Would be added to panel in actual implementation
       }
     }
-    
+
     const statusIcons = {
       listening: '🎤',
       hearing: '👂',
       stopped: '🔇',
       error: '⚠️',
       unknown: '❓',
-      'no-match': '🤷'
+      'no-match': '🤷',
     };
-    
+
     this.statusElement.innerHTML = `
       <span class="status-icon">${statusIcons[status] || '🎤'}</span>
       <span class="status-text">${text || status}</span>
     `;
-    
+
     this.statusElement.className = `voice-status status-${status}`;
-    
+
     this.emit('statusChanged', { status, text });
   }
 
@@ -444,7 +441,7 @@ export class VoiceSpottingController {
   }
 
   // Event emitter methods
-  
+
   on(event, callback) {
     if (!this.eventListeners[event]) {
       this.eventListeners[event] = [];
@@ -454,13 +451,13 @@ export class VoiceSpottingController {
 
   emit(event, data = {}) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event].forEach(callback => callback(data));
+      this.eventListeners[event].forEach((callback) => callback(data));
     }
   }
 
   off(event, callback) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+      this.eventListeners[event] = this.eventListeners[event].filter((cb) => cb !== callback);
     }
   }
 
@@ -470,24 +467,13 @@ export class VoiceSpottingController {
   destroy() {
     this.stop();
     this.shouldAutoRestart = false;
-    
+
     if (this.feedbackElement) {
       this.feedbackElement.remove();
     }
-    
+
     this.eventListeners = {};
   }
 }
 
 export default VoiceSpottingController;
-
-
-
-
-
-
-
-
-
-
-

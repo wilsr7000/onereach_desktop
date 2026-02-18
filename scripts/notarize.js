@@ -2,7 +2,7 @@ const { notarize } = require('@electron/notarize');
 
 exports.default = async function notarizing(context) {
   const { electronPlatformName, appOutDir } = context;
-  
+
   if (electronPlatformName !== 'darwin') {
     return;
   }
@@ -20,18 +20,18 @@ exports.default = async function notarizing(context) {
   console.log(`   Bundle ID: com.onereach.app`);
   console.log(`   Apple ID: ${process.env.APPLE_ID}`);
   console.log(`   Team ID: ${process.env.APPLE_TEAM_ID}`);
-  
+
   try {
     await notarize({
       appBundleId: 'com.onereach.app',
       appPath: appPath,
       appleId: process.env.APPLE_ID,
       appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
-      teamId: process.env.APPLE_TEAM_ID
+      teamId: process.env.APPLE_TEAM_ID,
     });
     console.log('✅ Notarization successful!');
   } catch (error) {
     console.error('❌ Notarization failed:', error.message);
     throw error;
   }
-}; 
+};

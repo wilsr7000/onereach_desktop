@@ -4,14 +4,14 @@
  * This monolithic file has been replaced by the modular architecture in:
  *   src/video/          - Backend video processing services
  *   src/video-editor/   - Frontend video editor UI modules
- * 
+ *
  * The application now imports from:
  *   const { VideoEditor } = require('./src/video/index.js');
- * 
+ *
  * This file is kept for reference only and will be removed in a future release.
  * Last active: December 2025
  * ============================================================================
- * 
+ *
  * ORIGINAL DESCRIPTION:
  * Video Editor Module for Onereach.ai
  * Provides video editing capabilities using fluent-ffmpeg
@@ -38,22 +38,22 @@ class VideoEditor {
     console.log('[VideoEditor] FFprobe path:', ffprobePath);
     console.log('[VideoEditor] FFmpeg exists:', fs.existsSync(ffmpegPath));
     console.log('[VideoEditor] FFprobe exists:', fs.existsSync(ffprobePath));
-    
+
     this.activeJobs = new Map();
     this.outputDir = path.join(app.getPath('userData'), 'video-exports');
     this.thumbnailDir = path.join(app.getPath('userData'), 'video-thumbnails');
     this.ipcHandlersRegistered = false; // Track if IPC handlers have been registered
     this.detachedVideoWindows = new Map(); // Track detached video windows by parent window ID
-    
+
     // Ensure directories exist
     this.ensureDirectories();
-    
+
     console.log('[VideoEditor] Initialized with output dir:', this.outputDir);
     console.log('[VideoEditor] Thumbnail dir:', this.thumbnailDir);
   }
 
   ensureDirectories() {
-    [this.outputDir, this.thumbnailDir].forEach(dir => {
+    [this.outputDir, this.thumbnailDir].forEach((dir) => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
@@ -95,8 +95,8 @@ class VideoEditor {
           return;
         }
 
-        const videoStream = metadata.streams.find(s => s.codec_type === 'video');
-        const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
+        const videoStream = metadata.streams.find((s) => s.codec_type === 'video');
+        const audioStream = metadata.streams.find((s) => s.codec_type === 'audio');
 
         resolve({
           duration: metadata.format.duration,
@@ -104,20 +104,24 @@ class VideoEditor {
           size: metadata.format.size,
           bitrate: metadata.format.bit_rate,
           format: metadata.format.format_name,
-          video: videoStream ? {
-            codec: videoStream.codec_name,
-            width: videoStream.width,
-            height: videoStream.height,
-            fps: eval(videoStream.r_frame_rate),
-            aspectRatio: videoStream.display_aspect_ratio
-          } : null,
-          audio: audioStream ? {
-            codec: audioStream.codec_name,
-            channels: audioStream.channels,
-            sampleRate: audioStream.sample_rate,
-            bitrate: audioStream.bit_rate
-          } : null,
-          raw: metadata
+          video: videoStream
+            ? {
+                codec: videoStream.codec_name,
+                width: videoStream.width,
+                height: videoStream.height,
+                fps: eval(videoStream.r_frame_rate),
+                aspectRatio: videoStream.display_aspect_ratio,
+              }
+            : null,
+          audio: audioStream
+            ? {
+                codec: audioStream.codec_name,
+                channels: audioStream.channels,
+                sampleRate: audioStream.sample_rate,
+                bitrate: audioStream.bit_rate,
+              }
+            : null,
+          raw: metadata,
         });
       });
     });
@@ -155,7 +159,7 @@ class VideoEditor {
       count = 1,
       timestamps = null, // Array of specific timestamps like ['00:00:05', '00:00:10']
       size = '320x180',
-      filename = 'thumb_%i.png'
+      filename = 'thumb_%i.png',
     } = options;
 
     const outputFolder = options.outputFolder || this.thumbnailDir;
@@ -163,10 +167,10 @@ class VideoEditor {
 
     return new Promise((resolve, reject) => {
       const thumbs = [];
-      
+
       const command = ffmpeg(inputPath)
         .on('filenames', (filenames) => {
-          filenames.forEach(f => thumbs.push(path.join(outputFolder, f)));
+          filenames.forEach((f) => thumbs.push(path.join(outputFolder, f)));
         })
         .on('end', () => {
           resolve(thumbs);
@@ -180,14 +184,14 @@ class VideoEditor {
           timestamps: timestamps,
           folder: outputFolder,
           filename: `${baseName}_${filename}`,
-          size: size
+          size: size,
         });
       } else {
         command.screenshots({
           count: count,
           folder: outputFolder,
           filename: `${baseName}_${filename}`,
-          size: size
+          size: size,
         });
       }
     });
@@ -206,7 +210,7 @@ class VideoEditor {
           timestamps: [timestamp],
           folder: path.dirname(output),
           filename: path.basename(output),
-          size: '640x360'
+          size: '640x360',
         })
         .on('end', () => resolve(output))
         .on('error', reject);
@@ -223,8 +227,8 @@ class VideoEditor {
       duration = null,
       outputPath = null,
       format = null,
-      fadeIn = null,    // Fade in duration in seconds
-      fadeOut = null    // Fade out duration in seconds
+      fadeIn = null, // Fade in duration in seconds
+      fadeOut = null, // Fade out duration in seconds
     } = options;
 
     const ext = format || path.extname(inputPath).slice(1) || 'mp4';
@@ -236,8 +240,7 @@ class VideoEditor {
     const hasFades = fadeIn || fadeOut;
 
     return new Promise((resolve, reject) => {
-      let command = ffmpeg(inputPath)
-        .setStartTime(this.parseTime(startTime));
+      let command = ffmpeg(inputPath).setStartTime(this.parseTime(startTime));
 
       // Calculate the output duration
       let outputDuration = null;
@@ -275,11 +278,16 @@ class VideoEditor {
 
         // Use reasonable encoding settings for re-encode
         command = command.outputOptions([
-          '-c:v', 'libx264',
-          '-preset', 'medium',
-          '-crf', '23',
-          '-c:a', 'aac',
-          '-b:a', '192k'
+          '-c:v',
+          'libx264',
+          '-preset',
+          'medium',
+          '-crf',
+          '23',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '192k',
         ]);
       } else {
         // No fades - use fast copy without re-encoding
@@ -297,7 +305,7 @@ class VideoEditor {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -327,7 +335,7 @@ class VideoEditor {
       fps = null,
       preset = 'medium', // ultrafast, fast, medium, slow, veryslow
       crf = 23, // Quality: 0-51, lower = better
-      outputPath = null
+      outputPath = null,
     } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
@@ -343,11 +351,11 @@ class VideoEditor {
       } else {
         // Default codecs based on format
         const defaultCodecs = {
-          'mp4': 'libx264',
-          'webm': 'libvpx-vp9',
-          'mov': 'libx264',
-          'avi': 'mpeg4',
-          'mkv': 'libx264'
+          mp4: 'libx264',
+          webm: 'libvpx-vp9',
+          mov: 'libx264',
+          avi: 'mpeg4',
+          mkv: 'libx264',
         };
         if (defaultCodecs[format]) {
           command = command.videoCodec(defaultCodecs[format]);
@@ -359,11 +367,11 @@ class VideoEditor {
         command = command.audioCodec(audioCodec);
       } else {
         const defaultAudioCodecs = {
-          'mp4': 'aac',
-          'webm': 'libopus',
-          'mov': 'aac',
-          'avi': 'mp3',
-          'mkv': 'aac'
+          mp4: 'aac',
+          webm: 'libopus',
+          mov: 'aac',
+          avi: 'mp3',
+          mkv: 'aac',
         };
         if (defaultAudioCodecs[format]) {
           command = command.audioCodec(defaultAudioCodecs[format]);
@@ -391,10 +399,7 @@ class VideoEditor {
       }
 
       // Preset and CRF for h264/h265
-      command = command.outputOptions([
-        `-preset ${preset}`,
-        `-crf ${crf}`
-      ]);
+      command = command.outputOptions([`-preset ${preset}`, `-crf ${crf}`]);
 
       command
         .format(format)
@@ -410,7 +415,7 @@ class VideoEditor {
               percent: progress.percent,
               timemark: progress.timemark,
               currentFps: progress.currentFps,
-              targetSize: progress.targetSize
+              targetSize: progress.targetSize,
             });
           }
         })
@@ -430,11 +435,7 @@ class VideoEditor {
    * Extract audio from video
    */
   extractAudio(inputPath, options = {}, progressCallback = null) {
-    const {
-      format = 'mp3',
-      audioBitrate = '192k',
-      outputPath = null
-    } = options;
+    const { format = 'mp3', audioBitrate = '192k', outputPath = null } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
     const output = outputPath || path.join(this.outputDir, `${baseName}_audio.${format}`);
@@ -456,7 +457,7 @@ class VideoEditor {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -468,7 +469,7 @@ class VideoEditor {
           this.activeJobs.delete(jobId);
           reject(err);
         });
-      
+
       command.run();
     });
   }
@@ -482,12 +483,7 @@ class VideoEditor {
    * @returns {Promise<Object>} Result with outputPath and total duration
    */
   async extractSpeakerAudio(inputPath, segments, options = {}) {
-    const {
-      format = 'mp3',
-      audioBitrate = '192k',
-      outputPath = null,
-      speakerName = 'speaker'
-    } = options;
+    const { format = 'mp3', audioBitrate = '192k', outputPath = null, speakerName = 'speaker' } = options;
 
     if (!segments || segments.length === 0) {
       return { error: 'No segments provided' };
@@ -527,7 +523,7 @@ class VideoEditor {
           .audioCodec(format === 'mp3' ? 'libmp3lame' : 'aac')
           .audioBitrate(audioBitrate)
           .output(output)
-          .on('start', (cmd) => {
+          .on('start', (_cmd) => {
             console.log('[VideoEditor] Speaker audio extraction started');
             this.activeJobs.set(jobId, true);
           })
@@ -539,7 +535,7 @@ class VideoEditor {
               outputPath: output,
               duration: totalDuration,
               segmentCount: segments.length,
-              jobId
+              jobId,
             });
           })
           .on('error', (err) => {
@@ -565,7 +561,7 @@ class VideoEditor {
       text,
       markerName = 'segment',
       voice = 'Rachel', // ElevenLabs voice ID or name
-      outputPath = null
+      outputPath = null,
     } = options;
 
     if (!text || text.trim() === '') {
@@ -583,14 +579,14 @@ class VideoEditor {
 
       // Call ElevenLabs API to generate audio
       const audioFilePath = await this.generateElevenLabsAudio(text, voice);
-      
+
       if (progressCallback) {
         progressCallback({ jobId, status: 'Processing video...', percent: 40 });
       }
 
       // Use FFmpeg to replace the audio segment
-      const result = await this.replaceAudioSegment(inputPath, audioFilePath, startTime, endTime, output, progressCallback);
-      
+      await this.replaceAudioSegment(inputPath, audioFilePath, startTime, endTime, output, progressCallback);
+
       // Clean up temp audio file
       if (fs.existsSync(audioFilePath)) {
         fs.unlinkSync(audioFilePath);
@@ -600,13 +596,12 @@ class VideoEditor {
         progressCallback({ jobId, status: 'Complete!', percent: 100 });
       }
 
-      return { 
-        success: true, 
-        outputPath: output, 
+      return {
+        success: true,
+        outputPath: output,
         jobId,
-        message: `Audio replaced with ElevenLabs for "${markerName}"`
+        message: `Audio replaced with ElevenLabs for "${markerName}"`,
       };
-
     } catch (error) {
       console.error('[VideoEditor] ElevenLabs replacement error:', error);
       throw error;
@@ -618,25 +613,25 @@ class VideoEditor {
    */
   async generateElevenLabsAudio(text, voice = 'Rachel') {
     const outputPath = path.join(this.outputDir, `elevenlabs_${Date.now()}.mp3`);
-    
+
     // Get ElevenLabs API key from environment or settings
     const apiKey = process.env.ELEVENLABS_API_KEY;
-    
+
     if (!apiKey) {
       throw new Error('ElevenLabs API key not found. Please set ELEVENLABS_API_KEY in your environment.');
     }
 
     // ElevenLabs voice IDs (popular voices)
     const voiceIds = {
-      'Rachel': '21m00Tcm4TlvDq8ikWAM',
-      'Domi': 'AZnzlk1XvdvUeBnXmlld',
-      'Bella': 'EXAVITQu4vr4xnSDxMaL',
-      'Antoni': 'ErXwobaYiN019PkySvjV',
-      'Elli': 'MF3mGyEYCl7XYWbV9V6O',
-      'Josh': 'TxGEqnHWrfWFTfGW9XjX',
-      'Arnold': 'VR6AewLTigWG4xSOukaG',
-      'Adam': 'pNInz6obpgDQGcFmaJgB',
-      'Sam': 'yoZ06aMxZJJ28mfd3POQ'
+      Rachel: '21m00Tcm4TlvDq8ikWAM',
+      Domi: 'AZnzlk1XvdvUeBnXmlld',
+      Bella: 'EXAVITQu4vr4xnSDxMaL',
+      Antoni: 'ErXwobaYiN019PkySvjV',
+      Elli: 'MF3mGyEYCl7XYWbV9V6O',
+      Josh: 'TxGEqnHWrfWFTfGW9XjX',
+      Arnold: 'VR6AewLTigWG4xSOukaG',
+      Adam: 'pNInz6obpgDQGcFmaJgB',
+      Sam: 'yoZ06aMxZJJ28mfd3POQ',
     };
 
     const voiceId = voiceIds[voice] || voiceIds['Rachel'];
@@ -647,8 +642,8 @@ class VideoEditor {
         model_id: 'eleven_monolingual_v1',
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.75
-        }
+          similarity_boost: 0.75,
+        },
       });
 
       const options = {
@@ -657,11 +652,11 @@ class VideoEditor {
         path: `/v1/text-to-speech/${voiceId}`,
         method: 'POST',
         headers: {
-          'Accept': 'audio/mpeg',
+          Accept: 'audio/mpeg',
           'xi-api-key': apiKey,
           'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData)
-        }
+          'Content-Length': Buffer.byteLength(postData),
+        },
       };
 
       console.log('[VideoEditor] Calling ElevenLabs API with voice:', voice, voiceId);
@@ -722,8 +717,8 @@ class VideoEditor {
         model_id: 'eleven_multilingual_v2',
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.75
-        }
+          similarity_boost: 0.75,
+        },
       });
 
       const options = {
@@ -732,11 +727,11 @@ class VideoEditor {
         path: `/v1/text-to-speech/${voiceId}`,
         method: 'POST',
         headers: {
-          'Accept': 'audio/mpeg',
+          Accept: 'audio/mpeg',
           'xi-api-key': apiKey,
           'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData)
-        }
+          'Content-Length': Buffer.byteLength(postData),
+        },
       };
 
       console.log('[VideoEditor] Generating TTS with voice:', voiceId);
@@ -746,7 +741,7 @@ class VideoEditor {
       const req = https.request(options, (res) => {
         if (res.statusCode !== 200) {
           let errorData = '';
-          res.on('data', chunk => errorData += chunk);
+          res.on('data', (chunk) => (errorData += chunk));
           res.on('end', () => {
             reject(new Error(`ElevenLabs API error: ${res.statusCode} - ${errorData}`));
           });
@@ -803,12 +798,7 @@ class VideoEditor {
 
       const filterString = atempoFilters.join(',');
 
-      const ffmpegArgs = [
-        '-i', tempPath,
-        '-filter:a', filterString,
-        '-y',
-        outputPath
-      ];
+      const ffmpegArgs = ['-i', tempPath, '-filter:a', filterString, '-y', outputPath];
 
       const ffmpeg = spawn(this.ffmpegPath, ffmpegArgs);
 
@@ -845,15 +835,21 @@ class VideoEditor {
 
     return new Promise((resolve, reject) => {
       const ffmpegArgs = [
-        '-i', videoPath,
-        '-ss', startTime.toString(),
-        '-t', duration.toString(),
+        '-i',
+        videoPath,
+        '-ss',
+        startTime.toString(),
+        '-t',
+        duration.toString(),
         '-vn',
-        '-acodec', 'libmp3lame',
-        '-ar', '44100',
-        '-ab', '192k',
+        '-acodec',
+        'libmp3lame',
+        '-ar',
+        '44100',
+        '-ab',
+        '192k',
         '-y',
-        outputPath
+        outputPath,
       ];
 
       const ffmpeg = spawn(this.ffmpegPath, ffmpegArgs);
@@ -868,43 +864,6 @@ class VideoEditor {
       });
 
       ffmpeg.on('error', (err) => {
-        reject(err);
-      });
-    });
-  }
-
-  /**
-   * Get audio duration using FFprobe
-   * @param {string} audioPath - Path to audio file
-   * @returns {Promise<number>} Duration in seconds
-   */
-  async getAudioDuration(audioPath) {
-    return new Promise((resolve, reject) => {
-      const ffprobePath = this.ffmpegPath.replace('ffmpeg', 'ffprobe');
-      const args = [
-        '-v', 'error',
-        '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
-        audioPath
-      ];
-
-      const ffprobe = spawn(ffprobePath, args);
-      let output = '';
-
-      ffprobe.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-
-      ffprobe.on('close', (code) => {
-        if (code === 0) {
-          const duration = parseFloat(output.trim());
-          resolve(duration);
-        } else {
-          reject(new Error(`FFprobe failed with code ${code}`));
-        }
-      });
-
-      ffprobe.on('error', (err) => {
         reject(err);
       });
     });
@@ -946,17 +905,17 @@ class VideoEditor {
 
       // Build multipart body
       let body = '';
-      
+
       // Name field
       body += delimiter;
       body += 'Content-Disposition: form-data; name="name"\r\n\r\n';
       body += name;
-      
+
       // Files field (audio sample)
       body += delimiter;
       body += `Content-Disposition: form-data; name="files"; filename="sample.mp3"\r\n`;
       body += 'Content-Type: audio/mpeg\r\n\r\n';
-      
+
       // Combine text parts and audio buffer
       const preBoundary = Buffer.from(body, 'utf-8');
       const postBoundary = Buffer.from(closeDelimiter, 'utf-8');
@@ -968,11 +927,11 @@ class VideoEditor {
         path: '/v1/voices/add',
         method: 'POST',
         headers: {
-          'Accept': 'application/json',
+          Accept: 'application/json',
           'xi-api-key': apiKey,
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': payload.length
-        }
+          'Content-Length': payload.length,
+        },
       };
 
       console.log('[VideoEditor] Sending voice clone request to ElevenLabs...');
@@ -992,7 +951,7 @@ class VideoEditor {
               resolve({
                 success: true,
                 voiceId: result.voice_id,
-                name: name
+                name: name,
               });
             } catch (parseError) {
               reject(new Error('Failed to parse ElevenLabs response: ' + parseError.message));
@@ -1046,11 +1005,7 @@ class VideoEditor {
    * @returns {Promise<Object>} { success, outputPath, duration }
    */
   async generateSFX(options = {}) {
-    const {
-      text,
-      durationSeconds = null,
-      promptInfluence = 0.3
-    } = options;
+    const { text, durationSeconds = null, promptInfluence = 0.3 } = options;
 
     if (!text || text.trim() === '') {
       throw new Error('Sound effect description (text) is required');
@@ -1068,7 +1023,7 @@ class VideoEditor {
     return new Promise((resolve, reject) => {
       const requestBody = {
         text: text.trim(),
-        prompt_influence: promptInfluence
+        prompt_influence: promptInfluence,
       };
 
       // Add duration if specified (ElevenLabs accepts 0.5-22 seconds)
@@ -1086,20 +1041,22 @@ class VideoEditor {
         headers: {
           'Content-Type': 'application/json',
           'xi-api-key': apiKey,
-          'Accept': 'audio/mpeg'
-        }
+          Accept: 'audio/mpeg',
+        },
       };
 
       const file = fs.createWriteStream(outputPath);
-      
+
       const req = https.request(requestOptions, (res) => {
         if (res.statusCode !== 200) {
           let errorData = '';
-          res.on('data', chunk => errorData += chunk);
+          res.on('data', (chunk) => (errorData += chunk));
           res.on('end', () => {
             try {
               const errorJson = JSON.parse(errorData);
-              reject(new Error(`ElevenLabs SFX API error: ${errorJson.detail?.message || errorJson.error || res.statusCode}`));
+              reject(
+                new Error(`ElevenLabs SFX API error: ${errorJson.detail?.message || errorJson.error || res.statusCode}`)
+              );
             } catch {
               reject(new Error(`ElevenLabs SFX API error: ${res.statusCode} - ${errorData}`));
             }
@@ -1111,24 +1068,26 @@ class VideoEditor {
         file.on('finish', () => {
           file.close();
           console.log('[VideoEditor] SFX generated successfully:', outputPath);
-          
+
           // Get the duration of the generated audio
-          this.getAudioDuration(outputPath).then(duration => {
-            resolve({
-              success: true,
-              outputPath: outputPath,
-              duration: duration,
-              prompt: text.substring(0, 100)
+          this.getAudioDuration(outputPath)
+            .then((duration) => {
+              resolve({
+                success: true,
+                outputPath: outputPath,
+                duration: duration,
+                prompt: text.substring(0, 100),
+              });
+            })
+            .catch(() => {
+              // If we can't get duration, still return success
+              resolve({
+                success: true,
+                outputPath: outputPath,
+                duration: null,
+                prompt: text.substring(0, 100),
+              });
             });
-          }).catch(() => {
-            // If we can't get duration, still return success
-            resolve({
-              success: true,
-              outputPath: outputPath,
-              duration: null,
-              prompt: text.substring(0, 100)
-            });
-          });
         });
       });
 
@@ -1167,20 +1126,15 @@ class VideoEditor {
    * @returns {Promise<Object>} { success, outputPath }
    */
   async generateMusic(options = {}) {
-    const {
-      text,
-      genre = 'ambient',
-      mood = 'calm',
-      durationSeconds = 10
-    } = options;
+    const { text, genre = 'ambient', mood = 'calm', durationSeconds = 10 } = options;
 
     // Enhance the prompt for music generation
     const musicPrompt = text || `${mood} ${genre} background music, instrumental, no vocals`;
-    
+
     return this.generateSFX({
       text: musicPrompt,
       durationSeconds: Math.min(durationSeconds, 22), // ElevenLabs max is 22 seconds
-      promptInfluence: 0.5 // Higher influence for more accurate music generation
+      promptInfluence: 0.5, // Higher influence for more accurate music generation
     });
   }
 
@@ -1201,12 +1155,7 @@ class VideoEditor {
       throw new Error(`Video file not found: ${videoPath}`);
     }
 
-    const {
-      sourceLanguage = 'en',
-      numSpeakers = 1,
-      watermark = false,
-      projectName = `Dub_${Date.now()}`
-    } = options;
+    const { sourceLanguage = 'en', numSpeakers = 1, watermark = false, projectName = `Dub_${Date.now()}` } = options;
 
     // Read the video file
     const videoBuffer = fs.readFileSync(videoPath);
@@ -1216,46 +1165,48 @@ class VideoEditor {
 
     // Build multipart form data
     let formParts = [];
-    
+
     // File part
-    formParts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="file"; filename="${path.basename(videoPath)}"\r\n` +
-      `Content-Type: ${mimeType}\r\n\r\n`
-    ));
+    formParts.push(
+      Buffer.from(
+        `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="file"; filename="${path.basename(videoPath)}"\r\n` +
+          `Content-Type: ${mimeType}\r\n\r\n`
+      )
+    );
     formParts.push(videoBuffer);
     formParts.push(Buffer.from('\r\n'));
-    
+
     // Target languages
-    formParts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="target_lang"\r\n\r\n${targetLanguages.join(',')}\r\n`
-    ));
-    
+    formParts.push(
+      Buffer.from(
+        `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="target_lang"\r\n\r\n${targetLanguages.join(',')}\r\n`
+      )
+    );
+
     // Source language
-    formParts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="source_lang"\r\n\r\n${sourceLanguage}\r\n`
-    ));
-    
+    formParts.push(
+      Buffer.from(
+        `--${boundary}\r\n` + `Content-Disposition: form-data; name="source_lang"\r\n\r\n${sourceLanguage}\r\n`
+      )
+    );
+
     // Number of speakers
-    formParts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="num_speakers"\r\n\r\n${numSpeakers}\r\n`
-    ));
-    
+    formParts.push(
+      Buffer.from(`--${boundary}\r\n` + `Content-Disposition: form-data; name="num_speakers"\r\n\r\n${numSpeakers}\r\n`)
+    );
+
     // Watermark
-    formParts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="watermark"\r\n\r\n${watermark}\r\n`
-    ));
-    
+    formParts.push(
+      Buffer.from(`--${boundary}\r\n` + `Content-Disposition: form-data; name="watermark"\r\n\r\n${watermark}\r\n`)
+    );
+
     // Project name
-    formParts.push(Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="name"\r\n\r\n${projectName}\r\n`
-    ));
-    
+    formParts.push(
+      Buffer.from(`--${boundary}\r\n` + `Content-Disposition: form-data; name="name"\r\n\r\n${projectName}\r\n`)
+    );
+
     // End boundary
     formParts.push(Buffer.from(`--${boundary}--\r\n`));
 
@@ -1270,8 +1221,8 @@ class VideoEditor {
         headers: {
           'xi-api-key': apiKey,
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': body.length
-        }
+          'Content-Length': body.length,
+        },
       };
 
       console.log('[VideoEditor] Creating dubbing project:', projectName);
@@ -1279,7 +1230,7 @@ class VideoEditor {
 
       let responseData = '';
       const req = https.request(requestOptions, (res) => {
-        res.on('data', chunk => responseData += chunk);
+        res.on('data', (chunk) => (responseData += chunk));
         res.on('end', () => {
           try {
             const result = JSON.parse(responseData);
@@ -1287,7 +1238,7 @@ class VideoEditor {
               reject(new Error(result.detail?.message || `Dubbing error: ${res.statusCode}`));
               return;
             }
-            
+
             console.log('[VideoEditor] Dubbing project created:', result.dubbing_id);
             resolve(result);
           } catch (e) {
@@ -1320,13 +1271,13 @@ class VideoEditor {
         path: `/v1/dubbing/${dubbingId}`,
         method: 'GET',
         headers: {
-          'xi-api-key': apiKey
-        }
+          'xi-api-key': apiKey,
+        },
       };
 
       const req = https.request(options, (res) => {
         let data = '';
-        res.on('data', chunk => data += chunk);
+        res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
           try {
             const result = JSON.parse(data);
@@ -1335,7 +1286,7 @@ class VideoEditor {
               return;
             }
             resolve(result);
-          } catch (e) {
+          } catch (_e) {
             reject(new Error('Failed to parse status response'));
           }
         });
@@ -1367,16 +1318,16 @@ class VideoEditor {
         path: `/v1/dubbing/${dubbingId}/audio/${languageCode}`,
         method: 'GET',
         headers: {
-          'xi-api-key': apiKey
-        }
+          'xi-api-key': apiKey,
+        },
       };
 
       const file = fs.createWriteStream(outputPath);
-      
+
       const req = https.request(options, (res) => {
         if (res.statusCode !== 200) {
           let errorData = '';
-          res.on('data', chunk => errorData += chunk);
+          res.on('data', (chunk) => (errorData += chunk));
           res.on('end', () => {
             file.close();
             fs.unlinkSync(outputPath);
@@ -1413,8 +1364,8 @@ class VideoEditor {
   async findQuietSections(videoPath, options = {}) {
     const {
       noiseThreshold = '-50dB', // Volume threshold for "quiet"
-      minDuration = 2,           // Minimum duration in seconds
-      maxSections = 5            // Return top N sections
+      minDuration = 2, // Minimum duration in seconds
+      maxSections = 5, // Return top N sections
     } = options;
 
     console.log('[VideoEditor] Finding quiet sections in:', videoPath);
@@ -1424,11 +1375,9 @@ class VideoEditor {
 
       ffmpeg(videoPath)
         .audioFilters(`silencedetect=n=${noiseThreshold}:d=${minDuration}`)
-        .outputOptions([
-          '-f', 'null'
-        ])
+        .outputOptions(['-f', 'null'])
         .output('-')
-        .on('start', (cmd) => {
+        .on('start', (_cmd) => {
           console.log('[VideoEditor] Silence detection started');
         })
         .on('stderr', (stderrLine) => {
@@ -1440,31 +1389,31 @@ class VideoEditor {
             // Parse silence detection output
             const sections = [];
             const lines = silenceData.split('\n');
-            
+
             let silenceStart = null;
-            
+
             for (const line of lines) {
               // Match silence_start
               const startMatch = line.match(/silence_start: ([\d.]+)/);
               if (startMatch) {
                 silenceStart = parseFloat(startMatch[1]);
               }
-              
+
               // Match silence_end
               const endMatch = line.match(/silence_end: ([\d.]+) \| silence_duration: ([\d.]+)/);
               if (endMatch && silenceStart !== null) {
                 const silenceEnd = parseFloat(endMatch[1]);
                 const duration = parseFloat(endMatch[2]);
-                
+
                 if (duration >= minDuration) {
                   sections.push({
                     start: silenceStart,
                     end: silenceEnd,
                     duration: duration,
-                    volume: noiseThreshold
+                    volume: noiseThreshold,
                   });
                 }
-                
+
                 silenceStart = null;
               }
             }
@@ -1477,7 +1426,6 @@ class VideoEditor {
 
             console.log('[VideoEditor] Found', sections.length, 'quiet sections, returning top', topSections.length);
             resolve(topSections);
-
           } catch (error) {
             console.error('[VideoEditor] Error parsing silence data:', error);
             reject(error);
@@ -1491,11 +1439,11 @@ class VideoEditor {
               const sections = [];
               const lines = silenceData.split('\n');
               let silenceStart = null;
-              
+
               for (const line of lines) {
                 const startMatch = line.match(/silence_start: ([\d.]+)/);
                 if (startMatch) silenceStart = parseFloat(startMatch[1]);
-                
+
                 const endMatch = line.match(/silence_end: ([\d.]+) \| silence_duration: ([\d.]+)/);
                 if (endMatch && silenceStart !== null) {
                   const duration = parseFloat(endMatch[2]);
@@ -1504,13 +1452,13 @@ class VideoEditor {
                       start: silenceStart,
                       end: parseFloat(endMatch[1]),
                       duration: duration,
-                      volume: noiseThreshold
+                      volume: noiseThreshold,
                     });
                   }
                   silenceStart = null;
                 }
               }
-              
+
               sections.sort((a, b) => b.duration - a.duration);
               resolve(sections.slice(0, maxSections));
             } catch {
@@ -1538,7 +1486,7 @@ class VideoEditor {
     console.log('[VideoEditor] Exporting with ADR tracks:', {
       deadSpaceCount: deadSpaceRegions.length,
       adrClipsCount: adrClips.length,
-      hasFillTrack: !!fillTrack
+      hasFillTrack: !!fillTrack,
     });
 
     const baseName = path.basename(videoPath, path.extname(videoPath));
@@ -1572,11 +1520,11 @@ class VideoEditor {
       if (fillTrack && fillTrack.roomTonePath && fs.existsSync(fillTrack.roomTonePath)) {
         console.log('[VideoEditor] Step 4/5: Creating fill track audio...');
         fillAudioPath = path.join(tempDir, 'fill_audio.mp3');
-        
+
         // Get video duration
         const videoInfo = await this.getVideoInfo(videoPath);
         const duration = videoInfo.duration;
-        
+
         await this._createLoopedFill(fillTrack.roomTonePath, duration, fillAudioPath, fillTrack.volume || 0.6);
       } else {
         console.log('[VideoEditor] Step 4/5: Skipping fill track (not available)');
@@ -1599,18 +1547,17 @@ class VideoEditor {
       return {
         success: true,
         outputPath: outputPath,
-        filename: path.basename(outputPath)
+        filename: path.basename(outputPath),
       };
-
     } catch (error) {
       console.error('[VideoEditor] ADR export failed:', error);
-      
+
       // Cleanup on error
       this._cleanupTempDir(tempDir);
-      
+
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -1666,9 +1613,11 @@ class VideoEditor {
     const sortedRegions = [...regions].sort((a, b) => a.start - b.start);
 
     // Build FFmpeg filter to mute regions
-    const volumeFilters = sortedRegions.map(region => {
-      return `volume=enable='between(t,${region.start},${region.end})':volume=0`;
-    }).join(',');
+    const volumeFilters = sortedRegions
+      .map((region) => {
+        return `volume=enable='between(t,${region.start},${region.end})':volume=0`;
+      })
+      .join(',');
 
     return new Promise((resolve, reject) => {
       ffmpeg(audioPath)
@@ -1695,7 +1644,7 @@ class VideoEditor {
         .input(roomTonePath)
         .inputOptions([
           `-stream_loop -1`, // Infinite loop
-          `-t ${targetDuration}` // Duration limit
+          `-t ${targetDuration}`, // Duration limit
         ])
         .audioFilters(`volume=${volume}`)
         .audioCodec('libmp3lame')
@@ -1713,12 +1662,10 @@ class VideoEditor {
   /**
    * Mix audio layers: Working + Fill + ADR clips
    */
-  async _mixAudioLayers(workingAudioPath, fillAudioPath, adrClips, outputPath, tempDir) {
+  async _mixAudioLayers(workingAudioPath, fillAudioPath, adrClips, outputPath, _tempDir) {
     // Build list of inputs
     const inputs = [workingAudioPath];
     const filterInputs = ['[0:a]'];
-    let filterComplex = '';
-
     // Add fill track if exists
     if (fillAudioPath && fs.existsSync(fillAudioPath)) {
       inputs.push(fillAudioPath);
@@ -1749,7 +1696,7 @@ class VideoEditor {
       const command = ffmpeg();
 
       // Add all inputs
-      inputs.forEach(inputPath => {
+      inputs.forEach((inputPath) => {
         command.input(inputPath);
       });
 
@@ -1854,7 +1801,17 @@ class VideoEditor {
         .output(videoOnly)
         .on('end', () => {
           // Step 2: Build audio track
-          this.buildReplacedAudioTrack(videoPath, audioPath, startTime, endTime, audioBefore, audioAfter, audioNew, audioFinal, progressCallback)
+          this.buildReplacedAudioTrack(
+            videoPath,
+            audioPath,
+            startTime,
+            endTime,
+            audioBefore,
+            audioAfter,
+            audioNew,
+            audioFinal,
+            progressCallback
+          )
             .then(() => {
               // Step 3: Merge video and new audio
               ffmpeg(videoOnly)
@@ -1872,7 +1829,7 @@ class VideoEditor {
                       jobId,
                       status: 'Merging audio and video...',
                       percent: 60 + (progress.percent || 0) * 0.4,
-                      timemark: progress.timemark
+                      timemark: progress.timemark,
                     });
                   }
                 })
@@ -1883,7 +1840,7 @@ class VideoEditor {
                   } catch (e) {
                     console.warn('[VideoEditor] Failed to clean temp dir:', e);
                   }
-                  
+
                   this.activeJobs.delete(jobId);
                   resolve({ success: true, outputPath, jobId });
                 })
@@ -1903,7 +1860,17 @@ class VideoEditor {
   /**
    * Build audio track with replaced segment
    */
-  async buildReplacedAudioTrack(videoPath, newAudioPath, startTime, endTime, audioBeforePath, audioAfterPath, audioNewPath, outputPath, progressCallback = null) {
+  async buildReplacedAudioTrack(
+    videoPath,
+    newAudioPath,
+    startTime,
+    endTime,
+    audioBeforePath,
+    audioAfterPath,
+    audioNewPath,
+    outputPath,
+    _progressCallback = null
+  ) {
     const videoInfo = await this.getVideoInfo(videoPath);
     const totalDuration = videoInfo.duration;
 
@@ -1929,7 +1896,7 @@ class VideoEditor {
 
     // Adjust new audio duration to match segment
     const segmentDuration = endTime - startTime;
-    
+
     // First, get the generated audio duration
     const newAudioInfo = await new Promise((resolve, reject) => {
       ffmpeg.ffprobe(newAudioPath, (err, metadata) => {
@@ -1937,22 +1904,22 @@ class VideoEditor {
         else resolve(metadata);
       });
     });
-    
+
     const generatedDuration = newAudioInfo.format.duration;
     const tempoRatio = generatedDuration / segmentDuration;
-    
+
     console.log('[VideoEditor] Audio duration adjustment:', {
       segmentDuration,
       generatedDuration,
-      tempoRatio
+      tempoRatio,
     });
-    
+
     // Only adjust tempo if there's a significant difference (>5%)
     if (Math.abs(tempoRatio - 1.0) > 0.05) {
       // atempo must be between 0.5 and 2.0, so we might need multiple filters
       let tempoFilters = [];
       let currentRatio = tempoRatio;
-      
+
       while (currentRatio > 2.0) {
         tempoFilters.push('atempo=2.0');
         currentRatio /= 2.0;
@@ -1964,10 +1931,10 @@ class VideoEditor {
       if (currentRatio !== 1.0) {
         tempoFilters.push(`atempo=${currentRatio.toFixed(3)}`);
       }
-      
+
       const audioFilter = tempoFilters.join(',');
       console.log('[VideoEditor] Applying audio filter:', audioFilter);
-      
+
       promises.push(
         new Promise((resolve, reject) => {
           ffmpeg(newAudioPath)
@@ -2032,7 +1999,7 @@ class VideoEditor {
 
       // Create concat file list
       const concatFile = path.join(path.dirname(outputPath), 'concat.txt');
-      const concatContent = inputs.map(f => `file '${f}'`).join('\n');
+      const concatContent = inputs.map((f) => `file '${f}'`).join('\n');
       fs.writeFileSync(concatFile, concatContent);
 
       ffmpeg()
@@ -2059,10 +2026,10 @@ class VideoEditor {
     const {
       duration = 3, // seconds per image
       fps = 30,
-      transition = 'fade',
+      _transition = 'fade',
       audioPath = null,
       outputPath = null,
-      resolution = '1920x1080'
+      resolution = '1920x1080',
     } = options;
 
     const output = outputPath || path.join(this.outputDir, `slideshow_${Date.now()}.mp4`);
@@ -2071,7 +2038,7 @@ class VideoEditor {
     return new Promise((resolve, reject) => {
       // Create a temporary file list for FFmpeg
       const listFile = path.join(this.outputDir, `filelist_${jobId}.txt`);
-      const listContent = imagePaths.map(p => `file '${p}'\nduration ${duration}`).join('\n');
+      const listContent = imagePaths.map((p) => `file '${p}'\nduration ${duration}`).join('\n');
       fs.writeFileSync(listFile, listContent);
 
       let command = ffmpeg()
@@ -2083,7 +2050,7 @@ class VideoEditor {
           '-pix_fmt yuv420p',
           `-r ${fps}`,
           '-preset medium',
-          '-crf 23'
+          '-crf 23',
         ]);
 
       if (audioPath) {
@@ -2101,7 +2068,7 @@ class VideoEditor {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -2129,7 +2096,7 @@ class VideoEditor {
       opacity = 0.8,
       scale = 0.15, // Relative to video width
       margin = 10,
-      outputPath = null
+      outputPath = null,
     } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
@@ -2138,11 +2105,11 @@ class VideoEditor {
 
     // Position mapping
     const positionMap = {
-      'topleft': `${margin}:${margin}`,
-      'topright': `main_w-overlay_w-${margin}:${margin}`,
-      'bottomleft': `${margin}:main_h-overlay_h-${margin}`,
-      'bottomright': `main_w-overlay_w-${margin}:main_h-overlay_h-${margin}`,
-      'center': '(main_w-overlay_w)/2:(main_h-overlay_h)/2'
+      topleft: `${margin}:${margin}`,
+      topright: `main_w-overlay_w-${margin}:${margin}`,
+      bottomleft: `${margin}:main_h-overlay_h-${margin}`,
+      bottomright: `main_w-overlay_w-${margin}:main_h-overlay_h-${margin}`,
+      center: '(main_w-overlay_w)/2:(main_h-overlay_h)/2',
     };
 
     return new Promise((resolve, reject) => {
@@ -2150,7 +2117,7 @@ class VideoEditor {
         .input(watermarkPath)
         .complexFilter([
           `[1:v]scale=iw*${scale}:-1,format=rgba,colorchannelmixer=aa=${opacity}[wm]`,
-          `[0:v][wm]overlay=${positionMap[position] || positionMap['bottomright']}`
+          `[0:v][wm]overlay=${positionMap[position] || positionMap['bottomright']}`,
         ])
         .videoCodec('libx264')
         .audioCodec('copy')
@@ -2165,7 +2132,7 @@ class VideoEditor {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -2177,7 +2144,7 @@ class VideoEditor {
           this.activeJobs.delete(jobId);
           reject(err);
         });
-      
+
       command.run();
     });
   }
@@ -2186,10 +2153,7 @@ class VideoEditor {
    * Concatenate multiple videos
    */
   concatenateVideos(inputPaths, options = {}, progressCallback = null) {
-    const {
-      outputPath = null,
-      format = 'mp4'
-    } = options;
+    const { outputPath = null, format = 'mp4' } = options;
 
     const output = outputPath || path.join(this.outputDir, `merged_${Date.now()}.${format}`);
     const jobId = `concat_${Date.now()}`;
@@ -2197,7 +2161,7 @@ class VideoEditor {
     return new Promise((resolve, reject) => {
       // Create temporary file list
       const listFile = path.join(this.outputDir, `concat_${jobId}.txt`);
-      const listContent = inputPaths.map(p => `file '${p}'`).join('\n');
+      const listContent = inputPaths.map((p) => `file '${p}'`).join('\n');
       fs.writeFileSync(listFile, listContent);
 
       const command = ffmpeg()
@@ -2214,7 +2178,7 @@ class VideoEditor {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -2228,7 +2192,7 @@ class VideoEditor {
           if (fs.existsSync(listFile)) fs.unlinkSync(listFile);
           reject(err);
         });
-      
+
       command.run();
     });
   }
@@ -2239,8 +2203,8 @@ class VideoEditor {
   changeSpeed(inputPath, options = {}, progressCallback = null) {
     const {
       speed = 1.0, // 0.5 = half speed, 2.0 = double speed
-      preservePitch = true, // Keep audio pitch when changing speed
-      outputPath = null
+      _preservePitch = true, // Keep audio pitch when changing speed
+      outputPath = null,
     } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
@@ -2252,11 +2216,11 @@ class VideoEditor {
       // Calculate filter values
       // For video: setpts=PTS/speed (higher speed = lower PTS multiplier)
       const videoSpeed = 1 / speed;
-      
+
       // For audio: atempo only accepts 0.5 to 2.0, so chain filters for extreme speeds
       let audioFilters = [];
       let remainingSpeed = speed;
-      
+
       // atempo filter only accepts values between 0.5 and 2.0
       // So we need to chain multiple atempo filters for extreme speeds
       while (remainingSpeed > 2.0) {
@@ -2268,17 +2232,17 @@ class VideoEditor {
         remainingSpeed /= 0.5;
       }
       audioFilters.push(`atempo=${remainingSpeed}`);
-      
+
       const audioFilterString = audioFilters.join(',');
 
       let command = ffmpeg(inputPath);
-      
+
       // Apply video speed filter
       command = command.videoFilters(`setpts=${videoSpeed}*PTS`);
-      
+
       // Apply audio speed filter (if video has audio)
       command = command.audioFilters(audioFilterString);
-      
+
       command
         .videoCodec('libx264')
         .audioCodec('aac')
@@ -2293,7 +2257,7 @@ class VideoEditor {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -2336,7 +2300,9 @@ ${includeAll ? '- Include ALL scenes in the playlist' : '- Only include scenes r
     const userPrompt = `User request: "${prompt}"
 
 Available scenes:
-${scenes.map(s => `
+${scenes
+  .map(
+    (s) => `
 Scene ${s.index} (ID: ${s.id}):
 - Name: ${s.name}
 - Type: ${s.type}
@@ -2346,7 +2312,9 @@ ${s.description ? `- Description: ${s.description}` : ''}
 ${s.transcription ? `- Transcription: "${s.transcription.substring(0, 200)}${s.transcription.length > 200 ? '...' : ''}"` : ''}
 ${s.tags.length > 0 ? `- Tags: ${s.tags.join(', ')}` : ''}
 ${s.notes ? `- Notes: ${s.notes}` : ''}
-`).join('\n')}
+`
+  )
+  .join('\n')}
 
 Select the appropriate scenes and return JSON.`;
 
@@ -2367,8 +2335,8 @@ Select the appropriate scenes and return JSON.`;
       console.log('[VideoEditor] AI playlist result:', parsedResult);
 
       // Validate the selected IDs
-      const validIds = scenes.map(s => s.id);
-      const selectedIds = (parsedResult.selectedSceneIds || []).filter(id => validIds.includes(id));
+      const validIds = scenes.map((s) => s.id);
+      const selectedIds = (parsedResult.selectedSceneIds || []).filter((id) => validIds.includes(id));
 
       if (selectedIds.length === 0) {
         return { success: false, error: 'AI did not select any valid scenes' };
@@ -2377,9 +2345,8 @@ Select the appropriate scenes and return JSON.`;
       return {
         success: true,
         selectedSceneIds: selectedIds,
-        reasoning: parsedResult.reasoning || ''
+        reasoning: parsedResult.reasoning || '',
       };
-
     } catch (error) {
       console.error('[VideoEditor] AI playlist error:', error);
       return { success: false, error: error.message };
@@ -2414,17 +2381,12 @@ Select the appropriate scenes and return JSON.`;
       for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
         const segmentPath = path.join(tempDir, `segment_${String(i).padStart(3, '0')}.mp4`);
-        
+
         await new Promise((resolve, reject) => {
           ffmpeg(inputPath)
             .setStartTime(seg.startTime)
             .setDuration(seg.endTime - seg.startTime)
-            .outputOptions([
-              '-c:v', 'libx264',
-              '-c:a', 'aac',
-              '-avoid_negative_ts', 'make_zero',
-              '-preset', 'fast'
-            ])
+            .outputOptions(['-c:v', 'libx264', '-c:a', 'aac', '-avoid_negative_ts', 'make_zero', '-preset', 'fast'])
             .output(segmentPath)
             .on('end', () => {
               console.log(`[VideoEditor] Segment ${i + 1}/${segments.length} extracted`);
@@ -2433,13 +2395,13 @@ Select the appropriate scenes and return JSON.`;
             .on('error', reject)
             .run();
         });
-        
+
         segmentFiles.push(segmentPath);
       }
 
       // Create concat list file
       const listPath = path.join(tempDir, 'concat_list.txt');
-      const listContent = segmentFiles.map(f => `file '${f}'`).join('\n');
+      const listContent = segmentFiles.map((f) => `file '${f}'`).join('\n');
       fs.writeFileSync(listPath, listContent);
 
       // Concatenate all segments
@@ -2455,7 +2417,7 @@ Select the appropriate scenes and return JSON.`;
       });
 
       // Cleanup temp files
-      segmentFiles.forEach(f => {
+      segmentFiles.forEach((f) => {
         if (fs.existsSync(f)) fs.unlinkSync(f);
       });
       if (fs.existsSync(listPath)) fs.unlinkSync(listPath);
@@ -2466,13 +2428,12 @@ Select the appropriate scenes and return JSON.`;
       return {
         success: true,
         outputPath: output,
-        segmentCount: segments.length
+        segmentCount: segments.length,
       };
-
     } catch (error) {
       // Cleanup on error
       if (fs.existsSync(tempDir)) {
-        fs.readdirSync(tempDir).forEach(f => fs.unlinkSync(path.join(tempDir, f)));
+        fs.readdirSync(tempDir).forEach((f) => fs.unlinkSync(path.join(tempDir, f)));
         fs.rmdirSync(tempDir);
       }
       throw error;
@@ -2486,8 +2447,8 @@ Select the appropriate scenes and return JSON.`;
   spliceVideo(inputPath, options = {}, progressCallback = null) {
     const {
       cutStart, // Start time of section to remove
-      cutEnd,   // End time of section to remove
-      outputPath = null
+      cutEnd, // End time of section to remove
+      outputPath = null,
     } = options;
 
     if (cutStart === undefined || cutEnd === undefined) {
@@ -2519,7 +2480,7 @@ Select the appropriate scenes and return JSON.`;
             res(); // Skip part 1 if cut starts at beginning
             return;
           }
-          
+
           ffmpeg(inputPath)
             .setStartTime(0)
             .setDuration(cutStart)
@@ -2536,7 +2497,7 @@ Select the appropriate scenes and return JSON.`;
             res(); // Skip part 2 if cut ends at end
             return;
           }
-          
+
           ffmpeg(inputPath)
             .setStartTime(cutEnd)
             .outputOptions(['-c', 'copy', '-avoid_negative_ts', 'make_zero'])
@@ -2577,37 +2538,36 @@ Select the appropriate scenes and return JSON.`;
               progressCallback({
                 jobId,
                 percent: progress.percent,
-                timemark: progress.timemark
+                timemark: progress.timemark,
               });
             }
           })
           .on('end', () => {
             this.activeJobs.delete(jobId);
-            
+
             // Cleanup temp files
-            [tempPart1, tempPart2, tempList].forEach(f => {
+            [tempPart1, tempPart2, tempList].forEach((f) => {
               if (fs.existsSync(f)) fs.unlinkSync(f);
             });
-            
+
             const removedDuration = cutEnd - cutStart;
-            resolve({ 
-              success: true, 
-              outputPath: output, 
+            resolve({
+              success: true,
+              outputPath: output,
               jobId,
               removedDuration,
-              newDuration: duration - removedDuration
+              newDuration: duration - removedDuration,
             });
           })
           .on('error', (err) => {
             this.activeJobs.delete(jobId);
             // Cleanup temp files
-            [tempPart1, tempPart2, tempList].forEach(f => {
+            [tempPart1, tempPart2, tempList].forEach((f) => {
               if (fs.existsSync(f)) fs.unlinkSync(f);
             });
             reject(err);
           })
           .run();
-
       } catch (error) {
         reject(error);
       }
@@ -2626,11 +2586,7 @@ Select the appropriate scenes and return JSON.`;
    * @returns {Promise} - Resolves with output path
    */
   async concatenateVideoClips(clips, sources, options = {}, progressCallback = null) {
-    const {
-      outputPath = null,
-      format = 'mp4',
-      quality = 'medium'
-    } = options;
+    const { outputPath = null, format = 'mp4', _quality = 'medium' } = options;
 
     const output = outputPath || path.join(this.outputDir, `multiclip_${Date.now()}.${format}`);
     const tempDir = path.join(this.outputDir, `temp_concat_${Date.now()}`);
@@ -2651,14 +2607,14 @@ Select the appropriate scenes and return JSON.`;
       const segmentFiles = [];
       for (let i = 0; i < clips.length; i++) {
         const clip = clips[i];
-        const source = sources.find(s => s.id === clip.sourceId);
-        
+        const source = sources.find((s) => s.id === clip.sourceId);
+
         if (!source) {
           throw new Error(`Source not found for clip: ${clip.id}`);
         }
 
         const segmentPath = path.join(tempDir, `segment_${i.toString().padStart(3, '0')}.mp4`);
-        
+
         if (progressCallback) {
           const percent = (i / clips.length) * 50;
           progressCallback({ status: `Extracting clip ${i + 1}/${clips.length}...`, percent });
@@ -2677,10 +2633,7 @@ Select the appropriate scenes and return JSON.`;
             .duration(clip.duration)
             .videoCodec('libx264')
             .audioCodec('aac')
-            .outputOptions([
-              '-preset', 'medium',
-              '-crf', '23'
-            ])
+            .outputOptions(['-preset', 'medium', '-crf', '23'])
             .output(segmentPath)
             .on('end', () => {
               console.log(`[VideoEditor] Segment ${i + 1} extracted:`, segmentPath);
@@ -2702,7 +2655,7 @@ Select the appropriate scenes and return JSON.`;
 
       // Create concat list file
       const concatListPath = path.join(tempDir, 'concat_list.txt');
-      const concatContent = segmentFiles.map(f => `file '${f}'`).join('\n');
+      const concatContent = segmentFiles.map((f) => `file '${f}'`).join('\n');
       fs.writeFileSync(concatListPath, concatContent);
 
       // Concatenate using FFmpeg concat demuxer
@@ -2715,7 +2668,7 @@ Select the appropriate scenes and return JSON.`;
           .output(output)
           .on('progress', (progress) => {
             if (progressCallback && progress.percent) {
-              const percent = 60 + (progress.percent * 0.4);
+              const percent = 60 + progress.percent * 0.4;
               progressCallback({ status: `Finalizing... ${Math.round(progress.percent)}%`, percent });
             }
           })
@@ -2740,9 +2693,8 @@ Select the appropriate scenes and return JSON.`;
       return {
         success: true,
         outputPath: output,
-        clipsProcessed: clips.length
+        clipsProcessed: clips.length,
       };
-
     } catch (error) {
       // Cleanup on error
       if (fs.existsSync(tempDir)) {
@@ -2775,7 +2727,7 @@ Select the appropriate scenes and return JSON.`;
       trimEnd = null,
       outputPath = null,
       format = 'mp4',
-      quality = 'high'
+      quality = 'high',
     } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
@@ -2789,28 +2741,28 @@ Select the appropriate scenes and return JSON.`;
     const videoDuration = videoInfo.duration;
 
     // Filter active (non-muted) audio tracks
-    const activeTracks = audioTracks.filter(t => !t.muted && t.path && fs.existsSync(t.path));
+    const activeTracks = audioTracks.filter((t) => !t.muted && t.path && fs.existsSync(t.path));
 
     return new Promise((resolve, reject) => {
       try {
         let command = ffmpeg();
-        
+
         // Add video input
         command = command.input(inputPath);
-        
+
         // Add audio track inputs
-        activeTracks.forEach((track, i) => {
+        activeTracks.forEach((track, _i) => {
           command = command.input(track.path);
         });
 
         // Build the complex filter for mixing audio
         const filterParts = [];
         const audioLabels = [];
-        
+
         // Process video input - keep original audio as track 0
-        const hasOriginalAudio = audioTracks.some(t => t.type === 'original' && !t.muted);
+        const hasOriginalAudio = audioTracks.some((t) => t.type === 'original' && !t.muted);
         if (hasOriginalAudio) {
-          const originalTrack = audioTracks.find(t => t.type === 'original');
+          const originalTrack = audioTracks.find((t) => t.type === 'original');
           const vol = originalTrack?.volume || 1.0;
           filterParts.push(`[0:a]volume=${vol}[orig]`);
           audioLabels.push('[orig]');
@@ -2819,12 +2771,12 @@ Select the appropriate scenes and return JSON.`;
         // Process additional audio tracks
         activeTracks.forEach((track, i) => {
           if (track.type === 'original') return; // Already handled
-          
+
           const inputIndex = i + 1; // +1 because video is input 0
           const vol = track.volume || 1.0;
           const delay = (track.startTime || 0) * 1000; // Convert to milliseconds
           const label = `a${i}`;
-          
+
           if (delay > 0) {
             filterParts.push(`[${inputIndex}:a]volume=${vol},adelay=${delay}|${delay}[${label}]`);
           } else {
@@ -2835,7 +2787,9 @@ Select the appropriate scenes and return JSON.`;
 
         // Mix all audio tracks together
         if (audioLabels.length > 1) {
-          filterParts.push(`${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0[aout]`);
+          filterParts.push(
+            `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:dropout_transition=0[aout]`
+          );
         } else if (audioLabels.length === 1) {
           // Single track, just copy
           filterParts.push(`${audioLabels[0]}acopy[aout]`);
@@ -2847,7 +2801,7 @@ Select the appropriate scenes and return JSON.`;
           const start = trimStart || 0;
           const end = trimEnd || videoDuration;
           videoFilter = `trim=start=${start}:end=${end},setpts=PTS-STARTPTS`;
-          
+
           // Also trim audio
           if (filterParts.length > 0) {
             filterParts.push(`[aout]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS[afinal]`);
@@ -2860,13 +2814,13 @@ Select the appropriate scenes and return JSON.`;
         // Configure output
         if (filterComplex) {
           command = command.complexFilter(filterComplex);
-          
+
           // Map outputs
           if (videoFilter) {
             command = command.outputOptions([`-filter:v`, videoFilter]);
           }
-          
-          const audioOutput = filterParts.some(p => p.includes('[afinal]')) ? '[afinal]' : '[aout]';
+
+          const audioOutput = filterParts.some((p) => p.includes('[afinal]')) ? '[afinal]' : '[aout]';
           if (audioLabels.length > 0) {
             command = command.map('0:v').map(audioOutput);
           }
@@ -2878,18 +2832,14 @@ Select the appropriate scenes and return JSON.`;
         const qualitySettings = {
           high: { crf: 18, preset: 'slow' },
           medium: { crf: 23, preset: 'medium' },
-          low: { crf: 28, preset: 'fast' }
+          low: { crf: 28, preset: 'fast' },
         };
         const settings = qualitySettings[quality] || qualitySettings.medium;
 
         command
           .videoCodec('libx264')
           .audioCodec('aac')
-          .outputOptions([
-            '-preset', settings.preset,
-            '-crf', settings.crf.toString(),
-            '-movflags', '+faststart'
-          ])
+          .outputOptions(['-preset', settings.preset, '-crf', settings.crf.toString(), '-movflags', '+faststart'])
           .output(output)
           .on('start', (cmd) => {
             console.log('[VideoEditor] Multi-track export command:', cmd);
@@ -2904,20 +2854,20 @@ Select the appropriate scenes and return JSON.`;
                 jobId,
                 status: 'Rendering...',
                 percent: progress.percent || 0,
-                timemark: progress.timemark
+                timemark: progress.timemark,
               });
             }
           })
           .on('end', () => {
             this.activeJobs.delete(jobId);
             console.log('[VideoEditor] Multi-track export complete:', output);
-            resolve({ 
-              success: true, 
-              outputPath: output, 
+            resolve({
+              success: true,
+              outputPath: output,
               jobId,
               trackCount: activeTracks.length,
               format,
-              quality
+              quality,
             });
           })
           .on('error', (err) => {
@@ -2926,7 +2876,6 @@ Select the appropriate scenes and return JSON.`;
             reject(err);
           })
           .run();
-
       } catch (error) {
         console.error('[VideoEditor] exportMultiTrack error:', error);
         reject(error);
@@ -2939,13 +2888,13 @@ Select the appropriate scenes and return JSON.`;
    * @param {string} inputPath - Original video path
    * @param {Object} options - Replacement options
    */
-  async replaceVideoSegment(inputPath, options = {}, progressCallback = null) {
+  async replaceVideoSegment(inputPath, options = {}, _progressCallback = null) {
     const {
       replacementPath, // Path to new video to insert
-      startTime,       // Where to start replacement
-      endTime,         // Where to end replacement
+      startTime, // Where to start replacement
+      endTime, // Where to end replacement
       outputPath = null,
-      fitMode = 'scale' // 'scale', 'crop', 'pad'
+      fitMode = 'scale', // 'scale', 'crop', 'pad'
     } = options;
 
     if (!replacementPath || !fs.existsSync(replacementPath)) {
@@ -2987,7 +2936,7 @@ Select the appropriate scenes and return JSON.`;
       const part2Path = path.join(tempDir, 'part2.mp4');
       const targetWidth = originalInfo.width;
       const targetHeight = originalInfo.height;
-      
+
       let scaleFilter;
       if (fitMode === 'scale') {
         scaleFilter = `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2`;
@@ -3048,7 +2997,7 @@ Select the appropriate scenes and return JSON.`;
       });
 
       // Cleanup
-      [part1Path, part2Path, part3Path, listPath].forEach(f => {
+      [part1Path, part2Path, part3Path, listPath].forEach((f) => {
         if (fs.existsSync(f)) fs.unlinkSync(f);
       });
       fs.rmdirSync(tempDir);
@@ -3058,13 +3007,12 @@ Select the appropriate scenes and return JSON.`;
         outputPath: output,
         jobId,
         replacedDuration: endTime - startTime,
-        newDuration: (startTime) + replacementInfo.duration + (originalInfo.duration - endTime)
+        newDuration: startTime + replacementInfo.duration + (originalInfo.duration - endTime),
       };
-
     } catch (error) {
       // Cleanup on error
       if (fs.existsSync(tempDir)) {
-        fs.readdirSync(tempDir).forEach(f => fs.unlinkSync(path.join(tempDir, f)));
+        fs.readdirSync(tempDir).forEach((f) => fs.unlinkSync(path.join(tempDir, f)));
         fs.rmdirSync(tempDir);
       }
       throw error;
@@ -3075,25 +3023,21 @@ Select the appropriate scenes and return JSON.`;
    * Reverse video (play backwards)
    */
   reverseVideo(inputPath, options = {}, progressCallback = null) {
-    const {
-      includeAudio = true,
-      outputPath = null
-    } = options;
+    const { includeAudio = true, outputPath = null } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
     const output = outputPath || path.join(this.outputDir, `${baseName}_reversed.mp4`);
     const jobId = `reverse_${Date.now()}`;
 
     return new Promise((resolve, reject) => {
-      let command = ffmpeg(inputPath)
-        .videoFilters('reverse');
-      
+      let command = ffmpeg(inputPath).videoFilters('reverse');
+
       if (includeAudio) {
         command = command.audioFilters('areverse');
       } else {
         command = command.noAudio();
       }
-      
+
       command
         .videoCodec('libx264')
         .audioCodec('aac')
@@ -3108,7 +3052,7 @@ Select the appropriate scenes and return JSON.`;
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -3129,13 +3073,7 @@ Select the appropriate scenes and return JSON.`;
    * Evenly distributed across the time range
    */
   async generateRangeScreengrabs(inputPath, options = {}) {
-    const {
-      startTime = 0,
-      endTime,
-      count = 5,
-      outputDir = null,
-      prefix = 'frame'
-    } = options;
+    const { startTime = 0, endTime, count = 5, outputDir = null, prefix = 'frame' } = options;
 
     // Get video info if endTime not specified
     let duration;
@@ -3148,11 +3086,11 @@ Select the appropriate scenes and return JSON.`;
 
     // Calculate the time interval between captures
     const interval = count > 1 ? duration / (count - 1) : 0;
-    
+
     // Generate list of timestamps
     const timestamps = [];
     for (let i = 0; i < count; i++) {
-      const time = startTime + (interval * i);
+      const time = startTime + interval * i;
       timestamps.push(time);
     }
 
@@ -3162,23 +3100,27 @@ Select the appropriate scenes and return JSON.`;
       fs.mkdirSync(grabsDir, { recursive: true });
     }
 
-    console.log(`[VideoEditor] Generating ${count} screengrabs from ${this.formatTime(startTime)} to ${this.formatTime(startTime + duration)}`);
+    console.log(
+      `[VideoEditor] Generating ${count} screengrabs from ${this.formatTime(startTime)} to ${this.formatTime(startTime + duration)}`
+    );
 
     const results = [];
-    
+
     // Generate each screengrab
     for (let i = 0; i < timestamps.length; i++) {
       const time = timestamps[i];
       const outputPath = path.join(grabsDir, `${prefix}_${String(i + 1).padStart(3, '0')}.jpg`);
-      
+
       try {
         await new Promise((resolve, reject) => {
           ffmpeg(inputPath)
             .seekInput(time)
             .frames(1)
             .outputOptions([
-              '-vf', 'scale=1920:-1',  // Full HD width, maintain aspect ratio
-              '-q:v', '2'  // High quality JPEG
+              '-vf',
+              'scale=1920:-1', // Full HD width, maintain aspect ratio
+              '-q:v',
+              '2', // High quality JPEG
             ])
             .output(outputPath)
             .on('end', resolve)
@@ -3191,7 +3133,7 @@ Select the appropriate scenes and return JSON.`;
           time: time,
           timeFormatted: this.formatTime(time),
           path: outputPath,
-          filename: path.basename(outputPath)
+          filename: path.basename(outputPath),
         });
 
         console.log(`[VideoEditor] Generated frame ${i + 1}/${count} at ${this.formatTime(time)}`);
@@ -3207,7 +3149,7 @@ Select the appropriate scenes and return JSON.`;
       frames: results,
       startTime,
       endTime: startTime + duration,
-      duration
+      duration,
     };
   }
 
@@ -3217,7 +3159,7 @@ Select the appropriate scenes and return JSON.`;
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
     const ms = Math.floor((seconds % 1) * 100);
-    
+
     if (h > 0) {
       return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }
@@ -3230,14 +3172,14 @@ Select the appropriate scenes and return JSON.`;
   compressVideo(inputPath, options = {}, progressCallback = null) {
     const {
       quality = 'medium', // low, medium, high
-      maxSize = null, // Target size in MB
-      outputPath = null
+      _maxSize = null, // Target size in MB
+      outputPath = null,
     } = options;
 
     const qualitySettings = {
-      'low': { crf: 32, preset: 'fast', audioBitrate: '96k' },
-      'medium': { crf: 26, preset: 'medium', audioBitrate: '128k' },
-      'high': { crf: 20, preset: 'slow', audioBitrate: '192k' }
+      low: { crf: 32, preset: 'fast', audioBitrate: '96k' },
+      medium: { crf: 26, preset: 'medium', audioBitrate: '128k' },
+      high: { crf: 20, preset: 'slow', audioBitrate: '192k' },
     };
 
     const settings = qualitySettings[quality] || qualitySettings['medium'];
@@ -3250,10 +3192,7 @@ Select the appropriate scenes and return JSON.`;
         .videoCodec('libx264')
         .audioCodec('aac')
         .audioBitrate(settings.audioBitrate)
-        .outputOptions([
-          `-preset ${settings.preset}`,
-          `-crf ${settings.crf}`
-        ])
+        .outputOptions([`-preset ${settings.preset}`, `-crf ${settings.crf}`])
         .output(output)
         .on('start', (cmd) => {
           console.log('[VideoEditor] Compression started:', cmd);
@@ -3264,7 +3203,7 @@ Select the appropriate scenes and return JSON.`;
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -3276,7 +3215,7 @@ Select the appropriate scenes and return JSON.`;
           this.activeJobs.delete(jobId);
           reject(err);
         });
-      
+
       command.run();
     });
   }
@@ -3286,11 +3225,7 @@ Select the appropriate scenes and return JSON.`;
    * OPTIMIZED: Uses parallel processing, caching, and fast I-frame seeking
    */
   async generateTimelineThumbnails(inputPath, options = {}) {
-    const {
-      count = 10,
-      width = 160,
-      height = 90
-    } = options;
+    const { count = 10, width = 160, height = 90 } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
     const outputFolder = path.join(this.thumbnailDir, baseName);
@@ -3300,11 +3235,11 @@ Select the appropriate scenes and return JSON.`;
     if (fs.existsSync(cacheFile)) {
       try {
         const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-        if (cached.thumbnails && cached.thumbnails.every(f => fs.existsSync(f))) {
+        if (cached.thumbnails && cached.thumbnails.every((f) => fs.existsSync(f))) {
           console.log(`[VideoEditor] Using cached ${count} thumbnails`);
           return cached.thumbnails;
         }
-      } catch (e) {
+      } catch (_e) {
         // Cache invalid, regenerate
       }
     }
@@ -3338,29 +3273,31 @@ Select the appropriate scenes and return JSON.`;
     // Generate thumbnails in parallel batches (4 at a time)
     const batchSize = 4;
     const thumbnails = new Array(count);
-    
+
     for (let batch = 0; batch < Math.ceil(count / batchSize); batch++) {
       const batchStart = batch * batchSize;
       const batchEnd = Math.min(batchStart + batchSize, count);
-      
+
       const promises = [];
       for (let i = batchStart; i < batchEnd; i++) {
         const time = timestamps[i];
         const outputPath = path.join(outputFolder, `timeline_${String(i + 1).padStart(3, '0')}.jpg`);
-        
+
         // Skip if already exists
         if (fs.existsSync(outputPath)) {
           thumbnails[i] = outputPath;
           continue;
         }
-        
+
         const promise = new Promise((resolve) => {
           ffmpeg(inputPath)
-            .seekInput(time)  // Fast I-frame seeking BEFORE input
+            .seekInput(time) // Fast I-frame seeking BEFORE input
             .frames(1)
             .outputOptions([
-              '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`,
-              '-q:v', '5'  // Lower quality for speed
+              '-vf',
+              `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`,
+              '-q:v',
+              '5', // Lower quality for speed
             ])
             .output(outputPath)
             .on('end', () => {
@@ -3375,23 +3312,23 @@ Select the appropriate scenes and return JSON.`;
         });
         promises.push(promise);
       }
-      
+
       await Promise.all(promises);
     }
 
     // Filter out failed thumbnails
-    const validThumbnails = thumbnails.filter(t => t && fs.existsSync(t));
-    
+    const validThumbnails = thumbnails.filter((t) => t && fs.existsSync(t));
+
     // Cache results
     try {
       fs.writeFileSync(cacheFile, JSON.stringify({ thumbnails: validThumbnails, count, duration }));
-    } catch (e) {
+    } catch (_e) {
       // Non-critical
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`[VideoEditor] Generated ${validThumbnails.length} thumbnails in ${elapsed}s`);
-    
+
     return validThumbnails;
   }
 
@@ -3413,14 +3350,14 @@ Select the appropriate scenes and return JSON.`;
         }
 
         const duration = metadata.format.duration;
-        const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
-        
+        const audioStream = metadata.streams.find((s) => s.codec_type === 'audio');
+
         if (!audioStream) {
           // No audio stream - return flat waveform
           resolve({
             peaks: new Array(samples).fill(0),
             duration: duration,
-            hasAudio: false
+            hasAudio: false,
           });
           return;
         }
@@ -3439,14 +3376,12 @@ Select the appropriate scenes and return JSON.`;
               peaks: peaks,
               duration: duration,
               hasAudio: true,
-              method: 'rms_analysis'
+              method: 'rms_analysis',
             });
             return;
           }
 
           const startTime = index * segmentDuration;
-          const tempAudio = path.join(this.outputDir, `waveform_segment_${Date.now()}_${index}.wav`);
-
           ffmpeg(inputPath)
             .setStartTime(startTime)
             .setDuration(Math.min(segmentDuration, duration - startTime))
@@ -3477,7 +3412,7 @@ Select the appropriate scenes and return JSON.`;
                 analyzeSegment(index + 1);
               }
             })
-            .on('error', (err) => {
+            .on('error', (_err) => {
               console.warn('[VideoEditor] Segment', index, 'failed, using default');
               peaks[index] = 0.3; // Default value
               processed++;
@@ -3504,14 +3439,14 @@ Select the appropriate scenes and return JSON.`;
   /**
    * Fast and RELIABLE waveform generation using FFmpeg audio analysis
    */
-  generateWaveformFast(inputPath, samples, duration, audioStream) {
+  generateWaveformFast(inputPath, samples, duration, _audioStream) {
     return new Promise((resolve, reject) => {
       console.log('[VideoEditor] Extracting real audio waveform data...');
-      
+
       // SIMPLE & RELIABLE: Extract audio to temp file, then analyze with FFmpeg filters
       const tempAudio = path.join(this.outputDir, `waveform_audio_${Date.now()}.wav`);
       const tempData = path.join(this.outputDir, `waveform_data_${Date.now()}.txt`);
-      
+
       // Step 1: Extract audio as WAV (fast and reliable)
       ffmpeg(inputPath)
         .noVideo()
@@ -3521,16 +3456,13 @@ Select the appropriate scenes and return JSON.`;
         .output(tempAudio)
         .on('end', () => {
           console.log('[VideoEditor] Audio extracted, analyzing levels...');
-          
+
           // Step 2: Analyze audio levels using astats filter
-          const segmentSize = Math.ceil(8000 * duration / samples); // samples per segment
+          const segmentSize = Math.ceil((8000 * duration) / samples); // samples per segment
           let stderrOutput = '';
-          
+
           ffmpeg(tempAudio)
-            .audioFilters([
-              `asetnsamples=${segmentSize}`,
-              `astats=metadata=1:reset=1`
-            ])
+            .audioFilters([`asetnsamples=${segmentSize}`, `astats=metadata=1:reset=1`])
             .outputOptions(['-f', 'null'])
             .output('-')
             .on('stderr', (line) => {
@@ -3541,36 +3473,35 @@ Select the appropriate scenes and return JSON.`;
                 // Parse RMS or Peak level from astats output
                 const rmsMatches = [...stderrOutput.matchAll(/lavfi\.astats\.Overall\.RMS_level=(-?[\d.]+)/g)];
                 const peakMatches = [...stderrOutput.matchAll(/lavfi\.astats\.Overall\.Peak_level=(-?[\d.]+)/g)];
-                
+
                 const levels = rmsMatches.length > 0 ? rmsMatches : peakMatches;
-                
+
                 console.log('[VideoEditor] Found', levels.length, 'audio level measurements');
-                
-                const peaks = levels.map(match => {
+
+                const peaks = levels.map((match) => {
                   const db = parseFloat(match[1]);
                   // Convert dB to linear 0-1 range
                   // -60dB = quiet (0.001), 0dB = max (1.0)
                   const linear = Math.pow(10, db / 20);
                   return Math.min(1, Math.max(0, linear));
                 });
-                
+
                 // Resample to exact number of samples needed
                 const finalPeaks = this.resampleArray(peaks, samples);
-                
+
                 // Cleanup temp files
                 if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
                 if (fs.existsSync(tempData)) fs.unlinkSync(tempData);
-                
+
                 console.log('[VideoEditor] ✅ Real waveform extracted:', finalPeaks.length, 'samples');
-                
+
                 resolve({
                   peaks: finalPeaks,
                   duration: duration,
                   hasAudio: true,
                   method: 'astats_accurate',
-                  sampleCount: levels.length
+                  sampleCount: levels.length,
                 });
-                
               } catch (error) {
                 console.error('[VideoEditor] Error parsing waveform data:', error);
                 // Cleanup and reject
@@ -3601,54 +3532,10 @@ Select the appropriate scenes and return JSON.`;
    * Generate approximate waveform using volumedetect
    */
   generateApproximateWaveform(inputPath, samples, duration) {
-    return new Promise((resolve, reject) => {
-      const peaks = [];
-      const segmentDuration = duration / samples;
-      let completed = 0;
-
+    return new Promise((resolve, _reject) => {
       console.log('[VideoEditor] Generating approximate waveform...');
 
-      // Process in chunks for better performance
-      const processSegment = (index) => {
-        if (index >= samples) {
-          resolve({
-            peaks: peaks,
-            duration: duration,
-            hasAudio: true,
-            approximate: true
-          });
-          return;
-        }
-
-        const startTime = index * segmentDuration;
-        
-        ffmpeg(inputPath)
-          .setStartTime(startTime)
-          .setDuration(segmentDuration)
-          .audioFilters('volumedetect')
-          .outputOptions(['-f', 'null'])
-          .output('-')
-          .on('end', (stdout, stderr) => {
-            // Parse max_volume from stderr
-            const match = stderr?.match(/max_volume:\s*(-?[\d.]+)\s*dB/);
-            if (match) {
-              const db = parseFloat(match[1]);
-              // Convert to 0-1 range (assuming -60dB to 0dB range)
-              const normalized = Math.min(1, Math.max(0, (db + 60) / 60));
-              peaks[index] = normalized;
-            } else {
-              peaks[index] = 0.3; // Default value
-            }
-            processSegment(index + 1);
-          })
-          .on('error', () => {
-            peaks[index] = 0.3;
-            processSegment(index + 1);
-          })
-          .run();
-      };
-
-      // Start processing - but use simpler method for speed
+      // Start processing - use simpler method for speed
       // Instead of per-segment analysis, do a single pass
       this.generateSimpleWaveform(inputPath, samples, duration)
         .then(resolve)
@@ -3662,7 +3549,7 @@ Select the appropriate scenes and return JSON.`;
             peaks: fallbackPeaks,
             duration: duration,
             hasAudio: true,
-            fallback: true
+            fallback: true,
           });
         });
     });
@@ -3674,11 +3561,13 @@ Select the appropriate scenes and return JSON.`;
   generateSimpleWaveform(inputPath, samples, duration) {
     return new Promise((resolve, reject) => {
       const tempImage = path.join(this.outputDir, `waveform_${Date.now()}.png`);
-      
+
       ffmpeg(inputPath)
         .outputOptions([
-          '-filter_complex', `aformat=channel_layouts=mono,showwavespic=s=${samples}x100:colors=white`,
-          '-frames:v', '1'
+          '-filter_complex',
+          `aformat=channel_layouts=mono,showwavespic=s=${samples}x100:colors=white`,
+          '-frames:v',
+          '1',
         ])
         .output(tempImage)
         .on('end', () => {
@@ -3689,7 +3578,7 @@ Select the appropriate scenes and return JSON.`;
             if (fs.existsSync(tempImage)) {
               fs.unlinkSync(tempImage);
             }
-            
+
             // Use a simpler volumedetect approach
             ffmpeg(inputPath)
               .audioFilters('volumedetect')
@@ -3698,15 +3587,15 @@ Select the appropriate scenes and return JSON.`;
               .on('end', (stdout, stderr) => {
                 const meanMatch = stderr?.match(/mean_volume:\s*(-?[\d.]+)\s*dB/);
                 const maxMatch = stderr?.match(/max_volume:\s*(-?[\d.]+)\s*dB/);
-                
+
                 const meanDb = meanMatch ? parseFloat(meanMatch[1]) : -20;
                 const maxDb = maxMatch ? parseFloat(maxMatch[1]) : -6;
-                
+
                 // Generate waveform based on overall audio characteristics
                 const peaks = [];
                 const baseLevel = Math.min(1, Math.max(0, (meanDb + 60) / 60));
                 const peakLevel = Math.min(1, Math.max(0, (maxDb + 60) / 60));
-                
+
                 for (let i = 0; i < samples; i++) {
                   // Create variation based on position
                   const variation = Math.sin(i * 0.3) * 0.15 + Math.sin(i * 0.7) * 0.1;
@@ -3714,13 +3603,13 @@ Select the appropriate scenes and return JSON.`;
                   const peak = baseLevel + variation + randomVariation;
                   peaks.push(Math.min(peakLevel, Math.max(0.05, peak)));
                 }
-                
+
                 resolve({
                   peaks: peaks,
                   duration: duration,
                   hasAudio: true,
                   meanVolume: meanDb,
-                  maxVolume: maxDb
+                  maxVolume: maxDb,
                 });
               })
               .on('error', reject)
@@ -3729,7 +3618,7 @@ Select the appropriate scenes and return JSON.`;
             reject(error);
           }
         })
-        .on('error', (err) => {
+        .on('error', (_err) => {
           // Fallback
           const peaks = [];
           for (let i = 0; i < samples; i++) {
@@ -3739,7 +3628,7 @@ Select the appropriate scenes and return JSON.`;
             peaks: peaks,
             duration: duration,
             hasAudio: true,
-            fallback: true
+            fallback: true,
           });
         })
         .run();
@@ -3752,14 +3641,14 @@ Select the appropriate scenes and return JSON.`;
   resampleArray(arr, targetLength) {
     if (arr.length === 0) return new Array(targetLength).fill(0);
     if (arr.length === targetLength) return arr;
-    
+
     const result = [];
     const ratio = arr.length / targetLength;
-    
+
     for (let i = 0; i < targetLength; i++) {
       const srcIndex = Math.floor(i * ratio);
       const nextIndex = Math.min(srcIndex + Math.ceil(ratio), arr.length - 1);
-      
+
       // Take max value in range for peaks
       let maxVal = 0;
       for (let j = srcIndex; j <= nextIndex; j++) {
@@ -3767,7 +3656,7 @@ Select the appropriate scenes and return JSON.`;
       }
       result.push(maxVal);
     }
-    
+
     return result;
   }
 
@@ -3785,11 +3674,11 @@ Select the appropriate scenes and return JSON.`;
   }
 
   // ==================== TRANSLATION PIPELINE (TEaR) ====================
-  
+
   /**
    * TEaR Translation Pipeline - Translate, Evaluate, Refine
    * Uses multi-LLM approach for high-quality translations
-   * 
+   *
    * @param {string} sourceText - Text to translate
    * @param {Object} options - Translation options
    * @returns {Promise} - Translation result with scores
@@ -3802,14 +3691,14 @@ Select the appropriate scenes and return JSON.`;
       videoContext = 'general',
       tone = 'professional',
       maxIterations = 5,
-      qualityThreshold = 9.0
+      qualityThreshold = 9.0,
     } = options;
 
     // Get API keys
     const settingsPath = path.join(app.getPath('userData'), 'settings.json');
     let openaiKey = null;
     let anthropicKey = null;
-    
+
     if (fs.existsSync(settingsPath)) {
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       openaiKey = settings.openaiApiKey;
@@ -3829,13 +3718,17 @@ Select the appropriate scenes and return JSON.`;
 
       // Step 1: Translate (or refine)
       if (i === 1) {
-        currentTranslation = await this.translateText(sourceText, {
-          sourceLanguage,
-          targetLanguage,
-          sourceDuration,
-          videoContext,
-          tone
-        }, openaiKey);
+        currentTranslation = await this.translateText(
+          sourceText,
+          {
+            sourceLanguage,
+            targetLanguage,
+            sourceDuration,
+            videoContext,
+            tone,
+          },
+          openaiKey
+        );
       } else {
         // Refine based on previous feedback
         currentTranslation = await this.refineTranslation(
@@ -3858,7 +3751,7 @@ Select the appropriate scenes and return JSON.`;
       iterations.push({
         iteration: i,
         translation: currentTranslation,
-        evaluation: currentEvaluation
+        evaluation: currentEvaluation,
       });
 
       // Check if we've reached quality threshold
@@ -3869,7 +3762,7 @@ Select the appropriate scenes and return JSON.`;
           translation: currentTranslation,
           finalScore: currentEvaluation.composite,
           iterations: iterations,
-          evaluation: currentEvaluation
+          evaluation: currentEvaluation,
         };
       }
 
@@ -3882,7 +3775,7 @@ Select the appropriate scenes and return JSON.`;
           finalScore: currentEvaluation.composite,
           iterations: iterations,
           evaluation: currentEvaluation,
-          warning: `Quality threshold (${qualityThreshold}) not met after ${maxIterations} iterations`
+          warning: `Quality threshold (${qualityThreshold}) not met after ${maxIterations} iterations`,
         };
       }
     }
@@ -3891,7 +3784,7 @@ Select the appropriate scenes and return JSON.`;
   /**
    * Translate text using LLM
    */
-  async translateText(sourceText, options, apiKey) {
+  async translateText(sourceText, options, _apiKey) {
     const { sourceLanguage, targetLanguage, sourceDuration, videoContext, tone } = options;
 
     const systemPrompt = `You are a professional video translator specializing in high-quality dubbing translations.
@@ -3937,7 +3830,7 @@ TRANSLATION:`;
   /**
    * Evaluate translation quality using multi-dimensional rubric
    */
-  async evaluateTranslation(sourceText, translatedText, options, apiKey) {
+  async evaluateTranslation(sourceText, translatedText, options, _apiKey) {
     const { sourceLanguage, targetLanguage, sourceDuration, videoContext } = options;
 
     const systemPrompt = `You are a professional translation quality evaluator. Rate the translation on 5 dimensions using a 1-10 scale.
@@ -3995,17 +3888,17 @@ Evaluate and return JSON:`;
       });
 
       const evaluation = JSON.parse(result.content);
-      
+
       // Calculate composite if not provided
       if (!evaluation.composite) {
-        const weights = { accuracy: 0.25, fluency: 0.25, adequacy: 0.20, cultural_fit: 0.15, timing_fit: 0.15 };
+        const weights = { accuracy: 0.25, fluency: 0.25, adequacy: 0.2, cultural_fit: 0.15, timing_fit: 0.15 };
         let composite = 0;
         for (const [key, weight] of Object.entries(weights)) {
           composite += (evaluation.scores[key]?.score || 7) * weight;
         }
         evaluation.composite = Math.round(composite * 10) / 10;
       }
-      
+
       evaluation.pass = evaluation.composite >= 9.0;
       return evaluation;
     } catch (e) {
@@ -4017,7 +3910,7 @@ Evaluate and return JSON:`;
   /**
    * Refine translation based on feedback
    */
-  async refineTranslation(sourceText, currentTranslation, improvements, options, apiKey) {
+  async refineTranslation(sourceText, currentTranslation, improvements, options, _apiKey) {
     const { sourceLanguage, targetLanguage, sourceDuration } = options;
 
     const systemPrompt = `You are a professional translation editor. Your task is to improve an existing translation based on specific feedback.
@@ -4072,20 +3965,20 @@ IMPROVED TRANSLATION:`;
         fluency: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
         adequacy: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
         cultural_fit: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
-        timing_fit: { score: 7.5, feedback: 'Unable to evaluate - please review manually' }
+        timing_fit: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
       },
       composite: 7.5,
       improvements: ['Manual review recommended'],
-      pass: false
+      pass: false,
     };
   }
 
   // ==================== TWO-STEP VIDEO WORKFLOW ====================
-  
+
   /**
    * Step 1: Process edit list - combine multiple segments into a single video
    * This is the "edit and re-record" step
-   * 
+   *
    * @param {string} inputPath - Source video path
    * @param {Array} editList - Array of segments to include: [{startTime, endTime, label?}]
    * @param {Object} options - Output options
@@ -4096,7 +3989,7 @@ IMPROVED TRANSLATION:`;
       outputPath = null,
       format = 'mp4',
       quality = 'high', // low, medium, high
-      preserveQuality = true // If true, use copy codec where possible
+      preserveQuality = true, // If true, use copy codec where possible
     } = options;
 
     if (!editList || editList.length === 0) {
@@ -4146,41 +4039,50 @@ IMPROVED TRANSLATION:`;
             segment: i + 1,
             totalSegments,
             percent: (i / totalSegments) * 50, // First 50% is extraction
-            message: `Extracting segment ${i + 1}/${totalSegments}`
+            message: `Extracting segment ${i + 1}/${totalSegments}`,
           });
         }
 
         await new Promise((resolve, reject) => {
-          let cmd = ffmpeg(inputPath)
-            .setStartTime(seg.startTime)
-            .setDuration(duration);
+          let cmd = ffmpeg(inputPath).setStartTime(seg.startTime).setDuration(duration);
 
           if (preserveQuality) {
             // Try to use stream copy for speed
             cmd = cmd.outputOptions([
-              '-c:v', 'libx264',
-              '-c:a', 'aac',
-              '-avoid_negative_ts', 'make_zero',
-              '-preset', 'fast',
-              '-crf', '18'
+              '-c:v',
+              'libx264',
+              '-c:a',
+              'aac',
+              '-avoid_negative_ts',
+              'make_zero',
+              '-preset',
+              'fast',
+              '-crf',
+              '18',
             ]);
           } else {
             const qualitySettings = {
-              'low': { crf: 28, preset: 'fast' },
-              'medium': { crf: 23, preset: 'medium' },
-              'high': { crf: 18, preset: 'slow' }
+              low: { crf: 28, preset: 'fast' },
+              medium: { crf: 23, preset: 'medium' },
+              high: { crf: 18, preset: 'slow' },
             };
             const settings = qualitySettings[quality] || qualitySettings.high;
             cmd = cmd.outputOptions([
-              '-c:v', 'libx264',
-              '-c:a', 'aac',
-              '-avoid_negative_ts', 'make_zero',
-              `-preset`, settings.preset,
-              `-crf`, String(settings.crf)
+              '-c:v',
+              'libx264',
+              '-c:a',
+              'aac',
+              '-avoid_negative_ts',
+              'make_zero',
+              `-preset`,
+              settings.preset,
+              `-crf`,
+              String(settings.crf),
             ]);
           }
 
-          cmd.output(segmentPath)
+          cmd
+            .output(segmentPath)
             .on('end', () => {
               console.log(`[VideoEditor] Segment ${i + 1}/${totalSegments} extracted`);
               resolve();
@@ -4197,13 +4099,13 @@ IMPROVED TRANSLATION:`;
           jobId,
           phase: 'merging',
           percent: 60,
-          message: 'Merging segments...'
+          message: 'Merging segments...',
         });
       }
 
       // Create concat list file
       const listPath = path.join(tempDir, 'concat_list.txt');
-      const listContent = segmentFiles.map(f => `file '${f}'`).join('\n');
+      const listContent = segmentFiles.map((f) => `file '${f}'`).join('\n');
       fs.writeFileSync(listPath, listContent);
 
       // Concatenate all segments
@@ -4219,7 +4121,7 @@ IMPROVED TRANSLATION:`;
                 jobId,
                 phase: 'merging',
                 percent: 60 + (progress.percent || 0) * 0.4,
-                message: 'Merging segments...'
+                message: 'Merging segments...',
               });
             }
           })
@@ -4229,7 +4131,7 @@ IMPROVED TRANSLATION:`;
       });
 
       // Cleanup temp files
-      segmentFiles.forEach(f => {
+      segmentFiles.forEach((f) => {
         if (fs.existsSync(f)) fs.unlinkSync(f);
       });
       if (fs.existsSync(listPath)) fs.unlinkSync(listPath);
@@ -4248,16 +4150,17 @@ IMPROVED TRANSLATION:`;
         segmentCount: editList.length,
         duration: outputInfo.duration,
         durationFormatted: outputInfo.durationFormatted,
-        fileSize: outputInfo.size
+        fileSize: outputInfo.size,
       };
-
     } catch (error) {
       // Cleanup on error
       if (fs.existsSync(tempDir)) {
         try {
-          fs.readdirSync(tempDir).forEach(f => fs.unlinkSync(path.join(tempDir, f)));
+          fs.readdirSync(tempDir).forEach((f) => fs.unlinkSync(path.join(tempDir, f)));
           fs.rmdirSync(tempDir);
-        } catch (e) {}
+        } catch (_ignored) {
+          /* cleanup may fail if files in use */
+        }
       }
       throw error;
     }
@@ -4267,7 +4170,7 @@ IMPROVED TRANSLATION:`;
    * Step 2: Finalize video workflow
    * Replaces the original video in the space with the edited version
    * and saves the scene list to metadata
-   * 
+   *
    * @param {string} spaceItemId - The clipboard item ID of the original video
    * @param {string} editedVideoPath - Path to the edited video
    * @param {Array} scenes - Scene list to save: [{id, name, inTime, outTime, description?, tags?}]
@@ -4292,8 +4195,6 @@ IMPROVED TRANSLATION:`;
 
     // Get the original file path in storage
     const originalPath = item.content; // This should be the file path
-    const itemDir = path.dirname(originalPath);
-
     // Backup original (optional - keep for safety)
     const backupPath = originalPath + '.backup';
     if (fs.existsSync(originalPath)) {
@@ -4320,7 +4221,7 @@ IMPROVED TRANSLATION:`;
       outTime: scene.outTime,
       description: scene.description || '',
       tags: scene.tags || [],
-      transcription: scene.transcription || ''
+      transcription: scene.transcription || '',
     }));
 
     metadata.scenes = validatedScenes;
@@ -4335,7 +4236,7 @@ IMPROVED TRANSLATION:`;
     const newInfo = await this.getVideoInfo(originalPath);
 
     // Update index entry with new file info
-    const indexEntry = clipboardManager.storage.index.items.find(i => i.id === spaceItemId);
+    const indexEntry = clipboardManager.storage.index.items.find((i) => i.id === spaceItemId);
     if (indexEntry) {
       indexEntry.fileSize = newInfo.size;
       indexEntry.timestamp = Date.now(); // Update modified time
@@ -4354,7 +4255,7 @@ IMPROVED TRANSLATION:`;
             scenesUpdatedAt: metadata.scenesUpdatedAt,
             editedAt: metadata.editedAt,
             duration: newInfo.duration,
-            fileSize: newInfo.size
+            fileSize: newInfo.size,
           };
           clipboardManager.storage.updateSpaceMetadata(item.spaceId, { files: spaceMetadata.files });
           console.log(`[VideoEditor] Synced to space metadata`);
@@ -4371,7 +4272,7 @@ IMPROVED TRANSLATION:`;
       newDuration: newInfo.duration,
       newDurationFormatted: newInfo.durationFormatted,
       newFileSize: newInfo.size,
-      backupPath: backupPath
+      backupPath: backupPath,
     };
   }
 
@@ -4383,7 +4284,7 @@ IMPROVED TRANSLATION:`;
     const {
       minSceneDuration = 5, // Minimum scene duration in seconds
       silenceThreshold = -30, // dB threshold for silence detection
-      silenceDuration = 0.5 // Minimum silence duration to mark as scene break
+      silenceDuration = 0.5, // Minimum silence duration to mark as scene break
     } = options;
 
     console.log(`[VideoEditor] Detecting scenes in: ${inputPath}`);
@@ -4406,26 +4307,26 @@ IMPROVED TRANSLATION:`;
         .on('end', () => {
           try {
             let silencePoints = [];
-            
+
             if (fs.existsSync(tempFile)) {
               const content = fs.readFileSync(tempFile, 'utf8');
-              
+
               // Parse silence_start and silence_end from FFmpeg output
               const startMatches = content.matchAll(/silence_start:\s*([\d.]+)/g);
               const endMatches = content.matchAll(/silence_end:\s*([\d.]+)/g);
-              
-              const starts = [...startMatches].map(m => parseFloat(m[1]));
-              const ends = [...endMatches].map(m => parseFloat(m[1]));
-              
+
+              const starts = [...startMatches].map((m) => parseFloat(m[1]));
+              const ends = [...endMatches].map((m) => parseFloat(m[1]));
+
               // Combine into silence periods
               for (let i = 0; i < Math.min(starts.length, ends.length); i++) {
                 silencePoints.push({
                   start: starts[i],
                   end: ends[i],
-                  midpoint: (starts[i] + ends[i]) / 2
+                  midpoint: (starts[i] + ends[i]) / 2,
                 });
               }
-              
+
               fs.unlinkSync(tempFile);
             }
 
@@ -4437,7 +4338,7 @@ IMPROVED TRANSLATION:`;
             for (const silence of silencePoints) {
               const sceneEnd = silence.midpoint;
               const sceneDuration = sceneEnd - sceneStart;
-              
+
               // Only create scene if it meets minimum duration
               if (sceneDuration >= minSceneDuration) {
                 scenes.push({
@@ -4448,7 +4349,7 @@ IMPROVED TRANSLATION:`;
                   duration: sceneDuration,
                   description: '',
                   tags: [],
-                  autoDetected: true
+                  autoDetected: true,
                 });
                 sceneStart = sceneEnd;
               }
@@ -4464,7 +4365,7 @@ IMPROVED TRANSLATION:`;
                 duration: duration - sceneStart,
                 description: '',
                 tags: [],
-                autoDetected: true
+                autoDetected: true,
               });
             }
 
@@ -4478,7 +4379,7 @@ IMPROVED TRANSLATION:`;
                 duration: duration,
                 description: '',
                 tags: [],
-                autoDetected: true
+                autoDetected: true,
               });
             }
 
@@ -4488,9 +4389,8 @@ IMPROVED TRANSLATION:`;
               success: true,
               scenes,
               totalDuration: duration,
-              silencePoints: silencePoints.length
+              silencePoints: silencePoints.length,
             });
-
           } catch (error) {
             reject(error);
           }
@@ -4508,10 +4408,11 @@ IMPROVED TRANSLATION:`;
    */
   getExportedFiles() {
     if (!fs.existsSync(this.outputDir)) return [];
-    
-    return fs.readdirSync(this.outputDir)
-      .filter(f => !f.startsWith('.') && !f.endsWith('.txt'))
-      .map(f => {
+
+    return fs
+      .readdirSync(this.outputDir)
+      .filter((f) => !f.startsWith('.') && !f.endsWith('.txt'))
+      .map((f) => {
         const filePath = path.join(this.outputDir, f);
         const stats = fs.statSync(filePath);
         return {
@@ -4519,7 +4420,7 @@ IMPROVED TRANSLATION:`;
           path: filePath,
           size: stats.size,
           created: stats.birthtime,
-          modified: stats.mtime
+          modified: stats.mtime,
         };
       })
       .sort((a, b) => b.modified - a.modified);
@@ -4663,7 +4564,7 @@ IMPROVED TRANSLATION:`;
     });
 
     // ==================== THUMBNAIL CACHE ====================
-    
+
     // Save thumbnail cache metadata to disk
     ipcMain.handle('video-editor:save-thumbnail-cache', async (event, videoPath, cacheData) => {
       try {
@@ -4689,7 +4590,7 @@ IMPROVED TRANSLATION:`;
         const cacheData = JSON.parse(data);
         console.log('[VideoEditor] Thumbnail cache loaded:', cachePath);
         return { exists: true, ...cacheData };
-      } catch (error) {
+      } catch (_error) {
         // Cache file doesn't exist - not an error
         return { exists: false };
       }
@@ -4719,7 +4620,7 @@ IMPROVED TRANSLATION:`;
         const videoDir = path.dirname(videoPath);
         const videoName = path.basename(videoPath, path.extname(videoPath));
         const imagePath = path.join(videoDir, `.${videoName}.thumbstrip-${tierName}.jpg`);
-        
+
         console.log(`[VideoEditor] Looking for thumbnail strip: ${imagePath}`);
 
         // Check if image exists
@@ -4732,7 +4633,7 @@ IMPROVED TRANSLATION:`;
 
         const imageBuffer = await fs.promises.readFile(imagePath);
         const dataUrl = `data:image/jpeg;base64,${imageBuffer.toString('base64')}`;
-        console.log('[VideoEditor] Thumbnail strip loaded:', tierName, `(${Math.round(imageBuffer.length/1024)}KB)`);
+        console.log('[VideoEditor] Thumbnail strip loaded:', tierName, `(${Math.round(imageBuffer.length / 1024)}KB)`);
         return { exists: true, dataUrl };
       } catch (error) {
         console.error('[VideoEditor] Load thumbnail strip error:', error);
@@ -4868,16 +4769,16 @@ IMPROVED TRANSLATION:`;
 
         const result = await transcriptionService.transcribe(audioPath, {
           language: options.language || null,
-          diarize: options.diarize !== false,  // Default true
+          diarize: options.diarize !== false, // Default true
           numSpeakers: options.numSpeakers || null,
-          projectId: options.projectId || null
+          projectId: options.projectId || null,
         });
 
         // If transcription succeeded and has multiple speakers, try to identify them
         let speakerNames = null;
         let speakerRoles = null;
         let textWithSpeakers = null;
-        
+
         if (result.success && result.speakerCount > 0 && options.identifySpeakers !== false) {
           console.log('[VideoEditor] Attempting to identify speaker names with web search...');
           try {
@@ -4885,13 +4786,13 @@ IMPROVED TRANSLATION:`;
               context: options.context || null,
               expectedNames: options.expectedNames || [],
               projectId: options.projectId || null,
-              videoTitle: options.videoTitle || null  // Pass video title for web search
+              videoTitle: options.videoTitle || null, // Pass video title for web search
             });
 
             if (identification.success && Object.keys(identification.speakerMap).length > 0) {
               speakerNames = identification.speakerMap;
               speakerRoles = identification.roles || {};
-              
+
               // Log if web search was used
               if (identification.webSearchUsed) {
                 console.log('[VideoEditor] Web search was used for speaker identification');
@@ -4903,7 +4804,7 @@ IMPROVED TRANSLATION:`;
               // Create text with speaker names
               const segments = [];
               let currentSegment = { speaker: null, text: [] };
-              
+
               for (const word of result.words || []) {
                 const speakerId = word.speaker || 'unknown';
                 if (speakerId !== currentSegment.speaker) {
@@ -4921,7 +4822,7 @@ IMPROVED TRANSLATION:`;
                 segments.push(`${name}: ${currentSegment.text.join(' ')}`);
               }
               textWithSpeakers = segments.join('\n\n');
-              
+
               console.log('[VideoEditor] Speaker names identified:', speakerNames);
             }
           } catch (identifyError) {
@@ -4944,7 +4845,7 @@ IMPROVED TRANSLATION:`;
           textWithSpeakers: textWithSpeakers,
           language: result.language,
           source: result.source,
-          error: result.error
+          error: result.error,
         };
       } catch (error) {
         console.error('[VideoEditor] Transcription error:', error);
@@ -4963,7 +4864,7 @@ IMPROVED TRANSLATION:`;
           context: options.context || null,
           expectedNames: options.expectedNames || [],
           projectId: options.projectId || null,
-          videoTitle: options.videoTitle || null  // Pass video title for web search
+          videoTitle: options.videoTitle || null, // Pass video title for web search
         });
 
         if (result.webSearchUsed) {
@@ -4985,32 +4886,32 @@ IMPROVED TRANSLATION:`;
         console.log('[VideoEditor] === TRANSCRIBE RANGE START ===');
         console.log('[VideoEditor] Video path:', videoPath);
         console.log('[VideoEditor] Options:', options);
-        
+
         // First extract audio from the video
         console.log('[VideoEditor] Extracting audio...');
         const audioResult = await this.extractAudio(videoPath, {
           format: 'mp3',
           startTime: options.startTime || 0,
-          duration: options.endTime ? (options.endTime - (options.startTime || 0)) : null
+          duration: options.endTime ? options.endTime - (options.startTime || 0) : null,
         });
-        
+
         if (!audioResult.outputPath) {
           console.error('[VideoEditor] Audio extraction failed - no output path');
           throw new Error('Failed to extract audio for transcription');
         }
-        
+
         console.log('[VideoEditor] Audio extracted to:', audioResult.outputPath);
-        
+
         // Use the unified TranscriptionService
         console.log('[VideoEditor] Loading TranscriptionService...');
         const { getTranscriptionService } = await import('./src/transcription/index.js');
         const transcriptionService = getTranscriptionService();
-        
+
         console.log('[VideoEditor] Starting transcription with ElevenLabs Scribe...');
         const result = await transcriptionService.transcribe(audioResult.outputPath, {
-          diarize: options.diarize !== false
+          diarize: options.diarize !== false,
         });
-        
+
         console.log('[VideoEditor] === TRANSCRIBE RANGE COMPLETE ===');
         console.log('[VideoEditor] Success:', result.success);
         console.log('[VideoEditor] Words:', result.words?.length || 0);
@@ -5025,7 +4926,7 @@ IMPROVED TRANSLATION:`;
         let speakerNames = null;
         let speakerRoles = null;
         let textWithSpeakers = null;
-        
+
         if (result.speakerCount > 0 && options.identifySpeakers !== false) {
           console.log('[VideoEditor] Attempting to identify speaker names with web search...');
           try {
@@ -5033,13 +4934,13 @@ IMPROVED TRANSLATION:`;
               context: options.context || null,
               expectedNames: options.expectedNames || [],
               projectId: options.projectId || null,
-              videoTitle: options.videoTitle || null  // Pass video title for web search
+              videoTitle: options.videoTitle || null, // Pass video title for web search
             });
 
             if (identification.success && Object.keys(identification.speakerMap).length > 0) {
               speakerNames = identification.speakerMap;
               speakerRoles = identification.roles || {};
-              
+
               // Log if web search was used
               if (identification.webSearchUsed) {
                 console.log('[VideoEditor] Web search was used for speaker identification');
@@ -5048,7 +4949,7 @@ IMPROVED TRANSLATION:`;
               // Create text with speaker names
               const segments = [];
               let currentSegment = { speaker: null, text: [] };
-              
+
               for (const word of result.words || []) {
                 const speakerId = word.speaker || 'unknown';
                 if (speakerId !== currentSegment.speaker) {
@@ -5066,7 +4967,7 @@ IMPROVED TRANSLATION:`;
                 segments.push(`${name}: ${currentSegment.text.join(' ')}`);
               }
               textWithSpeakers = segments.join('\n\n');
-              
+
               console.log('[VideoEditor] Speaker names identified:', speakerNames);
             }
           } catch (identifyError) {
@@ -5084,7 +4985,7 @@ IMPROVED TRANSLATION:`;
           speakerCount: result.speakerCount || 0,
           speakerNames: speakerNames,
           speakerRoles: speakerRoles,
-          textWithSpeakers: textWithSpeakers
+          textWithSpeakers: textWithSpeakers,
         };
       } catch (error) {
         console.error('[VideoEditor] === TRANSCRIBE RANGE ERROR ===');
@@ -5181,7 +5082,7 @@ IMPROVED TRANSLATION:`;
           sourceLanguage,
           numSpeakers,
           watermark,
-          projectName
+          projectName,
         });
         // Return with success flag for frontend compatibility
         return { success: true, ...result };
@@ -5376,7 +5277,7 @@ IMPROVED TRANSLATION:`;
     });
 
     // ==================== TRANSLATION PIPELINE IPC HANDLERS ====================
-    
+
     // Full translation with quality loop
     ipcMain.handle('video-editor:translate-with-quality', async (event, sourceText, options) => {
       try {
@@ -5393,7 +5294,7 @@ IMPROVED TRANSLATION:`;
       try {
         const settingsPath = path.join(app.getPath('userData'), 'settings.json');
         let openaiKey = null;
-        
+
         if (fs.existsSync(settingsPath)) {
           const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
           openaiKey = settings.openaiApiKey;
@@ -5416,7 +5317,7 @@ IMPROVED TRANSLATION:`;
       try {
         const settingsPath = path.join(app.getPath('userData'), 'settings.json');
         let apiKey = null;
-        
+
         if (fs.existsSync(settingsPath)) {
           const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
           apiKey = settings.anthropicApiKey || settings.claudeApiKey || settings.openaiApiKey;
@@ -5441,16 +5342,16 @@ IMPROVED TRANSLATION:`;
         if (!clipboardManager) {
           throw new Error('Clipboard manager not available');
         }
-        
+
         const item = clipboardManager.storage.loadItem(itemId);
         if (!item) {
           return { success: false, error: 'Item not found' };
         }
-        
+
         if (item.type !== 'file' || !item.fileType?.startsWith('video/')) {
           return { success: false, error: 'Item is not a video' };
         }
-        
+
         // Load scenes from metadata
         const metadataPath = path.join(clipboardManager.storage.storageRoot, item.metadataPath);
         let scenes = [];
@@ -5458,7 +5359,7 @@ IMPROVED TRANSLATION:`;
           const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
           scenes = metadata.scenes || [];
         }
-        
+
         return {
           success: true,
           itemId: itemId,
@@ -5466,7 +5367,7 @@ IMPROVED TRANSLATION:`;
           fileName: item.fileName,
           fileType: item.fileType,
           spaceId: item.spaceId,
-          scenes: scenes
+          scenes: scenes,
         };
       } catch (error) {
         return { success: false, error: error.message };
@@ -5480,24 +5381,24 @@ IMPROVED TRANSLATION:`;
         if (!clipboardManager) {
           throw new Error('Clipboard manager not available');
         }
-        
+
         const item = clipboardManager.storage.loadItem(itemId);
         if (!item) {
           return { success: false, error: 'Item not found' };
         }
-        
+
         // Update metadata
         const metadataPath = path.join(clipboardManager.storage.storageRoot, item.metadataPath);
         let metadata = {};
         if (fs.existsSync(metadataPath)) {
           metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
         }
-        
+
         metadata.scenes = scenes;
         metadata.scenesUpdatedAt = new Date().toISOString();
-        
+
         fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-        
+
         // Sync to space metadata
         if (item.spaceId) {
           try {
@@ -5507,7 +5408,7 @@ IMPROVED TRANSLATION:`;
               spaceMetadata.files[fileKey] = {
                 ...spaceMetadata.files[fileKey],
                 scenes: scenes,
-                scenesUpdatedAt: metadata.scenesUpdatedAt
+                scenesUpdatedAt: metadata.scenesUpdatedAt,
               };
               clipboardManager.storage.updateSpaceMetadata(item.spaceId, { files: spaceMetadata.files });
             }
@@ -5515,7 +5416,7 @@ IMPROVED TRANSLATION:`;
             console.error('[VideoEditor] Error syncing scenes to space:', e);
           }
         }
-        
+
         console.log(`[VideoEditor] Saved ${scenes.length} scenes for item: ${itemId}`);
         return { success: true, scenesCount: scenes.length };
       } catch (error) {
@@ -5526,96 +5427,103 @@ IMPROVED TRANSLATION:`;
     console.log('[VideoEditor] IPC handlers registered (including workflow handlers)');
 
     // ==================== DETACHED VIDEO PLAYER HANDLERS ====================
-    
-    // Detach video player to separate window
-    ipcMain.handle('video-editor:detach-player', async (event, videoPath, currentTime = 0, playing = false, playbackRate = 1) => {
-      try {
-        const parentWindow = BrowserWindow.fromWebContents(event.sender);
-        if (!parentWindow) {
-          throw new Error('Parent window not found');
-        }
-        
-        const parentId = parentWindow.id;
-        
-        // Check if already detached
-        if (this.detachedVideoWindows.has(parentId)) {
-          const existing = this.detachedVideoWindows.get(parentId);
-          if (existing && !existing.isDestroyed()) {
-            existing.focus();
-            return { success: true, alreadyDetached: true };
-          }
-        }
-        
-        // Create detached video window
-        const detachedWindow = new BrowserWindow({
-          width: 640,
-          height: 360,
-          minWidth: 320,
-          minHeight: 180,
-          title: 'Video Player',
-          frame: true,
-          transparent: false,
-          alwaysOnTop: false,
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            preload: path.join(__dirname, 'preload-detached-video.js')
-          }
-        });
-        
-        // Attach structured log forwarding
-        try {
-          const { attachLogForwarder } = require('./browserWindow');
-          attachLogForwarder(detachedWindow, 'video');
-        } catch (e) { /* browserWindow may not be available */ }
 
-        // Store reference
-        this.detachedVideoWindows.set(parentId, detachedWindow);
-        
-        // Load the detached player HTML
-        await detachedWindow.loadFile('detached-video-player.html');
-        
-        // Send video source after window is loaded (small delay for renderer to initialize)
-        setTimeout(() => {
-          if (videoPath) {
-            console.log('[VideoEditor] Sending video source to detached window:', videoPath);
-            detachedWindow.webContents.send('detached-video:set-source', videoPath);
-            // Sync initial playback state
-            setTimeout(() => {
-              detachedWindow.webContents.send('detached-video:sync-playback', {
-                currentTime: currentTime,
-                playing: !!playing,
-                playbackRate: (typeof playbackRate === 'number' && Number.isFinite(playbackRate) && playbackRate > 0) ? playbackRate : 1
-              });
-            }, 100);
+    // Detach video player to separate window
+    ipcMain.handle(
+      'video-editor:detach-player',
+      async (event, videoPath, currentTime = 0, playing = false, playbackRate = 1) => {
+        try {
+          const parentWindow = BrowserWindow.fromWebContents(event.sender);
+          if (!parentWindow) {
+            throw new Error('Parent window not found');
           }
-        }, 200);
-        
-        // Handle window close
-        detachedWindow.on('closed', () => {
-          this.detachedVideoWindows.delete(parentId);
-          // Notify parent window
-          if (parentWindow && !parentWindow.isDestroyed()) {
-            parentWindow.webContents.send('video-editor:player-attached');
+
+          const parentId = parentWindow.id;
+
+          // Check if already detached
+          if (this.detachedVideoWindows.has(parentId)) {
+            const existing = this.detachedVideoWindows.get(parentId);
+            if (existing && !existing.isDestroyed()) {
+              existing.focus();
+              return { success: true, alreadyDetached: true };
+            }
           }
-        });
-        
-        // Handle parent window close - also close detached
-        parentWindow.on('closed', () => {
-          if (detachedWindow && !detachedWindow.isDestroyed()) {
-            detachedWindow.close();
+
+          // Create detached video window
+          const detachedWindow = new BrowserWindow({
+            width: 640,
+            height: 360,
+            minWidth: 320,
+            minHeight: 180,
+            title: 'Video Player',
+            frame: true,
+            transparent: false,
+            alwaysOnTop: false,
+            webPreferences: {
+              nodeIntegration: false,
+              contextIsolation: true,
+              preload: path.join(__dirname, 'preload-detached-video.js'),
+            },
+          });
+
+          // Attach structured log forwarding
+          try {
+            const { attachLogForwarder } = require('./browserWindow');
+            attachLogForwarder(detachedWindow, 'video');
+          } catch (_e) {
+            /* browserWindow may not be available */
           }
-        });
-        
-        console.log('[VideoEditor] Detached video player created for parent:', parentId);
-        return { success: true, windowId: detachedWindow.id };
-        
-      } catch (error) {
-        console.error('[VideoEditor] Error detaching player:', error);
-        return { success: false, error: error.message };
+
+          // Store reference
+          this.detachedVideoWindows.set(parentId, detachedWindow);
+
+          // Load the detached player HTML
+          await detachedWindow.loadFile('detached-video-player.html');
+
+          // Send video source after window is loaded (small delay for renderer to initialize)
+          setTimeout(() => {
+            if (videoPath) {
+              console.log('[VideoEditor] Sending video source to detached window:', videoPath);
+              detachedWindow.webContents.send('detached-video:set-source', videoPath);
+              // Sync initial playback state
+              setTimeout(() => {
+                detachedWindow.webContents.send('detached-video:sync-playback', {
+                  currentTime: currentTime,
+                  playing: !!playing,
+                  playbackRate:
+                    typeof playbackRate === 'number' && Number.isFinite(playbackRate) && playbackRate > 0
+                      ? playbackRate
+                      : 1,
+                });
+              }, 100);
+            }
+          }, 200);
+
+          // Handle window close
+          detachedWindow.on('closed', () => {
+            this.detachedVideoWindows.delete(parentId);
+            // Notify parent window
+            if (parentWindow && !parentWindow.isDestroyed()) {
+              parentWindow.webContents.send('video-editor:player-attached');
+            }
+          });
+
+          // Handle parent window close - also close detached
+          parentWindow.on('closed', () => {
+            if (detachedWindow && !detachedWindow.isDestroyed()) {
+              detachedWindow.close();
+            }
+          });
+
+          console.log('[VideoEditor] Detached video player created for parent:', parentId);
+          return { success: true, windowId: detachedWindow.id };
+        } catch (error) {
+          console.error('[VideoEditor] Error detaching player:', error);
+          return { success: false, error: error.message };
+        }
       }
-    });
-    
+    );
+
     // Attach (close) detached video player
     ipcMain.handle('video-editor:attach-player', async (event) => {
       try {
@@ -5623,75 +5531,74 @@ IMPROVED TRANSLATION:`;
         if (!parentWindow) {
           return { success: false, error: 'Parent window not found' };
         }
-        
+
         const parentId = parentWindow.id;
         const detachedWindow = this.detachedVideoWindows.get(parentId);
-        
+
         if (detachedWindow && !detachedWindow.isDestroyed()) {
           // Get current state before closing
           detachedWindow.webContents.send('detached-video:get-state');
-          
+
           // Wait briefly for state response, then close
-          await new Promise(resolve => setTimeout(resolve, 100));
+          await new Promise((resolve) => {
+            setTimeout(resolve, 100);
+          });
           detachedWindow.close();
           this.detachedVideoWindows.delete(parentId);
         }
-        
+
         return { success: true };
-        
       } catch (error) {
         console.error('[VideoEditor] Error attaching player:', error);
         return { success: false, error: error.message };
       }
     });
-    
+
     // Sync playback state to detached window
     ipcMain.handle('video-editor:sync-playback', async (event, state) => {
       try {
         const parentWindow = BrowserWindow.fromWebContents(event.sender);
         if (!parentWindow) return { success: false };
-        
+
         const detachedWindow = this.detachedVideoWindows.get(parentWindow.id);
         if (detachedWindow && !detachedWindow.isDestroyed()) {
           detachedWindow.webContents.send('detached-video:sync-playback', state);
           return { success: true };
         }
-        
+
         return { success: false, error: 'No detached window' };
-        
       } catch (error) {
         return { success: false, error: error.message };
       }
     });
-    
+
     // Update video source in detached window
     ipcMain.handle('video-editor:update-detached-source', async (event, videoPath) => {
       try {
         const parentWindow = BrowserWindow.fromWebContents(event.sender);
         if (!parentWindow) return { success: false };
-        
+
         const detachedWindow = this.detachedVideoWindows.get(parentWindow.id);
         if (detachedWindow && !detachedWindow.isDestroyed()) {
           detachedWindow.webContents.send('detached-video:set-source', videoPath);
           return { success: true };
         }
-        
+
         return { success: false, error: 'No detached window' };
-        
       } catch (error) {
         return { success: false, error: error.message };
       }
     });
-    
+
     // Check if video is detached
     ipcMain.handle('video-editor:is-detached', async (event) => {
       const parentWindow = BrowserWindow.fromWebContents(event.sender);
       if (!parentWindow) return false;
-      
+
       const detachedWindow = this.detachedVideoWindows.get(parentWindow.id);
       return detachedWindow && !detachedWindow.isDestroyed();
     });
-    
+
     // Handle always on top toggle from detached window
     ipcMain.handle('detached-video:set-always-on-top', async (event, enabled) => {
       const win = BrowserWindow.fromWebContents(event.sender);
@@ -5701,13 +5608,13 @@ IMPROVED TRANSLATION:`;
       }
       return { success: false };
     });
-    
+
     // Handle time updates from detached window (forwarded to parent)
     ipcMain.on('detached-video:time-update', (event, currentTime) => {
       // Find parent window for this detached window
       const detachedWindow = BrowserWindow.fromWebContents(event.sender);
       if (!detachedWindow) return;
-      
+
       for (const [parentId, detached] of this.detachedVideoWindows.entries()) {
         if (detached === detachedWindow) {
           const parentWindow = BrowserWindow.fromId(parentId);
@@ -5718,12 +5625,12 @@ IMPROVED TRANSLATION:`;
         }
       }
     });
-    
+
     // Handle play state changes from detached window
     ipcMain.on('detached-video:play-state', (event, playing) => {
       const detachedWindow = BrowserWindow.fromWebContents(event.sender);
       if (!detachedWindow) return;
-      
+
       for (const [parentId, detached] of this.detachedVideoWindows.entries()) {
         if (detached === detachedWindow) {
           const parentWindow = BrowserWindow.fromId(parentId);
@@ -5734,30 +5641,30 @@ IMPROVED TRANSLATION:`;
         }
       }
     });
-    
+
     // ==================== SCENE DESCRIPTION GENERATION ====================
-    
+
     // Generate scene description from transcript using LLM
     ipcMain.handle('video-editor:generate-scene-description', async (event, options) => {
       try {
         const { transcript, timeContext, videoName, existingDescription } = options;
-        
+
         if (!transcript || transcript.trim().length === 0) {
           return { success: false, error: 'No transcript provided' };
         }
-        
+
         // Get API key from settings
         const settingsManager = require('./settings-manager').getSettingsManager();
         const apiKey = settingsManager.get('llmApiKey');
         const provider = settingsManager.get('llmProvider') || 'anthropic';
         const model = settingsManager.get('llmModel') || 'claude-sonnet-4-5-20250929';
-        
+
         if (!apiKey) {
           return { success: false, error: 'No LLM API key configured. Please set your API key in Settings.' };
         }
-        
+
         console.log('[VideoEditor] Generating scene description with', provider, model);
-        
+
         // Build prompt
         const prompt = `You are a professional video editor's assistant. Analyze the following transcript from a video segment and write a concise, descriptive scene description.
 
@@ -5785,16 +5692,15 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
           temperature: 0.7,
           feature: 'video-editor',
         });
-        
+
         const description = result.content.trim();
-        
+
         if (!description) {
           return { success: false, error: 'No description generated' };
         }
-        
+
         console.log('[VideoEditor] Generated scene description:', description.substring(0, 100) + '...');
         return { success: true, description };
-        
       } catch (error) {
         console.error('[VideoEditor] Generate scene description error:', error);
         return { success: false, error: error.message };
@@ -5802,9 +5708,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
     });
 
     // ==================== END DETACHED VIDEO PLAYER HANDLERS ====================
-
   }
 }
 
 module.exports = VideoEditor;
-

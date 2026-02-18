@@ -27,7 +27,6 @@ const {
   snapshotErrors,
   checkNewErrors,
   filterBenignErrors,
-  checkSpacesApi,
   createSpace,
   deleteSpace,
   setLogLevel,
@@ -51,17 +50,13 @@ function buildMultipart(fields, fileBuffer, fileName, fileMime) {
 
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined || value === null) continue;
-    parts.push(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="${key}"\r\n\r\n` +
-      `${value}\r\n`
-    );
+    parts.push(`--${boundary}\r\n` + `Content-Disposition: form-data; name="${key}"\r\n\r\n` + `${value}\r\n`);
   }
 
   parts.push(
     `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
-    `Content-Type: ${fileMime}\r\n\r\n`
+      `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+      `Content-Type: ${fileMime}\r\n\r\n`
   );
 
   const header = Buffer.from(parts.join(''));
@@ -172,7 +167,6 @@ const items = {
 };
 
 test.describe('Asset Editing', () => {
-
   test.beforeAll(async () => {
     electronApp = await electron.launch({
       args: [path.join(__dirname, '../../main.js')],
@@ -192,9 +186,17 @@ test.describe('Asset Editing', () => {
 
   test.afterAll(async () => {
     if (testSpaceId) {
-      try { await deleteSpace(testSpaceId); } catch { /* ok */ }
+      try {
+        await deleteSpace(testSpaceId);
+      } catch {
+        /* ok */
+      }
     }
-    try { await setLogLevel('info'); } catch { /* ok */ }
+    try {
+      await setLogLevel('info');
+    } catch {
+      /* ok */
+    }
     await closeApp({ electronApp });
   });
 
@@ -298,12 +300,8 @@ test.describe('Asset Editing', () => {
     // Content or metadata should reflect the update
     const content = item.content || item.preview || '';
     const meta = item.metadata || {};
-    const title =
-      meta.title || meta.attributes?.title || item.title || item.preview || '';
-    expect(
-      content.includes('Updated text content') ||
-      title.includes('Updated Text Item')
-    ).toBe(true);
+    const title = meta.title || meta.attributes?.title || item.title || item.preview || '';
+    expect(content.includes('Updated text content') || title.includes('Updated Text Item')).toBe(true);
 
     const errors = filterBenignErrors(await checkNewErrors(snap));
     expect(errors).toHaveLength(0);
@@ -323,10 +321,7 @@ test.describe('Asset Editing', () => {
     // The item API may return original content if stored as a file.
     const content = item?.content || '';
     const meta = item?.metadata || {};
-    const updated =
-      content.includes('farewell') ||
-      content.includes('Goodbye') ||
-      meta.dateModified; // At minimum, modification timestamp should be updated
+    const updated = content.includes('farewell') || content.includes('Goodbye') || meta.dateModified; // At minimum, modification timestamp should be updated
     expect(updated).toBeTruthy();
 
     const errors = filterBenignErrors(await checkNewErrors(snap));
@@ -355,12 +350,12 @@ test.describe('Asset Editing', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   const metadataTestCases = [
-    { key: 'text',  label: 'text item' },
-    { key: 'code',  label: 'code item' },
+    { key: 'text', label: 'text item' },
+    { key: 'code', label: 'code item' },
     { key: 'image', label: 'image item' },
     { key: 'video', label: 'video item' },
     { key: 'audio', label: 'audio item' },
-    { key: 'pdf',   label: 'PDF item' },
+    { key: 'pdf', label: 'PDF item' },
   ];
 
   for (const { key, label } of metadataTestCases) {
@@ -386,13 +381,9 @@ test.describe('Asset Editing', () => {
       expect(item).toBeTruthy();
 
       const meta = item.metadata || {};
-      const title =
-        meta.title || meta.attributes?.title || meta.extensions?.title ||
-        item.title || item.preview || '';
+      const title = meta.title || meta.attributes?.title || meta.extensions?.title || item.title || item.preview || '';
       expect(
-        title.includes('metadata updated') ||
-        title.includes('E2E') ||
-        title.length > 0 // At minimum, the item has some title
+        title.includes('metadata updated') || title.includes('E2E') || title.length > 0 // At minimum, the item has some title
       ).toBe(true);
 
       const errors = filterBenignErrors(await checkNewErrors(snap));
@@ -415,7 +406,7 @@ test.describe('Asset Editing', () => {
       await sleep(300);
       const tags = await getItemTags(testSpaceId, items[key]);
       if (Array.isArray(tags) && tags.length > 0) {
-        const tagStrings = tags.map(t => typeof t === 'string' ? t : t.name || '');
+        const tagStrings = tags.map((t) => (typeof t === 'string' ? t : t.name || ''));
         expect(tagStrings).toEqual(expect.arrayContaining(['edited']));
         expect(tagStrings).toEqual(expect.arrayContaining([`type-${key}`]));
       }
@@ -434,7 +425,7 @@ test.describe('Asset Editing', () => {
 
     // Use electronApp.evaluate which runs in the main process context
     // The first arg destructured is the Electron module, not the app
-    const info = await electronApp.evaluate(async ({ app }) => {
+    const _info = await electronApp.evaluate(async ({ app: _app }) => {
       try {
         const videoIndex = require('./src/video/index');
         const processor = videoIndex.getVideoProcessor ? videoIndex.getVideoProcessor() : null;
@@ -449,7 +440,7 @@ test.describe('Asset Editing', () => {
 
     // Since electronApp.evaluate doesn't pass extra args easily,
     // use a different approach: invoke the IPC handler
-    const infoViaIpc = await electronApp.evaluate(async ({ ipcMain }, videoPath) => {
+    const infoViaIpc = await electronApp.evaluate(async ({ ipcMain: _ipcMain }, videoPath) => {
       try {
         // Try to get video info via the global video processor
         if (global.videoProcessor && global.videoProcessor.getInfo) {
@@ -498,7 +489,12 @@ test.describe('Asset Editing', () => {
           await processor.generateThumbnail(videoPath, outputPath, { time: 0.5 });
           const exists = fs.existsSync(outputPath);
           const size = exists ? fs.statSync(outputPath).size : 0;
-          if (exists) try { fs.unlinkSync(outputPath); } catch {}
+          if (exists)
+            try {
+              fs.unlinkSync(outputPath);
+            } catch {
+              /* no-op */
+            }
           return { success: exists, size };
         }
       } catch (e) {
@@ -535,7 +531,12 @@ test.describe('Asset Editing', () => {
           await extractor.extract(videoPath, outputPath);
           const exists = fs.existsSync(outputPath);
           const size = exists ? fs.statSync(outputPath).size : 0;
-          if (exists) try { fs.unlinkSync(outputPath); } catch {}
+          if (exists)
+            try {
+              fs.unlinkSync(outputPath);
+            } catch {
+              /* no-op */
+            }
           return { success: exists, size };
         }
       } catch (e) {
@@ -563,10 +564,7 @@ test.describe('Asset Editing', () => {
     test.skip(!items.text, 'No text item to delete');
     const snap = await snapshotErrors();
 
-    const res = await fetch(
-      `${SPACES_API}/api/spaces/${testSpaceId}/items/${items.text}`,
-      { method: 'DELETE' }
-    );
+    const res = await fetch(`${SPACES_API}/api/spaces/${testSpaceId}/items/${items.text}`, { method: 'DELETE' });
     const data = await res.json();
     expect(data.success).toBe(true);
 

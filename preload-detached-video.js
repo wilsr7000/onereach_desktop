@@ -14,7 +14,6 @@ const DETACHED_VIDEO_DEBUG =
 
 function dlog(...args) {
   if (!DETACHED_VIDEO_DEBUG) return;
-  // eslint-disable-next-line no-console
   console.log(...args);
 }
 
@@ -47,20 +46,20 @@ contextBridge.exposeInMainWorld('detachedVideo', {
   signalReady: (api) => {
     dlog('[DetachedVideo Preload] Renderer signaled ready');
     rendererReady = true;
-    
+
     // Process any pending messages
     if (pendingSource && api.setSource) {
       dlog('[DetachedVideo Preload] Processing queued source:', pendingSource);
       api.setSource(pendingSource);
       pendingSource = null;
     }
-    
+
     if (pendingPlayback && api.syncPlayback) {
       dlog('[DetachedVideo Preload] Processing queued playback state');
       api.syncPlayback(pendingPlayback);
       pendingPlayback = null;
     }
-    
+
     // Store callback for future messages
     onReadyCallback = api;
   },
@@ -69,18 +68,18 @@ contextBridge.exposeInMainWorld('detachedVideo', {
   reportTimeUpdate: (() => {
     let lastReportedTime = 0;
     let throttleTimeout = null;
-    
+
     return (currentTime) => {
       // Throttle to max 10 updates per second for smoother teleprompter sync
       if (throttleTimeout) return;
-      
+
       // Only report if time changed (even small changes matter for highlight sync)
       if (Math.abs(currentTime - lastReportedTime) < 0.05) return;
-      
+
       throttleTimeout = setTimeout(() => {
         throttleTimeout = null;
       }, 100); // 100ms = 10 updates per second
-      
+
       lastReportedTime = currentTime;
       ipcRenderer.send('detached-video:time-update', currentTime);
     };
@@ -94,7 +93,7 @@ contextBridge.exposeInMainWorld('detachedVideo', {
   // Toggle always on top
   toggleAlwaysOnTop: (enabled) => {
     ipcRenderer.invoke('detached-video:set-always-on-top', enabled);
-  }
+  },
 });
 
 // Set up listeners for IPC messages from main process
@@ -125,7 +124,7 @@ ipcRenderer.on('detached-video:set-pinned', (event, pinned) => {
 });
 
 // Handle request for current state
-ipcRenderer.on('detached-video:get-state', (event) => {
+ipcRenderer.on('detached-video:get-state', (_event) => {
   if (onReadyCallback && onReadyCallback.getState) {
     const state = onReadyCallback.getState();
     ipcRenderer.send('detached-video:state-response', state);

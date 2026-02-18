@@ -53,10 +53,12 @@ class ModuleAPIClient {
        * @returns {Promise<string>} The completion text
        */
       complete: async (prompt, options = {}) => {
-        const response = await ipcRenderer.invoke('module:claude:request', [
-          { role: 'user', content: prompt }
-        ], options);
-        
+        const response = await ipcRenderer.invoke(
+          'module:claude:request',
+          [{ role: 'user', content: prompt }],
+          options
+        );
+
         if (response.content && response.content.length > 0) {
           return response.content[0].text;
         }
@@ -71,12 +73,12 @@ class ModuleAPIClient {
        */
       chat: async (messages, options = {}) => {
         const response = await ipcRenderer.invoke('module:claude:request', messages, options);
-        
+
         if (response.content && response.content.length > 0) {
           return response.content[0].text;
         }
         throw new Error('No content in response');
-      }
+      },
     };
 
     this.settings = {
@@ -96,7 +98,7 @@ class ModuleAPIClient {
        */
       hasApiKey: async (provider) => {
         return ipcRenderer.invoke('module:settings:hasApiKey', provider);
-      }
+      },
     };
 
     this.app = {
@@ -123,7 +125,7 @@ class ModuleAPIClient {
        */
       getPath: async (name) => {
         return ipcRenderer.invoke('module:app:getPath', name);
-      }
+      },
     };
   }
 
@@ -160,4 +162,4 @@ if (typeof window !== 'undefined') {
   window.moduleAPI = moduleAPI;
 }
 
-module.exports = moduleAPI; 
+module.exports = moduleAPI;

@@ -1,12 +1,12 @@
 /**
  * StateManager - Core auto-save and undo/redo system
- * 
+ *
  * Provides:
  * - Undo/redo stack (in-memory, configurable depth)
  * - Auto-save with debouncing
  * - Named snapshots (persistent)
  * - State change callbacks
- * 
+ *
  * Usage:
  * ```javascript
  * const stateManager = new StateManager('video-editor', {
@@ -14,14 +14,14 @@
  *   autoSaveInterval: 5000,
  *   onStateChange: (state) => applyState(state)
  * });
- * 
+ *
  * // Push state changes
  * stateManager.pushState(currentState, 'Added marker');
- * 
+ *
  * // Undo/redo
  * stateManager.undo();
  * stateManager.redo();
- * 
+ *
  * // Named snapshots
  * await stateManager.createSnapshot('Before export');
  * ```
@@ -85,7 +85,7 @@ class StateManager {
     const entry = {
       state: this._cloneState(state),
       description,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     // Push current state to undo stack (if exists)
@@ -108,7 +108,11 @@ class StateManager {
     // Trigger debounced auto-save
     this._triggerAutoSave();
 
-    log.info('app', '[StateManager] State pushed: "" (undo: , redo: )', { v0: description, v1: this.undoStack.length, v2: this.redoStack.length });
+    log.info('app', '[StateManager] State pushed: "" (undo: , redo: )', {
+      v0: description,
+      v1: this.undoStack.length,
+      v2: this.redoStack.length,
+    });
   }
 
   /**
@@ -134,7 +138,11 @@ class StateManager {
       this.onStateChange(this.currentState.state, 'undo', this.currentState.description);
     }
 
-    log.info('app', '[StateManager] Undo: "" (undo: , redo: )', { v0: this.currentState.description, v1: this.undoStack.length, v2: this.redoStack.length });
+    log.info('app', '[StateManager] Undo: "" (undo: , redo: )', {
+      v0: this.currentState.description,
+      v1: this.undoStack.length,
+      v2: this.redoStack.length,
+    });
     return true;
   }
 
@@ -161,7 +169,11 @@ class StateManager {
       this.onStateChange(this.currentState.state, 'redo', this.currentState.description);
     }
 
-    log.info('app', '[StateManager] Redo: "" (undo: , redo: )', { v0: this.currentState.description, v1: this.undoStack.length, v2: this.redoStack.length });
+    log.info('app', '[StateManager] Redo: "" (undo: , redo: )', {
+      v0: this.currentState.description,
+      v1: this.undoStack.length,
+      v2: this.redoStack.length,
+    });
     return true;
   }
 
@@ -189,14 +201,10 @@ class StateManager {
     return {
       canUndo: this.canUndo(),
       canRedo: this.canRedo(),
-      undoDescription: this.undoStack.length > 0 
-        ? this.undoStack[this.undoStack.length - 1].description 
-        : null,
-      redoDescription: this.redoStack.length > 0 
-        ? this.redoStack[this.redoStack.length - 1].description 
-        : null,
+      undoDescription: this.undoStack.length > 0 ? this.undoStack[this.undoStack.length - 1].description : null,
+      redoDescription: this.redoStack.length > 0 ? this.redoStack[this.redoStack.length - 1].description : null,
       undoCount: this.undoStack.length,
-      redoCount: this.redoStack.length
+      redoCount: this.redoStack.length,
     };
   }
 
@@ -272,16 +280,19 @@ class StateManager {
 
     try {
       const stateToSave = this.getState ? this.getState() : this.currentState?.state;
-      
+
       if (!stateToSave) return;
 
       // Save to localStorage as backup
       const key = `stateManager_${this.editorId}_autosave`;
-      localStorage.setItem(key, JSON.stringify({
-        state: stateToSave,
-        timestamp: Date.now(),
-        editorId: this.editorId
-      }));
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          state: stateToSave,
+          timestamp: Date.now(),
+          editorId: this.editorId,
+        })
+      );
 
       this.isDirty = false;
       this.lastSavedState = stateToSave;
@@ -305,7 +316,7 @@ class StateManager {
     try {
       const key = `stateManager_${this.editorId}_autosave`;
       const saved = localStorage.getItem(key);
-      
+
       if (saved) {
         const data = JSON.parse(saved);
         log.info('app', '[StateManager] Loaded auto-save from', { v0: new Date(data.timestamp).toLocaleString() });
@@ -338,7 +349,7 @@ class StateManager {
    */
   async createSnapshot(name, state = null) {
     const stateToSave = state || (this.getState ? this.getState() : this.currentState?.state);
-    
+
     if (!stateToSave) {
       throw new Error('No state to snapshot');
     }
@@ -349,7 +360,7 @@ class StateManager {
       editorId: this.editorId,
       state: this._cloneState(stateToSave),
       timestamp: Date.now(),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     // Save via IPC (if available)
@@ -360,12 +371,12 @@ class StateManager {
       const key = `stateManager_${this.editorId}_snapshots`;
       const snapshots = JSON.parse(localStorage.getItem(key) || '[]');
       snapshots.unshift(snapshot);
-      
+
       // Keep max 100 snapshots
       while (snapshots.length > 100) {
         snapshots.pop();
       }
-      
+
       localStorage.setItem(key, JSON.stringify(snapshots));
     }
 
@@ -386,13 +397,13 @@ class StateManager {
     // Fallback to localStorage
     const key = `stateManager_${this.editorId}_snapshots`;
     const snapshots = JSON.parse(localStorage.getItem(key) || '[]');
-    
+
     // Return metadata only (not full state)
-    return snapshots.map(s => ({
+    return snapshots.map((s) => ({
       id: s.id,
       name: s.name,
       timestamp: s.timestamp,
-      createdAt: s.createdAt
+      createdAt: s.createdAt,
     }));
   }
 
@@ -411,7 +422,7 @@ class StateManager {
       // Fallback to localStorage
       const key = `stateManager_${this.editorId}_snapshots`;
       const snapshots = JSON.parse(localStorage.getItem(key) || '[]');
-      snapshot = snapshots.find(s => s.id === snapshotId);
+      snapshot = snapshots.find((s) => s.id === snapshotId);
     }
 
     if (!snapshot) {
@@ -428,7 +439,7 @@ class StateManager {
     this.currentState = {
       state: snapshot.state,
       description: `Restored: ${snapshot.name}`,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     // Notify callback
@@ -455,8 +466,8 @@ class StateManager {
     const key = `stateManager_${this.editorId}_snapshots`;
     let snapshots = JSON.parse(localStorage.getItem(key) || '[]');
     const initialLength = snapshots.length;
-    snapshots = snapshots.filter(s => s.id !== snapshotId);
-    
+    snapshots = snapshots.filter((s) => s.id !== snapshotId);
+
     if (snapshots.length === initialLength) {
       return false;
     }
@@ -481,8 +492,8 @@ class StateManager {
     // Fallback to localStorage
     const key = `stateManager_${this.editorId}_snapshots`;
     const snapshots = JSON.parse(localStorage.getItem(key) || '[]');
-    const snapshot = snapshots.find(s => s.id === snapshotId);
-    
+    const snapshot = snapshots.find((s) => s.id === snapshotId);
+
     if (!snapshot) {
       return false;
     }
@@ -517,7 +528,7 @@ class StateManager {
   _statesEqual(state1, state2) {
     try {
       return JSON.stringify(state1) === JSON.stringify(state2);
-    } catch (error) {
+    } catch (_error) {
       return false;
     }
   }
@@ -545,14 +556,3 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 export { StateManager };
-
-
-
-
-
-
-
-
-
-
-

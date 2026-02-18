@@ -1,10 +1,10 @@
 /**
  * Cost Tracker for GSX Create
- * 
+ *
  * Provides per-space cost summaries and tracking.
  * DELEGATES storage to BudgetManager (primary tracker).
  * Uses unified pricing from pricing-config.js.
- * 
+ *
  * This tracker provides space-local summaries while BudgetManager
  * handles the global cost database.
  */
@@ -37,7 +37,7 @@ class CostTracker {
     // Ensure all fields exist
     return {
       ...this.getDefaultData(),
-      ...data
+      ...data,
     };
   }
 
@@ -51,7 +51,7 @@ class CostTracker {
       totalCalls: 0,
       sessions: [],
       dailyCosts: {},
-      modelBreakdown: {}
+      modelBreakdown: {},
     };
   }
 
@@ -82,7 +82,7 @@ class CostTracker {
       imageCount = 0,
       sessionId = null,
       success = true,
-      feature = 'gsx-create'
+      feature = 'gsx-create',
     } = callData;
 
     // Use unified pricing calculation
@@ -102,7 +102,7 @@ class CostTracker {
       ...costResult,
       promptPreview: prompt.substring(0, 100),
       sessionId,
-      success
+      success,
     };
 
     // Update local totals
@@ -150,10 +150,12 @@ class CostTracker {
       feature,
       operation: type,
       success,
-      options: { imageCount }
+      options: { imageCount },
     });
 
-    console.log(`[CostTracker] Recorded: ${formatCost(costResult.totalCost)} (${inputTokens} in, ${outputTokens} out) - Total: ${formatCost(this.data.totalCost)}`);
+    console.log(
+      `[CostTracker] Recorded: ${formatCost(costResult.totalCost)} (${inputTokens} in, ${outputTokens} out) - Total: ${formatCost(this.data.totalCost)}`
+    );
 
     return record;
   }
@@ -178,11 +180,11 @@ class CostTracker {
   parseAiderCostMessage(message) {
     const tokenMatch = message.match(/Tokens:\s*([\d.]+)k?\s*sent,\s*([\d.]+)k?\s*received/i);
     const costMatch = message.match(/Cost:\s*\$([\d.]+)\s*message/i);
-    
+
     if (tokenMatch) {
       let inputTokens = parseFloat(tokenMatch[1]);
       let outputTokens = parseFloat(tokenMatch[2]);
-      
+
       // Handle 'k' suffix
       if (tokenMatch[1].includes('k') || inputTokens > 100) {
         inputTokens = inputTokens * 1000;
@@ -190,14 +192,14 @@ class CostTracker {
       if (tokenMatch[2].includes('k') || outputTokens > 100) {
         outputTokens = outputTokens * 1000;
       }
-      
+
       return {
         inputTokens: Math.round(inputTokens),
         outputTokens: Math.round(outputTokens),
-        reportedCost: costMatch ? parseFloat(costMatch[1]) : null
+        reportedCost: costMatch ? parseFloat(costMatch[1]) : null,
       };
     }
-    
+
     return null;
   }
 
@@ -207,7 +209,7 @@ class CostTracker {
   getSummary() {
     const today = new Date().toISOString().split('T')[0];
     const todayCosts = this.data.dailyCosts[today] || { cost: 0, calls: 0 };
-    
+
     // Get last 7 days
     const last7Days = [];
     for (let i = 0; i < 7; i++) {
@@ -216,10 +218,10 @@ class CostTracker {
       const dateStr = date.toISOString().split('T')[0];
       last7Days.push({
         date: dateStr,
-        ...this.data.dailyCosts[dateStr] || { cost: 0, calls: 0, inputTokens: 0, outputTokens: 0 }
+        ...(this.data.dailyCosts[dateStr] || { cost: 0, calls: 0, inputTokens: 0, outputTokens: 0 }),
       });
     }
-    
+
     return {
       spaceId: this.spaceId,
       totalCost: Math.round(this.data.totalCost * 10000) / 10000,
@@ -232,7 +234,7 @@ class CostTracker {
       todayCalls: todayCosts.calls,
       last7Days,
       modelBreakdown: this.data.modelBreakdown,
-      recentCalls: this.data.sessions.slice(0, 20)
+      recentCalls: this.data.sessions.slice(0, 20),
     };
   }
 
@@ -242,20 +244,20 @@ class CostTracker {
   getCostByDateRange(startDate, endDate) {
     let totalCost = 0;
     let totalCalls = 0;
-    
+
     Object.entries(this.data.dailyCosts).forEach(([date, data]) => {
       if (date >= startDate && date <= endDate) {
         totalCost += data.cost;
         totalCalls += data.calls;
       }
     });
-    
-    return { 
-      totalCost, 
+
+    return {
+      totalCost,
       totalCostFormatted: formatCost(totalCost),
-      totalCalls, 
-      startDate, 
-      endDate 
+      totalCalls,
+      startDate,
+      endDate,
     };
   }
 

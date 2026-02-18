@@ -11,11 +11,10 @@ class TemplateManager {
   loadTemplates() {
     try {
       // Get all template files
-      const templateFiles = fs.readdirSync(this.templatesDir)
-        .filter(file => file.endsWith('.json'));
-      
+      const templateFiles = fs.readdirSync(this.templatesDir).filter((file) => file.endsWith('.json'));
+
       // Load each template
-      templateFiles.forEach(file => {
+      templateFiles.forEach((file) => {
         try {
           const templatePath = path.join(this.templatesDir, file);
           const templateData = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
@@ -24,7 +23,7 @@ class TemplateManager {
           console.error(`Error loading template ${file}:`, error);
         }
       });
-      
+
       console.log(`Loaded ${this.templates.size} export templates`);
     } catch (error) {
       console.error('Error loading templates:', error);
@@ -32,12 +31,12 @@ class TemplateManager {
   }
 
   getAllTemplates() {
-    return Array.from(this.templates.values()).map(template => ({
+    return Array.from(this.templates.values()).map((template) => ({
       id: template.id,
       name: template.name,
       description: template.description,
       icon: template.icon,
-      category: template.category
+      category: template.category,
     }));
   }
 
@@ -70,4 +69,4 @@ function getTemplateManager() {
   return templateManager;
 }
 
-module.exports = { getTemplateManager }; 
+module.exports = { getTemplateManager };

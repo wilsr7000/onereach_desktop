@@ -23,7 +23,7 @@ function refreshLinks() {
 const TEST_CONFIG = {
   // Test data directory
   testDataDir: path.join(__dirname, 'test-data'),
-  
+
   // Test scenarios
   scenarios: {
     createNew: true,
@@ -31,9 +31,9 @@ const TEST_CONFIG = {
     deleteExisting: true,
     menuUpdates: true,
     filePersistence: true,
-    ipcCommunication: true
+    ipcCommunication: true,
   },
-  
+
   // Test environments
   testEnvironments: [
     {
@@ -42,7 +42,7 @@ const TEST_CONFIG = {
       environment: 'edison',
       homeUrl: 'https://idw.edison.onereach.ai/test-env-1',
       chatUrl: 'https://idw.edison.onereach.ai/chat/test-1',
-      type: 'idw'
+      type: 'idw',
     },
     {
       id: 'test-env-2',
@@ -50,9 +50,9 @@ const TEST_CONFIG = {
       environment: 'staging',
       homeUrl: 'https://idw.staging.onereach.ai/test-env-2',
       chatUrl: 'https://idw.staging.onereach.ai/chat/test-2',
-      type: 'idw'
-    }
-  ]
+      type: 'idw',
+    },
+  ],
 };
 
 // Test results tracking
@@ -61,7 +61,7 @@ let testResults = {
   failed: [],
   warnings: [],
   startTime: null,
-  endTime: null
+  endTime: null,
 };
 
 // Windows
@@ -71,14 +71,15 @@ let setupWizardWindow = null;
 // Helper functions
 function log(message, type = 'info') {
   const timestamp = new Date().toISOString();
-  const prefix = {
-    info: '📘',
-    success: '✅',
-    error: '❌',
-    warning: '⚠️',
-    test: '🧪'
-  }[type] || '📝';
-  
+  const prefix =
+    {
+      info: '📘',
+      success: '✅',
+      error: '❌',
+      warning: '⚠️',
+      test: '🧪',
+    }[type] || '📝';
+
   console.log(`[${timestamp}] ${prefix} ${message}`);
 }
 
@@ -87,9 +88,9 @@ function addTestResult(testName, passed, details = '') {
     test: testName,
     passed: passed,
     details: details,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   };
-  
+
   if (passed) {
     testResults.passed.push(result);
     log(`${testName}: PASSED ${details ? '- ' + details : ''}`, 'success');
@@ -102,7 +103,7 @@ function addTestResult(testName, passed, details = '') {
 function addWarning(message) {
   testResults.warnings.push({
     message: message,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
   log(message, 'warning');
 }
@@ -110,12 +111,12 @@ function addWarning(message) {
 // Setup test environment
 async function setupTestEnvironment() {
   log('Setting up test environment...', 'info');
-  
+
   // Create test data directory
   if (!fs.existsSync(TEST_CONFIG.testDataDir)) {
     fs.mkdirSync(TEST_CONFIG.testDataDir, { recursive: true });
   }
-  
+
   // Backup existing configuration files
   const configPath = path.join(app.getPath('userData'), 'idw-entries.json');
   if (fs.existsSync(configPath)) {
@@ -123,7 +124,7 @@ async function setupTestEnvironment() {
     fs.copyFileSync(configPath, backupPath);
     log('Backed up existing configuration', 'info');
   }
-  
+
   // Initialize with test data
   fs.writeFileSync(configPath, JSON.stringify(TEST_CONFIG.testEnvironments, null, 2));
   addTestResult('Test environment setup', true);
@@ -132,41 +133,41 @@ async function setupTestEnvironment() {
 // Cleanup test environment
 async function cleanupTestEnvironment() {
   log('Cleaning up test environment...', 'info');
-  
+
   // Restore original configuration if exists
   const backupPath = path.join(TEST_CONFIG.testDataDir, 'idw-entries.backup.json');
   const configPath = path.join(app.getPath('userData'), 'idw-entries.json');
-  
+
   if (fs.existsSync(backupPath)) {
     fs.copyFileSync(backupPath, configPath);
     fs.unlinkSync(backupPath);
     log('Restored original configuration', 'info');
   }
-  
+
   // Clean up test data directory
   if (fs.existsSync(TEST_CONFIG.testDataDir)) {
     fs.rmSync(TEST_CONFIG.testDataDir, { recursive: true, force: true });
   }
-  
+
   addTestResult('Test environment cleanup', true);
 }
 
 // Setup IPC handlers with logging
 function setupIPCHandlers() {
   log('Setting up IPC handlers...', 'info');
-  
+
   // Track IPC calls
   const ipcCalls = {
     'get-idw-environments': 0,
     'save-idw-environments': 0,
-    'refresh-menu': 0
+    'refresh-menu': 0,
   };
-  
+
   // Handler for getting IDW environments
   ipcMain.on('get-idw-environments', (event) => {
     ipcCalls['get-idw-environments']++;
     log(`IPC: get-idw-environments (call #${ipcCalls['get-idw-environments']})`, 'info');
-    
+
     const configPath = path.join(app.getPath('userData'), 'idw-entries.json');
     try {
       if (fs.existsSync(configPath)) {
@@ -183,30 +184,30 @@ function setupIPCHandlers() {
       event.reply('get-idw-environments', []);
     }
   });
-  
+
   // Handler for saving IDW environments
   ipcMain.on('save-idw-environments', (event, environments) => {
     ipcCalls['save-idw-environments']++;
     log(`IPC: save-idw-environments (call #${ipcCalls['save-idw-environments']})`, 'info');
-    
+
     const configPath = path.join(app.getPath('userData'), 'idw-entries.json');
     try {
       // Validate data
       if (!Array.isArray(environments)) {
         throw new Error('Invalid data: environments must be an array');
       }
-      
+
       // Create backup
       if (fs.existsSync(configPath)) {
         fs.copyFileSync(configPath, configPath + '.test-backup');
       }
-      
+
       // Save environments
       fs.writeFileSync(configPath, JSON.stringify(environments, null, 2));
-      
+
       // Update menu
       rebuildMenu(environments);
-      
+
       event.reply('idw-environments-saved', true);
       addTestResult('IPC: save-idw-environments', true, `Saved ${environments.length} environments`);
     } catch (error) {
@@ -214,38 +215,38 @@ function setupIPCHandlers() {
       event.reply('idw-environments-saved', false);
     }
   });
-  
+
   // Handler for menu refresh
-  ipcMain.on('refresh-menu', (event) => {
+  ipcMain.on('refresh-menu', (_event) => {
     ipcCalls['refresh-menu']++;
     log(`IPC: refresh-menu (call #${ipcCalls['refresh-menu']})`, 'info');
-    
+
     try {
       const configPath = path.join(app.getPath('userData'), 'idw-entries.json');
       let idwEnvironments = [];
-      
+
       if (fs.existsSync(configPath)) {
         const data = fs.readFileSync(configPath, 'utf8');
         idwEnvironments = JSON.parse(data);
       }
-      
+
       rebuildMenu(idwEnvironments);
       refreshLinks();
-      
+
       addTestResult('IPC: refresh-menu', true);
     } catch (error) {
       addTestResult('IPC: refresh-menu', false, error.message);
     }
   });
-  
+
   // Handlers for other data types
-  ['get-external-bots', 'get-image-creators', 'get-video-creators', 'get-audio-generators'].forEach(channel => {
+  ['get-external-bots', 'get-image-creators', 'get-video-creators', 'get-audio-generators'].forEach((channel) => {
     ipcMain.on(channel, (event) => {
       log(`IPC: ${channel}`, 'info');
       event.reply(channel, []);
     });
   });
-  
+
   // Store IPC call counts for verification
   global.ipcCallCounts = ipcCalls;
 }
@@ -253,9 +254,11 @@ function setupIPCHandlers() {
 // Test: Create new environment
 async function testCreateNewEnvironment(window) {
   log('Testing: Create new environment', 'test');
-  
+
   return new Promise((resolve) => {
-    window.webContents.executeJavaScript(`
+    window.webContents
+      .executeJavaScript(
+        `
       (async function() {
         try {
           // Click Add New button
@@ -294,19 +297,23 @@ async function testCreateNewEnvironment(window) {
           return { success: false, message: error.message };
         }
       })();
-    `).then(result => {
-      addTestResult('Create new environment', result.success, result.message);
-      resolve(result.success);
-    });
+    `
+      )
+      .then((result) => {
+        addTestResult('Create new environment', result.success, result.message);
+        resolve(result.success);
+      });
   });
 }
 
 // Test: Edit existing environment
 async function testEditExistingEnvironment(window) {
   log('Testing: Edit existing environment', 'test');
-  
+
   return new Promise((resolve) => {
-    window.webContents.executeJavaScript(`
+    window.webContents
+      .executeJavaScript(
+        `
       (async function() {
         try {
           // Wait for environments to load
@@ -344,23 +351,25 @@ async function testEditExistingEnvironment(window) {
           return { success: false, message: error.message };
         }
       })();
-    `).then(result => {
-      addTestResult('Edit existing environment', result.success, result.message);
-      resolve(result.success);
-    });
+    `
+      )
+      .then((result) => {
+        addTestResult('Edit existing environment', result.success, result.message);
+        resolve(result.success);
+      });
   });
 }
 
 // Test: Menu updates
 async function testMenuUpdates() {
   log('Testing: Menu updates', 'test');
-  
+
   const menu = Menu.getApplicationMenu();
   if (!menu) {
     addTestResult('Menu updates', false, 'No application menu found');
     return false;
   }
-  
+
   // Find IDW menu
   let idwMenu = null;
   for (let i = 0; i < menu.items.length; i++) {
@@ -369,19 +378,18 @@ async function testMenuUpdates() {
       break;
     }
   }
-  
+
   if (!idwMenu) {
     addTestResult('Menu updates', false, 'IDW menu not found');
     return false;
   }
-  
+
   // Check submenu items
   const submenuItems = idwMenu.submenu ? idwMenu.submenu.items : [];
-  const environmentItems = submenuItems.filter(item => 
-    item.label !== 'Manage Environments' && 
-    item.type !== 'separator'
+  const environmentItems = submenuItems.filter(
+    (item) => item.label !== 'Manage Environments' && item.type !== 'separator'
   );
-  
+
   addTestResult('Menu updates', true, `Found ${environmentItems.length} environment items in menu`);
   return true;
 }
@@ -389,25 +397,26 @@ async function testMenuUpdates() {
 // Test: File persistence
 async function testFilePersistence() {
   log('Testing: File persistence', 'test');
-  
+
   const configPath = path.join(app.getPath('userData'), 'idw-entries.json');
-  
+
   try {
     if (!fs.existsSync(configPath)) {
       addTestResult('File persistence', false, 'Configuration file not found');
       return false;
     }
-    
+
     const data = fs.readFileSync(configPath, 'utf8');
     const environments = JSON.parse(data);
-    
+
     // Check if file contains expected data
-    const hasEditedEnvironment = environments.some(env => 
-      env.homeUrl && env.homeUrl.includes('-EDITED')
+    const hasEditedEnvironment = environments.some((env) => env.homeUrl && env.homeUrl.includes('-EDITED'));
+
+    addTestResult(
+      'File persistence',
+      true,
+      `File contains ${environments.length} environments${hasEditedEnvironment ? ' (including edited)' : ''}`
     );
-    
-    addTestResult('File persistence', true, 
-      `File contains ${environments.length} environments${hasEditedEnvironment ? ' (including edited)' : ''}`);
     return true;
   } catch (error) {
     addTestResult('File persistence', false, error.message);
@@ -420,14 +429,14 @@ async function runAllTests() {
   testResults.startTime = new Date();
   log('Starting Setup Wizard Test Suite', 'test');
   log('================================', 'info');
-  
+
   try {
     // Setup test environment
     await setupTestEnvironment();
-    
+
     // Setup IPC handlers
     setupIPCHandlers();
-    
+
     // Create main window
     mainWindow = new BrowserWindow({
       width: 1200,
@@ -436,13 +445,13 @@ async function runAllTests() {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        preload: path.join(__dirname, '..', 'preload.js')
-      }
+        preload: path.join(__dirname, '..', 'preload.js'),
+      },
     });
-    
+
     // Set initial menu
     rebuildMenu(TEST_CONFIG.testEnvironments);
-    
+
     // Create setup wizard window
     setupWizardWindow = new BrowserWindow({
       width: 1000,
@@ -450,55 +459,61 @@ async function runAllTests() {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        preload: path.join(__dirname, '..', 'preload.js')
-      }
+        preload: path.join(__dirname, '..', 'preload.js'),
+      },
     });
-    
+
     // Load setup wizard
     await setupWizardWindow.loadFile(path.join(__dirname, '..', 'setup-wizard.html'));
-    
+
     // Show dev tools for debugging
     if (process.env.DEBUG_TESTS) {
       setupWizardWindow.webContents.openDevTools();
     }
-    
+
     // Wait for wizard to fully load
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
+    await new Promise((resolve) => {
+      setTimeout(resolve, 2000);
+    });
+
     // Run tests based on configuration
     if (TEST_CONFIG.scenarios.editExisting) {
       await testEditExistingEnvironment(setupWizardWindow);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000);
+      });
     }
-    
+
     if (TEST_CONFIG.scenarios.createNew) {
       await testCreateNewEnvironment(setupWizardWindow);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000);
+      });
     }
-    
+
     if (TEST_CONFIG.scenarios.menuUpdates) {
       await testMenuUpdates();
     }
-    
+
     if (TEST_CONFIG.scenarios.filePersistence) {
       await testFilePersistence();
     }
-    
+
     if (TEST_CONFIG.scenarios.ipcCommunication) {
       const ipcCalls = global.ipcCallCounts;
-      addTestResult('IPC Communication', 
+      addTestResult(
+        'IPC Communication',
         ipcCalls['get-idw-environments'] > 0 && ipcCalls['save-idw-environments'] > 0,
         `get: ${ipcCalls['get-idw-environments']}, save: ${ipcCalls['save-idw-environments']}, refresh: ${ipcCalls['refresh-menu']}`
       );
     }
-    
   } catch (error) {
     log(`Test suite error: ${error.message}`, 'error');
     addTestResult('Test suite execution', false, error.message);
   } finally {
     // Cleanup
     await cleanupTestEnvironment();
-    
+
     // Close windows
     if (setupWizardWindow && !setupWizardWindow.isDestroyed()) {
       setupWizardWindow.close();
@@ -506,7 +521,7 @@ async function runAllTests() {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.close();
     }
-    
+
     // Generate test report
     generateTestReport();
   }
@@ -516,7 +531,7 @@ async function runAllTests() {
 function generateTestReport() {
   testResults.endTime = new Date();
   const duration = (testResults.endTime - testResults.startTime) / 1000;
-  
+
   log('\n================================', 'info');
   log('Test Suite Results', 'test');
   log('================================', 'info');
@@ -525,26 +540,26 @@ function generateTestReport() {
   log(`Passed: ${testResults.passed.length}`, 'success');
   log(`Failed: ${testResults.failed.length}`, testResults.failed.length > 0 ? 'error' : 'success');
   log(`Warnings: ${testResults.warnings.length}`, testResults.warnings.length > 0 ? 'warning' : 'info');
-  
+
   if (testResults.failed.length > 0) {
     log('\nFailed Tests:', 'error');
-    testResults.failed.forEach(result => {
+    testResults.failed.forEach((result) => {
       log(`  - ${result.test}: ${result.details}`, 'error');
     });
   }
-  
+
   if (testResults.warnings.length > 0) {
     log('\nWarnings:', 'warning');
-    testResults.warnings.forEach(warning => {
+    testResults.warnings.forEach((warning) => {
       log(`  - ${warning.message}`, 'warning');
     });
   }
-  
+
   // Save report to file
   const reportPath = path.join(__dirname, `test-report-${Date.now()}.json`);
   fs.writeFileSync(reportPath, JSON.stringify(testResults, null, 2));
   log(`\nDetailed report saved to: ${reportPath}`, 'info');
-  
+
   // Exit with appropriate code
   process.exit(testResults.failed.length > 0 ? 1 : 0);
 }
@@ -559,4 +574,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
-}); 
+});

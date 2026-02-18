@@ -1,13 +1,13 @@
 /**
  * Search Agent - A Thinking Agent
- * 
+ *
  * Handles informational queries by searching the web.
  * Can answer questions about weather, current events, facts, definitions, etc.
- * 
- * Uses webview-based search (hidden BrowserWindow) as primary method.
- * Falls back to DuckDuckGo API if webview unavailable.
+ *
+ * Uses GSX Search Serper API as primary method (structured Google results).
+ * Falls back to webview-based search, then DuckDuckGo API.
  * Uses Omni Data Agent for context (location, preferences, etc.)
- * 
+ *
  * Thinking Agent features:
  * - Remembers recent searches
  * - Tracks preferred sources
@@ -39,72 +39,103 @@ function getWebviewSearch() {
 const webCircuit = getCircuit('web-search', {
   failureThreshold: 3,
   resetTimeout: 30000,
-  windowMs: 60000
+  windowMs: 60000,
 });
 
+// GSX Search Serper API (primary search method)
+const GSX_SEARCH_BASE = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29';
+const GSX_SEARCH_PATH = '/gsx-search';
+
 // Timeout constants
-const TIMEOUT_WEB_SEARCH = 8000;      // 8 seconds for web search
-const TIMEOUT_WEB_SEARCH_LITE = 10000; // 10 seconds for fallback search
-const TIMEOUT_LLM = 15000;             // 15 seconds for LLM synthesis
-const TIMEOUT_OVERALL = 20000;         // 20 seconds max for entire execute
+const TIMEOUT_GSX_SEARCH = 10000; // 10 seconds for GSX Serper API
+const TIMEOUT_WEB_SEARCH = 8000; // 8 seconds for webview fallback
+const TIMEOUT_WEB_SEARCH_LITE = 10000; // 10 seconds for DDG fallback
+const _TIMEOUT_LLM = 15000; // 15 seconds for LLM synthesis
+const TIMEOUT_OVERALL = 25000; // 25 seconds max (increased for GSX API)
+
+// Use centralized HTTP client for timeout, circuit breaker, and retry
+const httpClient = require('../../lib/http-client');
 
 /**
- * Fetch with timeout using AbortController
- * Prevents hanging requests by aborting after specified timeout
+ * Fetch with timeout -- delegates to the centralized http-client.
  * @param {string} url - URL to fetch
  * @param {Object} options - Fetch options
  * @param {number} timeoutMs - Timeout in milliseconds
  * @returns {Promise<Response>}
  */
 async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    return response;
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      throw new Error(`Request timed out after ${timeoutMs}ms`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return httpClient.fetch(url, { ...options, timeoutMs });
 }
 
 // Keywords that suggest an informational/search query
 const SEARCH_KEYWORDS = [
   // Weather
-  'weather', 'temperature', 'forecast', 'rain', 'snow', 'sunny', 'cloudy', 'humid', 'cold', 'hot', 'warm',
+  'weather',
+  'temperature',
+  'forecast',
+  'rain',
+  'snow',
+  'sunny',
+  'cloudy',
+  'humid',
+  'cold',
+  'hot',
+  'warm',
   // General knowledge
-  'what is', 'who is', 'where is', 'when did', 'how does', 'why does', 'define', 'meaning of',
+  'what is',
+  'who is',
+  'where is',
+  'when did',
+  'how does',
+  'why does',
+  'define',
+  'meaning of',
   // Current events
-  'news', 'latest', 'current', 'today', 'recent', 'update',
+  'news',
+  'latest',
+  'current',
+  'today',
+  'recent',
+  'update',
   // Facts and information
-  'how many', 'how much', 'how far', 'how long', 'how old', 'how tall',
+  'how many',
+  'how much',
+  'how far',
+  'how long',
+  'how old',
+  'how tall',
   // Lookups
-  'search', 'find', 'look up', 'google', 'search for'
+  'search',
+  'find',
+  'look up',
+  'google',
+  'search for',
 ];
 
 // Exclude keywords (these should go to other agents)
-const EXCLUDE_KEYWORDS = [
-  'play', 'pause', 'stop', 'skip', 'volume', 'music', 'song',  // media
-  'help', 'commands', 'what can you do'  // help
+const _EXCLUDE_KEYWORDS = [
+  'play',
+  'pause',
+  'stop',
+  'skip',
+  'volume',
+  'music',
+  'song', // media
+  'help',
+  'commands',
+  'what can you do', // help
   // Note: time/date excluded only when NOT combined with weather/events
 ];
 
 const searchAgent = {
   id: 'search-agent',
   name: 'Search Agent',
-  description: 'Searches the web for any query requiring external information - podcasts, people, companies, facts, news, definitions',
-  voice: 'echo',  // Authoritative, knowledgeable - see VOICE-GUIDE.md
-  acks: ["Let me look that up.", "Searching now."],
+  description:
+    'Searches the web for any query requiring external information - podcasts, people, companies, facts, news, definitions',
+  voice: 'echo', // Authoritative, knowledgeable - see VOICE-GUIDE.md
+  acks: ['Let me look that up.', 'Searching now.'],
   categories: ['search', 'information', 'knowledge'],
-  
+
   // Prompt for LLM evaluation
   prompt: `Search Agent handles ANY query that requires external or current information from the internet.
 
@@ -137,11 +168,11 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
 
 This agent searches the internet. It does NOT control media playback or access personal data.`,
   keywords: SEARCH_KEYWORDS,
-  executionType: 'action',  // Needs web search API for data
-  
+  executionType: 'action', // Needs web search API for data
+
   // Memory instance
   memory: null,
-  
+
   /**
    * Initialize memory
    */
@@ -153,31 +184,34 @@ This agent searches the internet. It does NOT control media playback or access p
     }
     return this.memory;
   },
-  
+
   /**
    * Ensure required memory sections exist
    */
   _ensureMemorySections() {
     const sections = this.memory.getSectionNames();
-    
+
     if (!sections.includes('Learned Preferences')) {
-      this.memory.updateSection('Learned Preferences', `- Preferred Sources: Any
+      this.memory.updateSection(
+        'Learned Preferences',
+        `- Preferred Sources: Any
 - Detail Level: Concise
-- Include Sources: No`);
+- Include Sources: No`
+      );
     }
-    
+
     if (!sections.includes('Recent Searches')) {
       this.memory.updateSection('Recent Searches', `*Your recent searches will appear here*`);
     }
-    
+
     if (this.memory.isDirty()) {
       this.memory.save();
     }
   },
-  
+
   // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
   // NEVER add keyword/regex bidding here. See .cursorrules.
-  
+
   /**
    * Execute the task with overall timeout protection
    * @param {Object} task - { content, context, ... }
@@ -186,23 +220,34 @@ This agent searches the internet. It does NOT control media playback or access p
    */
   async execute(task, context = {}) {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search-agent.js:execute',message:'SearchAgent execute called',data:{taskId:task.id,taskContent:task.content?.slice(0,80),timestamp:Date.now()},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location: 'search-agent.js:execute',
+        message: 'SearchAgent execute called',
+        data: { taskId: task.id, taskContent: task.content?.slice(0, 80), timestamp: Date.now() },
+        timestamp: Date.now(),
+        sessionId: 'debug-session',
+        hypothesisId: 'C',
+      }),
+    }).catch((err) => console.warn('[search-agent] ingest fetch:', err.message));
     // #endregion
     // Wrap execution with overall timeout to prevent hanging
     return Promise.race([
       this._executeInternal(task, context),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Search timed out')), TIMEOUT_OVERALL)
-      )
-    ]).catch(error => {
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Search timed out')), TIMEOUT_OVERALL);
+      }),
+    ]).catch((error) => {
       log.error('agent', 'Overall timeout or error', { error: error.message });
       return {
         success: false,
-        message: "I'm having trouble searching right now. Please try again."
+        message: "I'm having trouble searching right now. Please try again.",
       };
     });
   },
-  
+
   /**
    * Internal execute implementation
    * @param {Object} task - { content, context, ... }
@@ -214,49 +259,49 @@ This agent searches the internet. It does NOT control media playback or access p
     if (!this.memory) {
       await this.initialize();
     }
-    
+
     let query = task.content;
     const { onProgress = () => {} } = context;
     const action = task.data?.action || task.action;
-    
+
     log.info('agent', `Searching for: "${query}" (action: ${action || 'web_search'})`);
-    
+
     // Track search in memory
     try {
       const timestamp = new Date().toISOString().split('T')[0];
       this.memory.appendToSection('Recent Searches', `- ${timestamp}: "${query.slice(0, 50)}..."`, 20);
       await this.memory.save();
-    } catch (e) {
+    } catch (_e) {
       // Non-fatal, continue with search
     }
-    
+
     try {
       // Step 0: Pull context from Omni Data Agent
       onProgress('Getting context...');
       const relevantContext = await omniData.getRelevantContext(task, {
         id: this.id,
         name: this.name,
-        description: this.description
+        description: this.description,
       });
-      
+
       // Handle user_info action - answer from context, no web search
       if (action === 'user_info' || this.isUserInfoQuery(query)) {
         log.info('agent', 'Handling user info query from context');
         const allContext = await omniData.getAll();
         const profile = await omniData.getAgentProfile();
-        
+
         return this.answerUserInfoQuery(query, allContext, profile);
       }
-      
+
       // Enhance weather queries with location from context
       if (this.isWeatherQuery(query) && !this.hasLocation(query) && relevantContext.location?.city) {
-        const locationStr = relevantContext.location.state 
+        const locationStr = relevantContext.location.state
           ? `${relevantContext.location.city}, ${relevantContext.location.state}`
           : relevantContext.location.city;
         query = `${query} in ${locationStr}`;
         log.info('agent', `Enhanced query with location: "${query}"`);
       }
-      
+
       // Step 1: Try web search first
       onProgress('Searching the web...');
       let searchResults = [];
@@ -266,55 +311,71 @@ This agent searches the internet. It does NOT control media playback or access p
       } catch (e) {
         log.info('agent', `Web search failed: ${e.message}`);
       }
-      
+
       // Step 2: Synthesize answer (with or without search results)
       onProgress(searchResults.length > 0 ? 'Analyzing results...' : 'Generating answer...');
       const answer = await this.synthesizeAnswer(query, searchResults);
-      
+
       return {
         success: true,
         message: answer,
-        sources: searchResults.slice(0, 3).map(r => r.url).filter(u => u)
+        sources: searchResults
+          .slice(0, 3)
+          .map((r) => r.url)
+          .filter((u) => u),
       };
-      
     } catch (error) {
       log.error('agent', 'Error', { error: error.message });
       return {
         success: false,
-        message: `I had trouble with that question. ${error.message}`
+        message: `I had trouble with that question. ${error.message}`,
       };
     }
   },
-  
+
   /**
    * Check if query is about the user's personal info
    */
   isUserInfoQuery(query) {
     const lower = query.toLowerCase();
     const userInfoPatterns = [
-      'who am i', 'what is my name', 'what\'s my name', 'my name',
-      'where am i', 'what city', 'my location', 'where do i live',
-      'what apps', 'my apps', 'installed apps', 'what software',
-      'my computer', 'my system', 'what os', 'my timezone', 'my time zone',
-      'about me', 'tell me about myself'
+      'who am i',
+      'what is my name',
+      "what's my name",
+      'my name',
+      'where am i',
+      'what city',
+      'my location',
+      'where do i live',
+      'what apps',
+      'my apps',
+      'installed apps',
+      'what software',
+      'my computer',
+      'my system',
+      'what os',
+      'my timezone',
+      'my time zone',
+      'about me',
+      'tell me about myself',
     ];
-    return userInfoPatterns.some(p => lower.includes(p));
+    return userInfoPatterns.some((p) => lower.includes(p));
   },
-  
+
   /**
    * Answer user info queries from Omni Data context
    */
-  answerUserInfoQuery(query, context, profile) {
+  answerUserInfoQuery(query, context, _profile) {
     const lower = query.toLowerCase();
-    
+
     // Who am I / my name - use raw content if available for rich response
     if (lower.includes('who am i') || lower.includes('my name') || lower.includes('about me')) {
       // If we have rich raw content, extract a summary
       if (context.rawContent && context.rawContent.length > 100) {
         // Extract first meaningful paragraph or identity statement
-        const lines = context.rawContent.split('\n').filter(l => l.trim() && !l.startsWith('#'));
-        const firstMeaningful = lines.find(l => l.length > 20 && !l.startsWith('*') && !l.startsWith('-'));
-        
+        const lines = context.rawContent.split('\n').filter((l) => l.trim() && !l.startsWith('#'));
+        const firstMeaningful = lines.find((l) => l.length > 20 && !l.startsWith('*') && !l.startsWith('-'));
+
         if (firstMeaningful) {
           // Clean it up and return
           let summary = firstMeaningful.replace(/\*\*/g, '').trim();
@@ -324,21 +385,21 @@ This agent searches the internet. It does NOT control media playback or access p
           return { success: true, message: summary };
         }
       }
-      
+
       // Fallback to structured data
       const name = context.user?.name || context.user?.username || 'friend';
       const system = context.system?.os ? ` on ${context.system.os}` : '';
       const location = context.location?.city ? ` in ${context.location.city}` : '';
       const appsCount = context.apps?.length || 0;
-      
+
       let response = `You're ${name}${location}${system}.`;
       if (appsCount > 0) {
         response += ` You have ${appsCount} apps installed.`;
       }
-      
+
       return { success: true, message: response };
     }
-    
+
     // Location queries
     if (lower.includes('where am i') || lower.includes('my location') || lower.includes('my city')) {
       if (context.location?.city) {
@@ -348,8 +409,8 @@ This agent searches the internet. It does NOT control media playback or access p
       }
       return { success: true, message: "I don't have your location set. You can add it in the GSX Agent space." };
     }
-    
-    // Apps queries  
+
+    // Apps queries
     if (lower.includes('apps') || lower.includes('software') || lower.includes('installed')) {
       if (context.apps && context.apps.length > 0) {
         const topApps = context.apps.slice(0, 10).join(', ');
@@ -358,7 +419,7 @@ This agent searches the internet. It does NOT control media playback or access p
       }
       return { success: true, message: "I don't have information about your installed apps." };
     }
-    
+
     // System queries
     if (lower.includes('my computer') || lower.includes('my system') || lower.includes('what os')) {
       if (context.system) {
@@ -367,7 +428,7 @@ This agent searches the internet. It does NOT control media playback or access p
       }
       return { success: true, message: "I don't have your system information." };
     }
-    
+
     // Timezone
     if (lower.includes('timezone') || lower.includes('time zone')) {
       if (context.timezone) {
@@ -375,7 +436,7 @@ This agent searches the internet. It does NOT control media playback or access p
       }
       return { success: true, message: "I don't have your timezone set." };
     }
-    
+
     // Generic about me
     const parts = [];
     if (context.user?.name) parts.push(`Name: ${context.user.name}`);
@@ -383,47 +444,75 @@ This agent searches the internet. It does NOT control media playback or access p
     if (context.timezone) parts.push(`Timezone: ${context.timezone}`);
     if (context.system?.os) parts.push(`System: ${context.system.os}`);
     if (context.apps?.length) parts.push(`Apps: ${context.apps.length} installed`);
-    
+
     if (parts.length > 0) {
       return { success: true, message: `Here's what I know about you: ${parts.join(', ')}.` };
     }
-    
-    return { success: true, message: "I don't have much information about you yet. You can add details in the GSX Agent space." };
+
+    return {
+      success: true,
+      message: "I don't have much information about you yet. You can add details in the GSX Agent space.",
+    };
   },
-  
+
   /**
    * Check if query is about weather
    */
   isWeatherQuery(query) {
-    const weatherKeywords = ['weather', 'temperature', 'forecast', 'rain', 'snow', 'sunny', 'cloudy', 'humid', 'cold', 'hot', 'warm'];
+    const weatherKeywords = [
+      'weather',
+      'temperature',
+      'forecast',
+      'rain',
+      'snow',
+      'sunny',
+      'cloudy',
+      'humid',
+      'cold',
+      'hot',
+      'warm',
+    ];
     const lower = query.toLowerCase();
-    return weatherKeywords.some(k => lower.includes(k));
+    return weatherKeywords.some((k) => lower.includes(k));
   },
-  
+
   /**
    * Check if query already contains a location
    */
   hasLocation(query) {
     // Check for common location patterns
     const locationPatterns = [
-      /\bin\s+\w+/i,           // "in Denver"
-      /\bat\s+\w+/i,           // "at Denver"
-      /\bfor\s+\w+/i,          // "for Denver"
-      /\bnear\s+\w+/i,         // "near Denver"
-      /\b\d{5}\b/,             // ZIP code
-      /,\s*[A-Z]{2}\b/,        // State abbreviation ", CO"
+      /\bin\s+\w+/i, // "in Denver"
+      /\bat\s+\w+/i, // "at Denver"
+      /\bfor\s+\w+/i, // "for Denver"
+      /\bnear\s+\w+/i, // "near Denver"
+      /\b\d{5}\b/, // ZIP code
+      /,\s*[A-Z]{2}\b/, // State abbreviation ", CO"
     ];
-    return locationPatterns.some(p => p.test(query));
+    return locationPatterns.some((p) => p.test(query));
   },
-  
+
   /**
-   * Search the web using webview (primary) or DuckDuckGo (fallback)
+   * Search the web using GSX Serper API (primary), webview, or DuckDuckGo (fallbacks)
    * @param {string} query - Search query
    * @returns {Promise<Array<{title, snippet, url}>>}
    */
   async webSearch(query) {
     return webCircuit.execute(async () => {
-      // Try webview search first (more reliable, real browser results)
+      // Primary: GSX Search Serper API (structured Google results)
+      try {
+        log.info('agent', 'Trying GSX Search API...');
+        const results = await this.gsxSearch(query);
+        if (results && results.length > 0) {
+          log.info('agent', `GSX Search found ${results.length} results`);
+          return results;
+        }
+        log.info('agent', 'GSX Search returned no results, trying fallbacks...');
+      } catch (e) {
+        log.info('agent', 'GSX Search failed, trying fallbacks', { error: e.message });
+      }
+
+      // Fallback 1: Webview search (hidden BrowserWindow)
       const webviewSearch = getWebviewSearch();
       if (webviewSearch) {
         try {
@@ -438,12 +527,104 @@ This agent searches the internet. It does NOT control media playback or access p
           log.info('agent', 'Webview search failed', { error: e.message });
         }
       }
-      
-      // Fallback to DuckDuckGo API
+
+      // Fallback 2: DuckDuckGo API
       return this.duckDuckGoSearch(query);
     });
   },
-  
+
+  /**
+   * Search using GSX Search Serper API (primary method)
+   * Calls the OneReach-hosted Serper flow that returns structured Google results.
+   * @param {string} query - Search query
+   * @returns {Promise<Array<{title, snippet, url}>>}
+   */
+  async gsxSearch(query) {
+    const encodedQuery = encodeURIComponent(query);
+    const url = `${GSX_SEARCH_BASE}${GSX_SEARCH_PATH}?query=${encodedQuery}`;
+
+    const response = await fetchWithTimeout(
+      url,
+      {
+        headers: { Accept: 'application/json' },
+      },
+      TIMEOUT_GSX_SEARCH
+    );
+
+    if (!response.ok) {
+      throw new Error(`GSX Search API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // Check for fetch error in response
+    if (data.fetchError) {
+      throw new Error(`GSX Search error: ${data.fetchError}`);
+    }
+
+    return this.parseGsxResults(data);
+  },
+
+  /**
+   * Parse GSX Search Serper API response into standard result format
+   * @param {Object} data - Raw API response
+   * @returns {Array<{title, snippet, url}>}
+   */
+  parseGsxResults(data) {
+    const results = [];
+
+    // Parse organic results (main search results)
+    if (data.organic && Array.isArray(data.organic)) {
+      for (const item of data.organic.slice(0, 7)) {
+        if (item.title || item.snippet) {
+          results.push({
+            title: item.title || '',
+            snippet: item.snippet || '',
+            url: item.link || '',
+          });
+        }
+      }
+    }
+
+    // Include "People Also Ask" as additional context (up to 3)
+    if (data.peopleAlsoAsk && Array.isArray(data.peopleAlsoAsk)) {
+      for (const paa of data.peopleAlsoAsk.slice(0, 3)) {
+        if (paa.question && paa.snippet) {
+          results.push({
+            title: paa.question,
+            snippet: paa.snippet,
+            url: paa.link || '',
+          });
+        }
+      }
+    }
+
+    // Include knowledge graph if present
+    if (data.knowledgeGraph) {
+      const kg = data.knowledgeGraph;
+      const kgSnippet =
+        kg.description ||
+        [
+          kg.type,
+          kg.attributes &&
+            Object.entries(kg.attributes)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join(', '),
+        ]
+          .filter(Boolean)
+          .join('. ');
+      if (kg.title && kgSnippet) {
+        results.unshift({
+          title: kg.title,
+          snippet: kgSnippet,
+          url: kg.website || kg.descriptionLink || '',
+        });
+      }
+    }
+
+    return results;
+  },
+
   /**
    * Search using DuckDuckGo API (fallback method)
    * @param {string} query - Search query
@@ -451,21 +632,25 @@ This agent searches the internet. It does NOT control media playback or access p
    */
   async duckDuckGoSearch(query) {
     const encodedQuery = encodeURIComponent(query);
-    
+
     // Try DuckDuckGo Instant Answer API first (JSON, no parsing needed)
     const instantUrl = `https://api.duckduckgo.com/?q=${encodedQuery}&format=json&no_html=1&skip_disambig=1`;
-    
+
     try {
-      const instantResponse = await fetchWithTimeout(instantUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        }
-      }, TIMEOUT_WEB_SEARCH);
-      
+      const instantResponse = await fetchWithTimeout(
+        instantUrl,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+          },
+        },
+        TIMEOUT_WEB_SEARCH
+      );
+
       if (instantResponse.ok) {
         const data = await instantResponse.json();
         const results = this.parseDuckDuckGoInstant(data, query);
-        
+
         if (results.length > 0) {
           return results;
         }
@@ -473,24 +658,28 @@ This agent searches the internet. It does NOT control media playback or access p
     } catch (e) {
       log.info('agent', 'DuckDuckGo Instant API failed, trying Lite', { error: e.message });
     }
-    
+
     // Fallback to DuckDuckGo Lite HTML
     const searchUrl = `https://lite.duckduckgo.com/lite/?q=${encodedQuery}`;
-    
-    const response = await fetchWithTimeout(searchUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-      }
-    }, TIMEOUT_WEB_SEARCH_LITE);
-    
+
+    const response = await fetchWithTimeout(
+      searchUrl,
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        },
+      },
+      TIMEOUT_WEB_SEARCH_LITE
+    );
+
     if (!response.ok) {
       throw new Error(`Search failed: ${response.status}`);
     }
-    
+
     const html = await response.text();
     return this.parseDuckDuckGoLite(html);
   },
-  
+
   /**
    * Parse DuckDuckGo Instant Answer API response
    * @param {Object} data - JSON response
@@ -499,25 +688,25 @@ This agent searches the internet. It does NOT control media playback or access p
    */
   parseDuckDuckGoInstant(data, query) {
     const results = [];
-    
+
     // Abstract (main answer)
     if (data.Abstract && data.AbstractText) {
       results.push({
         title: data.Heading || query,
         snippet: data.AbstractText,
-        url: data.AbstractURL || data.AbstractSource || ''
+        url: data.AbstractURL || data.AbstractSource || '',
       });
     }
-    
+
     // Answer (for calculations, conversions, etc.)
     if (data.Answer) {
       results.push({
         title: 'Direct Answer',
         snippet: data.Answer,
-        url: ''
+        url: '',
       });
     }
-    
+
     // Related topics
     if (data.RelatedTopics && Array.isArray(data.RelatedTopics)) {
       for (const topic of data.RelatedTopics.slice(0, 5)) {
@@ -525,7 +714,7 @@ This agent searches the internet. It does NOT control media playback or access p
           results.push({
             title: topic.Text.split(' - ')[0] || topic.Text.substring(0, 50),
             snippet: topic.Text,
-            url: topic.FirstURL
+            url: topic.FirstURL,
           });
         }
         // Handle nested topics
@@ -535,33 +724,33 @@ This agent searches the internet. It does NOT control media playback or access p
               results.push({
                 title: subtopic.Text.split(' - ')[0] || subtopic.Text.substring(0, 50),
                 snippet: subtopic.Text,
-                url: subtopic.FirstURL
+                url: subtopic.FirstURL,
               });
             }
           }
         }
       }
     }
-    
+
     // Infobox data
     if (data.Infobox && data.Infobox.content) {
       const infoItems = data.Infobox.content
-        .filter(item => item.label && item.value)
-        .map(item => `${item.label}: ${item.value}`)
+        .filter((item) => item.label && item.value)
+        .map((item) => `${item.label}: ${item.value}`)
         .join('. ');
-      
+
       if (infoItems) {
         results.push({
           title: data.Heading || 'Information',
           snippet: infoItems,
-          url: data.AbstractURL || ''
+          url: data.AbstractURL || '',
         });
       }
     }
-    
+
     return results;
   },
-  
+
   /**
    * Parse DuckDuckGo Lite HTML results
    * @param {string} html - Raw HTML
@@ -569,36 +758,38 @@ This agent searches the internet. It does NOT control media playback or access p
    */
   parseDuckDuckGoLite(html) {
     const results = [];
-    
+
     // DuckDuckGo Lite uses a table-based format
     // Results are in rows with class containing "result" or in specific table cells
-    
+
     // Method 1: Look for result links (class="result-link" or similar patterns)
     // DuckDuckGo Lite format has links followed by snippets in table cells
-    
+
     // Try to find links with their text content - filter out internal DDG links
     const linkPattern = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([^<]+)<\/a>/gi;
-    
+
     let match;
     const potentialResults = [];
-    
+
     while ((match = linkPattern.exec(html)) !== null) {
       const url = match[1];
       const title = match[2].trim();
-      
+
       // Skip DuckDuckGo internal links, W3C DTD, and empty/short titles
-      if (url.includes('duckduckgo.com') ||
-          url.includes('duck.co') ||
-          url.includes('w3.org') ||
-          title.length < 5 ||
-          title.toLowerCase() === 'next' ||
-          title.toLowerCase() === 'previous') {
+      if (
+        url.includes('duckduckgo.com') ||
+        url.includes('duck.co') ||
+        url.includes('w3.org') ||
+        title.length < 5 ||
+        title.toLowerCase() === 'next' ||
+        title.toLowerCase() === 'previous'
+      ) {
         continue;
       }
-      
+
       potentialResults.push({ url, title });
     }
-    
+
     // Try to extract snippets from text following links
     // Look for text content between </a> and next <a> that looks like a snippet
     const snippetPattern = /<\/a>\s*([^<]{20,300})</gi;
@@ -610,24 +801,24 @@ This agent searches the internet. It does NOT control media playback or access p
         snippets.push(text);
       }
     }
-    
+
     // Combine links with snippets
     for (let i = 0; i < Math.min(potentialResults.length, 10); i++) {
       results.push({
         title: potentialResults[i].title,
         url: potentialResults[i].url,
-        snippet: snippets[i] || ''
+        snippet: snippets[i] || '',
       });
     }
-    
+
     // Method 2: If above didn't work, try DuckDuckGo instant answer API
     if (results.length === 0) {
       log.info('agent', 'Lite parsing found no results, returning empty');
     }
-    
+
     return results;
   },
-  
+
   /**
    * Use LLM to synthesize an answer from search results
    * @param {string} query - Original query
@@ -637,13 +828,14 @@ This agent searches the internet. It does NOT control media playback or access p
   async synthesizeAnswer(query, results) {
     // Build prompt based on whether we have search results
     let systemPrompt, userPrompt;
-    
+
     if (results.length > 0) {
       // Format search results for the LLM
-      const resultsText = results.slice(0, 5).map((r, i) => 
-        `${i + 1}. ${r.title}\n   ${r.snippet}\n   Source: ${r.url}`
-      ).join('\n\n');
-      
+      const resultsText = results
+        .slice(0, 5)
+        .map((r, i) => `${i + 1}. ${r.title}\n   ${r.snippet}\n   Source: ${r.url}`)
+        .join('\n\n');
+
       systemPrompt = `You are a helpful assistant that answers questions based on web search results.
 Give a concise, conversational answer suitable for voice output (1-3 sentences).
 If the search results don't contain the answer, use your general knowledge.
@@ -676,12 +868,11 @@ Provide a brief, natural answer:`;
         messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
         maxTokens: 200,
-        feature: 'search-agent'
+        feature: 'search-agent',
       });
-      
+
       const answer = result.content?.trim();
       return answer || `Here's what I found: ${results[0]?.title || 'No results'}`;
-      
     } catch (error) {
       log.error('agent', 'LLM synthesis error', { error: error.message });
       // Fallback to simple result (works even on timeout)
@@ -690,7 +881,7 @@ Provide a brief, natural answer:`;
       }
       return "I couldn't complete the search right now. Please try again.";
     }
-  }
+  },
 };
 
 module.exports = searchAgent;

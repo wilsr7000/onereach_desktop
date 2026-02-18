@@ -4,7 +4,7 @@
  * Tests the Command HUD window lifecycle, IPC events, and disambiguation flow.
  * The HUD is a transparent overlay that shows agent task status and accepts user input.
  *
- * Uses renderer-side APIs (window.api, window.hudAPI) and Playwright window
+ * Uses renderer-side APIs (window.api, window.commandHUD) and Playwright window
  * enumeration since electronApp.evaluate doesn't have require().
  *
  * Run:  npx playwright test test/e2e/command-hud.spec.js
@@ -12,7 +12,12 @@
 
 const { test, expect } = require('@playwright/test');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
 } = require('./helpers/electron-app');
 
 let app;
@@ -21,7 +26,6 @@ let mainWindow;
 let errorSnapshot;
 
 test.describe('Command HUD', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -48,7 +52,7 @@ test.describe('Command HUD', () => {
           await window.api.invoke('command-hud:show', {
             action: 'test',
             transcript: 'Testing HUD creation',
-            status: 'pending'
+            status: 'pending',
           });
           return { sent: true };
         }
@@ -62,8 +66,12 @@ test.describe('Command HUD', () => {
 
     // Check if a new window appeared
     const afterWindows = await electronApp.windows();
-    const hudPage = afterWindows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = afterWindows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     expect(opened.sent || hudPage || afterWindows.length > beforeCount).toBeTruthy();
@@ -72,15 +80,19 @@ test.describe('Command HUD', () => {
   test('HUD window is transparent and always-on-top', async () => {
     // Check window properties via Playwright's window enumeration
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       // The HUD exists -- verify its properties via the page
       const props = await hudPage.evaluate(() => ({
-        hasHudAPI: typeof window.hudAPI !== 'undefined',
-        url: window.location.href
+        hasHudAPI: typeof window.commandHUD !== 'undefined',
+        url: window.location.href,
       }));
       expect(props.hasHudAPI).toBeDefined();
       // Window creation options (transparent, alwaysOnTop) are set at creation time
@@ -119,7 +131,7 @@ test.describe('Command HUD', () => {
           await window.api.invoke('command-hud:show', {
             action: 'search',
             transcript: 'Testing HUD show',
-            status: 'pending'
+            status: 'pending',
           });
           return { sent: true };
         }
@@ -159,16 +171,20 @@ test.describe('Command HUD', () => {
   test('hud:reset clears displayed content', async () => {
     // Find the HUD window page
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(() => {
         // In the HUD renderer, check if reset capability exists
         return {
-          hasHudAPI: typeof window.hudAPI !== 'undefined',
-          hasOnReset: typeof window.hudAPI?.onReset === 'function'
+          hasHudAPI: typeof window.commandHUD !== 'undefined',
+          hasOnReset: typeof window.commandHUD?.onReset === 'function',
         };
       });
       expect(result.hasHudAPI).toBeDefined();
@@ -189,26 +205,32 @@ test.describe('Command HUD', () => {
             transcript: 'Test lifecycle',
             status: 'running',
             agentName: 'test-agent',
-            confidence: 0.95
+            confidence: 0.95,
           });
         }
-      } catch {}
+      } catch {
+        /* no-op */
+      }
     });
 
     await sleep(500);
 
     // Check HUD window for lifecycle event handling
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(() => ({
-        hasHudAPI: typeof window.hudAPI !== 'undefined',
-        hasOnTask: typeof window.hudAPI?.onTask === 'function',
-        hasOnTaskLifecycle: typeof window.hudAPI?.onTaskLifecycle === 'function',
-        hasOnResult: typeof window.hudAPI?.onResult === 'function'
+        hasHudAPI: typeof window.commandHUD !== 'undefined',
+        hasOnTask: typeof window.commandHUD?.onTask === 'function',
+        hasOnTaskLifecycle: typeof window.commandHUD?.onTaskLifecycle === 'function',
+        hasOnResult: typeof window.commandHUD?.onResult === 'function',
       }));
       expect(result.hasHudAPI || result.hasOnTask || result.hasOnTaskLifecycle).toBeTruthy();
     }
@@ -220,10 +242,12 @@ test.describe('Command HUD', () => {
         if (window.api?.invoke) {
           await window.api.invoke('command-hud:result', {
             success: true,
-            message: 'Test task completed'
+            message: 'Test task completed',
           });
         }
-      } catch {}
+      } catch {
+        /* no-op */
+      }
     });
 
     // Result was sent successfully if no error
@@ -237,16 +261,20 @@ test.describe('Command HUD', () => {
   test('success result auto-hides after timeout', async () => {
     // Verify auto-hide timer exists in HUD by checking from renderer
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       // The HUD renderer should have setTimeout-based auto-hide logic
       const result = await hudPage.evaluate(() => ({
-        hasHudAPI: typeof window.hudAPI !== 'undefined',
+        hasHudAPI: typeof window.commandHUD !== 'undefined',
         // If the HUD page loaded successfully, the auto-hide logic is present
-        pageLoaded: document.readyState === 'complete'
+        pageLoaded: document.readyState === 'complete',
       }));
       expect(result.pageLoaded).toBe(true);
     } else {
@@ -279,19 +307,23 @@ test.describe('Command HUD', () => {
   test('disambiguation select sends selection via IPC', async () => {
     // Check the HUD page for disambiguation API
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(() => ({
-        hasSelectDisambiguation: typeof window.hudAPI?.selectDisambiguationOption === 'function'
+        hasSelectDisambiguation: typeof window.commandHUD?.selectDisambiguationOption === 'function',
       }));
       expect(result.hasSelectDisambiguation).toBe(true);
     } else {
       // Verify from main window that IPC channels exist
       const result = await mainWindow.evaluate(() => ({
-        hasApi: typeof window.api !== 'undefined'
+        hasApi: typeof window.api !== 'undefined',
       }));
       expect(result.hasApi).toBeDefined();
     }
@@ -299,13 +331,17 @@ test.describe('Command HUD', () => {
 
   test('disambiguation cancel sends cancel via IPC', async () => {
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(() => ({
-        hasCancelDisambiguation: typeof window.hudAPI?.cancelDisambiguation === 'function'
+        hasCancelDisambiguation: typeof window.commandHUD?.cancelDisambiguation === 'function',
       }));
       expect(result.hasCancelDisambiguation).toBe(true);
     }
@@ -313,13 +349,17 @@ test.describe('Command HUD', () => {
 
   test('disambiguation voice resolve sends voice response', async () => {
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(() => ({
-        hasVoiceResolve: typeof window.hudAPI?.resolveDisambiguationWithVoice === 'function'
+        hasVoiceResolve: typeof window.commandHUD?.resolveDisambiguationWithVoice === 'function',
       }));
       expect(result.hasVoiceResolve).toBe(true);
     }
@@ -331,13 +371,17 @@ test.describe('Command HUD', () => {
 
   test('text input event listener exists on HUD', async () => {
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(() => ({
-        hasOnShowTextInput: typeof window.hudAPI?.onShowTextInput === 'function'
+        hasOnShowTextInput: typeof window.commandHUD?.onShowTextInput === 'function',
       }));
       expect(result.hasOnShowTextInput).toBe(true);
     }
@@ -345,13 +389,17 @@ test.describe('Command HUD', () => {
 
   test('text command submission works via HUD API', async () => {
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(() => ({
-        hasSubmitTextCommand: typeof window.hudAPI?.submitTextCommand === 'function'
+        hasSubmitTextCommand: typeof window.commandHUD?.submitTextCommand === 'function',
       }));
       expect(result.hasSubmitTextCommand).toBe(true);
     }
@@ -363,13 +411,17 @@ test.describe('Command HUD', () => {
 
   test('dismiss() exists on HUD API', async () => {
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(() => ({
-        hasDismiss: typeof window.hudAPI?.dismiss === 'function'
+        hasDismiss: typeof window.commandHUD?.dismiss === 'function',
       }));
       expect(result.hasDismiss).toBe(true);
     }
@@ -377,13 +429,17 @@ test.describe('Command HUD', () => {
 
   test('retry() exists on HUD API', async () => {
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(() => ({
-        hasRetry: typeof window.hudAPI?.retry === 'function'
+        hasRetry: typeof window.commandHUD?.retry === 'function',
       }));
       expect(result.hasRetry).toBe(true);
     }
@@ -391,15 +447,19 @@ test.describe('Command HUD', () => {
 
   test('getQueueStats returns queue information', async () => {
     const windows = await electronApp.windows();
-    const hudPage = windows.find(p => {
-      try { return p.url().includes('command-hud'); } catch { return false; }
+    const hudPage = windows.find((p) => {
+      try {
+        return p.url().includes('command-hud');
+      } catch {
+        return false;
+      }
     });
 
     if (hudPage) {
       const result = await hudPage.evaluate(async () => {
         try {
-          if (typeof window.hudAPI?.getQueueStats === 'function') {
-            const stats = await window.hudAPI.getQueueStats('default');
+          if (typeof window.commandHUD?.getQueueStats === 'function') {
+            const stats = await window.commandHUD.getQueueStats('default');
             return { hasStats: true, stats };
           }
           return { hasStats: false, note: 'getQueueStats not available' };
@@ -419,7 +479,10 @@ test.describe('Command HUD', () => {
     const errors = await checkNewErrors(errorSnapshot);
     const genuine = filterBenignErrors(errors);
     if (genuine.length > 0) {
-      console.log('HUD test errors:', genuine.map(e => e.message));
+      console.log(
+        'HUD test errors:',
+        genuine.map((e) => e.message)
+      );
     }
     expect(genuine.length).toBeLessThanOrEqual(5);
   });

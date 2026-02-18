@@ -11,7 +11,10 @@ const mockAI = createMockAIService();
 const { JsonToHtmlAgent } = require('../../../lib/converters/json-to-html.js');
 
 testConverterAgent(JsonToHtmlAgent, {
-  sampleInput: JSON.stringify([{ name: 'Alice', age: 30 }, { name: 'Bob', age: 25 }]),
+  sampleInput: JSON.stringify([
+    { name: 'Alice', age: 30 },
+    { name: 'Bob', age: 25 },
+  ]),
   expectedFromFormats: ['json'],
   expectedToFormats: ['html'],
   expectedStrategies: ['table', 'tree', 'pretty'],

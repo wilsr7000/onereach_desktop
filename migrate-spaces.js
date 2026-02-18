@@ -28,7 +28,7 @@ const path = require('path');
 console.log('\nVerifying space-metadata.json files:');
 for (const space of storage.index.spaces) {
   if (space.id === 'unclassified') continue;
-  
+
   const metaPath = path.join(storage.spacesDir, space.id, 'space-metadata.json');
   if (fs.existsSync(metaPath)) {
     const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));

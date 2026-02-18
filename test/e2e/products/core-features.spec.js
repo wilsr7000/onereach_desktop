@@ -14,11 +14,18 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep,
-  SPACES_API, LOG_SERVER, listSpaces
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
+  _SPACES_API,
+  _LOG_SERVER,
+  listSpaces,
 } = require('../helpers/electron-app');
 
-let app, electronApp, mainWindow, errorSnapshot;
+let app, _electronApp, mainWindow, errorSnapshot;
 
 test.describe('Core Features', () => {
   test.beforeAll(async () => {
@@ -27,7 +34,9 @@ test.describe('Core Features', () => {
     mainWindow = app.mainWindow;
     errorSnapshot = await snapshotErrors();
   });
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  01 -- SETTINGS
@@ -38,18 +47,22 @@ test.describe('Core Features', () => {
         try {
           const settings = await window.api?.getSettings?.();
           return { ok: true, hasTheme: 'theme' in (settings || {}) };
-        } catch (e) { return { ok: false, e: e.message }; }
+        } catch (e) {
+          return { ok: false, e: e.message };
+        }
       });
       expect(r).toBeDefined();
     });
 
     test('saving settings does not produce error-level logs', async () => {
       const snap = await snapshotErrors();
-      const r = await mainWindow.evaluate(async () => {
+      const _r = await mainWindow.evaluate(async () => {
         try {
-          const settings = await window.api?.getSettings?.();
+          const _settings = await window.api?.getSettings?.();
           return { ok: true };
-        } catch (e) { return { ok: false, e: e.message }; }
+        } catch (e) {
+          return { ok: false, e: e.message };
+        }
       });
       await sleep(500);
       const errors = await checkNewErrors(snap);
@@ -66,7 +79,9 @@ test.describe('Core Features', () => {
       const r = await mainWindow.evaluate(async () => {
         try {
           return { hasExchange: typeof window.api?.invoke === 'function' };
-        } catch { return {}; }
+        } catch {
+          return {};
+        }
       });
       expect(r.hasExchange).toBe(true);
     });
@@ -109,7 +124,11 @@ test.describe('Core Features', () => {
   test.describe('Tools Management', () => {
     test('adding a web tool auto-creates a matching agent', async () => {
       const r = await mainWindow.evaluate(async () => {
-        try { return { hasInvoke: typeof window.api?.invoke === 'function' }; } catch { return {}; }
+        try {
+          return { hasInvoke: typeof window.api?.invoke === 'function' };
+        } catch {
+          return {};
+        }
       });
       expect(r.hasInvoke).toBe(true);
     });
@@ -125,7 +144,11 @@ test.describe('Core Features', () => {
   test.describe('Agent Manager', () => {
     test('agents:compare-versions returns meaningful diff', async () => {
       const r = await mainWindow.evaluate(async () => {
-        try { return { hasInvoke: typeof window.api?.invoke === 'function' }; } catch { return {}; }
+        try {
+          return { hasInvoke: typeof window.api?.invoke === 'function' };
+        } catch {
+          return {};
+        }
       });
       expect(r.hasInvoke).toBe(true);
     });
@@ -135,7 +158,9 @@ test.describe('Core Features', () => {
         try {
           const bid = await window.api?.invoke?.('agents:test-phrase', 'test', 'what is the weather');
           return { ok: true, bid };
-        } catch (e) { return { ok: false, e: e.message }; }
+        } catch (e) {
+          return { ok: false, e: e.message };
+        }
       });
       expect(r).toBeDefined();
     });
@@ -145,7 +170,9 @@ test.describe('Core Features', () => {
         try {
           const bids = await window.api?.invoke?.('agents:test-phrase-all', 'what is the weather');
           return { ok: true, bids };
-        } catch (e) { return { ok: false, e: e.message }; }
+        } catch (e) {
+          return { ok: false, e: e.message };
+        }
       });
       expect(r).toBeDefined();
     });
@@ -161,8 +188,12 @@ test.describe('Core Features', () => {
       expect(typeof exists).toBe('boolean');
     });
 
-    test('store fetches directory from API', async () => { expect(true).toBe(true); });
-    test('installed IDW appears in the IDW menu section', async () => { expect(true).toBe(true); });
+    test('store fetches directory from API', async () => {
+      expect(true).toBe(true);
+    });
+    test('installed IDW appears in the IDW menu section', async () => {
+      expect(true).toBe(true);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -171,17 +202,29 @@ test.describe('Core Features', () => {
   test.describe('Main Window Tabs', () => {
     test('closing tab cleans up partition', async () => {
       const r = await mainWindow.evaluate(async () => {
-        try { return { hasInvoke: typeof window.api?.invoke === 'function' }; } catch { return {}; }
+        try {
+          return { hasInvoke: typeof window.api?.invoke === 'function' };
+        } catch {
+          return {};
+        }
       });
       expect(r.hasInvoke).toBe(true);
     });
 
-    test('opening a OneReach URL auto-detects environment', async () => { expect(true).toBe(true); });
-    test('token injection happens before page load completes', async () => { expect(true).toBe(true); });
+    test('opening a OneReach URL auto-detects environment', async () => {
+      expect(true).toBe(true);
+    });
+    test('token injection happens before page load completes', async () => {
+      expect(true).toBe(true);
+    });
 
     test('tab-picker:capture-tab captures content/screenshots', async () => {
       const r = await mainWindow.evaluate(async () => {
-        try { return { hasInvoke: typeof window.api?.invoke === 'function' }; } catch { return {}; }
+        try {
+          return { hasInvoke: typeof window.api?.invoke === 'function' };
+        } catch {
+          return {};
+        }
       });
       expect(r.hasInvoke).toBe(true);
     });
@@ -204,10 +247,18 @@ test.describe('Core Features', () => {
   //  17 -- WEB MONITORING
   // ═══════════════════════════════════════════════════════════════════════════
   test.describe('Web Monitoring', () => {
-    test('check captures screenshot when screenshot option enabled', async () => { expect(true).toBe(true); });
-    test('page change returns different hash and diff', async () => { expect(true).toBe(true); });
-    test('monitor with CSS selector only captures that element', async () => { expect(true).toBe(true); });
-    test('monitor without selector captures full page body', async () => { expect(true).toBe(true); });
+    test('check captures screenshot when screenshot option enabled', async () => {
+      expect(true).toBe(true);
+    });
+    test('page change returns different hash and diff', async () => {
+      expect(true).toBe(true);
+    });
+    test('monitor with CSS selector only captures that element', async () => {
+      expect(true).toBe(true);
+    });
+    test('monitor without selector captures full page body', async () => {
+      expect(true).toBe(true);
+    });
     test('detected changes saved as items in designated Space', async () => {
       const spaces = await listSpaces();
       expect(Array.isArray(spaces)).toBe(true);
@@ -222,14 +273,16 @@ test.describe('Core Features', () => {
       const r = await mainWindow.evaluate(async () => {
         try {
           return { hasAI: typeof window.ai?.chat === 'function' || typeof window.api?.invoke === 'function' };
-        } catch { return {}; }
+        } catch {
+          return {};
+        }
       });
       expect(r.hasAI).toBe(true);
     });
 
     test('imageGenerate() returns a valid image URL or base64', async () => {
       const r = await mainWindow.evaluate(() => ({
-        hasInvoke: typeof window.api?.invoke === 'function'
+        hasInvoke: typeof window.api?.invoke === 'function',
       }));
       expect(r.hasInvoke).toBe(true);
     });
@@ -255,8 +308,12 @@ test.describe('Core Features', () => {
       expect(true).toBe(true);
     });
 
-    test('real-time text appears during recording', async () => { expect(true).toBe(true); });
-    test('agent integration categorizes content automatically', async () => { expect(true).toBe(true); });
+    test('real-time text appears during recording', async () => {
+      expect(true).toBe(true);
+    });
+    test('agent integration categorizes content automatically', async () => {
+      expect(true).toBe(true);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -277,10 +334,18 @@ test.describe('Core Features', () => {
   //  28 -- SMART EXPORT
   // ═══════════════════════════════════════════════════════════════════════════
   test.describe('Smart Export', () => {
-    test('AI Thinking tab shows AI reasoning', async () => { expect(true).toBe(true); });
-    test('Mermaid diagrams render as SVGs', async () => { expect(true).toBe(true); });
-    test('adding a style from URL extracts and applies CSS', async () => { expect(true).toBe(true); });
-    test('Web Slides export produces an HTML presentation', async () => { expect(true).toBe(true); });
+    test('AI Thinking tab shows AI reasoning', async () => {
+      expect(true).toBe(true);
+    });
+    test('Mermaid diagrams render as SVGs', async () => {
+      expect(true).toBe(true);
+    });
+    test('adding a style from URL extracts and applies CSS', async () => {
+      expect(true).toBe(true);
+    });
+    test('Web Slides export produces an HTML presentation', async () => {
+      expect(true).toBe(true);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -289,26 +354,44 @@ test.describe('Core Features', () => {
   test.describe('Wizards & Onboarding', () => {
     test('AI generates a project plan from Step 1 inputs', async () => {
       const r = await mainWindow.evaluate(() => ({
-        hasInvoke: typeof window.api?.invoke === 'function'
+        hasInvoke: typeof window.api?.invoke === 'function',
       }));
       expect(r.hasInvoke).toBe(true);
     });
 
-    test('plan shows goals, timeline, and success metrics', async () => { expect(true).toBe(true); });
-    test('changelog loads version entries', async () => { expect(true).toBe(true); });
-    test('current version has "NEW" badge', async () => { expect(true).toBe(true); });
-    test('change tags are color-coded', async () => { expect(true).toBe(true); });
-    test('success message appears when extension connects', async () => { expect(true).toBe(true); });
+    test('plan shows goals, timeline, and success metrics', async () => {
+      expect(true).toBe(true);
+    });
+    test('changelog loads version entries', async () => {
+      expect(true).toBe(true);
+    });
+    test('current version has "NEW" badge', async () => {
+      expect(true).toBe(true);
+    });
+    test('change tags are color-coded', async () => {
+      expect(true).toBe(true);
+    });
+    test('success message appears when extension connects', async () => {
+      expect(true).toBe(true);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  30 -- DOCUMENTATION / TUTORIALS
   // ═══════════════════════════════════════════════════════════════════════════
   test.describe('Documentation', () => {
-    test('progress bar reflects viewing progress', async () => { expect(true).toBe(true); });
-    test('article tiles render with reading time estimation', async () => { expect(true).toBe(true); });
-    test('content fetches from RSS sources', async () => { expect(true).toBe(true); });
-    test('progress bars show reading progress', async () => { expect(true).toBe(true); });
+    test('progress bar reflects viewing progress', async () => {
+      expect(true).toBe(true);
+    });
+    test('article tiles render with reading time estimation', async () => {
+      expect(true).toBe(true);
+    });
+    test('content fetches from RSS sources', async () => {
+      expect(true).toBe(true);
+    });
+    test('progress bars show reading progress', async () => {
+      expect(true).toBe(true);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

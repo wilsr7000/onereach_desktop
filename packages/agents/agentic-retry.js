@@ -1,9 +1,9 @@
 /**
  * Agentic Retry Template
- * 
+ *
  * Wraps any agent with LLM-based reasoning for retries.
  * Not deterministic - the LLM decides what to try next based on failures.
- * 
+ *
  * Usage:
  *   const smartAgent = withAgenticRetry(myAgent, {
  *     actions: { ... },
@@ -26,16 +26,14 @@ async function extractIntent(request, domain = 'general') {
     music: `Extract music intent. Return JSON: { "action": "play/pause/skip", "searchTerm": "term or null", "genre": "genre or null", "artist": "artist or null", "mood": "mood or null" }`,
     files: `Extract file operation intent. Return JSON: { "action": "open/save/find/delete", "filename": "name or null", "path": "path or null", "type": "type or null" }`,
     calendar: `Extract calendar intent. Return JSON: { "action": "create/find/delete", "title": "title or null", "date": "date or null", "time": "time or null" }`,
-    general: `Extract the user's intent. Return JSON: { "action": "primary action", "target": "what they want to act on", "params": {} }`
+    general: `Extract the user's intent. Return JSON: { "action": "primary action", "target": "what they want to act on", "params": {} }`,
   };
 
   try {
     const data = await ai.chat({
       profile: 'fast',
       system: domainPrompts[domain] || domainPrompts.general,
-      messages: [
-        { role: 'user', content: request }
-      ],
+      messages: [{ role: 'user', content: request }],
       temperature: 0,
       maxTokens: 200,
       jsonMode: true,
@@ -43,7 +41,7 @@ async function extractIntent(request, domain = 'general') {
     });
     return {
       raw: request,
-      parsed: JSON.parse(data.content || '{}')
+      parsed: JSON.parse(data.content || '{}'),
     };
   } catch (error) {
     log.error('agent', 'Extract intent error', { error: error.message });
@@ -68,7 +66,7 @@ async function decideNextAction(context) {
 Analyze what failed and decide the best next action.
 
 Available actions:
-${availableActions.map(a => `- "${a.name}": ${a.description}`).join('\n')}
+${availableActions.map((a) => `- "${a.name}": ${a.description}`).join('\n')}
 - "ask_user": Ask user for clarification
 - "stop": Give up (use sparingly)
 
@@ -107,10 +105,9 @@ What should I try next?`;
     });
 
     const decision = JSON.parse(result.content || '{}');
-    
+
     log.info('agent', `Decision: ${decision.action} - ${decision.reasoning}`);
     return decision;
-
   } catch (error) {
     log.error('agent', 'Decision error', { error: error.message });
     return { action: 'stop', reasoning: error.message, shouldStop: true };
@@ -124,12 +121,12 @@ What should I try next?`;
  */
 async function executeWithRetry(config) {
   const {
-    intent,           // User's request
-    domain,           // Domain for intent extraction (music, files, etc.)
-    actions,          // Available actions: [{ name, description, handler }]
-    initialAction,    // First action to try: async (parsedIntent) => result
+    intent, // User's request
+    domain, // Domain for intent extraction (music, files, etc.)
+    actions, // Available actions: [{ name, description, handler }]
+    initialAction, // First action to try: async (parsedIntent) => result
     maxAttempts = 4,
-    onAttempt         // Optional callback: (attemptNumber, action, result) => void
+    onAttempt, // Optional callback: (attemptNumber, action, result) => void
   } = config;
 
   // Extract intent first
@@ -137,21 +134,21 @@ async function executeWithRetry(config) {
   log.info('agent', `Extracted intent`, { parsed: extracted.parsed || extracted.raw });
 
   const attempts = [];
-  
+
   // First attempt
   let result = await initialAction(extracted);
   attempts.push({
     action: 'initial',
     result: result.success ? result.message : null,
-    error: result.success ? null : result.message
+    error: result.success ? null : result.message,
   });
-  
+
   if (onAttempt) onAttempt(1, 'initial', result);
 
   // Build available actions list for LLM
-  const availableActions = actions.map(a => ({
+  const availableActions = actions.map((a) => ({
     name: a.name,
-    description: a.description
+    description: a.description,
   }));
 
   // Retry loop - LLM decides each step
@@ -161,7 +158,7 @@ async function executeWithRetry(config) {
       attempts,
       availableActions,
       maxAttempts,
-      domain
+      domain,
     });
 
     if (decision.shouldStop || decision.action === 'stop') {
@@ -173,12 +170,12 @@ async function executeWithRetry(config) {
         success: false,
         needsClarification: true,
         message: decision.params?.question || `Could you clarify what you meant by "${intent}"?`,
-        attempts
+        attempts,
       };
     }
 
     // Find and execute the action
-    const actionDef = actions.find(a => a.name === decision.action);
+    const actionDef = actions.find((a) => a.name === decision.action);
     if (!actionDef) {
       log.warn('agent', `Unknown action: ${decision.action}`);
       break;
@@ -189,15 +186,14 @@ async function executeWithRetry(config) {
       attempts.push({
         action: `${decision.action}(${JSON.stringify(decision.params || {})})`,
         result: result.success ? result.message : null,
-        error: result.success ? null : result.message
+        error: result.success ? null : result.message,
       });
-      
+
       if (onAttempt) onAttempt(attempts.length, decision.action, result);
-      
     } catch (error) {
       attempts.push({
         action: decision.action,
-        error: error.message
+        error: error.message,
       });
     }
   }
@@ -208,7 +204,7 @@ async function executeWithRetry(config) {
       success: true,
       message: result.message,
       attempts: attempts.length,
-      reasoning: attempts.map(a => a.action).join(' → ')
+      reasoning: attempts.map((a) => a.action).join(' → '),
     };
   }
 
@@ -216,7 +212,7 @@ async function executeWithRetry(config) {
     success: false,
     message: `Tried ${attempts.length} approaches but couldn't complete: "${intent}"`,
     attempts,
-    lastError: result.message
+    lastError: result.message,
   };
 }
 
@@ -231,12 +227,12 @@ function withAgenticRetry(agent, retryConfig) {
     domain,
     actions,
     maxAttempts = 4,
-    shouldRetry = (task) => true  // Function to decide if retry applies
+    shouldRetry = (_task) => true, // Function to decide if retry applies
   } = retryConfig;
 
   return {
     ...agent,
-    
+
     async execute(task) {
       // Check if retry should be used for this task
       if (!shouldRetry(task)) {
@@ -252,9 +248,9 @@ function withAgenticRetry(agent, retryConfig) {
           // Inject extracted intent into task
           const enrichedTask = { ...task, extractedIntent: extracted };
           return agent.execute(enrichedTask);
-        }
+        },
       });
-    }
+    },
   };
 }
 
@@ -262,5 +258,5 @@ module.exports = {
   extractIntent,
   decideNextAction,
   executeWithRetry,
-  withAgenticRetry
+  withAgenticRetry,
 };

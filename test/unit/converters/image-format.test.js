@@ -19,7 +19,7 @@ const { ImageFormatAgent } = require('../../../lib/converters/image-format.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(ImageFormatAgent, {
-  sampleInput: Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+  sampleInput: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   expectedFromFormats: ['png', 'jpg', 'webp'],
   expectedToFormats: ['png', 'jpg', 'webp'],
   expectedStrategies: ['direct', 'optimized'],
@@ -36,13 +36,15 @@ describe('ImageFormatAgent (specific)', () => {
   });
 
   it('rejects non-Buffer input in execute', async () => {
-    await expect(agent.execute('not-a-buffer', 'direct', { targetFormat: 'webp' }))
-      .rejects.toThrow('Input must be a Buffer');
+    await expect(agent.execute('not-a-buffer', 'direct', { targetFormat: 'webp' })).rejects.toThrow(
+      'Input must be a Buffer'
+    );
   });
 
   it('rejects empty buffer in execute', async () => {
-    await expect(agent.execute(Buffer.alloc(0), 'direct', { targetFormat: 'png' }))
-      .rejects.toThrow('Input buffer is empty');
+    await expect(agent.execute(Buffer.alloc(0), 'direct', { targetFormat: 'png' })).rejects.toThrow(
+      'Input buffer is empty'
+    );
   });
 
   it('normalises jpeg to jpg', () => {

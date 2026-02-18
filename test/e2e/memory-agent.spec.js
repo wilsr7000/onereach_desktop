@@ -13,15 +13,18 @@
  */
 
 const { test, expect } = require('@playwright/test');
-const { launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, BENIGN_ERROR_PATTERNS, sleep } = require('./helpers/electron-app');
+const {
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  BENIGN_ERROR_PATTERNS,
+} = require('./helpers/electron-app');
 
 // Additional benign patterns for memory agent tests:
 // Evaluation failures in the bidder are pre-existing (JSON truncation from long context).
 // They don't affect agent execution -- the bidder handles them with fallback scoring.
-const MEMORY_TEST_BENIGN_PATTERNS = [
-  ...BENIGN_ERROR_PATTERNS,
-  /Evaluation failed for/i,
-];
+const MEMORY_TEST_BENIGN_PATTERNS = [...BENIGN_ERROR_PATTERNS, /Evaluation failed for/i];
 
 const LOG_SERVER = 'http://127.0.0.1:47292';
 
@@ -48,9 +51,11 @@ async function waitForLog(pattern, opts = {}) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     const logs = await getLogs({ category: opts.category || 'voice', since, limit: 200 });
-    const match = logs.find(l => pattern.test(l.message || ''));
+    const match = logs.find((l) => pattern.test(l.message || ''));
     if (match) return match;
-    await new Promise(r => setTimeout(r, interval));
+    await new Promise((r) => {
+      setTimeout(r, interval);
+    });
   }
   return null;
 }
@@ -62,7 +67,9 @@ async function findOrbWindow(electronApp) {
     for (const w of windows) {
       if (w.url().includes('orb.html')) return w;
     }
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise((r) => {
+      setTimeout(r, 1000);
+    });
   }
   return null;
 }
@@ -82,7 +89,7 @@ async function submitAndWait(orb, text, since, opts = {}) {
   const settled = await waitForLog(/Task settled by/, {
     since,
     timeout: opts.timeout || 35000,
-    category: 'voice'
+    category: 'voice',
   });
 
   return { submitResult, settled };
@@ -91,7 +98,6 @@ async function submitAndWait(orb, text, since, opts = {}) {
 let app;
 
 test.describe('Memory Agent Pipeline', () => {
-
   test.beforeAll(async () => {
     app = await launchApp({ timeout: 45000 });
 
@@ -111,7 +117,9 @@ test.describe('Memory Agent Pipeline', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ level: 'info' }),
       });
-    } catch (_) {}
+    } catch (_) {
+      /* no-op */
+    }
 
     if (app) await closeApp(app);
   });
@@ -125,9 +133,7 @@ test.describe('Memory Agent Pipeline', () => {
     const orb = await findOrbWindow(app.electronApp);
     expect(orb).toBeTruthy();
 
-    const { submitResult, settled } = await submitAndWait(
-      orb, 'what do you know about me', since
-    );
+    const { submitResult, settled } = await submitAndWait(orb, 'what do you know about me', since);
 
     console.log('Submit result:', JSON.stringify(submitResult, null, 2));
     expect(submitResult).toBeTruthy();
@@ -142,13 +148,16 @@ test.describe('Memory Agent Pipeline', () => {
 
     // Check for MemoryAgent-specific logs
     const memoryLogs = await getLogs({ category: 'agent', since, search: 'MemoryAgent', limit: 20 });
-    console.log('Memory agent logs:', memoryLogs.map(l => l.message));
+    console.log(
+      'Memory agent logs:',
+      memoryLogs.map((l) => l.message)
+    );
 
     // Verify no unexpected errors (filter bidder evaluation failures as pre-existing)
     const newErrors = await checkNewErrors(snapshot);
-    const realErrors = newErrors.filter(err => {
+    const realErrors = newErrors.filter((err) => {
       const msg = err.message || '';
-      return !MEMORY_TEST_BENIGN_PATTERNS.some(p => p.test(msg));
+      return !MEMORY_TEST_BENIGN_PATTERNS.some((p) => p.test(msg));
     });
     if (realErrors.length > 0) {
       console.log('Unexpected errors:');
@@ -168,9 +177,7 @@ test.describe('Memory Agent Pipeline', () => {
     const orb = await findOrbWindow(app.electronApp);
     expect(orb).toBeTruthy();
 
-    const { submitResult, settled } = await submitAndWait(
-      orb, 'my name is TestUser', since
-    );
+    const { submitResult, settled } = await submitAndWait(orb, 'my name is TestUser', since);
 
     console.log('Submit result:', JSON.stringify(submitResult, null, 2));
     expect(submitResult).toBeTruthy();
@@ -184,25 +191,34 @@ test.describe('Memory Agent Pipeline', () => {
 
     // Check for profile update log (memory-agent logs "Updated fact" via log server)
     const updateLogs = await getLogs({ category: 'agent', since, search: 'MemoryAgent', limit: 20 });
-    console.log('Memory agent logs:', updateLogs.map(l => l.message));
+    console.log(
+      'Memory agent logs:',
+      updateLogs.map((l) => l.message)
+    );
 
     // Also check settings logs (updateFact writes there)
     const settingsLogs = await getLogs({ category: 'settings', since, search: 'Updated', limit: 20 });
-    console.log('Settings update logs:', settingsLogs.map(l => l.message));
+    console.log(
+      'Settings update logs:',
+      settingsLogs.map((l) => l.message)
+    );
 
     // Verify the update was logged -- memory-agent logs to 'agent' category
     // and updateFact logs to 'settings' category
     const allAgentLogs = await getLogs({ category: 'agent', since, limit: 50 });
-    const memoryUpdateLogs = allAgentLogs.filter(l =>
-      (l.message || '').includes('MemoryAgent') || (l.message || '').includes('Updated fact')
+    const memoryUpdateLogs = allAgentLogs.filter(
+      (l) => (l.message || '').includes('MemoryAgent') || (l.message || '').includes('Updated fact')
     );
-    console.log('Memory update evidence:', memoryUpdateLogs.map(l => l.message));
+    console.log(
+      'Memory update evidence:',
+      memoryUpdateLogs.map((l) => l.message)
+    );
 
     // Verify no unexpected errors
     const newErrors = await checkNewErrors(snapshot);
-    const realErrors = newErrors.filter(err => {
+    const realErrors = newErrors.filter((err) => {
       const msg = err.message || '';
-      return !MEMORY_TEST_BENIGN_PATTERNS.some(p => p.test(msg));
+      return !MEMORY_TEST_BENIGN_PATTERNS.some((p) => p.test(msg));
     });
     if (realErrors.length > 0) {
       console.log('Unexpected errors:');
@@ -222,9 +238,7 @@ test.describe('Memory Agent Pipeline', () => {
     const orb = await findOrbWindow(app.electronApp);
     expect(orb).toBeTruthy();
 
-    const { submitResult, settled } = await submitAndWait(
-      orb, 'forget my name', since
-    );
+    const { submitResult, settled } = await submitAndWait(orb, 'forget my name', since);
 
     console.log('Submit result:', JSON.stringify(submitResult, null, 2));
     expect(submitResult).toBeTruthy();
@@ -236,20 +250,26 @@ test.describe('Memory Agent Pipeline', () => {
 
     // Check for deletion log -- memory-agent logs to 'agent' category
     const deleteLogs = await getLogs({ category: 'agent', since, search: 'MemoryAgent', limit: 20 });
-    console.log('Memory agent deletion logs:', deleteLogs.map(l => l.message));
+    console.log(
+      'Memory agent deletion logs:',
+      deleteLogs.map((l) => l.message)
+    );
 
     // Also check for the specific "Deleted fact" log entry
     const allAgentLogs = await getLogs({ category: 'agent', since, limit: 50 });
-    const deleteEvidence = allAgentLogs.filter(l =>
-      (l.message || '').includes('Deleted fact') || (l.message || '').includes('MemoryAgent')
+    const deleteEvidence = allAgentLogs.filter(
+      (l) => (l.message || '').includes('Deleted fact') || (l.message || '').includes('MemoryAgent')
     );
-    console.log('Delete evidence:', deleteEvidence.map(l => l.message));
+    console.log(
+      'Delete evidence:',
+      deleteEvidence.map((l) => l.message)
+    );
 
     // Verify no unexpected errors
     const newErrors = await checkNewErrors(snapshot);
-    const realErrors = newErrors.filter(err => {
+    const realErrors = newErrors.filter((err) => {
       const msg = err.message || '';
-      return !MEMORY_TEST_BENIGN_PATTERNS.some(p => p.test(msg));
+      return !MEMORY_TEST_BENIGN_PATTERNS.some((p) => p.test(msg));
     });
     if (realErrors.length > 0) {
       console.log('Unexpected errors:');
@@ -267,9 +287,7 @@ test.describe('Memory Agent Pipeline', () => {
     const orb = await findOrbWindow(app.electronApp);
     expect(orb).toBeTruthy();
 
-    const { submitResult, settled } = await submitAndWait(
-      orb, 'play some music', since
-    );
+    const { submitResult, settled } = await submitAndWait(orb, 'play some music', since);
 
     console.log('Submit result:', JSON.stringify(submitResult, null, 2));
     expect(submitResult).toBeTruthy();
@@ -283,9 +301,9 @@ test.describe('Memory Agent Pipeline', () => {
 
     // Verify no unexpected errors
     const newErrors = await checkNewErrors(snapshot);
-    const realErrors = newErrors.filter(err => {
+    const realErrors = newErrors.filter((err) => {
       const msg = err.message || '';
-      return !MEMORY_TEST_BENIGN_PATTERNS.some(p => p.test(msg));
+      return !MEMORY_TEST_BENIGN_PATTERNS.some((p) => p.test(msg));
     });
     if (realErrors.length > 0) {
       console.log('Unexpected errors:');
@@ -305,8 +323,8 @@ test.describe('Memory Agent Pipeline', () => {
       const spacesRes = await fetch(`${SPACES_API}/api/spaces/gsx-agent/items`);
       const spacesData = await spacesRes.json();
       const items = spacesData.items || spacesData || [];
-      const memoryItem = items.find(i =>
-        (i.id || '').includes('memory-agent') || (i.metadata?.agentId === 'memory-agent')
+      const memoryItem = items.find(
+        (i) => (i.id || '').includes('memory-agent') || i.metadata?.agentId === 'memory-agent'
       );
 
       console.log('Memory agent space item found:', !!memoryItem);
@@ -320,7 +338,10 @@ test.describe('Memory Agent Pipeline', () => {
         // Item may not exist yet if the agent didn't run (bidding issue).
         // Check that the agent at least registered successfully.
         const agentLogs = await getLogs({ category: 'agent', search: 'memory-agent', limit: 20 });
-        console.log('Agent registration logs:', agentLogs.map(l => l.message));
+        console.log(
+          'Agent registration logs:',
+          agentLogs.map((l) => l.message)
+        );
         // The agent should at least have been loaded
         expect(agentLogs.length).toBeGreaterThanOrEqual(0); // Soft assertion
         console.log('NOTE: Memory agent space item not found -- agent may not have won any bids yet');
@@ -329,7 +350,10 @@ test.describe('Memory Agent Pipeline', () => {
       console.log('Spaces API check failed:', e.message);
       // Fall back to just checking log server for any memory-agent activity
       const memLogs = await getLogs({ category: 'agent', search: 'memory-agent', limit: 20 });
-      console.log('Memory agent activity logs:', memLogs.map(l => l.message));
+      console.log(
+        'Memory agent activity logs:',
+        memLogs.map((l) => l.message)
+      );
     }
   });
 });
@@ -373,7 +397,9 @@ test.describe('Memory Agent Onboarding', () => {
     // Close the app so it saves state
     await closeApp(onboardApp);
     onboardApp = null;
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise((r) => {
+      setTimeout(r, 2000);
+    });
 
     // Step 2: Relaunch -- profile is gone, should trigger onboarding
     onboardApp = await launchApp({ timeout: 45000 });
@@ -390,23 +416,27 @@ test.describe('Memory Agent Onboarding', () => {
 
     while (Date.now() - start < 30000) {
       const logs = await getLogs({ category: 'voice', search: 'Onboarding', limit: 10 });
-      onboardingLog = logs.find(l =>
-        (l.message || '').includes('Welcome message spoken') ||
-        (l.message || '').includes('blank')
+      onboardingLog = logs.find(
+        (l) => (l.message || '').includes('Welcome message spoken') || (l.message || '').includes('blank')
       );
       if (onboardingLog) break;
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => {
+        setTimeout(r, 2000);
+      });
     }
 
     console.log('Onboarding log found:', onboardingLog ? onboardingLog.message : 'NOT FOUND');
 
     // Check for all onboarding logs
     const allOnboardLogs = await getLogs({ category: 'voice', search: 'Onboarding', limit: 20 });
-    console.log('All onboarding logs:', allOnboardLogs.map(l => l.message));
+    console.log(
+      'All onboarding logs:',
+      allOnboardLogs.map((l) => l.message)
+    );
 
     // The onboarding should have triggered
-    const triggered = allOnboardLogs.some(l =>
-      (l.message || '').includes('blank') || (l.message || '').includes('Welcome')
+    const triggered = allOnboardLogs.some(
+      (l) => (l.message || '').includes('blank') || (l.message || '').includes('Welcome')
     );
     expect(triggered).toBeTruthy();
   });

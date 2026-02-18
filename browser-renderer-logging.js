@@ -6,17 +6,17 @@
 // Override createNewTab to add logging
 const originalCreateNewTab = window.createNewTab;
 if (originalCreateNewTab) {
-  window.createNewTab = function(url) {
+  window.createNewTab = function (url) {
     const result = originalCreateNewTab.call(this, url);
-    
+
     // Log tab creation
     if (window.api && window.api.logTabCreated) {
       window.api.logTabCreated(result?.tabId || 'unknown', url, {
         source: 'user-action',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
     }
-    
+
     return result;
   };
 }
@@ -24,31 +24,21 @@ if (originalCreateNewTab) {
 // Log tab switches
 document.addEventListener('tab-switched', (event) => {
   if (window.api && window.api.logTabSwitched) {
-    window.api.logTabSwitched(
-      event.detail.fromTab,
-      event.detail.toTab
-    );
+    window.api.logTabSwitched(event.detail.fromTab, event.detail.toTab);
   }
 });
 
 // Log tab closes
 document.addEventListener('tab-closed', (event) => {
   if (window.api && window.api.logTabClosed) {
-    window.api.logTabClosed(
-      event.detail.tabId,
-      event.detail.url
-    );
+    window.api.logTabClosed(event.detail.tabId, event.detail.url);
   }
 });
 
 // Log navigation events
 window.addEventListener('navigation', (event) => {
   if (window.api && window.api.logWindowNavigation) {
-    window.api.logWindowNavigation(
-      'main',
-      event.detail.url,
-      event.detail.from
-    );
+    window.api.logWindowNavigation('main', event.detail.url, event.detail.from);
   }
 });
 

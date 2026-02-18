@@ -1,10 +1,10 @@
 /**
  * Spaces Agent - Intelligent Content Assistant
- * 
+ *
  * A dedicated agent for managing and querying Spaces content.
  * Provides smart summaries when opening Spaces, answers questions
  * about saved content, and searches within Spaces.
- * 
+ *
  * Capabilities:
  * - "Open Spaces" with intelligent summary of recent items
  * - "What did I save today/yesterday/this week?"
@@ -36,29 +36,47 @@ function getSpacesAPI() {
 
 // Time period keywords and their millisecond values
 const TIME_PERIODS = {
-  'today': 24 * 60 * 60 * 1000,
-  'yesterday': 48 * 60 * 60 * 1000,  // Look back 48h, filter for yesterday
+  today: 24 * 60 * 60 * 1000,
+  yesterday: 48 * 60 * 60 * 1000, // Look back 48h, filter for yesterday
   'this week': 7 * 24 * 60 * 60 * 1000,
   'last week': 14 * 24 * 60 * 60 * 1000,
   'this month': 30 * 24 * 60 * 60 * 1000,
-  'recent': 24 * 60 * 60 * 1000,
+  recent: 24 * 60 * 60 * 1000,
 };
 
 const spacesAgent = {
   id: 'spaces-agent',
   name: 'Spaces Assistant',
-  description: 'Manages your saved content in Spaces. Opens Spaces with smart summaries, searches your content, creates new spaces, and saves notes. Say "create a space called Work" or "add a note" to manage content.',
+  description:
+    'Manages your saved content in Spaces. Opens Spaces with smart summaries, searches your content, creates new spaces, and saves notes. Say "create a space called Work" or "add a note" to manage content.',
   voice: 'nova',
   acks: ['Let me check your Spaces.', 'Looking at your saved items.', 'Working on that.'],
   categories: ['storage', 'content', 'clipboard', 'search', 'organization', 'notes'],
   keywords: [
-    'spaces', 'clipboard', 'saved', 'items', 'find', 'search', 'recent',
-    'what did i save', 'open spaces', 'show clipboard', 'my items',
-    'screenshots', 'notes', 'files', 'content', 'storage',
-    'create space', 'new space', 'add note', 'save note', 'remember this'
+    'spaces',
+    'clipboard',
+    'saved',
+    'items',
+    'find',
+    'search',
+    'recent',
+    'what did i save',
+    'open spaces',
+    'show clipboard',
+    'my items',
+    'screenshots',
+    'notes',
+    'files',
+    'content',
+    'storage',
+    'create space',
+    'new space',
+    'add note',
+    'save note',
+    'remember this',
   ],
-  executionType: 'action',  // Reads/writes Spaces data
-  
+  executionType: 'action', // Reads/writes Spaces data
+
   // Pending note content (for multi-turn note creation)
   _pendingNote: null,
 
@@ -116,18 +134,18 @@ const spacesAgent = {
       const action = task.context?.action;
       if (action) {
         log.info('agent', `Handling follow-up for action: ${action}`);
-        
+
         if (action === 'create-space') {
           // User is providing the space name
           return this._handleCreateSpaceResponse(task, onProgress);
         }
-        
+
         if (action === 'add-note') {
           // User is providing the note content
           return this._handleAddNoteResponse(task, onProgress);
         }
       }
-      
+
       // Handle generic yes/no follow-ups (for "open spaces?" prompts)
       if (task.context?.userInput) {
         const userResponse = task.context.userInput.toLowerCase();
@@ -137,20 +155,28 @@ const spacesAgent = {
       }
 
       // Create space command
-      if ((lower.includes('create') || lower.includes('make') || lower.includes('new')) &&
-          (lower.includes('space') || lower.includes('folder'))) {
+      if (
+        (lower.includes('create') || lower.includes('make') || lower.includes('new')) &&
+        (lower.includes('space') || lower.includes('folder'))
+      ) {
         return this._createSpace(task, onProgress);
       }
 
       // Add note command
-      if ((lower.includes('add') || lower.includes('save') || lower.includes('create') || lower.includes('remember')) &&
-          (lower.includes('note') || lower.includes('reminder'))) {
+      if (
+        (lower.includes('add') || lower.includes('save') || lower.includes('create') || lower.includes('remember')) &&
+        (lower.includes('note') || lower.includes('reminder'))
+      ) {
         return this._addNote(task, onProgress);
       }
 
       // List spaces command
-      if ((lower.includes('list') || lower.includes('what')) && lower.includes('spaces') && 
-          !lower.includes('open') && !lower.includes('show')) {
+      if (
+        (lower.includes('list') || lower.includes('what')) &&
+        lower.includes('spaces') &&
+        !lower.includes('open') &&
+        !lower.includes('show')
+      ) {
         return this._listSpaces(task, onProgress);
       }
 
@@ -176,12 +202,11 @@ const spacesAgent = {
 
       // Default: provide summary and offer to open
       return this._summarizeAndOffer(task, onProgress);
-
     } catch (error) {
       log.error('agent', 'Execute error', { error });
       return {
         success: false,
-        message: 'Sorry, I had trouble accessing your Spaces. Please try again.'
+        message: 'Sorry, I had trouble accessing your Spaces. Please try again.',
       };
     }
   },
@@ -214,8 +239,8 @@ const spacesAgent = {
       success: true,
       message: summary,
       data: {
-        action: { type: 'open-spaces' }
-      }
+        action: { type: 'open-spaces' },
+      },
     };
   },
 
@@ -224,11 +249,11 @@ const spacesAgent = {
    */
   async _searchSpaces(task, onProgress) {
     const query = this._extractSearchQuery(task.content);
-    
+
     if (!query) {
       return {
         success: true,
-        message: "What would you like me to search for in your Spaces?"
+        message: 'What would you like me to search for in your Spaces?',
       };
     }
 
@@ -245,7 +270,7 @@ const spacesAgent = {
       if (!results || results.length === 0) {
         return {
           success: true,
-          message: `I didn't find anything matching "${query}" in your Spaces.`
+          message: `I didn't find anything matching "${query}" in your Spaces.`,
         };
       }
 
@@ -257,15 +282,15 @@ const spacesAgent = {
         message: summary,
         data: {
           action: { type: 'open-spaces' },
-          searchQuery: query
-        }
+          searchQuery: query,
+        },
       };
     } catch (error) {
       log.error('agent', 'Search error', { error });
       return {
         success: true,
         message: `I had trouble searching. Opening Spaces so you can search manually.`,
-        data: { action: { type: 'open-spaces' } }
+        data: { action: { type: 'open-spaces' } },
       };
     }
   },
@@ -275,7 +300,7 @@ const spacesAgent = {
    */
   async _queryByTime(task, onProgress) {
     const lower = task.content.toLowerCase();
-    
+
     // Determine time period
     let periodMs = 24 * 60 * 60 * 1000; // Default: today
     let periodName = 'today';
@@ -297,9 +322,7 @@ const spacesAgent = {
       const now = Date.now();
       const yesterdayStart = now - 48 * 60 * 60 * 1000;
       const yesterdayEnd = now - 24 * 60 * 60 * 1000;
-      const yesterdayItems = items.filter(item => 
-        item.timestamp >= yesterdayStart && item.timestamp < yesterdayEnd
-      );
+      const yesterdayItems = items.filter((item) => item.timestamp >= yesterdayStart && item.timestamp < yesterdayEnd);
       return this._formatTimeQueryResponse(yesterdayItems, periodName);
     }
 
@@ -311,7 +334,7 @@ const spacesAgent = {
    */
   async _getAnalytics(task, onProgress) {
     const lower = task.content.toLowerCase();
-    
+
     onProgress('Counting items...');
 
     const api = getSpacesAPI();
@@ -325,20 +348,20 @@ const spacesAgent = {
 
       // Get items to count by type
       const allItems = await this._getAllItems();
-      
+
       // Count by type
       const byType = {};
-      allItems.forEach(item => {
+      allItems.forEach((item) => {
         byType[item.type] = (byType[item.type] || 0) + 1;
       });
 
       // Determine what they're asking about
       let response = '';
-      
+
       if (lower.includes('screenshot')) {
         const count = byType['image'] || 0;
-        const recentScreenshots = allItems.filter(i => 
-          i.type === 'image' && i.timestamp > Date.now() - 7 * 24 * 60 * 60 * 1000
+        const recentScreenshots = allItems.filter(
+          (i) => i.type === 'image' && i.timestamp > Date.now() - 7 * 24 * 60 * 60 * 1000
         ).length;
         response = `You have ${count} images and screenshots in Spaces. ${recentScreenshots} were saved this week.`;
       } else if (lower.includes('video')) {
@@ -354,7 +377,7 @@ const spacesAgent = {
           .slice(0, 3)
           .map(([type, count]) => `${count} ${type}${count > 1 ? 's' : ''}`)
           .join(', ');
-        
+
         response = `You have ${totalItems} items across ${spaces.length} spaces. Most common: ${typeList}.`;
       }
 
@@ -368,17 +391,17 @@ const spacesAgent = {
   /**
    * Summarize Spaces and offer to open
    */
-  async _summarizeAndOffer(task, onProgress) {
+  async _summarizeAndOffer(_task, _onProgress) {
     const recentItems = await this._getRecentItems(24 * 60 * 60 * 1000);
-    
+
     if (recentItems.length === 0) {
       return {
         success: true,
-        message: "Your Spaces is quiet today. No new items in the last 24 hours. Would you like me to open it?",
+        message: 'Your Spaces is quiet today. No new items in the last 24 hours. Would you like me to open it?',
         needsInput: {
           prompt: "Say 'yes' to open Spaces, or ask me something specific.",
-          agentId: this.id
-        }
+          agentId: this.id,
+        },
       };
     }
 
@@ -392,8 +415,8 @@ const spacesAgent = {
       message: `You have ${recentItems.length} new items today: ${typesSummary}. Would you like me to open Spaces?`,
       needsInput: {
         prompt: "Say 'yes' or 'open' to view them.",
-        agentId: this.id
-      }
+        agentId: this.id,
+      },
     };
   },
 
@@ -412,12 +435,12 @@ const spacesAgent = {
     if (!spaceName) {
       return {
         success: true,
-        message: "What would you like to call the new space?",
+        message: 'What would you like to call the new space?',
         needsInput: {
-          prompt: "Tell me the name for your new space.",
+          prompt: 'Tell me the name for your new space.',
           agentId: this.id,
-          context: { action: 'create-space' }
-        }
+          context: { action: 'create-space' },
+        },
       };
     }
 
@@ -426,9 +449,7 @@ const spacesAgent = {
     try {
       // Check if space already exists
       const existingSpaces = await api.list();
-      const existing = existingSpaces.find(s => 
-        s.name.toLowerCase() === spaceName.toLowerCase()
-      );
+      const existing = existingSpaces.find((s) => s.name.toLowerCase() === spaceName.toLowerCase());
 
       if (existing) {
         return {
@@ -436,8 +457,8 @@ const spacesAgent = {
           message: `A space called "${existing.name}" already exists. Would you like me to open it?`,
           needsInput: {
             prompt: "Say 'yes' to open it, or give me a different name.",
-            agentId: this.id
-          }
+            agentId: this.id,
+          },
         };
       }
 
@@ -454,14 +475,14 @@ const spacesAgent = {
         message: `Done! I created a new space called "${newSpace.name}". Would you like me to open Spaces?`,
         data: {
           action: { type: 'open-spaces' },
-          created: newSpace
-        }
+          created: newSpace,
+        },
       };
     } catch (error) {
       log.error('agent', 'Create space error', { error });
       return {
         success: false,
-        message: `Sorry, I couldn't create the space: ${error.message}`
+        message: `Sorry, I couldn't create the space: ${error.message}`,
       };
     }
   },
@@ -477,16 +498,16 @@ const spacesAgent = {
 
     // The user's response IS the space name
     const spaceName = (task.context?.userInput || task.content || '').trim();
-    
+
     if (!spaceName || spaceName.length < 1) {
       return {
         success: true,
         message: "I didn't catch the name. What would you like to call the space?",
         needsInput: {
-          prompt: "Tell me the name for your new space.",
+          prompt: 'Tell me the name for your new space.',
           agentId: this.id,
-          context: { action: 'create-space' }
-        }
+          context: { action: 'create-space' },
+        },
       };
     }
 
@@ -495,14 +516,12 @@ const spacesAgent = {
     try {
       // Check if space already exists
       const existingSpaces = await api.list();
-      const existing = existingSpaces.find(s => 
-        s.name.toLowerCase() === spaceName.toLowerCase()
-      );
+      const existing = existingSpaces.find((s) => s.name.toLowerCase() === spaceName.toLowerCase());
 
       if (existing) {
         return {
           success: true,
-          message: `A space called "${existing.name}" already exists. Would you like me to open it?`
+          message: `A space called "${existing.name}" already exists. Would you like me to open it?`,
         };
       }
 
@@ -519,14 +538,14 @@ const spacesAgent = {
         message: `Done! I created a new space called "${newSpace.name}".`,
         data: {
           action: { type: 'open-spaces' },
-          created: newSpace
-        }
+          created: newSpace,
+        },
       };
     } catch (error) {
       log.error('agent', 'Create space error', { error });
       return {
         success: false,
-        message: `Sorry, I couldn't create the space: ${error.message}`
+        message: `Sorry, I couldn't create the space: ${error.message}`,
       };
     }
   },
@@ -542,16 +561,16 @@ const spacesAgent = {
 
     // The user's response IS the note content
     const noteContent = (task.context?.userInput || task.content || '').trim();
-    
+
     if (!noteContent || noteContent.length < 1) {
       return {
         success: true,
         message: "I didn't catch that. What would you like me to save?",
         needsInput: {
-          prompt: "Tell me what to write in the note.",
+          prompt: 'Tell me what to write in the note.',
           agentId: this.id,
-          context: { action: 'add-note' }
-        }
+          context: { action: 'add-note' },
+        },
       };
     }
 
@@ -560,11 +579,11 @@ const spacesAgent = {
     try {
       // Save to the default "Unclassified" space
       const title = noteContent.slice(0, 50) + (noteContent.length > 50 ? '...' : '');
-      
+
       await api.addItem('unclassified', {
         type: 'text',
         title: title,
-        text: noteContent
+        text: noteContent,
       });
 
       // Track in memory
@@ -574,13 +593,13 @@ const spacesAgent = {
 
       return {
         success: true,
-        message: `Done! I saved your note "${title}" to Unclassified.`
+        message: `Done! I saved your note "${title}" to Unclassified.`,
       };
     } catch (error) {
       log.error('agent', 'Add note error', { error });
       return {
         success: false,
-        message: `Sorry, I couldn't save the note: ${error.message}`
+        message: `Sorry, I couldn't save the note: ${error.message}`,
       };
     }
   },
@@ -600,12 +619,12 @@ const spacesAgent = {
     if (!noteContent) {
       return {
         success: true,
-        message: "What would you like me to save?",
+        message: 'What would you like me to save?',
         needsInput: {
-          prompt: "Tell me what to write in the note.",
+          prompt: 'Tell me what to write in the note.',
           agentId: this.id,
-          context: { action: 'add-note' }
-        }
+          context: { action: 'add-note' },
+        },
       };
     }
 
@@ -618,8 +637,8 @@ const spacesAgent = {
         content: noteContent,
         metadata: {
           title: noteContent.length > 50 ? noteContent.slice(0, 50) + '...' : noteContent,
-          source: 'voice-assistant'
-        }
+          source: 'voice-assistant',
+        },
       });
 
       // Track in memory
@@ -633,14 +652,14 @@ const spacesAgent = {
         message: `Saved! I added your note to Spaces.`,
         data: {
           action: { type: 'open-spaces' },
-          created: newItem
-        }
+          created: newItem,
+        },
       };
     } catch (error) {
       log.error('agent', 'Add note error', { error });
       return {
         success: false,
-        message: `Sorry, I couldn't save the note: ${error.message}`
+        message: `Sorry, I couldn't save the note: ${error.message}`,
       };
     }
   },
@@ -662,7 +681,7 @@ const spacesAgent = {
       if (spaces.length === 0) {
         return {
           success: true,
-          message: "You don't have any spaces yet. Would you like me to create one?"
+          message: "You don't have any spaces yet. Would you like me to create one?",
         };
       }
 
@@ -670,22 +689,23 @@ const spacesAgent = {
       const spaceList = spaces
         .sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0))
         .slice(0, 5)
-        .map(s => `${s.name} with ${s.itemCount || 0} items`)
+        .map((s) => `${s.name} with ${s.itemCount || 0} items`)
         .join(', ');
 
-      const response = spaces.length <= 5
-        ? `You have ${spaces.length} spaces: ${spaceList}.`
-        : `You have ${spaces.length} spaces. The top ones are: ${spaceList}.`;
+      const response =
+        spaces.length <= 5
+          ? `You have ${spaces.length} spaces: ${spaceList}.`
+          : `You have ${spaces.length} spaces. The top ones are: ${spaceList}.`;
 
       return {
         success: true,
-        message: response
+        message: response,
       };
     } catch (error) {
       log.error('agent', 'List spaces error', { error });
       return {
         success: false,
-        message: 'Sorry, I had trouble getting your spaces.'
+        message: 'Sorry, I had trouble getting your spaces.',
       };
     }
   },
@@ -695,7 +715,7 @@ const spacesAgent = {
    */
   _extractSpaceName(text) {
     const lower = text.toLowerCase();
-    
+
     // Patterns like "create a space called X" or "new space named X"
     const patterns = [
       /(?:create|make|new)\s+(?:a\s+)?(?:space|folder)\s+(?:called|named|for)\s+["']?(.+?)["']?$/i,
@@ -714,12 +734,13 @@ const spacesAgent = {
     const cleaned = lower
       .replace(/\b(create|make|new|a|space|folder|called|named|for|please|can you|could you)\b/gi, '')
       .trim();
-    
+
     // Only return if it looks like a name (2+ chars, not just punctuation)
     if (cleaned.length >= 2 && /[a-z]/i.test(cleaned)) {
       // Capitalize first letter of each word
-      return cleaned.split(/\s+/)
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      return cleaned
+        .split(/\s+/)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
         .join(' ');
     }
 
@@ -780,8 +801,7 @@ const spacesAgent = {
 
       // Filter by time
       const cutoff = Date.now() - periodMs;
-      return allItems.filter(item => item.timestamp >= cutoff)
-        .sort((a, b) => b.timestamp - a.timestamp);
+      return allItems.filter((item) => item.timestamp >= cutoff).sort((a, b) => b.timestamp - a.timestamp);
     } catch (error) {
       log.error('agent', 'Error getting recent items', { error });
       return [];
@@ -854,7 +874,7 @@ const spacesAgent = {
    */
   _groupByType(items) {
     const byType = {};
-    items.forEach(item => {
+    items.forEach((item) => {
       const type = item.type || 'other';
       byType[type] = byType[type] || [];
       byType[type].push(item);
@@ -873,10 +893,10 @@ const spacesAgent = {
     for (const [type, items] of Object.entries(byType)) {
       typeSummary[type] = {
         count: items.length,
-        samples: items.slice(0, 3).map(i => ({
+        samples: items.slice(0, 3).map((i) => ({
           preview: (i.preview || i.title || '').slice(0, 80),
-          tags: i.tags || []
-        }))
+          tags: i.tags || [],
+        })),
       };
     }
 
@@ -886,9 +906,7 @@ const spacesAgent = {
       spacesCount: spaces.length,
       byType: typeSummary,
       timeRange: '24 hours',
-      pinnedHighlights: pinnedItems.slice(0, 3).map(p => 
-        (p.title || p.preview || 'Untitled').slice(0, 50)
-      )
+      pinnedHighlights: pinnedItems.slice(0, 3).map((p) => (p.title || p.preview || 'Untitled').slice(0, 50)),
     };
   },
 
@@ -897,7 +915,7 @@ const spacesAgent = {
    */
   async _generateSummary(itemsData, userQuery) {
     if (itemsData.totalRecentCount === 0) {
-      return "Opening Spaces. Nothing new in the last 24 hours.";
+      return 'Opening Spaces. Nothing new in the last 24 hours.';
     }
 
     try {
@@ -924,7 +942,7 @@ Be conversational and brief. Don't list everything - pick the most interesting p
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.7,
         maxTokens: 100,
-        feature: 'spaces-agent'
+        feature: 'spaces-agent',
       });
 
       return result.content?.trim() || this._generateSimpleSummary(itemsData);
@@ -939,7 +957,7 @@ Be conversational and brief. Don't list everything - pick the most interesting p
    */
   _generateSimpleSummary(itemsData) {
     if (itemsData.totalRecentCount === 0) {
-      return "Opening Spaces. No new items in the last 24 hours.";
+      return 'Opening Spaces. No new items in the last 24 hours.';
     }
 
     const types = Object.entries(itemsData.byType)
@@ -956,7 +974,7 @@ Be conversational and brief. Don't list everything - pick the most interesting p
    */
   _extractSearchQuery(text) {
     const lower = text.toLowerCase();
-    
+
     // Common patterns
     const patterns = [
       /(?:find|search|look for|search for)\s+(?:my\s+)?(?:notes?\s+)?(?:about\s+)?["']?(.+?)["']?$/i,
@@ -972,9 +990,7 @@ Be conversational and brief. Don't list everything - pick the most interesting p
     }
 
     // Fallback: remove common words
-    return lower
-      .replace(/\b(find|search|look|for|in|my|spaces|clipboard|notes?|items?|the|about)\b/gi, '')
-      .trim();
+    return lower.replace(/\b(find|search|look|for|in|my|spaces|clipboard|notes?|items?|the|about)\b/gi, '').trim();
   },
 
   /**
@@ -1003,7 +1019,7 @@ Be conversational and brief. Don't list everything - pick the most interesting p
     if (items.length === 0) {
       return {
         success: true,
-        message: `You didn't save anything ${periodName}.`
+        message: `You didn't save anything ${periodName}.`,
       };
     }
 
@@ -1014,16 +1030,16 @@ Be conversational and brief. Don't list everything - pick the most interesting p
       .join(', ');
 
     const verb = periodName === 'today' ? 'saved' : 'saved';
-    
+
     return {
       success: true,
       message: `${periodName === 'today' ? 'Today' : periodName.charAt(0).toUpperCase() + periodName.slice(1)} you ${verb} ${items.length} items: ${typeParts}. Want me to open Spaces?`,
       needsInput: {
         prompt: "Say 'yes' or 'open' to view them.",
-        agentId: this.id
-      }
+        agentId: this.id,
+      },
     };
-  }
+  },
 };
 
 module.exports = spacesAgent;

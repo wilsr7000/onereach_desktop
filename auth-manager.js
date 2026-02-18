@@ -3,7 +3,7 @@
  * Provides persistent authentication, credential capture, and auto-fill
  */
 
-const { session, BrowserWindow, ipcMain, dialog } = require('electron');
+const { _session, _BrowserWindow, ipcMain, _dialog } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const credentialManager = require('./credential-manager');
@@ -13,14 +13,14 @@ class AuthManager {
     this.app = app;
     this.authDataPath = path.join(app.getPath('userData'), 'auth-sessions.json');
     this.sessions = new Map();
-    
+
     // Track webviews with pending credential captures
     // Key: webContentsId, Value: { url, loginPageUrl, hasLoginForm }
     this.loginTracking = new Map();
-    
+
     this.loadSessions();
     this.setupCredentialIPC();
-    
+
     console.log('[AuthManager] Initialized with credential support');
   }
 
@@ -31,7 +31,7 @@ class AuthManager {
     // Handle credentials captured from webview form submission
     ipcMain.on('credentials-captured', async (event, data) => {
       console.log('[AuthManager] Credentials captured for:', data.url);
-      
+
       // Store temporarily until we confirm login success
       const key = credentialManager.storePendingCredentials(
         data.url,
@@ -39,13 +39,13 @@ class AuthManager {
         data.password,
         data.idwName || null
       );
-      
+
       // Track this webContents for navigation monitoring
       const webContentsId = event.sender.id;
       this.loginTracking.set(webContentsId, {
         credentialKey: key,
         loginPageUrl: data.url,
-        capturedAt: Date.now()
+        capturedAt: Date.now(),
       });
     });
 
@@ -80,7 +80,7 @@ class AuthManager {
           success: true,
           username: credential.username,
           password: credential.password,
-          idwName: credential.idwName
+          idwName: credential.idwName,
         };
       }
       return { success: false };
@@ -119,12 +119,12 @@ class AuthManager {
     // Handle login form detected notification
     ipcMain.on('login-form-detected', async (event, { url, hasCredential }) => {
       console.log('[AuthManager] Login form detected at:', url, 'Has saved credential:', hasCredential);
-      
+
       const webContentsId = event.sender.id;
       this.loginTracking.set(webContentsId, {
         ...this.loginTracking.get(webContentsId),
         hasLoginForm: true,
-        loginPageUrl: url
+        loginPageUrl: url,
       });
     });
 
@@ -139,7 +139,7 @@ class AuthManager {
         this.sessions.set(domain, cookies);
       });
       console.log('Loaded auth sessions for domains:', Array.from(this.sessions.keys()));
-    } catch (error) {
+    } catch (_error) {
       console.log('No existing auth sessions found');
     }
   }
@@ -175,31 +175,30 @@ class AuthManager {
         'microsoft.com',
         'login.microsoftonline.com',
         'adobe.com',
-        'auth.services.adobe.com'
+        'auth.services.adobe.com',
       ];
 
-      const isAuthDomain = authDomains.some(domain => 
-        cookie.domain.includes(domain)
-      );
+      const isAuthDomain = authDomains.some((domain) => cookie.domain.includes(domain));
 
       if (isAuthDomain && !removed) {
         console.log(`Storing auth cookie: ${cookie.name} for ${cookie.domain}`);
-        
+
         // Get all cookies for this domain
         const cookies = await ses.cookies.get({ domain: cookie.domain });
-        
+
         // Filter for important auth cookies
-        const authCookies = cookies.filter(c => 
-          c.name.includes('auth') ||
-          c.name.includes('session') ||
-          c.name.includes('token') ||
-          c.name.includes('SID') ||
-          c.name.includes('SSID') ||
-          c.name.includes('HSID') ||
-          c.name.includes('APISID') ||
-          c.name.includes('SAPISID') ||
-          c.name.includes('__Secure') ||
-          c.name === 'user'
+        const authCookies = cookies.filter(
+          (c) =>
+            c.name.includes('auth') ||
+            c.name.includes('session') ||
+            c.name.includes('token') ||
+            c.name.includes('SID') ||
+            c.name.includes('SSID') ||
+            c.name.includes('HSID') ||
+            c.name.includes('APISID') ||
+            c.name.includes('SAPISID') ||
+            c.name.includes('__Secure') ||
+            c.name === 'user'
         );
 
         if (authCookies.length > 0) {
@@ -212,11 +211,11 @@ class AuthManager {
     // Restore saved sessions when window loads
     window.webContents.on('did-start-loading', async () => {
       const url = window.webContents.getURL();
-      
+
       for (const [domain, cookies] of this.sessions) {
         if (url.includes(domain)) {
           console.log(`Restoring ${cookies.length} auth cookies for ${domain}`);
-          
+
           for (const cookie of cookies) {
             try {
               await ses.cookies.set({
@@ -227,7 +226,7 @@ class AuthManager {
                 path: cookie.path || '/',
                 secure: cookie.secure !== false,
                 httpOnly: cookie.httpOnly !== false,
-                expirationDate: cookie.expirationDate || (Date.now() / 1000) + 86400 * 30 // 30 days
+                expirationDate: cookie.expirationDate || Date.now() / 1000 + 86400 * 30, // 30 days
               });
             } catch (error) {
               console.error(`Error restoring cookie ${cookie.name}:`, error);
@@ -241,12 +240,12 @@ class AuthManager {
     window.webContents.on('did-finish-load', () => {
       this.injectAuthHelper(window);
     });
-    
+
     // Monitor navigation for login success detection
     window.webContents.on('did-navigate', (event, url) => {
       this.handleNavigation(window.webContents.id, url);
     });
-    
+
     window.webContents.on('did-navigate-in-page', (event, url) => {
       this.handleNavigation(window.webContents.id, url);
     });
@@ -261,12 +260,12 @@ class AuthManager {
     webContents.on('did-finish-load', () => {
       this.injectCredentialHelper(webContents);
     });
-    
+
     // Monitor navigation for login success
     webContents.on('did-navigate', (event, url) => {
       this.handleNavigation(webContents.id, url);
     });
-    
+
     webContents.on('did-navigate-in-page', (event, url) => {
       this.handleNavigation(webContents.id, url);
     });
@@ -278,29 +277,29 @@ class AuthManager {
   async handleNavigation(webContentsId, newUrl) {
     const tracking = this.loginTracking.get(webContentsId);
     if (!tracking || !tracking.credentialKey) return;
-    
+
     // Check if we navigated away from the login page
     const loginPageDomain = new URL(tracking.loginPageUrl).hostname;
     let navigatedAway = false;
-    
+
     try {
       const newDomain = new URL(newUrl).hostname;
       // Consider login successful if:
       // 1. Domain changed, OR
       // 2. URL no longer contains login-related paths
       const loginPaths = ['login', 'signin', 'auth', 'authenticate', 'sso'];
-      const wasOnLoginPath = loginPaths.some(p => tracking.loginPageUrl.toLowerCase().includes(p));
-      const stillOnLoginPath = loginPaths.some(p => newUrl.toLowerCase().includes(p));
-      
-      navigatedAway = (newDomain !== loginPageDomain) || (wasOnLoginPath && !stillOnLoginPath);
-    } catch (e) {
+      const wasOnLoginPath = loginPaths.some((p) => tracking.loginPageUrl.toLowerCase().includes(p));
+      const stillOnLoginPath = loginPaths.some((p) => newUrl.toLowerCase().includes(p));
+
+      navigatedAway = newDomain !== loginPageDomain || (wasOnLoginPath && !stillOnLoginPath);
+    } catch (_e) {
       // Invalid URL, ignore
       return;
     }
-    
+
     if (navigatedAway) {
       console.log('[AuthManager] Login appears successful, prompting to save credentials');
-      
+
       // Get pending credentials
       const pending = credentialManager.getPendingCredentials(tracking.loginPageUrl);
       if (pending) {
@@ -312,14 +311,14 @@ class AuthManager {
             wc.send('show-save-credential-prompt', {
               domain: pending.domain,
               username: pending.username,
-              idwName: pending.idwName
+              idwName: pending.idwName,
             });
           }
         } catch (e) {
           console.error('[AuthManager] Error sending save prompt:', e);
         }
       }
-      
+
       // Clear tracking for this webContents
       this.loginTracking.delete(webContentsId);
     }
@@ -662,8 +661,8 @@ class AuthManager {
         console.log('[CredentialHelper] Initialized');
       })();
     `;
-    
-    webContents.executeJavaScript(script).catch(err => {
+
+    webContents.executeJavaScript(script).catch((err) => {
       console.error('[AuthManager] Failed to inject credential helper:', err);
     });
   }
@@ -674,9 +673,11 @@ class AuthManager {
   injectAuthHelper(window) {
     // Use the new credential helper
     this.injectCredentialHelper(window.webContents);
-    
+
     // Also inject Google compatibility fixes
-    window.webContents.executeJavaScript(`
+    window.webContents
+      .executeJavaScript(
+        `
       (function() {
         // Make Google login less aggressive
         if (window.location.hostname.includes('google.com')) {
@@ -689,7 +690,7 @@ class AuthManager {
             Object.defineProperty(navigator.connection, 'downlink', {
               get: () => 10
             });
-          } catch (e) {}
+          } catch (_ignored) { /* navigator.connection may not be configurable */ }
           
           window.ontouchstart = null;
           
@@ -704,7 +705,9 @@ class AuthManager {
           }
         }
       })();
-    `).catch(err => console.error('Failed to inject Google compat:', err));
+    `
+      )
+      .catch((err) => console.error('Failed to inject Google compat:', err));
   }
 
   /**
@@ -715,7 +718,7 @@ class AuthManager {
     try {
       await fs.unlink(this.authDataPath);
       console.log('Cleared all saved auth sessions');
-    } catch (error) {
+    } catch (_error) {
       // File might not exist
     }
   }
@@ -729,11 +732,9 @@ class AuthManager {
       info.push({
         domain,
         cookieCount: cookies.length,
-        hasAuthCookies: cookies.some(c => 
-          c.name.includes('auth') || 
-          c.name.includes('session') || 
-          c.name.includes('token')
-        )
+        hasAuthCookies: cookies.some(
+          (c) => c.name.includes('auth') || c.name.includes('session') || c.name.includes('token')
+        ),
       });
     });
     return info;

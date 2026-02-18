@@ -1,6 +1,6 @@
 /**
  * Tab Picker - Client-side script
- * 
+ *
  * Handles tab selection and communication with the main process
  */
 
@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Event listeners
   closeBtn.addEventListener('click', () => window.tabPicker.close());
   cancelBtn.addEventListener('click', () => window.tabPicker.close());
-  
+
   attachBtn.addEventListener('click', () => {
     if (selectedTabId) {
       attachSelectedTab();
@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function checkConnectionAndLoadTabs() {
     try {
       const status = await window.tabPicker.getStatus();
-      
+
       if (status.extensionConnected) {
         showConnected();
         loadTabs();
@@ -100,9 +100,9 @@ document.addEventListener('DOMContentLoaded', () => {
       emptyState.classList.add('hidden');
 
       tabs = await window.tabPicker.getTabs();
-      
+
       loadingState.classList.add('hidden');
-      
+
       if (tabs && tabs.length > 0) {
         renderTabs(tabs);
       } else {
@@ -127,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Clear existing tab items
     const existingItems = tabList.querySelectorAll('.tab-item');
-    existingItems.forEach(item => item.remove());
+    existingItems.forEach((item) => item.remove());
 
     // Sort: active tab first, then by title
     const sortedTabs = [...tabs].sort((a, b) => {
@@ -137,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Render each tab
-    sortedTabs.forEach(tab => {
+    sortedTabs.forEach((tab) => {
       const item = createTabItem(tab);
       tabList.appendChild(item);
     });
@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let domain = '';
     try {
       domain = new URL(tab.url).hostname;
-    } catch (e) {
+    } catch (_e) {
       domain = tab.url;
     }
 
@@ -185,15 +185,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // Info section
     const infoDiv = document.createElement('div');
     infoDiv.className = 'tab-info';
-    
+
     const titleDiv = document.createElement('div');
     titleDiv.className = 'tab-title';
     titleDiv.textContent = tab.title || 'Untitled';
-    
+
     const urlDiv = document.createElement('div');
     urlDiv.className = 'tab-url';
     urlDiv.textContent = domain;
-    
+
     infoDiv.appendChild(titleDiv);
     infoDiv.appendChild(urlDiv);
 
@@ -253,11 +253,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const capture = await window.tabPicker.captureTab(selectedTabId);
-      
+
       // Send result back to main window
       window.tabPicker.sendResult({
         type: 'tab-capture',
-        data: capture
+        data: capture,
       });
 
       window.tabPicker.close();
@@ -276,7 +276,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Validate URL
     try {
       new URL(url);
-    } catch (e) {
+    } catch (_e) {
       alert('Please enter a valid URL');
       return;
     }
@@ -286,11 +286,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const capture = await window.tabPicker.fetchUrl(url);
-      
+
       // Send result back to main window
       window.tabPicker.sendResult({
         type: 'url-capture',
-        data: capture
+        data: capture,
       });
 
       window.tabPicker.close();
@@ -320,7 +320,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
-
-
-
-

@@ -12,9 +12,9 @@
  */
 export function positionContextMenu(menu, x, y, options = {}) {
   const {
-    minMargin = 12,      // Minimum distance from screen edges
-    minWidth = 180,      // Minimum menu width
-    showClass = 'visible' // CSS class to show menu
+    minMargin = 12, // Minimum distance from screen edges
+    minWidth = 180, // Minimum menu width
+    showClass = 'visible', // CSS class to show menu
   } = options;
 
   const vw = window.innerWidth;
@@ -35,8 +35,8 @@ export function positionContextMenu(menu, x, y, options = {}) {
   let mh = rect.height;
 
   // Calculate usable viewport area (with margins)
-  const usableWidth = vw - (minMargin * 2);
-  const usableHeight = vh - (minMargin * 2);
+  const usableWidth = vw - minMargin * 2;
+  const usableHeight = vh - minMargin * 2;
 
   // Clamp menu size to usable viewport
   if (mw > usableWidth) {
@@ -97,7 +97,7 @@ export function hideContextMenu(menu, hideClass = 'visible') {
  */
 export function buildContextMenuHTML(items) {
   let html = '';
-  
+
   for (const item of items) {
     if (item.type === 'header') {
       html += `<div class="context-menu-header">${item.label}</div>`;
@@ -107,7 +107,7 @@ export function buildContextMenuHTML(items) {
       const disabledClass = item.disabled ? 'disabled' : '';
       const dangerClass = item.danger ? 'danger' : '';
       const dataAction = item.action ? `data-action="${item.action}"` : '';
-      
+
       html += `
         <div class="context-menu-item ${disabledClass} ${dangerClass}" ${dataAction}>
           ${item.icon ? `<span class="context-menu-item-icon">${item.icon}</span>` : ''}
@@ -117,7 +117,7 @@ export function buildContextMenuHTML(items) {
       `;
     }
   }
-  
+
   return html;
 }
 
@@ -126,18 +126,15 @@ export function buildContextMenuHTML(items) {
  */
 export class ContextMenu {
   constructor(menuElement) {
-    this.menu = typeof menuElement === 'string' 
-      ? document.querySelector(menuElement) 
-      : menuElement;
+    this.menu = typeof menuElement === 'string' ? document.querySelector(menuElement) : menuElement;
     this.itemsContainer = null;
-    
+
     // Find items container
     if (this.menu) {
-      this.itemsContainer = this.menu.querySelector('#contextMenuItems') || 
-                            this.menu.querySelector('.context-menu-items') ||
-                            this.menu;
+      this.itemsContainer =
+        this.menu.querySelector('#contextMenuItems') || this.menu.querySelector('.context-menu-items') || this.menu;
     }
-    
+
     // Setup global click handler to close menu
     this._setupClickOutside();
   }
@@ -147,11 +144,11 @@ export class ContextMenu {
    */
   show(x, y, items = null) {
     if (!this.menu) return;
-    
+
     if (items && this.itemsContainer) {
       this.itemsContainer.innerHTML = buildContextMenuHTML(items);
     }
-    
+
     positionContextMenu(this.menu, x, y);
   }
 
@@ -176,7 +173,7 @@ export class ContextMenu {
    */
   onAction(callback) {
     if (!this.itemsContainer) return;
-    
+
     this.itemsContainer.addEventListener('click', (e) => {
       const item = e.target.closest('.context-menu-item');
       if (item && !item.classList.contains('disabled')) {
@@ -198,7 +195,7 @@ export class ContextMenu {
         this.hide();
       }
     });
-    
+
     document.addEventListener('contextmenu', (e) => {
       // Don't hide if clicking on something that will show a new context menu
       if (!e.target.closest('[oncontextmenu]')) {
@@ -207,21 +204,3 @@ export class ContextMenu {
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

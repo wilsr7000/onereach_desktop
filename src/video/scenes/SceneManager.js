@@ -32,12 +32,7 @@ export class SceneManager {
    * @returns {Promise<Object>} Resolves with output path
    */
   async processEditList(inputPath, editList, options = {}, progressCallback = null) {
-    const {
-      outputPath = null,
-      format = 'mp4',
-      quality = 'high',
-      preserveQuality = true
-    } = options;
+    const { outputPath = null, format = 'mp4', quality = 'high', preserveQuality = true } = options;
 
     if (!editList || editList.length === 0) {
       throw new Error('Edit list is empty - no segments to process');
@@ -63,8 +58,13 @@ export class SceneManager {
 
     try {
       const segmentFiles = await this.extractSegments(
-        inputPath, sortedSegments, tempDir, 
-        quality, preserveQuality, progressCallback, jobId
+        inputPath,
+        sortedSegments,
+        tempDir,
+        quality,
+        preserveQuality,
+        progressCallback,
+        jobId
       );
 
       if (progressCallback) {
@@ -89,9 +89,8 @@ export class SceneManager {
         segmentCount: editList.length,
         duration: outputInfo.duration,
         durationFormatted: outputInfo.durationFormatted,
-        fileSize: outputInfo.size
+        fileSize: outputInfo.size,
       };
-
     } catch (error) {
       this.cleanupTempDir(tempDir, []);
       throw error;
@@ -134,19 +133,18 @@ export class SceneManager {
           segment: i + 1,
           totalSegments,
           percent: (i / totalSegments) * 50,
-          message: `Extracting segment ${i + 1}/${totalSegments}`
+          message: `Extracting segment ${i + 1}/${totalSegments}`,
         });
       }
 
       await new Promise((resolve, reject) => {
-        let cmd = ffmpeg(inputPath)
-          .setStartTime(seg.startTime)
-          .setDuration(duration);
+        let cmd = ffmpeg(inputPath).setStartTime(seg.startTime).setDuration(duration);
 
         const outputOptions = this.getEncodingOptions(quality, preserveQuality);
         cmd = cmd.outputOptions(outputOptions);
 
-        cmd.output(segmentPath)
+        cmd
+          .output(segmentPath)
           .on('end', () => {
             log.info('video', '[SceneManager] Segment / extracted', { v0: i + 1, v1: totalSegments });
             resolve();
@@ -167,28 +165,27 @@ export class SceneManager {
    */
   getEncodingOptions(quality, preserveQuality) {
     if (preserveQuality) {
-      return [
-        '-c:v', 'libx264',
-        '-c:a', 'aac',
-        '-avoid_negative_ts', 'make_zero',
-        '-preset', 'fast',
-        '-crf', '18'
-      ];
+      return ['-c:v', 'libx264', '-c:a', 'aac', '-avoid_negative_ts', 'make_zero', '-preset', 'fast', '-crf', '18'];
     }
 
     const qualitySettings = {
-      'low': { crf: 28, preset: 'fast' },
-      'medium': { crf: 23, preset: 'medium' },
-      'high': { crf: 18, preset: 'slow' }
+      low: { crf: 28, preset: 'fast' },
+      medium: { crf: 23, preset: 'medium' },
+      high: { crf: 18, preset: 'slow' },
     };
     const settings = qualitySettings[quality] || qualitySettings.high;
 
     return [
-      '-c:v', 'libx264',
-      '-c:a', 'aac',
-      '-avoid_negative_ts', 'make_zero',
-      '-preset', settings.preset,
-      '-crf', String(settings.crf)
+      '-c:v',
+      'libx264',
+      '-c:a',
+      'aac',
+      '-avoid_negative_ts',
+      'make_zero',
+      '-preset',
+      settings.preset,
+      '-crf',
+      String(settings.crf),
     ];
   }
 
@@ -198,7 +195,7 @@ export class SceneManager {
    */
   async concatenateSegments(segmentFiles, output, tempDir, progressCallback, jobId) {
     const listPath = path.join(tempDir, 'concat_list.txt');
-    const listContent = segmentFiles.map(f => `file '${f}'`).join('\n');
+    const listContent = segmentFiles.map((f) => `file '${f}'`).join('\n');
     fs.writeFileSync(listPath, listContent);
 
     await new Promise((resolve, reject) => {
@@ -213,7 +210,7 @@ export class SceneManager {
               jobId,
               phase: 'merging',
               percent: 60 + (progress.percent || 0) * 0.4,
-              message: 'Merging segments...'
+              message: 'Merging segments...',
             });
           }
         })
@@ -250,7 +247,7 @@ export class SceneManager {
 
     // Get the original file path in storage
     const originalPath = item.content;
-    const itemDir = path.dirname(originalPath);
+    const _itemDir = path.dirname(originalPath);
 
     // Backup original
     const backupPath = originalPath + '.backup';
@@ -279,7 +276,7 @@ export class SceneManager {
       newDuration: newInfo.duration,
       newDurationFormatted: newInfo.durationFormatted,
       newFileSize: newInfo.size,
-      backupPath: backupPath
+      backupPath: backupPath,
     };
   }
 
@@ -302,7 +299,7 @@ export class SceneManager {
       outTime: scene.outTime,
       description: scene.description || '',
       tags: scene.tags || [],
-      transcription: scene.transcription || ''
+      transcription: scene.transcription || '',
     }));
 
     metadata.scenes = validatedScenes;
@@ -319,7 +316,7 @@ export class SceneManager {
    * @private
    */
   updateIndexEntry(spaceItemId, newInfo, clipboardManager) {
-    const indexEntry = clipboardManager.storage.index.items.find(i => i.id === spaceItemId);
+    const indexEntry = clipboardManager.storage.index.items.find((i) => i.id === spaceItemId);
     if (indexEntry) {
       indexEntry.fileSize = newInfo.size;
       indexEntry.timestamp = Date.now();
@@ -349,7 +346,7 @@ export class SceneManager {
     return {
       success: true,
       itemId,
-      scenesCount: scenes.length
+      scenesCount: scenes.length,
     };
   }
 
@@ -359,32 +356,16 @@ export class SceneManager {
    */
   cleanupTempDir(tempDir, segmentFiles) {
     try {
-      segmentFiles.forEach(f => {
+      segmentFiles.forEach((f) => {
         if (fs.existsSync(f)) fs.unlinkSync(f);
       });
-      
+
       const listPath = path.join(tempDir, 'concat_list.txt');
       if (fs.existsSync(listPath)) fs.unlinkSync(listPath);
-      
+
       if (fs.existsSync(tempDir)) fs.rmdirSync(tempDir);
     } catch (e) {
       log.warn('video', '[SceneManager] Cleanup error', { data: e });
     }
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

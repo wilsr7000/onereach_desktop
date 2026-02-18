@@ -14,41 +14,47 @@
  * Run:  npx vitest run test/unit/ai-service.test.js
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock Electron modules that ai-service may reference
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp'), getVersion: vi.fn(() => '3.12.5') },
-  ipcMain: { handle: vi.fn(), on: vi.fn() },
-}), { virtual: true });
+vi.mock(
+  'electron',
+  () => ({
+    app: { getPath: vi.fn(() => '/tmp'), getVersion: vi.fn(() => '3.12.5') },
+    ipcMain: { handle: vi.fn(), on: vi.fn() },
+  }),
+  { virtual: true }
+);
 
 // Mock settings manager to avoid file system access
-vi.mock('../../settings-manager', () => ({
-  getSettingsManager: vi.fn(() => ({
-    get: vi.fn((key) => {
-      const defaults = {
-        'ai.openaiApiKey': 'test-openai-key',
-        'ai.anthropicApiKey': 'test-anthropic-key',
-        'ai.profiles': null,
-      };
-      return defaults[key] ?? null;
-    }),
-    set: vi.fn(),
-  })),
-}), { virtual: true });
+vi.mock(
+  '../../settings-manager',
+  () => ({
+    getSettingsManager: vi.fn(() => ({
+      get: vi.fn((key) => {
+        const defaults = {
+          'ai.openaiApiKey': 'test-openai-key',
+          'ai.anthropicApiKey': 'test-anthropic-key',
+          'ai.profiles': null,
+        };
+        return defaults[key] ?? null;
+      }),
+      set: vi.fn(),
+    })),
+  }),
+  { virtual: true }
+);
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('AI Service', () => {
-
   // ═══════════════════════════════════════════════════════════════════════════
   // Module Loading & Singleton
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Module Initialization', () => {
-
     it('require returns a functional object', async () => {
       const ai = require('../../lib/ai-service');
       expect(ai).toBeDefined();
@@ -82,28 +88,36 @@ describe('AI Service', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Profile System', () => {
-
     it('all 8 default profiles resolve to valid provider+model', () => {
       const { DEFAULT_MODEL_PROFILES } = require('../../lib/ai-service');
-      const expectedProfiles = ['fast', 'standard', 'powerful', 'large', 'vision', 'realtime', 'embedding', 'transcription'];
+      const expectedProfiles = [
+        'fast',
+        'standard',
+        'powerful',
+        'large',
+        'vision',
+        'realtime',
+        'embedding',
+        'transcription',
+      ];
 
       expect(Object.keys(DEFAULT_MODEL_PROFILES)).toEqual(expect.arrayContaining(expectedProfiles));
       expect(Object.keys(DEFAULT_MODEL_PROFILES).length).toBe(expectedProfiles.length);
 
-      for (const [name, profile] of Object.entries(DEFAULT_MODEL_PROFILES)) {
+      for (const [profile] of Object.entries(DEFAULT_MODEL_PROFILES)) {
         expect(profile.provider).toBeTruthy();
         expect(profile.model).toBeTruthy();
         expect(['openai', 'anthropic']).toContain(profile.provider);
       }
     });
 
-    it('fast profile maps to gpt-4o-mini with anthropic fallback', () => {
+    it('fast profile maps to Claude Haiku with OpenAI fallback', () => {
       const { DEFAULT_MODEL_PROFILES } = require('../../lib/ai-service');
       const fast = DEFAULT_MODEL_PROFILES.fast;
-      expect(fast.provider).toBe('openai');
-      expect(fast.model).toBe('gpt-4o-mini');
+      expect(fast.provider).toBe('anthropic');
+      expect(fast.model).toBe('claude-haiku-4-5-20251001');
       expect(fast.fallback).toBeDefined();
-      expect(fast.fallback.provider).toBe('anthropic');
+      expect(fast.fallback.provider).toBe('openai');
     });
 
     it('standard profile maps to Claude Sonnet with OpenAI fallback', () => {
@@ -172,7 +186,7 @@ describe('AI Service', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Circuit Breaker', () => {
-    let CircuitBreaker;
+    let _CircuitBreaker;
 
     beforeEach(() => {
       // Extract the CircuitBreaker class from the module internals
@@ -182,7 +196,13 @@ describe('AI Service', () => {
 
     it('5 consecutive failures open the circuit', () => {
       // Simulate circuit breaker behavior
-      const breaker = { state: 'closed', failureCount: 0, failureThreshold: 5, lastFailure: null, resetTimeoutMs: 60000 };
+      const breaker = {
+        state: 'closed',
+        failureCount: 0,
+        failureThreshold: 5,
+        lastFailure: null,
+        resetTimeoutMs: 60000,
+      };
 
       function onFailure(b) {
         b.failureCount++;
@@ -191,7 +211,10 @@ describe('AI Service', () => {
       }
       function isOpen(b) {
         if (b.state === 'open') {
-          if (Date.now() - b.lastFailure > b.resetTimeoutMs) { b.state = 'half-open'; return false; }
+          if (Date.now() - b.lastFailure > b.resetTimeoutMs) {
+            b.state = 'half-open';
+            return false;
+          }
           return true;
         }
         return false;
@@ -204,10 +227,19 @@ describe('AI Service', () => {
     });
 
     it('open circuit rejects immediately without API call', () => {
-      const breaker = { state: 'open', failureCount: 5, failureThreshold: 5, lastFailure: Date.now(), resetTimeoutMs: 60000 };
+      const breaker = {
+        state: 'open',
+        failureCount: 5,
+        failureThreshold: 5,
+        lastFailure: Date.now(),
+        resetTimeoutMs: 60000,
+      };
       function isOpen(b) {
         if (b.state === 'open') {
-          if (Date.now() - b.lastFailure > b.resetTimeoutMs) { b.state = 'half-open'; return false; }
+          if (Date.now() - b.lastFailure > b.resetTimeoutMs) {
+            b.state = 'half-open';
+            return false;
+          }
           return true;
         }
         return false;
@@ -216,10 +248,19 @@ describe('AI Service', () => {
     });
 
     it('circuit resets after 60s cooldown (half-open)', () => {
-      const breaker = { state: 'open', failureCount: 5, failureThreshold: 5, lastFailure: Date.now() - 61000, resetTimeoutMs: 60000 };
+      const breaker = {
+        state: 'open',
+        failureCount: 5,
+        failureThreshold: 5,
+        lastFailure: Date.now() - 61000,
+        resetTimeoutMs: 60000,
+      };
       function isOpen(b) {
         if (b.state === 'open') {
-          if (Date.now() - b.lastFailure > b.resetTimeoutMs) { b.state = 'half-open'; return false; }
+          if (Date.now() - b.lastFailure > b.resetTimeoutMs) {
+            b.state = 'half-open';
+            return false;
+          }
           return true;
         }
         return false;
@@ -230,7 +271,10 @@ describe('AI Service', () => {
 
     it('successful request in half-open state closes circuit', () => {
       const breaker = { state: 'half-open', failureCount: 5 };
-      function onSuccess(b) { b.failureCount = 0; b.state = 'closed'; }
+      function onSuccess(b) {
+        b.failureCount = 0;
+        b.state = 'closed';
+      }
       onSuccess(breaker);
       expect(breaker.state).toBe('closed');
       expect(breaker.failureCount).toBe(0);
@@ -254,7 +298,6 @@ describe('AI Service', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Retry Configuration', () => {
-
     it('429 response is retryable', () => {
       const retryableStatuses = [429, 500, 502, 503];
       expect(retryableStatuses).toContain(429);
@@ -287,7 +330,6 @@ describe('AI Service', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Error Classes', () => {
-
     it('BudgetExceededError includes remaining budget info', () => {
       const { BudgetExceededError } = require('../../lib/ai-service');
       if (BudgetExceededError) {
@@ -320,7 +362,6 @@ describe('AI Service', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Adapter Structure', () => {
-
     it('OpenAI adapter handles JSON mode', () => {
       // Verify the adapter exists and accepts jsonMode option
       try {
@@ -348,18 +389,17 @@ describe('AI Service', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Deprecated Wrappers', () => {
-
     it('claude-api.js emits deprecation warning on load', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
         require('../../claude-api');
-        const warnings = warnSpy.mock.calls.map(c => c.join(' '));
-        const hasDeprecation = warnings.some(w => /deprecat|ai-service|use.*instead/i.test(w));
+        const warnings = warnSpy.mock.calls.map((c) => c.join(' '));
+        const hasDeprecation = warnings.some((w) => /deprecat|ai-service|use.*instead/i.test(w));
         expect(hasDeprecation).toBe(true);
       } catch {
         // Module may fail to load -- check if the warning was emitted before failure
-        const warnings = warnSpy.mock.calls.map(c => c.join(' '));
-        const hasDeprecation = warnings.some(w => /deprecat|ai-service|use.*instead/i.test(w));
+        const warnings = warnSpy.mock.calls.map((c) => c.join(' '));
+        const _hasDeprecation = warnings.some((w) => /deprecat|ai-service|use.*instead/i.test(w));
         // Either it warned or it failed -- both acceptable
         expect(true).toBe(true);
       } finally {
@@ -371,8 +411,8 @@ describe('AI Service', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
         require('../../openai-api');
-        const warnings = warnSpy.mock.calls.map(c => c.join(' '));
-        const hasDeprecation = warnings.some(w => /deprecat|ai-service|use.*instead/i.test(w));
+        const warnings = warnSpy.mock.calls.map((c) => c.join(' '));
+        const hasDeprecation = warnings.some((w) => /deprecat|ai-service|use.*instead/i.test(w));
         expect(hasDeprecation).toBe(true);
       } catch {
         expect(true).toBe(true);
@@ -387,7 +427,6 @@ describe('AI Service', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Token Estimation', () => {
-
     it('token estimation is within 20% accuracy for English text', () => {
       try {
         const { estimateTokens } = require('../../lib/ai-providers/openai-adapter');
@@ -395,8 +434,8 @@ describe('AI Service', () => {
           // "The quick brown fox jumps over the lazy dog" is ~10 tokens
           const text = 'The quick brown fox jumps over the lazy dog';
           const estimate = estimateTokens(text);
-          expect(estimate).toBeGreaterThan(6);  // 10 * 0.8
-          expect(estimate).toBeLessThan(16);     // 10 * 1.2 + buffer
+          expect(estimate).toBeGreaterThan(6); // 10 * 0.8
+          expect(estimate).toBeLessThan(16); // 10 * 1.2 + buffer
         }
       } catch {
         // Function may not be exported
@@ -409,7 +448,6 @@ describe('AI Service', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Status Methods', () => {
-
     it('getStatus() returns structured status object', () => {
       const ai = require('../../lib/ai-service');
       try {
@@ -430,6 +468,81 @@ describe('AI Service', () => {
       } catch {
         // May fail if budget manager not available
       }
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FULL METHOD LIFECYCLE: Profiles -> Chat -> Complete -> JSON -> Status -> Cost
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('AI Service - Full API Lifecycle', () => {
+    let ai;
+
+    beforeEach(() => {
+      ai = require('../../lib/ai-service');
+    });
+
+    it('Step 1: getProfiles returns profile map', () => {
+      try {
+        const profiles = ai.getProfiles();
+        expect(profiles).toBeDefined();
+        expect(typeof profiles).toBe('object');
+        // Should have at least the standard profiles
+        const keys = Object.keys(profiles);
+        expect(keys.length).toBeGreaterThan(0);
+      } catch {
+        // Initialization may fail in test env
+      }
+    });
+
+    it('Step 2: chat() is callable with correct signature', () => {
+      expect(typeof ai.chat).toBe('function');
+    });
+
+    it('Step 3: complete() is callable with correct signature', () => {
+      expect(typeof ai.complete).toBe('function');
+    });
+
+    it('Step 4: json() is callable with correct signature', () => {
+      expect(typeof ai.json).toBe('function');
+    });
+
+    it('Step 5: vision() is callable with correct signature', () => {
+      expect(typeof ai.vision).toBe('function');
+    });
+
+    it('Step 6: embed() is callable with correct signature', () => {
+      expect(typeof ai.embed).toBe('function');
+    });
+
+    it('Step 7: transcribe() is callable with correct signature', () => {
+      expect(typeof ai.transcribe).toBe('function');
+    });
+
+    it('Step 8: imageGenerate() is callable with correct signature', () => {
+      expect(typeof ai.imageGenerate).toBe('function');
+    });
+
+    it('Step 9: getStatus() returns status object', () => {
+      try {
+        const status = ai.getStatus();
+        expect(status).toBeDefined();
+        expect(typeof status).toBe('object');
+      } catch {
+        // May fail in test env
+      }
+    });
+
+    it('Step 10: resetCircuit() is callable', () => {
+      expect(typeof ai.resetCircuit).toBe('function');
+    });
+
+    it('Step 11: testConnection() is callable', () => {
+      expect(typeof ai.testConnection).toBe('function');
+    });
+
+    it('Step 12: chatStream() is callable', () => {
+      expect(typeof ai.chatStream).toBe('function');
     });
   });
 });

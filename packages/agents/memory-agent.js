@@ -46,7 +46,8 @@ let _deps = {
 const memoryAgent = {
   id: 'memory-agent',
   name: 'Memory Manager',
-  description: 'Central memory orchestrator -- manages what the app remembers about you across ALL agents. View, correct, update, or delete personal facts and preferences anywhere in the system.',
+  description:
+    'Central memory orchestrator -- manages what the app remembers about you across ALL agents. View, correct, update, or delete personal facts and preferences anywhere in the system.',
   voice: 'ash',
 
   categories: ['system', 'settings', 'profile', 'memory', 'preferences'],
@@ -76,17 +77,45 @@ This agent is the ONLY agent that should modify the user profile store or any ag
 If the user says something is wrong about their profile or any agent's behavior, this agent handles it.`,
 
   keywords: [
-    'my name is', 'call me', 'i am', "i'm called",
-    'what do you know', 'what do you remember', 'show my profile',
-    'forget', 'remove', 'delete', 'clear',
-    'correct', 'wrong', 'not my name', 'that is wrong', "that's wrong",
-    'change my', 'update my', 'set my',
-    'my home', 'my work', 'my address', 'my city', 'my timezone',
-    'i moved', 'i live in', 'i prefer',
-    'remember that', 'remember my', 'don\'t forget',
-    'what is my name', 'who am i', 'my preferences',
-    'profile', 'personal info', 'about me',
-    'brief preference', 'weather location', 'agent memory',
+    'my name is',
+    'call me',
+    'i am',
+    "i'm called",
+    'what do you know',
+    'what do you remember',
+    'show my profile',
+    'forget',
+    'remove',
+    'delete',
+    'clear',
+    'correct',
+    'wrong',
+    'not my name',
+    'that is wrong',
+    "that's wrong",
+    'change my',
+    'update my',
+    'set my',
+    'my home',
+    'my work',
+    'my address',
+    'my city',
+    'my timezone',
+    'i moved',
+    'i live in',
+    'i prefer',
+    'remember that',
+    'remember my',
+    "don't forget",
+    'what is my name',
+    'who am i',
+    'my preferences',
+    'profile',
+    'personal info',
+    'about me',
+    'brief preference',
+    'weather location',
+    'agent memory',
   ],
 
   executionType: 'action',
@@ -244,7 +273,10 @@ If the user says something is wrong about their profile or any agent's behavior,
   async execute(task) {
     const content = (task.content || '').trim();
     if (!content) {
-      return { success: false, message: 'I didn\'t catch that. What would you like to know or change about your memory?' };
+      return {
+        success: false,
+        message: "I didn't catch that. What would you like to know or change about your memory?",
+      };
     }
 
     // Initialize our own memory (for change log)
@@ -258,7 +290,7 @@ If the user says something is wrong about their profile or any agent's behavior,
 
       // Conversation history for context
       const conversationText = (task.conversationHistory || [])
-        .map(m => `${m.role}: ${m.content}`)
+        .map((m) => `${m.role}: ${m.content}`)
         .join('\n')
         .slice(-800);
 
@@ -338,15 +370,19 @@ Rules:
 - If an agent's memory has no relevant content, do NOT include it in agentChanges.`,
         {
           profile: 'standard',
-          system: 'You are the central memory orchestrator. Analyze all agent memories and the user profile to determine what needs to change. Return valid JSON only.',
+          system:
+            'You are the central memory orchestrator. Analyze all agent memories and the user profile to determine what needs to change. Return valid JSON only.',
           temperature: 0.1,
           maxTokens: 4000,
-          feature: 'memory-agent-orchestrator'
+          feature: 'memory-agent-orchestrator',
         }
       );
 
       if (!interpretation || !interpretation.action) {
-        return { success: false, message: 'I couldn\'t understand that request. Try "what do you know about me?" or "my name is ..."' };
+        return {
+          success: false,
+          message: 'I couldn\'t understand that request. Try "what do you know about me?" or "my name is ..."',
+        };
       }
 
       const { action, response, profileChanges, agentChanges } = interpretation;
@@ -386,11 +422,13 @@ Rules:
               const mem = agentData.memory;
               if (change.sectionUpdates && typeof change.sectionUpdates === 'object') {
                 for (const [section, newContent] of Object.entries(change.sectionUpdates)) {
-                  const oldContent = mem.getSection(section) || '(empty)';
+                  const _oldContent = mem.getSection(section) || '(empty)';
                   mem.updateSection(section, String(newContent));
                   allChanges.push(`[${change.agentId}] ${section}: updated (${change.reason || 'user request'})`);
                   log.info('agent', '[MemoryAgent] Updated agent memory', {
-                    agentId: change.agentId, section, reason: change.reason,
+                    agentId: change.agentId,
+                    section,
+                    reason: change.reason,
                   });
                 }
                 mem.save();
@@ -464,14 +502,19 @@ Rules:
             try {
               const sections = mem.getSectionNames();
               if (sections.includes('Learned Preferences')) {
-                mem.updateSection('Learned Preferences', '*No preferences learned yet. The agent will update this section as it learns.*');
+                mem.updateSection(
+                  'Learned Preferences',
+                  '*No preferences learned yet. The agent will update this section as it learns.*'
+                );
               }
               if (sections.includes('Recent History')) {
                 mem.updateSection('Recent History', '*No history yet.*');
               }
               mem.save();
               allChanges.push(`[${agentId}] preferences and history cleared`);
-            } catch (_) { /* non-critical */ }
+            } catch (_) {
+              /* non-critical */
+            }
           }
 
           this._logChange(timestamp, 'clear_all', ['Full system memory reset', ...allChanges]);
@@ -493,8 +536,8 @@ Rules:
 
   // Rate limiter state for passive observation
   _lastObservationTime: 0,
-  _observationCooldownMs: 45000,  // 45s between observations
-  _recentObservations: [],        // dedup buffer: last N observation signatures
+  _observationCooldownMs: 45000, // 45s between observations
+  _recentObservations: [], // dedup buffer: last N observation signatures
 
   /**
    * Observe a completed conversation and automatically extract facts to store
@@ -540,7 +583,11 @@ Rules:
 
     // ── Initialize own memory if needed ──────────────────────────────────
     if (!this.memory) {
-      try { await this.initialize(); } catch (_) { /* non-critical */ }
+      try {
+        await this.initialize();
+      } catch (_) {
+        /* non-critical */
+      }
     }
 
     try {
@@ -607,10 +654,11 @@ If nothing new to learn, return: { "shouldUpdate": false, "reasoning": "...", "p
         {
           profile: 'fast',
           thinking: false,
-          system: 'You analyze conversations to extract learnable facts. Return valid JSON only. Be conservative -- only extract clearly stated facts.',
+          system:
+            'You analyze conversations to extract learnable facts. Return valid JSON only. Be conservative -- only extract clearly stated facts.',
           temperature: 0.1,
           maxTokens: 1000,
-          feature: 'memory-agent-observer'
+          feature: 'memory-agent-observer',
         }
       );
 
@@ -629,7 +677,7 @@ If nothing new to learn, return: { "shouldUpdate": false, "reasoning": "...", "p
       // Profile changes
       if (analysis.profileChanges?.facts && typeof analysis.profileChanges.facts === 'object') {
         const newFacts = analysis.profileChanges.facts;
-        const newKeys = Object.keys(newFacts).filter(k => newFacts[k] && String(newFacts[k]).trim());
+        const newKeys = Object.keys(newFacts).filter((k) => newFacts[k] && String(newFacts[k]).trim());
         if (newKeys.length > 0) {
           for (const [key, value] of Object.entries(newFacts)) {
             if (value && String(value).trim()) {
@@ -660,7 +708,7 @@ If nothing new to learn, return: { "shouldUpdate": false, "reasoning": "...", "p
               mem.updateSection(section, String(newContent));
               allChanges.push(`[${change.agentId}] ${section}: updated (${change.reason || 'observed'})`);
             }
-            if (allChanges.some(c => c.startsWith(`[${change.agentId}]`))) {
+            if (allChanges.some((c) => c.startsWith(`[${change.agentId}]`))) {
               mem.save();
             }
           }
@@ -711,7 +759,9 @@ If nothing new to learn, return: { "shouldUpdate": false, "reasoning": "...", "p
       const lines = current.startsWith('*') ? [entry] : [entry, ...current.split('\n').slice(0, 29)];
       this.memory.updateSection('Change Log', lines.join('\n'));
       this.memory.save();
-    } catch (_) { /* non-critical */ }
+    } catch (_) {
+      /* non-critical */
+    }
   },
 
   /**
@@ -723,14 +773,16 @@ If nothing new to learn, return: { "shouldUpdate": false, "reasoning": "...", "p
     try {
       const current = this.memory.getSection('Deleted Facts') || '';
       const entries = keys
-        .filter(k => previousFacts[k])
-        .map(k => `- [${timestamp.slice(0, 16)}] ${k}: "${previousFacts[k]}"`);
+        .filter((k) => previousFacts[k])
+        .map((k) => `- [${timestamp.slice(0, 16)}] ${k}: "${previousFacts[k]}"`);
       if (entries.length === 0) return;
       const lines = current.startsWith('*') ? entries : [...entries, ...current.split('\n').slice(0, 29)];
       this.memory.updateSection('Deleted Facts', lines.join('\n'));
       this.memory.save();
-    } catch (_) { /* non-critical */ }
-  }
+    } catch (_) {
+      /* non-critical */
+    }
+  },
 };
 
 module.exports = memoryAgent;

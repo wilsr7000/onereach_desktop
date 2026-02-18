@@ -397,7 +397,7 @@
   .production-sidebar-container {
     width: 280px;
   }
-  
+
   .production-button-grid {
     grid-template-columns: 1fr;
   }
@@ -407,7 +407,7 @@
   .linescript-production-mode {
     flex-direction: column;
   }
-  
+
   .production-sidebar-container {
     width: 100%;
     max-height: 300px;
@@ -419,7 +419,7 @@
   .production-sidebar-container {
     background: #2a2a2a;
   }
-  
+
   .production-btn,
   .direction-item,
   .production-quick-add {
@@ -427,34 +427,34 @@
     border-color: #444;
     color: #e0e0e0;
   }
-  
+
   .production-btn .btn-abbr {
     color: #e0e0e0;
   }
-  
+
   .production-btn .btn-name {
     color: #999;
   }
-  
+
   .category-tab {
     background: #333;
     border-color: #444;
     color: #e0e0e0;
   }
-  
+
   .production-script-display {
     background: #1e1e1e;
     color: #e0e0e0;
   }
-  
+
   .camera-direction {
     background: #2a3a4a;
   }
-  
+
   .camera-direction:hover {
     background: #344454;
   }
-  
+
   .production-script-content .dialogue-line:hover {
     background: #2a2a2a;
   }

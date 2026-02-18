@@ -9,7 +9,12 @@
 
 const { test, expect } = require('@playwright/test');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
 } = require('./helpers/electron-app');
 
 let app;
@@ -18,7 +23,6 @@ let mainWindow;
 let errorSnapshot;
 
 test.describe('Settings Extended', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -59,7 +63,7 @@ test.describe('Settings Extended', () => {
           return {
             success: true,
             currentLevel: level,
-            validLevels: ['off', 'error', 'warn', 'info', 'debug']
+            validLevels: ['off', 'error', 'warn', 'info', 'debug'],
           };
         }
         return { success: false };
@@ -80,7 +84,7 @@ test.describe('Settings Extended', () => {
           const settings = await window.api.getSettings();
           return {
             hasIdwSettings: !!settings?.idws || !!settings?.idwEnvironments,
-            hasSaveSettings: typeof window.api.saveSettings === 'function'
+            hasSaveSettings: typeof window.api.saveSettings === 'function',
           };
         }
         return { hasIdwSettings: false };
@@ -99,15 +103,21 @@ test.describe('Settings Extended', () => {
         if (window.api?.invoke) {
           await window.api.invoke('open-settings');
         }
-      } catch {}
+      } catch {
+        /* no-op */
+      }
     });
 
     await sleep(1000);
 
     // Find the settings window
     const windows = await electronApp.windows();
-    const settingsPage = windows.find(p => {
-      try { return p.url().includes('settings'); } catch { return false; }
+    const settingsPage = windows.find((p) => {
+      try {
+        return p.url().includes('settings');
+      } catch {
+        return false;
+      }
     });
 
     if (settingsPage) {
@@ -121,8 +131,12 @@ test.describe('Settings Extended', () => {
 
   test('clicking each sidebar tab shows correct content pane', async () => {
     const windows = await electronApp.windows();
-    const settingsPage = windows.find(p => {
-      try { return p.url().includes('settings'); } catch { return false; }
+    const settingsPage = windows.find((p) => {
+      try {
+        return p.url().includes('settings');
+      } catch {
+        return false;
+      }
     });
 
     if (settingsPage) {
@@ -137,8 +151,12 @@ test.describe('Settings Extended', () => {
 
   test('budget tab renders budget controls', async () => {
     const windows = await electronApp.windows();
-    const settingsPage = windows.find(p => {
-      try { return p.url().includes('settings'); } catch { return false; }
+    const settingsPage = windows.find((p) => {
+      try {
+        return p.url().includes('settings');
+      } catch {
+        return false;
+      }
     });
 
     if (settingsPage) {
@@ -171,8 +189,12 @@ test.describe('Settings Extended', () => {
 
   test('conversation capture subsection renders controls', async () => {
     const windows = await electronApp.windows();
-    const settingsPage = windows.find(p => {
-      try { return p.url().includes('settings'); } catch { return false; }
+    const settingsPage = windows.find((p) => {
+      try {
+        return p.url().includes('settings');
+      } catch {
+        return false;
+      }
     });
 
     if (settingsPage) {
@@ -180,7 +202,7 @@ test.describe('Settings Extended', () => {
         const body = document.body.innerHTML.toLowerCase();
         return {
           hasConversationCapture: body.includes('conversation') || body.includes('capture'),
-          hasAIConfig: body.includes('ai') && body.includes('config')
+          hasAIConfig: body.includes('ai') && body.includes('config'),
         };
       });
       expect(result).toBeDefined();

@@ -1,6 +1,6 @@
 /**
  * TrackContextMenu - Right-click context menu for audio tracks
- * 
+ *
  * Provides track operations like Duplicate, Delete, Rename, etc.
  */
 
@@ -12,7 +12,7 @@ export class TrackContextMenu {
     this.adrManager = adrManager;
     this.menuElement = null;
     this.currentTrackId = null;
-    
+
     this._createMenuElement();
     this._setupEventListeners();
   }
@@ -23,7 +23,7 @@ export class TrackContextMenu {
   _createMenuElement() {
     // Check if menu already exists
     this.menuElement = document.getElementById('trackContextMenu');
-    
+
     if (!this.menuElement) {
       this.menuElement = document.createElement('div');
       this.menuElement.id = 'trackContextMenu';
@@ -32,8 +32,8 @@ export class TrackContextMenu {
       document.body.appendChild(this.menuElement);
     }
 
-    this.itemsContainer = this.menuElement.querySelector('#trackContextMenuItems') || 
-                          this.menuElement.querySelector('.context-menu-items');
+    this.itemsContainer =
+      this.menuElement.querySelector('#trackContextMenuItems') || this.menuElement.querySelector('.context-menu-items');
   }
 
   /**
@@ -75,14 +75,14 @@ export class TrackContextMenu {
   show(trackId, x, y) {
     this.currentTrackId = trackId;
     const track = this.adrManager.findTrack(trackId);
-    
+
     if (!track) {
       window.logging.error('video', 'TrackContextMenu Track not found', { error: trackId });
       return;
     }
 
     const items = this._buildMenuItems(track);
-    
+
     if (this.itemsContainer) {
       this.itemsContainer.innerHTML = buildContextMenuHTML(items);
     }
@@ -109,7 +109,7 @@ export class TrackContextMenu {
     // Header
     items.push({
       type: 'header',
-      label: `${track.name} (${displayInfo.label})`
+      label: `${track.name} (${displayInfo.label})`,
     });
 
     items.push({ type: 'divider' });
@@ -119,13 +119,13 @@ export class TrackContextMenu {
       items.push({
         icon: '📥',
         label: 'Import from Space...',
-        action: 'import-from-space'
+        action: 'import-from-space',
       });
 
       items.push({
         icon: '📁',
         label: 'Import from File...',
-        action: 'import-from-file'
+        action: 'import-from-file',
       });
 
       items.push({ type: 'divider' });
@@ -136,7 +136,7 @@ export class TrackContextMenu {
       icon: '📋',
       label: 'Duplicate Track',
       action: 'duplicate',
-      shortcut: '⌘D'
+      shortcut: '⌘D',
     });
 
     // Rename - available for non-original tracks
@@ -144,7 +144,7 @@ export class TrackContextMenu {
       icon: '✏️',
       label: 'Rename Track',
       action: 'rename',
-      disabled: isOriginal
+      disabled: isOriginal,
     });
 
     items.push({ type: 'divider' });
@@ -153,13 +153,13 @@ export class TrackContextMenu {
     items.push({
       icon: track.solo ? '🔊' : '🎯',
       label: track.solo ? 'Unsolo Track' : 'Solo Track',
-      action: 'toggle-solo'
+      action: 'toggle-solo',
     });
 
     items.push({
       icon: track.muted ? '🔊' : '🔇',
       label: track.muted ? 'Unmute Track' : 'Mute Track',
-      action: 'toggle-mute'
+      action: 'toggle-mute',
     });
 
     items.push({ type: 'divider' });
@@ -169,7 +169,7 @@ export class TrackContextMenu {
       items.push({
         icon: '📝',
         label: 'Create Working Track',
-        action: 'create-working'
+        action: 'create-working',
       });
     }
 
@@ -180,7 +180,7 @@ export class TrackContextMenu {
         icon: '🗑️',
         label: 'Delete Track',
         action: 'delete',
-        danger: true
+        danger: true,
       });
     }
 
@@ -192,14 +192,14 @@ export class TrackContextMenu {
    */
   _handleAction(action) {
     const trackId = this.currentTrackId;
-    
+
     if (!trackId) {
       window.logging.error('video', 'TrackContextMenu No track selected');
       this.hide();
       return;
     }
 
-    window.logging.info('video', 'TrackContextMenu Action', { data: action, 'Track:', trackId });
+    window.logging.info('video', 'TrackContextMenu Action', { action, trackId });
     const track = this.adrManager.findTrack(trackId);
 
     switch (action) {
@@ -247,9 +247,7 @@ export class TrackContextMenu {
    */
   _importFromSpace(trackId, track) {
     // Determine media type filter based on track type
-    const mediaType = (track?.type === 'sfx' || track?.type === 'music' || track?.type === 'voice') 
-      ? 'audio' 
-      : 'all';
+    const mediaType = track?.type === 'sfx' || track?.type === 'music' || track?.type === 'voice' ? 'audio' : 'all';
 
     // Show Space Asset Picker
     if (this.app.showSpaceAssetPicker) {
@@ -258,7 +256,7 @@ export class TrackContextMenu {
         trackId,
         onSelect: (asset) => {
           this.app.addClipToTrack?.(trackId, asset);
-        }
+        },
       });
     } else if (this.app.spaceAssetPicker) {
       this.app.spaceAssetPicker.show({
@@ -266,7 +264,7 @@ export class TrackContextMenu {
         trackId,
         onSelect: (asset) => {
           this.app.addClipToTrack?.(trackId, asset);
-        }
+        },
       });
     } else {
       window.logging.warn('video', 'TrackContextMenu Space Asset Picker not available');
@@ -280,8 +278,9 @@ export class TrackContextMenu {
   async _importFromFile(trackId, track) {
     try {
       // Determine file type filters based on track type
-      const isAudioTrack = track?.type === 'sfx' || track?.type === 'music' || track?.type === 'voice' || track?.type === 'adr';
-      
+      const isAudioTrack =
+        track?.type === 'sfx' || track?.type === 'music' || track?.type === 'voice' || track?.type === 'adr';
+
       let result;
       if (isAudioTrack) {
         // Use audio file picker
@@ -297,7 +296,7 @@ export class TrackContextMenu {
         this.app.addClipToTrack?.(trackId, {
           path: result.filePath,
           startTime: currentTime,
-          source: 'file'
+          source: 'file',
         });
         this.app.showToast?.('success', 'File imported to track');
       }
@@ -317,13 +316,13 @@ export class TrackContextMenu {
     const newName = prompt('Enter new track name:', track.name);
     if (newName && newName.trim()) {
       track.name = newName.trim();
-      
+
       // Update UI
       const nameEl = document.querySelector(`#track-${trackId} .track-name`);
       if (nameEl) {
         nameEl.textContent = track.name;
       }
-      
+
       this.app.showToast?.('success', `Renamed to "${track.name}"`);
     }
   }
@@ -355,21 +354,3 @@ export class TrackContextMenu {
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

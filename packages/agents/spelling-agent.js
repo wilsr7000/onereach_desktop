@@ -1,59 +1,51 @@
 /**
  * Spelling Agent
- * 
+ *
  * Handles spelling-related tasks:
  * - "Spell the word 'necessary'"
  * - "How do you spell 'receive'?"
  * - "Is 'recieve' spelled correctly?"
  */
 
-const path = require('path');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 
 // Common misspellings and corrections
 const COMMON_MISSPELLINGS = {
-  'recieve': 'receive',
-  'seperate': 'separate',
-  'occured': 'occurred',
-  'untill': 'until',
-  'definately': 'definitely',
-  'accomodate': 'accommodate',
-  'occassion': 'occasion',
-  'neccessary': 'necessary',
-  'independant': 'independent',
-  'embarass': 'embarrass',
-  'occurence': 'occurrence',
-  'millenium': 'millennium',
-  'persistant': 'persistent',
-  'refered': 'referred',
-  'wierd': 'weird',
-  'calender': 'calendar',
-  'foriegn': 'foreign',
-  'goverment': 'government',
-  'harrass': 'harass',
-  'immediatly': 'immediately',
-  'libary': 'library',
-  'mispell': 'misspell',
-  'noticable': 'noticeable',
-  'publically': 'publicly',
-  'recomend': 'recommend',
-  'rythm': 'rhythm',
-  'successfull': 'successful',
-  'tommorow': 'tomorrow',
-  'truely': 'truly',
-  'writting': 'writing',
+  recieve: 'receive',
+  seperate: 'separate',
+  occured: 'occurred',
+  untill: 'until',
+  definately: 'definitely',
+  accomodate: 'accommodate',
+  occassion: 'occasion',
+  neccessary: 'necessary',
+  independant: 'independent',
+  embarass: 'embarrass',
+  occurence: 'occurrence',
+  millenium: 'millennium',
+  persistant: 'persistent',
+  refered: 'referred',
+  wierd: 'weird',
+  calender: 'calendar',
+  foriegn: 'foreign',
+  goverment: 'government',
+  harrass: 'harass',
+  immediatly: 'immediately',
+  libary: 'library',
+  mispell: 'misspell',
+  noticable: 'noticeable',
+  publically: 'publicly',
+  recomend: 'recommend',
+  rythm: 'rhythm',
+  successfull: 'successful',
+  tommorow: 'tomorrow',
+  truely: 'truly',
+  writting: 'writing',
 };
 
 // Keywords that indicate a spelling task
-const SPELLING_KEYWORDS = [
-  'spell',
-  'spelling',
-  'spelled',
-  'spelt',
-  'letters',
-  'how do you write',
-];
+const SPELLING_KEYWORDS = ['spell', 'spelling', 'spelled', 'spelt', 'letters', 'how do you write'];
 
 /**
  * Extract the target word from the task content
@@ -97,7 +89,20 @@ function extractWord(content) {
 
   // Fallback: last word that's 3+ letters and not a common filler
   const words = content.match(/[a-zA-Z]{3,}/g);
-  const fillers = new Set(['how', 'you', 'the', 'what', 'spell', 'spelling', 'correct', 'write', 'this', 'that', 'does', 'can']);
+  const fillers = new Set([
+    'how',
+    'you',
+    'the',
+    'what',
+    'spell',
+    'spelling',
+    'correct',
+    'write',
+    'this',
+    'that',
+    'does',
+    'can',
+  ]);
   if (words) {
     for (let i = words.length - 1; i >= 0; i--) {
       if (!fillers.has(words[i].toLowerCase())) {
@@ -121,18 +126,18 @@ function spellWord(word) {
  */
 function checkSpelling(word) {
   const lower = word.toLowerCase();
-  
+
   // Check our known misspellings
   if (COMMON_MISSPELLINGS[lower]) {
     return { correct: false, suggestion: COMMON_MISSPELLINGS[lower] };
   }
-  
+
   // Basic heuristics for common patterns
   // Double letters that shouldn't be
   if (/([a-z])\1\1/.test(lower)) {
     return { correct: false, suggestion: undefined };
   }
-  
+
   // Assume correct if not in our list
   return { correct: true };
 }
@@ -142,57 +147,56 @@ function checkSpelling(word) {
  */
 function createSpellingAgent(exchangeUrl) {
   // Load the agent SDK from the compiled dist folder
-  let createAgent, createKeywordMatcher;
-  
+  let createAgent;
+
   try {
     const agentPkg = require('../task-agent/dist/index.js');
     createAgent = agentPkg.createAgent;
-    createKeywordMatcher = agentPkg.createKeywordMatcher;
   } catch (error) {
     log.error('agent', 'Failed to load task-agent package', { error: error.message });
     log.info('agent', 'Make sure to run: cd packages/task-agent && npm run build');
     throw error;
   }
-  
+
   return createAgent({
     name: 'spelling-agent',
     version: '1.0.0',
-    voice: 'sage',  // Calm, precise - see VOICE-GUIDE.md
+    voice: 'sage', // Calm, precise - see VOICE-GUIDE.md
     categories: ['spelling', 'language', 'words'],
-    
+
     exchange: {
       url: exchangeUrl,
       reconnect: true,
       reconnectIntervalMs: 3000,
     },
-    
+
     // Bidding is handled entirely by the unified LLM bidder (unified-bidder.js).
     // No quickMatch -- per project policy, no keyword/regex classification.
-    
+
     // Execute spelling tasks
     execute: async (task, context) => {
       const content = task.content.toLowerCase();
-      
+
       // Check for cancellation
       if (context.signal.aborted) {
-        return { success: false, error: 'Task cancelled' };
+        return { success: false, message: 'Task cancelled' };
       }
-      
+
       // Extract the target word
       const word = extractWord(task.content);
-      
+
       if (!word) {
         return {
           success: false,
           error: 'Could not identify the word to spell. Try: "Spell the word \'example\'"',
         };
       }
-      
+
       // Determine what kind of spelling task
       if (content.includes('correct') || content.includes('right') || content.includes('check')) {
         // Spelling check
         const result = checkSpelling(word);
-        
+
         if (result.correct) {
           return {
             success: true,
@@ -211,25 +215,25 @@ function createSpellingAgent(exchangeUrl) {
               word,
               correct: false,
               suggestion: result.suggestion,
-              message: result.suggestion 
+              message: result.suggestion
                 ? `"${word}" is misspelled. The correct spelling is "${result.suggestion}".`
                 : `"${word}" appears to be misspelled.`,
             },
           };
         }
       }
-      
+
       // Default: spell out the word
       // First check if it might be misspelled
       const spellCheck = checkSpelling(word);
       const correctWord = spellCheck.suggestion || word;
       const spelled = spellWord(correctWord);
-      
+
       let message = `${correctWord.toUpperCase()}: ${spelled}`;
       if (spellCheck.suggestion) {
         message = `Note: "${word}" is commonly misspelled. The correct spelling is:\n${correctWord.toUpperCase()}: ${spelled}`;
       }
-      
+
       return {
         success: true,
         data: {
@@ -242,7 +246,7 @@ function createSpellingAgent(exchangeUrl) {
         },
       };
     },
-    
+
     maxConcurrent: 10, // Spelling is fast, can handle many
   });
 }
@@ -256,7 +260,7 @@ const spellingAgent = {
   name: 'Spelling Agent',
   description: 'Spells words, checks spelling, and corrects common misspellings',
   voice: 'sage',
-  acks: ["Let me spell that.", "Checking the spelling."],
+  acks: ['Let me spell that.', 'Checking the spelling.'],
   categories: ['spelling', 'language', 'words'],
   keywords: ['spell', 'spelling', 'spelled', 'spelt', 'letters', 'how do you write', 'correct spelling'],
   executionType: 'informational',
@@ -284,7 +288,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     if (!word) {
       return {
         success: true,
-        message: "I couldn't identify the word to spell. Try: \"How do you spell 'example'?\""
+        message: "I couldn't identify the word to spell. Try: \"How do you spell 'example'?\"",
       };
     }
 
@@ -310,8 +314,12 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     }
 
     // Check / correct spelling
-    if (content.includes('correct') || content.includes('right') || content.includes('check')
-        || content.includes('is it')) {
+    if (
+      content.includes('correct') ||
+      content.includes('right') ||
+      content.includes('check') ||
+      content.includes('is it')
+    ) {
       const result = checkSpelling(word);
       if (result.correct) {
         return { success: true, message: 'Yes, "' + word + '" is spelled correctly.' };
@@ -320,7 +328,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
           success: true,
           message: result.suggestion
             ? '"' + word + '" is misspelled. The correct spelling is "' + result.suggestion + '".'
-            : '"' + word + '" appears to be misspelled.'
+            : '"' + word + '" appears to be misspelled.',
         };
       }
     }
@@ -332,11 +340,17 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
 
     let message = correctWord.toUpperCase() + ': ' + spelled;
     if (spellCheck.suggestion) {
-      message = 'Note: "' + word + '" is commonly misspelled. The correct spelling is:\n' + correctWord.toUpperCase() + ': ' + spelled;
+      message =
+        'Note: "' +
+        word +
+        '" is commonly misspelled. The correct spelling is:\n' +
+        correctWord.toUpperCase() +
+        ': ' +
+        spelled;
     }
 
     return { success: true, message };
-  }
+  },
 };
 
 // Default export: standard built-in agent

@@ -12,34 +12,11 @@ export {
   parseTime,
   formatBytes,
   formatBitrate,
-  TimeFormatter
+  TimeFormatter,
 } from './TimeFormatter.js';
 
 // Context menu
-export {
-  positionContextMenu,
-  hideContextMenu,
-  buildContextMenuHTML,
-  ContextMenu
-} from './ContextMenu.js';
+export { positionContextMenu, hideContextMenu, buildContextMenuHTML, ContextMenu } from './ContextMenu.js';
 
 // Space Asset Picker
 export { SpaceAssetPicker } from './SpaceAssetPicker.js';
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

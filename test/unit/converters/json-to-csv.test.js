@@ -38,9 +38,7 @@ describe('JsonToCsvAgent (specific)', () => {
   });
 
   it('flat strategy flattens nested objects with dot-notation', async () => {
-    const nested = JSON.stringify([
-      { name: 'Alice', address: { city: 'NYC', zip: '10001' } },
-    ]);
+    const nested = JSON.stringify([{ name: 'Alice', address: { city: 'NYC', zip: '10001' } }]);
     const result = await agent.execute(nested, 'flat');
     expect(result.output).toContain('address.city');
     expect(result.output).toContain('address.zip');
@@ -48,9 +46,7 @@ describe('JsonToCsvAgent (specific)', () => {
   });
 
   it('top-level strategy skips nested objects', async () => {
-    const nested = JSON.stringify([
-      { name: 'Alice', age: 30, address: { city: 'NYC' } },
-    ]);
+    const nested = JSON.stringify([{ name: 'Alice', age: 30, address: { city: 'NYC' } }]);
     const result = await agent.execute(nested, 'top-level');
     expect(result.output).toContain('name');
     expect(result.output).toContain('age');

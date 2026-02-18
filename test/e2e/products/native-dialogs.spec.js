@@ -10,11 +10,17 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep,
-  SPACES_API, LOG_SERVER
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  _sleep,
+  SPACES_API,
+  LOG_SERVER,
 } = require('../helpers/electron-app');
 
-let app, electronApp, mainWindow, errorSnapshot;
+let app, _electronApp, mainWindow, errorSnapshot;
 
 test.describe('Native Dialogs', () => {
   test.beforeAll(async () => {
@@ -23,7 +29,9 @@ test.describe('Native Dialogs', () => {
     mainWindow = app.mainWindow;
     errorSnapshot = await snapshotErrors();
   });
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ── Validation Results ───────────────────────────────────────────────────
   test('validation results display item count, issues found', async () => {
@@ -31,12 +39,16 @@ test.describe('Native Dialogs', () => {
       try {
         const result = await window.api?.invoke?.('spaces:validate');
         return { ok: true, result };
-      } catch (e) { return { ok: false, e: e.message }; }
+      } catch (e) {
+        return { ok: false, e: e.message };
+      }
     });
     expect(r).toBeDefined();
   });
 
-  test('fixed items count shows in results', async () => { expect(true).toBe(true); });
+  test('fixed items count shows in results', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Spaces Overview ──────────────────────────────────────────────────────
   test('shows total spaces count', async () => {
@@ -46,15 +58,19 @@ test.describe('Native Dialogs', () => {
     expect(Array.isArray(spaces)).toBe(true);
   });
 
-  test('shows total items count', async () => { expect(true).toBe(true); });
-  test('shows total storage size', async () => { expect(true).toBe(true); });
+  test('shows total items count', async () => {
+    expect(true).toBe(true);
+  });
+  test('shows total storage size', async () => {
+    expect(true).toBe(true);
+  });
   test('shows connection status', async () => {
     const res = await fetch(`${LOG_SERVER}/health`);
     expect(res.ok).toBe(true);
   });
 
   test('shows version information if connected', async () => {
-    const health = await fetch(`${LOG_SERVER}/health`).then(r => r.json());
+    const health = await fetch(`${LOG_SERVER}/health`).then((r) => r.json());
     expect(health.appVersion).toBeDefined();
   });
 
@@ -64,7 +80,9 @@ test.describe('Native Dialogs', () => {
       try {
         const settings = await window.api?.getSettings?.();
         return { ok: true, hasSettings: !!settings };
-      } catch (e) { return { ok: false, e: e.message }; }
+      } catch (e) {
+        return { ok: false, e: e.message };
+      }
     });
     expect(r).toBeDefined();
   });
@@ -75,9 +93,13 @@ test.describe('Native Dialogs', () => {
       try {
         const settings = await window.api?.getSettings?.();
         const keys = Object.keys(settings || {});
-        const hasRawKey = keys.some(k => k.toLowerCase().includes('apikey') && typeof settings[k] === 'string' && settings[k].length > 20);
+        const hasRawKey = keys.some(
+          (k) => k.toLowerCase().includes('apikey') && typeof settings[k] === 'string' && settings[k].length > 20
+        );
         return { ok: true, hasRawKey };
-      } catch (e) { return { ok: false, e: e.message }; }
+      } catch (e) {
+        return { ok: false, e: e.message };
+      }
     });
     expect(r).toBeDefined();
   });
@@ -89,21 +111,39 @@ test.describe('Native Dialogs', () => {
     expect(pkg.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 
-  test('shows update instructions or status', async () => { expect(true).toBe(true); });
+  test('shows update instructions or status', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Backup ───────────────────────────────────────────────────────────────
-  test('lists available backup files with dates', async () => { expect(true).toBe(true); });
-  test('restoring from backup applies the backup data', async () => { expect(true).toBe(true); });
+  test('lists available backup files with dates', async () => {
+    expect(true).toBe(true);
+  });
+  test('restoring from backup applies the backup data', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Sync Results ─────────────────────────────────────────────────────────
-  test('successful sync shows info dialog with stats', async () => { expect(true).toBe(true); });
-  test('failed sync shows error dialog with details', async () => { expect(true).toBe(true); });
-  test('history entries include timestamp, type, status, size', async () => { expect(true).toBe(true); });
+  test('successful sync shows info dialog with stats', async () => {
+    expect(true).toBe(true);
+  });
+  test('failed sync shows error dialog with details', async () => {
+    expect(true).toBe(true);
+  });
+  test('history entries include timestamp, type, status, size', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Audio Test Results ───────────────────────────────────────────────────
-  test('results dialog shows TTS test result', async () => { expect(true).toBe(true); });
-  test('results dialog shows SFX test result', async () => { expect(true).toBe(true); });
-  test('results dialog shows voice list result', async () => { expect(true).toBe(true); });
+  test('results dialog shows TTS test result', async () => {
+    expect(true).toBe(true);
+  });
+  test('results dialog shows SFX test result', async () => {
+    expect(true).toBe(true);
+  });
+  test('results dialog shows voice list result', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Error Check ──────────────────────────────────────────────────────────
   test('no unexpected errors', async () => {

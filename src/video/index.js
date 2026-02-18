@@ -7,7 +7,7 @@
 // Budget tracking
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { getBudgetManager } = require('../../budget-manager');
+
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 
@@ -67,7 +67,7 @@ export class VideoEditor {
     this.processor = new VideoProcessor();
     this.thumbnails = new ThumbnailService();
     this.waveform = new WaveformService();
-    
+
     // Editing
     this.trim = new TrimService();
     this.transcode = new TranscodeService();
@@ -76,25 +76,25 @@ export class VideoEditor {
     this.watermark = new WatermarkService();
     this.speed = new SpeedService();
     this.audioToVideo = new AudioToVideoService();
-    
+
     // Audio
     this.audioExtractor = new AudioExtractor();
     this.audioReplacer = new AudioReplacer();
     this.elevenLabs = new ElevenLabsService();
-    
+
     // Scenes
     this.sceneDetector = new SceneDetector();
     this.sceneManager = new SceneManager();
-    
+
     // Translation
     this.translation = new TranslationPipeline();
     this.translationEvaluator = new TranslationEvaluator();
-    
+
     // Export
     this.playlist = new PlaylistExporter();
     this.screengrabs = new ScreengrabService();
     this.slideshow = new SlideshowService();
-    
+
     // State
     this.ipcHandlersRegistered = false;
     this.outputDir = this.processor.outputDir;
@@ -192,14 +192,14 @@ export class VideoEditor {
    */
   async generateElevenLabsAudioOnly(options, progressCallback) {
     const { text, voice = 'Rachel' } = options;
-    
+
     if (progressCallback) {
       progressCallback({ status: 'Generating AI voice...', percent: 10 });
     }
 
     try {
       const audioPath = await this.elevenLabs.generateAudio(text, voice);
-      
+
       if (progressCallback) {
         progressCallback({ status: 'Audio generated!', percent: 100 });
       }
@@ -208,7 +208,7 @@ export class VideoEditor {
         success: true,
         audioPath,
         voice,
-        textLength: text.length
+        textLength: text.length,
       };
     } catch (error) {
       throw error;
@@ -223,20 +223,20 @@ export class VideoEditor {
     const fs = await import('fs');
     const path = await import('path');
     const ffmpeg = (await import('fluent-ffmpeg')).default;
-    
+
     if (!replacements || replacements.length === 0) {
       throw new Error('No audio replacements provided');
     }
 
     // Sort replacements by start time
     const sorted = [...replacements].sort((a, b) => a.startTime - b.startTime);
-    
+
     log.info('video', '[VideoEditor] Exporting with', { arg0: sorted.length, arg1: 'audio replacements' });
 
     const baseName = path.basename(videoPath, path.extname(videoPath));
     const outputPath = path.join(this.outputDir, `${baseName}_edited_${Date.now()}.mp4`);
     const tempDir = path.join(this.outputDir, `temp_export_${Date.now()}`);
-    
+
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
@@ -256,25 +256,25 @@ export class VideoEditor {
 
       for (let i = 0; i < sorted.length; i++) {
         const r = sorted[i];
-        
+
         // Audio before this replacement (from original)
         if (r.startTime > currentTime) {
           audioSegments.push({
             type: 'original',
             start: currentTime,
-            end: r.startTime
+            end: r.startTime,
           });
         }
-        
+
         // The replacement audio
         audioSegments.push({
           type: 'replacement',
           path: r.path,
           start: r.startTime,
           end: r.endTime,
-          targetDuration: r.endTime - r.startTime
+          targetDuration: r.endTime - r.startTime,
         });
-        
+
         currentTime = r.endTime;
       }
 
@@ -283,7 +283,7 @@ export class VideoEditor {
         audioSegments.push({
           type: 'original',
           start: currentTime,
-          end: totalDuration
+          end: totalDuration,
         });
       }
 
@@ -294,7 +294,7 @@ export class VideoEditor {
       for (let i = 0; i < audioSegments.length; i++) {
         const seg = audioSegments[i];
         const segPath = path.join(tempDir, `seg_${i}.mp3`);
-        
+
         if (progressCallback) {
           const pct = 10 + (i / audioSegments.length) * 40;
           progressCallback({ status: `Processing segment ${i + 1}/${audioSegments.length}...`, percent: pct });
@@ -321,10 +321,10 @@ export class VideoEditor {
               else resolve(data);
             });
           });
-          
+
           const sourceDuration = sourceInfo.format.duration;
           const tempoRatio = sourceDuration / seg.targetDuration;
-          
+
           if (Math.abs(tempoRatio - 1.0) > 0.05) {
             // Need to adjust tempo
             const filter = this._buildTempoFilter(tempoRatio);
@@ -342,7 +342,7 @@ export class VideoEditor {
             fs.copyFileSync(seg.path, segPath);
           }
         }
-        
+
         segmentFiles.push(segPath);
       }
 
@@ -352,7 +352,7 @@ export class VideoEditor {
 
       // Concatenate all audio segments
       const concatFile = path.join(tempDir, 'concat.txt');
-      const concatContent = segmentFiles.map(f => `file '${f}'`).join('\n');
+      const concatContent = segmentFiles.map((f) => `file '${f}'`).join('\n');
       fs.writeFileSync(concatFile, concatContent);
 
       const finalAudio = path.join(tempDir, 'final_audio.mp3');
@@ -381,9 +381,9 @@ export class VideoEditor {
           .output(outputPath)
           .on('progress', (progress) => {
             if (progressCallback && progress.percent) {
-              progressCallback({ 
-                status: `Finalizing... ${Math.round(progress.percent)}%`, 
-                percent: 70 + (progress.percent * 0.3) 
+              progressCallback({
+                status: `Finalizing... ${Math.round(progress.percent)}%`,
+                percent: 70 + progress.percent * 0.3,
               });
             }
           })
@@ -404,9 +404,8 @@ export class VideoEditor {
       return {
         success: true,
         outputPath,
-        replacementsApplied: replacements.length
+        replacementsApplied: replacements.length,
       };
-
     } catch (error) {
       // Cleanup on error
       if (fs.existsSync(tempDir)) {
@@ -423,7 +422,7 @@ export class VideoEditor {
   _buildTempoFilter(tempoRatio) {
     const tempoFilters = [];
     let currentRatio = tempoRatio;
-    
+
     while (currentRatio > 2.0) {
       tempoFilters.push('atempo=2.0');
       currentRatio /= 2.0;
@@ -435,12 +434,19 @@ export class VideoEditor {
     if (currentRatio !== 1.0) {
       tempoFilters.push(`atempo=${currentRatio.toFixed(3)}`);
     }
-    
+
     return tempoFilters.join(',') || 'anull';
   }
 
   async replaceAudioSegment(videoPath, audioPath, startTime, endTime, outputPath, progressCallback) {
-    return this.audioReplacer.replaceAudioSegment(videoPath, audioPath, startTime, endTime, outputPath, progressCallback);
+    return this.audioReplacer.replaceAudioSegment(
+      videoPath,
+      audioPath,
+      startTime,
+      endTime,
+      outputPath,
+      progressCallback
+    );
   }
 
   // ==================== SCENE OPERATIONS ====================
@@ -515,14 +521,14 @@ export class VideoEditor {
     const { app } = await import('electron');
     const fs = await import('fs');
     const path = await import('path');
-    const https = await import('https');
+    const _https = await import('https');
     const ffmpeg = (await import('fluent-ffmpeg')).default;
-    
+
     const {
       startTime = 0,
       endTime = null,
       language = 'en',
-      onChunkComplete = null  // Callback for progress updates
+      onChunkComplete = null, // Callback for progress updates
     } = options;
 
     // Get video duration if endTime not specified
@@ -552,23 +558,31 @@ export class VideoEditor {
     if (!openaiKey) {
       throw new Error('OpenAI API key not configured. Please set it in Settings → API Keys → OpenAI.');
     }
-    
+
     log.info('video', '[VideoEditor] Using OpenAI key', { hasKey: !!openaiKey });
 
     // Calculate chunk size: ~10 minutes per chunk (128kbps * 600s = ~9.6MB, safe under 25MB)
     const CHUNK_DURATION = 600; // 10 minutes in seconds
     const numChunks = Math.ceil(totalDuration / CHUNK_DURATION);
-    
-    log.info('video', '[VideoEditor] Total duration: s, splitting into chunk(s)', { v0: totalDuration.toFixed(0), v1: numChunks });
+
+    log.info('video', '[VideoEditor] Total duration: s, splitting into chunk(s)', {
+      v0: totalDuration.toFixed(0),
+      v1: numChunks,
+    });
 
     let allWords = [];
     let fullTranscription = '';
 
     for (let i = 0; i < numChunks; i++) {
-      const chunkStart = startTime + (i * CHUNK_DURATION);
-      const chunkDuration = Math.min(CHUNK_DURATION, totalDuration - (i * CHUNK_DURATION));
-      
-      log.info('video', '[VideoEditor] Processing chunk /: s - s', { v0: i + 1, v1: numChunks, v2: chunkStart.toFixed(0), v3: (chunkStart + chunkDuration).toFixed(0) });
+      const chunkStart = startTime + i * CHUNK_DURATION;
+      const chunkDuration = Math.min(CHUNK_DURATION, totalDuration - i * CHUNK_DURATION);
+
+      log.info('video', '[VideoEditor] Processing chunk /: s - s', {
+        v0: i + 1,
+        v1: numChunks,
+        v2: chunkStart.toFixed(0),
+        v3: (chunkStart + chunkDuration).toFixed(0),
+      });
 
       // Create temp audio file for this chunk
       const tempAudioPath = path.join(this.outputDir, `temp_transcribe_${Date.now()}_chunk${i}.mp3`);
@@ -595,20 +609,20 @@ export class VideoEditor {
 
         // Transcribe this chunk
         const chunkResult = await this._transcribeAudioBuffer(audioBuffer, openaiKey, language);
-        
+
         // Add words with adjusted timestamps
         let chunkWords = [];
         if (chunkResult.words) {
-          chunkWords = chunkResult.words.map(w => ({
+          chunkWords = chunkResult.words.map((w) => ({
             text: w.word || w.text,
             start: (w.start || 0) + chunkStart,
-            end: (w.end || w.start + 0.3) + chunkStart
+            end: (w.end || w.start + 0.3) + chunkStart,
           }));
           allWords.push(...chunkWords);
         }
-        
+
         fullTranscription += (fullTranscription ? ' ' : '') + (chunkResult.text || '');
-        
+
         // Send progress update with words so far
         if (onChunkComplete) {
           onChunkComplete({
@@ -616,18 +630,17 @@ export class VideoEditor {
             totalChunks: numChunks,
             chunkStart,
             chunkEnd: chunkStart + chunkDuration,
-            chunkWords: chunkWords,  // Just this chunk's words
-            allWords: allWords,       // All words so far
+            chunkWords: chunkWords, // Just this chunk's words
+            allWords: allWords, // All words so far
             transcription: fullTranscription,
-            progress: ((i + 1) / numChunks) * 100
+            progress: ((i + 1) / numChunks) * 100,
           });
         }
-        
+
         // Clean up temp file
         if (fs.existsSync(tempAudioPath)) {
           fs.unlinkSync(tempAudioPath);
         }
-        
       } catch (chunkError) {
         // Clean up on error
         if (fs.existsSync(tempAudioPath)) {
@@ -646,7 +659,7 @@ export class VideoEditor {
       startTime,
       endTime: startTime + totalDuration,
       duration: totalDuration,
-      language
+      language,
     };
   }
 
@@ -727,7 +740,5 @@ export {
   setupVideoEditorIPC,
   formatDuration,
   formatTime,
-  parseTime
+  parseTime,
 };
-
-

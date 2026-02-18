@@ -1,9 +1,9 @@
 /**
  * Circuit Breaker
- * 
+ *
  * Prevents cascading failures when external services are down.
  * After N failures within a time window, the circuit "opens" and fails fast.
- * 
+ *
  * States:
  * - CLOSED: Normal operation, requests flow through
  * - OPEN: Failing fast, no requests sent
@@ -15,8 +15,8 @@ const log = getLogQueue();
 
 const STATES = {
   CLOSED: 'CLOSED',
-  OPEN: 'OPEN', 
-  HALF_OPEN: 'HALF_OPEN'
+  OPEN: 'OPEN',
+  HALF_OPEN: 'HALF_OPEN',
 };
 
 class CircuitBreaker {
@@ -33,18 +33,18 @@ class CircuitBreaker {
     this.failureThreshold = options.failureThreshold || 3;
     this.resetTimeout = options.resetTimeout || 30000;
     this.windowMs = options.windowMs || 60000;
-    
+
     this.state = STATES.CLOSED;
     this.failures = [];
     this.lastFailureTime = null;
     this.openedAt = null;
-    
+
     // Stats
     this.stats = {
       totalCalls: 0,
       successfulCalls: 0,
       failedCalls: 0,
-      rejectedCalls: 0
+      rejectedCalls: 0,
     };
   }
 
@@ -55,7 +55,7 @@ class CircuitBreaker {
    */
   async execute(fn) {
     this.stats.totalCalls++;
-    
+
     // Check if we should try half-open
     if (this.state === STATES.OPEN) {
       if (this.shouldAttemptReset()) {
@@ -82,7 +82,7 @@ class CircuitBreaker {
    */
   onSuccess() {
     this.stats.successfulCalls++;
-    
+
     if (this.state === STATES.HALF_OPEN) {
       // Success in half-open means we're recovered
       log.info('agent', `[${this.name}] Circuit closed (recovered)`);
@@ -96,17 +96,17 @@ class CircuitBreaker {
    * Record a failed call
    * @param {Error} error
    */
-  onFailure(error) {
+  onFailure(_error) {
     this.stats.failedCalls++;
     const now = Date.now();
-    
+
     // Add failure to window
     this.failures.push(now);
     this.lastFailureTime = now;
-    
+
     // Clean old failures outside window
-    this.failures = this.failures.filter(t => now - t < this.windowMs);
-    
+    this.failures = this.failures.filter((t) => now - t < this.windowMs);
+
     if (this.state === STATES.HALF_OPEN) {
       // Failure in half-open means still broken
       log.info('agent', `[${this.name}] Circuit re-opened (still failing)`);
@@ -156,7 +156,7 @@ class CircuitBreaker {
       ...this.stats,
       state: this.state,
       recentFailures: this.failures.length,
-      remainingOpenTime: this.state === STATES.OPEN ? this.getRemainingOpenTime() : 0
+      remainingOpenTime: this.state === STATES.OPEN ? this.getRemainingOpenTime() : 0,
     };
   }
 
@@ -217,8 +217,8 @@ function getCircuit(name, options = {}) {
  */
 function withCircuitBreaker(circuitName, fn, options = {}) {
   const circuit = getCircuit(circuitName, options);
-  
-  return async function(...args) {
+
+  return async function (...args) {
     return circuit.execute(() => fn(...args));
   };
 }
@@ -241,5 +241,5 @@ module.exports = {
   getCircuit,
   withCircuitBreaker,
   getAllStats,
-  STATES
+  STATES,
 };

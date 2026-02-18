@@ -1,9 +1,9 @@
 /**
  * SnapshotStorage - Persistent snapshot storage system
- * 
+ *
  * Handles file-based storage of named snapshots via IPC.
  * Stores snapshots in userData/editor-snapshots/{editorId}/
- * 
+ *
  * Each snapshot file: {id}.json containing full state
  * Index file: index.json containing metadata for quick listing
  */
@@ -22,13 +22,13 @@ class SnapshotStorage {
     this.basePath = basePath;
     this.snapshotsDir = path.join(basePath, 'editor-snapshots');
     this.maxSnapshotsPerEditor = 100;
-    
+
     this._ensureDirectory(this.snapshotsDir);
   }
 
   /**
    * Get the storage path for an editor
-   * @param {string} editorId 
+   * @param {string} editorId
    * @returns {string}
    */
   _getEditorPath(editorId) {
@@ -39,7 +39,7 @@ class SnapshotStorage {
 
   /**
    * Get the index file path for an editor
-   * @param {string} editorId 
+   * @param {string} editorId
    * @returns {string}
    */
   _getIndexPath(editorId) {
@@ -48,8 +48,8 @@ class SnapshotStorage {
 
   /**
    * Get the snapshot file path
-   * @param {string} editorId 
-   * @param {string} snapshotId 
+   * @param {string} editorId
+   * @param {string} snapshotId
    * @returns {string}
    */
   _getSnapshotPath(editorId, snapshotId) {
@@ -58,7 +58,7 @@ class SnapshotStorage {
 
   /**
    * Ensure a directory exists
-   * @param {string} dirPath 
+   * @param {string} dirPath
    */
   _ensureDirectory(dirPath) {
     if (!fs.existsSync(dirPath)) {
@@ -68,12 +68,12 @@ class SnapshotStorage {
 
   /**
    * Load the index for an editor
-   * @param {string} editorId 
+   * @param {string} editorId
    * @returns {array}
    */
   _loadIndex(editorId) {
     const indexPath = this._getIndexPath(editorId);
-    
+
     if (fs.existsSync(indexPath)) {
       try {
         return JSON.parse(fs.readFileSync(indexPath, 'utf8'));
@@ -81,14 +81,14 @@ class SnapshotStorage {
         log.error('app', '[SnapshotStorage] Error loading index', { error: error });
       }
     }
-    
+
     return [];
   }
 
   /**
    * Save the index for an editor
-   * @param {string} editorId 
-   * @param {array} index 
+   * @param {string} editorId
+   * @param {array} index
    */
   _saveIndex(editorId, index) {
     const indexPath = this._getIndexPath(editorId);
@@ -107,7 +107,7 @@ class SnapshotStorage {
    */
   saveSnapshot(editorId, snapshot) {
     const snapshotPath = this._getSnapshotPath(editorId, snapshot.id);
-    
+
     // Save full snapshot to file
     fs.writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2));
 
@@ -118,7 +118,7 @@ class SnapshotStorage {
       name: snapshot.name,
       timestamp: snapshot.timestamp,
       createdAt: snapshot.createdAt,
-      size: JSON.stringify(snapshot.state).length
+      size: JSON.stringify(snapshot.state).length,
     };
 
     // Add to beginning of index
@@ -141,7 +141,7 @@ class SnapshotStorage {
 
   /**
    * List snapshots for an editor (metadata only)
-   * @param {string} editorId 
+   * @param {string} editorId
    * @returns {array}
    */
   listSnapshots(editorId) {
@@ -150,13 +150,13 @@ class SnapshotStorage {
 
   /**
    * Get a specific snapshot with full state
-   * @param {string} editorId 
-   * @param {string} snapshotId 
+   * @param {string} editorId
+   * @param {string} snapshotId
    * @returns {object|null}
    */
   getSnapshot(editorId, snapshotId) {
     const snapshotPath = this._getSnapshotPath(editorId, snapshotId);
-    
+
     if (!fs.existsSync(snapshotPath)) {
       log.error('app', '[SnapshotStorage] Snapshot not found:', { v0: snapshotId });
       return null;
@@ -172,13 +172,13 @@ class SnapshotStorage {
 
   /**
    * Delete a snapshot
-   * @param {string} editorId 
-   * @param {string} snapshotId 
+   * @param {string} editorId
+   * @param {string} snapshotId
    * @returns {boolean}
    */
   deleteSnapshot(editorId, snapshotId) {
     const snapshotPath = this._getSnapshotPath(editorId, snapshotId);
-    
+
     // Remove file
     if (fs.existsSync(snapshotPath)) {
       fs.unlinkSync(snapshotPath);
@@ -186,8 +186,8 @@ class SnapshotStorage {
 
     // Update index
     const index = this._loadIndex(editorId);
-    const newIndex = index.filter(s => s.id !== snapshotId);
-    
+    const newIndex = index.filter((s) => s.id !== snapshotId);
+
     if (newIndex.length === index.length) {
       return false; // Not found
     }
@@ -199,16 +199,16 @@ class SnapshotStorage {
 
   /**
    * Rename a snapshot
-   * @param {string} editorId 
-   * @param {string} snapshotId 
-   * @param {string} newName 
+   * @param {string} editorId
+   * @param {string} snapshotId
+   * @param {string} newName
    * @returns {boolean}
    */
   renameSnapshot(editorId, snapshotId, newName) {
     // Update index
     const index = this._loadIndex(editorId);
-    const entry = index.find(s => s.id === snapshotId);
-    
+    const entry = index.find((s) => s.id === snapshotId);
+
     if (!entry) {
       return false;
     }
@@ -237,20 +237,19 @@ class SnapshotStorage {
       return [];
     }
 
-    return fs.readdirSync(this.snapshotsDir)
-      .filter(name => {
-        const fullPath = path.join(this.snapshotsDir, name);
-        return fs.statSync(fullPath).isDirectory();
-      });
+    return fs.readdirSync(this.snapshotsDir).filter((name) => {
+      const fullPath = path.join(this.snapshotsDir, name);
+      return fs.statSync(fullPath).isDirectory();
+    });
   }
 
   /**
    * Clear all snapshots for an editor
-   * @param {string} editorId 
+   * @param {string} editorId
    */
   clearSnapshots(editorId) {
     const editorPath = this._getEditorPath(editorId);
-    
+
     if (fs.existsSync(editorPath)) {
       fs.rmSync(editorPath, { recursive: true, force: true });
       this._ensureDirectory(editorPath);
@@ -261,15 +260,15 @@ class SnapshotStorage {
 
   /**
    * Get storage statistics
-   * @param {string} editorId 
+   * @param {string} editorId
    * @returns {object}
    */
   getStats(editorId) {
     const index = this._loadIndex(editorId);
     const editorPath = this._getEditorPath(editorId);
-    
+
     let totalSize = 0;
-    
+
     if (fs.existsSync(editorPath)) {
       const files = fs.readdirSync(editorPath);
       for (const file of files) {
@@ -284,13 +283,13 @@ class SnapshotStorage {
       totalSizeBytes: totalSize,
       totalSizeFormatted: this._formatBytes(totalSize),
       oldestSnapshot: index.length > 0 ? index[index.length - 1].createdAt : null,
-      newestSnapshot: index.length > 0 ? index[0].createdAt : null
+      newestSnapshot: index.length > 0 ? index[0].createdAt : null,
     };
   }
 
   /**
    * Format bytes to human readable
-   * @param {number} bytes 
+   * @param {number} bytes
    * @returns {string}
    */
   _formatBytes(bytes) {
@@ -303,14 +302,3 @@ class SnapshotStorage {
 }
 
 module.exports = { SnapshotStorage };
-
-
-
-
-
-
-
-
-
-
-

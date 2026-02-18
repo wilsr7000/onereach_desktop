@@ -1,6 +1,6 @@
 /**
  * Story Beats Module - Full-page transcript-based video editing
- * 
+ *
  * Components:
  * - StoryBeatsEditor: Full-page text editor with word rendering and selection
  * - EditToolbar: Floating toolbar for edit actions
@@ -26,15 +26,13 @@ export function initStoryBeats(appContext) {
   appContext.storyBeatsToolbar = new EditToolbar(appContext);
   appContext.videoSyncEngine = new VideoSyncEngine(appContext);
   appContext.storyBeatsMiniTimeline = new MiniTimeline(appContext);
-  
+
   window.logging.info('video', 'StoryBeats Module initialized');
-  
+
   return {
     editor: appContext.storyBeatsEditor,
     toolbar: appContext.storyBeatsToolbar,
     syncEngine: appContext.videoSyncEngine,
-    miniTimeline: appContext.storyBeatsMiniTimeline
+    miniTimeline: appContext.storyBeatsMiniTimeline,
   };
 }
-
-

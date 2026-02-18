@@ -1,17 +1,17 @@
 /**
  * Documentation Agent - RAG-Grounded App Documentation Assistant
- * 
+ *
  * Answers questions about app features, setup, and usage by searching official
  * documentation. Uses Retrieval-Augmented Generation (RAG) to stay grounded
  * on actual docs and prevent hallucination.
- * 
+ *
  * Architecture:
  * 1. On initialize(), reads all key documentation markdown files
  * 2. Chunks each file by section headers (h1/h2/h3 boundaries)
  * 3. Generates embeddings for every chunk via ai.embed()
  * 4. On execute(), embeds the user query, finds top-k chunks by cosine
  *    similarity, and generates a grounded answer with source citations
- * 
+ *
  * Anti-hallucination:
  * - System prompt explicitly forbids fabricating answers
  * - If no relevant chunks are found (low similarity), the agent refuses
@@ -103,7 +103,7 @@ function chunkBySection(text, sourceFile) {
   const sections = text.split(/^(?=#{1,3}\s)/m);
 
   return sections
-    .filter(s => s.trim().length >= MIN_CHUNK_SIZE)
+    .filter((s) => s.trim().length >= MIN_CHUNK_SIZE)
     .map((content, i) => {
       const trimmed = content.trim();
       return {
@@ -120,13 +120,26 @@ function chunkBySection(text, sourceFile) {
 const docsAgent = {
   id: 'docs-agent',
   name: 'Documentation Agent',
-  description: 'Answers questions about app features, setup, and usage from official documentation. Uses RAG to retrieve relevant doc sections and generate grounded answers.',
+  description:
+    'Answers questions about app features, setup, and usage from official documentation. Uses RAG to retrieve relevant doc sections and generate grounded answers.',
   voice: 'alloy', // Neutral, helpful
   categories: ['system', 'help', 'documentation'],
   keywords: [
-    'docs', 'documentation', 'how to', 'guide', 'setup', 'tutorial',
-    'help', 'manual', 'reference', 'features', 'getting started',
-    'keyboard shortcut', 'where is', 'how do i', 'what is',
+    'docs',
+    'documentation',
+    'how to',
+    'guide',
+    'setup',
+    'tutorial',
+    'help',
+    'manual',
+    'reference',
+    'features',
+    'getting started',
+    'keyboard shortcut',
+    'where is',
+    'how do i',
+    'what is',
   ],
   executionType: 'informational', // No side effects -- can fast-path in bid
 
@@ -216,7 +229,7 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
 
     for (let i = 0; i < allChunks.length; i += BATCH_SIZE) {
       const batch = allChunks.slice(i, i + BATCH_SIZE);
-      const texts = batch.map(c => c.content);
+      const texts = batch.map((c) => c.content);
 
       try {
         const result = await ai.embed(texts, {
@@ -245,7 +258,7 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
     this._initialized = true;
 
     const elapsed = Date.now() - startTime;
-    const withEmbeddings = embeddedChunks.filter(c => c.embedding).length;
+    const withEmbeddings = embeddedChunks.filter((c) => c.embedding).length;
     log.info('agent', `[DocsAgent] Ready: ${withEmbeddings}/${embeddedChunks.length} chunks embedded in ${elapsed}ms`);
 
     // Initialize memory for tracking
@@ -263,9 +276,12 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
     const sections = this.memory.getSectionNames();
 
     if (!sections.includes('Stats')) {
-      this.memory.updateSection('Stats', `- Chunks Loaded: ${this._chunks.length}
+      this.memory.updateSection(
+        'Stats',
+        `- Chunks Loaded: ${this._chunks.length}
 - Documents: ${DOC_FILES.length}
-- Last Initialized: ${new Date().toISOString()}`);
+- Last Initialized: ${new Date().toISOString()}`
+      );
     }
 
     if (!sections.includes('Recent Questions')) {
@@ -304,7 +320,7 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
       const timestamp = new Date().toISOString().split('T')[0];
       this.memory.appendToSection('Recent Questions', `- ${timestamp}: "${query.slice(0, 60)}"`, 20);
       await this.memory.save();
-    } catch (e) {
+    } catch (_e) {
       // Non-fatal
     }
 
@@ -324,8 +340,8 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
 
       // Step 2: Find top-k similar chunks
       const scored = this._chunks
-        .filter(c => c.embedding) // Only chunks with embeddings
-        .map(c => ({
+        .filter((c) => c.embedding) // Only chunks with embeddings
+        .map((c) => ({
           ...c,
           score: cosineSimilarity(queryEmbedding, c.embedding),
         }))
@@ -333,13 +349,14 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
         .slice(0, TOP_K);
 
       // Step 3: Check if any chunks are relevant enough
-      const relevant = scored.filter(c => c.score >= MIN_SIMILARITY);
+      const relevant = scored.filter((c) => c.score >= MIN_SIMILARITY);
 
       if (relevant.length === 0) {
         log.info('agent', '[DocsAgent] No relevant chunks found -- refusing to answer');
         return {
           success: true,
-          message: "I don't have documentation about that. You might find the answer in the app's Help menu or by asking the Search Agent.",
+          message:
+            "I don't have documentation about that. You might find the answer in the app's Help menu or by asking the Search Agent.",
           metadata: {
             sources: [],
             confidence: 0,
@@ -350,9 +367,12 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
 
       // Step 4: Build context and generate answer
       onProgress('Generating answer from documentation...');
-      const contextExcerpts = relevant.map((c, i) =>
-        `[Source ${i + 1}: ${c.source} -- "${c.header}"] (relevance: ${(c.score * 100).toFixed(0)}%)\n${c.content}`
-      ).join('\n\n---\n\n');
+      const contextExcerpts = relevant
+        .map(
+          (c, i) =>
+            `[Source ${i + 1}: ${c.source} -- "${c.header}"] (relevance: ${(c.score * 100).toFixed(0)}%)\n${c.content}`
+        )
+        .join('\n\n---\n\n');
 
       const userPrompt = `Question: ${query}
 
@@ -377,7 +397,7 @@ Answer the question using ONLY the context excerpts above.`;
       const weightedScore = relevant.reduce((sum, c, i) => sum + c.score * (TOP_K - i), 0);
       const confidence = totalWeight > 0 ? weightedScore / totalWeight : 0;
 
-      const sources = relevant.map(c => ({
+      const sources = relevant.map((c) => ({
         file: c.source,
         section: c.header,
         relevance: parseFloat(c.score.toFixed(3)),
@@ -388,7 +408,7 @@ Answer the question using ONLY the context excerpts above.`;
       // Learn from interaction
       try {
         await learnFromInteraction(this.memory, task, { success: true, message: answer }, {});
-      } catch (e) {
+      } catch (_e) {
         // Non-fatal
       }
 
@@ -400,12 +420,11 @@ Answer the question using ONLY the context excerpts above.`;
           confidence: parseFloat(confidence.toFixed(3)),
         },
       };
-
     } catch (error) {
       log.error('agent', '[DocsAgent] Error during execute', { error: error.message });
       return {
         success: false,
-        message: "I had trouble searching the documentation. Please try again.",
+        message: 'I had trouble searching the documentation. Please try again.',
       };
     }
   },
@@ -420,8 +439,8 @@ Answer the question using ONLY the context excerpts above.`;
   getStats() {
     return {
       totalChunks: this._chunks.length,
-      withEmbeddings: this._chunks.filter(c => c.embedding).length,
-      documents: [...new Set(this._chunks.map(c => c.source))],
+      withEmbeddings: this._chunks.filter((c) => c.embedding).length,
+      documents: [...new Set(this._chunks.map((c) => c.source))],
       initialized: this._initialized,
     };
   },
@@ -442,8 +461,8 @@ Answer the question using ONLY the context excerpts above.`;
     if (!queryEmbedding || !Array.isArray(queryEmbedding)) return [];
 
     return this._chunks
-      .filter(c => c.embedding)
-      .map(c => ({
+      .filter((c) => c.embedding)
+      .map((c) => ({
         source: c.source,
         header: c.header,
         score: cosineSimilarity(queryEmbedding, c.embedding),

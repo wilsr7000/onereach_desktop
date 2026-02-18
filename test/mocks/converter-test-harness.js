@@ -44,14 +44,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  *     context.evalCriteria - Custom rubric criteria for quality evaluation
  */
 export function testConverterAgent(AgentClass, config) {
-  const {
-    sampleInput,
-    expectedFromFormats,
-    expectedToFormats,
-    expectedStrategies,
-    mockAI,
-    context = {},
-  } = config;
+  const { sampleInput, expectedFromFormats, expectedToFormats, expectedStrategies, mockAI, context = {} } = config;
 
   // Merge context into the options object passed to convert()/plan()
   const sampleOptions = Object.keys(context).length > 0 ? { ...context } : undefined;
@@ -86,14 +79,14 @@ export function testConverterAgent(AgentClass, config) {
 
     it('defines at least 2 strategies', () => {
       expect(agent.strategies.length).toBeGreaterThanOrEqual(2);
-      agent.strategies.forEach(s => {
+      agent.strategies.forEach((s) => {
         expect(s.id).toBeTruthy();
         expect(s.description).toBeTruthy();
       });
     });
 
     it('strategy IDs match expected', () => {
-      const ids = agent.strategies.map(s => s.id);
+      const ids = agent.strategies.map((s) => s.id);
       for (const expected of expectedStrategies) {
         expect(ids).toContain(expected);
       }
@@ -122,7 +115,7 @@ export function testConverterAgent(AgentClass, config) {
       expect(Array.isArray(result.report.events)).toBe(true);
       expect(result.report.events.length).toBeGreaterThan(0);
       // Should have start event
-      expect(result.report.events.some(e => e.event === 'converter:start')).toBe(true);
+      expect(result.report.events.some((e) => e.event === 'converter:start')).toBe(true);
     });
 
     it('handles null input gracefully', async () => {

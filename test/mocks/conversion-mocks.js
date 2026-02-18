@@ -9,7 +9,7 @@ import { vi } from 'vitest';
 // Mock AI service with deterministic responses
 export function createMockAIService(overrides = {}) {
   return {
-    chat: vi.fn().mockImplementation(async ({ system, messages }) => {
+    chat: vi.fn().mockImplementation(async ({ system, _messages }) => {
       // Strategy selection responses
       if (system && system.includes('strategy selector')) {
         return { content: JSON.stringify({ strategy: 'default', reasoning: 'Mock: default strategy' }) };
@@ -21,7 +21,7 @@ export function createMockAIService(overrides = {}) {
       // Content generation
       return { content: overrides.chatResponse || 'Mock AI response content' };
     }),
-    json: vi.fn().mockImplementation(async (prompt, options) => {
+    json: vi.fn().mockImplementation(async (prompt, _options) => {
       if (prompt.includes('strategy')) {
         return { strategy: overrides.strategy || 'default', reasoning: 'Mock strategy selection' };
       }
@@ -33,7 +33,9 @@ export function createMockAIService(overrides = {}) {
     complete: vi.fn().mockResolvedValue(overrides.completeResponse || 'Mock completion'),
     vision: vi.fn().mockResolvedValue({ content: overrides.visionResponse || 'A test image showing text content' }),
     tts: vi.fn().mockResolvedValue(overrides.ttsResponse || Buffer.from('mock-audio-data')),
-    transcribe: vi.fn().mockResolvedValue({ text: overrides.transcribeResponse || 'Mock transcription of audio content' }),
+    transcribe: vi
+      .fn()
+      .mockResolvedValue({ text: overrides.transcribeResponse || 'Mock transcription of audio content' }),
     embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
     imageEdit: vi.fn().mockResolvedValue(overrides.imageResponse || Buffer.from('mock-image-data')),
   };
@@ -50,7 +52,7 @@ export function createMockSharp() {
     webp: vi.fn().mockReturnThis(),
     gif: vi.fn().mockReturnThis(),
     tiff: vi.fn().mockReturnThis(),
-    toBuffer: vi.fn().mockResolvedValue(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])), // PNG header
+    toBuffer: vi.fn().mockResolvedValue(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), // PNG header
   };
   const sharpFn = vi.fn().mockReturnValue(instance);
   sharpFn.fit = { inside: 'inside', cover: 'cover', fill: 'fill' };

@@ -12,7 +12,12 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
 } = require('./helpers/electron-app');
 
 let app;
@@ -21,7 +26,6 @@ let mainWindow;
 let errorSnapshot;
 
 test.describe('Wizards & Onboarding', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -61,8 +65,12 @@ test.describe('Wizards & Onboarding', () => {
 
   test('setup wizard window closes cleanly', async () => {
     const windows = await electronApp.windows();
-    const wizardPage = windows.find(p => {
-      try { return p.url().includes('setup-wizard') || p.url().includes('wizard'); } catch { return false; }
+    const wizardPage = windows.find((p) => {
+      try {
+        return p.url().includes('setup-wizard') || p.url().includes('wizard');
+      } catch {
+        return false;
+      }
     });
 
     if (wizardPage) {
@@ -73,8 +81,12 @@ test.describe('Wizards & Onboarding', () => {
 
     // Verify it's gone or hidden
     const afterWindows = await electronApp.windows();
-    const stillOpen = afterWindows.find(p => {
-      try { return p.url().includes('setup-wizard'); } catch { return false; }
+    const _stillOpen = afterWindows.find((p) => {
+      try {
+        return p.url().includes('setup-wizard');
+      } catch {
+        return false;
+      }
     });
 
     // Either closed or never opened -- both valid
@@ -93,7 +105,7 @@ test.describe('Wizards & Onboarding', () => {
           const idws = settings?.idws || settings?.['idw.configurations'] || [];
           return {
             hasConfig: true,
-            idwCount: Array.isArray(idws) ? idws.length : Object.keys(idws || {}).length
+            idwCount: Array.isArray(idws) ? idws.length : Object.keys(idws || {}).length,
           };
         }
         return { hasConfig: false, note: 'No getSettings' };
@@ -127,7 +139,7 @@ test.describe('Wizards & Onboarding', () => {
     // We verify this by checking if the menu builder functions exist
     const result = await mainWindow.evaluate(() => ({
       hasApi: typeof window.api !== 'undefined',
-      hasMenuRelated: typeof window.api?.invoke === 'function'
+      hasMenuRelated: typeof window.api?.invoke === 'function',
     }));
 
     expect(result.hasApi).toBe(true);
@@ -145,7 +157,7 @@ test.describe('Wizards & Onboarding', () => {
           const agents = settings?.agents || settings?.['agent.configurations'] || [];
           return {
             hasAgents: true,
-            agentCount: Array.isArray(agents) ? agents.length : Object.keys(agents || {}).length
+            agentCount: Array.isArray(agents) ? agents.length : Object.keys(agents || {}).length,
           };
         }
         return { hasAgents: false };
@@ -165,7 +177,7 @@ test.describe('Wizards & Onboarding', () => {
           const agents = await window.api.invoke('get-registered-agents').catch(() => null);
           return {
             hasAgents: !!agents,
-            count: Array.isArray(agents) ? agents.length : (agents ? Object.keys(agents).length : 0)
+            count: Array.isArray(agents) ? agents.length : agents ? Object.keys(agents).length : 0,
           };
         }
         return { hasAgents: false };
@@ -317,7 +329,10 @@ test.describe('Wizards & Onboarding', () => {
     const errors = await checkNewErrors(errorSnapshot);
     const genuine = filterBenignErrors(errors);
     if (genuine.length > 0) {
-      console.log('Wizard test errors:', genuine.map(e => e.message));
+      console.log(
+        'Wizard test errors:',
+        genuine.map((e) => e.message)
+      );
     }
     expect(genuine.length).toBeLessThanOrEqual(5);
   });

@@ -11,9 +11,9 @@ export const defaultConfig = {
   apiKey: null,
   apiHeaders: {},
   context: {},
-  prefetchWhenRemaining: 2,  // Fetch more when this many clips left
-  prefetchThreshold: 5,      // Seconds before clip end to check queue
-  debugMode: false           // Enable verbose logging
+  prefetchWhenRemaining: 2, // Fetch more when this many clips left
+  prefetchThreshold: 5, // Seconds before clip end to check queue
+  debugMode: false, // Enable verbose logging
 };
 
 /**
@@ -29,22 +29,6 @@ export function loadConfig() {
     context: cfg.context || defaultConfig.context,
     prefetchWhenRemaining: cfg.prefetchWhenRemaining || defaultConfig.prefetchWhenRemaining,
     prefetchThreshold: cfg.prefetchThreshold || defaultConfig.prefetchThreshold,
-    debugMode: cfg.debugMode || defaultConfig.debugMode
+    debugMode: cfg.debugMode || defaultConfig.debugMode,
   };
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

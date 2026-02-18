@@ -1,1635 +1,1674 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Welcome to Onereach.ai</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      padding: 20px;
-      color: #333;
-    }
-
-    .wizard-container {
-      background: white;
-      border-radius: 20px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-      max-width: 600px;
-      width: 100%;
-      padding: 35px;
-      text-align: center;
-      animation: slideIn 0.5s ease-out;
-    }
-
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(30px);
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to Onereach.ai</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
-      to {
-        opacity: 1;
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        padding: 20px;
+        color: #333;
+      }
+
+      .wizard-container {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        max-width: 600px;
+        width: 100%;
+        padding: 35px;
+        text-align: center;
+        animation: slideIn 0.5s ease-out;
+      }
+
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(30px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .logo {
+        font-size: 36px;
+        margin-bottom: 8px;
+      }
+
+      h1 {
+        font-size: 28px;
+        color: #667eea;
+        margin-bottom: 6px;
+        font-weight: 700;
+      }
+
+      .subtitle {
+        font-size: 15px;
+        color: #666;
+        margin-bottom: 20px;
+      }
+
+      .steps-list {
+        text-align: left;
+        margin: 20px 0;
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 12px;
+      }
+
+      .step-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 12px;
+        padding: 10px;
+        background: white;
+        border-radius: 8px;
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s;
+        cursor: default;
+      }
+
+      .step-item:hover {
+        transform: translateX(5px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+      }
+
+      .step-item:last-child {
+        margin-bottom: 0;
+      }
+
+      .step-number {
+        width: 32px;
+        height: 32px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 15px;
+        margin-right: 12px;
+        flex-shrink: 0;
+      }
+
+      .step-text {
+        font-size: 14px;
+        color: #333;
+        font-weight: 500;
+      }
+
+      .cta-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 12px 32px;
+        font-size: 16px;
+        font-weight: 600;
+        border-radius: 50px;
+        cursor: pointer;
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s;
+        margin-top: 15px;
+      }
+
+      .cta-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+      }
+
+      .cta-button:active {
         transform: translateY(0);
       }
-    }
-
-    .logo {
-      font-size: 36px;
-      margin-bottom: 8px;
-    }
-
-    h1 {
-      font-size: 28px;
-      color: #667eea;
-      margin-bottom: 6px;
-      font-weight: 700;
-    }
-
-    .subtitle {
-      font-size: 15px;
-      color: #666;
-      margin-bottom: 20px;
-    }
-
-    .steps-list {
-      text-align: left;
-      margin: 20px 0;
-      background: #f8f9fa;
-      padding: 20px;
-      border-radius: 12px;
-    }
-
-    .step-item {
-      display: flex;
-      align-items: center;
-      margin-bottom: 12px;
-      padding: 10px;
-      background: white;
-      border-radius: 8px;
-      transition: transform 0.2s, box-shadow 0.2s;
-      cursor: default;
-    }
-
-    .step-item:hover {
-      transform: translateX(5px);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
-    }
-
-    .step-item:last-child {
-      margin-bottom: 0;
-    }
-
-    .step-number {
-      width: 32px;
-      height: 32px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      font-size: 15px;
-      margin-right: 12px;
-      flex-shrink: 0;
-    }
-
-    .step-text {
-      font-size: 14px;
-      color: #333;
-      font-weight: 500;
-    }
-
-    .cta-button {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border: none;
-      padding: 12px 32px;
-      font-size: 16px;
-      font-weight: 600;
-      border-radius: 50px;
-      cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-      margin-top: 15px;
-    }
-
-    .cta-button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
-    }
-
-    .cta-button:active {
-      transform: translateY(0);
-    }
-
-    .skip-link {
-      display: inline-block;
-      margin-top: 12px;
-      color: #999;
-      text-decoration: none;
-      font-size: 13px;
-      transition: color 0.2s;
-    }
-
-    .skip-link:hover {
-      color: #667eea;
-    }
-
-    .feature-highlight {
-      display: inline-block;
-      background: #fff3cd;
-      color: #856404;
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
-      margin-bottom: 15px;
-    }
-
-    /* Progress Bar */
-    .progress-bar {
-      width: 100%;
-      height: 6px;
-      background: #e0e0e0;
-      border-radius: 10px;
-      margin-bottom: 20px;
-      overflow: hidden;
-    }
-
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      transition: width 0.3s ease;
-    }
-
-    .step-indicator {
-      font-size: 13px;
-      color: #999;
-      margin-bottom: 15px;
-      font-weight: 500;
-    }
-
-    /* Form Styles */
-    .discovery-form {
-      text-align: left;
-      margin-top: 25px;
-    }
-
-    .form-group {
-      margin-bottom: 20px;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 14px;
-      font-weight: 600;
-      color: #333;
-      margin-bottom: 8px;
-    }
-
-    .form-group input,
-    .form-group textarea,
-    .form-group select {
-      width: 100%;
-      padding: 12px;
-      font-size: 14px;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      font-family: inherit;
-      transition: border-color 0.2s;
-    }
-
-    .form-group input:focus,
-    .form-group textarea:focus,
-    .form-group select:focus {
-      outline: none;
-      border-color: #667eea;
-    }
-
-    .form-group textarea {
-      resize: vertical;
-      min-height: 120px;
-    }
-
-    .button-group {
-      display: flex;
-      gap: 12px;
-      margin-top: 25px;
-      justify-content: space-between;
-    }
-
-    .secondary-button {
-      background: #f0f0f0;
-      color: #666;
-      border: none;
-      padding: 12px 24px;
-      font-size: 16px;
-      font-weight: 600;
-      border-radius: 50px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .secondary-button:hover {
-      background: #e0e0e0;
-      transform: translateY(-1px);
-    }
-
-    .secondary-button:active {
-      transform: translateY(0);
-    }
-
-    /* Plan Container */
-    .plan-container {
-      max-width: 700px;
-    }
-
-    /* Plan Display */
-    .plan-display {
-      background: #f8f9fa;
-      border-radius: 12px;
-      padding: 20px;
-      margin: 20px 0;
-      text-align: left;
-      max-height: 400px;
-      overflow-y: auto;
-    }
-
-    .plan-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 15px;
-      padding-bottom: 15px;
-      border-bottom: 2px solid #e0e0e0;
-    }
-
-    .plan-header h3 {
-      margin: 0;
-      color: #667eea;
-      font-size: 18px;
-    }
-
-    .priority-badge {
-      padding: 4px 12px;
-      border-radius: 12px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .priority-badge.high { background: #ffe0e0; color: #c00; }
-    .priority-badge.medium { background: #fff3cd; color: #856404; }
-    .priority-badge.low { background: #e0f0ff; color: #0066cc; }
-
-    .plan-section {
-      margin-bottom: 15px;
-    }
-
-    .plan-section h4 {
-      font-size: 14px;
-      color: #333;
-      margin-bottom: 8px;
-    }
-
-    .plan-section p {
-      font-size: 13px;
-      color: #666;
-      line-height: 1.6;
-      margin: 0;
-    }
-
-    .plan-section ul {
-      margin: 0;
-      padding-left: 20px;
-    }
-
-    .plan-section li {
-      font-size: 13px;
-      color: #666;
-      line-height: 1.6;
-      margin-bottom: 5px;
-    }
-
-    /* Suggestions */
-    .suggestions-box {
-      background: #fff3cd;
-      border-radius: 10px;
-      padding: 15px;
-      margin: 15px 0;
-    }
-
-    .suggestion-header {
-      font-size: 13px;
-      font-weight: 600;
-      color: #856404;
-      margin-bottom: 10px;
-    }
-
-    .suggestion-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .suggestion-chip {
-      background: white;
-      border: 1px solid #ffc107;
-      color: #856404;
-      padding: 6px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .suggestion-chip:hover {
-      background: #ffc107;
-      color: white;
-      transform: translateY(-1px);
-    }
-
-    /* Improvement Section */
-    .improvement-section {
-      margin: 15px 0;
-    }
-
-    .improvement-section label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      color: #333;
-      margin-bottom: 8px;
-    }
-
-    .improvement-input-group {
-      display: flex;
-      gap: 10px;
-      align-items: flex-end;
-    }
-
-    .improvement-input-group textarea {
-      flex: 1;
-      padding: 10px;
-      font-size: 13px;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      font-family: inherit;
-      resize: none;
-    }
-
-    .improvement-input-group .secondary-button {
-      padding: 10px 20px;
-      font-size: 14px;
-      white-space: nowrap;
-    }
-
-    .approve-button {
-      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-      color: white;
-      border: none;
-      padding: 12px 32px;
-      font-size: 16px;
-      font-weight: 600;
-      border-radius: 50px;
-      cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-    }
-
-    .approve-button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 25px rgba(40, 167, 69, 0.4);
-    }
-
-    /* Modal Styles */
-    .modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.6);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 1000;
-      animation: fadeIn 0.2s;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    .modal-content {
-      background: white;
-      border-radius: 20px;
-      padding: 40px;
-      max-width: 500px;
-      width: 90%;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-      animation: slideUp 0.3s;
-    }
-
-    @keyframes slideUp {
-      from { transform: translateY(30px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
-
-    .modal-content h2 {
-      font-size: 24px;
-      color: #333;
-      margin-bottom: 8px;
-    }
-
-    .modal-subtitle {
-      font-size: 14px;
-      color: #666;
-      margin-bottom: 25px;
-    }
-
-    .approval-options {
-      display: grid;
-      gap: 15px;
-      margin-bottom: 20px;
-    }
-
-    .approval-option {
-      border: 2px solid #e0e0e0;
-      border-radius: 12px;
-      padding: 20px;
-      cursor: pointer;
-      transition: all 0.2s;
-      text-align: left;
-    }
-
-    .approval-option:hover {
-      border-color: #667eea;
-      background: #f8f9ff;
-      transform: translateX(5px);
-    }
-
-    .option-icon {
-      font-size: 32px;
-      margin-bottom: 8px;
-    }
-
-    .approval-option h3 {
-      font-size: 16px;
-      color: #333;
-      margin: 0 0 5px 0;
-    }
-
-    .approval-option p {
-      font-size: 13px;
-      color: #666;
-      margin: 0;
-    }
-
-    .cancel-link {
-      background: none;
-      border: none;
-      color: #999;
-      font-size: 14px;
-      cursor: pointer;
-      transition: color 0.2s;
-    }
-
-    .cancel-link:hover {
-      color: #667eea;
-    }
-
-    .email-form {
-      text-align: left;
-    }
-
-    .checkbox-group label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      font-weight: normal;
-      cursor: pointer;
-    }
-
-    .checkbox-group input[type="checkbox"] {
-      width: auto;
-      cursor: pointer;
-    }
-
-    /* Collaborators Step */
-    .collaborator-types {
-      display: flex;
-      gap: 10px;
-      margin: 20px 0;
-      border-bottom: 2px solid #e0e0e0;
-    }
-
-    .type-tab {
-      flex: 1;
-      background: none;
-      border: none;
-      padding: 12px 20px;
-      font-size: 14px;
-      font-weight: 600;
-      color: #666;
-      cursor: pointer;
-      border-bottom: 3px solid transparent;
-      transition: all 0.2s;
-    }
-
-    .type-tab:hover {
-      color: #667eea;
-    }
-
-    .type-tab.active {
-      color: #667eea;
-      border-bottom-color: #667eea;
-    }
-
-    .collaborator-section {
-      margin: 20px 0;
-    }
-
-    .add-collaborator-form {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-
-    .add-collaborator-form input,
-    .add-collaborator-form select {
-      padding: 10px;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      font-size: 13px;
-      font-family: inherit;
-    }
-
-    .add-collaborator-form input {
-      flex: 1;
-    }
-
-    .add-collaborator-form select {
-      width: 120px;
-    }
-
-    .add-button {
-      background: #667eea;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      white-space: nowrap;
-    }
-
-    .add-button:hover {
-      background: #5568d3;
-      transform: translateY(-1px);
-    }
-
-    .collaborators-list {
-      background: #f8f9fa;
-      border-radius: 10px;
-      padding: 15px;
-      min-height: 100px;
-    }
-
-    .collaborator-item {
-      background: white;
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 10px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      transition: all 0.2s;
-    }
-
-    .collaborator-item:hover {
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-
-    .collaborator-item:last-child {
-      margin-bottom: 0;
-    }
-
-    .collaborator-info {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .collaborator-avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-weight: bold;
-      font-size: 16px;
-    }
-
-    .collaborator-details h5 {
-      margin: 0 0 2px 0;
-      font-size: 14px;
-      color: #333;
-    }
-
-    .collaborator-details p {
-      margin: 0;
-      font-size: 12px;
-      color: #666;
-    }
-
-    .collaborator-role {
-      padding: 4px 12px;
-      background: #e8f0fe;
-      color: #1967d2;
-      border-radius: 12px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .remove-button {
-      background: #fee;
-      color: #c00;
-      border: none;
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .remove-button:hover {
-      background: #fcc;
-    }
-
-    /* Agent Cards */
-    .agent-presets {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-
-    .agent-card {
-      background: white;
-      border: 2px solid #e0e0e0;
-      border-radius: 10px;
-      padding: 15px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .agent-card:hover {
-      border-color: #667eea;
-      background: #f8f9ff;
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
-    }
-
-    .agent-icon {
-      font-size: 32px;
-      margin-bottom: 8px;
-    }
-
-    .agent-card h4 {
-      margin: 0 0 5px 0;
-      font-size: 14px;
-      color: #333;
-    }
-
-    .agent-card p {
-      margin: 0;
-      font-size: 12px;
-      color: #666;
-      line-height: 1.4;
-    }
-
-    /* HUD Info Box */
-    .hud-info-box {
-      background: linear-gradient(135deg, #e8f0fe 0%, #f0e8ff 100%);
-      border-radius: 12px;
-      padding: 20px;
-      margin: 20px 0;
-      display: flex;
-      gap: 15px;
-    }
-
-    .hud-icon {
-      font-size: 36px;
-      flex-shrink: 0;
-    }
-
-    .hud-content h4 {
-      margin: 0 0 8px 0;
-      font-size: 15px;
-      color: #333;
-    }
-
-    .hud-content p {
-      margin: 0 0 10px 0;
-      font-size: 13px;
-      color: #666;
-      line-height: 1.5;
-    }
-
-    .hud-content ul {
-      margin: 0;
-      padding-left: 0;
-      list-style: none;
-    }
-
-    .hud-content li {
-      font-size: 13px;
-      color: #666;
-      line-height: 1.8;
-      padding-left: 0;
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 30px;
-      color: #999;
-      font-size: 13px;
-    }
-
-    /* Final Step - Completion */
-    .completion-checklist {
-      background: #f8f9fa;
-      border-radius: 12px;
-      padding: 20px;
-      margin: 20px 0;
-    }
-
-    .checklist-item {
-      display: flex;
-      gap: 15px;
-      padding: 15px;
-      background: white;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      border-left: 4px solid transparent;
-      transition: all 0.3s;
-    }
-
-    .checklist-item:last-child {
-      margin-bottom: 0;
-    }
-
-    .checklist-item.completed {
-      border-left-color: #28a745;
-    }
-
-    .check-icon {
-      width: 32px;
-      height: 32px;
-      background: #28a745;
-      color: white;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      font-size: 16px;
-      flex-shrink: 0;
-    }
-
-    .check-content h4 {
-      margin: 0 0 4px 0;
-      font-size: 14px;
-      color: #333;
-    }
-
-    .check-content p {
-      margin: 0;
-      font-size: 13px;
-      color: #666;
-    }
-
-    /* IDW Introduction Box */
-    .idw-intro-box {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border-radius: 12px;
-      padding: 25px;
-      margin: 20px 0;
-    }
-
-    .idw-header {
-      display: flex;
-      gap: 15px;
-      align-items: center;
-      margin-bottom: 15px;
-    }
-
-    .idw-logo {
-      font-size: 48px;
-    }
-
-    .idw-header h3 {
-      margin: 0;
-      font-size: 20px;
-      color: white;
-    }
-
-    .idw-subtitle {
-      margin: 4px 0 0 0;
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.9);
-    }
-
-    .idw-description {
-      margin-bottom: 15px;
-    }
-
-    .idw-description p {
-      margin: 0;
-      font-size: 14px;
-      color: rgba(255, 255, 255, 0.95);
-      line-height: 1.5;
-    }
-
-    .idw-features {
-      display: grid;
-      gap: 12px;
-    }
-
-    .idw-feature {
-      display: flex;
-      gap: 12px;
-      background: rgba(255, 255, 255, 0.15);
-      border-radius: 8px;
-      padding: 12px;
-      backdrop-filter: blur(10px);
-    }
-
-    .feature-icon {
-      font-size: 24px;
-      flex-shrink: 0;
-    }
-
-    .feature-text {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .feature-text strong {
-      font-size: 13px;
-      color: white;
-    }
-
-    .feature-text span {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.85);
-      line-height: 1.4;
-    }
-
-    /* Next Steps Box */
-    .next-steps-box {
-      background: #fff3cd;
-      border-radius: 12px;
-      padding: 20px;
-      margin: 20px 0;
-    }
-
-    .next-steps-box h4 {
-      margin: 0 0 12px 0;
-      font-size: 15px;
-      color: #856404;
-    }
-
-    .next-steps-box ol {
-      margin: 0;
-      padding-left: 20px;
-    }
-
-    .next-steps-box li {
-      font-size: 13px;
-      color: #856404;
-      line-height: 1.8;
-      margin-bottom: 6px;
-    }
-
-    .next-steps-box li:last-child {
-      margin-bottom: 0;
-    }
-
-    .next-steps-box strong {
-      color: #664d03;
-    }
-
-    .launch-button {
-      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-      color: white;
-      border: none;
-      padding: 12px 32px;
-      font-size: 16px;
-      font-weight: 600;
-      border-radius: 50px;
-      cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-      box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
-    }
-
-    .launch-button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 20px rgba(40, 167, 69, 0.4);
-    }
-
-    .launch-button:active {
-      transform: translateY(0);
-    }
-  </style>
-</head>
-<body>
-  <!-- Welcome Screen -->
-  <div class="wizard-container" id="welcome-screen">
-    <div class="logo">🚀</div>
-    <h1>Let's do some work!</h1>
-    <p class="subtitle">We'll get you set up in just a few steps</p>
-
-    <div class="steps-list">
-      <div class="step-item">
-        <div class="step-number">1</div>
-        <div class="step-text">First, we'll discuss the nature of your project</div>
-      </div>
-
-      <div class="step-item">
-        <div class="step-number">2</div>
-        <div class="step-text">Next we'll make a plan</div>
-      </div>
-
-      <div class="step-item">
-        <div class="step-number">3</div>
-        <div class="step-text">We'll invite collaborators</div>
-      </div>
-
-      <div class="step-item">
-        <div class="step-number">4</div>
-        <div class="step-text">Then I can get to work!</div>
-      </div>
-    </div>
-
-    <button class="cta-button" onclick="startSetup()">Get Started →</button>
-    
-    <br>
-    <a href="#" class="skip-link" onclick="skipSetup()">I'll do this later</a>
-  </div>
-
-  <!-- Discovery Step -->
-  <div class="wizard-container" id="discovery-screen" style="display: none;">
-    <div class="progress-bar">
-      <div class="progress-fill" style="width: 25%"></div>
-    </div>
-    
-    <div class="step-indicator">Step 1 of 4</div>
-    <div class="logo">🔍</div>
-    <h1>Tell me about your project</h1>
-    <p class="subtitle">The more detail you provide, the better I can help you</p>
-
-    <form id="discovery-form" class="discovery-form">
-      <div class="form-group">
-        <label for="project-name">What should we call this project?</label>
-        <input type="text" id="project-name" placeholder="e.g., Customer Support Automation" required>
-      </div>
-
-      <div class="form-group">
-        <label for="project-description">What do you want your IDW to work on?</label>
-        <textarea 
-          id="project-description" 
-          rows="6" 
-          placeholder="Describe what you'd like to accomplish. Include details like:&#10;• What problem are you trying to solve?&#10;• Who will benefit from this?&#10;• What does success look like?&#10;• Any specific requirements or constraints?"
-          required
-        ></textarea>
-      </div>
-
-      <div class="form-group">
-        <label for="project-priority">What's the priority level?</label>
-        <select id="project-priority">
-          <option value="high">High - Urgent, needs immediate attention</option>
-          <option value="medium" selected>Medium - Important, but not urgent</option>
-          <option value="low">Low - Nice to have, when time allows</option>
-        </select>
-      </div>
-
-      <div class="button-group">
-        <button type="button" class="secondary-button" onclick="goBack()">← Back</button>
-        <button type="submit" class="cta-button">Continue →</button>
-      </div>
-    </form>
-  </div>
-
-  <!-- Planning Step -->
-  <div class="wizard-container plan-container" id="planning-screen" style="display: none;">
-    <div class="progress-bar">
-      <div class="progress-fill" style="width: 50%"></div>
-    </div>
-    
-    <div class="step-indicator">Step 2 of 4</div>
-    <div class="logo">📋</div>
-    <h1>Here's your project plan</h1>
-    <p class="subtitle">Review it and help me make it better</p>
-
-    <!-- Plan Display -->
-    <div class="plan-display" id="plan-display">
-      <div class="plan-header">
-        <h3 id="plan-project-name"></h3>
-        <span class="priority-badge" id="plan-priority"></span>
-      </div>
-      
-      <div class="plan-section">
-        <h4>📝 Overview</h4>
-        <p id="plan-overview"></p>
-      </div>
-
-      <div class="plan-section">
-        <h4>🎯 Goals</h4>
-        <ul id="plan-goals"></ul>
-      </div>
-
-      <div class="plan-section">
-        <h4>📅 Proposed Timeline</h4>
-        <p id="plan-timeline"></p>
-      </div>
-
-      <div class="plan-section">
-        <h4>✅ Success Metrics</h4>
-        <p id="plan-metrics"></p>
-      </div>
-    </div>
-
-    <!-- Improvement Suggestions -->
-    <div class="suggestions-box">
-      <div class="suggestion-header">💡 Make this plan even better:</div>
-      <div class="suggestion-chips">
-        <button class="suggestion-chip" onclick="requestImprovement('Add more specific milestones')">Add milestones</button>
-        <button class="suggestion-chip" onclick="requestImprovement('Include risk assessment')">Add risks</button>
-        <button class="suggestion-chip" onclick="requestImprovement('Define success metrics more clearly')">Better metrics</button>
-        <button class="suggestion-chip" onclick="requestImprovement('Add resource requirements')">Resources needed</button>
-      </div>
-    </div>
-
-    <!-- Improvement Request -->
-    <div class="improvement-section">
-      <label for="improvement-request">Request specific changes:</label>
-      <div class="improvement-input-group">
-        <textarea 
-          id="improvement-request" 
-          rows="2" 
-          placeholder="e.g., 'Can you add more detail about the implementation phase?'"
-        ></textarea>
-        <button class="secondary-button" onclick="improvePlan()">🔄 Improve Plan</button>
-      </div>
-    </div>
-
-    <!-- Action Buttons -->
-    <div class="button-group">
-      <button type="button" class="secondary-button" onclick="goBackToDiscovery()">← Back</button>
-      <button type="button" class="approve-button" onclick="showApprovalOptions()">✓ Approve Plan</button>
-    </div>
-  </div>
-
-  <!-- Approval Modal -->
-  <div class="modal-overlay" id="approval-modal" style="display: none;">
-    <div class="modal-content">
-      <h2>🎉 Great! How would you like to proceed?</h2>
-      <p class="modal-subtitle">Choose how you'd like to approve this plan</p>
-
-      <div class="approval-options">
-        <div class="approval-option" onclick="approveInWizard()">
-          <div class="option-icon">✓</div>
-          <h3>Approve Now</h3>
-          <p>Continue in the wizard and move to the next step</p>
+
+      .skip-link {
+        display: inline-block;
+        margin-top: 12px;
+        color: #999;
+        text-decoration: none;
+        font-size: 13px;
+        transition: color 0.2s;
+      }
+
+      .skip-link:hover {
+        color: #667eea;
+      }
+
+      .feature-highlight {
+        display: inline-block;
+        background: #fff3cd;
+        color: #856404;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 15px;
+      }
+
+      /* Progress Bar */
+      .progress-bar {
+        width: 100%;
+        height: 6px;
+        background: #e0e0e0;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        transition: width 0.3s ease;
+      }
+
+      .step-indicator {
+        font-size: 13px;
+        color: #999;
+        margin-bottom: 15px;
+        font-weight: 500;
+      }
+
+      /* Form Styles */
+      .discovery-form {
+        text-align: left;
+        margin-top: 25px;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      .form-group label {
+        display: block;
+        font-size: 14px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 8px;
+      }
+
+      .form-group input,
+      .form-group textarea,
+      .form-group select {
+        width: 100%;
+        padding: 12px;
+        font-size: 14px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-family: inherit;
+        transition: border-color 0.2s;
+      }
+
+      .form-group input:focus,
+      .form-group textarea:focus,
+      .form-group select:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .form-group textarea {
+        resize: vertical;
+        min-height: 120px;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 12px;
+        margin-top: 25px;
+        justify-content: space-between;
+      }
+
+      .secondary-button {
+        background: #f0f0f0;
+        color: #666;
+        border: none;
+        padding: 12px 24px;
+        font-size: 16px;
+        font-weight: 600;
+        border-radius: 50px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .secondary-button:hover {
+        background: #e0e0e0;
+        transform: translateY(-1px);
+      }
+
+      .secondary-button:active {
+        transform: translateY(0);
+      }
+
+      /* Plan Container */
+      .plan-container {
+        max-width: 700px;
+      }
+
+      /* Plan Display */
+      .plan-display {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 20px 0;
+        text-align: left;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .plan-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #e0e0e0;
+      }
+
+      .plan-header h3 {
+        margin: 0;
+        color: #667eea;
+        font-size: 18px;
+      }
+
+      .priority-badge {
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+
+      .priority-badge.high {
+        background: #ffe0e0;
+        color: #c00;
+      }
+      .priority-badge.medium {
+        background: #fff3cd;
+        color: #856404;
+      }
+      .priority-badge.low {
+        background: #e0f0ff;
+        color: #0066cc;
+      }
+
+      .plan-section {
+        margin-bottom: 15px;
+      }
+
+      .plan-section h4 {
+        font-size: 14px;
+        color: #333;
+        margin-bottom: 8px;
+      }
+
+      .plan-section p {
+        font-size: 13px;
+        color: #666;
+        line-height: 1.6;
+        margin: 0;
+      }
+
+      .plan-section ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      .plan-section li {
+        font-size: 13px;
+        color: #666;
+        line-height: 1.6;
+        margin-bottom: 5px;
+      }
+
+      /* Suggestions */
+      .suggestions-box {
+        background: #fff3cd;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 15px 0;
+      }
+
+      .suggestion-header {
+        font-size: 13px;
+        font-weight: 600;
+        color: #856404;
+        margin-bottom: 10px;
+      }
+
+      .suggestion-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .suggestion-chip {
+        background: white;
+        border: 1px solid #ffc107;
+        color: #856404;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .suggestion-chip:hover {
+        background: #ffc107;
+        color: white;
+        transform: translateY(-1px);
+      }
+
+      /* Improvement Section */
+      .improvement-section {
+        margin: 15px 0;
+      }
+
+      .improvement-section label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 8px;
+      }
+
+      .improvement-input-group {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+
+      .improvement-input-group textarea {
+        flex: 1;
+        padding: 10px;
+        font-size: 13px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-family: inherit;
+        resize: none;
+      }
+
+      .improvement-input-group .secondary-button {
+        padding: 10px 20px;
+        font-size: 14px;
+        white-space: nowrap;
+      }
+
+      .approve-button {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: white;
+        border: none;
+        padding: 12px 32px;
+        font-size: 16px;
+        font-weight: 600;
+        border-radius: 50px;
+        cursor: pointer;
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s;
+      }
+
+      .approve-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px rgba(40, 167, 69, 0.4);
+      }
+
+      /* Modal Styles */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        animation: fadeIn 0.2s;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .modal-content {
+        background: white;
+        border-radius: 20px;
+        padding: 40px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        animation: slideUp 0.3s;
+      }
+
+      @keyframes slideUp {
+        from {
+          transform: translateY(30px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      .modal-content h2 {
+        font-size: 24px;
+        color: #333;
+        margin-bottom: 8px;
+      }
+
+      .modal-subtitle {
+        font-size: 14px;
+        color: #666;
+        margin-bottom: 25px;
+      }
+
+      .approval-options {
+        display: grid;
+        gap: 15px;
+        margin-bottom: 20px;
+      }
+
+      .approval-option {
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        padding: 20px;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-align: left;
+      }
+
+      .approval-option:hover {
+        border-color: #667eea;
+        background: #f8f9ff;
+        transform: translateX(5px);
+      }
+
+      .option-icon {
+        font-size: 32px;
+        margin-bottom: 8px;
+      }
+
+      .approval-option h3 {
+        font-size: 16px;
+        color: #333;
+        margin: 0 0 5px 0;
+      }
+
+      .approval-option p {
+        font-size: 13px;
+        color: #666;
+        margin: 0;
+      }
+
+      .cancel-link {
+        background: none;
+        border: none;
+        color: #999;
+        font-size: 14px;
+        cursor: pointer;
+        transition: color 0.2s;
+      }
+
+      .cancel-link:hover {
+        color: #667eea;
+      }
+
+      .email-form {
+        text-align: left;
+      }
+
+      .checkbox-group label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: normal;
+        cursor: pointer;
+      }
+
+      .checkbox-group input[type='checkbox'] {
+        width: auto;
+        cursor: pointer;
+      }
+
+      /* Collaborators Step */
+      .collaborator-types {
+        display: flex;
+        gap: 10px;
+        margin: 20px 0;
+        border-bottom: 2px solid #e0e0e0;
+      }
+
+      .type-tab {
+        flex: 1;
+        background: none;
+        border: none;
+        padding: 12px 20px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #666;
+        cursor: pointer;
+        border-bottom: 3px solid transparent;
+        transition: all 0.2s;
+      }
+
+      .type-tab:hover {
+        color: #667eea;
+      }
+
+      .type-tab.active {
+        color: #667eea;
+        border-bottom-color: #667eea;
+      }
+
+      .collaborator-section {
+        margin: 20px 0;
+      }
+
+      .add-collaborator-form {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+      }
+
+      .add-collaborator-form input,
+      .add-collaborator-form select {
+        padding: 10px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 13px;
+        font-family: inherit;
+      }
+
+      .add-collaborator-form input {
+        flex: 1;
+      }
+
+      .add-collaborator-form select {
+        width: 120px;
+      }
+
+      .add-button {
+        background: #667eea;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+      }
+
+      .add-button:hover {
+        background: #5568d3;
+        transform: translateY(-1px);
+      }
+
+      .collaborators-list {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 15px;
+        min-height: 100px;
+      }
+
+      .collaborator-item {
+        background: white;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: all 0.2s;
+      }
+
+      .collaborator-item:hover {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .collaborator-item:last-child {
+        margin-bottom: 0;
+      }
+
+      .collaborator-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .collaborator-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 16px;
+      }
+
+      .collaborator-details h5 {
+        margin: 0 0 2px 0;
+        font-size: 14px;
+        color: #333;
+      }
+
+      .collaborator-details p {
+        margin: 0;
+        font-size: 12px;
+        color: #666;
+      }
+
+      .collaborator-role {
+        padding: 4px 12px;
+        background: #e8f0fe;
+        color: #1967d2;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+
+      .remove-button {
+        background: #fee;
+        color: #c00;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .remove-button:hover {
+        background: #fcc;
+      }
+
+      /* Agent Cards */
+      .agent-presets {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+
+      .agent-card {
+        background: white;
+        border: 2px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 15px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .agent-card:hover {
+        border-color: #667eea;
+        background: #f8f9ff;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+      }
+
+      .agent-icon {
+        font-size: 32px;
+        margin-bottom: 8px;
+      }
+
+      .agent-card h4 {
+        margin: 0 0 5px 0;
+        font-size: 14px;
+        color: #333;
+      }
+
+      .agent-card p {
+        margin: 0;
+        font-size: 12px;
+        color: #666;
+        line-height: 1.4;
+      }
+
+      /* HUD Info Box */
+      .hud-info-box {
+        background: linear-gradient(135deg, #e8f0fe 0%, #f0e8ff 100%);
+        border-radius: 12px;
+        padding: 20px;
+        margin: 20px 0;
+        display: flex;
+        gap: 15px;
+      }
+
+      .hud-icon {
+        font-size: 36px;
+        flex-shrink: 0;
+      }
+
+      .hud-content h4 {
+        margin: 0 0 8px 0;
+        font-size: 15px;
+        color: #333;
+      }
+
+      .hud-content p {
+        margin: 0 0 10px 0;
+        font-size: 13px;
+        color: #666;
+        line-height: 1.5;
+      }
+
+      .hud-content ul {
+        margin: 0;
+        padding-left: 0;
+        list-style: none;
+      }
+
+      .hud-content li {
+        font-size: 13px;
+        color: #666;
+        line-height: 1.8;
+        padding-left: 0;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 30px;
+        color: #999;
+        font-size: 13px;
+      }
+
+      /* Final Step - Completion */
+      .completion-checklist {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 20px 0;
+      }
+
+      .checklist-item {
+        display: flex;
+        gap: 15px;
+        padding: 15px;
+        background: white;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        border-left: 4px solid transparent;
+        transition: all 0.3s;
+      }
+
+      .checklist-item:last-child {
+        margin-bottom: 0;
+      }
+
+      .checklist-item.completed {
+        border-left-color: #28a745;
+      }
+
+      .check-icon {
+        width: 32px;
+        height: 32px;
+        background: #28a745;
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
+      .check-content h4 {
+        margin: 0 0 4px 0;
+        font-size: 14px;
+        color: #333;
+      }
+
+      .check-content p {
+        margin: 0;
+        font-size: 13px;
+        color: #666;
+      }
+
+      /* IDW Introduction Box */
+      .idw-intro-box {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 12px;
+        padding: 25px;
+        margin: 20px 0;
+      }
+
+      .idw-header {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        margin-bottom: 15px;
+      }
+
+      .idw-logo {
+        font-size: 48px;
+      }
+
+      .idw-header h3 {
+        margin: 0;
+        font-size: 20px;
+        color: white;
+      }
+
+      .idw-subtitle {
+        margin: 4px 0 0 0;
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .idw-description {
+        margin-bottom: 15px;
+      }
+
+      .idw-description p {
+        margin: 0;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.95);
+        line-height: 1.5;
+      }
+
+      .idw-features {
+        display: grid;
+        gap: 12px;
+      }
+
+      .idw-feature {
+        display: flex;
+        gap: 12px;
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 8px;
+        padding: 12px;
+        backdrop-filter: blur(10px);
+      }
+
+      .feature-icon {
+        font-size: 24px;
+        flex-shrink: 0;
+      }
+
+      .feature-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .feature-text strong {
+        font-size: 13px;
+        color: white;
+      }
+
+      .feature-text span {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.85);
+        line-height: 1.4;
+      }
+
+      /* Next Steps Box */
+      .next-steps-box {
+        background: #fff3cd;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 20px 0;
+      }
+
+      .next-steps-box h4 {
+        margin: 0 0 12px 0;
+        font-size: 15px;
+        color: #856404;
+      }
+
+      .next-steps-box ol {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      .next-steps-box li {
+        font-size: 13px;
+        color: #856404;
+        line-height: 1.8;
+        margin-bottom: 6px;
+      }
+
+      .next-steps-box li:last-child {
+        margin-bottom: 0;
+      }
+
+      .next-steps-box strong {
+        color: #664d03;
+      }
+
+      .launch-button {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: white;
+        border: none;
+        padding: 12px 32px;
+        font-size: 16px;
+        font-weight: 600;
+        border-radius: 50px;
+        cursor: pointer;
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s;
+        box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+      }
+
+      .launch-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(40, 167, 69, 0.4);
+      }
+
+      .launch-button:active {
+        transform: translateY(0);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Welcome Screen -->
+    <div class="wizard-container" id="welcome-screen">
+      <div class="logo">🚀</div>
+      <h1>Let's do some work!</h1>
+      <p class="subtitle">We'll get you set up in just a few steps</p>
+
+      <div class="steps-list">
+        <div class="step-item">
+          <div class="step-number">1</div>
+          <div class="step-text">First, we'll discuss the nature of your project</div>
         </div>
 
-        <div class="approval-option" onclick="showEmailForm()">
-          <div class="option-icon">📧</div>
-          <h3>Email Me the Plan</h3>
-          <p>Review and approve via email at your convenience</p>
+        <div class="step-item">
+          <div class="step-number">2</div>
+          <div class="step-text">Next we'll make a plan</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-number">3</div>
+          <div class="step-text">We'll invite collaborators</div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-number">4</div>
+          <div class="step-text">Then I can get to work!</div>
         </div>
       </div>
 
-      <button class="cancel-link" onclick="closeApprovalModal()">← Back to plan</button>
+      <button class="cta-button" onclick="startSetup()">Get Started →</button>
+
+      <br />
+      <a href="#" class="skip-link" onclick="skipSetup()">I'll do this later</a>
     </div>
-  </div>
 
-  <!-- Email Form Modal -->
-  <div class="modal-overlay" id="email-modal" style="display: none;">
-    <div class="modal-content">
-      <h2>📧 Send plan via email</h2>
-      <p class="modal-subtitle">We'll send the plan to your email for review</p>
+    <!-- Discovery Step -->
+    <div class="wizard-container" id="discovery-screen" style="display: none">
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: 25%"></div>
+      </div>
 
-      <form id="email-form" class="email-form">
+      <div class="step-indicator">Step 1 of 4</div>
+      <div class="logo">🔍</div>
+      <h1>Tell me about your project</h1>
+      <p class="subtitle">The more detail you provide, the better I can help you</p>
+
+      <form id="discovery-form" class="discovery-form">
         <div class="form-group">
-          <label for="user-email">Email address</label>
-          <input type="email" id="user-email" placeholder="your.email@example.com" required>
+          <label for="project-name">What should we call this project?</label>
+          <input type="text" id="project-name" placeholder="e.g., Customer Support Automation" required />
         </div>
 
-        <div class="form-group checkbox-group">
-          <label>
-            <input type="checkbox" id="send-copy" checked>
-            Send me a copy of the approval link
-          </label>
+        <div class="form-group">
+          <label for="project-description">What do you want your IDW to work on?</label>
+          <textarea
+            id="project-description"
+            rows="6"
+            placeholder="Describe what you'd like to accomplish. Include details like:&#10;• What problem are you trying to solve?&#10;• Who will benefit from this?&#10;• What does success look like?&#10;• Any specific requirements or constraints?"
+            required
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="project-priority">What's the priority level?</label>
+          <select id="project-priority">
+            <option value="high">High - Urgent, needs immediate attention</option>
+            <option value="medium" selected>Medium - Important, but not urgent</option>
+            <option value="low">Low - Nice to have, when time allows</option>
+          </select>
         </div>
 
         <div class="button-group">
-          <button type="button" class="secondary-button" onclick="closeEmailModal()">← Back</button>
-          <button type="submit" class="cta-button">Send Email →</button>
+          <button type="button" class="secondary-button" onclick="goBack()">← Back</button>
+          <button type="submit" class="cta-button">Continue →</button>
         </div>
       </form>
     </div>
-  </div>
 
-  <!-- Collaborators Step -->
-  <div class="wizard-container plan-container" id="collaborators-screen" style="display: none;">
-    <div class="progress-bar">
-      <div class="progress-fill" style="width: 75%"></div>
-    </div>
-    
-    <div class="step-indicator">Step 3 of 4</div>
-    <div class="logo">👥</div>
-    <h1>Invite your team</h1>
-    <p class="subtitle">Add humans and AI agents who can help with this project</p>
-
-    <!-- Collaborator Type Selection -->
-    <div class="collaborator-types">
-      <button class="type-tab active" data-type="human" onclick="switchCollaboratorType('human')">
-        👤 Humans
-      </button>
-      <button class="type-tab" data-type="agent" onclick="switchCollaboratorType('agent')">
-        🤖 AI Agents
-      </button>
-    </div>
-
-    <!-- Human Collaborators -->
-    <div class="collaborator-section" id="human-section">
-      <div class="add-collaborator-form">
-        <input type="text" id="human-name" placeholder="Name">
-        <input type="email" id="human-email" placeholder="email@example.com">
-        <select id="human-role">
-          <option value="contributor">Contributor</option>
-          <option value="reviewer">Reviewer</option>
-          <option value="lead">Lead</option>
-        </select>
-        <button class="add-button" onclick="addHuman()">+ Add</button>
+    <!-- Planning Step -->
+    <div class="wizard-container plan-container" id="planning-screen" style="display: none">
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: 50%"></div>
       </div>
 
-      <div class="collaborators-list" id="human-list">
-        <!-- Added humans will appear here -->
-      </div>
-    </div>
+      <div class="step-indicator">Step 2 of 4</div>
+      <div class="logo">📋</div>
+      <h1>Here's your project plan</h1>
+      <p class="subtitle">Review it and help me make it better</p>
 
-    <!-- AI Agent Collaborators -->
-    <div class="collaborator-section" id="agent-section" style="display: none;">
-      <div class="agent-presets">
-        <div class="agent-card" onclick="addAgentPreset('researcher')">
-          <div class="agent-icon">🔍</div>
-          <h4>Research Agent</h4>
-          <p>Gathers information and analyzes data</p>
+      <!-- Plan Display -->
+      <div class="plan-display" id="plan-display">
+        <div class="plan-header">
+          <h3 id="plan-project-name"></h3>
+          <span class="priority-badge" id="plan-priority"></span>
         </div>
-        <div class="agent-card" onclick="addAgentPreset('developer')">
-          <div class="agent-icon">💻</div>
-          <h4>Developer Agent</h4>
-          <p>Writes and reviews code</p>
+
+        <div class="plan-section">
+          <h4>📝 Overview</h4>
+          <p id="plan-overview"></p>
         </div>
-        <div class="agent-card" onclick="addAgentPreset('writer')">
-          <div class="agent-icon">✍️</div>
-          <h4>Content Writer</h4>
-          <p>Creates documentation and content</p>
+
+        <div class="plan-section">
+          <h4>🎯 Goals</h4>
+          <ul id="plan-goals"></ul>
         </div>
-        <div class="agent-card" onclick="addAgentPreset('qa')">
-          <div class="agent-icon">✅</div>
-          <h4>QA Agent</h4>
-          <p>Tests and validates deliverables</p>
+
+        <div class="plan-section">
+          <h4>📅 Proposed Timeline</h4>
+          <p id="plan-timeline"></p>
+        </div>
+
+        <div class="plan-section">
+          <h4>✅ Success Metrics</h4>
+          <p id="plan-metrics"></p>
         </div>
       </div>
 
-      <div class="collaborators-list" id="agent-list">
-        <!-- Added agents will appear here -->
+      <!-- Improvement Suggestions -->
+      <div class="suggestions-box">
+        <div class="suggestion-header">💡 Make this plan even better:</div>
+        <div class="suggestion-chips">
+          <button class="suggestion-chip" onclick="requestImprovement('Add more specific milestones')">
+            Add milestones
+          </button>
+          <button class="suggestion-chip" onclick="requestImprovement('Include risk assessment')">Add risks</button>
+          <button class="suggestion-chip" onclick="requestImprovement('Define success metrics more clearly')">
+            Better metrics
+          </button>
+          <button class="suggestion-chip" onclick="requestImprovement('Add resource requirements')">
+            Resources needed
+          </button>
+        </div>
       </div>
-    </div>
 
-    <!-- HUD Explanation -->
-    <div class="hud-info-box">
-      <div class="hud-icon">📊</div>
-      <div class="hud-content">
-        <h4>How the Bidding HUD Works</h4>
-        <p>Your IDW will post objectives from the plan to a shared HUD. Team members and AI agents can:</p>
-        <ul>
-          <li>🎯 View all available objectives</li>
-          <li>💰 Bid on tasks with estimated time/cost</li>
-          <li>🏆 Get assigned based on bids and expertise</li>
-          <li>📈 Track progress in real-time</li>
-        </ul>
+      <!-- Improvement Request -->
+      <div class="improvement-section">
+        <label for="improvement-request">Request specific changes:</label>
+        <div class="improvement-input-group">
+          <textarea
+            id="improvement-request"
+            rows="2"
+            placeholder="e.g., 'Can you add more detail about the implementation phase?'"
+          ></textarea>
+          <button class="secondary-button" onclick="improvePlan()">🔄 Improve Plan</button>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="button-group">
+        <button type="button" class="secondary-button" onclick="goBackToDiscovery()">← Back</button>
+        <button type="button" class="approve-button" onclick="showApprovalOptions()">✓ Approve Plan</button>
       </div>
     </div>
 
-    <!-- Action Buttons -->
-    <div class="button-group">
-      <button type="button" class="secondary-button" onclick="goBackToPlan()">← Back</button>
-      <button type="button" class="cta-button" onclick="proceedToFinal()">Continue →</button>
-    </div>
-  </div>
+    <!-- Approval Modal -->
+    <div class="modal-overlay" id="approval-modal" style="display: none">
+      <div class="modal-content">
+        <h2>🎉 Great! How would you like to proceed?</h2>
+        <p class="modal-subtitle">Choose how you'd like to approve this plan</p>
 
-  <!-- Final Step - Ready to Launch -->
-  <div class="wizard-container plan-container" id="final-screen" style="display: none;">
-    <div class="progress-bar">
-      <div class="progress-fill" style="width: 100%"></div>
-    </div>
-    
-    <div class="step-indicator">Step 4 of 4</div>
-    <div class="logo">🎉</div>
-    <h1>You're all set!</h1>
-    <p class="subtitle">Your IDW is ready to manage this project</p>
+        <div class="approval-options">
+          <div class="approval-option" onclick="approveInWizard()">
+            <div class="option-icon">✓</div>
+            <h3>Approve Now</h3>
+            <p>Continue in the wizard and move to the next step</p>
+          </div>
 
-    <!-- Completed Steps Checklist -->
-    <div class="completion-checklist">
-      <div class="checklist-item completed">
-        <div class="check-icon">✓</div>
-        <div class="check-content">
-          <h4>Project Defined</h4>
-          <p id="summary-project-name"></p>
-        </div>
-      </div>
-
-      <div class="checklist-item completed">
-        <div class="check-icon">✓</div>
-        <div class="check-content">
-          <h4>Plan Created</h4>
-          <p id="summary-plan-status"></p>
-        </div>
-      </div>
-
-      <div class="checklist-item completed">
-        <div class="check-icon">✓</div>
-        <div class="check-content">
-          <h4>Team Assembled</h4>
-          <p id="summary-team-count"></p>
-        </div>
-      </div>
-
-      <div class="checklist-item completed">
-        <div class="check-icon">✓</div>
-        <div class="check-content">
-          <h4>HUD Activated</h4>
-          <p>Ready for objective bidding and task assignment</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- IDW Introduction -->
-    <div class="idw-intro-box">
-      <div class="idw-header">
-        <div class="idw-logo">🤖</div>
-        <div>
-          <h3>Meet Your IDW</h3>
-          <p class="idw-subtitle">Intelligent Digital Worker - Your Hyperconnected Project Manager</p>
-        </div>
-      </div>
-
-      <div class="idw-description">
-        <p>Your IDW isn't just software—it's an intelligent system that connects everything:</p>
-      </div>
-
-      <div class="idw-features">
-        <div class="idw-feature">
-          <div class="feature-icon">🔗</div>
-          <div class="feature-text">
-            <strong>Hyperconnected</strong>
-            <span>Links team members, AI agents, tasks, and resources in real-time</span>
+          <div class="approval-option" onclick="showEmailForm()">
+            <div class="option-icon">📧</div>
+            <h3>Email Me the Plan</h3>
+            <p>Review and approve via email at your convenience</p>
           </div>
         </div>
 
-        <div class="idw-feature">
-          <div class="feature-icon">🎯</div>
-          <div class="feature-text">
-            <strong>Intelligent Routing</strong>
-            <span>Automatically matches tasks to the best-suited team members or agents</span>
-          </div>
-        </div>
-
-        <div class="idw-feature">
-          <div class="feature-icon">📊</div>
-          <div class="feature-text">
-            <strong>Live Dashboard</strong>
-            <span>Real-time visibility into progress, blockers, and opportunities</span>
-          </div>
-        </div>
-
-        <div class="idw-feature">
-          <div class="feature-icon">⚡</div>
-          <div class="feature-text">
-            <strong>Proactive Management</strong>
-            <span>Anticipates issues, suggests solutions, and keeps everything moving</span>
-          </div>
-        </div>
+        <button class="cancel-link" onclick="closeApprovalModal()">← Back to plan</button>
       </div>
     </div>
 
-    <!-- Next Steps Info -->
-    <div class="next-steps-box">
-      <h4>🚀 What Happens Next</h4>
-      <ol>
-        <li>You'll tour the <strong>IDW Dashboard</strong> where you can see everything at a glance</li>
-        <li>We'll show you the <strong>Bidding HUD</strong> where objectives are posted and claimed</li>
-        <li>You'll learn to use the <strong>Communication Hub</strong> for seamless team collaboration</li>
-        <li>Finally, you'll see how the <strong>Progress Tracker</strong> keeps everyone aligned</li>
-      </ol>
+    <!-- Email Form Modal -->
+    <div class="modal-overlay" id="email-modal" style="display: none">
+      <div class="modal-content">
+        <h2>📧 Send plan via email</h2>
+        <p class="modal-subtitle">We'll send the plan to your email for review</p>
+
+        <form id="email-form" class="email-form">
+          <div class="form-group">
+            <label for="user-email">Email address</label>
+            <input type="email" id="user-email" placeholder="your.email@example.com" required />
+          </div>
+
+          <div class="form-group checkbox-group">
+            <label>
+              <input type="checkbox" id="send-copy" checked />
+              Send me a copy of the approval link
+            </label>
+          </div>
+
+          <div class="button-group">
+            <button type="button" class="secondary-button" onclick="closeEmailModal()">← Back</button>
+            <button type="submit" class="cta-button">Send Email →</button>
+          </div>
+        </form>
+      </div>
     </div>
 
-    <!-- Action Buttons -->
-    <div class="button-group">
-      <button type="button" class="secondary-button" onclick="goBackToCollaborators()">← Back</button>
-      <button type="button" class="launch-button" onclick="launchIDW()">🚀 Launch Tour</button>
+    <!-- Collaborators Step -->
+    <div class="wizard-container plan-container" id="collaborators-screen" style="display: none">
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: 75%"></div>
+      </div>
+
+      <div class="step-indicator">Step 3 of 4</div>
+      <div class="logo">👥</div>
+      <h1>Invite your team</h1>
+      <p class="subtitle">Add humans and AI agents who can help with this project</p>
+
+      <!-- Collaborator Type Selection -->
+      <div class="collaborator-types">
+        <button class="type-tab active" data-type="human" onclick="switchCollaboratorType('human')">👤 Humans</button>
+        <button class="type-tab" data-type="agent" onclick="switchCollaboratorType('agent')">🤖 AI Agents</button>
+      </div>
+
+      <!-- Human Collaborators -->
+      <div class="collaborator-section" id="human-section">
+        <div class="add-collaborator-form">
+          <input type="text" id="human-name" placeholder="Name" />
+          <input type="email" id="human-email" placeholder="email@example.com" />
+          <select id="human-role">
+            <option value="contributor">Contributor</option>
+            <option value="reviewer">Reviewer</option>
+            <option value="lead">Lead</option>
+          </select>
+          <button class="add-button" onclick="addHuman()">+ Add</button>
+        </div>
+
+        <div class="collaborators-list" id="human-list">
+          <!-- Added humans will appear here -->
+        </div>
+      </div>
+
+      <!-- AI Agent Collaborators -->
+      <div class="collaborator-section" id="agent-section" style="display: none">
+        <div class="agent-presets">
+          <div class="agent-card" onclick="addAgentPreset('researcher')">
+            <div class="agent-icon">🔍</div>
+            <h4>Research Agent</h4>
+            <p>Gathers information and analyzes data</p>
+          </div>
+          <div class="agent-card" onclick="addAgentPreset('developer')">
+            <div class="agent-icon">💻</div>
+            <h4>Developer Agent</h4>
+            <p>Writes and reviews code</p>
+          </div>
+          <div class="agent-card" onclick="addAgentPreset('writer')">
+            <div class="agent-icon">✍️</div>
+            <h4>Content Writer</h4>
+            <p>Creates documentation and content</p>
+          </div>
+          <div class="agent-card" onclick="addAgentPreset('qa')">
+            <div class="agent-icon">✅</div>
+            <h4>QA Agent</h4>
+            <p>Tests and validates deliverables</p>
+          </div>
+        </div>
+
+        <div class="collaborators-list" id="agent-list">
+          <!-- Added agents will appear here -->
+        </div>
+      </div>
+
+      <!-- HUD Explanation -->
+      <div class="hud-info-box">
+        <div class="hud-icon">📊</div>
+        <div class="hud-content">
+          <h4>How the Bidding HUD Works</h4>
+          <p>Your IDW will post objectives from the plan to a shared HUD. Team members and AI agents can:</p>
+          <ul>
+            <li>🎯 View all available objectives</li>
+            <li>💰 Bid on tasks with estimated time/cost</li>
+            <li>🏆 Get assigned based on bids and expertise</li>
+            <li>📈 Track progress in real-time</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="button-group">
+        <button type="button" class="secondary-button" onclick="goBackToPlan()">← Back</button>
+        <button type="button" class="cta-button" onclick="proceedToFinal()">Continue →</button>
+      </div>
     </div>
-  </div>
 
-  <script>
-    let projectData = {
-      name: '',
-      description: '',
-      priority: 'medium',
-      plan: '',
-      collaborators: []
-    };
+    <!-- Final Step - Ready to Launch -->
+    <div class="wizard-container plan-container" id="final-screen" style="display: none">
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: 100%"></div>
+      </div>
 
-    function startSetup() {
-      console.log('Starting setup wizard...');
-      document.getElementById('welcome-screen').style.display = 'none';
-      document.getElementById('discovery-screen').style.display = 'block';
-    }
+      <div class="step-indicator">Step 4 of 4</div>
+      <div class="logo">🎉</div>
+      <h1>You're all set!</h1>
+      <p class="subtitle">Your IDW is ready to manage this project</p>
 
-    function goBack() {
-      document.getElementById('discovery-screen').style.display = 'none';
-      document.getElementById('welcome-screen').style.display = 'block';
-    }
+      <!-- Completed Steps Checklist -->
+      <div class="completion-checklist">
+        <div class="checklist-item completed">
+          <div class="check-icon">✓</div>
+          <div class="check-content">
+            <h4>Project Defined</h4>
+            <p id="summary-project-name"></p>
+          </div>
+        </div>
 
-    function skipSetup() {
-      console.log('User skipped setup');
-      if (window.api && window.api.send) {
-        window.api.send('close-wizard');
-      } else {
-        window.close();
-      }
-      return false;
-    }
+        <div class="checklist-item completed">
+          <div class="check-icon">✓</div>
+          <div class="check-content">
+            <h4>Plan Created</h4>
+            <p id="summary-plan-status"></p>
+          </div>
+        </div>
 
-    // Handle discovery form submission
-    document.getElementById('discovery-form').addEventListener('submit', (e) => {
-      e.preventDefault();
-      
-      projectData.name = document.getElementById('project-name').value;
-      projectData.description = document.getElementById('project-description').value;
-      projectData.priority = document.getElementById('project-priority').value;
-      
-      console.log('Project data collected:', projectData);
-      
-      // Generate initial plan and show planning screen
-      generateInitialPlan();
-      document.getElementById('discovery-screen').style.display = 'none';
-      document.getElementById('planning-screen').style.display = 'block';
-    });
+        <div class="checklist-item completed">
+          <div class="check-icon">✓</div>
+          <div class="check-content">
+            <h4>Team Assembled</h4>
+            <p id="summary-team-count"></p>
+          </div>
+        </div>
 
-    function generateInitialPlan() {
-      // Generate a plan based on the project data
-      projectData.plan = {
-        overview: projectData.description,
-        goals: [
-          'Define clear success criteria and KPIs',
-          'Identify key stakeholders and resources needed',
-          'Create detailed implementation timeline',
-          'Establish communication and feedback loops'
-        ],
-        timeline: 'Estimated 4-6 weeks for initial implementation, with ongoing optimization',
-        metrics: 'Success will be measured by completion of milestones, stakeholder satisfaction, and achievement of stated objectives'
+        <div class="checklist-item completed">
+          <div class="check-icon">✓</div>
+          <div class="check-content">
+            <h4>HUD Activated</h4>
+            <p>Ready for objective bidding and task assignment</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- IDW Introduction -->
+      <div class="idw-intro-box">
+        <div class="idw-header">
+          <div class="idw-logo">🤖</div>
+          <div>
+            <h3>Meet Your IDW</h3>
+            <p class="idw-subtitle">Intelligent Digital Worker - Your Hyperconnected Project Manager</p>
+          </div>
+        </div>
+
+        <div class="idw-description">
+          <p>Your IDW isn't just software—it's an intelligent system that connects everything:</p>
+        </div>
+
+        <div class="idw-features">
+          <div class="idw-feature">
+            <div class="feature-icon">🔗</div>
+            <div class="feature-text">
+              <strong>Hyperconnected</strong>
+              <span>Links team members, AI agents, tasks, and resources in real-time</span>
+            </div>
+          </div>
+
+          <div class="idw-feature">
+            <div class="feature-icon">🎯</div>
+            <div class="feature-text">
+              <strong>Intelligent Routing</strong>
+              <span>Automatically matches tasks to the best-suited team members or agents</span>
+            </div>
+          </div>
+
+          <div class="idw-feature">
+            <div class="feature-icon">📊</div>
+            <div class="feature-text">
+              <strong>Live Dashboard</strong>
+              <span>Real-time visibility into progress, blockers, and opportunities</span>
+            </div>
+          </div>
+
+          <div class="idw-feature">
+            <div class="feature-icon">⚡</div>
+            <div class="feature-text">
+              <strong>Proactive Management</strong>
+              <span>Anticipates issues, suggests solutions, and keeps everything moving</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Next Steps Info -->
+      <div class="next-steps-box">
+        <h4>🚀 What Happens Next</h4>
+        <ol>
+          <li>You'll tour the <strong>IDW Dashboard</strong> where you can see everything at a glance</li>
+          <li>We'll show you the <strong>Bidding HUD</strong> where objectives are posted and claimed</li>
+          <li>You'll learn to use the <strong>Communication Hub</strong> for seamless team collaboration</li>
+          <li>Finally, you'll see how the <strong>Progress Tracker</strong> keeps everyone aligned</li>
+        </ol>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="button-group">
+        <button type="button" class="secondary-button" onclick="goBackToCollaborators()">← Back</button>
+        <button type="button" class="launch-button" onclick="launchIDW()">🚀 Launch Tour</button>
+      </div>
+    </div>
+
+    <script>
+      let projectData = {
+        name: '',
+        description: '',
+        priority: 'medium',
+        plan: '',
+        collaborators: [],
       };
-      
-      // Display the plan
-      displayPlan();
-    }
 
-    function displayPlan() {
-      document.getElementById('plan-project-name').textContent = projectData.name;
-      
-      const priorityBadge = document.getElementById('plan-priority');
-      priorityBadge.textContent = projectData.priority;
-      priorityBadge.className = 'priority-badge ' + projectData.priority;
-      
-      document.getElementById('plan-overview').textContent = projectData.plan.overview;
-      
-      const goalsList = document.getElementById('plan-goals');
-      goalsList.innerHTML = '';
-      projectData.plan.goals.forEach(goal => {
-        const li = document.createElement('li');
-        li.textContent = goal;
-        goalsList.appendChild(li);
-      });
-      
-      document.getElementById('plan-timeline').textContent = projectData.plan.timeline;
-      document.getElementById('plan-metrics').textContent = projectData.plan.metrics;
-    }
-
-    function requestImprovement(suggestion) {
-      document.getElementById('improvement-request').value = suggestion;
-      document.getElementById('improvement-request').focus();
-    }
-
-    function improvePlan() {
-      const improvement = document.getElementById('improvement-request').value;
-      if (!improvement.trim()) {
-        alert('Please describe what you\'d like to improve');
-        return;
+      function startSetup() {
+        console.log('Starting setup wizard...');
+        document.getElementById('welcome-screen').style.display = 'none';
+        document.getElementById('discovery-screen').style.display = 'block';
       }
-      
-      console.log('Improvement requested:', improvement);
-      
-      // Simulate plan improvement (in real implementation, this would call an API)
-      alert('Great suggestion! I\'m updating the plan to include: ' + improvement + '\n\n(In the full version, the AI would regenerate the plan with your feedback)');
-      
-      // Clear the input
-      document.getElementById('improvement-request').value = '';
-      
-      // You could regenerate the plan here with the improvement
-    }
 
-    function goBackToDiscovery() {
-      document.getElementById('planning-screen').style.display = 'none';
-      document.getElementById('discovery-screen').style.display = 'block';
-    }
+      function goBack() {
+        document.getElementById('discovery-screen').style.display = 'none';
+        document.getElementById('welcome-screen').style.display = 'block';
+      }
 
-    function showApprovalOptions() {
-      document.getElementById('approval-modal').style.display = 'flex';
-    }
+      function skipSetup() {
+        console.log('User skipped setup');
+        if (window.api && window.api.send) {
+          window.api.send('close-wizard');
+        } else {
+          window.close();
+        }
+        return false;
+      }
 
-    function closeApprovalModal() {
-      document.getElementById('approval-modal').style.display = 'none';
-    }
+      // Handle discovery form submission
+      document.getElementById('discovery-form').addEventListener('submit', (e) => {
+        e.preventDefault();
 
-    function approveInWizard() {
-      closeApprovalModal();
-      projectData.approvedInWizard = true;
-      console.log('Plan approved in wizard:', projectData);
-      
-      // Navigate to collaborators step
-      document.getElementById('planning-screen').style.display = 'none';
-      document.getElementById('collaborators-screen').style.display = 'block';
-    }
+        projectData.name = document.getElementById('project-name').value;
+        projectData.description = document.getElementById('project-description').value;
+        projectData.priority = document.getElementById('project-priority').value;
 
-    function showEmailForm() {
-      document.getElementById('approval-modal').style.display = 'none';
-      document.getElementById('email-modal').style.display = 'flex';
-    }
+        console.log('Project data collected:', projectData);
 
-    function closeEmailModal() {
-      document.getElementById('email-modal').style.display = 'none';
-      document.getElementById('approval-modal').style.display = 'flex';
-    }
+        // Generate initial plan and show planning screen
+        generateInitialPlan();
+        document.getElementById('discovery-screen').style.display = 'none';
+        document.getElementById('planning-screen').style.display = 'block';
+      });
 
-    // Handle email form submission
-    document.getElementById('email-form').addEventListener('submit', (e) => {
-      e.preventDefault();
-      
-      const email = document.getElementById('user-email').value;
-      const sendCopy = document.getElementById('send-copy').checked;
-      
-      projectData.email = email;
-      projectData.sendCopy = sendCopy;
-      projectData.approvalMethod = 'email';
-      
-      console.log('Sending plan to email:', email);
-      console.log('Project data:', projectData);
-      
-      // In real implementation, this would send the email via API
-      const continueSetup = confirm('📧 Plan sent to ' + email + '!\n\nYou\'ll receive an email with the full plan and an approval link.\n\nWould you like to continue setting up your team now?');
-      
-      closeEmailModal();
-      
-      if (continueSetup) {
+      function generateInitialPlan() {
+        // Generate a plan based on the project data
+        projectData.plan = {
+          overview: projectData.description,
+          goals: [
+            'Define clear success criteria and KPIs',
+            'Identify key stakeholders and resources needed',
+            'Create detailed implementation timeline',
+            'Establish communication and feedback loops',
+          ],
+          timeline: 'Estimated 4-6 weeks for initial implementation, with ongoing optimization',
+          metrics:
+            'Success will be measured by completion of milestones, stakeholder satisfaction, and achievement of stated objectives',
+        };
+
+        // Display the plan
+        displayPlan();
+      }
+
+      function displayPlan() {
+        document.getElementById('plan-project-name').textContent = projectData.name;
+
+        const priorityBadge = document.getElementById('plan-priority');
+        priorityBadge.textContent = projectData.priority;
+        priorityBadge.className = 'priority-badge ' + projectData.priority;
+
+        document.getElementById('plan-overview').textContent = projectData.plan.overview;
+
+        const goalsList = document.getElementById('plan-goals');
+        goalsList.innerHTML = '';
+        projectData.plan.goals.forEach((goal) => {
+          const li = document.createElement('li');
+          li.textContent = goal;
+          goalsList.appendChild(li);
+        });
+
+        document.getElementById('plan-timeline').textContent = projectData.plan.timeline;
+        document.getElementById('plan-metrics').textContent = projectData.plan.metrics;
+      }
+
+      function requestImprovement(suggestion) {
+        document.getElementById('improvement-request').value = suggestion;
+        document.getElementById('improvement-request').focus();
+      }
+
+      function improvePlan() {
+        const improvement = document.getElementById('improvement-request').value;
+        if (!improvement.trim()) {
+          alert("Please describe what you'd like to improve");
+          return;
+        }
+
+        console.log('Improvement requested:', improvement);
+
+        // Simulate plan improvement (in real implementation, this would call an API)
+        alert(
+          "Great suggestion! I'm updating the plan to include: " +
+            improvement +
+            '\n\n(In the full version, the AI would regenerate the plan with your feedback)'
+        );
+
+        // Clear the input
+        document.getElementById('improvement-request').value = '';
+
+        // You could regenerate the plan here with the improvement
+      }
+
+      function goBackToDiscovery() {
+        document.getElementById('planning-screen').style.display = 'none';
+        document.getElementById('discovery-screen').style.display = 'block';
+      }
+
+      function showApprovalOptions() {
+        document.getElementById('approval-modal').style.display = 'flex';
+      }
+
+      function closeApprovalModal() {
+        document.getElementById('approval-modal').style.display = 'none';
+      }
+
+      function approveInWizard() {
+        closeApprovalModal();
+        projectData.approvedInWizard = true;
+        console.log('Plan approved in wizard:', projectData);
+
+        // Navigate to collaborators step
         document.getElementById('planning-screen').style.display = 'none';
         document.getElementById('collaborators-screen').style.display = 'block';
       }
-    });
 
-    // Collaborators Step Functions
-    function switchCollaboratorType(type) {
-      // Update tabs
-      document.querySelectorAll('.type-tab').forEach(tab => {
-        tab.classList.remove('active');
+      function showEmailForm() {
+        document.getElementById('approval-modal').style.display = 'none';
+        document.getElementById('email-modal').style.display = 'flex';
+      }
+
+      function closeEmailModal() {
+        document.getElementById('email-modal').style.display = 'none';
+        document.getElementById('approval-modal').style.display = 'flex';
+      }
+
+      // Handle email form submission
+      document.getElementById('email-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+
+        const email = document.getElementById('user-email').value;
+        const sendCopy = document.getElementById('send-copy').checked;
+
+        projectData.email = email;
+        projectData.sendCopy = sendCopy;
+        projectData.approvalMethod = 'email';
+
+        console.log('Sending plan to email:', email);
+        console.log('Project data:', projectData);
+
+        // In real implementation, this would send the email via API
+        const continueSetup = confirm(
+          '📧 Plan sent to ' +
+            email +
+            "!\n\nYou'll receive an email with the full plan and an approval link.\n\nWould you like to continue setting up your team now?"
+        );
+
+        closeEmailModal();
+
+        if (continueSetup) {
+          document.getElementById('planning-screen').style.display = 'none';
+          document.getElementById('collaborators-screen').style.display = 'block';
+        }
       });
-      document.querySelector(`[data-type="${type}"]`).classList.add('active');
-      
-      // Switch sections
-      if (type === 'human') {
-        document.getElementById('human-section').style.display = 'block';
-        document.getElementById('agent-section').style.display = 'none';
-      } else {
-        document.getElementById('human-section').style.display = 'none';
-        document.getElementById('agent-section').style.display = 'block';
-      }
-    }
 
-    function addHuman() {
-      const name = document.getElementById('human-name').value.trim();
-      const email = document.getElementById('human-email').value.trim();
-      const role = document.getElementById('human-role').value;
-      
-      if (!name || !email) {
-        alert('Please enter both name and email');
-        return;
-      }
-      
-      if (!projectData.collaborators) {
-        projectData.collaborators = [];
-      }
-      
-      const collaborator = {
-        type: 'human',
-        name: name,
-        email: email,
-        role: role
-      };
-      
-      projectData.collaborators.push(collaborator);
-      
-      // Clear form
-      document.getElementById('human-name').value = '';
-      document.getElementById('human-email').value = '';
-      document.getElementById('human-role').value = 'contributor';
-      
-      renderCollaborators();
-    }
+      // Collaborators Step Functions
+      function switchCollaboratorType(type) {
+        // Update tabs
+        document.querySelectorAll('.type-tab').forEach((tab) => {
+          tab.classList.remove('active');
+        });
+        document.querySelector(`[data-type="${type}"]`).classList.add('active');
 
-    function addAgentPreset(agentType) {
-      const agents = {
-        researcher: { name: 'Research Agent', icon: '🔍', specialty: 'Data Analysis' },
-        developer: { name: 'Developer Agent', icon: '💻', specialty: 'Code Development' },
-        writer: { name: 'Content Writer', icon: '✍️', specialty: 'Documentation' },
-        qa: { name: 'QA Agent', icon: '✅', specialty: 'Quality Assurance' }
-      };
-      
-      const agent = agents[agentType];
-      
-      if (!projectData.collaborators) {
-        projectData.collaborators = [];
+        // Switch sections
+        if (type === 'human') {
+          document.getElementById('human-section').style.display = 'block';
+          document.getElementById('agent-section').style.display = 'none';
+        } else {
+          document.getElementById('human-section').style.display = 'none';
+          document.getElementById('agent-section').style.display = 'block';
+        }
       }
-      
-      const collaborator = {
-        type: 'agent',
-        name: agent.name,
-        icon: agent.icon,
-        specialty: agent.specialty,
-        agentType: agentType
-      };
-      
-      projectData.collaborators.push(collaborator);
-      renderCollaborators();
-    }
 
-    function removeCollaborator(index) {
-      projectData.collaborators.splice(index, 1);
-      renderCollaborators();
-    }
+      function addHuman() {
+        const name = document.getElementById('human-name').value.trim();
+        const email = document.getElementById('human-email').value.trim();
+        const role = document.getElementById('human-role').value;
 
-    function renderCollaborators() {
-      const humanList = document.getElementById('human-list');
-      const agentList = document.getElementById('agent-list');
-      
-      const humans = projectData.collaborators ? projectData.collaborators.filter(c => c.type === 'human') : [];
-      const agents = projectData.collaborators ? projectData.collaborators.filter(c => c.type === 'agent') : [];
-      
-      // Render humans
-      if (humans.length === 0) {
-        humanList.innerHTML = '<div class="empty-state">No humans added yet. Add team members above.</div>';
-      } else {
-        humanList.innerHTML = humans.map((collab, index) => {
-          const globalIndex = projectData.collaborators.indexOf(collab);
-          const initial = collab.name.charAt(0).toUpperCase();
-          return `
+        if (!name || !email) {
+          alert('Please enter both name and email');
+          return;
+        }
+
+        if (!projectData.collaborators) {
+          projectData.collaborators = [];
+        }
+
+        const collaborator = {
+          type: 'human',
+          name: name,
+          email: email,
+          role: role,
+        };
+
+        projectData.collaborators.push(collaborator);
+
+        // Clear form
+        document.getElementById('human-name').value = '';
+        document.getElementById('human-email').value = '';
+        document.getElementById('human-role').value = 'contributor';
+
+        renderCollaborators();
+      }
+
+      function addAgentPreset(agentType) {
+        const agents = {
+          researcher: { name: 'Research Agent', icon: '🔍', specialty: 'Data Analysis' },
+          developer: { name: 'Developer Agent', icon: '💻', specialty: 'Code Development' },
+          writer: { name: 'Content Writer', icon: '✍️', specialty: 'Documentation' },
+          qa: { name: 'QA Agent', icon: '✅', specialty: 'Quality Assurance' },
+        };
+
+        const agent = agents[agentType];
+
+        if (!projectData.collaborators) {
+          projectData.collaborators = [];
+        }
+
+        const collaborator = {
+          type: 'agent',
+          name: agent.name,
+          icon: agent.icon,
+          specialty: agent.specialty,
+          agentType: agentType,
+        };
+
+        projectData.collaborators.push(collaborator);
+        renderCollaborators();
+      }
+
+      function removeCollaborator(index) {
+        projectData.collaborators.splice(index, 1);
+        renderCollaborators();
+      }
+
+      function renderCollaborators() {
+        const humanList = document.getElementById('human-list');
+        const agentList = document.getElementById('agent-list');
+
+        const humans = projectData.collaborators ? projectData.collaborators.filter((c) => c.type === 'human') : [];
+        const agents = projectData.collaborators ? projectData.collaborators.filter((c) => c.type === 'agent') : [];
+
+        // Render humans
+        if (humans.length === 0) {
+          humanList.innerHTML = '<div class="empty-state">No humans added yet. Add team members above.</div>';
+        } else {
+          humanList.innerHTML = humans
+            .map((collab, index) => {
+              const globalIndex = projectData.collaborators.indexOf(collab);
+              const initial = collab.name.charAt(0).toUpperCase();
+              return `
             <div class="collaborator-item">
               <div class="collaborator-info">
                 <div class="collaborator-avatar">${initial}</div>
@@ -1644,16 +1683,18 @@
               </div>
             </div>
           `;
-        }).join('');
-      }
-      
-      // Render agents
-      if (agents.length === 0) {
-        agentList.innerHTML = '<div class="empty-state">No AI agents added yet. Choose from the presets above.</div>';
-      } else {
-        agentList.innerHTML = agents.map((collab, index) => {
-          const globalIndex = projectData.collaborators.indexOf(collab);
-          return `
+            })
+            .join('');
+        }
+
+        // Render agents
+        if (agents.length === 0) {
+          agentList.innerHTML = '<div class="empty-state">No AI agents added yet. Choose from the presets above.</div>';
+        } else {
+          agentList.innerHTML = agents
+            .map((collab, index) => {
+              const globalIndex = projectData.collaborators.indexOf(collab);
+              return `
             <div class="collaborator-item">
               <div class="collaborator-info">
                 <div class="collaborator-avatar">${collab.icon}</div>
@@ -1665,103 +1706,112 @@
               <button class="remove-button" onclick="removeCollaborator(${globalIndex})">Remove</button>
             </div>
           `;
-        }).join('');
-      }
-    }
-
-    function goBackToPlan() {
-      document.getElementById('collaborators-screen').style.display = 'none';
-      document.getElementById('planning-screen').style.display = 'block';
-    }
-
-    function proceedToFinal() {
-      console.log('Project data with collaborators:', projectData);
-      
-      if (!projectData.collaborators || projectData.collaborators.length === 0) {
-        if (!confirm('You haven\'t added any collaborators yet. Continue anyway?')) {
-          return;
+            })
+            .join('');
         }
       }
-      
-      // Populate final screen summary
-      populateFinalSummary();
-      
-      // Navigate to final screen
-      document.getElementById('collaborators-screen').style.display = 'none';
-      document.getElementById('final-screen').style.display = 'block';
-    }
 
-    function populateFinalSummary() {
-      // Project name
-      document.getElementById('summary-project-name').textContent = projectData.name;
-      
-      // Plan status
-      const approvalMethod = projectData.approvedInWizard ? 'Approved in wizard' : 
-                            projectData.approvalMethod === 'email' ? 'Sent for email approval' : 
-                            'Plan ready';
-      document.getElementById('summary-plan-status').textContent = approvalMethod;
-      
-      // Team count
-      const collabCount = projectData.collaborators ? projectData.collaborators.length : 0;
-      const humans = projectData.collaborators ? projectData.collaborators.filter(c => c.type === 'human').length : 0;
-      const agents = projectData.collaborators ? projectData.collaborators.filter(c => c.type === 'agent').length : 0;
-      
-      let teamText = '';
-      if (collabCount === 0) {
-        teamText = 'No collaborators added yet';
-      } else {
-        const parts = [];
-        if (humans > 0) parts.push(`${humans} human${humans > 1 ? 's' : ''}`);
-        if (agents > 0) parts.push(`${agents} AI agent${agents > 1 ? 's' : ''}`);
-        teamText = parts.join(' and ');
+      function goBackToPlan() {
+        document.getElementById('collaborators-screen').style.display = 'none';
+        document.getElementById('planning-screen').style.display = 'block';
       }
-      
-      document.getElementById('summary-team-count').textContent = teamText;
-    }
 
-    function goBackToCollaborators() {
-      document.getElementById('final-screen').style.display = 'none';
-      document.getElementById('collaborators-screen').style.display = 'block';
-    }
+      function proceedToFinal() {
+        console.log('Project data with collaborators:', projectData);
 
-    function launchIDW() {
-      console.log('🚀 Launching IDW with project data:', projectData);
-      
-      // In real implementation, this would:
-      // 1. Save all project data to the backend
-      // 2. Initialize the IDW dashboard
-      // 3. Create the bidding HUD
-      // 4. Send notifications to team members
-      // 5. Start the interactive tour
-      
-      alert('🎉 Congratulations!\n\nYour IDW is now active and ready to manage your project.\n\n' +
+        if (!projectData.collaborators || projectData.collaborators.length === 0) {
+          if (!confirm("You haven't added any collaborators yet. Continue anyway?")) {
+            return;
+          }
+        }
+
+        // Populate final screen summary
+        populateFinalSummary();
+
+        // Navigate to final screen
+        document.getElementById('collaborators-screen').style.display = 'none';
+        document.getElementById('final-screen').style.display = 'block';
+      }
+
+      function populateFinalSummary() {
+        // Project name
+        document.getElementById('summary-project-name').textContent = projectData.name;
+
+        // Plan status
+        const approvalMethod = projectData.approvedInWizard
+          ? 'Approved in wizard'
+          : projectData.approvalMethod === 'email'
+            ? 'Sent for email approval'
+            : 'Plan ready';
+        document.getElementById('summary-plan-status').textContent = approvalMethod;
+
+        // Team count
+        const collabCount = projectData.collaborators ? projectData.collaborators.length : 0;
+        const humans = projectData.collaborators
+          ? projectData.collaborators.filter((c) => c.type === 'human').length
+          : 0;
+        const agents = projectData.collaborators
+          ? projectData.collaborators.filter((c) => c.type === 'agent').length
+          : 0;
+
+        let teamText = '';
+        if (collabCount === 0) {
+          teamText = 'No collaborators added yet';
+        } else {
+          const parts = [];
+          if (humans > 0) parts.push(`${humans} human${humans > 1 ? 's' : ''}`);
+          if (agents > 0) parts.push(`${agents} AI agent${agents > 1 ? 's' : ''}`);
+          teamText = parts.join(' and ');
+        }
+
+        document.getElementById('summary-team-count').textContent = teamText;
+      }
+
+      function goBackToCollaborators() {
+        document.getElementById('final-screen').style.display = 'none';
+        document.getElementById('collaborators-screen').style.display = 'block';
+      }
+
+      function launchIDW() {
+        console.log('🚀 Launching IDW with project data:', projectData);
+
+        // In real implementation, this would:
+        // 1. Save all project data to the backend
+        // 2. Initialize the IDW dashboard
+        // 3. Create the bidding HUD
+        // 4. Send notifications to team members
+        // 5. Start the interactive tour
+
+        alert(
+          '🎉 Congratulations!\n\nYour IDW is now active and ready to manage your project.\n\n' +
             'In the full version, you would now see:\n' +
             '• Interactive dashboard tour\n' +
             '• Live bidding HUD\n' +
             '• Team communication hub\n' +
             '• Real-time progress tracking\n\n' +
-            'Your hyperconnected project manager is at work!');
-      
-      // Close the wizard
-      if (window.api && window.api.send) {
-        window.api.send('close-wizard');
-      } else {
-        window.close();
-      }
-    }
+            'Your hyperconnected project manager is at work!'
+        );
 
-    // Add keyboard support
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        if (document.getElementById('email-modal').style.display === 'flex') {
-          closeEmailModal();
-        } else if (document.getElementById('approval-modal').style.display === 'flex') {
-          closeApprovalModal();
+        // Close the wizard
+        if (window.api && window.api.send) {
+          window.api.send('close-wizard');
         } else {
-          skipSetup();
+          window.close();
         }
       }
-    });
-  </script>
-</body>
+
+      // Add keyboard support
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          if (document.getElementById('email-modal').style.display === 'flex') {
+            closeEmailModal();
+          } else if (document.getElementById('approval-modal').style.display === 'flex') {
+            closeApprovalModal();
+          } else {
+            skipSetup();
+          }
+        }
+      });
+    </script>
+  </body>
 </html>

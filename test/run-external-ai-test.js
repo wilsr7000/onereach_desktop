@@ -20,7 +20,7 @@ app.on('ready', () => {
 
 function createMainWindow() {
   console.log('🪟 Creating main window...');
-  
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 900,
@@ -28,55 +28,55 @@ function createMainWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      webSecurity: false
-    }
+      webSecurity: false,
+    },
   });
 
   const htmlPath = path.join(__dirname, 'external-ai-test-ui.html');
   console.log('📄 Loading HTML from:', htmlPath);
-  
+
   // Check if file exists
   if (!fs.existsSync(htmlPath)) {
     console.error('❌ HTML file not found:', htmlPath);
     app.quit();
     return;
   }
-  
+
   mainWindow.loadFile(htmlPath);
-  
+
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('✅ HTML loaded successfully');
     mainWindow.show();
   });
-  
+
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     console.error('❌ Failed to load HTML:', errorCode, errorDescription);
   });
-  
+
   // Open DevTools
   mainWindow.webContents.openDevTools();
-  
+
   mainWindow.on('closed', () => {
     console.log('🚪 Main window closed');
     mainWindow = null;
     // Close all test windows
-    testWindows.forEach(w => {
+    testWindows.forEach((w) => {
       if (w && !w.isDestroyed()) w.close();
     });
     app.quit();
   });
-  
+
   // Setup IPC handlers
   setupIPC();
 }
 
 function setupIPC() {
   console.log('📡 Setting up IPC handlers...');
-  
+
   // Test a specific service
   ipcMain.handle('test-service', async (event, category, service, config) => {
     console.log(`🧪 Testing ${config.name}...`);
-    
+
     const result = {
       category,
       service,
@@ -88,8 +88,8 @@ function setupIPC() {
         loginVisible: false,
         googleLoginAvailable: false,
         pageResponsive: false,
-        httpsSecure: false
-      }
+        httpsSecure: false,
+      },
     };
 
     try {
@@ -101,18 +101,18 @@ function setupIPC() {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          webSecurity: false
-        }
+          webSecurity: false,
+        },
       });
 
       console.log(`  📍 Loading ${config.url}...`);
-      
+
       // Test URL loading with timeout
       const loadPromise = testWindow.loadURL(config.url);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout')), 10000)
-      );
-      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout')), 10000);
+      });
+
       await Promise.race([loadPromise, timeoutPromise]);
       result.tests.urlLoads = true;
       console.log(`  ✅ URL loaded`);
@@ -196,9 +196,13 @@ function setupIPC() {
           })();
         `);
         result.tests.googleLoginAvailable = googleLoginCheck.hasGoogleLogin;
-        console.log(`  ${googleLoginCheck.hasGoogleLogin ? '✅' : '❌'} Google login: ${googleLoginCheck.hasGoogleLogin}`);
+        console.log(
+          `  ${googleLoginCheck.hasGoogleLogin ? '✅' : '❌'} Google login: ${googleLoginCheck.hasGoogleLogin}`
+        );
         if (googleLoginCheck.hasGoogleLogin) {
-          console.log(`    Details: Text:${googleLoginCheck.details.text} Button:${googleLoginCheck.details.button} OAuth:${googleLoginCheck.details.oauth} Images:${googleLoginCheck.details.images}`);
+          console.log(
+            `    Details: Text:${googleLoginCheck.details.text} Button:${googleLoginCheck.details.button} OAuth:${googleLoginCheck.details.oauth} Images:${googleLoginCheck.details.images}`
+          );
         }
       } catch (e) {
         console.log(`  ❌ Could not check Google login:`, e.message);
@@ -216,7 +220,7 @@ function setupIPC() {
   // Open service in new window for manual testing
   ipcMain.handle('open-service', async (event, url, name) => {
     console.log(`🪟 Opening ${name} at ${url}`);
-    
+
     const testWindow = new BrowserWindow({
       width: 1400,
       height: 900,
@@ -224,15 +228,15 @@ function setupIPC() {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        webSecurity: false
-      }
+        webSecurity: false,
+      },
     });
 
     testWindow.loadURL(url);
     testWindow.webContents.openDevTools();
-    
+
     testWindows.push(testWindow);
-    
+
     testWindow.on('closed', () => {
       const index = testWindows.indexOf(testWindow);
       if (index > -1) testWindows.splice(index, 1);
@@ -246,13 +250,13 @@ function setupIPC() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `external-ai-test-results-${timestamp}.json`;
     const filepath = path.join(__dirname, filename);
-    
+
     fs.writeFileSync(filepath, JSON.stringify(results, null, 2));
     console.log(`💾 Results saved to: ${filepath}`);
-    
+
     return filepath;
   });
-  
+
   console.log('✅ IPC handlers ready');
 }
 
@@ -263,4 +267,4 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Unhandled rejection at:', promise, 'reason:', reason);
-}); 
+});

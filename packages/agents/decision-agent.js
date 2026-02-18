@@ -1,14 +1,14 @@
 /**
  * Decision Agent
- * 
+ *
  * Logs decisions made during meetings with:
  * - Decision text
  * - Who was involved (tags)
  * - Rationale/context
- * 
+ *
  * Part of the meeting-agents space. Used by the Meeting HUD
  * in the recorder to track decisions during meetings.
- * 
+ *
  * Returns structured data: { type, text, tags, deadline }
  */
 
@@ -20,7 +20,8 @@ const log = getLogQueue();
 const decisionAgent = {
   id: 'decision-agent',
   name: 'Decision Agent',
-  description: 'Logs decisions made during meetings. Captures the decision, who was involved, and rationale. Says things like "Decision: we agreed to use React" or "We decided to launch in Q3".',
+  description:
+    'Logs decisions made during meetings. Captures the decision, who was involved, and rationale. Says things like "Decision: we agreed to use React" or "We decided to launch in Q3".',
   voice: 'sage',
   acks: ['Decision noted.', 'Got it, decision recorded.'],
   categories: ['meeting', 'productivity'],
@@ -38,7 +39,7 @@ const decisionAgent = {
       const items = await spacesApi.getItemsBySpace?.('meeting-agents');
       if (!items || items.length === 0) return { section: 'Decisions', priority: 7, content: null };
       const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-      const recent = items.filter(i => {
+      const recent = items.filter((i) => {
         const created = new Date(i.createdAt || 0).getTime();
         return created > dayAgo && (i.type === 'decision' || i.agentId === 'decision-agent');
       });
@@ -48,7 +49,9 @@ const decisionAgent = {
         priority: 7,
         content: `${recent.length} decision${recent.length === 1 ? '' : 's'} logged in the last 24 hours.`,
       };
-    } catch (e) { /* skip */ }
+    } catch (_e) {
+      /* skip */
+    }
     return { section: 'Decisions', priority: 7, content: null };
   },
 
@@ -90,12 +93,9 @@ const decisionAgent = {
         try {
           const timestamp = new Date().toLocaleTimeString();
           const tagStr = extraction.tags.join(', ');
-          this.memory.appendToSection(
-            'Decisions',
-            `- [${timestamp}] [${tagStr}] ${extraction.text}`
-          );
+          this.memory.appendToSection('Decisions', `- [${timestamp}] [${tagStr}] ${extraction.text}`);
           this.memory.save();
-        } catch (e) {
+        } catch (_e) {
           // Non-fatal
         }
       }
@@ -121,9 +121,10 @@ async function _extractDecision(text) {
   try {
     const data = await ai.chat({
       profile: 'fast',
-      messages: [{
-        role: 'user',
-        content: `Extract the decision from this meeting input. Return JSON only.
+      messages: [
+        {
+          role: 'user',
+          content: `Extract the decision from this meeting input. Return JSON only.
 
 Input: "${text}"
 
@@ -138,7 +139,8 @@ Examples:
 - "Decision: launch by March 15" -> {"text":"Launch by March 15","tags":["Everyone"],"deadline":"March 15"}
 
 Return ONLY valid JSON, no other text.`,
-      }],
+        },
+      ],
       temperature: 0.1,
       maxTokens: 200,
       jsonMode: true,

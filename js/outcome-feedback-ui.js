@@ -1,13 +1,13 @@
 /**
  * Outcome Feedback UI Component
  * Part of the Governed Self-Improving Agent Runtime
- * 
+ *
  * Post-evaluation feedback capture for meta-learning
- * 
+ *
  * @version 2.0.0 - Added learning progress bar on feedback submit
  */
 
-(function() {
+(function () {
   'use strict';
 
   const FEEDBACK_UI_VERSION = '2.0.0';
@@ -24,7 +24,7 @@
       this.onSubmit = options.onSubmit || (() => {});
       this.previouslyFocusedElement = null;
       this.focusableElements = [];
-      
+
       console.log(`[OutcomeFeedbackUI] v${FEEDBACK_UI_VERSION} initializing...`);
       this.init();
     }
@@ -42,7 +42,7 @@
      */
     createStyles() {
       if (document.getElementById('outcome-feedback-styles')) return;
-      
+
       const styles = document.createElement('style');
       styles.id = 'outcome-feedback-styles';
       styles.textContent = `
@@ -532,7 +532,7 @@
         </div>
       `;
       document.body.appendChild(this.modal);
-      
+
       this.setupEventListeners();
     }
 
@@ -541,9 +541,11 @@
      */
     getFocusableElements() {
       const modal = this.modal.querySelector('.outcome-modal');
-      return Array.from(modal.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"]), .outcome-option[tabindex="0"]'
-      )).filter(el => !el.disabled && el.offsetParent !== null);
+      return Array.from(
+        modal.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"]), .outcome-option[tabindex="0"]'
+        )
+      ).filter((el) => !el.disabled && el.offsetParent !== null);
     }
 
     /**
@@ -552,10 +554,10 @@
     trapFocus(e) {
       const focusable = this.getFocusableElements();
       if (focusable.length === 0) return;
-      
+
       const firstElement = focusable[0];
       const lastElement = focusable[focusable.length - 1];
-      
+
       if (e.shiftKey && document.activeElement === firstElement) {
         e.preventDefault();
         lastElement.focus();
@@ -570,20 +572,20 @@
      */
     setupEventListeners() {
       // Option selection with keyboard support
-      this.modal.querySelectorAll('.outcome-options').forEach(group => {
+      this.modal.querySelectorAll('.outcome-options').forEach((group) => {
         const options = group.querySelectorAll('.outcome-option');
-        
-        options.forEach(opt => {
+
+        options.forEach((opt) => {
           opt.addEventListener('click', () => {
             this.selectOption(group, opt);
           });
-          
+
           opt.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               this.selectOption(group, opt);
             }
-            
+
             // Arrow key navigation
             if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
               e.preventDefault();
@@ -593,7 +595,7 @@
               this.selectOption(group, optionsArray[nextIndex]);
               optionsArray[nextIndex].focus();
             }
-            
+
             if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
               e.preventDefault();
               const optionsArray = Array.from(options);
@@ -627,7 +629,7 @@
         if (e.key === 'Escape') {
           this.hide();
         }
-        
+
         if (e.key === 'Tab') {
           this.trapFocus(e);
         }
@@ -638,7 +640,7 @@
      * Select an option in a group
      */
     selectOption(group, opt) {
-      group.querySelectorAll('.outcome-option').forEach(o => {
+      group.querySelectorAll('.outcome-option').forEach((o) => {
         o.classList.remove('selected');
         o.setAttribute('aria-checked', 'false');
         o.setAttribute('tabindex', '-1');
@@ -656,14 +658,17 @@
       this.previouslyFocusedElement = document.activeElement;
       this.currentEvaluationId = evaluation.id || Date.now().toString();
       this.currentEvaluation = evaluation;
-      
+
       // Populate suggestions if any
       const suggestionsSection = this.modal.querySelector('.outcome-suggestions-section');
       const suggestionsList = this.modal.querySelector('.outcome-suggestions-list');
-      
+
       if (evaluation.suggestions?.length > 0) {
         suggestionsSection.style.display = 'block';
-        suggestionsList.innerHTML = evaluation.suggestions.slice(0, 5).map((s, i) => `
+        suggestionsList.innerHTML = evaluation.suggestions
+          .slice(0, 5)
+          .map(
+            (s, i) => `
           <div class="outcome-suggestion-item" data-index="${i}" role="listitem">
             <span class="outcome-suggestion-text">${this.escapeHtml(s.text)}</span>
             <div class="outcome-suggestion-toggle" role="group" aria-label="Applied or ignored">
@@ -671,13 +676,15 @@
               <button class="outcome-toggle-btn" data-value="ignored" title="Ignored" aria-label="Mark as ignored" aria-pressed="false">✗</button>
             </div>
           </div>
-        `).join('');
-        
+        `
+          )
+          .join('');
+
         // Set up toggle handlers
-        suggestionsList.querySelectorAll('.outcome-toggle-btn').forEach(btn => {
+        suggestionsList.querySelectorAll('.outcome-toggle-btn').forEach((btn) => {
           btn.addEventListener('click', () => {
             const item = btn.closest('.outcome-suggestion-item');
-            item.querySelectorAll('.outcome-toggle-btn').forEach(b => {
+            item.querySelectorAll('.outcome-toggle-btn').forEach((b) => {
               b.classList.remove('selected');
               b.setAttribute('aria-pressed', 'false');
             });
@@ -690,38 +697,38 @@
       }
 
       // Reset selections
-      this.modal.querySelectorAll('.outcome-option').forEach(o => {
+      this.modal.querySelectorAll('.outcome-option').forEach((o) => {
         o.classList.remove('selected');
         o.setAttribute('aria-checked', 'false');
       });
-      
+
       // Reset tabindex for first options
-      this.modal.querySelectorAll('.outcome-options').forEach(group => {
+      this.modal.querySelectorAll('.outcome-options').forEach((group) => {
         const options = group.querySelectorAll('.outcome-option');
         options.forEach((opt, i) => {
           opt.setAttribute('tabindex', i === 0 ? '0' : '-1');
         });
       });
-      
+
       this.modal.querySelector('.outcome-comments').value = '';
-      
+
       // Reset body content (in case showing success state)
       const body = this.modal.querySelector('.outcome-modal-body');
       if (body.querySelector('.outcome-success')) {
         // Recreate the body content
         this.modal.querySelector('.outcome-modal').innerHTML = this.getModalContent();
         this.setupEventListeners();
-        
+
         // Re-populate suggestions
         if (evaluation.suggestions?.length > 0) {
           this.show(evaluation);
           return;
         }
       }
-      
+
       // Show modal
       this.modal.classList.add('visible');
-      
+
       // Focus the modal
       setTimeout(() => {
         const firstOption = this.modal.querySelector('.outcome-option');
@@ -809,7 +816,7 @@
      */
     hide() {
       this.modal.classList.remove('visible');
-      
+
       // Restore focus
       if (this.previouslyFocusedElement) {
         this.previouslyFocusedElement.focus();
@@ -822,7 +829,7 @@
     async showSuccess() {
       const body = this.modal.querySelector('.outcome-modal-body');
       const footer = this.modal.querySelector('.outcome-modal-footer');
-      
+
       // Fetch current learning status
       let learningSummary = null;
       try {
@@ -835,9 +842,9 @@
       } catch (error) {
         console.warn('[OutcomeFeedback] Could not fetch learning summary:', error);
       }
-      
+
       const progressHtml = learningSummary ? this.renderLearningProgress(learningSummary) : '';
-      
+
       body.innerHTML = `
         <div class="outcome-success" role="alert">
           <div class="outcome-success-icon" aria-hidden="true">✅</div>
@@ -846,22 +853,22 @@
           ${progressHtml}
         </div>
       `;
-      
+
       footer.innerHTML = `
         <button class="outcome-btn outcome-btn-primary" data-action="close">Done</button>
       `;
-      
+
       footer.querySelector('[data-action="close"]').addEventListener('click', () => {
         this.hide();
       });
-      
+
       footer.querySelector('[data-action="close"]').focus();
-      
+
       // Trigger HUD refresh if available
       if (window.evaluationHUD?.refreshLearningData) {
         window.evaluationHUD.refreshLearningData();
       }
-      
+
       // Auto-close after delay
       setTimeout(() => {
         if (this.modal.classList.contains('visible')) {
@@ -877,7 +884,7 @@
       const { totalSamples, minSamplesRequired, isLearningActive } = summary;
       const progress = Math.min(100, (totalSamples / minSamplesRequired) * 100);
       const remaining = Math.max(0, minSamplesRequired - totalSamples);
-      
+
       return `
         <div class="outcome-success-progress">
           <div class="outcome-progress-label">Learning Progress</div>
@@ -888,9 +895,7 @@
           <div class="outcome-progress-text">
             <span>${totalSamples} samples collected</span>
             <span class="outcome-progress-status ${isLearningActive ? 'active' : ''}">
-              ${isLearningActive 
-                ? 'Learning Active!' 
-                : `${remaining} more needed`}
+              ${isLearningActive ? 'Learning Active!' : `${remaining} more needed`}
             </span>
           </div>
         </div>
@@ -904,11 +909,11 @@
       const submitBtn = this.modal.querySelector('[data-action="submit"]');
       submitBtn.classList.add('submitting');
       submitBtn.disabled = true;
-      
+
       const documentOutcome = this.modal.querySelector('[data-field="documentOutcome"] .selected')?.dataset.value;
       const userSatisfaction = this.modal.querySelector('[data-field="userSatisfaction"] .selected')?.dataset.value;
       const comments = this.modal.querySelector('.outcome-comments').value.trim();
-      
+
       // Collect suggestion outcomes
       const suggestionOutcomes = [];
       this.modal.querySelectorAll('.outcome-suggestion-item').forEach((item, i) => {
@@ -917,7 +922,7 @@
           suggestionOutcomes.push({
             index: i,
             applied: selected.dataset.value === 'applied',
-            suggestion: this.currentEvaluation?.suggestions?.[i]
+            suggestion: this.currentEvaluation?.suggestions?.[i],
           });
         }
       });
@@ -930,17 +935,17 @@
         suggestions: suggestionOutcomes,
         originalEvaluation: this.currentEvaluation,
         documentType: this.currentEvaluation?.documentType,
-        submittedAt: new Date().toISOString()
+        submittedAt: new Date().toISOString(),
       };
 
       // Simulate brief delay for feedback
       setTimeout(() => {
         submitBtn.classList.remove('submitting');
         submitBtn.disabled = false;
-        
+
         // Call the callback
         this.onSubmit(outcome);
-        
+
         // Show success state
         this.showSuccess();
       }, 300);

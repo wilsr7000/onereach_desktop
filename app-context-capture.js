@@ -3,7 +3,7 @@
  * Captures context about the active application when clipboard events occur
  */
 
-const { app } = require('electron');
+const { _app } = require('electron');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
@@ -13,11 +13,11 @@ class AppContextCapture {
     this.lastActiveApp = null;
     this.appCache = new Map();
     this.backgroundTrackingInterval = null;
-    
+
     // Start background tracking of active app
     this.startBackgroundTracking();
   }
-  
+
   /**
    * Start background tracking of the active application
    */
@@ -30,12 +30,12 @@ class AppContextCapture {
         if (appInfo.name !== 'Electron' && appInfo.name !== 'Unknown') {
           this.lastActiveApp = appInfo;
         }
-      } catch (error) {
+      } catch (_error) {
         // Silently ignore errors in background tracking
       }
     }, 2000);
   }
-  
+
   /**
    * Stop background tracking
    */
@@ -57,10 +57,10 @@ class AppContextCapture {
       return {
         name: 'Unknown',
         bundleId: 'unknown',
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
     }
-    
+
     try {
       // Use AppleScript to get the frontmost application
       const script = `
@@ -86,16 +86,16 @@ class AppContextCapture {
           return appName & "|" & bundleId
         end tell
       `;
-      
+
       const { stdout } = await execAsync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`);
       const [appName, bundleId] = stdout.trim().split('|');
-      
+
       const appInfo = {
         name: appName,
         bundleId: bundleId || 'unknown',
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
-      
+
       // If we still got Electron, check our cache for the last non-Electron app
       if (appName === 'Electron' && this.lastActiveApp && this.lastActiveApp.name !== 'Electron') {
         // Use the cached app if it's recent (within 5 seconds)
@@ -103,25 +103,25 @@ class AppContextCapture {
           return this.lastActiveApp;
         }
       }
-      
+
       // Cache the result only if it's not Electron
       if (appName !== 'Electron') {
         this.lastActiveApp = appInfo;
       }
-      
+
       return appInfo;
     } catch (error) {
       console.error('Error getting active application:', error);
-      
+
       // If we have a cached non-Electron app, use it
       if (this.lastActiveApp && this.lastActiveApp.name !== 'Electron') {
         return this.lastActiveApp;
       }
-      
+
       return {
         name: 'Unknown',
         bundleId: 'unknown',
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
     }
   }
@@ -136,10 +136,10 @@ class AppContextCapture {
       return {
         windowTitle: '',
         url: '',
-        domain: ''
+        domain: '',
       };
     }
-    
+
     try {
       // Get window title and URL if available
       const script = `
@@ -182,14 +182,14 @@ class AppContextCapture {
           return windowTitle & "|" & urlText
         end tell
       `;
-      
+
       const { stdout } = await execAsync(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`);
       const [windowTitle, url] = stdout.trim().split('|');
-      
+
       return {
         windowTitle: windowTitle || '',
         url: url || '',
-        domain: url ? this.extractDomain(url) : ''
+        domain: url ? this.extractDomain(url) : '',
       };
     } catch (error) {
       // Silently handle - this often fails due to permissions or certain apps being in focus
@@ -200,7 +200,7 @@ class AppContextCapture {
       return {
         windowTitle: '',
         url: '',
-        domain: ''
+        domain: '',
       };
     }
   }
@@ -224,15 +224,12 @@ class AppContextCapture {
    * @returns {Promise<Object>} Full context object
    */
   async getFullContext() {
-    const [appInfo, windowContext] = await Promise.all([
-      this.getActiveApplication(),
-      this.getWindowContext()
-    ]);
-    
+    const [appInfo, windowContext] = await Promise.all([this.getActiveApplication(), this.getWindowContext()]);
+
     return {
       app: appInfo,
       window: windowContext,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
   }
 
@@ -246,57 +243,63 @@ class AppContextCapture {
     // If we have app context, use it
     if (context && context.app) {
       const appName = context.app.name.toLowerCase();
-      
+
       // Map common applications to source types
       const appSourceMap = {
         'visual studio code': 'vscode',
-        'code': 'vscode',
+        code: 'vscode',
         'sublime text': 'sublime',
-        'xcode': 'xcode',
+        xcode: 'xcode',
         'intellij idea': 'intellij',
-        'webstorm': 'webstorm',
-        'terminal': 'terminal',
-        'iterm': 'terminal',
-        'safari': 'browser-safari',
+        webstorm: 'webstorm',
+        terminal: 'terminal',
+        iterm: 'terminal',
+        safari: 'browser-safari',
         'google chrome': 'browser-chrome',
-        'chrome': 'browser-chrome',
-        'firefox': 'browser-firefox',
-        'arc': 'browser-arc',
+        chrome: 'browser-chrome',
+        firefox: 'browser-firefox',
+        arc: 'browser-arc',
         'microsoft edge': 'browser-edge',
-        'edge': 'browser-edge',
-        'slack': 'slack',
-        'discord': 'discord',
-        'messages': 'messages',
-        'mail': 'mail',
-        'notes': 'notes',
-        'notion': 'notion',
-        'obsidian': 'obsidian',
-        'figma': 'figma',
-        'sketch': 'sketch',
+        edge: 'browser-edge',
+        slack: 'slack',
+        discord: 'discord',
+        messages: 'messages',
+        mail: 'mail',
+        notes: 'notes',
+        notion: 'notion',
+        obsidian: 'obsidian',
+        figma: 'figma',
+        sketch: 'sketch',
         'adobe photoshop': 'photoshop',
         'adobe illustrator': 'illustrator',
         'microsoft word': 'word',
         'microsoft excel': 'excel',
-        'pages': 'pages',
-        'numbers': 'numbers',
-        'keynote': 'keynote'
+        pages: 'pages',
+        numbers: 'numbers',
+        keynote: 'keynote',
       };
-      
+
       // Check if app name matches any known apps
       for (const [key, value] of Object.entries(appSourceMap)) {
         if (appName.includes(key)) {
           return value;
         }
       }
-      
+
       // For browsers, include the domain if available
-      if (appName.includes('safari') || appName.includes('chrome') || appName.includes('firefox') || appName.includes('edge') || appName.includes('arc')) {
+      if (
+        appName.includes('safari') ||
+        appName.includes('chrome') ||
+        appName.includes('firefox') ||
+        appName.includes('edge') ||
+        appName.includes('arc')
+      ) {
         if (context.window && context.window.domain) {
           return `web-${context.window.domain.replace(/\./g, '-')}`;
         }
       }
     }
-    
+
     // Fall back to text-based detection
     if (text.includes('```') || /function|const|let|var|class/.test(text)) {
       return 'code';
@@ -307,7 +310,7 @@ class AppContextCapture {
     if (text.includes('@') && text.includes('.')) {
       return 'email';
     }
-    
+
     return context?.app?.name || 'unknown';
   }
 
@@ -318,9 +321,9 @@ class AppContextCapture {
    */
   formatContextDisplay(context) {
     if (!context || !context.app) return 'Unknown Source';
-    
+
     let display = context.app.name;
-    
+
     if (context.window) {
       if (context.window.windowTitle) {
         display += ` - ${context.window.windowTitle}`;
@@ -329,9 +332,9 @@ class AppContextCapture {
         display += ` (${context.window.domain})`;
       }
     }
-    
+
     return display;
   }
 }
 
-module.exports = AppContextCapture; 
+module.exports = AppContextCapture;

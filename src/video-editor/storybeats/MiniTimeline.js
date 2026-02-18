@@ -1,6 +1,6 @@
 /**
  * MiniTimeline - Compact timeline preview showing edit impacts
- * 
+ *
  * Displays:
  * - Keep segments (blue/normal)
  * - Cut/deleted segments (red, strikethrough)
@@ -12,12 +12,12 @@ const log = getLogQueue();
 export class MiniTimeline {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // State
     this.segments = [];
     this.originalDuration = 0;
     this.newDuration = 0;
-    
+
     // DOM reference
     this.container = null;
     this.canvas = null;
@@ -32,7 +32,7 @@ export class MiniTimeline {
       log.warn('video', '[MiniTimeline] Container not found');
       return;
     }
-    
+
     this.render();
   }
 
@@ -77,13 +77,13 @@ export class MiniTimeline {
    */
   render() {
     if (!this.container) return;
-    
-    const hasEdits = this.segments.some(s => s.type !== 'keep');
+
+    const hasEdits = this.segments.some((s) => s.type !== 'keep');
     const durationChange = this.newDuration - this.originalDuration;
-    
+
     // Build timeline visualization
     let segmentsHtml = '';
-    
+
     if (this.segments.length === 0 || this.originalDuration === 0) {
       // No segments or no video
       segmentsHtml = `
@@ -94,13 +94,14 @@ export class MiniTimeline {
     } else {
       // Render each segment
       this.segments.forEach((segment, index) => {
-        const widthPercent = segment.type === 'gap' 
-          ? (segment.duration / this.originalDuration) * 100
-          : (segment.duration / this.originalDuration) * 100;
-        
+        const widthPercent =
+          segment.type === 'gap'
+            ? (segment.duration / this.originalDuration) * 100
+            : (segment.duration / this.originalDuration) * 100;
+
         let className = 'mini-timeline-segment';
         let tooltip = '';
-        
+
         switch (segment.type) {
           case 'keep':
             className += ' segment-keep';
@@ -115,7 +116,7 @@ export class MiniTimeline {
             tooltip = `Gap: ${this.formatTimeShort(segment.duration)} for new content`;
             break;
         }
-        
+
         segmentsHtml += `
           <div class="${className}" 
                style="width: ${Math.max(widthPercent, 1)}%;" 
@@ -127,16 +128,18 @@ export class MiniTimeline {
         `;
       });
     }
-    
+
     // Build duration info
-    const durationClass = durationChange === 0 ? '' : (durationChange > 0 ? 'duration-longer' : 'duration-shorter');
+    const durationClass = durationChange === 0 ? '' : durationChange > 0 ? 'duration-longer' : 'duration-shorter';
     const changeText = durationChange === 0 ? '' : `(${this.formatDurationChange(durationChange)})`;
-    
+
     this.container.innerHTML = `
       <div class="mini-timeline-header">
         <span class="mini-timeline-label">Timeline Preview</span>
         <div class="mini-timeline-actions">
-          ${hasEdits ? `
+          ${
+            hasEdits
+              ? `
             <button class="mini-timeline-btn" onclick="app.videoSyncEngine?.undoLastEdit()" title="Undo last edit">
               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
@@ -147,7 +150,9 @@ export class MiniTimeline {
                 <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
               </svg>
             </button>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
       </div>
       
@@ -170,7 +175,9 @@ export class MiniTimeline {
         </div>
       </div>
       
-      ${hasEdits ? `
+      ${
+        hasEdits
+          ? `
         <div class="mini-timeline-apply">
           <div class="mini-timeline-preview-controls">
             <button class="btn btn-secondary mini-timeline-preview-btn ${this.isPreviewActive() ? 'active' : ''}" 
@@ -185,12 +192,14 @@ export class MiniTimeline {
             </button>
           </div>
           <button class="btn btn-primary mini-timeline-apply-btn" onclick="app.applyStoryBeatsEdits()">
-            Apply ${this.segments.filter(s => s.type !== 'keep').length} Edit${this.segments.filter(s => s.type !== 'keep').length !== 1 ? 's' : ''}
+            Apply ${this.segments.filter((s) => s.type !== 'keep').length} Edit${this.segments.filter((s) => s.type !== 'keep').length !== 1 ? 's' : ''}
           </button>
         </div>
-      ` : ''}
+      `
+          : ''
+      }
     `;
-    
+
     // Update playhead position if video is playing
     this.updatePlayhead();
   }
@@ -231,7 +240,7 @@ export class MiniTimeline {
     const modal = document.createElement('div');
     modal.id = 'timelineDiffModal';
     modal.className = 'modal-overlay timeline-diff-modal-overlay';
-    
+
     const editSummary = this.app.videoSyncEngine?.getEditSummary() || {};
     const durationChange = editSummary.durationChange || 0;
     const changeSign = durationChange >= 0 ? '+' : '';
@@ -312,9 +321,9 @@ export class MiniTimeline {
 
     // Add styles for diff modal
     this._addDiffModalStyles();
-    
+
     document.body.appendChild(modal);
-    
+
     // Animate in
     requestAnimationFrame(() => modal.classList.add('visible'));
   }
@@ -328,24 +337,26 @@ export class MiniTimeline {
     }
 
     const totalOriginal = this.originalDuration || 1;
-    
-    return this.segments.map(segment => {
-      const widthPercent = (segment.duration / totalOriginal) * 100;
-      let className = 'diff-segment';
-      
-      switch (segment.type) {
-        case 'keep':
-          className += ' diff-keep';
-          break;
-        case 'cut':
-          return ''; // Don't show cuts in result
-        case 'gap':
-          className += ' diff-gap';
-          break;
-      }
-      
-      return `<div class="${className}" style="width: ${widthPercent}%"></div>`;
-    }).join('');
+
+    return this.segments
+      .map((segment) => {
+        const widthPercent = (segment.duration / totalOriginal) * 100;
+        let className = 'diff-segment';
+
+        switch (segment.type) {
+          case 'keep':
+            className += ' diff-keep';
+            break;
+          case 'cut':
+            return ''; // Don't show cuts in result
+          case 'gap':
+            className += ' diff-gap';
+            break;
+        }
+
+        return `<div class="${className}" style="width: ${widthPercent}%"></div>`;
+      })
+      .join('');
   }
 
   /**
@@ -592,9 +603,9 @@ export class MiniTimeline {
   updatePlayhead() {
     const video = document.getElementById('videoPlayer');
     const playhead = document.getElementById('miniTimelinePlayhead');
-    
+
     if (!video || !playhead || this.originalDuration === 0) return;
-    
+
     const percent = (video.currentTime / this.originalDuration) * 100;
     playhead.style.left = `${Math.min(percent, 100)}%`;
   }
@@ -605,7 +616,7 @@ export class MiniTimeline {
   startPlayheadTracking() {
     const video = document.getElementById('videoPlayer');
     if (!video) return;
-    
+
     video.addEventListener('timeupdate', () => this.updatePlayhead());
   }
 
@@ -613,25 +624,25 @@ export class MiniTimeline {
    * Get summary text for current edits
    */
   getSummaryText() {
-    const cuts = this.segments.filter(s => s.type === 'cut');
-    const gaps = this.segments.filter(s => s.type === 'gap');
-    
+    const cuts = this.segments.filter((s) => s.type === 'cut');
+    const gaps = this.segments.filter((s) => s.type === 'gap');
+
     const parts = [];
-    
+
     if (cuts.length > 0) {
       const totalCutTime = cuts.reduce((sum, s) => sum + s.duration, 0);
       parts.push(`${cuts.length} cut${cuts.length !== 1 ? 's' : ''} (${this.formatTimeShort(totalCutTime)})`);
     }
-    
+
     if (gaps.length > 0) {
       const totalGapTime = gaps.reduce((sum, s) => sum + s.duration, 0);
       parts.push(`${gaps.length} gap${gaps.length !== 1 ? 's' : ''} (${this.formatTimeShort(totalGapTime)})`);
     }
-    
+
     if (parts.length === 0) {
       return 'No edits';
     }
-    
+
     return parts.join(', ');
   }
 
@@ -653,5 +664,3 @@ export class MiniTimeline {
     }
   }
 }
-
-

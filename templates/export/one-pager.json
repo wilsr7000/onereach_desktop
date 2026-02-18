@@ -12,11 +12,7 @@
       {
         "type": "key-points",
         "title": "Key Takeaways",
-        "points": [
-          "Most important finding",
-          "Critical insight",
-          "Action required"
-        ]
+        "points": ["Most important finding", "Critical insight", "Action required"]
       },
       {
         "type": "metrics",
@@ -29,10 +25,7 @@
       {
         "type": "next-steps",
         "title": "Next Steps",
-        "items": [
-          "Immediate action 1",
-          "Follow-up action 2"
-        ]
+        "items": ["Immediate action 1", "Follow-up action 2"]
       }
     ]
   },

@@ -1,6 +1,6 @@
 /**
  * SpottingController.js - Keyboard Spotting Controller
- * 
+ *
  * Features:
  * - Play/pause control
  * - Template-specific keyboard shortcuts
@@ -18,28 +18,28 @@ export class SpottingController {
   constructor(lineScriptPanel) {
     this.panel = lineScriptPanel;
     this.app = lineScriptPanel.app;
-    
+
     // Configuration
     this.templateId = 'podcast';
     this.shortcuts = {};
     this.enabled = true;
-    
+
     // Range marker state
     this.pendingInPoint = null;
-    
+
     // Undo stack
     this.undoStack = [];
     this.maxUndoSize = 50;
-    
+
     // Feedback element
     this.feedbackElement = null;
-    
+
     // Event listeners
     this.eventListeners = {};
-    
+
     // Bind methods
     this.handleKeyDown = this.handleKeyDown.bind(this);
-    
+
     // Initialize
     this.init();
   }
@@ -50,7 +50,7 @@ export class SpottingController {
   init() {
     // Load shortcuts for default template
     this.loadShortcuts(this.templateId);
-    
+
     // Setup keyboard listener
     document.addEventListener('keydown', this.handleKeyDown);
   }
@@ -62,13 +62,16 @@ export class SpottingController {
   loadShortcuts(templateId) {
     this.templateId = templateId;
     this.shortcuts = getKeyboardShortcuts(templateId);
-    
+
     // Add universal shortcuts
     this.shortcuts[' '] = { action: 'togglePlayPause', label: 'Space - Play/Pause' };
     this.shortcuts['escape'] = { action: 'cancel', label: 'Esc - Cancel' };
     this.shortcuts['z'] = { action: 'undo', label: 'Z - Undo', requiresCtrl: true };
-    
-    window.logging.info('video', `SpottingController Loaded ${Object.keys(this.shortcuts).length} shortcuts for ${templateId}`);
+
+    window.logging.info(
+      'video',
+      `SpottingController Loaded ${Object.keys(this.shortcuts).length} shortcuts for ${templateId}`
+    );
   }
 
   /**
@@ -93,30 +96,30 @@ export class SpottingController {
    */
   handleKeyDown(event) {
     if (!this.enabled) return;
-    
+
     // Don't capture if typing in input
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
-    
+
     // Don't capture if panel isn't visible
     if (this.panel && !this.panel.visible) return;
-    
+
     const key = event.key.toLowerCase();
     const shortcut = this.shortcuts[key];
-    
+
     // Check for Ctrl+Z undo
     if (key === 'z' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       this.undo();
       return;
     }
-    
+
     // Check for shortcut
     if (shortcut && (!shortcut.requiresCtrl || event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       this.executeShortcut(shortcut, key);
       return;
     }
-    
+
     // Global shortcuts
     switch (key) {
       case ' ':
@@ -136,40 +139,40 @@ export class SpottingController {
    */
   executeShortcut(shortcut, key) {
     const time = this.getCurrentTime();
-    
+
     window.logging.info('video', `SpottingController Executing: ${shortcut.action} at ${time.toFixed(2)}s`);
-    
+
     // Show visual feedback
     this.showFeedback(`[${key.toUpperCase()}] ${shortcut.label || shortcut.action}`);
-    
+
     switch (shortcut.action) {
       case 'togglePlayPause':
         this.togglePlayPause();
         break;
-        
+
       case 'setInPoint':
         this.setInPoint(time);
         break;
-        
+
       case 'setOutPoint':
         this.setOutPoint(time);
         break;
-        
+
       case 'cancel':
         this.cancelPendingRange();
         break;
-        
+
       case 'undo':
         this.undo();
         break;
-        
+
       default:
         // Template-specific marker actions
         if (shortcut.action.startsWith('add') && shortcut.action.endsWith('Marker')) {
           this.addMarker(shortcut.action, time);
         }
     }
-    
+
     // Emit event
     this.emit('shortcutExecuted', { shortcut, key, time });
   }
@@ -180,7 +183,7 @@ export class SpottingController {
   togglePlayPause() {
     const video = this.app.video;
     if (!video) return;
-    
+
     if (video.paused) {
       video.play();
       this.showFeedback('▶ Play');
@@ -188,7 +191,7 @@ export class SpottingController {
       video.pause();
       this.showFeedback('⏸ Pause');
     }
-    
+
     this.emit('playStateChanged', { playing: !video.paused });
   }
 
@@ -208,7 +211,7 @@ export class SpottingController {
     this.pendingInPoint = time;
     this.showFeedback(`◀ IN: ${this.formatTime(time)}`);
     this.updatePendingIndicator();
-    
+
     this.emit('inPointSet', { time });
   }
 
@@ -221,25 +224,25 @@ export class SpottingController {
       this.showFeedback('Set IN point first (I)', 'warning');
       return;
     }
-    
+
     const inTime = this.pendingInPoint;
     const outTime = time;
-    
+
     if (outTime <= inTime) {
       this.showFeedback('OUT must be after IN', 'error');
       return;
     }
-    
+
     // Create range marker
     const marker = this.createRangeMarker(inTime, outTime);
-    
+
     // Add to undo stack
     this.pushUndo({ type: 'marker', marker });
-    
+
     // Clear pending
     this.pendingInPoint = null;
     this.updatePendingIndicator();
-    
+
     this.showFeedback(`▶ OUT: ${this.formatTime(outTime)} (Range created)`);
     this.emit('rangeCreated', { inTime, outTime, marker });
   }
@@ -264,28 +267,28 @@ export class SpottingController {
   addMarker(action, time) {
     const markerManager = this.app.markerManager;
     if (!markerManager) return;
-    
+
     // Determine marker type from action
     const markerType = action.replace('add', '').replace('Marker', '').toLowerCase();
-    
+
     const marker = markerManager.addSpotMarker(
       time,
       `${markerType.charAt(0).toUpperCase() + markerType.slice(1)}`,
       null,
-      { 
+      {
         markerType,
-        source: 'keyboard'
+        source: 'keyboard',
       }
     );
-    
+
     // Add to undo stack
     this.pushUndo({ type: 'marker', marker });
-    
+
     // Notify panel
     if (this.panel) {
       this.panel.loadMarkers();
     }
-    
+
     this.emit('markerAdded', { marker, time });
   }
 
@@ -298,20 +301,14 @@ export class SpottingController {
   createRangeMarker(inTime, outTime) {
     const markerManager = this.app.markerManager;
     if (!markerManager) return null;
-    
-    const marker = markerManager.addRangeMarker(
-      inTime,
-      outTime,
-      'Scene',
-      null,
-      { source: 'keyboard' }
-    );
-    
+
+    const marker = markerManager.addRangeMarker(inTime, outTime, 'Scene', null, { source: 'keyboard' });
+
     // Notify panel
     if (this.panel) {
       this.panel.loadMarkers();
     }
-    
+
     return marker;
   }
 
@@ -323,9 +320,9 @@ export class SpottingController {
       this.showFeedback('Nothing to undo');
       return;
     }
-    
+
     const lastAction = this.undoStack.pop();
-    
+
     switch (lastAction.type) {
       case 'marker':
         // Remove marker
@@ -338,7 +335,7 @@ export class SpottingController {
           this.showFeedback('↩️ Marker undone');
         }
         break;
-        
+
       case 'range':
         // Remove range marker
         if (this.app.markerManager && lastAction.marker) {
@@ -350,7 +347,7 @@ export class SpottingController {
         }
         break;
     }
-    
+
     this.emit('undoPerformed', { action: lastAction });
   }
 
@@ -360,7 +357,7 @@ export class SpottingController {
    */
   pushUndo(action) {
     this.undoStack.push(action);
-    
+
     // Limit stack size
     while (this.undoStack.length > this.maxUndoSize) {
       this.undoStack.shift();
@@ -386,17 +383,17 @@ export class SpottingController {
       this.feedbackElement.className = 'spotting-feedback';
       document.body.appendChild(this.feedbackElement);
     }
-    
+
     // Set content and type
     this.feedbackElement.textContent = message;
     this.feedbackElement.className = `spotting-feedback ${type} visible`;
-    
+
     // Hide after delay
     clearTimeout(this.feedbackTimeout);
     this.feedbackTimeout = setTimeout(() => {
       this.feedbackElement.classList.remove('visible');
     }, 1500);
-    
+
     // Also emit for external handlers
     this.emit('feedback', { message, type });
   }
@@ -438,12 +435,12 @@ export class SpottingController {
   getShortcutsHelp() {
     return Object.entries(this.shortcuts).map(([key, config]) => ({
       key: key.toUpperCase(),
-      label: config.label || config.action
+      label: config.label || config.action,
     }));
   }
 
   // Event emitter methods
-  
+
   on(event, callback) {
     if (!this.eventListeners[event]) {
       this.eventListeners[event] = [];
@@ -453,13 +450,13 @@ export class SpottingController {
 
   emit(event, data = {}) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event].forEach(callback => callback(data));
+      this.eventListeners[event].forEach((callback) => callback(data));
     }
   }
 
   off(event, callback) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+      this.eventListeners[event] = this.eventListeners[event].filter((cb) => cb !== callback);
     }
   }
 
@@ -468,25 +465,14 @@ export class SpottingController {
    */
   destroy() {
     document.removeEventListener('keydown', this.handleKeyDown);
-    
+
     if (this.feedbackElement) {
       this.feedbackElement.remove();
     }
-    
+
     clearTimeout(this.feedbackTimeout);
     this.eventListeners = {};
   }
 }
 
 export default SpottingController;
-
-
-
-
-
-
-
-
-
-
-

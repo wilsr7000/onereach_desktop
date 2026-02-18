@@ -1,6 +1,6 @@
 /**
  * Line Script Module Index
- * 
+ *
  * Enhanced Line Script System with:
  * - Content-type templates (Podcast, Product, Promo, Learning)
  * - Progressive AI metadata generation
@@ -13,7 +13,20 @@
 // Core components
 export { LineScriptPanel, VIEW_MODES } from './LineScriptPanel.js';
 export { AdaptiveModeManager, CONTEXT_SIGNALS } from './AdaptiveModeManager.js';
-export { ContentTemplates, CONTENT_TEMPLATES, getTemplate, getAllTemplates, getMarkerTypes, getVoiceCommands, getKeyboardShortcuts, getAIPrompts, getExportFormats, getRatingCriteria, getUIConfig, suggestTemplate } from './ContentTemplates.js';
+export {
+  ContentTemplates,
+  CONTENT_TEMPLATES,
+  getTemplate,
+  getAllTemplates,
+  getMarkerTypes,
+  getVoiceCommands,
+  getKeyboardShortcuts,
+  getAIPrompts,
+  getExportFormats,
+  getRatingCriteria,
+  getUIConfig,
+  suggestTemplate,
+} from './ContentTemplates.js';
 
 // AI components
 export { LineScriptAI } from './LineScriptAI.js';
@@ -47,49 +60,49 @@ export { initLineScriptBridge } from './LineScriptBridge.js';
 export function initLineScriptModules(appContext) {
   // Create rating storage first (no dependencies)
   const ratingStorage = new (require('./RatingStorage.js').RatingStorage)();
-  
+
   // Create content templates
   const contentTemplates = new (require('./ContentTemplates.js').ContentTemplates)();
-  
+
   // Create panel (core UI)
   const LineScriptPanel = require('./LineScriptPanel.js').LineScriptPanel;
   const lineScriptPanel = new LineScriptPanel(appContext);
-  
+
   // Create mode manager
   const AdaptiveModeManager = require('./AdaptiveModeManager.js').AdaptiveModeManager;
   const adaptiveModeManager = new AdaptiveModeManager(lineScriptPanel);
-  
+
   // Create AI components
   const LineScriptAI = require('./LineScriptAI.js').LineScriptAI;
   const lineScriptAI = new LineScriptAI(appContext, lineScriptPanel);
-  
+
   const QuoteFinder = require('./QuoteFinder.js').QuoteFinder;
   const quoteFinder = new QuoteFinder(appContext);
-  
+
   // Create detectors
   const HookDetector = require('./HookDetector.js').HookDetector;
   const hookDetector = new HookDetector(appContext);
-  
+
   const ZZZDetector = require('./ZZZDetector.js').ZZZDetector;
   const zzzDetector = new ZZZDetector(appContext);
-  
+
   const EnergyAnalyzer = require('./EnergyAnalyzer.js').EnergyAnalyzer;
   const energyAnalyzer = new EnergyAnalyzer(appContext);
-  
+
   const CustomBeatPrompts = require('./CustomBeatPrompts.js').CustomBeatPrompts;
   const customBeatPrompts = new CustomBeatPrompts(appContext);
-  
+
   // Create spotting controllers
   const SpottingController = require('./SpottingController.js').SpottingController;
   const spottingController = new SpottingController(lineScriptPanel);
-  
+
   const VoiceSpottingController = require('./VoiceSpottingController.js').VoiceSpottingController;
   const voiceSpottingController = new VoiceSpottingController(lineScriptPanel);
-  
+
   // Create rating system
   const ProjectRating = require('./ProjectRating.js').ProjectRating;
   const projectRating = new ProjectRating(appContext, ratingStorage);
-  
+
   // Attach to app context
   appContext.lineScriptPanel = lineScriptPanel;
   appContext.adaptiveModeManager = adaptiveModeManager;
@@ -104,7 +117,7 @@ export function initLineScriptModules(appContext) {
   appContext.voiceSpottingController = voiceSpottingController;
   appContext.projectRating = projectRating;
   appContext.ratingStorage = ratingStorage;
-  
+
   return {
     lineScriptPanel,
     adaptiveModeManager,
@@ -118,7 +131,7 @@ export function initLineScriptModules(appContext) {
     spottingController,
     voiceSpottingController,
     projectRating,
-    ratingStorage
+    ratingStorage,
   };
 }
 
@@ -140,16 +153,5 @@ export const FEATURES = {
   ENERGY_ANALYSIS: true,
   CUSTOM_BEATS: true,
   PROJECT_RATING: true,
-  QUOTE_FINDER: true
+  QUOTE_FINDER: true,
 };
-
-
-
-
-
-
-
-
-
-
-

@@ -5,7 +5,10 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 // Mock child_process (FFmpeg-dependent)
 vi.mock('child_process', () => ({
   execFile: vi.fn((cmd, args, opts, cb) => {
-    if (typeof opts === 'function') { cb = opts; opts = {}; }
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
     if (cb) cb(null, 'mock output', '');
     return { on: vi.fn(), stdout: { on: vi.fn() }, stderr: { on: vi.fn() } };
   }),
@@ -17,7 +20,7 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     writeFileSync: vi.fn(),
-    readFileSync: vi.fn(() => Buffer.from([0x00, 0x00, 0x00, 0x1C, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D])),
+    readFileSync: vi.fn(() => Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d])),
     unlinkSync: vi.fn(),
     existsSync: vi.fn(() => true),
     statSync: vi.fn(() => ({ size: 32768 })),
@@ -60,7 +63,7 @@ describe('GifToVideoAgent (specific)', () => {
   });
 
   it('has three distinct strategies', () => {
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toContain('standard');
     expect(ids).toContain('high-quality');
     expect(ids).toContain('loop');

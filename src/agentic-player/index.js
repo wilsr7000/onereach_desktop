@@ -20,21 +20,21 @@ import { QueueRenderer } from './ui/QueueRenderer.js';
 export function createPlayer() {
   // Load configuration
   const config = loadConfig();
-  
+
   // Initialize services
   const session = new SessionManager();
   const api = new APIService(config);
   const buffer = new BufferManager();
   const queue = new QueueManager();
   const ui = new PlayerUI();
-  
+
   // Get video element
   const videoElement = document.getElementById('videoPlayer');
   const playback = new PlaybackController(videoElement);
-  
+
   // Queue renderer
   const queueRenderer = new QueueRenderer(ui.elements.queueList, ui.elements.queueCount);
-  
+
   // Debug logger
   const debug = (...args) => {
     if (config.debugMode) {
@@ -45,7 +45,7 @@ export function createPlayer() {
   // Log reasoning
   const logReasoning = (clip, text) => {
     if (!ui.elements.showReasoning?.checked) return;
-    
+
     const entry = document.createElement('div');
     entry.className = 'reasoning-entry';
     entry.innerHTML = `
@@ -58,7 +58,7 @@ export function createPlayer() {
   // Fetch clips from API
   const fetchClips = async () => {
     if (!session.isActive || api.fetching || queue.endSignaled) return;
-    
+
     if (session.isTimeLimitReached()) {
       endSession('Time limit reached');
       return;
@@ -68,7 +68,7 @@ export function createPlayer() {
       ui.showThinking(true);
       const payload = session.getApiPayload(queue.length);
       const data = await api.fetchClips(payload);
-      
+
       if (!data) return;
 
       // Handle end signal
@@ -83,7 +83,7 @@ export function createPlayer() {
       // Add clips to queue
       if (data.scenes && data.scenes.length > 0) {
         queue.addClips(data.scenes);
-        
+
         if (data.reasoning) {
           logReasoning(null, data.reasoning);
         }
@@ -95,10 +95,9 @@ export function createPlayer() {
           playNext();
         }
       }
-
     } catch (error) {
       logReasoning(null, `Error: ${error.message}`);
-      
+
       if (queue.length === 0 && !playback.currentClip) {
         endSession(`API Error: ${error.message}`);
       }
@@ -148,7 +147,7 @@ export function createPlayer() {
   // Check if should prefetch
   const checkPrefetch = () => {
     debug('checkPrefetch:', { queueLength: queue.length, fetching: api.fetching });
-    
+
     if (queue.shouldPrefetch(config.prefetchWhenRemaining) && !api.fetching) {
       window.logging.info('agent', `Player Queue low (${queue.length}), pre-fetching...`);
       fetchClips();
@@ -157,7 +156,7 @@ export function createPlayer() {
     // Preload next video
     const nextClip = queue.peekNext();
     if (nextClip && !buffer.isPreloaded(nextClip)) {
-      buffer.preloadNextVideo(nextClip).catch(e => debug('Preload failed:', e));
+      buffer.preloadNextVideo(nextClip).catch((e) => debug('Preload failed:', e));
     }
   };
 
@@ -168,7 +167,7 @@ export function createPlayer() {
 
   // Setup playback events
   playback.setupEvents();
-  
+
   playback.onClipEnd = (clip) => {
     if (clip) {
       const duration = (clip.outTime || videoElement.duration) - (clip.inTime || 0);
@@ -247,12 +246,12 @@ export function createPlayer() {
       }
     },
     toggleSection: (el) => el.closest('.sidebar-section')?.classList.toggle('collapsed'),
-    
+
     // Expose for debugging
     session,
     queue,
     playback,
-    config
+    config,
   };
 }
 
@@ -266,19 +265,3 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 export default createPlayer;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

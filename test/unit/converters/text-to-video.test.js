@@ -5,8 +5,11 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 // Mock child_process for FFmpeg calls
 vi.mock('child_process', () => ({
   execFile: vi.fn((cmd, args, opts, cb) => {
-    if (typeof opts === 'function') { opts(null, '', ''); }
-    else if (typeof cb === 'function') { cb(null, '', ''); }
+    if (typeof opts === 'function') {
+      opts(null, '', '');
+    } else if (typeof cb === 'function') {
+      cb(null, '', '');
+    }
   }),
 }));
 
@@ -32,8 +35,12 @@ vi.mock('fs', async () => {
       if (typeof opts === 'function') opts(null);
       else if (typeof cb === 'function') cb(null);
     }),
-    unlink: vi.fn((path, cb) => { if (typeof cb === 'function') cb(null); }),
-    readdir: vi.fn((path, cb) => { if (typeof cb === 'function') cb(null, []); }),
+    unlink: vi.fn((path, cb) => {
+      if (typeof cb === 'function') cb(null);
+    }),
+    readdir: vi.fn((path, cb) => {
+      if (typeof cb === 'function') cb(null, []);
+    }),
     existsSync: vi.fn().mockReturnValue(false),
     mkdirSync: vi.fn(),
   };

@@ -9,7 +9,8 @@ vi.mock('../../../lib/log-event-queue', () => ({
 }));
 
 const mockAI = createMockAIService({
-  chatResponse: 'This function named "hello" takes no arguments and returns the string "world". It is a simple pure function with no side effects.',
+  chatResponse:
+    'This function named "hello" takes no arguments and returns the string "world". It is a simple pure function with no side effects.',
 });
 
 // Import the agent class (CJS)
@@ -37,10 +38,8 @@ describe('CodeToExplanationAgent (specific)', () => {
     await agent.execute('function hello() { return "world"; }', 'overview');
     expect(mockAI.chat).toHaveBeenCalledWith(
       expect.objectContaining({
-        messages: expect.arrayContaining([
-          expect.objectContaining({ role: 'user' }),
-        ]),
-      }),
+        messages: expect.arrayContaining([expect.objectContaining({ role: 'user' })]),
+      })
     );
   });
 

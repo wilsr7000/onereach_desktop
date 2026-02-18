@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
    */
   function saveToken() {
     const token = tokenInput.value.trim();
-    
+
     if (!token) {
       showToast('Please enter a token', true);
       return;
@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (response && response.success) {
         showToast('Token saved!');
         tokenInput.value = '';
-        
+
         // Wait a moment then check status
         setTimeout(checkStatus, 1000);
       } else {
@@ -149,7 +149,3 @@ document.addEventListener('DOMContentLoaded', () => {
   // Refresh status periodically while popup is open
   setInterval(checkStatus, 5000);
 });
-
-
-
-

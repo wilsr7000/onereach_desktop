@@ -1,6 +1,6 @@
 /**
  * SnapManager - Snap-to-grid functionality for audio clip editing
- * 
+ *
  * Features:
  * - Snap to playhead, markers, and clip edges
  * - Configurable snap threshold
@@ -14,38 +14,38 @@ export class SnapManager {
     this.snapTargets = [];
     this.snapThreshold = options.snapThreshold || 10; // pixels
     this.enabled = options.enabled !== false;
-    
+
     // Callbacks for converting between time and pixels
     this.timeToPixels = options.timeToPixels || ((time) => time * 100);
     this.pixelsToTime = options.pixelsToTime || ((pixels) => pixels / 100);
-    
+
     log.info('video', '[SnapManager] Initialized with threshold', { arg0: this.snapThreshold, arg1: 'px' });
   }
-  
+
   /**
    * Update snap targets based on current state
    * @param {object} params - { tracks, playheadTime, markers }
    */
   updateSnapTargets(params = {}) {
     const { tracks = [], playheadTime = 0, markers = [] } = params;
-    
+
     this.snapTargets = [];
-    
+
     // Add playhead as snap target
     this.snapTargets.push({
       time: playheadTime,
       type: 'playhead',
-      priority: 1
+      priority: 1,
     });
-    
+
     // Add markers
-    markers.forEach(marker => {
+    markers.forEach((marker) => {
       if (marker.time !== undefined) {
         this.snapTargets.push({
           time: marker.time,
           type: 'marker',
           markerId: marker.id,
-          priority: 2
+          priority: 2,
         });
       }
       // For range markers, add in and out points
@@ -54,7 +54,7 @@ export class SnapManager {
           time: marker.inTime,
           type: 'marker-in',
           markerId: marker.id,
-          priority: 2
+          priority: 2,
         });
       }
       if (marker.outTime !== undefined) {
@@ -62,44 +62,44 @@ export class SnapManager {
           time: marker.outTime,
           type: 'marker-out',
           markerId: marker.id,
-          priority: 2
+          priority: 2,
         });
       }
     });
-    
+
     // Add clip edges from all tracks
-    tracks.forEach(track => {
+    tracks.forEach((track) => {
       if (!track.clips) return;
-      
-      track.clips.forEach(clip => {
+
+      track.clips.forEach((clip) => {
         const clipStart = clip.timelineStart ?? 0;
         const clipDuration = (clip.sourceOut ?? 0) - (clip.sourceIn ?? 0);
         const clipEnd = clipStart + clipDuration;
-        
+
         // Clip start
         this.snapTargets.push({
           time: clipStart,
           type: 'clip-start',
           clipId: clip.id,
           trackId: track.id,
-          priority: 3
+          priority: 3,
         });
-        
+
         // Clip end
         this.snapTargets.push({
           time: clipEnd,
           type: 'clip-end',
           clipId: clip.id,
           trackId: track.id,
-          priority: 3
+          priority: 3,
         });
       });
     });
-    
+
     // Sort by priority (higher priority = more important)
     this.snapTargets.sort((a, b) => a.priority - b.priority);
   }
-  
+
   /**
    * Get the snap point for a given time
    * @param {number} time - Time to check
@@ -110,29 +110,29 @@ export class SnapManager {
     if (!this.enabled) {
       return { snapped: false, time };
     }
-    
+
     const timePixels = this.timeToPixels(time);
-    
+
     for (const target of this.snapTargets) {
       // Skip the clip being dragged
       if (target.clipId === excludeClipId) continue;
-      
+
       const targetPixels = this.timeToPixels(target.time);
       const distance = Math.abs(timePixels - targetPixels);
-      
+
       if (distance < this.snapThreshold) {
         return {
           snapped: true,
           time: target.time,
           type: target.type,
-          target
+          target,
         };
       }
     }
-    
+
     return { snapped: false, time };
   }
-  
+
   /**
    * Get snap point for a clip being moved
    * Checks both start and end of the clip
@@ -144,33 +144,33 @@ export class SnapManager {
     if (!this.enabled) {
       return { snapped: false, adjustedStart: newStart };
     }
-    
+
     const clipDuration = (clip.sourceOut ?? 0) - (clip.sourceIn ?? 0);
     const newEnd = newStart + clipDuration;
-    
+
     // Check snap for clip start
     const startSnap = this.getSnapPoint(newStart, clip.id);
     if (startSnap.snapped) {
       return {
         snapped: true,
         adjustedStart: startSnap.time,
-        snapInfo: { edge: 'start', ...startSnap }
+        snapInfo: { edge: 'start', ...startSnap },
       };
     }
-    
+
     // Check snap for clip end
     const endSnap = this.getSnapPoint(newEnd, clip.id);
     if (endSnap.snapped) {
       return {
         snapped: true,
         adjustedStart: endSnap.time - clipDuration,
-        snapInfo: { edge: 'end', ...endSnap }
+        snapInfo: { edge: 'end', ...endSnap },
       };
     }
-    
+
     return { snapped: false, adjustedStart: newStart };
   }
-  
+
   /**
    * Enable/disable snapping
    */
@@ -178,7 +178,7 @@ export class SnapManager {
     this.enabled = enabled;
     log.info('video', '[SnapManager] Enabled', { data: enabled });
   }
-  
+
   /**
    * Toggle snapping on/off
    */
@@ -187,7 +187,7 @@ export class SnapManager {
     log.info('video', '[SnapManager] Toggled', { data: this.enabled });
     return this.enabled;
   }
-  
+
   /**
    * Set snap threshold in pixels
    */
@@ -195,7 +195,7 @@ export class SnapManager {
     this.snapThreshold = Math.max(1, pixels);
     log.info('video', '[SnapManager] Threshold set', { arg0: this.snapThreshold, arg1: 'px' });
   }
-  
+
   /**
    * Set time/pixel conversion functions
    */
@@ -203,21 +203,21 @@ export class SnapManager {
     this.timeToPixels = timeToPixels;
     this.pixelsToTime = pixelsToTime;
   }
-  
+
   /**
    * Get all current snap targets (for visualization)
    */
   getSnapTargets() {
     return this.snapTargets;
   }
-  
+
   /**
    * Clear snap targets
    */
   clear() {
     this.snapTargets = [];
   }
-  
+
   /**
    * Dispose of resources
    */
@@ -228,13 +228,3 @@ export class SnapManager {
     log.info('video', '[SnapManager] Disposed');
   }
 }
-
-
-
-
-
-
-
-
-
-

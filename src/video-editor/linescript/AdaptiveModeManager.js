@@ -1,6 +1,6 @@
 /**
  * AdaptiveModeManager.js - Automatic Mode Detection and Switching
- * 
+ *
  * Detects user context and smoothly transitions between modes:
  * - Spotting Mode: Video playing, minimal UI
  * - Edit Mode: Video paused + selecting content
@@ -17,23 +17,23 @@ const MODE_CONFIG = {
   [VIEW_MODES.SPOTTING]: {
     priority: 1,
     transitionDelay: 0,
-    exitDelay: 500
+    exitDelay: 500,
   },
   [VIEW_MODES.EDIT]: {
     priority: 2,
     transitionDelay: 300,
-    exitDelay: 1000
+    exitDelay: 1000,
   },
   [VIEW_MODES.REVIEW]: {
     priority: 2,
     transitionDelay: 500,
-    exitDelay: 500
+    exitDelay: 500,
   },
   [VIEW_MODES.EXPORT]: {
     priority: 3,
     transitionDelay: 0,
-    exitDelay: 0
-  }
+    exitDelay: 0,
+  },
 };
 
 /**
@@ -48,7 +48,7 @@ const CONTEXT_SIGNALS = {
   EXPORT_PANEL_OPEN: 'export_panel_open',
   KEYBOARD_ACTIVE: 'keyboard_active',
   VOICE_ACTIVE: 'voice_active',
-  IDLE: 'idle'
+  IDLE: 'idle',
 };
 
 /**
@@ -58,28 +58,28 @@ export class AdaptiveModeManager {
   constructor(lineScriptPanel) {
     this.panel = lineScriptPanel;
     this.app = lineScriptPanel.app;
-    
+
     // Current state
     this.currentMode = VIEW_MODES.SPOTTING;
     this.locked = false;
     this.pendingTransition = null;
-    
+
     // Context tracking
     this.activeSignals = new Set();
     this.lastActivity = Date.now();
     this.idleTimeout = 30000; // 30 seconds
-    
+
     // Transition state
     this.transitioning = false;
     this.transitionCallbacks = [];
-    
+
     // Mouse tracking for hover detection
     this.lastMousePosition = { x: 0, y: 0 };
     this.hoverTarget = null;
-    
+
     // Event listeners
     this.eventListeners = {};
-    
+
     // Bind methods
     this.handleVideoPlay = this.handleVideoPlay.bind(this);
     this.handleVideoPause = this.handleVideoPause.bind(this);
@@ -108,16 +108,16 @@ export class AdaptiveModeManager {
       this.app.video.addEventListener('pause', this.handleVideoPause);
       this.app.video.addEventListener('ended', this.handleVideoPause);
     }
-    
+
     // Selection events
     document.addEventListener('selectionchange', this.handleTextSelection);
-    
+
     // Mouse events for hover detection
     document.addEventListener('mousemove', this.handleMouseMove);
-    
+
     // Keyboard events
     document.addEventListener('keydown', this.handleKeyDown);
-    
+
     // Panel events
     this.panel.on('export', () => this.addSignal(CONTEXT_SIGNALS.EXPORT_PANEL_OPEN));
     this.panel.on('markerAdded', () => this.recordActivity());
@@ -140,7 +140,7 @@ export class AdaptiveModeManager {
     this.addSignal(CONTEXT_SIGNALS.VIDEO_PAUSED);
     this.removeSignal(CONTEXT_SIGNALS.VIDEO_PLAYING);
     this.recordActivity();
-    
+
     // Delay mode evaluation to allow for user action
     setTimeout(() => this.evaluateModeChange(), 300);
   }
@@ -165,12 +165,12 @@ export class AdaptiveModeManager {
    */
   handleMouseMove(e) {
     this.lastMousePosition = { x: e.clientX, y: e.clientY };
-    
+
     // Check if hovering over marker elements
     const target = document.elementFromPoint(e.clientX, e.clientY);
     const markerElement = target?.closest('[data-marker-id]');
     const reviewCard = target?.closest('.review-card');
-    
+
     if (markerElement || reviewCard) {
       if (!this.activeSignals.has(CONTEXT_SIGNALS.MARKER_HOVERING)) {
         this.addSignal(CONTEXT_SIGNALS.MARKER_HOVERING);
@@ -184,7 +184,7 @@ export class AdaptiveModeManager {
         setTimeout(() => this.evaluateModeChange(), 500);
       }
     }
-    
+
     this.recordActivity();
   }
 
@@ -194,7 +194,7 @@ export class AdaptiveModeManager {
    */
   handleKeyDown(e) {
     this.recordActivity();
-    
+
     // Check for spotting shortcuts
     const spottingKeys = ['m', 'i', 'o', ' ', 'q', 't', 'c', 'f', 'h', 'k'];
     if (spottingKeys.includes(e.key.toLowerCase())) {
@@ -244,7 +244,7 @@ export class AdaptiveModeManager {
    */
   checkIdleState() {
     const idleTime = Date.now() - this.lastActivity;
-    
+
     if (idleTime > this.idleTimeout) {
       if (!this.activeSignals.has(CONTEXT_SIGNALS.IDLE)) {
         this.addSignal(CONTEXT_SIGNALS.IDLE);
@@ -258,9 +258,9 @@ export class AdaptiveModeManager {
    */
   evaluateModeChange() {
     if (this.locked || this.transitioning) return;
-    
+
     const suggestedMode = this.detectOptimalMode();
-    
+
     if (suggestedMode !== this.currentMode) {
       this.scheduleModeTransition(suggestedMode);
     }
@@ -272,42 +272,46 @@ export class AdaptiveModeManager {
    */
   detectOptimalMode() {
     const signals = this.activeSignals;
-    
+
     // Priority order: Export > Edit > Review > Spotting
-    
+
     // Export mode: export panel is open
     if (signals.has(CONTEXT_SIGNALS.EXPORT_PANEL_OPEN)) {
       return VIEW_MODES.EXPORT;
     }
-    
+
     // Edit mode: video paused AND (text selected OR marker editing)
-    if (signals.has(CONTEXT_SIGNALS.VIDEO_PAUSED) && 
-        (signals.has(CONTEXT_SIGNALS.TEXT_SELECTED) || signals.has(CONTEXT_SIGNALS.MARKER_EDITING))) {
+    if (
+      signals.has(CONTEXT_SIGNALS.VIDEO_PAUSED) &&
+      (signals.has(CONTEXT_SIGNALS.TEXT_SELECTED) || signals.has(CONTEXT_SIGNALS.MARKER_EDITING))
+    ) {
       return VIEW_MODES.EDIT;
     }
-    
+
     // Review mode: video paused AND hovering markers
     if (signals.has(CONTEXT_SIGNALS.VIDEO_PAUSED) && signals.has(CONTEXT_SIGNALS.MARKER_HOVERING)) {
       return VIEW_MODES.REVIEW;
     }
-    
+
     // Spotting mode: video playing OR keyboard active OR voice active
-    if (signals.has(CONTEXT_SIGNALS.VIDEO_PLAYING) || 
-        signals.has(CONTEXT_SIGNALS.KEYBOARD_ACTIVE) ||
-        signals.has(CONTEXT_SIGNALS.VOICE_ACTIVE)) {
+    if (
+      signals.has(CONTEXT_SIGNALS.VIDEO_PLAYING) ||
+      signals.has(CONTEXT_SIGNALS.KEYBOARD_ACTIVE) ||
+      signals.has(CONTEXT_SIGNALS.VOICE_ACTIVE)
+    ) {
       return VIEW_MODES.SPOTTING;
     }
-    
+
     // Default: if video is paused, go to edit mode
     if (signals.has(CONTEXT_SIGNALS.VIDEO_PAUSED)) {
       return VIEW_MODES.EDIT;
     }
-    
+
     // If idle, stay in current mode
     if (signals.has(CONTEXT_SIGNALS.IDLE)) {
       return this.currentMode;
     }
-    
+
     // Default to spotting
     return VIEW_MODES.SPOTTING;
   }
@@ -321,10 +325,10 @@ export class AdaptiveModeManager {
     if (this.pendingTransition) {
       clearTimeout(this.pendingTransition.timeout);
     }
-    
+
     const config = MODE_CONFIG[targetMode];
     const delay = config.transitionDelay;
-    
+
     if (delay === 0) {
       this.transitionTo(targetMode);
     } else {
@@ -333,7 +337,7 @@ export class AdaptiveModeManager {
         timeout: setTimeout(() => {
           this.transitionTo(targetMode);
           this.pendingTransition = null;
-        }, delay)
+        }, delay),
       };
     }
   }
@@ -344,32 +348,34 @@ export class AdaptiveModeManager {
    */
   transitionTo(targetMode) {
     if (this.currentMode === targetMode) return;
-    
+
     this.transitioning = true;
     const previousMode = this.currentMode;
-    
+
     // Emit before transition event
     this.emit('beforeTransition', { from: previousMode, to: targetMode });
-    
+
     // Animate out
-    this.animateOut(previousMode).then(() => {
-      // Update mode
-      this.currentMode = targetMode;
-      this.panel.viewMode = targetMode;
-      
-      // Render new mode
-      this.panel.render();
-      
-      // Animate in
-      return this.animateIn(targetMode);
-    }).then(() => {
-      this.transitioning = false;
-      
-      // Emit after transition event
-      this.emit('afterTransition', { from: previousMode, to: targetMode });
-      
-      window.logging.info('video', `AdaptiveModeManager Transitioned: ${previousMode} → ${targetMode}`);
-    });
+    this.animateOut(previousMode)
+      .then(() => {
+        // Update mode
+        this.currentMode = targetMode;
+        this.panel.viewMode = targetMode;
+
+        // Render new mode
+        this.panel.render();
+
+        // Animate in
+        return this.animateIn(targetMode);
+      })
+      .then(() => {
+        this.transitioning = false;
+
+        // Emit after transition event
+        this.emit('afterTransition', { from: previousMode, to: targetMode });
+
+        window.logging.info('video', `AdaptiveModeManager Transitioned: ${previousMode} → ${targetMode}`);
+      });
   }
 
   /**
@@ -378,16 +384,16 @@ export class AdaptiveModeManager {
    * @returns {Promise} Animation promise
    */
   animateOut(mode) {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const container = this.panel.container;
       if (!container) {
         resolve();
         return;
       }
-      
+
       container.classList.add('mode-transitioning', 'mode-exit');
       container.style.setProperty('--exit-mode', mode);
-      
+
       setTimeout(() => {
         container.classList.remove('mode-exit');
         resolve();
@@ -401,16 +407,16 @@ export class AdaptiveModeManager {
    * @returns {Promise} Animation promise
    */
   animateIn(mode) {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const container = this.panel.container;
       if (!container) {
         resolve();
         return;
       }
-      
+
       container.classList.add('mode-enter');
       container.style.setProperty('--enter-mode', mode);
-      
+
       setTimeout(() => {
         container.classList.remove('mode-transitioning', 'mode-enter');
         resolve();
@@ -425,7 +431,7 @@ export class AdaptiveModeManager {
   lock(lock = true) {
     this.locked = lock;
     this.emit('lockChanged', { locked: lock });
-    
+
     if (lock && this.pendingTransition) {
       clearTimeout(this.pendingTransition.timeout);
       this.pendingTransition = null;
@@ -522,7 +528,7 @@ export class AdaptiveModeManager {
   }
 
   // Event emitter methods
-  
+
   /**
    * Subscribe to an event
    * @param {string} event - Event name
@@ -542,7 +548,7 @@ export class AdaptiveModeManager {
    */
   emit(event, data = {}) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event].forEach(callback => callback(data));
+      this.eventListeners[event].forEach((callback) => callback(data));
     }
   }
 
@@ -553,7 +559,7 @@ export class AdaptiveModeManager {
    */
   off(event, callback) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+      this.eventListeners[event] = this.eventListeners[event].filter((cb) => cb !== callback);
     }
   }
 
@@ -568,7 +574,7 @@ export class AdaptiveModeManager {
     if (this.pendingTransition) {
       clearTimeout(this.pendingTransition.timeout);
     }
-    
+
     // Remove event listeners
     if (this.app.video) {
       this.app.video.removeEventListener('play', this.handleVideoPlay);
@@ -577,7 +583,7 @@ export class AdaptiveModeManager {
     document.removeEventListener('selectionchange', this.handleTextSelection);
     document.removeEventListener('mousemove', this.handleMouseMove);
     document.removeEventListener('keydown', this.handleKeyDown);
-    
+
     // Clear state
     this.eventListeners = {};
     this.activeSignals.clear();
@@ -586,14 +592,3 @@ export class AdaptiveModeManager {
 
 export { CONTEXT_SIGNALS };
 export default AdaptiveModeManager;
-
-
-
-
-
-
-
-
-
-
-

@@ -1,6 +1,6 @@
 /**
  * MultiTrackAudioManager - Handles multi-track audio playback synchronized with video
- * 
+ *
  * Features:
  * - Independent audio buffers per track
  * - Synchronized playback with video element
@@ -16,28 +16,31 @@ function pathToFileUrl(filePath) {
   if (filePath.startsWith('file://') || filePath.startsWith('data:')) return filePath;
   let normalized = filePath.replace(/\\/g, '/');
   if (/^[a-zA-Z]:/.test(normalized)) normalized = '/' + normalized;
-  const encoded = normalized.split('/').map(c => encodeURIComponent(c).replace(/%3A/g, ':')).join('/');
+  const encoded = normalized
+    .split('/')
+    .map((c) => encodeURIComponent(c).replace(/%3A/g, ':'))
+    .join('/');
   return 'file://' + encoded;
 }
 
 export class MultiTrackAudioManager {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Web Audio API context (shared)
     this.audioContext = null;
     this.masterGain = null;
-    
+
     // Track audio state: { trackId: { buffer, source, gain, muted, solo, volume } }
     this.trackAudio = new Map();
-    
+
     // Playback state
     this.isPlaying = false;
     this.lastSeekTime = 0;
-    
+
     // Reference to video element
     this.videoElement = null;
-    
+
     log.info('video', '[MultiTrackAudio] Manager initialized');
   }
 
@@ -51,19 +54,19 @@ export class MultiTrackAudioManager {
       }
       return;
     }
-    
+
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    
+
     // Master gain node for overall volume
     this.masterGain = this.audioContext.createGain();
     this.masterGain.connect(this.audioContext.destination);
-    
+
     // Get video element reference
     this.videoElement = document.getElementById('videoPlayer');
-    
+
     // Set up video event listeners for sync
     this._setupVideoSync();
-    
+
     log.info('video', '[MultiTrackAudio] Audio context initialized');
   }
 
@@ -72,11 +75,11 @@ export class MultiTrackAudioManager {
    */
   _setupVideoSync() {
     if (!this.videoElement) return;
-    
+
     // Store original muted state
     this._originalVideoMuted = this.videoElement.muted;
     this._multiTrackActive = false;
-    
+
     // Sync on play
     this.videoElement.addEventListener('play', () => {
       // Only use multi-track if we have loaded tracks
@@ -85,12 +88,12 @@ export class MultiTrackAudioManager {
         this.startAllTracks(this.videoElement.currentTime);
       }
     });
-    
+
     // Sync on pause
     this.videoElement.addEventListener('pause', () => {
       this.stopAllTracks();
     });
-    
+
     // Sync on seek
     this.videoElement.addEventListener('seeked', () => {
       if (this.isPlaying && this._multiTrackActive) {
@@ -98,15 +101,15 @@ export class MultiTrackAudioManager {
         this.startAllTracks(this.videoElement.currentTime);
       }
     });
-    
+
     // Handle video ended
     this.videoElement.addEventListener('ended', () => {
       this.stopAllTracks();
     });
-    
+
     log.info('video', '[MultiTrackAudio] Video sync listeners attached');
   }
-  
+
   /**
    * Enable multi-track mode (mutes video's native audio)
    */
@@ -118,7 +121,7 @@ export class MultiTrackAudioManager {
       log.info('video', '[MultiTrackAudio] Multi-track mode enabled, video native audio muted');
     }
   }
-  
+
   /**
    * Disable multi-track mode (restores video's native audio)
    */
@@ -129,14 +132,14 @@ export class MultiTrackAudioManager {
       log.info('video', '[MultiTrackAudio] Multi-track mode disabled, video native audio restored');
     }
   }
-  
+
   /**
    * Check if multi-track playback is active
    */
   isActive() {
     return this._multiTrackActive && this.trackAudio.size > 0;
   }
-  
+
   /**
    * Restore video's native audio (when multi-track is disabled)
    */
@@ -152,12 +155,12 @@ export class MultiTrackAudioManager {
    */
   async loadTrackAudio(trackId, audioSource = null, options = {}) {
     await this.init();
-    
+
     const { volume = 1.0, muted = false, solo = false } = options;
-    
+
     try {
       let audioBuffer;
-      
+
       if (audioSource) {
         // Load from file path
         audioBuffer = await this._loadAudioFromFile(audioSource);
@@ -174,12 +177,12 @@ export class MultiTrackAudioManager {
       } else {
         throw new Error('No audio source available');
       }
-      
+
       // Create gain node for this track
       const trackGain = this.audioContext.createGain();
       trackGain.gain.value = muted ? 0 : volume;
       trackGain.connect(this.masterGain);
-      
+
       // Store track audio data
       this.trackAudio.set(trackId, {
         buffer: audioBuffer,
@@ -187,13 +190,16 @@ export class MultiTrackAudioManager {
         gain: trackGain,
         volume: volume,
         muted: muted,
-        solo: solo
+        solo: solo,
       });
-      
-      log.info('video', 'MultiTrackAudio loaded audio for track', { trackId, duration: audioBuffer.duration.toFixed(2) + 's', channels: audioBuffer.numberOfChannels });
-      
+
+      log.info('video', 'MultiTrackAudio loaded audio for track', {
+        trackId,
+        duration: audioBuffer.duration.toFixed(2) + 's',
+        channels: audioBuffer.numberOfChannels,
+      });
+
       return true;
-      
     } catch (error) {
       log.error('video', 'MultiTrackAudio failed to load audio for track', { trackId, error: error.message || error });
       return false;
@@ -207,19 +213,21 @@ export class MultiTrackAudioManager {
   async _loadAudioFromFile(filePath) {
     const response = await fetch(pathToFileUrl(filePath));
     if (!response.ok) throw new Error('Failed to fetch audio file');
-    
+
     const arrayBuffer = await response.arrayBuffer();
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-    
+
     // Check if we should use chunked loading for long audio
     const CHUNK_THRESHOLD = 600; // 10 minutes
     if (audioBuffer.duration > CHUNK_THRESHOLD) {
-      log.info('video', 'MultiTrackAudio long audio detected, enabling chunked mode', { duration: audioBuffer.duration.toFixed(0) + 's' });
+      log.info('video', 'MultiTrackAudio long audio detected, enabling chunked mode', {
+        duration: audioBuffer.duration.toFixed(0) + 's',
+      });
       // Store full buffer but flag for chunked playback
       this._useChunkedPlayback = true;
       this._chunkDuration = 120; // 2 minute chunks
     }
-    
+
     return audioBuffer;
   }
 
@@ -228,14 +236,14 @@ export class MultiTrackAudioManager {
    */
   async _loadAudioFromVideo() {
     if (!this.videoElement?.src) throw new Error('No video source');
-    
+
     const response = await fetch(this.videoElement.src);
     if (!response.ok) throw new Error('Failed to fetch video');
-    
+
     const arrayBuffer = await response.arrayBuffer();
     return await this.audioContext.decodeAudioData(arrayBuffer);
   }
-  
+
   /**
    * Load audio buffer for a specific time range (for chunked loading)
    * @param {string} filePath - Audio file path
@@ -246,19 +254,19 @@ export class MultiTrackAudioManager {
     // For now, we load the full buffer and slice it
     // Future optimization: use FFmpeg to extract range server-side
     const fullBuffer = await this._loadAudioFromFile(filePath);
-    
+
     const sampleRate = fullBuffer.sampleRate;
     const startSample = Math.floor(startTime * sampleRate);
     const numSamples = Math.floor(duration * sampleRate);
     const endSample = Math.min(startSample + numSamples, fullBuffer.length);
-    
+
     // Create a new buffer for the range
     const rangeBuffer = this.audioContext.createBuffer(
       fullBuffer.numberOfChannels,
       endSample - startSample,
       sampleRate
     );
-    
+
     // Copy channel data
     for (let channel = 0; channel < fullBuffer.numberOfChannels; channel++) {
       const sourceData = fullBuffer.getChannelData(channel);
@@ -267,10 +275,10 @@ export class MultiTrackAudioManager {
         destData[i] = sourceData[startSample + i];
       }
     }
-    
+
     return rangeBuffer;
   }
-  
+
   /**
    * Preload adjacent audio chunks for smooth playback
    * @param {string} trackId - Track identifier
@@ -279,13 +287,13 @@ export class MultiTrackAudioManager {
   async preloadAdjacentChunks(trackId, currentTime) {
     const trackData = this.trackAudio.get(trackId);
     if (!trackData || !trackData.audioPath || !this._useChunkedPlayback) return;
-    
+
     const chunkDuration = this._chunkDuration || 120;
     const preloadAhead = chunkDuration * 0.5; // Preload when 50% through current chunk
-    
+
     const currentChunkStart = Math.floor(currentTime / chunkDuration) * chunkDuration;
     const nextChunkStart = currentChunkStart + chunkDuration;
-    
+
     // Check if we're close to the next chunk and it's not loaded
     if (currentTime > currentChunkStart + preloadAhead) {
       const cacheKey = `${trackId}-${nextChunkStart}`;
@@ -293,11 +301,11 @@ export class MultiTrackAudioManager {
         log.info('video', '[MultiTrackAudio] Preloading next chunk', { data: nextChunkStart });
         // Preload in background (non-blocking)
         this._loadAudioRange(trackData.audioPath, nextChunkStart, chunkDuration)
-          .then(buffer => {
+          .then((buffer) => {
             if (!this._chunkCache) this._chunkCache = new Map();
             this._chunkCache.set(cacheKey, buffer);
           })
-          .catch(err => log.warn('video', 'MultiTrackAudio Chunk preload failed', { data: err }));
+          .catch((err) => log.warn('video', 'MultiTrackAudio Chunk preload failed', { data: err }));
       }
     }
   }
@@ -311,11 +319,11 @@ export class MultiTrackAudioManager {
   createClipEnvelope(clip, clipDuration) {
     const gain = this.audioContext.createGain();
     const now = this.audioContext.currentTime;
-    
+
     const fadeIn = clip.fadeIn || 0;
     const fadeOut = clip.fadeOut || 0;
     const clipGain = clip.gain ?? 1.0;
-    
+
     // Set initial gain (0 if fading in, else clip gain)
     if (fadeIn > 0) {
       gain.gain.setValueAtTime(0, now);
@@ -323,17 +331,17 @@ export class MultiTrackAudioManager {
     } else {
       gain.gain.setValueAtTime(clipGain, now);
     }
-    
+
     // Schedule fade out
     if (fadeOut > 0) {
       const fadeStart = now + clipDuration - fadeOut;
       gain.gain.setValueAtTime(clipGain, fadeStart);
       gain.gain.linearRampToValueAtTime(0, fadeStart + fadeOut);
     }
-    
+
     return gain;
   }
-  
+
   /**
    * Play a clip with optional crossfade envelope
    * @param {object} clip - Clip object with sourceIn, sourceOut, fadeIn, fadeOut
@@ -344,9 +352,9 @@ export class MultiTrackAudioManager {
   playClip(clip, trackGain, scheduleTime = 0) {
     const source = this.audioContext.createBufferSource();
     source.buffer = this.audioBuffer;
-    
+
     const duration = (clip.sourceOut ?? 0) - (clip.sourceIn ?? 0);
-    
+
     // Create envelope if clip has fades
     if (clip.fadeIn > 0 || clip.fadeOut > 0 || clip.gain !== undefined) {
       const envelope = this.createClipEnvelope(clip, duration);
@@ -355,11 +363,11 @@ export class MultiTrackAudioManager {
     } else {
       source.connect(trackGain);
     }
-    
+
     // Start the clip at the specified time
     const offset = clip.sourceIn ?? 0;
     source.start(scheduleTime, offset, duration);
-    
+
     return source;
   }
 
@@ -370,14 +378,14 @@ export class MultiTrackAudioManager {
   startAllTracks(startTime = 0) {
     this.isPlaying = true;
     this.lastSeekTime = startTime;
-    
+
     // Update solo state before starting
     this._updateSoloState();
-    
+
     this.trackAudio.forEach((trackData, trackId) => {
       this._startTrack(trackId, trackData, startTime);
     });
-    
+
     log.info('video', 'MultiTrackAudio started all tracks', { startTime: startTime.toFixed(2) + 's' });
   }
 
@@ -389,23 +397,23 @@ export class MultiTrackAudioManager {
     if (trackData.source) {
       try {
         trackData.source.stop();
-      } catch (e) {
+      } catch (_e) {
         // Ignore - source may already be stopped
       }
     }
-    
+
     // Don't play if no buffer
     if (!trackData.buffer) return;
-    
+
     // Create new source
     const source = this.audioContext.createBufferSource();
     source.buffer = trackData.buffer;
     source.connect(trackData.gain);
-    
+
     // Start from the specified time
     const safeStart = Math.max(0, Math.min(startTime, trackData.buffer.duration - 0.01));
     source.start(0, safeStart);
-    
+
     // Store reference
     trackData.source = source;
   }
@@ -415,18 +423,18 @@ export class MultiTrackAudioManager {
    */
   stopAllTracks() {
     this.isPlaying = false;
-    
-    this.trackAudio.forEach((trackData, trackId) => {
+
+    this.trackAudio.forEach((trackData, _trackId) => {
       if (trackData.source) {
         try {
           trackData.source.stop();
-        } catch (e) {
+        } catch (_e) {
           // Ignore - source may already be stopped
         }
         trackData.source = null;
       }
     });
-    
+
     log.info('video', '[MultiTrackAudio] Stopped all tracks');
   }
 
@@ -438,14 +446,14 @@ export class MultiTrackAudioManager {
   setTrackVolume(trackId, volume) {
     const trackData = this.trackAudio.get(trackId);
     if (!trackData) return;
-    
+
     trackData.volume = volume;
-    
+
     // Apply volume if not muted
     if (!trackData.muted && !this._isTrackSilencedBySolo(trackId)) {
       trackData.gain.gain.value = volume;
     }
-    
+
     log.info('video', 'MultiTrackAudio set volume for track', { trackId, volume });
   }
 
@@ -457,12 +465,12 @@ export class MultiTrackAudioManager {
   toggleTrackMute(trackId) {
     const trackData = this.trackAudio.get(trackId);
     if (!trackData) return false;
-    
+
     trackData.muted = !trackData.muted;
-    
+
     // Update gain
     this._updateTrackGain(trackId, trackData);
-    
+
     log.info('video', 'MultiTrackAudio toggle mute for track', { trackId, muted: trackData.muted });
     return trackData.muted;
   }
@@ -488,12 +496,12 @@ export class MultiTrackAudioManager {
   toggleTrackSolo(trackId) {
     const trackData = this.trackAudio.get(trackId);
     if (!trackData) return false;
-    
+
     trackData.solo = !trackData.solo;
-    
+
     // Update all track gains (solo affects other tracks)
     this._updateSoloState();
-    
+
     log.info('video', 'MultiTrackAudio toggle solo for track', { trackId, solo: trackData.solo });
     return trackData.solo;
   }
@@ -504,8 +512,8 @@ export class MultiTrackAudioManager {
   _updateTrackGain(trackId, trackData) {
     const silencedBySolo = this._isTrackSilencedBySolo(trackId);
     const shouldMute = trackData.muted || silencedBySolo;
-    const previousGain = trackData.gain?.gain?.value;
-    
+    const _previousGain = trackData.gain?.gain?.value;
+
     if (shouldMute) {
       trackData.gain.gain.value = 0;
     } else {
@@ -528,7 +536,7 @@ export class MultiTrackAudioManager {
    */
   _isTrackSilencedBySolo(trackId) {
     if (!this._hasSoloTracks()) return false;
-    
+
     const trackData = this.trackAudio.get(trackId);
     return trackData && !trackData.solo;
   }
@@ -549,19 +557,21 @@ export class MultiTrackAudioManager {
   removeTrack(trackId) {
     const trackData = this.trackAudio.get(trackId);
     if (!trackData) return;
-    
+
     // Stop playback
     if (trackData.source) {
       try {
         trackData.source.stop();
-      } catch (e) {}
+      } catch (_ignored) {
+        /* source may already be stopped */
+      }
     }
-    
+
     // Disconnect gain node
     if (trackData.gain) {
       trackData.gain.disconnect();
     }
-    
+
     this.trackAudio.delete(trackId);
     log.info('video', '[MultiTrackAudio] Removed track', { data: trackId });
   }
@@ -572,12 +582,12 @@ export class MultiTrackAudioManager {
   getTrackState(trackId) {
     const trackData = this.trackAudio.get(trackId);
     if (!trackData) return null;
-    
+
     return {
       volume: trackData.volume,
       muted: trackData.muted,
       solo: trackData.solo,
-      hasAudio: !!trackData.buffer
+      hasAudio: !!trackData.buffer,
     };
   }
 
@@ -593,9 +603,9 @@ export class MultiTrackAudioManager {
       log.warn('video', '[MultiTrackAudio] loadTrackFromFile called without filePath');
       return false;
     }
-    
+
     log.info('video', 'MultiTrackAudio loading track from file', { trackId, filePath });
-    
+
     try {
       return await this.loadTrackAudio(trackId, filePath, options);
     } catch (error) {
@@ -603,7 +613,7 @@ export class MultiTrackAudioManager {
       return false;
     }
   }
-  
+
   /**
    * Render mixed audio from all tracks using OfflineAudioContext
    * @param {Array} tracks - Array of track objects with clips
@@ -615,56 +625,52 @@ export class MultiTrackAudioManager {
     if (!tracks || tracks.length === 0) {
       throw new Error('No tracks to render');
     }
-    
+
     const sampleRate = sourceBuffer?.sampleRate || 44100;
     const channels = sourceBuffer?.numberOfChannels || 2;
-    
+
     // Create offline context for rendering
-    const offlineCtx = new OfflineAudioContext(
-      channels,
-      Math.ceil(sampleRate * duration),
-      sampleRate
-    );
-    
+    const offlineCtx = new OfflineAudioContext(channels, Math.ceil(sampleRate * duration), sampleRate);
+
     log.info('video', 'MultiTrackAudio starting offline render', {
       duration: duration.toFixed(2) + 's',
       tracks: tracks.length,
       sampleRate,
-      channels
+      channels,
     });
-    
+
     // Render each track
     for (const track of tracks) {
       // Skip guide track (uses video's embedded audio)
       if (track.type === 'guide') continue;
-      
+
       // Skip muted tracks
       if (track.muted) continue;
-      
+
       // Get track buffer
       const trackData = this.trackAudio.get(track.id);
       const buffer = trackData?.buffer || sourceBuffer;
       if (!buffer) continue;
-      
+
       // Create track gain
       const trackGain = offlineCtx.createGain();
       trackGain.gain.value = track.volume ?? 1.0;
       trackGain.connect(offlineCtx.destination);
-      
+
       // Render each clip in the track
       const clips = track.clips || [{ sourceIn: 0, sourceOut: duration, timelineStart: 0 }];
-      
+
       for (const clip of clips) {
         const source = offlineCtx.createBufferSource();
         source.buffer = buffer;
-        
+
         const clipDuration = (clip.sourceOut ?? duration) - (clip.sourceIn ?? 0);
-        
+
         // Apply clip envelope if fades are present
         if (clip.fadeIn > 0 || clip.fadeOut > 0) {
           const envelope = offlineCtx.createGain();
           const startTime = clip.timelineStart ?? 0;
-          
+
           // Fade in
           if (clip.fadeIn > 0) {
             envelope.gain.setValueAtTime(0, startTime);
@@ -672,14 +678,14 @@ export class MultiTrackAudioManager {
           } else {
             envelope.gain.setValueAtTime(clip.gain ?? 1.0, startTime);
           }
-          
+
           // Fade out
           if (clip.fadeOut > 0) {
             const fadeStart = startTime + clipDuration - clip.fadeOut;
             envelope.gain.setValueAtTime(clip.gain ?? 1.0, fadeStart);
             envelope.gain.linearRampToValueAtTime(0, fadeStart + clip.fadeOut);
           }
-          
+
           source.connect(envelope);
           envelope.connect(trackGain);
         } else {
@@ -693,19 +699,21 @@ export class MultiTrackAudioManager {
             source.connect(trackGain);
           }
         }
-        
+
         // Schedule clip playback
         source.start(clip.timelineStart ?? 0, clip.sourceIn ?? 0, clipDuration);
       }
     }
-    
+
     // Render to buffer
     const renderedBuffer = await offlineCtx.startRendering();
-    log.info('video', 'MultiTrackAudio offline render complete', { duration: renderedBuffer.duration.toFixed(2) + 's' });
-    
+    log.info('video', 'MultiTrackAudio offline render complete', {
+      duration: renderedBuffer.duration.toFixed(2) + 's',
+    });
+
     return renderedBuffer;
   }
-  
+
   /**
    * Export audio buffer to a WAV file (returns array buffer)
    * @param {AudioBuffer} buffer - Audio buffer to export
@@ -721,15 +729,15 @@ export class MultiTrackAudioManager {
     const dataSize = length * blockAlign;
     const headerSize = 44;
     const totalSize = headerSize + dataSize;
-    
+
     const arrayBuffer = new ArrayBuffer(totalSize);
     const view = new DataView(arrayBuffer);
-    
+
     // RIFF header
     this._writeString(view, 0, 'RIFF');
     view.setUint32(4, totalSize - 8, true);
     this._writeString(view, 8, 'WAVE');
-    
+
     // fmt chunk
     this._writeString(view, 12, 'fmt ');
     view.setUint32(16, 16, true); // chunk size
@@ -739,61 +747,61 @@ export class MultiTrackAudioManager {
     view.setUint32(28, byteRate, true);
     view.setUint16(32, blockAlign, true);
     view.setUint16(34, bytesPerSample * 8, true);
-    
+
     // data chunk
     this._writeString(view, 36, 'data');
     view.setUint32(40, dataSize, true);
-    
+
     // Interleave channels and convert to 16-bit
     const channelData = [];
     for (let ch = 0; ch < numChannels; ch++) {
       channelData.push(buffer.getChannelData(ch));
     }
-    
+
     let offset = 44;
     for (let i = 0; i < length; i++) {
       for (let ch = 0; ch < numChannels; ch++) {
         const sample = Math.max(-1, Math.min(1, channelData[ch][i]));
-        const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+        const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
         view.setInt16(offset, intSample, true);
         offset += 2;
       }
     }
-    
+
     return arrayBuffer;
   }
-  
+
   _writeString(view, offset, string) {
     for (let i = 0; i < string.length; i++) {
       view.setUint8(offset + i, string.charCodeAt(i));
     }
   }
-  
+
   /**
    * Clean up all resources
    */
   dispose() {
     this.stopAllTracks();
-    
+
     // Restore video's native audio
     this._disableMultiTrack();
-    
-    this.trackAudio.forEach((trackData, trackId) => {
+
+    this.trackAudio.forEach((trackData, _trackId) => {
       if (trackData.gain) {
         trackData.gain.disconnect();
       }
     });
-    
+
     this.trackAudio.clear();
-    
+
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
     }
-    
+
     log.info('video', '[MultiTrackAudio] Disposed');
   }
-  
+
   /**
    * Get the number of loaded tracks
    */
@@ -801,14 +809,3 @@ export class MultiTrackAudioManager {
     return this.trackAudio.size;
   }
 }
-
-
-
-
-
-
-
-
-
-
-

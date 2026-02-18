@@ -11,7 +11,7 @@ class XlsxGenerator {
       headerFill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2B579A' } },
       headerFont: { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 },
       bodyFont: { size: 11 },
-      alternateFill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } }
+      alternateFill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } },
     };
   }
 
@@ -23,15 +23,11 @@ class XlsxGenerator {
    * @returns {Promise<Object>} Result with buffer
    */
   async generate(space, items, options = {}) {
-    const {
-      includeMetadata = true,
-      separateSheets = true,
-      includeStats = true
-    } = options;
+    const { includeMetadata = true, separateSheets = true, includeStats = true } = options;
 
     try {
       const workbook = new ExcelJS.Workbook();
-      
+
       // Set workbook properties
       workbook.creator = 'Onereach.ai Smart Export';
       workbook.lastModifiedBy = 'Onereach.ai';
@@ -65,14 +61,13 @@ class XlsxGenerator {
         buffer: Buffer.from(buffer),
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         extension: 'xlsx',
-        filename: `${this.sanitizeFilename(space.name)}.xlsx`
+        filename: `${this.sanitizeFilename(space.name)}.xlsx`,
       };
-
     } catch (error) {
       console.error('[XlsxGenerator] Error generating spreadsheet:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -82,7 +77,7 @@ class XlsxGenerator {
    */
   createSummarySheet(workbook, space, items) {
     const sheet = workbook.addWorksheet('Summary', {
-      properties: { tabColor: { argb: 'FF2B579A' } }
+      properties: { tabColor: { argb: 'FF2B579A' } },
     });
 
     // Title
@@ -114,7 +109,7 @@ class XlsxGenerator {
       ['Generated Date', new Date().toLocaleDateString()],
       ['Space ID', space.id || 'N/A'],
       ['', ''], // Spacer
-      ['Items by Type', '']
+      ['Items by Type', ''],
     ];
 
     for (const [type, typeItems] of Object.entries(typeGroups)) {
@@ -141,7 +136,7 @@ class XlsxGenerator {
    */
   createItemsSheet(workbook, items, includeMetadata) {
     const sheet = workbook.addWorksheet('All Items', {
-      properties: { tabColor: { argb: 'FF22C55E' } }
+      properties: { tabColor: { argb: 'FF22C55E' } },
     });
 
     // Define columns
@@ -150,7 +145,7 @@ class XlsxGenerator {
       { header: 'Type', key: 'type', width: 12 },
       { header: 'Content', key: 'content', width: 50 },
       { header: 'File Name', key: 'fileName', width: 25 },
-      { header: 'Created', key: 'timestamp', width: 20 }
+      { header: 'Created', key: 'timestamp', width: 20 },
     ];
 
     if (includeMetadata) {
@@ -179,7 +174,7 @@ class XlsxGenerator {
         type: item.type || 'unknown',
         content: this.truncateContent(item.content || item.plainText || ''),
         fileName: item.fileName || item.metadata?.filename || '',
-        timestamp: item.timestamp ? new Date(item.timestamp).toLocaleString() : ''
+        timestamp: item.timestamp ? new Date(item.timestamp).toLocaleString() : '',
       };
 
       if (includeMetadata) {
@@ -204,7 +199,7 @@ class XlsxGenerator {
     // Add filters
     sheet.autoFilter = {
       from: 'A1',
-      to: `${String.fromCharCode(64 + columns.length)}1`
+      to: `${String.fromCharCode(64 + columns.length)}1`,
     };
 
     // Freeze header row
@@ -223,16 +218,16 @@ class XlsxGenerator {
       file: 'FF64748B',
       url: 'FF22C55E',
       link: 'FF22C55E',
-      code: 'FFEF4444'
+      code: 'FFEF4444',
     };
 
     const sheet = workbook.addWorksheet(sheetName, {
-      properties: { tabColor: { argb: tabColors[type] || 'FF888888' } }
+      properties: { tabColor: { argb: tabColors[type] || 'FF888888' } },
     });
 
     // Define type-specific columns
     let columns = [];
-    
+
     switch (type) {
       case 'text':
       case 'html':
@@ -240,7 +235,7 @@ class XlsxGenerator {
           { header: 'ID', key: 'id', width: 15 },
           { header: 'Content', key: 'content', width: 60 },
           { header: 'Length', key: 'length', width: 10 },
-          { header: 'Created', key: 'timestamp', width: 20 }
+          { header: 'Created', key: 'timestamp', width: 20 },
         ];
         break;
 
@@ -251,7 +246,7 @@ class XlsxGenerator {
           { header: 'Dimensions', key: 'dimensions', width: 15 },
           { header: 'File Size', key: 'fileSize', width: 12 },
           { header: 'File Path', key: 'filePath', width: 40 },
-          { header: 'Created', key: 'timestamp', width: 20 }
+          { header: 'Created', key: 'timestamp', width: 20 },
         ];
         break;
 
@@ -262,7 +257,7 @@ class XlsxGenerator {
           { header: 'File Type', key: 'fileType', width: 15 },
           { header: 'File Size', key: 'fileSize', width: 12 },
           { header: 'File Path', key: 'filePath', width: 40 },
-          { header: 'Created', key: 'timestamp', width: 20 }
+          { header: 'Created', key: 'timestamp', width: 20 },
         ];
         break;
 
@@ -272,7 +267,7 @@ class XlsxGenerator {
           { header: 'ID', key: 'id', width: 15 },
           { header: 'Title', key: 'title', width: 35 },
           { header: 'URL', key: 'url', width: 50 },
-          { header: 'Created', key: 'timestamp', width: 20 }
+          { header: 'Created', key: 'timestamp', width: 20 },
         ];
         break;
 
@@ -280,7 +275,7 @@ class XlsxGenerator {
         columns = [
           { header: 'ID', key: 'id', width: 15 },
           { header: 'Content', key: 'content', width: 50 },
-          { header: 'Created', key: 'timestamp', width: 20 }
+          { header: 'Created', key: 'timestamp', width: 20 },
         ];
     }
 
@@ -332,7 +327,7 @@ class XlsxGenerator {
   getTypeSpecificRowData(type, item, index) {
     const base = {
       id: item.id || `item-${index + 1}`,
-      timestamp: item.timestamp ? new Date(item.timestamp).toLocaleString() : ''
+      timestamp: item.timestamp ? new Date(item.timestamp).toLocaleString() : '',
     };
 
     switch (type) {
@@ -341,18 +336,18 @@ class XlsxGenerator {
         return {
           ...base,
           content: this.truncateContent(item.content || item.plainText || '', 500),
-          length: (item.content || item.plainText || '').length
+          length: (item.content || item.plainText || '').length,
         };
 
       case 'image':
         return {
           ...base,
           fileName: item.fileName || item.metadata?.filename || 'Untitled',
-          dimensions: item.metadata?.dimensions 
+          dimensions: item.metadata?.dimensions
             ? `${item.metadata.dimensions.width}x${item.metadata.dimensions.height}`
             : 'N/A',
           fileSize: item.fileSize ? this.formatFileSize(item.fileSize) : 'N/A',
-          filePath: item.filePath || ''
+          filePath: item.filePath || '',
         };
 
       case 'file':
@@ -361,7 +356,7 @@ class XlsxGenerator {
           fileName: item.fileName || 'Untitled',
           fileType: item.fileType || item.fileExt || 'Unknown',
           fileSize: item.fileSize ? this.formatFileSize(item.fileSize) : 'N/A',
-          filePath: item.filePath || ''
+          filePath: item.filePath || '',
         };
 
       case 'url':
@@ -369,13 +364,13 @@ class XlsxGenerator {
         return {
           ...base,
           title: item.metadata?.title || item.content || 'Untitled',
-          url: item.url || item.content || ''
+          url: item.url || item.content || '',
         };
 
       default:
         return {
           ...base,
-          content: this.truncateContent(item.content || '', 300)
+          content: this.truncateContent(item.content || '', 300),
         };
     }
   }
@@ -407,7 +402,7 @@ class XlsxGenerator {
       url: 'URLs',
       link: 'Links',
       code: 'Code',
-      other: 'Other'
+      other: 'Other',
     };
     return names[type] || type.charAt(0).toUpperCase() + type.slice(1);
   }
@@ -430,7 +425,7 @@ class XlsxGenerator {
     if (!bytes) return 'N/A';
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
   }
 
   /**
@@ -442,7 +437,3 @@ class XlsxGenerator {
 }
 
 module.exports = XlsxGenerator;
-
-
-
-

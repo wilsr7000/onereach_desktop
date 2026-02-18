@@ -5,11 +5,12 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 // Mock child_process (FFmpeg-dependent)
 vi.mock('child_process', () => ({
   execFile: vi.fn((cmd, args, opts, cb) => {
-    if (typeof opts === 'function') { cb = opts; opts = {}; }
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
     // Return valid duration for ffprobe calls
-    const stdout = (Array.isArray(args) && args.includes('-show_entries'))
-      ? '30.0'
-      : 'mock output';
+    const stdout = Array.isArray(args) && args.includes('-show_entries') ? '30.0' : 'mock output';
     if (cb) cb(null, stdout, '');
     return { on: vi.fn(), stdout: { on: vi.fn() }, stderr: { on: vi.fn() } };
   }),
@@ -44,7 +45,7 @@ const { VideoToGifAgent } = require('../../../lib/converters/video-to-gif.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(VideoToGifAgent, {
-  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1C, 0x66, 0x74, 0x79, 0x70]),
+  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]),
   expectedFromFormats: ['mp4', 'webm', 'mov'],
   expectedToFormats: ['gif'],
   expectedStrategies: ['clip', 'highlight', 'timelapse'],
@@ -65,7 +66,7 @@ describe('VideoToGifAgent (specific)', () => {
   });
 
   it('has three distinct strategies for different use cases', () => {
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toContain('clip');
     expect(ids).toContain('highlight');
     expect(ids).toContain('timelapse');

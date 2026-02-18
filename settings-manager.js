@@ -9,7 +9,7 @@ const log = getLogQueue();
 function isDev() {
   try {
     return !app.isPackaged;
-  } catch (e) {
+  } catch (_e) {
     return true; // Assume dev mode if can't determine
   }
 }
@@ -54,8 +54,8 @@ class SettingsManager {
         let encryptedData;
         try {
           encryptedData = JSON.parse(fs.readFileSync(this.encryptedSettingsPath, 'utf8'));
-        } catch (parseError) {
-          log.error('settings', 'Settings file corrupted, trying backup...')
+        } catch (_parseError) {
+          log.error('settings', 'Settings file corrupted, trying backup...');
           // Try to restore from backup
           const backupPath = this.encryptedSettingsPath + '.backup';
           if (fs.existsSync(backupPath)) {
@@ -63,18 +63,18 @@ class SettingsManager {
               encryptedData = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
               // Restore the backup
               fs.copyFileSync(backupPath, this.encryptedSettingsPath);
-              log.info('settings', 'Restored settings from backup')
+              log.info('settings', 'Restored settings from backup');
             } catch (backupError) {
-              log.error('settings', 'Backup also corrupted', { error: backupError.message })
+              log.error('settings', 'Backup also corrupted', { error: backupError.message });
               return {};
             }
           } else {
-            log.error('settings', 'No backup available')
+            log.error('settings', 'No backup available');
             return {};
           }
         }
         const settings = {};
-        
+
         // Decrypt sensitive fields
         for (const [key, value] of Object.entries(encryptedData)) {
           if (key.includes('apiKey') || key.includes('secret') || key.includes('Token')) {
@@ -84,42 +84,45 @@ class SettingsManager {
               try {
                 const decrypted = safeStorage.decryptString(Buffer.from(value.data, 'base64'));
                 settings[key] = decrypted;
-                log.info('settings', 'Successfully decrypted ... (... chars)', { key, decryptedCount: decrypted.length })
-              } catch (error) {
-                log.error('settings', 'Error decrypting ...', { key })
+                log.info('settings', 'Successfully decrypted ... (... chars)', {
+                  key,
+                  decryptedCount: decrypted.length,
+                });
+              } catch (_error) {
+                log.error('settings', 'Error decrypting ...', { key });
                 // Fallback: check if there's a plain value in the regular settings file
                 try {
                   if (fs.existsSync(this.settingsPath)) {
                     const plainSettings = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
                     if (plainSettings[key]) {
                       settings[key] = plainSettings[key];
-                      log.info('settings', 'Using fallback plain value for ...', { key })
+                      log.info('settings', 'Using fallback plain value for ...', { key });
                     } else {
                       settings[key] = '';
                     }
                   } else {
                     settings[key] = '';
                   }
-                } catch (e) {
+                } catch (_e) {
                   settings[key] = '';
                 }
               }
             } else if (value && value.encrypted) {
               // Encryption not available but value is encrypted - try plain fallback
-              log.warn('settings', 'Encryption not available for ..., trying fallback', { key })
+              log.warn('settings', 'Encryption not available for ..., trying fallback', { key });
               try {
                 if (fs.existsSync(this.settingsPath)) {
                   const plainSettings = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
                   if (plainSettings[key]) {
                     settings[key] = plainSettings[key];
-                    log.info('settings', 'Using fallback plain value for ...', { key })
+                    log.info('settings', 'Using fallback plain value for ...', { key });
                   } else {
                     settings[key] = '';
                   }
                 } else {
                   settings[key] = '';
                 }
-              } catch (e) {
+              } catch (_e) {
                 settings[key] = '';
               }
             } else {
@@ -129,16 +132,16 @@ class SettingsManager {
             settings[key] = value;
           }
         }
-        
+
         return settings;
       } else if (fs.existsSync(this.settingsPath)) {
         // Fallback to plain settings file
         return JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
       }
     } catch (error) {
-      log.error('settings', 'Error loading settings', { error: error.message || error })
+      log.error('settings', 'Error loading settings', { error: error.message || error });
     }
-    
+
     // Return default settings
     return {
       llmProvider: 'anthropic',
@@ -181,35 +184,39 @@ class SettingsManager {
         enableUndoWindow: true,
         undoWindowMinutes: 5,
         clearPauseOnRestart: true,
-        privateModeByDefault: false
+        privateModeByDefault: false,
       },
       // Unified Claude Service settings (headless-first, API-fallback)
-      claudePreferHeadless: true,      // Try headless Claude first (uses web login, free)
-      claudeHeadlessTimeout: 60000,    // Timeout for headless method (60s default)
-      claudeApiFallback: true          // Fall back to API if headless fails
+      claudePreferHeadless: true, // Try headless Claude first (uses web login, free)
+      claudeHeadlessTimeout: 60000, // Timeout for headless method (60s default)
+      claudeApiFallback: true, // Fall back to API if headless fails
     };
   }
 
   saveSettings() {
     try {
       const dataToSave = {};
-      
+
       // Encrypt sensitive fields (skip in dev mode to avoid Keychain prompts)
       for (const [key, value] of Object.entries(this.settings)) {
-        if ((key.includes('apiKey') || key.includes('secret') || key.includes('Token')) && value && typeof value === 'string') {
+        if (
+          (key.includes('apiKey') || key.includes('secret') || key.includes('Token')) &&
+          value &&
+          typeof value === 'string'
+        ) {
           // Encrypt sensitive data (only in production)
           if (!isDev() && safeStorage.isEncryptionAvailable()) {
             const encrypted = safeStorage.encryptString(value);
             dataToSave[key] = {
               encrypted: true,
-              data: encrypted.toString('base64')
+              data: encrypted.toString('base64'),
             };
           } else {
             // In dev mode or if encryption not available, store as plain text
             if (isDev()) {
-              log.info('settings', 'Dev mode: storing API key without encryption')
+              log.info('settings', 'Dev mode: storing API key without encryption');
             } else {
-              log.warn('settings', 'Encryption not available, storing API key in plain text')
+              log.warn('settings', 'Encryption not available, storing API key in plain text');
             }
             dataToSave[key] = value;
           }
@@ -217,40 +224,40 @@ class SettingsManager {
           dataToSave[key] = value;
         }
       }
-      
+
       // Create backup before saving (in case of corruption)
       const backupPath = this.encryptedSettingsPath + '.backup';
       if (fs.existsSync(this.encryptedSettingsPath)) {
         try {
           fs.copyFileSync(this.encryptedSettingsPath, backupPath);
         } catch (backupError) {
-          log.warn('settings', 'Could not create backup', { error: backupError.message })
+          log.warn('settings', 'Could not create backup', { error: backupError.message });
         }
       }
-      
+
       // Use atomic write: write to temp file, then rename
       const tempPath = this.encryptedSettingsPath + '.tmp';
       const jsonData = JSON.stringify(dataToSave, null, 2);
       fs.writeFileSync(tempPath, jsonData);
-      
+
       // Verify the temp file is valid JSON before renaming
       try {
         JSON.parse(fs.readFileSync(tempPath, 'utf8'));
         fs.renameSync(tempPath, this.encryptedSettingsPath);
       } catch (verifyError) {
-        log.error('settings', 'Verification failed, keeping original file', { error: verifyError.message })
+        log.error('settings', 'Verification failed, keeping original file', { error: verifyError.message });
         fs.unlinkSync(tempPath);
         return false;
       }
-      
+
       // Remove old plain settings file if it exists
       if (fs.existsSync(this.settingsPath)) {
         fs.unlinkSync(this.settingsPath);
       }
-      
+
       return true;
     } catch (error) {
-      log.error('settings', 'Error saving settings', { error: error.message || error })
+      log.error('settings', 'Error saving settings', { error: error.message || error });
       return false;
     }
   }
@@ -260,12 +267,12 @@ class SettingsManager {
     if (key === 'llmApiKey') {
       return this._getComputedLLMApiKey();
     }
-    
+
     // If the setting exists, return it
     if (this.settings[key] !== undefined) {
       return this.settings[key];
     }
-    
+
     // Otherwise, return the default value
     const defaults = {
       llmProvider: 'anthropic',
@@ -302,7 +309,7 @@ class SettingsManager {
         enableUndoWindow: true,
         undoWindowMinutes: 5,
         clearPauseOnRestart: true,
-        privateModeByDefault: false
+        privateModeByDefault: false,
       },
       // Unified Claude Service settings
       claudePreferHeadless: true,
@@ -311,12 +318,12 @@ class SettingsManager {
       // AI Service Model Profiles
       // Each profile maps a capability tier to a provider/model pair.
       // Change these to swap models across the entire app in one place.
-      aiModelProfiles: null,  // null = use defaults from ai-service.js
+      aiModelProfiles: null, // null = use defaults from ai-service.js
       // Diagnostic logging level: 'off', 'error', 'warn', 'info', 'debug'
       // Controls log queue min level, log server, and renderer console capture
-      diagnosticLogging: 'info'
+      diagnosticLogging: 'info',
     };
-    
+
     return defaults[key];
   }
 
@@ -338,14 +345,14 @@ class SettingsManager {
   // Compute the LLM API key based on the selected provider
   _getComputedLLMApiKey() {
     const provider = this.settings.llmProvider || 'anthropic';
-    
+
     // Return the appropriate dedicated key based on provider
     if (provider === 'anthropic') {
       return this.settings.anthropicApiKey || '';
     } else if (provider === 'openai') {
       return this.settings.openaiApiKey || '';
     }
-    
+
     // For other providers, check if we have a matching key or fall back to anthropic
     return this.settings.anthropicApiKey || this.settings.openaiApiKey || '';
   }
@@ -401,44 +408,43 @@ class SettingsManager {
   // Get Claude 4 API headers for thinking mode
   getClaude4Headers() {
     const headers = {};
-    
-    if (this.getLLMModel() === 'claude-opus-4-5-20251101' && 
-        this.getClaude4ThinkingMode() === 'enabled') {
+
+    if (this.getLLMModel() === 'claude-opus-4-5-20251101' && this.getClaude4ThinkingMode() === 'enabled') {
       headers['interleaved-thinking-2025-05-14'] = 'true';
     }
-    
+
     return headers;
   }
-  
+
   // GSX-specific methods
   getGSXToken() {
     return this.get('gsxToken') || '';
   }
-  
+
   setGSXToken(token) {
     return this.set('gsxToken', token);
   }
-  
+
   getGSXEnvironment() {
     return this.get('gsxEnvironment') || 'production';
   }
-  
+
   setGSXEnvironment(env) {
     return this.set('gsxEnvironment', env);
   }
-  
+
   getGSXAutoSync() {
     return this.get('gsxAutoSync') || false;
   }
-  
+
   setGSXAutoSync(enabled) {
     return this.set('gsxAutoSync', enabled);
   }
-  
+
   getGSXSyncInterval() {
     return this.get('gsxSyncInterval') || 'daily';
   }
-  
+
   setGSXSyncInterval(interval) {
     return this.set('gsxSyncInterval', interval);
   }
@@ -447,27 +453,27 @@ class SettingsManager {
   isBudgetEnabled() {
     return this.get('budgetEnabled') !== false;
   }
-  
+
   setBudgetEnabled(enabled) {
     return this.set('budgetEnabled', enabled);
   }
-  
+
   shouldShowBudgetEstimates() {
     return this.get('budgetShowEstimates') !== false;
   }
-  
+
   setShowBudgetEstimates(show) {
     return this.set('budgetShowEstimates', show);
   }
-  
+
   getBudgetConfirmThreshold() {
     return this.get('budgetConfirmThreshold') || 0.05;
   }
-  
+
   setBudgetConfirmThreshold(threshold) {
     return this.set('budgetConfirmThreshold', threshold);
   }
-  
+
   // AI Service Model Profiles
   getAIModelProfiles() {
     return this.get('aiModelProfiles') || null;
@@ -492,24 +498,24 @@ class SettingsManager {
   getSpacesUploadEnabled() {
     return this.get('spacesUploadIntegration') !== false; // Default true
   }
-  
+
   setSpacesUploadEnabled(enabled) {
     return this.set('spacesUploadIntegration', enabled);
   }
-  
+
   // Intro wizard / version tracking methods
   getLastSeenVersion() {
     return this.get('lastSeenVersion') || null;
   }
-  
+
   setLastSeenVersion(version) {
     return this.set('lastSeenVersion', version);
   }
-  
+
   isFirstRun() {
     return !this.getLastSeenVersion();
   }
-  
+
   /**
    * Check if intro wizard should be shown
    * @param {string} currentVersion - Current app version from package.json
@@ -517,16 +523,16 @@ class SettingsManager {
    */
   shouldShowIntroWizard(currentVersion) {
     const lastSeen = this.getLastSeenVersion();
-    
+
     // First run - show intro
     if (!lastSeen) {
       return true;
     }
-    
+
     // Compare versions - show updates if current version is newer
     return this.compareVersions(currentVersion, lastSeen) > 0;
   }
-  
+
   /**
    * Compare semantic versions
    * @returns 1 if a > b, -1 if a < b, 0 if equal
@@ -556,5 +562,5 @@ function getSettingsManager() {
 
 module.exports = {
   getSettingsManager,
-  SettingsManager
-}; 
+  SettingsManager,
+};

@@ -40,13 +40,13 @@ export class APIService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(this.config.apiKey && { 'Authorization': `Bearer ${this.config.apiKey}` }),
-          ...this.config.apiHeaders
+          ...(this.config.apiKey && { Authorization: `Bearer ${this.config.apiKey}` }),
+          ...this.config.apiHeaders,
         },
         body: JSON.stringify({
           ...payload,
-          context: this.config.context
-        })
+          context: this.config.context,
+        }),
       });
 
       if (!response.ok) {
@@ -61,7 +61,6 @@ export class APIService {
       this.isFetching = false;
 
       return data;
-
     } catch (error) {
       log.error('agent', '[APIService] Error', { error: error });
 
@@ -69,9 +68,9 @@ export class APIService {
       if (this.retryCount < this.maxRetries) {
         this.retryCount++;
         const delay = this.retryDelay * Math.pow(2, this.retryCount - 1);
-        
+
         log.info('agent', '[APIService] Retrying in ms (/)', { v0: delay, v1: this.retryCount, v2: this.maxRetries });
-        
+
         await this.sleep(delay);
         this.isFetching = false;
         return this.fetchClips(payload);
@@ -90,7 +89,9 @@ export class APIService {
    * @returns {Promise} Resolves after delay
    */
   sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   /**
@@ -107,19 +108,3 @@ export class APIService {
     return this.isFetching;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -46,7 +46,7 @@ describe('AudioToSummaryAgent (specific)', () => {
   });
 
   it('has three summary strategies', () => {
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toContain('transcript-summary');
     expect(ids).toContain('chapter-summary');
     expect(ids).toContain('key-points');

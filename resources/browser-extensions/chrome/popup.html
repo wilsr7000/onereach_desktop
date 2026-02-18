@@ -1,315 +1,307 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <meta charset="UTF-8">
-  <title>OneReach.ai Tab Share</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+  <head>
+    <meta charset="UTF-8" />
+    <title>OneReach.ai Tab Share</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-    body {
-      width: 320px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      background: #0d0d14;
-      color: #e8e8ec;
-      font-size: 14px;
-    }
+      body {
+        width: 320px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        background: #0d0d14;
+        color: #e8e8ec;
+        font-size: 14px;
+      }
 
-    .header {
-      padding: 16px;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+      .header {
+        padding: 16px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
 
-    .logo {
-      width: 32px;
-      height: 32px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      font-size: 16px;
-    }
+      .logo {
+        width: 32px;
+        height: 32px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 16px;
+      }
 
-    .title {
-      font-size: 16px;
-      font-weight: 600;
-    }
+      .title {
+        font-size: 16px;
+        font-weight: 600;
+      }
 
-    .subtitle {
-      font-size: 11px;
-      color: #8888a0;
-      margin-top: 2px;
-    }
+      .subtitle {
+        font-size: 11px;
+        color: #8888a0;
+        margin-top: 2px;
+      }
 
-    .status-bar {
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(255, 255, 255, 0.03);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
+      .status-bar {
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.03);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
 
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #ef4444;
-    }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #ef4444;
+      }
 
-    .status-dot.connected {
-      background: #22c55e;
-      box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
-    }
+      .status-dot.connected {
+        background: #22c55e;
+        box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+      }
 
-    .status-text {
-      font-size: 12px;
-      color: #8888a0;
-    }
+      .status-text {
+        font-size: 12px;
+        color: #8888a0;
+      }
 
-    .content {
-      padding: 16px;
-    }
+      .content {
+        padding: 16px;
+      }
 
-    .section {
-      margin-bottom: 16px;
-    }
+      .section {
+        margin-bottom: 16px;
+      }
 
-    .section-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: #6b6b80;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
+      .section-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: #6b6b80;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+      }
 
-    .action-btn {
-      width: 100%;
-      padding: 12px 16px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      border: none;
-      border-radius: 8px;
-      color: white;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
+      .action-btn {
+        width: 100%;
+        padding: 12px 16px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        border-radius: 8px;
+        color: white;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition:
+          transform 0.15s,
+          box-shadow 0.15s;
+      }
 
-    .action-btn:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-    }
+      .action-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+      }
 
-    .action-btn:active {
-      transform: translateY(0);
-    }
+      .action-btn:active {
+        transform: translateY(0);
+      }
 
-    .action-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none;
-    }
+      .action-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
 
-    .secondary-btn {
-      background: rgba(255, 255, 255, 0.1);
-      margin-top: 8px;
-    }
+      .secondary-btn {
+        background: rgba(255, 255, 255, 0.1);
+        margin-top: 8px;
+      }
 
-    .secondary-btn:hover {
-      background: rgba(255, 255, 255, 0.15);
-      box-shadow: none;
-    }
+      .secondary-btn:hover {
+        background: rgba(255, 255, 255, 0.15);
+        box-shadow: none;
+      }
 
-    .token-section {
-      background: rgba(255, 255, 255, 0.03);
-      border-radius: 8px;
-      padding: 12px;
-    }
+      .token-section {
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 8px;
+        padding: 12px;
+      }
 
-    .token-input {
-      width: 100%;
-      padding: 10px 12px;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 6px;
-      color: #e8e8ec;
-      font-size: 12px;
-      font-family: monospace;
-      margin-bottom: 8px;
-    }
+      .token-input {
+        width: 100%;
+        padding: 10px 12px;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 6px;
+        color: #e8e8ec;
+        font-size: 12px;
+        font-family: monospace;
+        margin-bottom: 8px;
+      }
 
-    .token-input:focus {
-      outline: none;
-      border-color: #667eea;
-    }
+      .token-input:focus {
+        outline: none;
+        border-color: #667eea;
+      }
 
-    .token-input::placeholder {
-      color: #6b6b80;
-    }
+      .token-input::placeholder {
+        color: #6b6b80;
+      }
 
-    .small-btn {
-      padding: 8px 12px;
-      font-size: 12px;
-    }
+      .small-btn {
+        padding: 8px 12px;
+        font-size: 12px;
+      }
 
-    .help-text {
-      font-size: 11px;
-      color: #6b6b80;
-      margin-top: 8px;
-      line-height: 1.4;
-    }
+      .help-text {
+        font-size: 11px;
+        color: #6b6b80;
+        margin-top: 8px;
+        line-height: 1.4;
+      }
 
-    .shortcut {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 4px 8px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
-      font-size: 11px;
-      font-family: monospace;
-      margin-top: 12px;
-    }
+      .shortcut {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        font-size: 11px;
+        font-family: monospace;
+        margin-top: 12px;
+      }
 
-    .shortcut kbd {
-      padding: 2px 6px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 3px;
-      font-size: 10px;
-    }
+      .shortcut kbd {
+        padding: 2px 6px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+        font-size: 10px;
+      }
 
-    .footer {
-      padding: 12px 16px;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      text-align: center;
-    }
+      .footer {
+        padding: 12px 16px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        text-align: center;
+      }
 
-    .footer a {
-      color: #667eea;
-      text-decoration: none;
-      font-size: 12px;
-    }
+      .footer a {
+        color: #667eea;
+        text-decoration: none;
+        font-size: 12px;
+      }
 
-    .footer a:hover {
-      text-decoration: underline;
-    }
+      .footer a:hover {
+        text-decoration: underline;
+      }
 
-    .hidden {
-      display: none !important;
-    }
+      .hidden {
+        display: none !important;
+      }
 
-    .toast {
-      position: fixed;
-      bottom: 16px;
-      left: 16px;
-      right: 16px;
-      padding: 12px 16px;
-      background: #22c55e;
-      color: white;
-      border-radius: 8px;
-      font-size: 13px;
-      text-align: center;
-      transform: translateY(100px);
-      opacity: 0;
-      transition: transform 0.3s, opacity 0.3s;
-    }
+      .toast {
+        position: fixed;
+        bottom: 16px;
+        left: 16px;
+        right: 16px;
+        padding: 12px 16px;
+        background: #22c55e;
+        color: white;
+        border-radius: 8px;
+        font-size: 13px;
+        text-align: center;
+        transform: translateY(100px);
+        opacity: 0;
+        transition:
+          transform 0.3s,
+          opacity 0.3s;
+      }
 
-    .toast.show {
-      transform: translateY(0);
-      opacity: 1;
-    }
+      .toast.show {
+        transform: translateY(0);
+        opacity: 1;
+      }
 
-    .toast.error {
-      background: #ef4444;
-    }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <div class="logo">O</div>
-    <div>
-      <div class="title">OneReach.ai</div>
-      <div class="subtitle">Tab Share Extension</div>
+      .toast.error {
+        background: #ef4444;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="logo">O</div>
+      <div>
+        <div class="title">OneReach.ai</div>
+        <div class="subtitle">Tab Share Extension</div>
+      </div>
     </div>
-  </div>
 
-  <div class="status-bar">
-    <div class="status-dot" id="statusDot"></div>
-    <div class="status-text" id="statusText">Checking connection...</div>
-  </div>
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <div class="status-text" id="statusText">Checking connection...</div>
+    </div>
 
-  <div class="content">
-    <!-- Connected State -->
-    <div id="connectedView" class="hidden">
-      <div class="section">
-        <button class="action-btn" id="shareTabBtn">
-          <span>📸</span> Share Current Tab
-        </button>
-        
-        <div class="shortcut">
-          Keyboard: <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>
+    <div class="content">
+      <!-- Connected State -->
+      <div id="connectedView" class="hidden">
+        <div class="section">
+          <button class="action-btn" id="shareTabBtn"><span>📸</span> Share Current Tab</button>
+
+          <div class="shortcut">Keyboard: <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd></div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Quick Actions</div>
+          <p class="help-text">Right-click on any page to access these options:</p>
+          <ul class="help-text" style="margin-left: 16px; margin-top: 8px">
+            <li>Send selected text to Space</li>
+            <li>Send image to Space</li>
+            <li>Share entire page</li>
+          </ul>
         </div>
       </div>
 
-      <div class="section">
-        <div class="section-title">Quick Actions</div>
-        <p class="help-text">
-          Right-click on any page to access these options:
-        </p>
-        <ul class="help-text" style="margin-left: 16px; margin-top: 8px;">
-          <li>Send selected text to Space</li>
-          <li>Send image to Space</li>
-          <li>Share entire page</li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Disconnected State -->
-    <div id="disconnectedView">
-      <div class="section">
-        <div class="section-title">Setup Required</div>
-        <div class="token-section">
-          <input type="text" class="token-input" id="tokenInput" placeholder="Paste your auth token here">
-          <button class="action-btn small-btn" id="saveTokenBtn">Save Token</button>
+      <!-- Disconnected State -->
+      <div id="disconnectedView">
+        <div class="section">
+          <div class="section-title">Setup Required</div>
+          <div class="token-section">
+            <input type="text" class="token-input" id="tokenInput" placeholder="Paste your auth token here" />
+            <button class="action-btn small-btn" id="saveTokenBtn">Save Token</button>
+          </div>
+          <p class="help-text">
+            1. Open the OneReach.ai desktop app<br />
+            2. Go to Help → Browser Extension Setup<br />
+            3. Copy the token and paste it above
+          </p>
         </div>
-        <p class="help-text">
-          1. Open the OneReach.ai desktop app<br>
-          2. Go to Help → Browser Extension Setup<br>
-          3. Copy the token and paste it above
-        </p>
+
+        <button class="action-btn secondary-btn" id="retryBtn"><span>🔄</span> Retry Connection</button>
       </div>
-
-      <button class="action-btn secondary-btn" id="retryBtn">
-        <span>🔄</span> Retry Connection
-      </button>
     </div>
-  </div>
 
-  <div class="footer">
-    <a href="https://onereach.ai" target="_blank">onereach.ai</a>
-  </div>
+    <div class="footer">
+      <a href="https://onereach.ai" target="_blank">onereach.ai</a>
+    </div>
 
-  <div class="toast" id="toast"></div>
+    <div class="toast" id="toast"></div>
 
-  <script src="popup.js"></script>
-</body>
+    <script src="popup.js"></script>
+  </body>
 </html>
-
-
-
-

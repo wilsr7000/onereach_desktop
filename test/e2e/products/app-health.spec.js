@@ -10,11 +10,17 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep,
-  LOG_SERVER, SPACES_API
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  _sleep,
+  LOG_SERVER,
+  SPACES_API,
 } = require('../helpers/electron-app');
 
-let app, electronApp, mainWindow, errorSnapshot;
+let app, _electronApp, mainWindow, errorSnapshot;
 
 test.describe('App Health Dashboard', () => {
   test.beforeAll(async () => {
@@ -23,7 +29,9 @@ test.describe('App Health Dashboard', () => {
     mainWindow = app.mainWindow;
     errorSnapshot = await snapshotErrors();
   });
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ── Window ───────────────────────────────────────────────────────────────
   test('HTML file exists', async () => {
@@ -35,14 +43,18 @@ test.describe('App Health Dashboard', () => {
       try {
         await window.api?.invoke?.('open-health-dashboard');
         return { sent: true };
-      } catch (e) { return { sent: true, e: e.message }; }
+      } catch (e) {
+        return { sent: true, e: e.message };
+      }
     });
     expect(r.sent).toBe(true);
   });
 
   // ── Health Overview ──────────────────────────────────────────────────────
   test('overall health score displays and is numeric', async () => {
-    const health = await fetch(`${LOG_SERVER}/health`).then(r => r.json()).catch(() => null);
+    const health = await fetch(`${LOG_SERVER}/health`)
+      .then((r) => r.json())
+      .catch(() => null);
     expect(health).toBeTruthy();
     if (health) {
       expect(health.appVersion).toBeDefined();
@@ -50,19 +62,25 @@ test.describe('App Health Dashboard', () => {
   });
 
   test('app status card shows uptime and memory', async () => {
-    const health = await fetch(`${LOG_SERVER}/health`).then(r => r.json()).catch(() => null);
+    const health = await fetch(`${LOG_SERVER}/health`)
+      .then((r) => r.json())
+      .catch(() => null);
     expect(health?.uptime).toBeDefined();
   });
 
   test("today's summary shows item/AI/error counts", async () => {
-    const stats = await fetch(`${LOG_SERVER}/logs/stats`).then(r => r.json()).catch(() => null);
+    const stats = await fetch(`${LOG_SERVER}/logs/stats`)
+      .then((r) => r.json())
+      .catch(() => null);
     expect(stats).toBeTruthy();
     expect(stats?.byLevel).toBeDefined();
   });
 
   // ── Spaces Health ────────────────────────────────────────────────────────
   test('spaces health shows utilization', async () => {
-    const spaces = await fetch(`${SPACES_API}/api/spaces`).then(r => r.json()).catch(() => null);
+    const spaces = await fetch(`${SPACES_API}/api/spaces`)
+      .then((r) => r.json())
+      .catch(() => null);
     expect(spaces).toBeTruthy();
   });
 
@@ -73,7 +91,9 @@ test.describe('App Health Dashboard', () => {
     expect(Array.isArray(spaces)).toBe(true);
   });
 
-  test('items, size, last used columns are accurate', async () => { expect(true).toBe(true); });
+  test('items, size, last used columns are accurate', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── LLM Costs ────────────────────────────────────────────────────────────
   test('LLM costs show per-provider breakdown', async () => {
@@ -81,33 +101,61 @@ test.describe('App Health Dashboard', () => {
       try {
         const cost = await window.api?.invoke?.('budget:getCostSummary', 'daily');
         return { ok: true, cost };
-      } catch (e) { return { ok: false, e: e.message }; }
+      } catch (e) {
+        return { ok: false, e: e.message };
+      }
     });
     expect(r).toBeDefined();
   });
 
-  test('provider cards show calls, tokens, cost', async () => { expect(true).toBe(true); });
-  test('average cost per call is calculated correctly', async () => { expect(true).toBe(true); });
-  test('feature breakdown lists AI features by usage', async () => { expect(true).toBe(true); });
-  test('recent operations show timestamps and costs', async () => { expect(true).toBe(true); });
+  test('provider cards show calls, tokens, cost', async () => {
+    expect(true).toBe(true);
+  });
+  test('average cost per call is calculated correctly', async () => {
+    expect(true).toBe(true);
+  });
+  test('feature breakdown lists AI features by usage', async () => {
+    expect(true).toBe(true);
+  });
+  test('recent operations show timestamps and costs', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Activity Feed ────────────────────────────────────────────────────────
   test('activity feed displays recent events', async () => {
-    const r = await fetch(`${LOG_SERVER}/logs?limit=10`).then(r => r.json()).catch(() => null);
+    const r = await fetch(`${LOG_SERVER}/logs?limit=10`)
+      .then((r) => r.json())
+      .catch(() => null);
     expect(r?.data || r).toBeDefined();
   });
 
   // ── Pipeline ─────────────────────────────────────────────────────────────
-  test('stage success rates display percentages', async () => { expect(true).toBe(true); });
-  test('recent pipeline runs show status per run', async () => { expect(true).toBe(true); });
+  test('stage success rates display percentages', async () => {
+    expect(true).toBe(true);
+  });
+  test('recent pipeline runs show status per run', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Verification / Agents ────────────────────────────────────────────────
-  test('verification summary shows integrity status', async () => { expect(true).toBe(true); });
-  test('agent status shows Active or Paused', async () => { expect(true).toBe(true); });
-  test('agent status banner shows last scan time', async () => { expect(true).toBe(true); });
-  test("today's activity stats are accurate", async () => { expect(true).toBe(true); });
-  test('recent diagnoses list shows entries', async () => { expect(true).toBe(true); });
-  test('issue registry loads open/fixed/ignored items', async () => { expect(true).toBe(true); });
+  test('verification summary shows integrity status', async () => {
+    expect(true).toBe(true);
+  });
+  test('agent status shows Active or Paused', async () => {
+    expect(true).toBe(true);
+  });
+  test('agent status banner shows last scan time', async () => {
+    expect(true).toBe(true);
+  });
+  test("today's activity stats are accurate", async () => {
+    expect(true).toBe(true);
+  });
+  test('recent diagnoses list shows entries', async () => {
+    expect(true).toBe(true);
+  });
+  test('issue registry loads open/fixed/ignored items', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Exports ──────────────────────────────────────────────────────────────
   test('CSV export produces valid data', async () => {

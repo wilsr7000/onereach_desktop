@@ -40,9 +40,11 @@ async function waitForLog(pattern, opts = {}) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     const logs = await getLogs({ category: 'voice', since, limit: 200 });
-    const match = logs.find(l => pattern.test(l.message || ''));
+    const match = logs.find((l) => pattern.test(l.message || ''));
     if (match) return match;
-    await new Promise(r => setTimeout(r, interval));
+    await new Promise((r) => {
+      setTimeout(r, interval);
+    });
   }
   return null;
 }
@@ -56,7 +58,9 @@ async function findOrbWindow(electronApp) {
   }
   // Wait a bit for orb to load
   for (let i = 0; i < 10; i++) {
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise((r) => {
+      setTimeout(r, 1000);
+    });
     const ws = electronApp.windows();
     for (const w of ws) {
       if (w.url().includes('orb.html')) return w;
@@ -68,7 +72,6 @@ async function findOrbWindow(electronApp) {
 let app;
 
 test.describe('Daily Brief Pipeline', () => {
-
   test.beforeAll(async () => {
     app = await launchApp({ timeout: 45000 });
 
@@ -126,14 +129,16 @@ test.describe('Daily Brief Pipeline', () => {
 
     // Verify no new real errors
     const newErrors = await checkNewErrors(snapshot);
-    const realErrors = newErrors.filter(e => {
+    const realErrors = newErrors.filter((e) => {
       const msg = e.message || '';
-      return !msg.includes('Agent reconnect') &&
-             !msg.includes('WebSocket error') &&
-             !msg.includes('Chrome-like behavior') &&
-             !msg.includes('Material Symbols') &&
-             !msg.includes('Database IO') &&
-             !msg.includes('console-message arguments');
+      return (
+        !msg.includes('Agent reconnect') &&
+        !msg.includes('WebSocket error') &&
+        !msg.includes('Chrome-like behavior') &&
+        !msg.includes('Material Symbols') &&
+        !msg.includes('Database IO') &&
+        !msg.includes('console-message arguments')
+      );
     });
     if (realErrors.length > 0) {
       console.log('Unexpected errors:');
@@ -155,7 +160,9 @@ test.describe('Daily Brief Pipeline', () => {
 
       function checkDay(message) {
         const lower = message.toLowerCase();
-        const match = lower.match(/(?:today is|it(?:'|')s|this)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/i);
+        const match = lower.match(
+          /(?:today is|it(?:'|')s|this)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/i
+        );
         if (match && match[1].toLowerCase() !== todayName) {
           return `Wrong day: "${match[1]}" but today is ${todayName}`;
         }
@@ -169,8 +176,23 @@ test.describe('Daily Brief Pipeline', () => {
         correctDayPasses: checkDay(`Today is ${todayName}, have a great day.`),
         wrongDateCaught: (() => {
           const lower = `today is february ${now.getDate() - 1}`.toLowerCase();
-          const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-          const match = lower.match(/today(?:\s+is|,)\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})/i);
+          const MONTHS = [
+            'january',
+            'february',
+            'march',
+            'april',
+            'may',
+            'june',
+            'july',
+            'august',
+            'september',
+            'october',
+            'november',
+            'december',
+          ];
+          const match = lower.match(
+            /today(?:\s+is|,)\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})/i
+          );
           if (match) {
             const cm = MONTHS.indexOf(match[1].toLowerCase());
             const cd = parseInt(match[2], 10);
@@ -197,11 +219,14 @@ test.describe('Daily Brief Pipeline', () => {
     //
     // We look at ALL voice logs since app start for any NormalizeIntent logs.
     const normLogs = await getLogs({ category: 'voice', search: 'NormalizeIntent', limit: 50 });
-    console.log('All NormalizeIntent logs:', normLogs.map(l => l.message));
+    console.log(
+      'All NormalizeIntent logs:',
+      normLogs.map((l) => l.message)
+    );
 
     // For "give me my daily brief", the normalizer should fast-skip.
     // If an "Interpreted" log exists, the intent must still contain "daily brief".
-    const interpreted = normLogs.filter(l => (l.message || '').includes('Interpreted'));
+    const interpreted = normLogs.filter((l) => (l.message || '').includes('Interpreted'));
     console.log('Interpreted logs (expected 0 for clear commands):', interpreted.length);
 
     for (const l of interpreted) {
@@ -238,14 +263,16 @@ test.describe('Daily Brief Pipeline', () => {
 
     // Check for any errors
     const newErrors = await checkNewErrors(snapshot);
-    const realErrors = newErrors.filter(e => {
+    const realErrors = newErrors.filter((e) => {
       const msg = e.message || '';
-      return !msg.includes('Agent reconnect') &&
-             !msg.includes('WebSocket error') &&
-             !msg.includes('Chrome-like behavior') &&
-             !msg.includes('Material Symbols') &&
-             !msg.includes('Database IO') &&
-             !msg.includes('console-message arguments');
+      return (
+        !msg.includes('Agent reconnect') &&
+        !msg.includes('WebSocket error') &&
+        !msg.includes('Chrome-like behavior') &&
+        !msg.includes('Material Symbols') &&
+        !msg.includes('Database IO') &&
+        !msg.includes('console-message arguments')
+      );
     });
     expect(realErrors.length).toBe(0);
   });

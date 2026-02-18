@@ -1,6 +1,6 @@
 /**
  * Voice Task SDK - Electron Integration Module
- * 
+ *
  * Full task queuing system with:
  * - Named queues with concurrency control
  * - Priority-based task ordering
@@ -27,31 +27,27 @@ async function initializeContextProviders() {
   try {
     // Dynamic import to avoid circular dependencies
     const contextModule = await import('./context/index.js');
-    const { 
-      createContextRegistry,
-      createTemporalProvider,
-      createActiveAppProvider,
-      createCustomFactsProvider 
-    } = contextModule;
-    
+    const { createContextRegistry, createTemporalProvider, createActiveAppProvider, createCustomFactsProvider } =
+      contextModule;
+
     // Create registry
     contextRegistry = createContextRegistry({
       autoEnableBuiltins: true,
     });
-    
+
     // Register built-in providers
     temporalProvider = createTemporalProvider();
     contextRegistry.register(temporalProvider);
     contextRegistry.enable('temporal');
-    
+
     activeAppProvider = createActiveAppProvider();
     contextRegistry.register(activeAppProvider);
     contextRegistry.enable('active-app');
-    
+
     customFactsProvider = createCustomFactsProvider();
     contextRegistry.register(customFactsProvider);
     contextRegistry.enable('custom-facts');
-    
+
     log.info('voice', '[VoiceTaskSDK] Context providers initialized');
   } catch (e) {
     log.warn('voice', '[VoiceTaskSDK] Could not initialize context providers', { data: e.message });
@@ -66,7 +62,7 @@ async function getAggregatedContext() {
   if (!contextRegistry) {
     return {};
   }
-  
+
   try {
     const aggregated = await contextRegistry.aggregate();
     return aggregated.providers;
@@ -94,12 +90,12 @@ function addUserMessage(content) {
     content,
     timestamp: Date.now(),
   });
-  
+
   // Trim to max length
   if (conversationHistory.length > MAX_HISTORY_LENGTH) {
     conversationHistory = conversationHistory.slice(-MAX_HISTORY_LENGTH);
   }
-  
+
   // Save to settings for persistence
   saveHistoryToSettings();
 }
@@ -114,12 +110,12 @@ function addAssistantMessage(content) {
     content,
     timestamp: Date.now(),
   });
-  
+
   // Trim to max length
   if (conversationHistory.length > MAX_HISTORY_LENGTH) {
     conversationHistory = conversationHistory.slice(-MAX_HISTORY_LENGTH);
   }
-  
+
   saveHistoryToSettings();
 }
 
@@ -191,10 +187,10 @@ function classifyTranscript(transcript) {
   let action = null;
   let params = {};
   let confidence = 0.6;
-  
+
   // Check conversation history for context
   const recentHistory = conversationHistory.slice(-5);
-  const historyContext = recentHistory.map(h => h.content.toLowerCase()).join(' ');
+  const _historyContext = recentHistory.map((h) => h.content.toLowerCase()).join(' ');
 
   // Keyword-based classification
   if (text.includes('search') || text.includes('find') || text.includes('look for')) {
@@ -205,7 +201,7 @@ function classifyTranscript(transcript) {
   } else if (text.includes('open') || text.includes('launch') || text.includes('start')) {
     const match = text.match(/(?:open|launch|start)\s+(?:the\s+)?(.+)/i);
     const target = match ? match[1].trim().toLowerCase() : '';
-    
+
     // Check for specific window targets
     if (target.includes('agent composer') || target.includes('composer') || target.includes('gsx create')) {
       action = 'open-agent-composer';
@@ -224,7 +220,9 @@ function classifyTranscript(transcript) {
     // Check specifically for "create agent" voice command
     if (text.includes('agent') || text.includes('assistant') || text.includes('bot')) {
       action = 'create-agent';
-      const match = text.match(/(?:create|make|new)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:agent|assistant|bot)\s*(?:that\s+|to\s+|for\s+)?(.+)?/i);
+      const match = text.match(
+        /(?:create|make|new)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:agent|assistant|bot)\s*(?:that\s+|to\s+|for\s+)?(.+)?/i
+      );
       if (match && match[1]) {
         params.description = match[1].trim();
       }
@@ -288,19 +286,21 @@ function createDefaultAgent() {
     name: 'voice-command-agent',
     queues: ['voice-commands'],
     priority: 0,
-    resolve: async (task, ctx) => {
+    resolve: async (task, _ctx) => {
       log.info('voice', '[VoiceAgent] Executing task:', { v0: task.action, arg0: task.params });
-      
+
       // Simulate execution time
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
+      await new Promise((resolve) => {
+        setTimeout(resolve, 500);
+      });
+
       // Broadcast task progress
       broadcastToWindows('voice-task:progress', {
         taskId: task.id,
         action: task.action,
         status: 'executing',
       });
-      
+
       // Execute based on action type
       switch (task.action) {
         case 'search':
@@ -339,7 +339,7 @@ function createDefaultAgent() {
  * Broadcast message to all windows
  */
 function broadcastToWindows(channel, data) {
-  BrowserWindow.getAllWindows().forEach(win => {
+  BrowserWindow.getAllWindows().forEach((win) => {
     if (!win.isDestroyed()) {
       win.webContents.send(channel, data);
     }
@@ -355,14 +355,14 @@ function initializeVoiceTaskSDK(config = {}) {
   log.info('voice', '[VoiceTaskSDK] Initializing with config', {
     arg0: mergedConfig.defaultQueue,
     arg1: mergedConfig.defaultConcurrency,
-    arg2: mergedConfig.maxQueueSize
+    arg2: mergedConfig.maxQueueSize,
   });
-  
+
   // Load conversation history from settings
   loadHistoryFromSettings();
-  
+
   // Initialize context providers (non-blocking)
-  initializeContextProviders().catch(e => {
+  initializeContextProviders().catch((e) => {
     log.warn('voice', '[VoiceTaskSDK] Context provider init failed', { data: e });
   });
 
@@ -378,7 +378,7 @@ function initializeVoiceTaskSDK(config = {}) {
   sdk.on('queued', (task) => {
     log.info('voice', '[VoiceTaskSDK] Task queued', { arg0: task.id, arg1: task.action });
     broadcastToWindows('voice-task:queued', task);
-    
+
     // Show HUD if available
     if (global.showCommandHUD) {
       global.showCommandHUD({
@@ -391,7 +391,7 @@ function initializeVoiceTaskSDK(config = {}) {
   sdk.on('started', (task) => {
     log.info('voice', '[VoiceTaskSDK] Task started', { data: task.id });
     broadcastToWindows('voice-task:started', task);
-    
+
     // Update HUD
     if (global.showCommandHUD) {
       global.showCommandHUD({
@@ -405,7 +405,7 @@ function initializeVoiceTaskSDK(config = {}) {
   sdk.on('completed', ({ task, result }) => {
     log.info('voice', '[VoiceTaskSDK] Task completed', { data: task.id });
     broadcastToWindows('voice-task:completed', { task, result });
-    
+
     // Update HUD with result
     if (global.sendCommandHUDResult) {
       global.sendCommandHUDResult({
@@ -418,7 +418,7 @@ function initializeVoiceTaskSDK(config = {}) {
   sdk.on('failed', ({ task, error }) => {
     log.info('voice', '[VoiceTaskSDK] Task failed', { arg0: task.id, arg1: error });
     broadcastToWindows('voice-task:failed', { task, error: String(error) });
-    
+
     // Update HUD with error
     if (global.sendCommandHUDResult) {
       global.sendCommandHUDResult({
@@ -470,19 +470,18 @@ function setupSDKIPC() {
 
   // Submit transcript for classification and queuing
   ipcMain.handle('voice-task-sdk:submit', async (_event, transcript, options = {}) => {
-    
     if (!sdk) {
       throw new Error('SDK not initialized');
     }
 
     log.info('voice', '[VoiceTaskSDK] Submit transcript', { data: transcript });
-    
+
     // Add to conversation history
     addUserMessage(transcript);
-    
+
     // Get context from providers
     const providerContext = await getAggregatedContext();
-    
+
     // Update context with providers
     if (sdk && Object.keys(providerContext).length > 0) {
       sdk.updateContext({
@@ -498,7 +497,7 @@ function setupSDKIPC() {
     if (!classification.classified) {
       // Add assistant response to history
       addAssistantMessage('I did not understand that command.');
-      
+
       return {
         ...classification,
         queued: false,
@@ -509,10 +508,10 @@ function setupSDKIPC() {
     // Handle special actions that open windows directly
     if (classification.action === 'create-agent' || classification.action === 'open-agent-composer') {
       log.info('voice', '[VoiceTaskSDK] Opening Agent Composer');
-      
+
       // Extract description from params if this is a create-agent request
       const description = classification.params?.description || '';
-      
+
       // Open the Claude Code window (GSX Agent Composer) with the description
       try {
         const main = require('../../main');
@@ -522,16 +521,16 @@ function setupSDKIPC() {
       } catch (e) {
         log.error('voice', '[VoiceTaskSDK] Could not open Agent Composer window', { error: e });
       }
-      
+
       // Set global flag that we're in agent creation mode (for voice relay)
       global.agentCreationMode = true;
-      
+
       if (description) {
         addAssistantMessage(`Opening the Agent Composer to create an agent for: "${description}"`);
       } else {
         addAssistantMessage('Opening the Agent Composer.');
       }
-      
+
       return {
         ...classification,
         queued: false,
@@ -539,10 +538,10 @@ function setupSDKIPC() {
         message: description ? `Opening Agent Composer with: ${description}` : 'Opening Agent Composer window',
       };
     }
-    
+
     if (classification.action === 'open-agent-manager') {
       log.info('voice', '[VoiceTaskSDK] Opening Agent Manager');
-      
+
       // Open the Agent Manager window
       try {
         const main = require('../../main');
@@ -552,9 +551,9 @@ function setupSDKIPC() {
       } catch (e) {
         log.error('voice', '[VoiceTaskSDK] Could not open Agent Manager window', { error: e });
       }
-      
+
       addAssistantMessage('Opening the Agent Manager.');
-      
+
       return {
         ...classification,
         queued: false,
@@ -573,7 +572,7 @@ function setupSDKIPC() {
 
     // Submit to queue
     const task = await sdk.submit(classifiedTask);
-    
+
     // Add assistant response to history
     addAssistantMessage(`Executing ${classification.action} action.`);
 
@@ -584,30 +583,30 @@ function setupSDKIPC() {
       task,
     };
   });
-  
+
   // Submit a specific action directly (used after disambiguation)
   ipcMain.handle('voice-task-sdk:submit-action', async (_event, actionData) => {
     if (!sdk) {
       throw new Error('SDK not initialized');
     }
-    
+
     const { action, params, originalTranscript, clarification } = actionData;
-    
+
     log.info('voice', '[VoiceTaskSDK] Submit action directly', { data: action });
-    
+
     // Add clarification to history if provided
     if (clarification) {
       addUserMessage(clarification);
       addAssistantMessage(`Got it, executing ${action}.`);
     }
-    
+
     // Handle special actions that open windows directly
     if (action === 'create-agent' || action === 'open-agent-composer') {
       log.info('voice', '[VoiceTaskSDK] Opening Agent Composer');
-      
+
       // Extract description from params if available
       const description = params?.description || '';
-      
+
       try {
         const main = require('../../main');
         if (main.createClaudeCodeWindow) {
@@ -616,16 +615,16 @@ function setupSDKIPC() {
       } catch (e) {
         log.error('voice', '[VoiceTaskSDK] Could not open Agent Composer window', { error: e });
       }
-      
+
       // Set global flag that we're in agent creation mode (for voice relay)
       global.agentCreationMode = true;
-      
+
       if (description) {
         addAssistantMessage(`Opening the Agent Composer to create an agent for: "${description}"`);
       } else {
         addAssistantMessage('Opening the Agent Composer.');
       }
-      
+
       return {
         action,
         queued: false,
@@ -633,10 +632,10 @@ function setupSDKIPC() {
         message: description ? `Opening Agent Composer with: ${description}` : 'Opening Agent Composer window',
       };
     }
-    
+
     if (action === 'open-agent-manager') {
       log.info('voice', '[VoiceTaskSDK] Opening Agent Manager');
-      
+
       try {
         const main = require('../../main');
         if (main.createAgentManagerWindow) {
@@ -645,9 +644,9 @@ function setupSDKIPC() {
       } catch (e) {
         log.error('voice', '[VoiceTaskSDK] Could not open Agent Manager window', { error: e });
       }
-      
+
       addAssistantMessage('Opening the Agent Manager.');
-      
+
       return {
         action,
         queued: false,
@@ -655,7 +654,7 @@ function setupSDKIPC() {
         message: 'Opening Agent Manager window',
       };
     }
-    
+
     // Create classified task object
     const classifiedTask = {
       action,
@@ -663,10 +662,10 @@ function setupSDKIPC() {
       params: params || {},
       priority: 2,
     };
-    
+
     // Submit to queue
     const task = await sdk.submit(classifiedTask);
-    
+
     return {
       action,
       queued: true,
@@ -684,7 +683,7 @@ function setupSDKIPC() {
   // List all queues
   ipcMain.handle('voice-task-sdk:list-queues', () => {
     if (!sdk) return [];
-    return sdk.queues.list().map(q => ({
+    return sdk.queues.list().map((q) => ({
       ...q,
       stats: sdk.queues.getStats(q.name),
     }));
@@ -711,7 +710,7 @@ function setupSDKIPC() {
   // List agents
   ipcMain.handle('voice-task-sdk:list-agents', () => {
     if (!sdk) return [];
-    return sdk.agents.list().map(a => ({
+    return sdk.agents.list().map((a) => ({
       id: a.id,
       name: a.name,
       queues: a.queues,
@@ -750,18 +749,18 @@ function setupSDKIPC() {
   // Register custom agent
   ipcMain.handle('voice-task-sdk:register-agent', (_event, input) => {
     if (!sdk) throw new Error('SDK not initialized');
-    
+
     // Note: For security, we only allow registering agents with predefined resolvers
     // Custom resolve functions would need a more secure mechanism
     const agent = sdk.agents.create({
       ...input,
-      resolve: async (task, ctx) => {
+      resolve: async (task, _ctx) => {
         // Default implementation - broadcast for renderer to handle
         broadcastToWindows('voice-task:execute', { task });
         return { success: true, data: { message: 'Executed via broadcast' } };
       },
     });
-    
+
     return {
       id: agent.id,
       name: agent.name,
@@ -769,20 +768,20 @@ function setupSDKIPC() {
       actions: agent.actions,
     };
   });
-  
+
   // ==================== CONVERSATION HISTORY ====================
-  
+
   // Get conversation history
   ipcMain.handle('voice-task-sdk:get-history', () => {
     return getConversationHistory();
   });
-  
+
   // Clear conversation history
   ipcMain.handle('voice-task-sdk:clear-history', () => {
     clearConversationHistory();
     return { success: true };
   });
-  
+
   // Add custom message to history (for external integrations)
   ipcMain.handle('voice-task-sdk:add-history', (_event, role, content) => {
     if (role === 'user') {
@@ -792,38 +791,38 @@ function setupSDKIPC() {
     }
     return { success: true };
   });
-  
+
   // ==================== CONTEXT PROVIDERS ====================
-  
+
   // List context providers
   ipcMain.handle('voice-task-sdk:list-providers', () => {
     if (!contextRegistry) return [];
     return contextRegistry.list();
   });
-  
+
   // Enable a context provider
   ipcMain.handle('voice-task-sdk:enable-provider', (_event, providerId) => {
     if (!contextRegistry) return false;
     return contextRegistry.enable(providerId);
   });
-  
+
   // Disable a context provider
   ipcMain.handle('voice-task-sdk:disable-provider', (_event, providerId) => {
     if (!contextRegistry) return false;
     return contextRegistry.disable(providerId);
   });
-  
+
   // Configure a provider
   ipcMain.handle('voice-task-sdk:configure-provider', (_event, providerId, settings) => {
     if (!contextRegistry) return false;
     return contextRegistry.configure(providerId, settings);
   });
-  
+
   // Get current context
   ipcMain.handle('voice-task-sdk:get-context', async () => {
     return await getAggregatedContext();
   });
-  
+
   // Add custom fact
   ipcMain.handle('voice-task-sdk:add-fact', (_event, key, value, category) => {
     if (customFactsProvider && customFactsProvider.addFact) {
@@ -832,7 +831,7 @@ function setupSDKIPC() {
     }
     return false;
   });
-  
+
   // Remove custom fact
   ipcMain.handle('voice-task-sdk:remove-fact', (_event, key) => {
     if (customFactsProvider && customFactsProvider.removeFact) {
@@ -840,7 +839,7 @@ function setupSDKIPC() {
     }
     return false;
   });
-  
+
   // Get custom facts
   ipcMain.handle('voice-task-sdk:get-facts', () => {
     if (customFactsProvider && customFactsProvider.getFacts) {
@@ -878,7 +877,7 @@ function cleanup() {
 
   // Clear conversation history on cleanup
   conversationHistory = [];
-  
+
   // Dispose context registry
   if (contextRegistry) {
     contextRegistry.dispose();
@@ -917,10 +916,10 @@ function cleanup() {
     'voice-task-sdk:get-facts',
   ];
 
-  handlers.forEach(handler => {
+  handlers.forEach((handler) => {
     try {
       ipcMain.removeHandler(handler);
-    } catch (e) {
+    } catch (_e) {
       // Handler may not exist
     }
   });

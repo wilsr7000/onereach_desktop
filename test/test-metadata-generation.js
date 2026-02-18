@@ -2,12 +2,11 @@
  * Metadata Generation Test Suite
  * Tests the spaces menu, file type detection, metadata schema validation,
  * and correct LLM model routing for different file types.
- * 
+ *
  * Run with: node test/test-metadata-generation.js
  * Or in Electron: npm run test:metadata (add to package.json)
  */
 
-const fs = require('fs');
 const path = require('path');
 
 // Test configuration
@@ -15,7 +14,7 @@ const TEST_CONFIG = {
   verbose: true,
   runAPITests: false, // Set to true to test actual Claude API calls (requires API key)
   apiKey: process.env.CLAUDE_API_KEY || '', // Set via environment variable
-  testDataDir: path.join(__dirname, 'test-files')
+  testDataDir: path.join(__dirname, 'test-files'),
 };
 
 // Color codes for terminal output
@@ -26,7 +25,7 @@ const colors = {
   yellow: '\x1b[33m',
   blue: '\x1b[34m',
   cyan: '\x1b[36m',
-  dim: '\x1b[2m'
+  dim: '\x1b[2m',
 };
 
 // Test results tracker
@@ -34,7 +33,7 @@ const results = {
   passed: 0,
   failed: 0,
   skipped: 0,
-  tests: []
+  tests: [],
 };
 
 function log(message, color = 'reset') {
@@ -47,7 +46,7 @@ function logTest(name, passed, details = '') {
   const status = passed ? '✓' : '✗';
   const color = passed ? 'green' : 'red';
   log(`  ${status} ${name}${details ? ` - ${details}` : ''}`, color);
-  
+
   results.tests.push({ name, passed, details });
   if (passed) {
     results.passed++;
@@ -82,10 +81,12 @@ const testItems = {
     fileName: 'Screenshot 2024-01-15.png',
     fileExt: '.png',
     fileSize: 245000,
-    thumbnail: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-    content: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    thumbnail:
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    content:
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
   },
-  
+
   photo: {
     id: 'test-photo-001',
     type: 'image',
@@ -95,9 +96,10 @@ const testItems = {
     fileName: 'vacation-photo.jpg',
     fileExt: '.jpg',
     fileSize: 1500000,
-    thumbnail: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBEQCEAwEPwAB//9k='
+    thumbnail:
+      'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBEQCEAwEPwAB//9k=',
   },
-  
+
   // Video
   video: {
     id: 'test-video-001',
@@ -109,11 +111,12 @@ const testItems = {
     fileSize: 52000000,
     metadata: {
       duration: '10:25',
-      resolution: '1920x1080'
+      resolution: '1920x1080',
     },
-    thumbnail: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBEQCEAwEPwAB//9k='
+    thumbnail:
+      'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBEQCEAwEPwAB//9k=',
   },
-  
+
   // Audio
   audio: {
     id: 'test-audio-001',
@@ -125,10 +128,11 @@ const testItems = {
     fileSize: 15000000,
     metadata: {
       duration: '45:30',
-      transcript: 'Welcome to this episode of the podcast. Today we will be discussing artificial intelligence and its impact on software development...'
-    }
+      transcript:
+        'Welcome to this episode of the podcast. Today we will be discussing artificial intelligence and its impact on software development...',
+    },
   },
-  
+
   // PDF
   pdf: {
     id: 'test-pdf-001',
@@ -138,9 +142,9 @@ const testItems = {
     fileName: 'quarterly-report-Q4-2024.pdf',
     fileExt: '.pdf',
     fileSize: 2500000,
-    pageCount: 15
+    pageCount: 15,
   },
-  
+
   // Text
   text: {
     id: 'test-text-001',
@@ -162,9 +166,9 @@ Action Items:
 - [ ] Mike: Set up CI/CD pipeline
 
 Next meeting: January 22, 2024`,
-    preview: 'Meeting Notes - Project Kickoff...'
+    preview: 'Meeting Notes - Project Kickoff...',
   },
-  
+
   // Code
   code: {
     id: 'test-code-001',
@@ -202,9 +206,9 @@ export function useAuth() {
   }, []);
   
   return { user, loading, login, logout };
-}`
+}`,
   },
-  
+
   // HTML/Rich content
   html: {
     id: 'test-html-001',
@@ -220,19 +224,19 @@ export function useAuth() {
 </ul>`,
     plainText: 'Product Requirements Document\nUser Authentication Feature\nThis document outlines the requirements...',
     metadata: {
-      type: 'generated-document'
-    }
+      type: 'generated-document',
+    },
   },
-  
+
   // URL
   url: {
     id: 'test-url-001',
     type: 'text',
     content: 'https://react.dev/reference/react/hooks',
     pageTitle: 'React Hooks Reference',
-    pageDescription: 'Official React documentation for Hooks API'
+    pageDescription: 'Official React documentation for Hooks API',
   },
-  
+
   // Data files
   jsonData: {
     id: 'test-json-001',
@@ -241,15 +245,19 @@ export function useAuth() {
     fileName: 'users.json',
     fileExt: '.json',
     fileSize: 50000,
-    content: JSON.stringify({
-      users: [
-        { id: 1, name: 'John Doe', email: 'john@example.com', role: 'admin' },
-        { id: 2, name: 'Jane Smith', email: 'jane@example.com', role: 'user' }
-      ],
-      pagination: { page: 1, total: 100 }
-    }, null, 2)
+    content: JSON.stringify(
+      {
+        users: [
+          { id: 1, name: 'John Doe', email: 'john@example.com', role: 'admin' },
+          { id: 2, name: 'Jane Smith', email: 'jane@example.com', role: 'user' },
+        ],
+        pagination: { page: 1, total: 100 },
+      },
+      null,
+      2
+    ),
   },
-  
+
   csvData: {
     id: 'test-csv-001',
     type: 'file',
@@ -260,9 +268,9 @@ export function useAuth() {
     content: `date,product,quantity,revenue
 2024-01-01,Widget A,100,5000
 2024-01-01,Widget B,50,2500
-2024-01-02,Widget A,150,7500`
+2024-01-02,Widget A,150,7500`,
   },
-  
+
   // Generic file
   genericFile: {
     id: 'test-file-001',
@@ -270,8 +278,8 @@ export function useAuth() {
     fileCategory: 'document',
     fileName: 'presentation.key',
     fileExt: '.key',
-    fileSize: 10000000
-  }
+    fileSize: 10000000,
+  },
 };
 
 // ============================================
@@ -281,53 +289,53 @@ export function useAuth() {
 const metadataSchemas = {
   image: {
     required: ['title', 'description', 'tags', 'notes', 'category'],
-    optional: ['extracted_text', 'visible_urls', 'app_detected', 'ai_detected', 'instructions', 'source']
+    optional: ['extracted_text', 'visible_urls', 'app_detected', 'ai_detected', 'instructions', 'source'],
   },
-  
+
   video: {
     required: ['title', 'shortDescription', 'longDescription', 'category', 'tags'],
-    optional: ['topics', 'speakers', 'keyPoints', 'targetAudience', 'notes']
+    optional: ['topics', 'speakers', 'keyPoints', 'targetAudience', 'notes'],
   },
-  
+
   audio: {
     required: ['title', 'description', 'audioType', 'tags'],
-    optional: ['topics', 'speakers', 'keyPoints', 'genre', 'notes']
+    optional: ['topics', 'speakers', 'keyPoints', 'genre', 'notes'],
   },
-  
+
   code: {
     required: ['title', 'description', 'language', 'purpose', 'tags'],
-    optional: ['functions', 'dependencies', 'complexity', 'notes']
+    optional: ['functions', 'dependencies', 'complexity', 'notes'],
   },
-  
+
   text: {
     required: ['title', 'description', 'contentType', 'tags'],
-    optional: ['topics', 'keyPoints', 'actionItems', 'notes']
+    optional: ['topics', 'keyPoints', 'actionItems', 'notes'],
   },
-  
+
   pdf: {
     required: ['title', 'description', 'documentType', 'tags'],
-    optional: ['subject', 'category', 'topics', 'purpose', 'notes']
+    optional: ['subject', 'category', 'topics', 'purpose', 'notes'],
   },
-  
+
   data: {
     required: ['title', 'description', 'dataType', 'format', 'tags'],
-    optional: ['entities', 'keyFields', 'purpose', 'notes']
+    optional: ['entities', 'keyFields', 'purpose', 'notes'],
   },
-  
+
   url: {
     required: ['title', 'description', 'urlType', 'platform', 'tags'],
-    optional: ['topics', 'category', 'purpose', 'notes']
+    optional: ['topics', 'category', 'purpose', 'notes'],
   },
-  
+
   html: {
     required: ['title', 'description', 'documentType', 'tags'],
-    optional: ['topics', 'keyPoints', 'author', 'source', 'notes']
+    optional: ['topics', 'keyPoints', 'author', 'source', 'notes'],
   },
-  
+
   file: {
     required: ['title', 'description', 'fileCategory', 'tags'],
-    optional: ['purpose', 'relatedTools', 'notes']
-  }
+    optional: ['purpose', 'relatedTools', 'notes'],
+  },
 };
 
 // ============================================
@@ -345,7 +353,7 @@ const expectedModels = {
   data: 'claude-sonnet-4-20250514', // Text-only
   url: 'claude-sonnet-4-20250514', // Text-only
   html: 'claude-sonnet-4-20250514', // Text-only
-  file: 'claude-sonnet-4-20250514' // Text-only
+  file: 'claude-sonnet-4-20250514', // Text-only
 };
 
 // ============================================
@@ -357,7 +365,7 @@ const expectedModels = {
  */
 function testFileTypeDetection() {
   logSection('File Type Detection Tests');
-  
+
   // Test extension to category mapping
   const extensionTests = [
     // Images
@@ -366,25 +374,25 @@ function testFileTypeDetection() {
     { ext: '.gif', expected: { category: 'media', type: 'image-file' } },
     { ext: '.webp', expected: { category: 'media', type: 'image-file' } },
     { ext: '.svg', expected: { category: 'media', type: 'image-file' } },
-    
+
     // Video
     { ext: '.mp4', expected: { category: 'media', type: 'video' } },
     { ext: '.mov', expected: { category: 'media', type: 'video' } },
     { ext: '.webm', expected: { category: 'media', type: 'video' } },
     { ext: '.mkv', expected: { category: 'media', type: 'video' } },
-    
+
     // Audio
     { ext: '.mp3', expected: { category: 'media', type: 'audio' } },
     { ext: '.wav', expected: { category: 'media', type: 'audio' } },
     { ext: '.m4a', expected: { category: 'media', type: 'audio' } },
     { ext: '.ogg', expected: { category: 'media', type: 'audio' } },
-    
+
     // Documents
     { ext: '.pdf', expected: { category: 'document', type: 'pdf' } },
     { ext: '.doc', expected: { category: 'document' } },
     { ext: '.docx', expected: { category: 'document' } },
     { ext: '.txt', expected: { category: 'document' } },
-    
+
     // Code
     { ext: '.js', expected: { category: 'code' } },
     { ext: '.ts', expected: { category: 'code' } },
@@ -393,29 +401,29 @@ function testFileTypeDetection() {
     { ext: '.tsx', expected: { category: 'code' } },
     { ext: '.html', expected: { category: 'code' } },
     { ext: '.css', expected: { category: 'code' } },
-    
+
     // Data
     { ext: '.json', expected: { category: 'data' } },
     { ext: '.csv', expected: { category: 'data' } },
     { ext: '.yaml', expected: { category: 'data' } },
     { ext: '.xml', expected: { category: 'data' } },
-    
+
     // Archives
     { ext: '.zip', expected: { category: 'archive' } },
     { ext: '.rar', expected: { category: 'archive' } },
     { ext: '.7z', expected: { category: 'archive' } },
-    
+
     // Design
     { ext: '.psd', expected: { category: 'design' } },
     { ext: '.sketch', expected: { category: 'design' } },
-    { ext: '.fig', expected: { category: 'design' } }
+    { ext: '.fig', expected: { category: 'design' } },
   ];
-  
-  extensionTests.forEach(test => {
+
+  extensionTests.forEach((test) => {
     const result = detectFileType(test.ext);
     const categoryMatch = result.category === test.expected.category;
     const typeMatch = !test.expected.type || result.type === test.expected.type;
-    
+
     logTest(
       `Extension ${test.ext}`,
       categoryMatch && typeMatch,
@@ -429,7 +437,7 @@ function testFileTypeDetection() {
  */
 function detectFileType(ext) {
   ext = ext.toLowerCase();
-  
+
   if (['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v'].includes(ext)) {
     return { category: 'media', type: 'video' };
   }
@@ -445,7 +453,30 @@ function detectFileType(ext) {
   if (['.doc', '.docx', '.txt', '.rtf', '.odt', '.md'].includes(ext)) {
     return { category: 'document', type: 'document' };
   }
-  if (['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.html', '.htm', '.css', '.scss'].includes(ext)) {
+  if (
+    [
+      '.js',
+      '.ts',
+      '.jsx',
+      '.tsx',
+      '.py',
+      '.java',
+      '.cpp',
+      '.c',
+      '.h',
+      '.cs',
+      '.php',
+      '.rb',
+      '.go',
+      '.rs',
+      '.swift',
+      '.kt',
+      '.html',
+      '.htm',
+      '.css',
+      '.scss',
+    ].includes(ext)
+  ) {
     return { category: 'code', type: 'code' };
   }
   if (['.fig', '.sketch', '.xd', '.ai', '.psd', '.psb', '.indd'].includes(ext)) {
@@ -457,7 +488,7 @@ function detectFileType(ext) {
   if (['.json', '.xml', '.csv', '.tsv', '.yaml', '.yml'].includes(ext)) {
     return { category: 'data', type: 'data' };
   }
-  
+
   return { category: 'document', type: 'unknown' };
 }
 
@@ -466,7 +497,7 @@ function detectFileType(ext) {
  */
 function testMetadataRouting() {
   logSection('Metadata Routing Tests');
-  
+
   const routingTests = [
     { item: testItems.screenshot, expectedHandler: 'image', reason: 'isScreenshot=true' },
     { item: testItems.photo, expectedHandler: 'image', reason: 'type=image' },
@@ -479,13 +510,13 @@ function testMetadataRouting() {
     { item: testItems.url, expectedHandler: 'url', reason: 'content is URL' },
     { item: testItems.jsonData, expectedHandler: 'data', reason: 'fileCategory=data' },
     { item: testItems.csvData, expectedHandler: 'data', reason: 'fileExt=.csv' },
-    { item: testItems.genericFile, expectedHandler: 'file', reason: 'type=file (generic)' }
+    { item: testItems.genericFile, expectedHandler: 'file', reason: 'type=file (generic)' },
   ];
-  
-  routingTests.forEach(test => {
+
+  routingTests.forEach((test) => {
     const handler = determineMetadataHandler(test.item);
     const passed = handler === test.expectedHandler;
-    
+
     logTest(
       `${test.item.fileName || test.item.id}`,
       passed,
@@ -533,7 +564,7 @@ function determineMetadataHandler(item) {
  */
 function testMetadataSchemas() {
   logSection('Metadata Schema Validation Tests');
-  
+
   // Sample metadata responses (simulated)
   const sampleMetadata = {
     image: {
@@ -543,9 +574,9 @@ function testMetadataSchemas() {
       notes: 'Authentication component implementation',
       category: 'screenshot',
       extracted_text: 'import React from react',
-      app_detected: 'VS Code'
+      app_detected: 'VS Code',
     },
-    
+
     video: {
       title: 'React Tutorial',
       shortDescription: 'Introduction to React hooks',
@@ -553,18 +584,18 @@ function testMetadataSchemas() {
       category: 'tutorial',
       tags: ['react', 'hooks', 'javascript'],
       topics: ['useState', 'useEffect'],
-      speakers: ['Dan Abramov']
+      speakers: ['Dan Abramov'],
     },
-    
+
     audio: {
       title: 'Tech Podcast Episode',
       description: 'Discussion about AI and software development',
       audioType: 'podcast',
       tags: ['podcast', 'ai', 'tech'],
       topics: ['AI', 'development'],
-      speakers: ['Host', 'Guest']
+      speakers: ['Host', 'Guest'],
     },
-    
+
     code: {
       title: 'useAuth Hook',
       description: 'Custom React hook for authentication',
@@ -572,70 +603,70 @@ function testMetadataSchemas() {
       purpose: 'Authentication state management',
       tags: ['react', 'typescript', 'auth'],
       functions: ['useAuth', 'login', 'logout'],
-      complexity: 'moderate'
+      complexity: 'moderate',
     },
-    
+
     text: {
       title: 'Project Kickoff Notes',
       description: 'Meeting notes from project kickoff session',
       contentType: 'meeting-notes',
       tags: ['meeting', 'project', 'notes'],
       keyPoints: ['Launch Q2', 'Budget approved'],
-      actionItems: ['Review designs', 'Schedule planning']
+      actionItems: ['Review designs', 'Schedule planning'],
     },
-    
+
     pdf: {
       title: 'Q4 Report',
       description: 'Quarterly financial report',
       documentType: 'report',
       tags: ['finance', 'report', 'q4'],
-      subject: 'Financial Analysis'
+      subject: 'Financial Analysis',
     },
-    
+
     data: {
       title: 'User Data Export',
       description: 'JSON export of user records',
       dataType: 'export',
       format: 'JSON',
       tags: ['users', 'data', 'export'],
-      entities: ['users', 'profiles']
+      entities: ['users', 'profiles'],
     },
-    
+
     url: {
       title: 'React Hooks Docs',
       description: 'Official React documentation for hooks',
       urlType: 'documentation',
       platform: 'React Official',
       tags: ['react', 'docs', 'hooks'],
-      category: 'Documentation'
+      category: 'Documentation',
     },
-    
+
     html: {
       title: 'Product Requirements',
       description: 'PRD for authentication feature',
       documentType: 'documentation',
       tags: ['prd', 'requirements', 'auth'],
-      topics: ['authentication', 'security']
-    }
+      topics: ['authentication', 'security'],
+    },
   };
-  
+
   Object.entries(sampleMetadata).forEach(([type, metadata]) => {
     const schema = metadataSchemas[type];
     if (!schema) {
       logSkipped(`Schema for ${type}`, 'No schema defined');
       return;
     }
-    
+
     // Check required fields
-    const missingRequired = schema.required.filter(field => !(field in metadata));
+    const missingRequired = schema.required.filter((field) => !(field in metadata));
     const hasAllRequired = missingRequired.length === 0;
-    
+
     logTest(
       `${type} - required fields`,
       hasAllRequired,
       hasAllRequired ? 'all present' : `missing: ${missingRequired.join(', ')}`
     );
-    
+
     // Check field types
     const invalidTypes = [];
     if (metadata.tags && !Array.isArray(metadata.tags)) {
@@ -647,7 +678,7 @@ function testMetadataSchemas() {
     if (metadata.keyPoints && !Array.isArray(metadata.keyPoints)) {
       invalidTypes.push('keyPoints should be array');
     }
-    
+
     logTest(
       `${type} - field types`,
       invalidTypes.length === 0,
@@ -661,7 +692,7 @@ function testMetadataSchemas() {
  */
 function testModelSelection() {
   logSection('LLM Model Selection Tests');
-  
+
   const modelTests = [
     { type: 'image', hasVision: true, description: 'Images should use vision-capable model' },
     { type: 'screenshot', hasVision: true, description: 'Screenshots should use vision-capable model' },
@@ -672,13 +703,13 @@ function testModelSelection() {
     { type: 'text', hasVision: false, description: 'Text uses text-only analysis' },
     { type: 'data', hasVision: false, description: 'Data files use text-only analysis' },
     { type: 'url', hasVision: false, description: 'URLs use text-only analysis' },
-    { type: 'html', hasVision: false, description: 'HTML uses text-only analysis' }
+    { type: 'html', hasVision: false, description: 'HTML uses text-only analysis' },
   ];
-  
-  modelTests.forEach(test => {
+
+  modelTests.forEach((test) => {
     const expectedModel = expectedModels[test.type];
-    const isVisionCapable = expectedModel.includes('sonnet') || expectedModel.includes('opus'); // All current models support vision
-    
+    const _isVisionCapable = expectedModel.includes('sonnet') || expectedModel.includes('opus'); // All current models support vision
+
     logTest(
       `${test.type} model`,
       true, // Claude Sonnet 4 supports both vision and text
@@ -692,48 +723,46 @@ function testModelSelection() {
  */
 function testPromptConstruction() {
   logSection('Prompt Construction Tests');
-  
+
   const promptTests = [
     {
       type: 'image',
       mustContain: ['JSON', 'title', 'description', 'tags', 'category'],
-      mustNotContain: ['audioType', 'language', 'dataType']
+      mustNotContain: ['audioType', 'language', 'dataType'],
     },
     {
       type: 'video',
       mustContain: ['VIDEO', 'JSON', 'title', 'topics', 'speakers'],
-      mustNotContain: ['extracted_text', 'language']
+      mustNotContain: ['extracted_text', 'language'],
     },
     {
       type: 'code',
       mustContain: ['CODE', 'JSON', 'language', 'functions', 'complexity'],
-      mustNotContain: ['audioType', 'speakers']
+      mustNotContain: ['audioType', 'speakers'],
     },
     {
       type: 'data',
       mustContain: ['DATA', 'JSON', 'dataType', 'format', 'entities'],
-      mustNotContain: ['audioType', 'speakers', 'language']
-    }
+      mustNotContain: ['audioType', 'speakers', 'language'],
+    },
   ];
-  
+
   // Simulate prompt building for each type
-  promptTests.forEach(test => {
+  promptTests.forEach((test) => {
     const samplePrompt = buildSamplePrompt(test.type);
-    
-    const containsRequired = test.mustContain.every(term => 
-      samplePrompt.toLowerCase().includes(term.toLowerCase())
+
+    const containsRequired = test.mustContain.every((term) => samplePrompt.toLowerCase().includes(term.toLowerCase()));
+
+    const avoidsWrongFields = test.mustNotContain.every(
+      (term) => !samplePrompt.toLowerCase().includes(`"${term.toLowerCase()}"`)
     );
-    
-    const avoidsWrongFields = test.mustNotContain.every(term => 
-      !samplePrompt.toLowerCase().includes(`"${term.toLowerCase()}"`)
-    );
-    
+
     logTest(
       `${test.type} prompt - required terms`,
       containsRequired,
       containsRequired ? 'all present' : 'missing some terms'
     );
-    
+
     logTest(
       `${test.type} prompt - no wrong fields`,
       avoidsWrongFields,
@@ -755,9 +784,9 @@ function buildSamplePrompt(type) {
     data: `Analyze this DATA file. Respond with JSON: { "title": "", "description": "", "dataType": "", "format": "", "entities": [], "keyFields": [], "tags": [] }`,
     url: `Analyze this URL. Respond with JSON: { "title": "", "description": "", "urlType": "", "platform": "", "topics": [], "tags": [] }`,
     html: `Analyze this HTML document. Respond with JSON: { "title": "", "description": "", "documentType": "", "topics": [], "keyPoints": [], "tags": [] }`,
-    pdf: `Analyze this PDF. Respond with JSON: { "title": "", "description": "", "documentType": "", "subject": "", "topics": [], "tags": [] }`
+    pdf: `Analyze this PDF. Respond with JSON: { "title": "", "description": "", "documentType": "", "subject": "", "topics": [], "tags": [] }`,
   };
-  
+
   return prompts[type] || prompts.text;
 }
 
@@ -766,24 +795,20 @@ function buildSamplePrompt(type) {
  */
 function testMetadataGenerationFlow() {
   logSection('Metadata Generation Flow Tests');
-  
+
   Object.entries(testItems).forEach(([name, item]) => {
     try {
       // Step 1: Determine handler
       const handler = determineMetadataHandler(item);
-      
+
       // Step 2: Check schema exists
       const schemaType = handler === 'text' && item.fileCategory === 'code' ? 'code' : handler;
-      const schema = metadataSchemas[schemaType] || metadataSchemas.text;
-      
+      const _schema = metadataSchemas[schemaType] || metadataSchemas.text;
+
       // Step 3: Validate item has necessary data
       const hasContent = item.content || item.text || item.html || item.thumbnail || item.fileName;
-      
-      logTest(
-        `Flow: ${name}`,
-        !!hasContent,
-        `handler=${handler}, schema=${schemaType}, hasContent=${!!hasContent}`
-      );
+
+      logTest(`Flow: ${name}`, !!hasContent, `handler=${handler}, schema=${schemaType}, hasContent=${!!hasContent}`);
     } catch (error) {
       logTest(`Flow: ${name}`, false, `Error: ${error.message}`);
     }
@@ -795,15 +820,11 @@ function testMetadataGenerationFlow() {
  */
 function testEdgeCases() {
   logSection('Edge Case Tests');
-  
+
   // Empty content
   const emptyItem = { id: 'empty', type: 'text', content: '' };
-  logTest(
-    'Empty content handling',
-    determineMetadataHandler(emptyItem) === 'text',
-    'Falls back to text handler'
-  );
-  
+  logTest('Empty content handling', determineMetadataHandler(emptyItem) === 'text', 'Falls back to text handler');
+
   // URL with extra text
   const urlWithText = { id: 'url-text', type: 'text', content: 'Check out https://example.com for more info' };
   logTest(
@@ -811,15 +832,11 @@ function testEdgeCases() {
     determineMetadataHandler(urlWithText) !== 'url',
     'Not treated as pure URL (has surrounding text)'
   );
-  
+
   // Pure URL
   const pureUrl = { id: 'pure-url', type: 'text', content: 'https://example.com/path/to/page' };
-  logTest(
-    'Pure URL detection',
-    determineMetadataHandler(pureUrl) === 'url',
-    'Correctly routed to URL handler'
-  );
-  
+  logTest('Pure URL detection', determineMetadataHandler(pureUrl) === 'url', 'Correctly routed to URL handler');
+
   // File with unknown extension
   const unknownExt = { id: 'unknown', type: 'file', fileExt: '.xyz', fileCategory: 'unknown' };
   logTest(
@@ -827,7 +844,7 @@ function testEdgeCases() {
     determineMetadataHandler(unknownExt) === 'file',
     'Falls back to generic file handler'
   );
-  
+
   // Screenshot flag override
   const screenshotOverride = { id: 'ss', type: 'file', isScreenshot: true, fileCategory: 'document' };
   logTest(
@@ -847,9 +864,9 @@ function runAllTests() {
   log('║     Metadata Generation Test Suite                       ║', 'cyan');
   log('║     Testing file types, schemas, and LLM routing         ║', 'cyan');
   log('╚══════════════════════════════════════════════════════════╝', 'cyan');
-  
+
   const startTime = Date.now();
-  
+
   // Run test suites
   testFileTypeDetection();
   testMetadataRouting();
@@ -858,10 +875,10 @@ function runAllTests() {
   testPromptConstruction();
   testMetadataGenerationFlow();
   testEdgeCases();
-  
+
   // Summary
   const duration = Date.now() - startTime;
-  
+
   logSection('Test Summary');
   log(`  Total tests: ${results.passed + results.failed}`, 'dim');
   log(`  ✓ Passed: ${results.passed}`, 'green');
@@ -869,59 +886,23 @@ function runAllTests() {
   log(`  ○ Skipped: ${results.skipped}`, 'yellow');
   log(`  Duration: ${duration}ms`, 'dim');
   log('');
-  
+
   if (results.failed > 0) {
     log('Failed tests:', 'red');
-    results.tests.filter(t => !t.passed).forEach(t => {
-      log(`  - ${t.name}: ${t.details}`, 'red');
-    });
+    results.tests
+      .filter((t) => !t.passed)
+      .forEach((t) => {
+        log(`  - ${t.name}: ${t.details}`, 'red');
+      });
     log('');
   }
-  
+
   const allPassed = results.failed === 0;
   log(allPassed ? '✓ All tests passed!' : '✗ Some tests failed', allPassed ? 'green' : 'red');
-  
+
   return allPassed;
 }
 
 // Run tests
 const success = runAllTests();
 process.exit(success ? 0 : 1);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

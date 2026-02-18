@@ -38,7 +38,7 @@ export class ScreengrabService {
       outputDir = null,
       prefix = 'frame',
       quality = 2, // JPEG quality (1-31, lower is better)
-      width = 1920
+      width = 1920,
     } = options;
 
     // Get video info if endTime not specified
@@ -52,11 +52,11 @@ export class ScreengrabService {
 
     // Calculate the time interval between captures
     const interval = count > 1 ? duration / (count - 1) : 0;
-    
+
     // Generate list of timestamps
     const timestamps = [];
     for (let i = 0; i < count; i++) {
-      const time = startTime + (interval * i);
+      const time = startTime + interval * i;
       timestamps.push(time);
     }
 
@@ -69,21 +69,18 @@ export class ScreengrabService {
     log.info('video', '[ScreengrabService] Generating screengrabs', { v0: count });
 
     const results = [];
-    
+
     // Generate each screengrab
     for (let i = 0; i < timestamps.length; i++) {
       const time = timestamps[i];
       const outputPath = path.join(grabsDir, `${prefix}_${String(i + 1).padStart(3, '0')}.jpg`);
-      
+
       try {
         await new Promise((resolve, reject) => {
           ffmpeg(inputPath)
             .seekInput(time)
             .frames(1)
-            .outputOptions([
-              '-vf', `scale=${width}:-1`,
-              '-q:v', String(quality)
-            ])
+            .outputOptions(['-vf', `scale=${width}:-1`, '-q:v', String(quality)])
             .output(outputPath)
             .on('end', resolve)
             .on('error', reject)
@@ -95,7 +92,7 @@ export class ScreengrabService {
           time: time,
           timeFormatted: formatTime(time),
           path: outputPath,
-          filename: path.basename(outputPath)
+          filename: path.basename(outputPath),
         });
 
         log.info('video', '[ScreengrabService] Generated frame / at', { v0: i + 1, v1: count, v2: formatTime(time) });
@@ -111,7 +108,7 @@ export class ScreengrabService {
       frames: results,
       startTime,
       endTime: startTime + duration,
-      duration
+      duration,
     };
   }
 
@@ -123,12 +120,7 @@ export class ScreengrabService {
    * @returns {Promise<Object>} Result with frames array
    */
   async generateScreengrabsAtTimestamps(inputPath, timestamps, options = {}) {
-    const {
-      outputDir = null,
-      prefix = 'frame',
-      quality = 2,
-      width = 1920
-    } = options;
+    const { outputDir = null, prefix = 'frame', quality = 2, width = 1920 } = options;
 
     const grabsDir = outputDir || path.join(this.thumbnailDir, `grabs_${Date.now()}`);
     if (!fs.existsSync(grabsDir)) {
@@ -146,10 +138,7 @@ export class ScreengrabService {
           ffmpeg(inputPath)
             .seekInput(time)
             .frames(1)
-            .outputOptions([
-              '-vf', `scale=${width}:-1`,
-              '-q:v', String(quality)
-            ])
+            .outputOptions(['-vf', `scale=${width}:-1`, '-q:v', String(quality)])
             .output(outputPath)
             .on('end', resolve)
             .on('error', reject)
@@ -161,7 +150,7 @@ export class ScreengrabService {
           time: time,
           timeFormatted: formatTime(time),
           path: outputPath,
-          filename: path.basename(outputPath)
+          filename: path.basename(outputPath),
         });
       } catch (error) {
         log.error('video', '[ScreengrabService] Error at timestamp :', { v0: time, arg0: error });
@@ -172,23 +161,7 @@ export class ScreengrabService {
       success: true,
       outputDir: grabsDir,
       count: results.length,
-      frames: results
+      frames: results,
     };
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

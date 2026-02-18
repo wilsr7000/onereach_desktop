@@ -21,13 +21,13 @@ class SmartExport {
     this.contentAnalyzer = new ContentStyleAnalyzer();
     // setupIpcHandlers is now called from main.js after instantiation
   }
-  
+
   loadStyleGuideCSS() {
     try {
       const cssPath = path.join(__dirname, 'smart-export-styles.css');
       return fs.readFileSync(cssPath, 'utf8');
     } catch (error) {
-      log.error('app', 'Error loading style guide CSS', { error: error.message || error })
+      log.error('app', 'Error loading style guide CSS', { error: error.message || error });
       // Return a minimal fallback CSS if file can't be loaded
       return `
         :root {
@@ -50,26 +50,26 @@ class SmartExport {
   setupIpcHandlers() {
     ipcMain.handle('smart-export:extract-styles', async (event, urls, options = {}) => {
       try {
-        log.info('app', 'Extracting CSS styles from URLs', { urls })
-        
+        log.info('app', 'Extracting CSS styles from URLs', { urls });
+
         // Enable LLM enhancement by default unless explicitly disabled
         const analyzerOptions = {
           ...options,
-          useLLMEnhancement: options.useLLMEnhancement !== false // Default to true
+          useLLMEnhancement: options.useLLMEnhancement !== false, // Default to true
         };
-        
+
         return await this.styleAnalyzer.analyzeStyles(urls, analyzerOptions);
       } catch (error) {
-        log.error('app', 'Style extraction error', { error: error.message || error })
+        log.error('app', 'Style extraction error', { error: error.message || error });
         throw error;
       }
     });
 
     ipcMain.handle('smart-export:extract-content-guidelines', async (event, url, options) => {
       try {
-        log.info('app', 'Extracting content guidelines from URL', { url })
+        log.info('app', 'Extracting content guidelines from URL', { url });
         const result = await this.contentAnalyzer.analyzeContentStyle(url, options);
-        
+
         if (result.success) {
           // Format guidelines for easier use
           const formattedGuidelines = this.formatContentGuidelines(result.guidelines);
@@ -78,16 +78,16 @@ class SmartExport {
             url: url,
             content: result.content,
             guidelines: formattedGuidelines,
-            rawGuidelines: result.guidelines
+            rawGuidelines: result.guidelines,
           };
         } else {
           return result;
         }
       } catch (error) {
-        log.error('app', 'Content guideline extraction error', { error: error.message || error })
+        log.error('app', 'Content guideline extraction error', { error: error.message || error });
         return {
           success: false,
-          error: error.message
+          error: error.message,
         };
       }
     });
@@ -95,22 +95,22 @@ class SmartExport {
     ipcMain.handle('smart-export:generate-with-guidelines', async (event, data) => {
       try {
         const { template, guidelines, userContent } = data;
-        
+
         // Generate content that follows the extracted guidelines
         const enhancedPrompt = this.buildEnhancedPrompt(template, guidelines, userContent);
-        
+
         // Here you would integrate with your AI service
         // For now, return a structured response
         return {
           success: true,
           content: enhancedPrompt,
-          appliedGuidelines: guidelines
+          appliedGuidelines: guidelines,
         };
       } catch (error) {
-        log.error('app', 'Generation with guidelines error', { error: error.message || error })
+        log.error('app', 'Generation with guidelines error', { error: error.message || error });
         return {
           success: false,
-          error: error.message
+          error: error.message,
         };
       }
     });
@@ -122,20 +122,20 @@ class SmartExport {
       formatting: [],
       terminology: [],
       structure: [],
-      citations: []
+      citations: [],
     };
 
     // Format tone guidelines
     if (guidelines.tone && guidelines.tone.length > 0) {
-      formatted.tone = guidelines.tone.map(g => ({
+      formatted.tone = guidelines.tone.map((g) => ({
         rule: g.type === 'tone' ? `Use ${g.value} tone` : `Use ${g.value}`,
-        confidence: g.confidence
+        confidence: g.confidence,
       }));
     }
 
     // Format formatting guidelines
     if (guidelines.formatting && guidelines.formatting.length > 0) {
-      formatted.formatting = guidelines.formatting.map(g => {
+      formatted.formatting = guidelines.formatting.map((g) => {
         let rule = '';
         switch (g.type) {
           case 'heading-case':
@@ -160,39 +160,37 @@ class SmartExport {
     // Format terminology
     if (guidelines.terminology && guidelines.terminology.length > 0) {
       formatted.terminology = guidelines.terminology
-        .filter(t => t.term)
-        .map(t => ({
+        .filter((t) => t.term)
+        .map((t) => ({
           term: t.term,
           usage: `Use consistently (appears ${t.frequency || 0} times)`,
-          confidence: t.confidence
+          confidence: t.confidence,
         }));
     }
 
     // Format structure guidelines
     if (guidelines.structure && guidelines.structure.length > 0) {
-      formatted.structure = guidelines.structure.map(g => ({
-        rule: g.type === 'section' ? 
-          `Include ${g.value} section` : 
-          `Use ${g.value} document structure`,
-        confidence: g.confidence
+      formatted.structure = guidelines.structure.map((g) => ({
+        rule: g.type === 'section' ? `Include ${g.value} section` : `Use ${g.value} document structure`,
+        confidence: g.confidence,
       }));
     }
 
     // Format citation guidelines
     if (guidelines.citations && guidelines.citations.length > 0) {
-      const citationStyle = guidelines.citations.find(c => c.style);
+      const citationStyle = guidelines.citations.find((c) => c.style);
       if (citationStyle) {
         formatted.citations.push({
           rule: `Use ${citationStyle.style.toUpperCase()} citation style`,
-          confidence: citationStyle.confidence
+          confidence: citationStyle.confidence,
         });
       }
-      
-      const hasRefs = guidelines.citations.find(c => c.hasReferences);
+
+      const hasRefs = guidelines.citations.find((c) => c.hasReferences);
       if (hasRefs) {
         formatted.citations.push({
           rule: `Include ${hasRefs.heading} section`,
-          confidence: hasRefs.confidence
+          confidence: hasRefs.confidence,
         });
       }
     }
@@ -202,58 +200,58 @@ class SmartExport {
 
   buildEnhancedPrompt(template, guidelines, userContent) {
     let prompt = `Generate content for: ${template.name}\n\n`;
-    
+
     // Add style guidelines
-    prompt += "Please follow these style guidelines:\n\n";
-    
+    prompt += 'Please follow these style guidelines:\n\n';
+
     if (guidelines.tone && guidelines.tone.length > 0) {
-      prompt += "TONE AND VOICE:\n";
-      guidelines.tone.forEach(g => {
+      prompt += 'TONE AND VOICE:\n';
+      guidelines.tone.forEach((g) => {
         prompt += `- ${g.rule}\n`;
       });
-      prompt += "\n";
+      prompt += '\n';
     }
-    
+
     if (guidelines.formatting && guidelines.formatting.length > 0) {
-      prompt += "FORMATTING:\n";
-      guidelines.formatting.forEach(g => {
+      prompt += 'FORMATTING:\n';
+      guidelines.formatting.forEach((g) => {
         prompt += `- ${g.rule}\n`;
       });
-      prompt += "\n";
+      prompt += '\n';
     }
-    
+
     if (guidelines.terminology && guidelines.terminology.length > 0) {
-      prompt += "TERMINOLOGY:\n";
-      guidelines.terminology.forEach(g => {
+      prompt += 'TERMINOLOGY:\n';
+      guidelines.terminology.forEach((g) => {
         prompt += `- "${g.term}": ${g.usage}\n`;
       });
-      prompt += "\n";
+      prompt += '\n';
     }
-    
+
     if (guidelines.structure && guidelines.structure.length > 0) {
-      prompt += "DOCUMENT STRUCTURE:\n";
-      guidelines.structure.forEach(g => {
+      prompt += 'DOCUMENT STRUCTURE:\n';
+      guidelines.structure.forEach((g) => {
         prompt += `- ${g.rule}\n`;
       });
-      prompt += "\n";
+      prompt += '\n';
     }
-    
+
     if (guidelines.citations && guidelines.citations.length > 0) {
-      prompt += "CITATIONS:\n";
-      guidelines.citations.forEach(g => {
+      prompt += 'CITATIONS:\n';
+      guidelines.citations.forEach((g) => {
         prompt += `- ${g.rule}\n`;
       });
-      prompt += "\n";
+      prompt += '\n';
     }
-    
+
     // Add user content
-    prompt += "USER CONTENT:\n";
-    prompt += userContent + "\n\n";
-    
+    prompt += 'USER CONTENT:\n';
+    prompt += userContent + '\n\n';
+
     // Add template-specific instructions
-    prompt += "TEMPLATE REQUIREMENTS:\n";
+    prompt += 'TEMPLATE REQUIREMENTS:\n';
     prompt += JSON.stringify(template, null, 2);
-    
+
     return prompt;
   }
 
@@ -267,94 +265,104 @@ class SmartExport {
   async generateSmartExport(space, items, options = {}) {
     // Check content size and handle large spaces
     const processedItems = this.preprocessItems(items);
-    
+
     // Log image items to debug
-    const imageItems = processedItems.filter(item => 
-      item.type === 'image' || (item.type === 'file' && item.fileType === 'image')
+    const imageItems = processedItems.filter(
+      (item) => item.type === 'image' || (item.type === 'file' && item.fileType === 'image')
     );
-    log.info('app', 'Image items after processing', { detail: imageItems.map(item => ({ id: item.id,
-      type: item.type,
-      content: item.content,
-      imagePath: item.imagePath,
-      imageDataUrl: item.imageDataUrl,
-      hasOriginalDataUrl: !!item.originalDataUrl,
-      fileName: item.metadata?.filename || item.fileName })) })
-    
+    log.info('app', 'Image items after processing', {
+      detail: imageItems.map((item) => ({
+        id: item.id,
+        type: item.type,
+        content: item.content,
+        imagePath: item.imagePath,
+        imageDataUrl: item.imageDataUrl,
+        hasOriginalDataUrl: !!item.originalDataUrl,
+        fileName: item.metadata?.filename || item.fileName,
+      })),
+    });
+
     // Prepare the content for Claude
     const prompt = this.buildPrompt(space, processedItems, options);
-    
+
     // Estimate tokens
     const estimatedTokens = this.estimateTokens(prompt);
-    log.info('app', 'Prompt size: ... characters, estimated ... tokens', { promptCount: prompt.length, estimatedTokens })
-    
+    log.info('app', 'Prompt size: ... characters, estimated ... tokens', {
+      promptCount: prompt.length,
+      estimatedTokens,
+    });
+
     if (estimatedTokens > this.MAX_TOKENS) {
-      log.warn('app', 'Content too large (... tokens). Using summarized version.', { estimatedTokens })
+      log.warn('app', 'Content too large (... tokens). Using summarized version.', { estimatedTokens });
       // Further reduce content if still too large
       const summaryItems = this.createSummaryItems(processedItems);
       return this.generateSmartExport(space, summaryItems, { ...options, isSummary: true });
     }
-    
+
     // Get Claude 4 specific settings
-    const thinkingMode = this.settingsManager.getClaude4ThinkingMode();
+    const _thinkingMode = this.settingsManager.getClaude4ThinkingMode();
     const thinkingLevel = this.settingsManager.getClaude4ThinkingLevel();
-    
+
     // Enhance prompt based on thinking level
     const enhancedPrompt = this.enhancePromptForThinkingLevel(prompt, thinkingLevel);
-    
+
     try {
       const result = await ai.chat({
-        profile: 'powerful',  // smart export uses powerful models for document generation
+        profile: 'powerful', // smart export uses powerful models for document generation
         messages: [{ role: 'user', content: enhancedPrompt }],
         maxTokens: 8000,
         temperature: 0.3,
         feature: 'smart-export',
       });
 
-      log.info('app', 'AI service response structure', { detail: { model: result.model,
-        provider: result.provider,
-        contentLength: result.content?.length || 0,
-        cost: result.cost || 0,
-        usedFallback: result.usedFallback || false
-      } })
-      
+      log.info('app', 'AI service response structure', {
+        detail: {
+          model: result.model,
+          provider: result.provider,
+          contentLength: result.content?.length || 0,
+          cost: result.cost || 0,
+          usedFallback: result.usedFallback || false,
+        },
+      });
+
       // Response content is always in result.content
       let htmlContent = result.content || '';
-      
+
       if (!htmlContent) {
         throw new Error('No HTML content generated');
       }
-      
+
       // Remove markdown code block formatting if present
       // Claude sometimes wraps HTML in ```html ... ``` blocks
       htmlContent = htmlContent.trim();
-      
+
       // Check for markdown code blocks with various formats
       const codeBlockRegex = /^```(?:html|HTML)?\s*\n([\s\S]*?)\n?```\s*$/;
       const match = htmlContent.match(codeBlockRegex);
-      
+
       if (match) {
-        log.info('app', 'Stripping markdown code block formatting from HTML')
+        log.info('app', 'Stripping markdown code block formatting from HTML');
         htmlContent = match[1].trim();
       } else if (htmlContent.startsWith('```') && htmlContent.includes('```')) {
         // Fallback for any other code block format
-        log.info('app', 'Stripping generic code block formatting from HTML')
+        log.info('app', 'Stripping generic code block formatting from HTML');
         const start = htmlContent.indexOf('\n') + 1;
         const end = htmlContent.lastIndexOf('```');
         if (start > 0 && end > start) {
           htmlContent = htmlContent.slice(start, end).trim();
         }
       }
-      
+
       // Extract thinking summary if available (ai-service doesn't expose this yet)
       let thinkingSummary = null;
       // Note: thinking_summary is not currently exposed by ai-service
       // This would need to be added to the adapter if needed
 
       // Post-process HTML to inject data URLs back
-      log.info('app', 'HTML before post-processing length', { htmlContentCount: htmlContent.length })
+      log.info('app', 'HTML before post-processing length', { htmlContentCount: htmlContent.length });
       const finalHTML = this.postProcessHTML(htmlContent, processedItems);
-      log.info('app', 'HTML after post-processing length', { finalHTMLCount: finalHTML.length })
-      
+      log.info('app', 'HTML after post-processing length', { finalHTMLCount: finalHTML.length });
+
       return {
         html: finalHTML,
         thinkingSummary,
@@ -366,11 +374,11 @@ class SmartExport {
           spaceName: space.name,
           isSummary: options.isSummary || false,
           cost: result.cost || 0,
-          usedFallback: result.usedFallback || false
-        }
+          usedFallback: result.usedFallback || false,
+        },
       };
     } catch (error) {
-      log.error('app', 'Error generating smart export', { error: error.message || error })
+      log.error('app', 'Error generating smart export', { error: error.message || error });
       throw error;
     }
   }
@@ -382,25 +390,26 @@ class SmartExport {
    */
   preprocessItems(items) {
     // Sort by timestamp (newest first)
-    const sortedItems = [...items].sort((a, b) => 
-      new Date(b.timestamp || 0) - new Date(a.timestamp || 0)
-    );
+    const sortedItems = [...items].sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
 
     // Take only the most recent items if there are too many
     if (sortedItems.length > this.MAX_ITEMS_PER_REQUEST) {
-      log.info('app', 'Limiting to ... most recent items out of ...', { MAX_ITEMS_PER_REQUEST: this.MAX_ITEMS_PER_REQUEST, sortedItemsCount: sortedItems.length })
+      log.info('app', 'Limiting to ... most recent items out of ...', {
+        MAX_ITEMS_PER_REQUEST: this.MAX_ITEMS_PER_REQUEST,
+        sortedItemsCount: sortedItems.length,
+      });
       return sortedItems.slice(0, this.MAX_ITEMS_PER_REQUEST);
     }
 
     // Clean items - remove binary data and truncate long content
-    return sortedItems.map(item => {
+    return sortedItems.map((item) => {
       const cleanedItem = { ...item };
-      
+
       // Handle different types of content
       if (item.type === 'image' || (item.type === 'file' && item.fileType === 'image')) {
         // For images, preserve the path/URL but remove binary data
         cleanedItem.content = `[Image: ${item.metadata?.filename || 'Untitled'}]`;
-        
+
         // Preserve image source information
         if (item.filePath) {
           // Convert absolute path to file:// URL for HTML (cross-platform)
@@ -420,12 +429,12 @@ class SmartExport {
           cleanedItem.imageDataUrl = '[DATA_URL_PLACEHOLDER]';
           cleanedItem.originalDataUrl = item.imageData;
         }
-        
+
         // Keep dimensions and other metadata
         if (item.metadata?.dimensions) {
           cleanedItem.dimensions = item.metadata.dimensions;
         }
-        
+
         delete cleanedItem.imageData;
         delete cleanedItem.base64;
         delete cleanedItem.dataUrl;
@@ -445,13 +454,13 @@ class SmartExport {
           cleanedItem.wasTruncated = true;
         }
       }
-      
+
       // Remove any fields that might contain binary data
       const binaryFields = ['imageData', 'fileData', 'base64', 'dataUrl', 'buffer', 'blob'];
-      binaryFields.forEach(field => {
+      binaryFields.forEach((field) => {
         delete cleanedItem[field];
       });
-      
+
       return cleanedItem;
     });
   }
@@ -463,9 +472,9 @@ class SmartExport {
    */
   createSummaryItems(items) {
     const itemsByType = {};
-    
+
     // Group items by type
-    items.forEach(item => {
+    items.forEach((item) => {
       const type = item.type || 'text';
       if (!itemsByType[type]) {
         itemsByType[type] = [];
@@ -475,11 +484,11 @@ class SmartExport {
 
     // Create summary items for each type
     const summaryItems = [];
-    
+
     Object.entries(itemsByType).forEach(([type, typeItems]) => {
       // Take only first 10 items of each type
       const samples = typeItems.slice(0, 10);
-      
+
       summaryItems.push({
         id: `summary-${type}`,
         type: 'summary',
@@ -487,19 +496,19 @@ class SmartExport {
         metadata: {
           originalType: type,
           totalCount: typeItems.length,
-          sampleCount: samples.length
+          sampleCount: samples.length,
         },
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
 
       // Add the sample items with cleaned content
-      samples.forEach(item => {
+      samples.forEach((item) => {
         const cleanedItem = { ...item };
-        
+
         // Apply same cleaning logic as preprocessItems
         if (item.type === 'image' || (item.type === 'file' && item.fileType === 'image')) {
           cleanedItem.content = `[Image: ${item.metadata?.filename || 'Untitled'}]`;
-          
+
           // Preserve image source information (cross-platform)
           if (item.filePath) {
             cleanedItem.imagePath = pathToFileURL(item.filePath).href;
@@ -515,11 +524,11 @@ class SmartExport {
             cleanedItem.imageDataUrl = '[DATA_URL_PLACEHOLDER]';
             cleanedItem.originalDataUrl = item.imageData;
           }
-          
+
           if (item.metadata?.dimensions) {
             cleanedItem.dimensions = item.metadata.dimensions;
           }
-          
+
           delete cleanedItem.imageData;
           delete cleanedItem.base64;
           delete cleanedItem.dataUrl;
@@ -535,13 +544,13 @@ class SmartExport {
             cleanedItem.content = item.content.substring(0, 1000) + (item.content.length > 1000 ? '...' : '');
           }
         }
-        
+
         // Remove binary fields
         const binaryFields = ['imageData', 'fileData', 'base64', 'dataUrl', 'buffer', 'blob'];
-        binaryFields.forEach(field => {
+        binaryFields.forEach((field) => {
           delete cleanedItem[field];
         });
-        
+
         summaryItems.push(cleanedItem);
       });
     });
@@ -561,22 +570,23 @@ class SmartExport {
   buildPrompt(space, items, options) {
     // Group items by type
     const itemsByType = this.groupItemsByType(items);
-    
-    const summaryNote = options.isSummary ? 
-      '\nNOTE: This is a SUMMARIZED export due to size constraints. Not all items are included.\n' : '';
-    
+
+    const summaryNote = options.isSummary
+      ? '\nNOTE: This is a SUMMARIZED export due to size constraints. Not all items are included.\n'
+      : '';
+
     // Check if a template is provided
     if (options.template) {
       const template = options.template;
-      
+
       // Build template-specific prompt
       let templatePrompt = template.prompt || '';
-      
+
       // Add template-specific system context
       if (template.systemPrompt) {
         templatePrompt = template.systemPrompt + '\n\n' + templatePrompt;
       }
-      
+
       // Add space and items information
       templatePrompt += `\n\nCONTENT TO FORMAT:
 ${summaryNote}
@@ -587,21 +597,27 @@ SPACE INFORMATION:
 - Total Items: ${items.length}
 
 ITEMS BY TYPE:
-${Object.entries(itemsByType).map(([type, count]) => `- ${type}: ${count} items`).join('\n')}
+${Object.entries(itemsByType)
+  .map(([type, count]) => `- ${type}: ${count} items`)
+  .join('\n')}
 
 ITEMS:
-${JSON.stringify(items.map(item => ({
-  id: item.id,
-  type: item.type,
-  content: item.content || item.text,
-  metadata: item.metadata,
-  timestamp: item.timestamp,
-  tags: item.tags,
-  wasTruncated: item.wasTruncated || false,
-  imagePath: item.imagePath,
-  imageDataUrl: item.imageDataUrl,
-  dimensions: item.dimensions
-})), null, 2)}`;
+${JSON.stringify(
+  items.map((item) => ({
+    id: item.id,
+    type: item.type,
+    content: item.content || item.text,
+    metadata: item.metadata,
+    timestamp: item.timestamp,
+    tags: item.tags,
+    wasTruncated: item.wasTruncated || false,
+    imagePath: item.imagePath,
+    imageDataUrl: item.imageDataUrl,
+    dimensions: item.dimensions,
+  })),
+  null,
+  2
+)}`;
 
       // Add styling requirements with COMPLETE CSS
       templatePrompt += `\n\nIMPORTANT STYLING REQUIREMENTS:
@@ -664,13 +680,13 @@ DESIGN PRINCIPLES:
 - Maintain generous white space
 - Use subtle gray lines (#D4D4D4)
 - Keep the design minimal and sophisticated`;
-      
+
       // Add example if provided
       if (template.example) {
         templatePrompt += `\n\nEXAMPLE STRUCTURE:
 ${JSON.stringify(template.example, null, 2)}`;
       }
-      
+
       templatePrompt += `\n\nOUTPUT FORMAT:
 1. Return ONLY the complete HTML document - do NOT wrap it in markdown code blocks or any other formatting
 2. Include the COMPLETE CSS from above in the <style> tag (don't summarize or shorten it)
@@ -679,10 +695,10 @@ ${JSON.stringify(template.example, null, 2)}`;
 5. ALWAYS wrap the main content in a div with class="smart-export-document"
 6. The document must be self-contained and portable with all styles embedded
 7. Start directly with <!DOCTYPE html> or <html> - no markdown formatting`;
-      
+
       return templatePrompt;
     }
-    
+
     // Default prompt (no template) - UPDATED
     const prompt = `You are an expert document formatter. Create a beautiful, well-organized HTML document for a knowledge space export using a sophisticated journey map design aesthetic.
 ${summaryNote}
@@ -693,21 +709,27 @@ SPACE INFORMATION:
 - Total Items: ${items.length}
 
 ITEMS BY TYPE:
-${Object.entries(itemsByType).map(([type, count]) => `- ${type}: ${count} items`).join('\n')}
+${Object.entries(itemsByType)
+  .map(([type, count]) => `- ${type}: ${count} items`)
+  .join('\n')}
 
 ITEMS TO FORMAT:
-${JSON.stringify(items.map(item => ({
-  id: item.id,
-  type: item.type,
-  content: item.content || item.text,
-  metadata: item.metadata,
-  timestamp: item.timestamp,
-  tags: item.tags,
-  wasTruncated: item.wasTruncated || false,
-  imagePath: item.imagePath,
-  imageDataUrl: item.imageDataUrl,
-  dimensions: item.dimensions
-})), null, 2)}
+${JSON.stringify(
+  items.map((item) => ({
+    id: item.id,
+    type: item.type,
+    content: item.content || item.text,
+    metadata: item.metadata,
+    timestamp: item.timestamp,
+    tags: item.tags,
+    wasTruncated: item.wasTruncated || false,
+    imagePath: item.imagePath,
+    imageDataUrl: item.imageDataUrl,
+    dimensions: item.dimensions,
+  })),
+  null,
+  2
+)}
 
 REQUIREMENTS:
 1. Use the CSS classes from the complete style guide below
@@ -806,7 +828,7 @@ OUTPUT FORMAT:
 
   groupItemsByType(items) {
     const groups = {};
-    items.forEach(item => {
+    items.forEach((item) => {
       const type = item.type || 'text';
       groups[type] = (groups[type] || 0) + 1;
     });
@@ -821,20 +843,20 @@ OUTPUT FORMAT:
    */
   postProcessHTML(html, items) {
     let processedHTML = html;
-    
-    log.info('app', 'Post-processing HTML for', { arg1: items.length, arg2: 'items' })
-    
+
+    log.info('app', 'Post-processing HTML for', { arg1: items.length, arg2: 'items' });
+
     // Count images that need data URL injection
-    const imagesToInject = items.filter(item => item.originalDataUrl);
-    log.info('app', 'Images needing data URL injection', { imagesToInjectCount: imagesToInject.length })
-    
+    const imagesToInject = items.filter((item) => item.originalDataUrl);
+    log.info('app', 'Images needing data URL injection', { imagesToInjectCount: imagesToInject.length });
+
     // Inject data URLs back for images that had them
-    items.forEach(item => {
+    items.forEach((item) => {
       if (item.originalDataUrl) {
-        log.info('app', 'Processing image', { arg1: item.id, arg2: item.metadata?.filename || item.fileName })
+        log.info('app', 'Processing image', { arg1: item.id, arg2: item.metadata?.filename || item.fileName });
         // Create patterns to find image references
         const patterns = [];
-        
+
         // If item has an ID, look for it
         if (item.id) {
           patterns.push(
@@ -844,7 +866,7 @@ OUTPUT FORMAT:
             new RegExp(`<img[^>]*alt="[^"]*\\b${item.id}\\b[^"]*"[^>]*>`, 'gi')
           );
         }
-        
+
         // If item has filename, look for it
         if (item.metadata?.filename || item.fileName) {
           const filename = item.metadata?.filename || item.fileName;
@@ -856,26 +878,23 @@ OUTPUT FORMAT:
             new RegExp(`<img[^>]*title="[^"]*${escapedFilename}[^"]*"[^>]*>`, 'gi')
           );
         }
-        
+
         // Look for placeholder text
-        patterns.push(
-          new RegExp(`\\[DATA_URL_PLACEHOLDER\\]`, 'g'),
-          new RegExp(`src="[^"]*placeholder[^"]*"`, 'gi')
-        );
-        
-        patterns.forEach(pattern => {
+        patterns.push(new RegExp(`\\[DATA_URL_PLACEHOLDER\\]`, 'g'), new RegExp(`src="[^"]*placeholder[^"]*"`, 'gi'));
+
+        patterns.forEach((pattern) => {
           const matches = processedHTML.match(pattern);
           if (matches) {
-            log.info('app', 'Found matches for pattern', { pattern, arg2: 'Matches:', matchesCount: matches.length })
+            log.info('app', 'Found matches for pattern', { pattern, arg2: 'Matches:', matchesCount: matches.length });
           }
-          
+
           processedHTML = processedHTML.replace(pattern, (match) => {
-            log.info('app', 'Replacing match', { detail: match.substring(0, 100) + '...' })
-            
+            log.info('app', 'Replacing match', { detail: match.substring(0, 100) + '...' });
+
             // For img tags, always replace the src if we have a data URL
             if (match.includes('<img') && match.includes('src=')) {
               const replaced = match.replace(/src="[^"]*"/, `src="${item.originalDataUrl}"`);
-              log.info('app', 'Replaced with', { detail: replaced.substring(0, 100) + '...' })
+              log.info('app', 'Replaced with', { detail: replaced.substring(0, 100) + '...' });
               return replaced;
             } else if (match === '[DATA_URL_PLACEHOLDER]') {
               return item.originalDataUrl;
@@ -885,9 +904,9 @@ OUTPUT FORMAT:
         });
       }
     });
-    
+
     return processedHTML;
   }
 }
 
-module.exports = SmartExport; 
+module.exports = SmartExport;

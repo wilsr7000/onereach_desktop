@@ -8,56 +8,56 @@ class TutorialsManager {
     this.loading = true;
     this.error = null;
   }
-  
+
   async init() {
     try {
       console.log('[Tutorials] Initializing...');
       this.showLoadingState();
-      
+
       // Get current user
       const userResult = await window.api.invoke('get-current-user');
       if (userResult.success) {
         this.currentUser = userResult.data;
         console.log('[Tutorials] Current user:', this.currentUser);
       }
-      
+
       // Fetch lessons for the user
       await this.fetchLessons();
-      
+
       // Setup event listeners
       this.setupEventListeners();
-      
+
       // Initial render
       this.renderContent();
-      
+
       this.hideLoadingState();
     } catch (error) {
       console.error('[Tutorials] Initialization error:', error);
       this.showError(error.message);
     }
   }
-  
+
   async fetchLessons() {
     try {
       console.log('[Tutorials] Fetching lessons...');
       const result = await window.api.invoke('fetch-user-lessons', this.currentUser?.id);
-      
+
       // Debug: Raw API result
-      
+
       if (result.success) {
         this.lessonsData = result.data;
-      // Validate data structure
-      const validation = {
-        hasUser: !!this.lessonsData.user,
-        hasFeatured: !!this.lessonsData.featured,
-        hasCategories: !!this.lessonsData.categories,
-        featuredCount: this.lessonsData.featured?.length || 0,
-        categoryCount: Object.keys(this.lessonsData.categories || {}).length
-      };
-        
+        // Validate data structure
+        const _validation = {
+          hasUser: !!this.lessonsData.user,
+          hasFeatured: !!this.lessonsData.featured,
+          hasCategories: !!this.lessonsData.categories,
+          featuredCount: this.lessonsData.featured?.length || 0,
+          categoryCount: Object.keys(this.lessonsData.categories || {}).length,
+        };
+
         // Validate required fields
         if (!this.lessonsData.user || !this.lessonsData.featured || !this.lessonsData.categories) {
-        console.warn('[Tutorials] Missing required fields in API response:', Object.keys(this.lessonsData));
+          console.warn('[Tutorials] Missing required fields in API response:', Object.keys(this.lessonsData));
         }
       } else {
         throw new Error(result.error || 'Failed to fetch lessons');
@@ -68,21 +68,21 @@ class TutorialsManager {
       throw error;
     }
   }
-  
+
   showLoadingState() {
     const loadingOverlay = document.getElementById('loadingOverlay');
     if (loadingOverlay) {
       loadingOverlay.style.display = 'flex';
     }
   }
-  
+
   hideLoadingState() {
     const loadingOverlay = document.getElementById('loadingOverlay');
     if (loadingOverlay) {
       loadingOverlay.style.display = 'none';
     }
   }
-  
+
   showError(message) {
     const errorContainer = document.getElementById('errorContainer');
     if (errorContainer) {
@@ -99,24 +99,24 @@ class TutorialsManager {
     }
     this.hideLoadingState();
   }
-  
+
   renderContent() {
     if (!this.lessonsData) {
       console.error('[Tutorials] No lessons data to render');
       this.showError('No lesson data available. Please try refreshing the page.');
       return;
     }
-    
+
     try {
       // Update user progress display
       this.renderUserProgress();
-      
+
       // Render featured carousel
       this.renderFeaturedCarousel();
-      
+
       // Render category sections
       this.renderCategorySections();
-      
+
       // Update navigation items based on available categories
       this.updateNavigation();
     } catch (error) {
@@ -124,7 +124,7 @@ class TutorialsManager {
       this.showError(`Failed to display content: ${error.message}`);
     }
   }
-  
+
   renderUserProgress() {
     const heroSubtitle = document.querySelector('.hero-subtitle');
     if (heroSubtitle && this.lessonsData.user) {
@@ -139,12 +139,14 @@ class TutorialsManager {
       }
     }
   }
-  
+
   renderFeaturedCarousel() {
     const carousel = document.querySelector('.feature-carousel');
     if (!carousel || !this.lessonsData.featured) return;
-    
-    carousel.innerHTML = this.lessonsData.featured.map(feature => `
+
+    carousel.innerHTML = this.lessonsData.featured
+      .map(
+        (feature) => `
       <div class="feature-card" 
            style="background: linear-gradient(135deg, ${feature.thumbnail.colors.join(', ')});"
            data-url="${feature.url}"
@@ -161,20 +163,22 @@ class TutorialsManager {
           <p class="feature-description">${feature.description}</p>
         </div>
       </div>
-    `).join('');
-    
+    `
+      )
+      .join('');
+
     // Add click handlers
-    carousel.querySelectorAll('.feature-card').forEach(card => {
+    carousel.querySelectorAll('.feature-card').forEach((card) => {
       card.addEventListener('click', () => this.openLesson(card.dataset.url, card.dataset.id));
     });
   }
-  
+
   renderCategorySections() {
     const container = document.getElementById('contentSections');
     if (!container || !this.lessonsData.categories) return;
-    
+
     container.innerHTML = '';
-    
+
     // Render "Continue Watching" section if there are in-progress lessons
     if (this.lessonsData.continueWatching && this.lessonsData.continueWatching.length > 0) {
       const continueSection = this.renderContinueWatchingSection();
@@ -182,7 +186,7 @@ class TutorialsManager {
         container.appendChild(continueSection);
       }
     }
-    
+
     // Render each category
     Object.entries(this.lessonsData.categories).forEach(([categoryKey, category]) => {
       const section = this.renderCategorySection(categoryKey, category);
@@ -191,66 +195,66 @@ class TutorialsManager {
       }
     });
   }
-  
+
   renderContinueWatchingSection() {
     const continueIds = this.lessonsData.continueWatching;
     const continueLessons = [];
-    
+
     // Find lessons from continueWatching IDs
-    Object.values(this.lessonsData.categories).forEach(category => {
-      category.lessons.forEach(lesson => {
+    Object.values(this.lessonsData.categories).forEach((category) => {
+      category.lessons.forEach((lesson) => {
         if (continueIds.includes(lesson.id)) {
           continueLessons.push(lesson);
         }
       });
     });
-    
+
     if (continueLessons.length === 0) return null;
-    
+
     const section = document.createElement('div');
     section.className = 'content-section';
     section.dataset.category = 'continue';
-    
+
     section.innerHTML = `
       <h2 class="section-title">Continue Watching</h2>
       <div class="tutorial-grid">
-        ${continueLessons.map(lesson => this.renderLessonCard(lesson)).join('')}
+        ${continueLessons.map((lesson) => this.renderLessonCard(lesson)).join('')}
       </div>
     `;
-    
+
     // Add click handlers
-    section.querySelectorAll('.tutorial-card').forEach(card => {
+    section.querySelectorAll('.tutorial-card').forEach((card) => {
       card.addEventListener('click', () => this.openLesson(card.dataset.url, card.dataset.id));
     });
-    
+
     return section;
   }
-  
+
   renderCategorySection(categoryKey, category) {
     if (!category.lessons || category.lessons.length === 0) return null;
-    
+
     const section = document.createElement('div');
     section.className = 'content-section';
     section.dataset.category = categoryKey;
-    
+
     section.innerHTML = `
       <h2 class="section-title">${category.name}</h2>
       <div class="tutorial-grid">
-        ${category.lessons.map(lesson => this.renderLessonCard(lesson)).join('')}
+        ${category.lessons.map((lesson) => this.renderLessonCard(lesson)).join('')}
       </div>
     `;
-    
+
     // Add click handlers
-    section.querySelectorAll('.tutorial-card').forEach(card => {
+    section.querySelectorAll('.tutorial-card').forEach((card) => {
       card.addEventListener('click', () => this.openLesson(card.dataset.url, card.dataset.id));
     });
-    
+
     return section;
   }
-  
+
   renderLessonCard(lesson) {
     const gradientColors = lesson.thumbnail?.colors || ['#667eea', '#764ba2'];
-    
+
     return `
       <div class="tutorial-card" 
            data-category="${lesson.category || 'general'}" 
@@ -271,7 +275,7 @@ class TutorialsManager {
       </div>
     `;
   }
-  
+
   renderProgressBar(progress) {
     return `
       <div class="progress-bar" style="position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background: rgba(0,0,0,0.3);">
@@ -279,21 +283,21 @@ class TutorialsManager {
       </div>
     `;
   }
-  
+
   updateNavigation() {
     const navItems = document.querySelector('.nav-items');
     if (!navItems || !this.lessonsData.categories) return;
-    
+
     // Clear existing items
     navItems.innerHTML = '';
-    
+
     // Add "All" item
     const allItem = document.createElement('li');
     allItem.className = 'nav-item active';
     allItem.dataset.category = 'all';
     allItem.textContent = 'All';
     navItems.appendChild(allItem);
-    
+
     // Add "Continue" if there are in-progress lessons
     if (this.lessonsData.continueWatching && this.lessonsData.continueWatching.length > 0) {
       const continueItem = document.createElement('li');
@@ -302,7 +306,7 @@ class TutorialsManager {
       continueItem.textContent = 'Continue';
       navItems.appendChild(continueItem);
     }
-    
+
     // Add category items
     Object.entries(this.lessonsData.categories).forEach(([key, category]) => {
       if (category.lessons && category.lessons.length > 0) {
@@ -314,21 +318,21 @@ class TutorialsManager {
       }
     });
   }
-  
+
   setupEventListeners() {
     // Navigation filtering
     document.addEventListener('click', (e) => {
       if (e.target.classList.contains('nav-item')) {
         this.filterByCategory(e.target.dataset.category);
-        
+
         // Update active state
-        document.querySelectorAll('.nav-item').forEach(item => {
+        document.querySelectorAll('.nav-item').forEach((item) => {
           item.classList.remove('active');
         });
         e.target.classList.add('active');
       }
     });
-    
+
     // Refresh button
     const refreshBtn = document.getElementById('refreshBtn');
     if (refreshBtn) {
@@ -338,12 +342,12 @@ class TutorialsManager {
       });
     }
   }
-  
+
   filterByCategory(category) {
     this.currentFilter = category;
     const sections = document.querySelectorAll('.content-section');
-    
-    sections.forEach(section => {
+
+    sections.forEach((section) => {
       if (category === 'all') {
         section.style.display = 'block';
       } else if (category === 'continue' && section.dataset.category === 'continue') {
@@ -355,52 +359,52 @@ class TutorialsManager {
       }
     });
   }
-  
+
   async openLesson(url, lessonId) {
     // Find lesson details for comprehensive logging
     let lessonDetails = null;
-    
+
     // Search in featured lessons
-    const featuredLesson = this.lessonsData?.featured?.find(l => l.id === lessonId);
+    const featuredLesson = this.lessonsData?.featured?.find((l) => l.id === lessonId);
     if (featuredLesson) {
       lessonDetails = featuredLesson;
     } else {
       // Search in categories
-      for (const category in (this.lessonsData?.categories || {})) {
-        const lesson = this.lessonsData.categories[category].find(l => l.id === lessonId);
+      for (const category in this.lessonsData?.categories || {}) {
+        const lesson = this.lessonsData.categories[category].find((l) => l.id === lessonId);
         if (lesson) {
           lessonDetails = { ...lesson, category };
           break;
         }
       }
     }
-    
+
     // Log the lesson click with comprehensive details
     const logData = {
       action: 'lesson_clicked',
       lessonId: lessonId,
       url: url,
       title: lessonDetails?.title || 'Unknown',
-      category: lessonDetails?.category || 'Unknown', 
+      category: lessonDetails?.category || 'Unknown',
       difficulty: lessonDetails?.difficulty || 'Unknown',
       duration: lessonDetails?.duration || 'Unknown',
       timestamp: new Date().toISOString(),
       userProgress: this.lessonsData?.user?.progress || 0,
-      userLevel: this.lessonsData?.user?.level || 'Unknown'
+      userLevel: this.lessonsData?.user?.level || 'Unknown',
     };
-    
+
     console.log(`[Tutorials] Opening lesson:`, logData);
-    
+
     // Send log event to main process
     if (window.api) {
       await window.api.invoke('log-lesson-click', logData);
     }
-    
+
     // Track lesson start progress
     if (lessonId) {
       await window.api.invoke('update-lesson-progress', lessonId, 1);
     }
-    
+
     // Open the URL
     if (window.api) {
       window.api.send('open-external-url', url);

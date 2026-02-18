@@ -15,7 +15,7 @@ describe('UnifiedTaskQueue', () => {
   beforeEach(() => {
     queue = new UnifiedTaskQueue({
       defaultTimeout: 5000,
-      cleanupInterval: 60000
+      cleanupInterval: 60000,
     });
   });
 
@@ -27,7 +27,7 @@ describe('UnifiedTaskQueue', () => {
     it('should add a task to the queue', () => {
       const task = queue.add({
         description: 'Test task',
-        type: 'code_generation'
+        type: 'code_generation',
       });
 
       expect(task).toBeDefined();
@@ -176,9 +176,9 @@ describe('UnifiedTaskQueue', () => {
 
   describe('Query', () => {
     beforeEach(() => {
-      queue.add({ description: 'Task 1', agent: 'aider' });
-      queue.add({ description: 'Task 2', agent: 'evaluator' });
-      queue.add({ description: 'Task 3', agent: 'aider' });
+      queue.add({ description: 'Task 1', agent: 'aider', timestamp: '2024-01-01T00:00:01Z' });
+      queue.add({ description: 'Task 2', agent: 'evaluator', timestamp: '2024-01-01T00:00:02Z' });
+      queue.add({ description: 'Task 3', agent: 'aider', timestamp: '2024-01-01T00:00:03Z' });
     });
 
     it('should query by agent', () => {
@@ -203,7 +203,7 @@ describe('UnifiedTaskQueue', () => {
       const task = queue.add({
         description: 'Test task',
         undoable: true,
-        filesAffected: [{ path: 'test.js', before: 'old', after: 'new' }]
+        filesAffected: [{ path: 'test.js', before: 'old', after: 'new' }],
       });
       queue.complete(task.id);
 
@@ -236,5 +236,3 @@ describe('UnifiedTaskQueue', () => {
     });
   });
 });
-
-

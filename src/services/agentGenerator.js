@@ -1,7 +1,7 @@
 /**
  * Agent Generator
  * Part of the Governed Self-Improving Agent Runtime
- * 
+ *
  * Spawns evaluation agents based on document type
  */
 
@@ -16,44 +16,44 @@ const AGENT_CONFIGS = {
     { type: 'reviewer', icon: '🔍', perspective: 'Code quality and maintainability', weight: 1.1 },
     { type: 'security', icon: '🛡️', perspective: 'Security vulnerabilities and data protection', weight: 1.0 },
     { type: 'performance', icon: '⚡', perspective: 'Performance and optimization', weight: 0.9 },
-    { type: 'beginner', icon: '🎓', perspective: 'Readability for newcomers', weight: 0.8 }
+    { type: 'beginner', icon: '🎓', perspective: 'Readability for newcomers', weight: 0.8 },
   ],
   technical: [
     { type: 'expert', icon: '🧑‍🔬', perspective: 'Technical accuracy and completeness', weight: 1.1 },
     { type: 'implementer', icon: '🛠️', perspective: 'Practical implementation guidance', weight: 1.0 },
     { type: 'beginner', icon: '🎓', perspective: 'Clarity for newcomers', weight: 1.2 },
-    { type: 'writer', icon: '✍️', perspective: 'Writing quality and structure', weight: 1.0 }
+    { type: 'writer', icon: '✍️', perspective: 'Writing quality and structure', weight: 1.0 },
   ],
   recipe: [
     { type: 'chef', icon: '👨‍🍳', perspective: 'Culinary accuracy and technique', weight: 1.2 },
     { type: 'teacher', icon: '👩‍🏫', perspective: 'Clarity for beginners', weight: 1.1 },
     { type: 'homecook', icon: '🏠', perspective: 'Practicality and accessibility', weight: 1.0 },
     { type: 'safety', icon: '🛡️', perspective: 'Food safety and allergens', weight: 1.1 },
-    { type: 'nutritionist', icon: '🥗', perspective: 'Nutritional information', weight: 0.9 }
+    { type: 'nutritionist', icon: '🥗', perspective: 'Nutritional information', weight: 0.9 },
   ],
   creative: [
     { type: 'reader', icon: '📖', perspective: 'Reader engagement and enjoyment', weight: 1.1 },
     { type: 'editor', icon: '✏️', perspective: 'Grammar, style, and structure', weight: 1.0 },
     { type: 'critic', icon: '🎭', perspective: 'Literary merit and originality', weight: 0.9 },
-    { type: 'author', icon: '🖋️', perspective: 'Author intent and voice', weight: 1.0 }
+    { type: 'author', icon: '🖋️', perspective: 'Author intent and voice', weight: 1.0 },
   ],
   api: [
     { type: 'consumer', icon: '📱', perspective: 'Developer experience and usability', weight: 1.2 },
     { type: 'implementer', icon: '🛠️', perspective: 'Implementation feasibility', weight: 1.0 },
     { type: 'security', icon: '🛡️', perspective: 'API security and authentication', weight: 1.1 },
-    { type: 'documentation', icon: '📚', perspective: 'Documentation completeness', weight: 1.0 }
+    { type: 'documentation', icon: '📚', perspective: 'Documentation completeness', weight: 1.0 },
   ],
   test: [
     { type: 'tester', icon: '🧪', perspective: 'Test coverage and thoroughness', weight: 1.2 },
     { type: 'developer', icon: '👨‍💻', perspective: 'Code being tested', weight: 1.0 },
     { type: 'coverage', icon: '📊', perspective: 'Edge cases and coverage gaps', weight: 1.1 },
-    { type: 'maintainer', icon: '🔧', perspective: 'Test maintainability', weight: 0.9 }
+    { type: 'maintainer', icon: '🔧', perspective: 'Test maintainability', weight: 0.9 },
   ],
   config: [
     { type: 'devops', icon: '🔧', perspective: 'Configuration best practices', weight: 1.1 },
     { type: 'security', icon: '🛡️', perspective: 'Security of configuration', weight: 1.2 },
-    { type: 'developer', icon: '👨‍💻', perspective: 'Developer experience', weight: 1.0 }
-  ]
+    { type: 'developer', icon: '👨‍💻', perspective: 'Developer experience', weight: 1.0 },
+  ],
 };
 
 /**
@@ -66,22 +66,22 @@ const DEFAULT_CRITERIA = {
     { name: 'maintainability', weight: 0.2 },
     { name: 'security', weight: 0.15 },
     { name: 'performance', weight: 0.1 },
-    { name: 'testing', weight: 0.1 }
+    { name: 'testing', weight: 0.1 },
   ],
   technical: [
     { name: 'accuracy', weight: 0.25 },
     { name: 'clarity', weight: 0.25 },
     { name: 'completeness', weight: 0.2 },
     { name: 'structure', weight: 0.15 },
-    { name: 'examples', weight: 0.15 }
+    { name: 'examples', weight: 0.15 },
   ],
   recipe: [
     { name: 'accuracy', weight: 0.25 },
     { name: 'clarity', weight: 0.25 },
     { name: 'practicality', weight: 0.2 },
     { name: 'safety', weight: 0.15 },
-    { name: 'presentation', weight: 0.15 }
-  ]
+    { name: 'presentation', weight: 0.15 },
+  ],
 };
 
 /**
@@ -104,11 +104,7 @@ class AgentGenerator {
    * @returns {Object} Generated agents and context
    */
   async generateAgents(content, options = {}) {
-    const { 
-      filePath,
-      profile = 'standard',
-      forceDocumentType = null
-    } = options;
+    const { filePath, profile = 'standard', forceDocumentType = null } = options;
 
     // Detect document type
     let documentType = forceDocumentType;
@@ -130,15 +126,17 @@ class AgentGenerator {
     const selectedConfigs = await this.selectAgents(configs, {
       maxAgents,
       documentType,
-      profile
+      profile,
     });
 
     // Create agent instances
-    const agents = selectedConfigs.map((config, index) => this.createAgent(config, {
-      documentType,
-      content,
-      index
-    }));
+    const agents = selectedConfigs.map((config, index) =>
+      this.createAgent(config, {
+        documentType,
+        content,
+        index,
+      })
+    );
 
     // Get criteria for this document type
     const criteria = this.defaultCriteria[documentType] || this.defaultCriteria.code;
@@ -152,8 +150,8 @@ class AgentGenerator {
       metadata: {
         totalAvailable: configs.length,
         selected: agents.length,
-        selectionMethod: this.agentMemory ? 'adaptive' : 'profile'
-      }
+        selectionMethod: this.agentMemory ? 'adaptive' : 'profile',
+      },
     };
   }
 
@@ -164,7 +162,7 @@ class AgentGenerator {
    * @returns {Object[]} Selected configs
    */
   async selectAgents(configs, options) {
-    const { maxAgents, documentType, profile } = options;
+    const { maxAgents, documentType } = options;
 
     if (configs.length <= maxAgents) {
       return configs;
@@ -172,18 +170,18 @@ class AgentGenerator {
 
     // If we have agent memory, use adaptive selection
     if (this.agentMemory) {
-      const scored = configs.map(config => {
+      const scored = configs.map((config) => {
         const memory = this.agentMemory.getMemory(config.type);
         const contextPerf = memory?.contextPerformance?.[documentType];
-        
+
         return {
           config,
-          score: (contextPerf?.accuracy || memory?.overallAccuracy || 0.5) + config.weight
+          score: (contextPerf?.accuracy || memory?.overallAccuracy || 0.5) + config.weight,
         };
       });
 
       scored.sort((a, b) => b.score - a.score);
-      return scored.slice(0, maxAgents).map(s => s.config);
+      return scored.slice(0, maxAgents).map((s) => s.config);
     }
 
     // Otherwise, select by weight
@@ -206,18 +204,18 @@ class AgentGenerator {
       icon: config.icon,
       perspective: config.perspective,
       weight: config.weight,
-      
+
       // Evaluation configuration
       criteria: this.defaultCriteria[context.documentType] || [],
-      
+
       // Prompt template
       systemPrompt: this.generateSystemPrompt(config, context),
-      
+
       // Status
       status: 'ready',
-      
+
       // Results (populated after evaluation)
-      evaluation: null
+      evaluation: null,
     };
   }
 
@@ -309,5 +307,3 @@ module.exports = AgentGenerator;
 module.exports.AgentGenerator = AgentGenerator;
 module.exports.AGENT_CONFIGS = AGENT_CONFIGS;
 module.exports.DEFAULT_CRITERIA = DEFAULT_CRITERIA;
-
-

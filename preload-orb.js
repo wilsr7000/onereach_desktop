@@ -1,64 +1,64 @@
 /**
  * Preload script for Voice Orb floating window
- * 
+ *
  * Exposes APIs for:
  * - Real-time speech transcription (realtimeSpeech)
  * - Voice Task SDK (classification, actions)
  * - Window controls (drag, position)
  */
 
-const { contextBridge, ipcRenderer, clipboard } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 // Expose Orb API to renderer
 contextBridge.exposeInMainWorld('orbAPI', {
   // ==========================================================================
   // REALTIME SPEECH (from realtime-speech.js)
   // ==========================================================================
-  
+
   /**
    * Connect to OpenAI Realtime API
    * @returns {Promise<{success: boolean, error?: string}>}
    */
   connect: () => ipcRenderer.invoke('realtime-speech:connect'),
-  
+
   /**
    * Disconnect from the API
    * @returns {Promise<void>}
    */
   disconnect: () => ipcRenderer.invoke('realtime-speech:disconnect'),
-  
+
   /**
    * Check connection status
    * @returns {Promise<boolean>}
    */
   isConnected: () => ipcRenderer.invoke('realtime-speech:is-connected'),
-  
+
   /**
    * Send audio chunk (base64 encoded PCM16, 24kHz, mono)
    * @param {string} base64Audio
    * @returns {Promise<void>}
    */
   sendAudio: (base64Audio) => ipcRenderer.invoke('realtime-speech:send-audio', base64Audio),
-  
+
   /**
    * Commit audio buffer (signal end of speech)
    * @returns {Promise<void>}
    */
   commit: () => ipcRenderer.invoke('realtime-speech:commit'),
-  
+
   /**
    * Clear audio buffer
    * @returns {Promise<void>}
    */
   clear: () => ipcRenderer.invoke('realtime-speech:clear'),
-  
+
   /**
    * Cancel any in-progress AI response
    * Used when handling commands locally without AI conversation
    * @returns {Promise<{success: boolean}>}
    */
   cancelResponse: () => ipcRenderer.invoke('realtime-speech:cancel-response'),
-  
+
   /**
    * Listen for transcription events
    * Events: transcript_delta (partial), transcript (final), speech_started, speech_stopped, error
@@ -70,80 +70,80 @@ contextBridge.exposeInMainWorld('orbAPI', {
     ipcRenderer.on('realtime-speech:event', handler);
     return () => ipcRenderer.removeListener('realtime-speech:event', handler);
   },
-  
+
   /**
    * Request microphone permission
    * @returns {Promise<boolean>}
    */
   requestMicPermission: () => ipcRenderer.invoke('speech:request-mic-permission'),
-  
+
   // ==========================================================================
   // VOICE TASK SDK (classification, queuing, task management)
   // ==========================================================================
-  
+
   /**
-   * Submit transcript for classification and queuing
-   * @param {string} transcript
-   * @param {Object} options - { priority?: 1|2|3 }
-   * @returns {Promise<{transcript, action, params, confidence, queued, taskId, task}>}
+   * DEPRECATED: Use window.agentHUD.submitTask() instead (canonical pipeline).
+   * Kept as a stub for backward compatibility.
    */
-  submit: (transcript, options = {}) => 
-    ipcRenderer.invoke('voice-task-sdk:submit', transcript, options),
-  
+  submit: (transcript, _options = {}) => {
+    console.warn('[OrbAPI] orbAPI.submit() is deprecated - use window.agentHUD.submitTask()');
+    return Promise.resolve({ deprecated: true });
+  },
+
   /**
    * Get SDK status
    * @returns {Promise<{initialized: boolean, running: boolean, version: string}>}
    */
   getStatus: () => ipcRenderer.invoke('voice-task-sdk:status'),
-  
+
   /**
    * Get queue statistics
    * @param {string} queueName - Queue name (default: 'voice-commands')
    * @returns {Promise<{pending, running, completed, failed}>}
    */
   getQueueStats: (queueName) => ipcRenderer.invoke('voice-task-sdk:queue-stats', queueName),
-  
+
   /**
    * List all queues with stats
    * @returns {Promise<Array<Queue>>}
    */
   listQueues: () => ipcRenderer.invoke('voice-task-sdk:list-queues'),
-  
+
   /**
    * Get pending tasks in a queue
    * @param {string} queueName
    * @returns {Promise<Array<Task>>}
    */
   getPendingTasks: (queueName) => ipcRenderer.invoke('voice-task-sdk:pending-tasks', queueName),
-  
+
   /**
    * List all tasks (optionally filter by status/queue)
    * @param {Object} filter - { status?, queue?, action?, limit? }
    * @returns {Promise<Array<Task>>}
    */
   listTasks: (filter) => ipcRenderer.invoke('voice-task-sdk:list-tasks', filter),
-  
+
   /**
    * Cancel a running or pending task
    * @param {string} taskId
    * @returns {Promise<boolean>}
    */
   cancelTask: (taskId) => ipcRenderer.invoke('voice-task-sdk:cancel-task', taskId),
-  
+
   /**
    * Pause a queue
    * @param {string} queueName
    * @returns {Promise<boolean>}
    */
   pauseQueue: (queueName) => ipcRenderer.invoke('voice-task-sdk:pause-queue', queueName),
-  
+
   /**
    * Resume a paused queue
    * @param {string} queueName
    * @returns {Promise<boolean>}
    */
   resumeQueue: (queueName) => ipcRenderer.invoke('voice-task-sdk:resume-queue', queueName),
-  
+
   /**
    * Listen for task lifecycle events from SDK
    * Events: queued, started, completed, failed, retry, cancelled, deadletter
@@ -151,10 +151,18 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * @returns {Function} Unsubscribe function
    */
   onTaskEvent: (callback) => {
-    const events = ['voice-task:queued', 'voice-task:started', 'voice-task:completed', 
-                    'voice-task:failed', 'voice-task:retry', 'voice-task:cancelled', 
-                    'voice-task:deadletter', 'voice-task:progress', 'voice-task:needs-input'];
-    const handlers = events.map(event => {
+    const events = [
+      'voice-task:queued',
+      'voice-task:started',
+      'voice-task:completed',
+      'voice-task:failed',
+      'voice-task:retry',
+      'voice-task:cancelled',
+      'voice-task:deadletter',
+      'voice-task:progress',
+      'voice-task:needs-input',
+    ];
+    const handlers = events.map((event) => {
       const handler = (e, data) => callback({ type: event.replace('voice-task:', ''), ...data });
       ipcRenderer.on(event, handler);
       return { event, handler };
@@ -165,29 +173,29 @@ contextBridge.exposeInMainWorld('orbAPI', {
       });
     };
   },
-  
+
   // ==========================================================================
   // WINDOW CONTROLS
   // ==========================================================================
-  
+
   /**
    * Show the orb window
    * @returns {Promise<void>}
    */
   show: () => ipcRenderer.invoke('orb:show'),
-  
+
   /**
    * Hide the orb window
    * @returns {Promise<void>}
    */
   hide: () => ipcRenderer.invoke('orb:hide'),
-  
+
   /**
    * Toggle orb visibility
    * @returns {Promise<void>}
    */
   toggle: () => ipcRenderer.invoke('orb:toggle'),
-  
+
   /**
    * Set orb position
    * @param {number} x
@@ -195,7 +203,7 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * @returns {Promise<void>}
    */
   setPosition: (x, y) => ipcRenderer.invoke('orb:position', x, y),
-  
+
   /**
    * Flip the orb side within its window so the tooltip can appear on the opposite side.
    * Repositions the BrowserWindow so the orb stays visually anchored.
@@ -203,7 +211,14 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * @returns {Promise<void>}
    */
   flipSide: (side) => ipcRenderer.invoke('orb:flip-side', side),
-  
+
+  /**
+   * Get the display work area for the screen the orb is currently on.
+   * Used for multi-monitor aware left/right detection during drag.
+   * @returns {Promise<{ x: number, y: number, width: number, height: number }>}
+   */
+  getDisplayForOrb: () => ipcRenderer.invoke('orb:get-display'),
+
   /**
    * Listen for initial orb side from main process (sent after window loads).
    * @param {function} callback - Called with 'left' or 'right'
@@ -214,25 +229,35 @@ contextBridge.exposeInMainWorld('orbAPI', {
     ipcRenderer.on('orb:initial-side', handler);
     return () => ipcRenderer.removeListener('orb:initial-side', handler);
   },
-  
+
+  /**
+   * Resize window to specific dimensions, anchored at the orb corner.
+   * @param {number} width
+   * @param {number} height
+   * @param {string} anchor - 'bottom-right' or 'bottom-left'
+   * @returns {Promise<{width:number, height:number}>}
+   */
+  resizeWindow: (width, height, anchor = 'bottom-right') =>
+    ipcRenderer.invoke('orb:resize-window', { width, height, anchor }),
+
   /**
    * Expand window for text chat
    * @param {string} anchor - Which corner to anchor: 'bottom-right', 'bottom-left', 'top-right', 'top-left'
    * @returns {Promise<void>}
    */
   expandForChat: (anchor = 'bottom-right') => ipcRenderer.invoke('orb:expand-for-chat', anchor),
-  
+
   /**
    * Collapse window when text chat closes (restores to original position)
    * @returns {Promise<void>}
    */
   collapseFromChat: () => ipcRenderer.invoke('orb:collapse-from-chat'),
-  
+
   /**
    * Notify that orb was clicked (for panel expansion)
    */
   notifyClicked: () => ipcRenderer.send('orb:clicked'),
-  
+
   /**
    * Toggle OS-level click-through for transparent areas.
    * When true, clicks on transparent pixels pass through to windows behind.
@@ -246,18 +271,18 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * Open the app settings window
    */
   openSettings: () => ipcRenderer.send('open-settings'),
-  
+
   // ==========================================================================
   // TEXT-TO-SPEECH (OpenAI Realtime Voice)
   // ==========================================================================
-  
+
   /**
    * Speak text using OpenAI Realtime TTS (same connection as speech recognition)
    * @param {string} text - Text to speak
    * @returns {Promise<{success: boolean, error?: string}>}
    */
   speak: (text) => ipcRenderer.invoke('realtime-speech:speak', text),
-  
+
   /**
    * Respond to a function call with our agent's result
    * @param {string} callId - The function call ID
@@ -265,7 +290,7 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * @returns {Promise<{success: boolean, error?: string}>}
    */
   respondToFunction: (callId, result) => ipcRenderer.invoke('realtime-speech:respond-to-function', callId, result),
-  
+
   /**
    * Speak text using ElevenLabs TTS (fallback)
    * @param {string} text - Text to speak
@@ -273,44 +298,44 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * @returns {Promise<string|null>} Audio file path or null if failed
    */
   speakElevenLabs: (text, voice = 'Rachel') => ipcRenderer.invoke('voice:speak', text, voice),
-  
+
   /**
    * Check if TTS is available
    * @returns {Promise<{available: boolean}>}
    */
   isTTSAvailable: () => ipcRenderer.invoke('voice:is-available'),
-  
+
   // ==========================================================================
   // COMMAND HUD (task status display)
   // ==========================================================================
-  
+
   /**
    * Show the Command HUD with a task
    * @param {Object} task - Task object with action, params, status, etc.
    * @returns {Promise<void>}
    */
   showHUD: (task) => ipcRenderer.invoke('command-hud:show', task),
-  
+
   /**
    * Hide the Command HUD
    * @returns {Promise<void>}
    */
   hideHUD: () => ipcRenderer.invoke('command-hud:hide'),
-  
+
   /**
    * Update HUD with task status
    * @param {Object} task - Updated task object
    * @returns {Promise<void>}
    */
   updateHUD: (task) => ipcRenderer.invoke('command-hud:task', task),
-  
+
   /**
    * Send result to HUD
    * @param {Object} result - Result object with success, message, error
    * @returns {Promise<void>}
    */
   sendHUDResult: (result) => ipcRenderer.invoke('command-hud:result', result),
-  
+
   /**
    * Listen for HUD retry events
    * @param {Function} callback - Called when user clicks retry
@@ -321,22 +346,22 @@ contextBridge.exposeInMainWorld('orbAPI', {
     ipcRenderer.on('hud:retry-task', handler);
     return () => ipcRenderer.removeListener('hud:retry-task', handler);
   },
-  
+
   // ==========================================================================
   // DISAMBIGUATION (clarification flow)
   // ==========================================================================
-  
+
   /**
    * Submit a specific action (used after disambiguation)
    * @param {Object} actionData - { action, params, originalTranscript, clarification }
    * @returns {Promise<Object>}
    */
   submitAction: (actionData) => ipcRenderer.invoke('voice-task-sdk:submit-action', actionData),
-  
+
   // ==========================================================================
   // AGENT COMPOSER INTEGRATION
   // ==========================================================================
-  
+
   /**
    * Listen for plan summary from Agent Composer (for TTS)
    * @param {Function} callback - Called with { type, summary, agentName, timestamp }
@@ -347,36 +372,25 @@ contextBridge.exposeInMainWorld('orbAPI', {
     ipcRenderer.on('agent-composer:plan-summary', handler);
     return () => ipcRenderer.removeListener('agent-composer:plan-summary', handler);
   },
-  
+
   /**
    * Relay voice input to Agent Composer
    * @param {string} transcript - Voice transcript to relay
    * @returns {Promise<boolean>} Whether relay was successful
    */
   relayToComposer: (transcript) => ipcRenderer.invoke('orb:relay-to-composer', transcript),
-  
+
   /**
    * Check if Agent Composer is in creation mode
    * @returns {Promise<boolean>}
    */
   isComposerActive: () => ipcRenderer.invoke('orb:is-composer-active'),
-  
 });
 
 // Expose clipboard API for frameless window paste support
-contextBridge.exposeInMainWorld('clipboardAPI', {
-  /**
-   * Read text from clipboard
-   * @returns {string}
-   */
-  readText: () => clipboard.readText(),
-  
-  /**
-   * Write text to clipboard
-   * @param {string} text
-   */
-  writeText: (text) => clipboard.writeText(text)
-});
+// Clipboard API (shared module)
+const { getClipboardMethods } = require('./preload-clipboard-shared');
+contextBridge.exposeInMainWorld('clipboardAPI', getClipboardMethods());
 
 // ==========================================
 // CENTRALIZED HUD API (general-agents space)
@@ -395,7 +409,9 @@ try {
     contextBridge.exposeInMainWorld('agentHUD', {
       submitTask: () => Promise.reject(new Error('HUD API failed to load: ' + hudErr.message)),
     });
-  } catch (_) { /* already exposed or sandbox issue */ }
+  } catch (_) {
+    /* already exposed or sandbox issue */
+  }
 }
 
 console.log('[Orb Preload] Voice Orb preload script loaded');

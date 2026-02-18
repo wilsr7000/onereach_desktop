@@ -1,6 +1,6 @@
 /**
  * NotesPanel - Production notes management panel
- * 
+ *
  * Tabbed interface for:
  * - Director Notes - Free-form notes with timestamps
  * - Script Supervisor - Continuity, timing, technical notes
@@ -13,17 +13,17 @@ export class NotesPanel {
     this.app = appContext;
     this.panelElement = null;
     this.isVisible = false;
-    
+
     // Current state
     this.currentMarkerId = null;
     this.currentTab = 'director';
-    
+
     // Notes data (keyed by markerId)
     this.directorNotes = {};
     this.supervisorNotes = {};
     this.technicalNotes = {};
     this.takes = {};
-    
+
     // Create panel
     this._createPanel();
   }
@@ -34,18 +34,18 @@ export class NotesPanel {
   _createPanel() {
     // Check if panel already exists
     this.panelElement = document.getElementById('notesPanelOverlay');
-    
+
     if (!this.panelElement) {
       this.panelElement = document.createElement('div');
       this.panelElement.id = 'notesPanelOverlay';
       this.panelElement.className = 'notes-panel-overlay';
       this.panelElement.innerHTML = this._getPanelHTML();
       document.body.appendChild(this.panelElement);
-      
+
       // Add styles
       this._addStyles();
     }
-    
+
     this._setupEventListeners();
   }
 
@@ -172,7 +172,7 @@ export class NotesPanel {
    */
   _addStyles() {
     if (document.getElementById('notesPanelStyles')) return;
-    
+
     const styleSheet = document.createElement('style');
     styleSheet.id = 'notesPanelStyles';
     styleSheet.textContent = `
@@ -542,48 +542,48 @@ export class NotesPanel {
    */
   _setupEventListeners() {
     if (!this.panelElement) return;
-    
+
     // Close and action buttons
     this.panelElement.addEventListener('click', (e) => {
       const action = e.target.dataset?.action || e.target.closest('[data-action]')?.dataset?.action;
-      
+
       if (action === 'close' || action === 'cancel') {
         this.hide();
       } else if (action === 'save') {
         this._saveNotes();
       }
-      
+
       // Close on backdrop click
       if (e.target === this.panelElement) {
         this.hide();
       }
     });
-    
+
     // Tab switching
-    this.panelElement.querySelectorAll('.notes-tab').forEach(tab => {
+    this.panelElement.querySelectorAll('.notes-tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         this._switchTab(tab.dataset.tab);
       });
     });
-    
+
     // Add director note
     const addDirectorBtn = this.panelElement.querySelector('#addDirectorNote');
     if (addDirectorBtn) {
       addDirectorBtn.addEventListener('click', () => this._addDirectorNote());
     }
-    
+
     // Add supervisor note
     const addSupervisorBtn = this.panelElement.querySelector('#addSupervisorNote');
     if (addSupervisorBtn) {
       addSupervisorBtn.addEventListener('click', () => this._addSupervisorNote());
     }
-    
+
     // Add take
     const addTakeBtn = this.panelElement.querySelector('#addTake');
     if (addTakeBtn) {
       addTakeBtn.addEventListener('click', () => this._addTake());
     }
-    
+
     // Escape to close
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.isVisible) {
@@ -599,23 +599,23 @@ export class NotesPanel {
    */
   show(markerId, noteType = 'director') {
     this.currentMarkerId = markerId;
-    
+
     // Get marker info
     const marker = this.app.markerManager?.getById(markerId);
     const markerName = marker?.name || `Marker ${markerId}`;
-    
+
     // Update title
     const titleEl = this.panelElement.querySelector('#notesPanelTitle');
     if (titleEl) {
       titleEl.textContent = `Notes: ${markerName}`;
     }
-    
+
     // Load notes for this marker
     this._loadNotes(markerId);
-    
+
     // Switch to requested tab
     this._switchTab(noteType);
-    
+
     // Show panel
     this.panelElement.classList.add('visible');
     this.isVisible = true;
@@ -635,14 +635,14 @@ export class NotesPanel {
    */
   _switchTab(tabId) {
     this.currentTab = tabId;
-    
+
     // Update tab buttons
-    this.panelElement.querySelectorAll('.notes-tab').forEach(tab => {
+    this.panelElement.querySelectorAll('.notes-tab').forEach((tab) => {
       tab.classList.toggle('active', tab.dataset.tab === tabId);
     });
-    
+
     // Update tab content
-    this.panelElement.querySelectorAll('.notes-tab-content').forEach(content => {
+    this.panelElement.querySelectorAll('.notes-tab-content').forEach((content) => {
       content.classList.toggle('active', content.id === `${tabId}TabContent`);
     });
   }
@@ -653,14 +653,14 @@ export class NotesPanel {
   _loadNotes(markerId) {
     // Get notes from StoryBeatsEditor if available
     const editor = this.app.storyBeatsEditor;
-    
+
     if (editor) {
       this.directorNotes[markerId] = editor.directorNotes?.[markerId] || [];
       this.supervisorNotes[markerId] = editor.supervisorNotes?.[markerId] || [];
       this.technicalNotes[markerId] = editor.technicalNotes?.[markerId] || {};
       this.takes[markerId] = editor.takes?.[markerId] || [];
     }
-    
+
     // Render all tabs
     this._renderDirectorNotes();
     this._renderSupervisorNotes();
@@ -674,15 +674,17 @@ export class NotesPanel {
   _renderDirectorNotes() {
     const list = this.panelElement.querySelector('#directorNotesList');
     if (!list) return;
-    
+
     const notes = this.directorNotes[this.currentMarkerId] || [];
-    
+
     if (notes.length === 0) {
       list.innerHTML = '<div class="notes-empty">No director notes yet</div>';
       return;
     }
-    
-    list.innerHTML = notes.map((note, index) => `
+
+    list.innerHTML = notes
+      .map(
+        (note, index) => `
       <div class="note-item" data-index="${index}">
         <div class="note-item-header">
           <span class="note-item-type">Director</span>
@@ -694,14 +696,16 @@ export class NotesPanel {
           <button class="note-item-btn danger" data-action="delete-director" data-index="${index}">Delete</button>
         </div>
       </div>
-    `).join('');
-    
+    `
+      )
+      .join('');
+
     // Add click handlers
-    list.querySelectorAll('[data-action]').forEach(btn => {
+    list.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const action = e.target.dataset.action;
         const index = parseInt(e.target.dataset.index);
-        
+
         if (action === 'edit-director') {
           this._editDirectorNote(index);
         } else if (action === 'delete-director') {
@@ -717,15 +721,17 @@ export class NotesPanel {
   _renderSupervisorNotes() {
     const list = this.panelElement.querySelector('#supervisorNotesList');
     if (!list) return;
-    
+
     const notes = this.supervisorNotes[this.currentMarkerId] || [];
-    
+
     if (notes.length === 0) {
       list.innerHTML = '<div class="notes-empty">No supervisor notes yet</div>';
       return;
     }
-    
-    list.innerHTML = notes.map((note, index) => `
+
+    list.innerHTML = notes
+      .map(
+        (note, index) => `
       <div class="note-item" data-index="${index}">
         <div class="note-item-header">
           <span class="note-item-type">${note.type || 'General'}</span>
@@ -737,14 +743,16 @@ export class NotesPanel {
           <button class="note-item-btn danger" data-action="delete-supervisor" data-index="${index}">Delete</button>
         </div>
       </div>
-    `).join('');
-    
+    `
+      )
+      .join('');
+
     // Add click handlers
-    list.querySelectorAll('[data-action]').forEach(btn => {
+    list.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const action = e.target.dataset.action;
         const index = parseInt(e.target.dataset.index);
-        
+
         if (action === 'edit-supervisor') {
           this._editSupervisorNote(index);
         } else if (action === 'delete-supervisor') {
@@ -759,14 +767,14 @@ export class NotesPanel {
    */
   _renderTechnicalNotes() {
     const tech = this.technicalNotes[this.currentMarkerId] || {};
-    
+
     const cameraEl = this.panelElement.querySelector('#techCamera');
     const lensEl = this.panelElement.querySelector('#techLens');
     const lightingEl = this.panelElement.querySelector('#techLighting');
     const soundEl = this.panelElement.querySelector('#techSound');
     const frameRateEl = this.panelElement.querySelector('#techFrameRate');
     const notesEl = this.panelElement.querySelector('#techNotes');
-    
+
     if (cameraEl) cameraEl.value = tech.camera || '';
     if (lensEl) lensEl.value = tech.lens || '';
     if (lightingEl) lightingEl.value = tech.lighting || '';
@@ -781,15 +789,17 @@ export class NotesPanel {
   _renderTakes() {
     const list = this.panelElement.querySelector('#takesList');
     if (!list) return;
-    
+
     const takes = this.takes[this.currentMarkerId] || [];
-    
+
     if (takes.length === 0) {
       list.innerHTML = '<div class="notes-empty">No takes recorded yet</div>';
       return;
     }
-    
-    list.innerHTML = takes.map((take, index) => `
+
+    list.innerHTML = takes
+      .map(
+        (take, index) => `
       <div class="take-item" data-index="${index}">
         <div class="take-number ${take.circled ? 'circled' : ''}">${take.takeNum}</div>
         <div class="take-info">
@@ -811,14 +821,16 @@ export class NotesPanel {
           </button>
         </div>
       </div>
-    `).join('');
-    
+    `
+      )
+      .join('');
+
     // Add click handlers
-    list.querySelectorAll('[data-action]').forEach(btn => {
+    list.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const action = e.target.dataset.action;
         const index = parseInt(e.target.dataset.index);
-        
+
         if (action === 'circle-take') {
           this._toggleCircleTake(index);
         } else if (action === 'print-take') {
@@ -838,16 +850,16 @@ export class NotesPanel {
   _addDirectorNote() {
     const note = prompt('Enter director note:');
     if (!note?.trim()) return;
-    
+
     if (!this.directorNotes[this.currentMarkerId]) {
       this.directorNotes[this.currentMarkerId] = [];
     }
-    
+
     this.directorNotes[this.currentMarkerId].push({
       note: note.trim(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
-    
+
     this._renderDirectorNotes();
   }
 
@@ -857,7 +869,7 @@ export class NotesPanel {
   _editDirectorNote(index) {
     const notes = this.directorNotes[this.currentMarkerId];
     if (!notes || !notes[index]) return;
-    
+
     const newNote = prompt('Edit director note:', notes[index].note);
     if (newNote !== null) {
       notes[index].note = newNote.trim();
@@ -872,7 +884,7 @@ export class NotesPanel {
   _deleteDirectorNote(index) {
     const notes = this.directorNotes[this.currentMarkerId];
     if (!notes || !notes[index]) return;
-    
+
     if (confirm('Delete this note?')) {
       notes.splice(index, 1);
       this._renderDirectorNotes();
@@ -885,20 +897,20 @@ export class NotesPanel {
   _addSupervisorNote() {
     const note = prompt('Enter supervisor note:');
     if (!note?.trim()) return;
-    
+
     const typeSelect = this.panelElement.querySelector('#supervisorNoteType');
     const type = typeSelect?.value || 'general';
-    
+
     if (!this.supervisorNotes[this.currentMarkerId]) {
       this.supervisorNotes[this.currentMarkerId] = [];
     }
-    
+
     this.supervisorNotes[this.currentMarkerId].push({
       type,
       note: note.trim(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
-    
+
     this._renderSupervisorNotes();
   }
 
@@ -908,7 +920,7 @@ export class NotesPanel {
   _editSupervisorNote(index) {
     const notes = this.supervisorNotes[this.currentMarkerId];
     if (!notes || !notes[index]) return;
-    
+
     const newNote = prompt('Edit supervisor note:', notes[index].note);
     if (newNote !== null) {
       notes[index].note = newNote.trim();
@@ -923,7 +935,7 @@ export class NotesPanel {
   _deleteSupervisorNote(index) {
     const notes = this.supervisorNotes[this.currentMarkerId];
     if (!notes || !notes[index]) return;
-    
+
     if (confirm('Delete this note?')) {
       notes.splice(index, 1);
       this._renderSupervisorNotes();
@@ -937,19 +949,19 @@ export class NotesPanel {
     if (!this.takes[this.currentMarkerId]) {
       this.takes[this.currentMarkerId] = [];
     }
-    
+
     const takeNum = this.takes[this.currentMarkerId].length + 1;
     const notes = prompt(`Notes for Take ${takeNum}:`) || '';
-    
+
     this.takes[this.currentMarkerId].push({
       takeNum,
       notes: notes.trim(),
       circled: false,
       print: false,
       duration: null,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
-    
+
     this._renderTakes();
   }
 
@@ -959,7 +971,7 @@ export class NotesPanel {
   _toggleCircleTake(index) {
     const takes = this.takes[this.currentMarkerId];
     if (!takes || !takes[index]) return;
-    
+
     takes[index].circled = !takes[index].circled;
     this._renderTakes();
   }
@@ -970,7 +982,7 @@ export class NotesPanel {
   _togglePrintTake(index) {
     const takes = this.takes[this.currentMarkerId];
     if (!takes || !takes[index]) return;
-    
+
     takes[index].print = !takes[index].print;
     this._renderTakes();
   }
@@ -981,7 +993,7 @@ export class NotesPanel {
   _editTake(index) {
     const takes = this.takes[this.currentMarkerId];
     if (!takes || !takes[index]) return;
-    
+
     const newNotes = prompt('Edit take notes:', takes[index].notes);
     if (newNotes !== null) {
       takes[index].notes = newNotes.trim();
@@ -996,11 +1008,11 @@ export class NotesPanel {
   _deleteTake(index) {
     const takes = this.takes[this.currentMarkerId];
     if (!takes || !takes[index]) return;
-    
+
     if (confirm('Delete this take?')) {
       takes.splice(index, 1);
       // Renumber remaining takes
-      takes.forEach((take, i) => take.takeNum = i + 1);
+      takes.forEach((take, i) => (take.takeNum = i + 1));
       this._renderTakes();
     }
   }
@@ -1016,10 +1028,10 @@ export class NotesPanel {
       lighting: this.panelElement.querySelector('#techLighting')?.value || '',
       sound: this.panelElement.querySelector('#techSound')?.value || '',
       frameRate: this.panelElement.querySelector('#techFrameRate')?.value || '',
-      notes: this.panelElement.querySelector('#techNotes')?.value || ''
+      notes: this.panelElement.querySelector('#techNotes')?.value || '',
     };
     this.technicalNotes[this.currentMarkerId] = tech;
-    
+
     // Save to StoryBeatsEditor if available
     const editor = this.app.storyBeatsEditor;
     if (editor) {
@@ -1028,7 +1040,7 @@ export class NotesPanel {
       editor.technicalNotes = { ...editor.technicalNotes, ...this.technicalNotes };
       editor.takes = { ...editor.takes, ...this.takes };
     }
-    
+
     this.app.showToast?.('success', 'Notes saved');
     this.hide();
   }
@@ -1063,14 +1075,3 @@ export class NotesPanel {
 }
 
 export default NotesPanel;
-
-
-
-
-
-
-
-
-
-
-

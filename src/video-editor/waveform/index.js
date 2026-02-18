@@ -19,21 +19,3 @@ export { WaveformRenderer, WaveformCache, WaveformTypes };
 export function initWaveformModule(appContext) {
   return new WaveformRenderer(appContext);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

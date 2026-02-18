@@ -39,14 +39,14 @@ export class WaveformService {
         }
 
         const duration = metadata.format.duration;
-        const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
-        
+        const audioStream = metadata.streams.find((s) => s.codec_type === 'audio');
+
         if (!audioStream) {
           // No audio stream - return flat waveform
           resolve({
             peaks: new Array(samples).fill(0),
             duration: duration,
-            hasAudio: false
+            hasAudio: false,
           });
           return;
         }
@@ -58,9 +58,7 @@ export class WaveformService {
           .then(resolve)
           .catch((err) => {
             log.warn('video', '[WaveformService] Fast method failed, using fallback', { data: err.message });
-            this.generateFallbackWaveform(inputPath, samples, duration)
-              .then(resolve)
-              .catch(reject);
+            this.generateFallbackWaveform(inputPath, samples, duration).then(resolve).catch(reject);
           });
       });
     });
@@ -74,12 +72,12 @@ export class WaveformService {
    * @param {Object} audioStream - Audio stream metadata
    * @returns {Promise<Object>} Waveform data
    */
-  async generateWaveformFast(inputPath, samples, duration, audioStream) {
+  async generateWaveformFast(inputPath, samples, duration, _audioStream) {
     return new Promise((resolve, reject) => {
       log.info('video', '[WaveformService] Extracting real audio waveform data...');
-      
+
       const tempAudio = path.join(this.outputDir, `waveform_audio_${Date.now()}.wav`);
-      
+
       // Step 1: Extract audio as WAV (fast and reliable)
       ffmpeg(inputPath)
         .noVideo()
@@ -89,16 +87,13 @@ export class WaveformService {
         .output(tempAudio)
         .on('end', () => {
           log.info('video', '[WaveformService] Audio extracted, analyzing levels...');
-          
+
           // Step 2: Analyze audio levels using astats filter
-          const segmentSize = Math.ceil(8000 * duration / samples);
+          const segmentSize = Math.ceil((8000 * duration) / samples);
           let stderrOutput = '';
-          
+
           ffmpeg(tempAudio)
-            .audioFilters([
-              `asetnsamples=${segmentSize}`,
-              `astats=metadata=1:reset=1`
-            ])
+            .audioFilters([`asetnsamples=${segmentSize}`, `astats=metadata=1:reset=1`])
             .outputOptions(['-f', 'null'])
             .output('-')
             .on('stderr', (line) => {
@@ -109,35 +104,37 @@ export class WaveformService {
                 // Parse RMS or Peak level from astats output
                 const rmsMatches = [...stderrOutput.matchAll(/lavfi\.astats\.Overall\.RMS_level=(-?[\d.]+)/g)];
                 const peakMatches = [...stderrOutput.matchAll(/lavfi\.astats\.Overall\.Peak_level=(-?[\d.]+)/g)];
-                
+
                 const levels = rmsMatches.length > 0 ? rmsMatches : peakMatches;
-                
+
                 log.info('video', '[WaveformService] Found', { arg0: levels.length, arg1: 'audio level measurements' });
-                
-                const peaks = levels.map(match => {
+
+                const peaks = levels.map((match) => {
                   const db = parseFloat(match[1]);
                   // Convert dB to linear 0-1 range
                   // -60dB = quiet (0.001), 0dB = max (1.0)
                   const linear = Math.pow(10, db / 20);
                   return Math.min(1, Math.max(0, linear));
                 });
-                
+
                 // Resample to exact number of samples needed
                 const finalPeaks = resampleArray(peaks, samples);
-                
+
                 // Cleanup temp files
                 if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
-                
-                log.info('video', '[WaveformService] Real waveform extracted', { arg0: finalPeaks.length, arg1: 'samples' });
-                
+
+                log.info('video', '[WaveformService] Real waveform extracted', {
+                  arg0: finalPeaks.length,
+                  arg1: 'samples',
+                });
+
                 resolve({
                   peaks: finalPeaks,
                   duration: duration,
                   hasAudio: true,
                   method: 'astats_accurate',
-                  sampleCount: levels.length
+                  sampleCount: levels.length,
                 });
-                
               } catch (error) {
                 log.error('video', '[WaveformService] Error parsing waveform data', { error: error });
                 if (fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
@@ -168,7 +165,7 @@ export class WaveformService {
    * @returns {Promise<Object>} Waveform data
    */
   async generateFallbackWaveform(inputPath, samples, duration) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve, _reject) => {
       ffmpeg(inputPath)
         .audioFilters('volumedetect')
         .outputOptions(['-f', 'null'])
@@ -176,15 +173,15 @@ export class WaveformService {
         .on('end', (stdout, stderr) => {
           const meanMatch = stderr?.match(/mean_volume:\s*(-?[\d.]+)\s*dB/);
           const maxMatch = stderr?.match(/max_volume:\s*(-?[\d.]+)\s*dB/);
-          
+
           const meanDb = meanMatch ? parseFloat(meanMatch[1]) : -20;
           const maxDb = maxMatch ? parseFloat(maxMatch[1]) : -6;
-          
+
           // Generate waveform based on overall audio characteristics
           const peaks = [];
           const baseLevel = Math.min(1, Math.max(0, (meanDb + 60) / 60));
           const peakLevel = Math.min(1, Math.max(0, (maxDb + 60) / 60));
-          
+
           for (let i = 0; i < samples; i++) {
             // Create variation based on position
             const variation = Math.sin(i * 0.3) * 0.15 + Math.sin(i * 0.7) * 0.1;
@@ -192,17 +189,17 @@ export class WaveformService {
             const peak = baseLevel + variation + randomVariation;
             peaks.push(Math.min(peakLevel, Math.max(0.05, peak)));
           }
-          
+
           resolve({
             peaks: peaks,
             duration: duration,
             hasAudio: true,
             meanVolume: meanDb,
             maxVolume: maxDb,
-            method: 'volumedetect_fallback'
+            method: 'volumedetect_fallback',
           });
         })
-        .on('error', (err) => {
+        .on('error', (_err) => {
           // Ultimate fallback - generate synthetic waveform
           const fallbackPeaks = [];
           for (let i = 0; i < samples; i++) {
@@ -212,26 +209,10 @@ export class WaveformService {
             peaks: fallbackPeaks,
             duration: duration,
             hasAudio: true,
-            method: 'synthetic_fallback'
+            method: 'synthetic_fallback',
           });
         })
         .run();
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

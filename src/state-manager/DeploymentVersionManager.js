@@ -1,28 +1,28 @@
 /**
  * DeploymentVersionManager - Manage different export versions of a video
- * 
+ *
  * Allows creating multiple "deployment versions" from the same source video:
  * - Trailer (30-60 seconds)
  * - Short (2-5 minutes)
  * - Full (complete video)
  * - Teaser (10-15 seconds for social)
  * - Localized versions (Spanish, French, etc.)
- * 
+ *
  * Each version defines which time regions to include from the source.
- * 
+ *
  * Usage:
  * ```javascript
  * const dvManager = new DeploymentVersionManager(videoPath, videoDuration);
- * 
+ *
  * // Create versions
  * dvManager.createVersion('trailer', 'trailer');
  * dvManager.createVersion('full-spanish', 'full', { language: 'es' });
- * 
+ *
  * // Add regions to trailer
  * dvManager.addRegion('trailer', 0, 10);      // Opening hook
  * dvManager.addRegion('trailer', 45, 55);     // Key demo
  * dvManager.addRegion('trailer', 180, 190);   // Call to action
- * 
+ *
  * // Export
  * const exportSpec = dvManager.getExportSpec('trailer');
  * // -> { regions: [...], totalDuration: 30, outputName: 'video-trailer.mp4' }
@@ -41,36 +41,36 @@ class DeploymentVersionManager {
       maxDuration: 60,
       description: '30-60 second highlight reel',
       icon: '🎬',
-      suggestedRegions: ['opening', 'highlight', 'cta']
+      suggestedRegions: ['opening', 'highlight', 'cta'],
     },
     short: {
       name: 'Short',
       maxDuration: 300,
       description: '2-5 minute condensed version',
       icon: '📱',
-      suggestedRegions: ['opening', 'key-points', 'closing']
+      suggestedRegions: ['opening', 'key-points', 'closing'],
     },
     full: {
       name: 'Full',
       maxDuration: null,
       description: 'Complete video',
       icon: '🎥',
-      suggestedRegions: ['all']
+      suggestedRegions: ['all'],
     },
     teaser: {
       name: 'Teaser',
       maxDuration: 15,
       description: '10-15 second social media clip',
       icon: '⚡',
-      suggestedRegions: ['best-moment']
+      suggestedRegions: ['best-moment'],
     },
     custom: {
       name: 'Custom',
       maxDuration: null,
       description: 'Custom version',
       icon: '✨',
-      suggestedRegions: []
-    }
+      suggestedRegions: [],
+    },
   };
 
   /**
@@ -88,7 +88,7 @@ class DeploymentVersionManager {
     zh: { name: 'Chinese', code: 'zh' },
     ar: { name: 'Arabic', code: 'ar' },
     hi: { name: 'Hindi', code: 'hi' },
-    ru: { name: 'Russian', code: 'ru' }
+    ru: { name: 'Russian', code: 'ru' },
   };
 
   /**
@@ -132,7 +132,7 @@ class DeploymentVersionManager {
       createdAt: Date.now(),
       modifiedAt: Date.now(),
       exportedAt: null,
-      isDefault: true
+      isDefault: true,
     };
     this.versions.set('full', fullVersion);
   }
@@ -155,8 +155,7 @@ class DeploymentVersionManager {
       throw new Error(`Version with id "${id}" already exists`);
     }
 
-    const templateConfig = DeploymentVersionManager.TEMPLATES[template] || 
-                           DeploymentVersionManager.TEMPLATES.custom;
+    const templateConfig = DeploymentVersionManager.TEMPLATES[template] || DeploymentVersionManager.TEMPLATES.custom;
 
     const version = {
       id,
@@ -169,7 +168,7 @@ class DeploymentVersionManager {
       modifiedAt: Date.now(),
       exportedAt: null,
       isDefault: false,
-      metadata: options.metadata || {}
+      metadata: options.metadata || {},
     };
 
     this.versions.set(id, version);
@@ -181,7 +180,7 @@ class DeploymentVersionManager {
 
   /**
    * Delete a version
-   * @param {string} versionId 
+   * @param {string} versionId
    * @returns {boolean}
    */
   deleteVersion(versionId) {
@@ -199,8 +198,8 @@ class DeploymentVersionManager {
 
   /**
    * Rename a version
-   * @param {string} versionId 
-   * @param {string} newName 
+   * @param {string} versionId
+   * @param {string} newName
    * @returns {boolean}
    */
   renameVersion(versionId, newName) {
@@ -215,7 +214,7 @@ class DeploymentVersionManager {
 
   /**
    * Get a version by ID
-   * @param {string} versionId 
+   * @param {string} versionId
    * @returns {object|null}
    */
   getVersion(versionId) {
@@ -227,10 +226,10 @@ class DeploymentVersionManager {
    * @returns {array}
    */
   listVersions() {
-    return Array.from(this.versions.values()).map(v => ({
+    return Array.from(this.versions.values()).map((v) => ({
       ...v,
       totalDuration: this._calculateDuration(v),
-      regionCount: v.regions.length
+      regionCount: v.regions.length,
     }));
   }
 
@@ -240,7 +239,7 @@ class DeploymentVersionManager {
 
   /**
    * Add a time region to a version
-   * @param {string} versionId 
+   * @param {string} versionId
    * @param {number} start - Start time in seconds
    * @param {number} end - End time in seconds
    * @param {object} options - Additional options
@@ -265,7 +264,7 @@ class DeploymentVersionManager {
       duration: end - start,
       label: options.label || `Region ${version.regions.length + 1}`,
       source: options.source || 'manual',
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
 
     version.regions.push(region);
@@ -276,21 +275,25 @@ class DeploymentVersionManager {
 
     this._notifyChange('addRegion', { versionId, region });
 
-    log.info('app', '[DeploymentVersionManager] Added region to : -', { v0: versionId, v1: start.toFixed(2), v2: end.toFixed(2) });
+    log.info('app', '[DeploymentVersionManager] Added region to : -', {
+      v0: versionId,
+      v1: start.toFixed(2),
+      v2: end.toFixed(2),
+    });
     return region;
   }
 
   /**
    * Remove a region from a version
-   * @param {string} versionId 
-   * @param {string} regionId 
+   * @param {string} versionId
+   * @param {string} regionId
    * @returns {boolean}
    */
   removeRegion(versionId, regionId) {
     const version = this.versions.get(versionId);
     if (!version) return false;
 
-    const index = version.regions.findIndex(r => r.id === regionId);
+    const index = version.regions.findIndex((r) => r.id === regionId);
     if (index === -1) return false;
 
     version.regions.splice(index, 1);
@@ -301,17 +304,17 @@ class DeploymentVersionManager {
 
   /**
    * Update a region's times
-   * @param {string} versionId 
-   * @param {string} regionId 
-   * @param {number} start 
-   * @param {number} end 
+   * @param {string} versionId
+   * @param {string} regionId
+   * @param {number} start
+   * @param {number} end
    * @returns {boolean}
    */
   updateRegion(versionId, regionId, start, end) {
     const version = this.versions.get(versionId);
     if (!version) return false;
 
-    const region = version.regions.find(r => r.id === regionId);
+    const region = version.regions.find((r) => r.id === regionId);
     if (!region) return false;
 
     region.start = Math.max(0, Math.min(start, this.videoDuration));
@@ -328,7 +331,7 @@ class DeploymentVersionManager {
 
   /**
    * Reorder regions within a version
-   * @param {string} versionId 
+   * @param {string} versionId
    * @param {array} regionIds - Array of region IDs in new order
    * @returns {boolean}
    */
@@ -338,7 +341,7 @@ class DeploymentVersionManager {
 
     const newOrder = [];
     for (const id of regionIds) {
-      const region = version.regions.find(r => r.id === id);
+      const region = version.regions.find((r) => r.id === id);
       if (region) newOrder.push(region);
     }
 
@@ -357,7 +360,7 @@ class DeploymentVersionManager {
 
   /**
    * Add regions from markers
-   * @param {string} versionId 
+   * @param {string} versionId
    * @param {array} markers - Array of marker objects with inTime/outTime or time
    * @returns {number} Number of regions added
    */
@@ -371,7 +374,7 @@ class DeploymentVersionManager {
       if (start !== undefined && end !== undefined) {
         this.addRegion(versionId, start, end, {
           label: marker.name || marker.description || `Marker ${added + 1}`,
-          source: 'marker'
+          source: 'marker',
         });
         added++;
       }
@@ -386,8 +389,8 @@ class DeploymentVersionManager {
 
   /**
    * Create a localized version from an existing version
-   * @param {string} sourceVersionId 
-   * @param {string} languageCode 
+   * @param {string} sourceVersionId
+   * @param {string} languageCode
    * @returns {object} The new localized version
    */
   createLocalizedVersion(sourceVersionId, languageCode) {
@@ -408,7 +411,7 @@ class DeploymentVersionManager {
     const version = this.createVersion(newId, source.template, {
       name: newName,
       language: languageCode,
-      maxDuration: source.maxDuration
+      maxDuration: source.maxDuration,
     });
 
     // Copy regions
@@ -426,7 +429,7 @@ class DeploymentVersionManager {
 
   /**
    * Get export specification for a version
-   * @param {string} versionId 
+   * @param {string} versionId
    * @returns {object} Export specification for FFmpeg
    */
   getExportSpec(versionId) {
@@ -444,15 +447,15 @@ class DeploymentVersionManager {
       versionName: version.name,
       template: version.template,
       language: version.language,
-      regions: version.regions.map(r => ({
+      regions: version.regions.map((r) => ({
         start: r.start,
         end: r.end,
-        duration: r.duration
+        duration: r.duration,
       })),
       totalDuration,
       outputName: `${this.videoName}${templateSuffix}${languageSuffix}`,
       sourceVideo: this.videoPath,
-      needsDubbing: version.language !== null
+      needsDubbing: version.language !== null,
     };
   }
 
@@ -462,13 +465,13 @@ class DeploymentVersionManager {
    */
   getAllExportSpecs() {
     return this.listVersions()
-      .filter(v => v.regions.length > 0)
-      .map(v => this.getExportSpec(v.id));
+      .filter((v) => v.regions.length > 0)
+      .map((v) => this.getExportSpec(v.id));
   }
 
   /**
    * Mark version as exported
-   * @param {string} versionId 
+   * @param {string} versionId
    */
   markExported(versionId) {
     const version = this.versions.get(versionId);
@@ -509,13 +512,13 @@ class DeploymentVersionManager {
       videoPath: this.videoPath,
       videoDuration: this.videoDuration,
       videoName: this.videoName,
-      versions: Array.from(this.versions.entries())
+      versions: Array.from(this.versions.entries()),
     };
   }
 
   /**
    * Load versions from serialized data
-   * @param {object} data 
+   * @param {object} data
    */
   deserialize(data) {
     if (data.versions) {
@@ -525,7 +528,7 @@ class DeploymentVersionManager {
 
   /**
    * Check if version exceeds max duration
-   * @param {string} versionId 
+   * @param {string} versionId
    * @returns {object} { exceeds, currentDuration, maxDuration }
    */
   checkDurationLimit(versionId) {
@@ -539,7 +542,7 @@ class DeploymentVersionManager {
       exceeds: maxDuration && currentDuration > maxDuration,
       currentDuration,
       maxDuration,
-      overBy: maxDuration ? Math.max(0, currentDuration - maxDuration) : 0
+      overBy: maxDuration ? Math.max(0, currentDuration - maxDuration) : 0,
     };
   }
 }
@@ -550,14 +553,3 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 export { DeploymentVersionManager };
-
-
-
-
-
-
-
-
-
-
-

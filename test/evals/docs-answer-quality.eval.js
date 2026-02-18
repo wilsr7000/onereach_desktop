@@ -40,13 +40,11 @@ async function judgeWithRubric(question, answer, { criteria, ai, sourceDoc }) {
     // Mock mode: all criteria pass
     return {
       score: 85,
-      criteriaResults: criteria.map(c => ({ criterion: c, pass: true, reasoning: 'Mock: auto-pass' })),
+      criteriaResults: criteria.map((c) => ({ criterion: c, pass: true, reasoning: 'Mock: auto-pass' })),
     };
   }
 
-  const docContext = sourceDoc
-    ? `\nREFERENCE DOCUMENTATION (ground truth):\n${sourceDoc.slice(0, 3000)}\n`
-    : '';
+  const docContext = sourceDoc ? `\nREFERENCE DOCUMENTATION (ground truth):\n${sourceDoc.slice(0, 3000)}\n` : '';
 
   const prompt = `You are a quality evaluator for a documentation Q&A agent.
 
@@ -76,7 +74,7 @@ Return JSON:
   } catch {
     return {
       score: 70,
-      criteriaResults: criteria.map(c => ({ criterion: c, pass: true, reasoning: 'Eval error fallback' })),
+      criteriaResults: criteria.map((c) => ({ criterion: c, pass: true, reasoning: 'Eval error fallback' })),
     };
   }
 }
@@ -155,63 +153,89 @@ function createMockDocsAgent() {
       if (q.includes('video editor')) {
         return {
           success: true,
-          message: 'The Video Editor is a professional video production system with timeline-based editing, AI voice replacement via ElevenLabs, smart transcription, and scene detection. Access it from the Window menu or drag a video file onto the app. (from VIDEO_EDITOR_QUICK_START.md)',
-          metadata: { sources: [{ file: 'VIDEO_EDITOR_QUICK_START.md', section: 'Quick Start', relevance: 0.89 }], confidence: 0.85 },
+          message:
+            'The Video Editor is a professional video production system with timeline-based editing, AI voice replacement via ElevenLabs, smart transcription, and scene detection. Access it from the Window menu or drag a video file onto the app. (from VIDEO_EDITOR_QUICK_START.md)',
+          metadata: {
+            sources: [{ file: 'VIDEO_EDITOR_QUICK_START.md', section: 'Quick Start', relevance: 0.89 }],
+            confidence: 0.85,
+          },
         };
       }
 
       if (q.includes('spaces') && (q.includes('upload') || q.includes('chatgpt'))) {
         return {
           success: true,
-          message: 'To upload files from Spaces into ChatGPT or Claude: click the upload button, look for the purple Spaces button, browse your Spaces, select files, and click Select. Files appear directly in the chat. (from SPACES-UPLOAD-QUICK-START.md)',
-          metadata: { sources: [{ file: 'SPACES-UPLOAD-QUICK-START.md', section: 'How to Use', relevance: 0.92 }], confidence: 0.88 },
+          message:
+            'To upload files from Spaces into ChatGPT or Claude: click the upload button, look for the purple Spaces button, browse your Spaces, select files, and click Select. Files appear directly in the chat. (from SPACES-UPLOAD-QUICK-START.md)',
+          metadata: {
+            sources: [{ file: 'SPACES-UPLOAD-QUICK-START.md', section: 'How to Use', relevance: 0.92 }],
+            confidence: 0.88,
+          },
         };
       }
 
       if (q.includes('elevenlabs') || q.includes('set up elevenlabs')) {
         return {
           success: true,
-          message: 'To set up ElevenLabs: go to elevenlabs.io, create an account, generate an API key from your profile, then paste it into the app Settings under API Keys. (from SETUP_ELEVENLABS.md)',
-          metadata: { sources: [{ file: 'SETUP_ELEVENLABS.md', section: 'Quick Setup', relevance: 0.91 }], confidence: 0.87 },
+          message:
+            'To set up ElevenLabs: go to elevenlabs.io, create an account, generate an API key from your profile, then paste it into the app Settings under API Keys. (from SETUP_ELEVENLABS.md)',
+          metadata: {
+            sources: [{ file: 'SETUP_ELEVENLABS.md', section: 'Quick Setup', relevance: 0.91 }],
+            confidence: 0.87,
+          },
         };
       }
 
       if (q.includes('log') && (q.includes('server') || q.includes('endpoint'))) {
         return {
           success: true,
-          message: 'The log server runs on port 47292 and provides endpoints: GET /health for app status, GET /logs for querying logs, GET /logs/stats for aggregated counts, GET /logs/stream for SSE real-time events, and POST /logs for pushing external events. (from LOGGING-API.md)',
-          metadata: { sources: [{ file: 'LOGGING-API.md', section: 'REST API', relevance: 0.93 }], confidence: 0.90 },
+          message:
+            'The log server runs on port 47292 and provides endpoints: GET /health for app status, GET /logs for querying logs, GET /logs/stats for aggregated counts, GET /logs/stream for SSE real-time events, and POST /logs for pushing external events. (from LOGGING-API.md)',
+          metadata: { sources: [{ file: 'LOGGING-API.md', section: 'REST API', relevance: 0.93 }], confidence: 0.9 },
         };
       }
 
       if (q.includes('keyboard shortcut') && q.includes('settings')) {
         return {
           success: true,
-          message: 'Open Settings with the keyboard shortcut Cmd+, (comma). You can also access it from the App menu. (from README.md)',
-          metadata: { sources: [{ file: 'README.md', section: 'Keyboard Shortcuts', relevance: 0.85 }], confidence: 0.82 },
+          message:
+            'Open Settings with the keyboard shortcut Cmd+, (comma). You can also access it from the App menu. (from README.md)',
+          metadata: {
+            sources: [{ file: 'README.md', section: 'Keyboard Shortcuts', relevance: 0.85 }],
+            confidence: 0.82,
+          },
         };
       }
 
       if (q.includes('create a new space') || q.includes('create a space')) {
         return {
           success: true,
-          message: 'To create a new Space, click the + button at the top of the sidebar. You can also right-click in the Spaces panel and select "New Space". (from SPACES-UPLOAD-QUICK-START.md)',
-          metadata: { sources: [{ file: 'SPACES-UPLOAD-QUICK-START.md', section: 'Spaces Picker Features', relevance: 0.80 }], confidence: 0.78 },
+          message:
+            'To create a new Space, click the + button at the top of the sidebar. You can also right-click in the Spaces panel and select "New Space". (from SPACES-UPLOAD-QUICK-START.md)',
+          metadata: {
+            sources: [{ file: 'SPACES-UPLOAD-QUICK-START.md', section: 'Spaces Picker Features', relevance: 0.8 }],
+            confidence: 0.78,
+          },
         };
       }
 
       if (q.includes('adr') || q.includes('automated dialogue replacement')) {
         return {
           success: true,
-          message: 'ADR (Automated Dialogue Replacement) lets you replace dialogue in video using AI voices. It provides a multi-track audio timeline, voice selection, and sync tools. Access it from the Video Editor. (from ADR_QUICK_START.md)',
-          metadata: { sources: [{ file: 'ADR_QUICK_START.md', section: 'Overview', relevance: 0.88 }], confidence: 0.84 },
+          message:
+            'ADR (Automated Dialogue Replacement) lets you replace dialogue in video using AI voices. It provides a multi-track audio timeline, voice selection, and sync tools. Access it from the Video Editor. (from ADR_QUICK_START.md)',
+          metadata: {
+            sources: [{ file: 'ADR_QUICK_START.md', section: 'Overview', relevance: 0.88 }],
+            confidence: 0.84,
+          },
         };
       }
 
       // Simulate refusal for unknown topics
       return {
         success: true,
-        message: "I don't have documentation about that. You might find the answer in the app's Help menu or by asking the Search Agent.",
+        message:
+          "I don't have documentation about that. You might find the answer in the app's Help menu or by asking the Search Agent.",
         metadata: { sources: [], confidence: 0 },
       };
     },
@@ -313,11 +337,11 @@ const HALLUCINATION_CORPUS = [
 const REFUSAL_PHRASES = [
   "don't have documentation",
   "don't have docs",
-  "not covered in the documentation",
-  "no documentation about",
-  "Help menu",
-  "Search Agent",
-  "not in the documentation",
+  'not covered in the documentation',
+  'no documentation about',
+  'Help menu',
+  'Search Agent',
+  'not in the documentation',
   "can't find information",
   "don't have information",
 ];
@@ -342,7 +366,6 @@ function getDocsAgent() {
 // ===========================================================================
 
 describe('Documentation Answer Quality Evals', () => {
-
   let agent;
   let aiService;
 
@@ -361,7 +384,6 @@ describe('Documentation Answer Quality Evals', () => {
   // =========================================================================
 
   describe('Tier 1: Deterministic fact checking', () => {
-
     for (const tc of DOC_QA_CORPUS) {
       it(`[${tc.id}] answer contains expected facts: ${tc.description}`, async () => {
         const result = await agent.execute({ content: tc.question });
@@ -389,9 +411,8 @@ describe('Documentation Answer Quality Evals', () => {
 
       // Answer should reference the source file or doc name
       const answer = result.message.toLowerCase();
-      const hasCitation = answer.includes('setup_elevenlabs') ||
-                          answer.includes('elevenlabs') ||
-                          (result.metadata?.sources?.length > 0);
+      const hasCitation =
+        answer.includes('setup_elevenlabs') || answer.includes('elevenlabs') || result.metadata?.sources?.length > 0;
       expect(hasCitation).toBe(true);
     });
   });
@@ -401,7 +422,6 @@ describe('Documentation Answer Quality Evals', () => {
   // =========================================================================
 
   describe('Tier 1: Hallucination refusal', () => {
-
     for (const tc of HALLUCINATION_CORPUS) {
       it(`[${tc.id}] refuses to answer: ${tc.description}`, async () => {
         const result = await agent.execute({ content: tc.question });
@@ -410,14 +430,11 @@ describe('Documentation Answer Quality Evals', () => {
 
         // Should contain a refusal phrase
         const answerLower = result.message.toLowerCase();
-        const hasRefusal = REFUSAL_PHRASES.some(phrase =>
-          answerLower.includes(phrase.toLowerCase())
-        );
+        const hasRefusal = REFUSAL_PHRASES.some((phrase) => answerLower.includes(phrase.toLowerCase()));
 
         if (!hasRefusal) {
           // If no explicit refusal, the confidence should be very low
-          const lowConfidence = result.metadata?.confidence !== undefined &&
-                                result.metadata.confidence < 0.3;
+          const lowConfidence = result.metadata?.confidence !== undefined && result.metadata.confidence < 0.3;
           expect(hasRefusal || lowConfidence).toBe(true);
         }
 
@@ -439,7 +456,6 @@ describe('Documentation Answer Quality Evals', () => {
   // =========================================================================
 
   describe('Tier 2: LLM-judged answer quality', () => {
-
     for (const tc of DOC_QA_CORPUS) {
       it(`[${tc.id}] quality score >= 70: ${tc.description}`, async () => {
         const result = await agent.execute({ content: tc.question });
@@ -450,10 +466,7 @@ describe('Documentation Answer Quality Evals', () => {
         try {
           const fs = require('fs');
           const path = require('path');
-          sourceContent = fs.readFileSync(
-            path.resolve(__dirname, '../../', tc.sourceDoc),
-            'utf-8'
-          );
+          sourceContent = fs.readFileSync(path.resolve(__dirname, '../../', tc.sourceDoc), 'utf-8');
         } catch {
           sourceContent = undefined;
         }
@@ -490,7 +503,6 @@ describe('Documentation Answer Quality Evals', () => {
   // =========================================================================
 
   describe('Tier 2: LLM-judged hallucination detection', () => {
-
     for (const tc of HALLUCINATION_CORPUS) {
       it(`[${tc.id}] no hallucination: ${tc.description}`, async () => {
         const result = await agent.execute({ content: tc.question });

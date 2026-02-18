@@ -27,11 +27,11 @@ const FILENAME_NUM_RE = /^(\d+)-/;
 function slugify(text) {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')  // strip non-alphanumeric
-    .replace(/\s+/g, '-')          // spaces to hyphens
-    .replace(/-+/g, '-')           // collapse multiple hyphens
-    .replace(/^-|-$/g, '')         // trim leading/trailing hyphens
-    .slice(0, 80);                 // cap length
+    .replace(/[^a-z0-9\s-]/g, '') // strip non-alphanumeric
+    .replace(/\s+/g, '-') // spaces to hyphens
+    .replace(/-+/g, '-') // collapse multiple hyphens
+    .replace(/^-|-$/g, '') // trim leading/trailing hyphens
+    .slice(0, 80); // cap length
 }
 
 /**
@@ -109,8 +109,9 @@ function parsePlanFile(filePath) {
  * @returns {Array<Object>} - Flat array of all checklist items across all plans, ordered by plan number then item index.
  */
 function parseAllPlans() {
-  const files = fs.readdirSync(PLANS_DIR)
-    .filter(f => f.endsWith('.md') && !f.startsWith('00-'))
+  const files = fs
+    .readdirSync(PLANS_DIR)
+    .filter((f) => f.endsWith('.md') && !f.startsWith('00-'))
     .sort();
 
   const allItems = [];

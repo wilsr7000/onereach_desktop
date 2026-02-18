@@ -5,7 +5,10 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 // Mock child_process (FFmpeg-dependent)
 vi.mock('child_process', () => ({
   execFile: vi.fn((cmd, args, opts, cb) => {
-    if (typeof opts === 'function') { cb = opts; opts = {}; }
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
     if (cb) cb(null, 'mock output', '');
     return { on: vi.fn(), stdout: { on: vi.fn() }, stderr: { on: vi.fn() } };
   }),
@@ -17,7 +20,7 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     writeFileSync: vi.fn(),
-    readFileSync: vi.fn(() => Buffer.from([0x00, 0x00, 0x00, 0x1C])),
+    readFileSync: vi.fn(() => Buffer.from([0x00, 0x00, 0x00, 0x1c])),
     unlinkSync: vi.fn(),
     existsSync: vi.fn(() => true),
     statSync: vi.fn(() => ({ size: 1024 })),
@@ -40,7 +43,7 @@ const { VideoTranscodeAgent } = require('../../../lib/converters/video-transcode
 
 // Run the standard lifecycle test harness
 testConverterAgent(VideoTranscodeAgent, {
-  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1C, 0x66, 0x74, 0x79, 0x70]),
+  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]),
   expectedFromFormats: ['mp4', 'webm', 'mov'],
   expectedToFormats: ['mp4', 'webm', 'mov'],
   expectedStrategies: ['fast', 'quality', 'compress'],

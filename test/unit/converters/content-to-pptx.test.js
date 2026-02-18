@@ -13,7 +13,7 @@ vi.mock('pptxgenjs', () => ({
     author: '',
     title: '',
     addSlide: vi.fn().mockReturnValue(mockSlide),
-    write: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)])),
+    write: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)])),
   })),
 }));
 
@@ -56,7 +56,7 @@ describe('ContentToPptxAgent (specific)', () => {
     await agent.execute('Some text for slides', 'structured');
     expect(mockAI.json).toHaveBeenCalledWith(
       expect.stringContaining('Break the following content into slides'),
-      expect.objectContaining({ profile: 'fast' }),
+      expect.objectContaining({ profile: 'fast' })
     );
   });
 

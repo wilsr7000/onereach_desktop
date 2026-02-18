@@ -1,6 +1,5 @@
 'use strict';
 
-const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -21,7 +20,7 @@ const AREA_SOURCE_MAP = {
     'packages/task-exchange/src/types/index.ts',
     'packages/agents/unified-bidder.js',
   ],
-  'settings': ['settings-manager.js', 'settings.html', 'preload.js'],
+  settings: ['settings-manager.js', 'settings.html', 'preload.js'],
   'voice-orb': ['orb.html', 'preload-orb.js', 'src/voice-task-sdk/exchange-bridge.js', 'voice-listener.js'],
   'spaces-api': ['spaces-api.js', 'spaces-api-server.js', 'clipboard-storage-v2.js'],
   'spaces-ui': ['clipboard-viewer.html', 'clipboard-viewer.js', 'preload.js'],
@@ -33,7 +32,7 @@ const AREA_SOURCE_MAP = {
   'command-hud': ['command-hud.html', 'preload-command-hud.js', 'lib/hud-api.js'],
   'log-viewer': ['log-viewer.html', 'preload-log-viewer.js', 'lib/log-server.js'],
   'app-health': ['app-health-dashboard.html', 'preload-health-dashboard.js'],
-  'conversion': ['lib/conversion-service.js', 'lib/conversion-routes.js', 'lib/converters/base-converter-agent.js'],
+  conversion: ['lib/conversion-service.js', 'lib/conversion-routes.js', 'lib/converters/base-converter-agent.js'],
 };
 
 // Regex to extract REST endpoint from descriptions like: `GET /api/spaces`
@@ -46,8 +45,11 @@ const IPC_CHANNEL_RE = /`([a-z][a-z0-9-]*:[a-z][a-z0-9-]*?)(?:\(|`)/i;
 let _mainJsCache = null;
 function getMainJs() {
   if (!_mainJsCache) {
-    try { _mainJsCache = fs.readFileSync(path.join(APP_ROOT, 'main.js'), 'utf-8'); }
-    catch { _mainJsCache = ''; }
+    try {
+      _mainJsCache = fs.readFileSync(path.join(APP_ROOT, 'main.js'), 'utf-8');
+    } catch {
+      _mainJsCache = '';
+    }
   }
   return _mainJsCache;
 }
@@ -109,7 +111,7 @@ class TestAuditOrchestrator {
   async run(itemId) {
     this._ensureInit();
 
-    const item = this._items.find(i => i.id === itemId);
+    const item = this._items.find((i) => i.id === itemId);
     if (!item) {
       throw new Error(`Item not found: ${itemId}`);
     }
@@ -143,10 +145,10 @@ class TestAuditOrchestrator {
       results,
       summary: {
         total: results.length,
-        passed: results.filter(r => r.result && r.result.status === 'passed').length,
-        failed: results.filter(r => r.result && r.result.status === 'failed').length,
-        manual: results.filter(r => r.action === 'manual' || r.action === 'verify').length,
-        skipped: results.filter(r => r.result && r.result.status === 'skipped').length,
+        passed: results.filter((r) => r.result && r.result.status === 'passed').length,
+        failed: results.filter((r) => r.result && r.result.status === 'failed').length,
+        manual: results.filter((r) => r.action === 'manual' || r.action === 'verify').length,
+        skipped: results.filter((r) => r.result && r.result.status === 'skipped').length,
       },
     };
   }
@@ -181,7 +183,14 @@ class TestAuditOrchestrator {
 
     const passedItems = this._state.getPassedItems();
     if (passedItems.length === 0) {
-      return { runId: null, regressions: [], stillPassing: [], total: 0, durationMs: 0, message: 'No passed items to regress.' };
+      return {
+        runId: null,
+        regressions: [],
+        stillPassing: [],
+        total: 0,
+        durationMs: 0,
+        message: 'No passed items to regress.',
+      };
     }
 
     const runId = `reg-${Date.now()}`;
@@ -327,15 +336,15 @@ class TestAuditOrchestrator {
     const nextItem = this._state.getNextUntested();
 
     // Per-plan status
-    const planStatuses = planSummary.plans.map(plan => {
+    const planStatuses = planSummary.plans.map((plan) => {
       const items = this._state.getPlanItems(plan.number);
-      const passed = items.filter(i => i.state.status === 'passed').length;
-      const failed = items.filter(i => i.state.status === 'failed').length;
-      const skipped = items.filter(i => i.state.status === 'skipped').length;
-      const blocked = items.filter(i => i.state.status === 'blocked').length;
-      const untested = items.filter(i => i.state.status === 'untested').length;
+      const passed = items.filter((i) => i.state.status === 'passed').length;
+      const failed = items.filter((i) => i.state.status === 'failed').length;
+      const skipped = items.filter((i) => i.state.status === 'skipped').length;
+      const blocked = items.filter((i) => i.state.status === 'blocked').length;
+      const untested = items.filter((i) => i.state.status === 'untested').length;
       const total = items.length;
-      const pending = items.filter(i => i.state.status === 'pending').length;
+      const pending = items.filter((i) => i.state.status === 'pending').length;
       let status = 'untested';
       if (untested === 0 && pending === 0 && failed === 0) status = 'pass';
       else if (untested === 0 && pending === 0 && failed > 0) status = 'fail';
@@ -357,7 +366,9 @@ class TestAuditOrchestrator {
     return {
       summary,
       cursor,
-      nextItem: nextItem ? { id: nextItem.id, type: nextItem.type, description: nextItem.description, plan: nextItem.planName } : null,
+      nextItem: nextItem
+        ? { id: nextItem.id, type: nextItem.type, description: nextItem.description, plan: nextItem.planName }
+        : null,
       plans: planStatuses,
       regressionRuns: this._state.getState().regressionRuns.length,
     };
@@ -470,7 +481,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   getItem(itemId) {
     this._ensureInit();
     const stateItem = this._state.getItem(itemId);
-    const parsedItem = this._items.find(i => i.id === itemId);
+    const parsedItem = this._items.find((i) => i.id === itemId);
     const trailEntries = this._logger.getTrail({ itemId });
     return {
       ...parsedItem,
@@ -493,7 +504,9 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
 
     // Wait for app to go down
     const startTime = Date.now();
-    await new Promise(r => setTimeout(r, 2000)); // give it 2s to shut down
+    await new Promise((r) => {
+      setTimeout(r, 2000);
+    }); // give it 2s to shut down
 
     // Poll until app comes back up
     while (Date.now() - startTime < timeoutMs) {
@@ -506,7 +519,9 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
           return { success: true, downtime };
         }
       }
-      await new Promise(r => setTimeout(r, 1000)); // poll every 1s
+      await new Promise((r) => {
+        setTimeout(r, 1000);
+      }); // poll every 1s
     }
 
     return { success: false, error: 'Timeout waiting for app to restart', elapsed: Date.now() - startTime };
@@ -564,11 +579,19 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       if (result.status === 'failed') {
         try {
           diagnosis = await this._diagnoseFailure(item, result);
-        } catch (_) { /* diagnosis is best-effort */ }
+        } catch (_) {
+          /* diagnosis is best-effort */
+        }
       }
 
       return {
-        item: { id: item.id, type: item.type, description: item.description, plan: item.planName, section: item.section },
+        item: {
+          id: item.id,
+          type: item.type,
+          description: item.description,
+          plan: item.planName,
+          section: item.section,
+        },
         result,
         action: 'automated',
         diagnosis,
@@ -584,7 +607,13 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       });
 
       return {
-        item: { id: item.id, type: item.type, description: item.description, plan: item.planName, section: item.section },
+        item: {
+          id: item.id,
+          type: item.type,
+          description: item.description,
+          plan: item.planName,
+          section: item.section,
+        },
         result: null,
         action: 'manual',
         prompt: `MANUAL TEST: [${item.planName} > ${item.section}]\n${item.description}\n\nPerform this test manually, then record the result.`,
@@ -602,7 +631,13 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       });
 
       return {
-        item: { id: item.id, type: item.type, description: item.description, plan: item.planName, section: item.section },
+        item: {
+          id: item.id,
+          type: item.type,
+          description: item.description,
+          plan: item.planName,
+          section: item.section,
+        },
         result: autoResult,
         action: 'verify',
         prompt: `VERIFY: [${item.planName} > ${item.section}]\n${item.description}\n\nAutomated part result: ${autoResult.status}${autoResult.notes ? ' -- ' + autoResult.notes : ''}\nPlease verify the result visually and record pass/fail.`,
@@ -643,7 +678,10 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       }
 
       // ─── Layer 3: Window opens / lifecycle tests ───
-      if (descLower.includes('opens') && (descLower.includes('without errors') || descLower.includes('without console errors'))) {
+      if (
+        descLower.includes('opens') &&
+        (descLower.includes('without errors') || descLower.includes('without console errors'))
+      ) {
         return await this._testWindowOpens(desc);
       }
       if (descLower.includes('window loads without')) {
@@ -725,7 +763,8 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
         // Verify getTask method exists in exchange
         try {
           const exchangeTs = fs.readFileSync(
-            path.join(APP_ROOT, 'packages/task-exchange/src/exchange/exchange.ts'), 'utf-8'
+            path.join(APP_ROOT, 'packages/task-exchange/src/exchange/exchange.ts'),
+            'utf-8'
           );
           if (exchangeTs.includes('getTask(taskId')) {
             const portCheck = await this._checkExchangePort();
@@ -742,23 +781,37 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
 
       // ─── Layer 12: Specific pattern matchers for common test types ───
       // Status transitions
-      if (descLower.includes('status') && (descLower.includes('pending') || descLower.includes('cancelled') || descLower.includes('transition'))) {
+      if (
+        descLower.includes('status') &&
+        (descLower.includes('pending') || descLower.includes('cancelled') || descLower.includes('transition'))
+      ) {
         return this._testCodeConstant(desc);
       }
       // Priority ordering
-      if (descLower.includes('priority') && (descLower.includes('urgent') || descLower.includes('normal') || descLower.includes('low'))) {
+      if (
+        descLower.includes('priority') &&
+        (descLower.includes('urgent') || descLower.includes('normal') || descLower.includes('low'))
+      ) {
         return this._testCodeConstant(desc);
       }
       // Error class checks
-      if (descLower.includes('error') && (descLower.includes('class') || descLower.includes('extends') || descLower.includes('thrown'))) {
+      if (
+        descLower.includes('error') &&
+        (descLower.includes('class') || descLower.includes('extends') || descLower.includes('thrown'))
+      ) {
         return this._testCodeConstant(desc);
       }
       // Retry / circuit breaker config
-      if (descLower.includes('maxretries') || descLower.includes('retry') || descLower.includes('circuit breaker') || descLower.includes('failurethreshold')) {
+      if (
+        descLower.includes('maxretries') ||
+        descLower.includes('retry') ||
+        descLower.includes('circuit breaker') ||
+        descLower.includes('failurethreshold')
+      ) {
         return this._testCodeConstant(desc);
       }
       // Adapter / provider checks
-      if (descLower.includes('adapter') || descLower.includes('provider') && descLower.includes('registered')) {
+      if (descLower.includes('adapter') || (descLower.includes('provider') && descLower.includes('registered'))) {
         return this._testCodeConstant(desc);
       }
       // Format / export checks
@@ -766,7 +819,10 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
         return this._testHtmlContent(desc);
       }
       // Menu item checks
-      if (descLower.includes('menu') && (descLower.includes('present') || descLower.includes('has expected') || descLower.includes('at least one'))) {
+      if (
+        descLower.includes('menu') &&
+        (descLower.includes('present') || descLower.includes('has expected') || descLower.includes('at least one'))
+      ) {
         return await this._testMenuCheck(desc);
       }
       // Disabled agents
@@ -780,7 +836,6 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
 
       // ─── Default: no automation implemented ───
       return { status: 'skipped', notes: 'No automation implemented for this item yet' };
-
     } catch (err) {
       return { status: 'failed', error: err.message, notes: 'Automation threw an exception' };
     }
@@ -791,7 +846,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   /**
    * Test a REST endpoint extracted from description. Handles parameterized paths.
    */
-  async _testExtractedEndpoint(method, endpoint, desc) {
+  async _testExtractedEndpoint(method, endpoint, _desc) {
     // Replace path params with known test values
     let url = endpoint;
     url = url.replace(/:id\b/g, 'unclassified');
@@ -823,7 +878,11 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
 
     // 404 = endpoint doesn't exist. Anything else (200, 400, 409, etc.) means it exists.
     if (response.status !== 404 && response.status !== 0) {
-      return { status: 'passed', notes: `${method} ${url}: ${response.status} -- endpoint exists (${durationMs}ms)`, durationMs };
+      return {
+        status: 'passed',
+        notes: `${method} ${url}: ${response.status} -- endpoint exists (${durationMs}ms)`,
+        durationMs,
+      };
     }
     return { status: 'failed', error: `${method} ${url}: endpoint not found (${response.status})`, durationMs };
   }
@@ -847,17 +906,29 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       }
     }
     // Also check preload files and other JS files
-    const preloadFiles = ['preload.js', 'preload-orb.js', 'preload-command-hud.js', 'preload-recorder.js',
-      'preload-video-editor.js', 'preload-budget.js', 'preload-health-dashboard.js',
-      'preload-log-viewer.js', 'preload-smart-export.js', 'preload-spaces.js',
-      'preload-claude-code.js', 'preload-agent-manager.js'];
+    const preloadFiles = [
+      'preload.js',
+      'preload-orb.js',
+      'preload-command-hud.js',
+      'preload-recorder.js',
+      'preload-video-editor.js',
+      'preload-budget.js',
+      'preload-health-dashboard.js',
+      'preload-log-viewer.js',
+      'preload-smart-export.js',
+      'preload-spaces.js',
+      'preload-claude-code.js',
+      'preload-agent-manager.js',
+    ];
     for (const f of preloadFiles) {
       try {
         const content = fs.readFileSync(path.join(APP_ROOT, f), 'utf-8');
         if (content.includes(`'${channel}'`) || content.includes(`"${channel}"`)) {
           return { status: 'passed', notes: `IPC channel '${channel}' referenced in ${f}` };
         }
-      } catch { /* file doesn't exist */ }
+      } catch {
+        /* file doesn't exist */
+      }
     }
     // Check clipboard-manager-v2-adapter.js, recorder.js etc.
     const otherFiles = ['clipboard-manager-v2-adapter.js', 'recorder.js', 'video-editor.js', 'budget-manager.js'];
@@ -867,7 +938,9 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
         if (content.includes(`'${channel}'`) || content.includes(`"${channel}"`)) {
           return { status: 'passed', notes: `IPC channel '${channel}' found in ${f}` };
         }
-      } catch { /* file doesn't exist */ }
+      } catch {
+        /* file doesn't exist */
+      }
     }
     return { status: 'failed', error: `IPC handler '${channel}' not found in codebase` };
   }
@@ -875,7 +948,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   /**
    * Test that a window opens by checking if the app is running and no recent error logs.
    */
-  async _testWindowOpens(desc) {
+  async _testWindowOpens(_desc) {
     const health = await this._httpGet(`${LOG_SERVER}/health`);
     if (!health) {
       return { status: 'skipped', notes: 'App not running -- cannot verify window lifecycle' };
@@ -894,7 +967,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   /**
    * Check that no recent error-level logs exist.
    */
-  async _testNoRecentErrors(desc) {
+  async _testNoRecentErrors(_desc) {
     const stats = await this._httpGet(`${LOG_SERVER}/logs/stats`);
     if (!stats) return { status: 'skipped', notes: 'Log server not reachable' };
     const errorsPerMin = stats.errorsPerMinute || 0;
@@ -925,7 +998,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   /**
    * Test that a module can be loaded.
    */
-  _testModuleCheck(desc) {
+  _testModuleCheck(_desc) {
     return { status: 'skipped', notes: 'Module check not yet implemented for this pattern' };
   }
 
@@ -957,18 +1030,30 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   /**
    * Test a window.api or preload method exists in preload files.
    */
-  _testApiMethod(funcName, desc) {
+  _testApiMethod(funcName, _desc) {
     // For methods like window.aider.getSpaces, hudAPI.onShow, logViewer.getLogStats
     const parts = funcName.split('.');
     const methodName = parts[parts.length - 1];
-    const namespace = parts.length > 1 ? parts[parts.length - 2] : '';
+    const _namespace = parts.length > 1 ? parts[parts.length - 2] : '';
 
-    const allJsFiles = ['preload.js', 'preload-orb.js', 'preload-command-hud.js',
-      'preload-hud-api.js', 'preload-recorder.js', 'preload-video-editor.js',
-      'preload-budget.js', 'preload-budget-estimator.js', 'preload-health-dashboard.js',
-      'preload-log-viewer.js', 'preload-smart-export.js', 'preload-spaces.js',
-      'preload-claude-code.js', 'preload-agent-manager.js',
-      'preload-detached-video.js', 'preload-tab-picker.js'];
+    const allJsFiles = [
+      'preload.js',
+      'preload-orb.js',
+      'preload-command-hud.js',
+      'preload-hud-api.js',
+      'preload-recorder.js',
+      'preload-video-editor.js',
+      'preload-budget.js',
+      'preload-budget-estimator.js',
+      'preload-health-dashboard.js',
+      'preload-log-viewer.js',
+      'preload-smart-export.js',
+      'preload-spaces.js',
+      'preload-claude-code.js',
+      'preload-agent-manager.js',
+      'preload-detached-video.js',
+      'preload-tab-picker.js',
+    ];
 
     for (const f of allJsFiles) {
       try {
@@ -976,20 +1061,31 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
         if (content.includes(methodName)) {
           return { status: 'passed', notes: `API method '${methodName}' found in ${f}` };
         }
-      } catch { /* skip missing files */ }
+      } catch {
+        /* skip missing files */
+      }
     }
 
     // Also check HTML files for inline scripts
-    const htmlFiles = ['command-hud.html', 'recorder.html', 'log-viewer.html',
-      'app-health-dashboard.html', 'claude-code-ui.html', 'aider-ui.html',
-      'budget-dashboard.html', 'smart-export-format-modal.html'];
+    const htmlFiles = [
+      'command-hud.html',
+      'recorder.html',
+      'log-viewer.html',
+      'app-health-dashboard.html',
+      'claude-code-ui.html',
+      'aider-ui.html',
+      'budget-dashboard.html',
+      'smart-export-format-modal.html',
+    ];
     for (const f of htmlFiles) {
       try {
         const content = fs.readFileSync(path.join(APP_ROOT, f), 'utf-8');
         if (content.includes(methodName)) {
           return { status: 'passed', notes: `API method '${methodName}' found in ${f}` };
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     return { status: 'skipped', notes: `Could not locate '${funcName}' in preload/HTML files` };
@@ -1014,7 +1110,9 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       if (mainJs.includes(accelerator)) {
         return { status: 'passed', notes: `Shortcut '${accelerator}' registered in main.js` };
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
 
     return { status: 'skipped', notes: 'Shortcut registration not found (may use different format)' };
   }
@@ -1032,10 +1130,15 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
         if (fs.existsSync(typesFile)) {
           const content = fs.readFileSync(typesFile, 'utf-8');
           if (content.includes('PENDING') && content.includes('SETTLED')) {
-            return { status: 'passed', notes: 'Task statuses PENDING/OPEN/MATCHING/ASSIGNED/SETTLED found in types/index.ts' };
+            return {
+              status: 'passed',
+              notes: 'Task statuses PENDING/OPEN/MATCHING/ASSIGNED/SETTLED found in types/index.ts',
+            };
           }
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     // Priority constants
@@ -1048,7 +1151,9 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
             return { status: 'passed', notes: 'Priority constants URGENT/NORMAL/LOW found in types/index.ts' };
           }
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     // Circuit breaker / retry config
@@ -1057,11 +1162,17 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
         const aiService = path.join(APP_ROOT, 'lib/ai-service.js');
         if (fs.existsSync(aiService)) {
           const content = fs.readFileSync(aiService, 'utf-8');
-          if (content.includes('maxRetries') || content.includes('failureThreshold') || content.includes('circuitBreaker')) {
+          if (
+            content.includes('maxRetries') ||
+            content.includes('failureThreshold') ||
+            content.includes('circuitBreaker')
+          ) {
             return { status: 'passed', notes: 'Retry/circuit breaker config found in lib/ai-service.js' };
           }
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     // Agent bidding / auction
@@ -1072,7 +1183,9 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
         if (fs.existsSync(bidder) || fs.existsSync(agentBidder)) {
           return { status: 'passed', notes: 'Agent bidding module exists (unified-bidder.js / agent-bidder.js)' };
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     // DEAD_LETTER / HALTED / BUSTED status
@@ -1081,12 +1194,14 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
         const typesFile = path.join(APP_ROOT, 'packages/task-exchange/src/types/index.ts');
         if (fs.existsSync(typesFile)) {
           const content = fs.readFileSync(typesFile, 'utf-8');
-          const found = ['DEAD_LETTER', 'HALTED', 'BUSTED'].filter(s => content.includes(s));
+          const found = ['DEAD_LETTER', 'HALTED', 'BUSTED'].filter((s) => content.includes(s));
           if (found.length > 0) {
             return { status: 'passed', notes: `Status constants found: ${found.join(', ')}` };
           }
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     // Disabled agents
@@ -1099,7 +1214,9 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
             return { status: 'passed', notes: 'Agent enabled/disabled support found in agent-registry.js' };
           }
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     return { status: 'skipped', notes: 'Code constant check not matched for this pattern' };
@@ -1110,22 +1227,39 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
    */
   _testHtmlContent(desc) {
     // Match format cards, tabs, buttons etc.
-    const htmlFiles = ['smart-export-format-modal.html', 'smart-export-preview.html',
-      'budget-dashboard.html', 'budget-setup.html', 'budget-estimator.html',
-      'app-health-dashboard.html', 'log-viewer.html', 'claude-code-ui.html',
-      'video-editor.html', 'aider-ui.html', 'recorder.html', 'command-hud.html',
-      'agent-manager.html', 'setup-wizard.html', 'onboarding-wizard.html'];
+    const htmlFiles = [
+      'smart-export-format-modal.html',
+      'smart-export-preview.html',
+      'budget-dashboard.html',
+      'budget-setup.html',
+      'budget-estimator.html',
+      'app-health-dashboard.html',
+      'log-viewer.html',
+      'claude-code-ui.html',
+      'video-editor.html',
+      'aider-ui.html',
+      'recorder.html',
+      'command-hud.html',
+      'agent-manager.html',
+      'setup-wizard.html',
+      'onboarding-wizard.html',
+    ];
     const descLower = desc.toLowerCase();
     for (const f of htmlFiles) {
       try {
         const content = fs.readFileSync(path.join(APP_ROOT, f), 'utf-8').toLowerCase();
         // Check if description keywords appear in the HTML
         const keywords = descLower.match(/[a-z]{4,}/g) || [];
-        const matchCount = keywords.filter(k => content.includes(k)).length;
+        const matchCount = keywords.filter((k) => content.includes(k)).length;
         if (matchCount > keywords.length * 0.5) {
-          return { status: 'passed', notes: `HTML content matches in ${f} (${matchCount}/${keywords.length} keywords)` };
+          return {
+            status: 'passed',
+            notes: `HTML content matches in ${f} (${matchCount}/${keywords.length} keywords)`,
+          };
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
     return { status: 'skipped', notes: 'HTML content check inconclusive' };
   }
@@ -1133,7 +1267,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   /**
    * Test menu structure via log server (app running check).
    */
-  async _testMenuCheck(desc) {
+  async _testMenuCheck(_desc) {
     const health = await this._httpGet(`${LOG_SERVER}/health`);
     if (!health) return { status: 'skipped', notes: 'App not running' };
     // If app is running, menu was constructed. Check for menu errors in logs.
@@ -1187,19 +1321,21 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       if (errData && errData.data) {
         const areaPatterns = this._getAreaPatterns(areaKey);
         diagnosis.recentErrors = errData.data
-          .filter(e => {
+          .filter((e) => {
             const msg = (e.message || '').toLowerCase();
             const cat = (e.category || '').toLowerCase();
-            return areaPatterns.some(p => msg.includes(p) || cat.includes(p));
+            return areaPatterns.some((p) => msg.includes(p) || cat.includes(p));
           })
           .slice(0, 5)
-          .map(e => ({
+          .map((e) => ({
             message: e.message,
             category: e.category,
             timestamp: e.timestamp,
           }));
       }
-    } catch (_) { /* log server not reachable */ }
+    } catch (_) {
+      /* log server not reachable */
+    }
 
     // 3. Analyze the error to suggest an action
     diagnosis.suggestedAction = this._suggestFix(item, result, diagnosis);
@@ -1218,16 +1354,16 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       diagnosis.context.exchangeHealth = await this._checkExchangePort();
       // Also check for exchange-specific log errors
       try {
-        const exchangeErrors = await this._httpGet(
-          `${LOG_SERVER}/logs?level=error&category=voice&limit=10`
-        );
+        const exchangeErrors = await this._httpGet(`${LOG_SERVER}/logs?level=error&category=voice&limit=10`);
         if (exchangeErrors && exchangeErrors.data) {
           diagnosis.context.exchangeErrors = exchangeErrors.data
-            .filter(e => (e.message || '').toLowerCase().includes('exchange'))
+            .filter((e) => (e.message || '').toLowerCase().includes('exchange'))
             .slice(0, 3)
-            .map(e => e.message);
+            .map((e) => e.message);
         }
-      } catch (_) {}
+      } catch (_) {
+        /* no-op */
+      }
     }
 
     return diagnosis;
@@ -1240,7 +1376,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
    */
   async diagnose(itemId) {
     this._ensureInit();
-    const item = this._items.find(i => i.id === itemId);
+    const item = this._items.find((i) => i.id === itemId);
     if (!item) throw new Error(`Item not found: ${itemId}`);
 
     const state = this._state.getItem(itemId);
@@ -1259,7 +1395,8 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
     const planName = (item.planName || '').toLowerCase();
     const desc = (item.description || '').toLowerCase();
 
-    if (planName.includes('task exchange') || desc.includes('task exchange') || desc.includes('exchange bridge')) return 'task-exchange';
+    if (planName.includes('task exchange') || desc.includes('task exchange') || desc.includes('exchange bridge'))
+      return 'task-exchange';
     if (planName.includes('settings')) return 'settings';
     if (planName.includes('voice orb')) return 'voice-orb';
     if (planName.includes('spaces api')) return 'spaces-api';
@@ -1282,7 +1419,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   _getAreaPatterns(areaKey) {
     const map = {
       'task-exchange': ['exchange', 'auction', 'bidder', 'task-exchange', 'voice'],
-      'settings': ['settings', 'config', 'preferences'],
+      settings: ['settings', 'config', 'preferences'],
       'voice-orb': ['orb', 'voice', 'speech', 'whisper', 'realtime'],
       'spaces-api': ['spaces', 'clipboard', 'storage'],
       'spaces-ui': ['spaces', 'clipboard', 'viewer'],
@@ -1294,7 +1431,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       'command-hud': ['hud', 'command'],
       'log-viewer': ['log', 'viewer'],
       'app-health': ['health', 'dashboard'],
-      'conversion': ['convert', 'converter', 'pipeline'],
+      conversion: ['convert', 'converter', 'pipeline'],
     };
     return map[areaKey] || [areaKey];
   }
@@ -1309,62 +1446,80 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
     // IPC handler missing
     if (err.includes('ipc handler') && err.includes('not found')) {
       const channel = diagnosis.context?.missingChannel || 'unknown';
-      return `REGISTER IPC HANDLER: The IPC channel '${channel}' is not registered. `
-        + `Add ipcMain.handle('${channel}', ...) in ${diagnosis.context?.expectedLocation || 'the appropriate main-process file'}. `
-        + `Check that the preload script also exposes this channel.`;
+      return (
+        `REGISTER IPC HANDLER: The IPC channel '${channel}' is not registered. ` +
+        `Add ipcMain.handle('${channel}', ...) in ${diagnosis.context?.expectedLocation || 'the appropriate main-process file'}. ` +
+        `Check that the preload script also exposes this channel.`
+      );
     }
 
     // Endpoint not found
     if (err.includes('endpoint not found') || err.includes('404')) {
-      return `ADD REST ENDPOINT: The endpoint returned 404. Register the route in the appropriate router file. `
-        + `Source files to check: ${diagnosis.sourceFiles.join(', ') || 'unknown'}`;
+      return (
+        `ADD REST ENDPOINT: The endpoint returned 404. Register the route in the appropriate router file. ` +
+        `Source files to check: ${diagnosis.sourceFiles.join(', ') || 'unknown'}`
+      );
     }
 
     // Service unreachable
     if (err.includes('unreachable') || err.includes('econnrefused')) {
-      return `SERVICE DOWN: The service is not running or not reachable. `
-        + `Verify the app is started (npm start) and the service initialized without errors. `
-        + `Check recent errors: ${diagnosis.recentErrors.map(e => e.message).join('; ') || 'none found'}`;
+      return (
+        `SERVICE DOWN: The service is not running or not reachable. ` +
+        `Verify the app is started (npm start) and the service initialized without errors. ` +
+        `Check recent errors: ${diagnosis.recentErrors.map((e) => e.message).join('; ') || 'none found'}`
+      );
     }
 
     // Exchange not running
     if (err.includes('exchange') && (err.includes('not running') || err.includes('not initialized'))) {
-      return `EXCHANGE NOT RUNNING: The Task Exchange failed to initialize. `
-        + `Check src/voice-task-sdk/exchange-bridge.js initializeExchangeBridge(). `
-        + `Common cause: packages/task-exchange not built (run: cd packages/task-exchange && npm run build). `
-        + `Exchange errors: ${(diagnosis.context?.exchangeErrors || []).join('; ') || 'none found'}`;
+      return (
+        `EXCHANGE NOT RUNNING: The Task Exchange failed to initialize. ` +
+        `Check src/voice-task-sdk/exchange-bridge.js initializeExchangeBridge(). ` +
+        `Common cause: packages/task-exchange not built (run: cd packages/task-exchange && npm run build). ` +
+        `Exchange errors: ${(diagnosis.context?.exchangeErrors || []).join('; ') || 'none found'}`
+      );
     }
 
     // Module not found
     if (err.includes('cannot find module') || err.includes('module not found')) {
-      return `MISSING MODULE: A required module is missing. Install it (npm install) or check the import path. `
-        + `Error: ${result.error}`;
+      return (
+        `MISSING MODULE: A required module is missing. Install it (npm install) or check the import path. ` +
+        `Error: ${result.error}`
+      );
     }
 
     // General automation exception
     if (notes.includes('automation threw')) {
-      return `AUTOMATION BUG: The test automation itself crashed. `
-        + `Fix the orchestrator's test logic for this item type, or add specific automation. `
-        + `Error: ${result.error}`;
+      return (
+        `AUTOMATION BUG: The test automation itself crashed. ` +
+        `Fix the orchestrator's test logic for this item type, or add specific automation. ` +
+        `Error: ${result.error}`
+      );
     }
 
     // Default
     if (diagnosis.recentErrors.length > 0) {
-      return `INVESTIGATE ERRORS: ${diagnosis.recentErrors.length} recent error(s) found in logs. `
-        + `Most recent: "${diagnosis.recentErrors[0].message}". `
-        + `Source files: ${diagnosis.sourceFiles.join(', ') || 'check plan for relevant files'}`;
+      return (
+        `INVESTIGATE ERRORS: ${diagnosis.recentErrors.length} recent error(s) found in logs. ` +
+        `Most recent: "${diagnosis.recentErrors[0].message}". ` +
+        `Source files: ${diagnosis.sourceFiles.join(', ') || 'check plan for relevant files'}`
+      );
     }
 
-    return `INVESTIGATE: Check source files (${diagnosis.sourceFiles.join(', ') || 'see test plan'}) `
-      + `and app logs (curl ${LOG_SERVER}/logs?level=error&limit=10) for clues.`;
+    return (
+      `INVESTIGATE: Check source files (${diagnosis.sourceFiles.join(', ') || 'see test plan'}) ` +
+      `and app logs (curl ${LOG_SERVER}/logs?level=error&limit=10) for clues.`
+    );
   }
 
   /**
    * Guess where an IPC handler should be registered based on channel name.
    */
   _guessIpcLocation(channel) {
-    if (channel.startsWith('voice-task-sdk:')) return 'src/voice-task-sdk/exchange-bridge.js or src/voice-task-sdk/integration.js';
-    if (channel.startsWith('task-exchange:')) return 'WARNING: task-exchange: channels do not exist. Use voice-task-sdk: namespace instead.';
+    if (channel.startsWith('voice-task-sdk:'))
+      return 'src/voice-task-sdk/exchange-bridge.js or src/voice-task-sdk/integration.js';
+    if (channel.startsWith('task-exchange:'))
+      return 'WARNING: task-exchange: channels do not exist. Use voice-task-sdk: namespace instead.';
     if (channel.startsWith('clipboard:')) return 'clipboard-manager-v2-adapter.js';
     if (channel.startsWith('settings:')) return 'settings-manager.js';
     if (channel.startsWith('ai:')) return 'lib/ai-service.js (IPC setup in main.js)';
@@ -1405,24 +1560,27 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   /**
    * Test the Task Exchange by checking port health and log server for exchange errors.
    */
-  async _testExchangeHealth(desc) {
+  async _testExchangeHealth(_desc) {
     const portCheck = await this._checkExchangePort();
     if (!portCheck.listening) {
       return {
         status: 'failed',
-        error: `Task Exchange not listening on port ${EXCHANGE_WS_PORT}: ${portCheck.error}. `
-          + `Check that exchange-bridge.js initialized. Run: cd packages/task-exchange && npm run build`,
+        error:
+          `Task Exchange not listening on port ${EXCHANGE_WS_PORT}: ${portCheck.error}. ` +
+          `Check that exchange-bridge.js initialized. Run: cd packages/task-exchange && npm run build`,
       };
     }
 
     // Also query log server for exchange status
     try {
       const logs = await this._httpGet(`${LOG_SERVER}/logs?category=voice&search=exchange&limit=5`);
-      const hasInitLog = logs?.data?.some(l => (l.message || '').toLowerCase().includes('loaded task-exchange'));
+      const hasInitLog = logs?.data?.some((l) => (l.message || '').toLowerCase().includes('loaded task-exchange'));
       if (hasInitLog) {
         return { status: 'passed', notes: `Exchange listening on port ${EXCHANGE_WS_PORT}, init confirmed in logs` };
       }
-    } catch (_) {}
+    } catch (_) {
+      /* no-op */
+    }
 
     return { status: 'passed', notes: `Exchange listening on port ${EXCHANGE_WS_PORT}` };
   }
@@ -1430,7 +1588,7 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
   /**
    * Test task submission by checking exchange is reachable and IPC handlers are registered.
    */
-  async _testTaskSubmission(desc) {
+  async _testTaskSubmission(_desc) {
     // First verify exchange is running
     const portCheck = await this._checkExchangePort();
     if (!portCheck.listening) {
@@ -1446,35 +1604,43 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       try {
         const content = fs.readFileSync(path.join(APP_ROOT, f), 'utf-8');
         if (content.includes("handle('voice-task-sdk:submit'") || content.includes('handle("voice-task-sdk:submit"')) {
-          return { status: 'passed', notes: `Submit handler registered in ${f}, exchange running on port ${EXCHANGE_WS_PORT}` };
+          return {
+            status: 'passed',
+            notes: `Submit handler registered in ${f}, exchange running on port ${EXCHANGE_WS_PORT}`,
+          };
         }
-      } catch (_) {}
+      } catch (_) {
+        /* no-op */
+      }
     }
 
-    return { status: 'failed', error: "voice-task-sdk:submit IPC handler not found in integration.js or exchange-bridge.js" };
+    return {
+      status: 'failed',
+      error: 'voice-task-sdk:submit IPC handler not found in integration.js or exchange-bridge.js',
+    };
   }
 
   /**
    * Test task cancellation by verifying cancelTask exists in exchange.
    */
-  async _testTaskCancel(desc) {
+  async _testTaskCancel(_desc) {
     try {
       const exchangeTs = fs.readFileSync(
-        path.join(APP_ROOT, 'packages/task-exchange/src/exchange/exchange.ts'), 'utf-8'
+        path.join(APP_ROOT, 'packages/task-exchange/src/exchange/exchange.ts'),
+        'utf-8'
       );
       if (exchangeTs.includes('cancelTask(taskId')) {
         // Also check IPC handler
-        const bridgeJs = fs.readFileSync(
-          path.join(APP_ROOT, 'src/voice-task-sdk/exchange-bridge.js'), 'utf-8'
-        );
-        const hasIpc = bridgeJs.includes("voice-task-sdk:cancel-task") ||
-                       bridgeJs.includes("cancel-task");
+        const bridgeJs = fs.readFileSync(path.join(APP_ROOT, 'src/voice-task-sdk/exchange-bridge.js'), 'utf-8');
+        const hasIpc = bridgeJs.includes('voice-task-sdk:cancel-task') || bridgeJs.includes('cancel-task');
         return {
           status: 'passed',
           notes: `cancelTask() in exchange.ts${hasIpc ? ', IPC handler registered' : ', IPC via integration.js'}`,
         };
       }
-    } catch (_) {}
+    } catch (_) {
+      /* no-op */
+    }
     return { status: 'failed', error: 'cancelTask method not found in exchange.ts' };
   }
 
@@ -1491,14 +1657,20 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
           return;
         }
         let data = '';
-        res.on('data', chunk => data += chunk);
+        res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
-          try { resolve(JSON.parse(data)); }
-          catch { resolve(data); }
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve(data);
+          }
         });
       });
       req.on('error', () => resolve(null));
-      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(null);
+      });
     });
   }
 
@@ -1522,15 +1694,22 @@ pre{background:#f5f5f5;padding:1rem;overflow-x:auto}</style></head>
       }
       const req = http.request(options, (res) => {
         let data = '';
-        res.on('data', chunk => data += chunk);
+        res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
           let parsed;
-          try { parsed = JSON.parse(data); } catch { parsed = data; }
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            parsed = data;
+          }
           resolve({ status: res.statusCode, body: parsed });
         });
       });
       req.on('error', () => resolve({ status: 0, body: null }));
-      req.on('timeout', () => { req.destroy(); resolve({ status: 0, body: null }); });
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({ status: 0, body: null });
+      });
       if (body) req.write(body);
       req.end();
     });

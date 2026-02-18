@@ -922,7 +922,7 @@ GET /api/spaces/:spaceId/items/:itemId
 
     "physical": {
       "sourceUrl": null,
-      "sourceApp": "GSX Capture",
+      "sourceApp": "WISER Meeting",
       "deviceName": "MacBook-Pro",
       "filePath": "items/item-abc123/content.mp4"
     },

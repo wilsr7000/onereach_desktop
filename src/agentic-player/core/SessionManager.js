@@ -32,7 +32,7 @@ export class SessionManager {
       prompt: '',
       timeLimit: 0,
       timeWatched: 0,
-      watchedIds: []
+      watchedIds: [],
     };
   }
 
@@ -49,7 +49,7 @@ export class SessionManager {
       prompt: prompt,
       timeLimit: timeLimit,
       timeWatched: 0,
-      watchedIds: []
+      watchedIds: [],
     };
 
     log.info('agent', '[SessionManager] Started:', { v0: this.session.id });
@@ -88,8 +88,7 @@ export class SessionManager {
    * @returns {boolean} True if limit reached
    */
   isTimeLimitReached() {
-    return this.session.timeLimit > 0 && 
-           this.session.timeWatched >= this.session.timeLimit;
+    return this.session.timeLimit > 0 && this.session.timeWatched >= this.session.timeLimit;
   }
 
   /**
@@ -104,7 +103,7 @@ export class SessionManager {
       watchedIds: this.session.watchedIds,
       timeWatched: this.session.timeWatched,
       timeLimit: this.session.timeLimit,
-      queueLength
+      queueLength,
     };
   }
 
@@ -124,19 +123,3 @@ export class SessionManager {
     return this.session;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

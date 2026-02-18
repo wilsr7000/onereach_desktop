@@ -53,25 +53,17 @@ const DOC_WINDOWS = [
   {
     name: 'User Guide',
     file: 'docs-readme.html',
-    expectedTexts: [
-      'Getting Started',
-      'Settings',
-    ],
+    expectedTexts: ['Getting Started', 'Settings'],
   },
   {
     name: 'AI Run Times Guide',
     file: 'docs-ai-insights.html',
-    expectedTexts: [
-      'AI Run Times',
-    ],
+    expectedTexts: ['AI Run Times'],
   },
   {
     name: 'Spaces API Guide',
     file: 'docs-spaces-api.html',
-    expectedTexts: [
-      'Spaces',
-      'API',
-    ],
+    expectedTexts: ['Spaces', 'API'],
   },
 ];
 
@@ -80,7 +72,6 @@ const DOC_WINDOWS = [
 // =========================================================================
 
 test.describe('Documentation Completeness', () => {
-
   test.beforeAll(async () => {
     electronApp = await electron.launch({
       args: [path.join(__dirname, '../../main.js')],
@@ -94,7 +85,11 @@ test.describe('Documentation Completeness', () => {
   });
 
   test.afterAll(async () => {
-    try { await setLogLevel('info'); } catch (e) { /* app may be closing */ }
+    try {
+      await setLogLevel('info');
+    } catch (_e) {
+      /* app may be closing */
+    }
     await closeApp({ electronApp });
   });
 
@@ -123,7 +118,7 @@ test.describe('Documentation Completeness', () => {
         const snap = await snapshotErrors();
 
         // Open the doc window via BrowserWindow in main process
-        await electronApp.evaluate(async ({ }, filePath) => {
+        await electronApp.evaluate(async (_modules, filePath) => {
           const { BrowserWindow } = require('electron');
           const pathMod = require('path');
           const docWindow = new BrowserWindow({
@@ -148,8 +143,12 @@ test.describe('Documentation Completeness', () => {
 
         // Find the window
         const allWindows = electronApp.windows();
-        const targetWindow = allWindows.find(w => {
-          try { return w.url().includes(docWin.file); } catch { return false; }
+        const targetWindow = allWindows.find((w) => {
+          try {
+            return w.url().includes(docWin.file);
+          } catch {
+            return false;
+          }
         });
 
         // Verify the window opened
@@ -238,7 +237,7 @@ test.describe('Documentation Completeness', () => {
       try {
         const { getAllAgents } = require('./packages/agents/agent-registry');
         const agents = getAllAgents();
-        const docsAgent = agents.find(a => a.id === 'docs-agent');
+        const docsAgent = agents.find((a) => a.id === 'docs-agent');
         return docsAgent ? { id: docsAgent.id, name: docsAgent.name } : null;
       } catch (err) {
         return { error: err.message };

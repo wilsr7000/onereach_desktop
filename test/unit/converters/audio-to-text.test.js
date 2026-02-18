@@ -5,7 +5,10 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 // Mock child_process (for chunked strategy FFmpeg splitting)
 vi.mock('child_process', () => ({
   execFile: vi.fn((cmd, args, opts, cb) => {
-    if (typeof opts === 'function') { cb = opts; opts = {}; }
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
     if (cb) cb(null, 'mock output', '');
     return { on: vi.fn(), stdout: { on: vi.fn() }, stderr: { on: vi.fn() } };
   }),
@@ -37,7 +40,7 @@ const { AudioToTextConverter } = require('../../../lib/converters/audio-to-text.
 
 // Run the standard lifecycle test harness
 testConverterAgent(AudioToTextConverter, {
-  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1C, 0x66, 0x74, 0x79, 0x70]),
+  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]),
   expectedFromFormats: ['mp3', 'wav', 'aac', 'ogg', 'flac'],
   expectedToFormats: ['text'],
   expectedStrategies: ['whisper', 'elevenlabs', 'chunked'],

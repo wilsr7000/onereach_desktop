@@ -3,42 +3,50 @@
 
 // In the renderHistory() function, when rendering a downloading YouTube item:
 
-function renderYouTubeDownloadItem(item) {
+function _renderYouTubeDownloadItem(item) {
   const isDownloading = item.metadata?.downloadStatus === 'downloading';
   const progress = item.metadata?.downloadProgress || 0;
-  
+
   return `
     <div class="history-item" data-id="${item.id}">
       <div class="item-content">
         <div class="item-icon">🎬</div>
         <div class="item-details">
           <div class="item-preview">${escapeHtml(item.preview)}</div>
-          ${isDownloading ? `
+          ${
+            isDownloading
+              ? `
             <div class="download-progress">
               <div class="progress-bar">
                 <div class="progress-fill" style="width: ${progress}%"></div>
               </div>
               <div class="progress-text">${progress}%</div>
             </div>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
-        ${isDownloading ? `
+        ${
+          isDownloading
+            ? `
           <button class="cancel-btn" onclick="cancelYouTubeDownload('${item.id}')">
             Cancel
           </button>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
     </div>
   `;
 }
 
 // Add the cancel function
-async function cancelYouTubeDownload(itemId) {
+async function _cancelYouTubeDownload(itemId) {
   try {
     console.log('[UI] Cancelling download:', itemId);
-    
+
     const result = await window.youtube.cancelDownload(itemId);
-    
+
     if (result.success) {
       console.log('[UI] Download cancelled successfully');
       showNotification('Download cancelled', 'info');
@@ -55,7 +63,7 @@ async function cancelYouTubeDownload(itemId) {
 }
 
 // Add CSS for cancel button and progress bar
-const styles = `
+const _styles = `
   .download-progress {
     margin-top: 8px;
     display: flex;
@@ -104,16 +112,16 @@ const styles = `
 // Example: Show Active Downloads Widget
 // ============================================
 
-async function showActiveDownloads() {
+async function _showActiveDownloads() {
   const result = await window.youtube.getActiveDownloads();
-  
+
   if (!result.success || result.downloads.length === 0) {
     console.log('[UI] No active downloads');
     return;
   }
-  
+
   console.log('[UI] Active downloads:', result.downloads);
-  
+
   // Create a floating widget showing active downloads
   const widget = document.createElement('div');
   widget.className = 'active-downloads-widget';
@@ -123,17 +131,21 @@ async function showActiveDownloads() {
       <button onclick="this.parentElement.parentElement.remove()">×</button>
     </div>
     <div class="widget-content">
-      ${result.downloads.map(dl => `
+      ${result.downloads
+        .map(
+          (dl) => `
         <div class="download-item">
           <div class="download-url">${new URL(dl.url).hostname}</div>
           <div class="download-progress">${dl.progress}%</div>
           <div class="download-time">${formatDuration(dl.duration)}</div>
           <button onclick="cancelYouTubeDownload('${dl.placeholderId}')">Cancel</button>
         </div>
-      `).join('')}
+      `
+        )
+        .join('')}
     </div>
   `;
-  
+
   document.body.appendChild(widget);
 }
 
@@ -141,7 +153,7 @@ function formatDuration(ms) {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
-  
+
   if (hours > 0) {
     return `${hours}h ${minutes % 60}m`;
   } else if (minutes > 0) {
@@ -152,7 +164,7 @@ function formatDuration(ms) {
 }
 
 // Add CSS for active downloads widget
-const widgetStyles = `
+const _widgetStyles = `
   .active-downloads-widget {
     position: fixed;
     bottom: 20px;

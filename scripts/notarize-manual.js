@@ -13,7 +13,7 @@ async function notarizeApp() {
   }
 
   const appPath = path.join(__dirname, '../dist/mac-arm64/Onereach.ai.app');
-  
+
   // Check if app exists
   if (!fs.existsSync(appPath)) {
     console.error('❌ App not found at:', appPath);
@@ -27,16 +27,16 @@ async function notarizeApp() {
   console.log(`   Bundle ID: com.onereach.app`);
   console.log(`   Apple ID: ${process.env.APPLE_ID}`);
   console.log(`   Team ID: ${process.env.APPLE_TEAM_ID}`);
-  
+
   try {
     await notarize({
       appBundleId: 'com.onereach.app',
       appPath: appPath,
       appleId: process.env.APPLE_ID,
       appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
-      teamId: process.env.APPLE_TEAM_ID
+      teamId: process.env.APPLE_TEAM_ID,
     });
-    
+
     console.log('✅ Notarization successful!');
     console.log('');
     console.log('📦 Next steps:');
@@ -59,4 +59,4 @@ async function notarizeApp() {
 // Run if called directly
 if (require.main === module) {
   notarizeApp();
-} 
+}

@@ -1,6 +1,6 @@
 /**
  * Retry Evaluator
- * 
+ *
  * Uses LLM to analyze failures and decide the best next action.
  * Not deterministic - reasons about each failure dynamically.
  */
@@ -14,7 +14,7 @@ const log = getLogQueue();
 const openaiCircuit = getCircuit('openai-retry-eval', {
   failureThreshold: 3,
   resetTimeout: 30000,
-  windowMs: 60000
+  windowMs: 60000,
 });
 
 /**
@@ -23,11 +23,11 @@ const openaiCircuit = getCircuit('openai-retry-eval', {
  * @returns {Promise<{action: string, params: Object, reasoning: string, shouldStop: boolean}>}
  */
 async function evaluateFailure(context) {
-  const { 
-    originalIntent,    // What the user wanted: "play some jazz"
-    attemptsMade,      // Array of {action, result, error}
-    availableActions,  // What actions are possible
-    maxAttempts        // How many total attempts allowed
+  const {
+    originalIntent, // What the user wanted: "play some jazz"
+    attemptsMade, // Array of {action, result, error}
+    _availableActions, // What actions are possible
+    maxAttempts, // How many total attempts allowed
   } = context;
 
   const systemPrompt = `You are a retry strategist. Analyze what failed and decide the best next action.
@@ -70,9 +70,7 @@ What should I try next?`;
       const data = await ai.chat({
         profile: 'fast',
         system: systemPrompt,
-        messages: [
-          { role: 'user', content: userPrompt }
-        ],
+        messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
         maxTokens: 300,
         jsonMode: true,
@@ -80,18 +78,17 @@ What should I try next?`;
       });
       return JSON.parse(data.content || '{}');
     });
-    
-    log.info('agent', `Decision: ${result.action} - ${result.reasoning}`);
-    
-    return result;
 
+    log.info('agent', `Decision: ${result.action} - ${result.reasoning}`);
+
+    return result;
   } catch (error) {
     log.error('agent', 'Error', { error: error.message });
     return {
       action: 'stop',
       params: {},
       reasoning: `Evaluation failed: ${error.message}`,
-      shouldStop: true
+      shouldStop: true,
     };
   }
 }
@@ -128,9 +125,7 @@ Examples:
 - "play jazz on living room" → {"intent": "play on device", "searchTerm": "jazz", "genre": "jazz", "artist": null, "durationSeconds": null, "outputDevice": "Living Room"}
 - "switch to kitchen speaker" → {"intent": "switch output", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": null, "outputDevice": "Kitchen"}
 - "play on HomePod" → {"intent": "switch output", "searchTerm": null, "genre": null, "artist": null, "durationSeconds": null, "outputDevice": "HomePod"}`,
-        messages: [
-          { role: 'user', content: request }
-        ],
+        messages: [{ role: 'user', content: request }],
         temperature: 0,
         maxTokens: 200,
         jsonMode: true,
@@ -138,25 +133,27 @@ Examples:
       });
       return JSON.parse(data.content || '{}');
     });
-    
-    return parsed;
 
+    return parsed;
   } catch (error) {
     log.error('agent', 'Extract intent error', { error: error.message });
     // Fallback: simple extraction
-    const words = request.toLowerCase().replace(/play\s+/i, '').split(/\s+/);
+    const words = request
+      .toLowerCase()
+      .replace(/play\s+/i, '')
+      .split(/\s+/);
     const fillers = ['some', 'a', 'the', 'any', 'my', 'music', 'songs', 'please'];
-    const meaningful = words.filter(w => !fillers.includes(w) && w.length > 2);
+    const meaningful = words.filter((w) => !fillers.includes(w) && w.length > 2);
     return {
       intent: request,
       searchTerm: meaningful.join(' ') || null,
       genre: null,
-      artist: null
+      artist: null,
     };
   }
 }
 
 module.exports = {
   evaluateFailure,
-  extractIntent
+  extractIntent,
 };

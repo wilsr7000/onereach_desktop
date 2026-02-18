@@ -27,12 +27,11 @@ let electronApp;
 let mainWindow;
 
 test.describe('Window Smoke Tests', () => {
-
   test.beforeAll(async () => {
     electronApp = await electron.launch({
       args: [path.join(__dirname, '../../main.js')],
       env: { ...process.env, NODE_ENV: 'test', TEST_MODE: 'true' },
-      timeout: 30000
+      timeout: 30000,
     });
     mainWindow = await electronApp.firstWindow();
     await mainWindow.waitForLoadState('domcontentloaded');
@@ -46,7 +45,11 @@ test.describe('Window Smoke Tests', () => {
 
   test.afterAll(async () => {
     // Reset logging level
-    try { await setLogLevel('info'); } catch (e) { /* app may be closing */ }
+    try {
+      await setLogLevel('info');
+    } catch (_e) {
+      /* app may be closing */
+    }
     await closeApp({ electronApp });
   });
 
@@ -89,8 +92,12 @@ test.describe('Window Smoke Tests', () => {
 
     // Check for new windows
     const allWindows = electronApp.windows();
-    const settingsWindow = allWindows.find(w => {
-      try { return w.url().includes('settings.html'); } catch { return false; }
+    const settingsWindow = allWindows.find((w) => {
+      try {
+        return w.url().includes('settings.html');
+      } catch {
+        return false;
+      }
     });
 
     // Settings window should have opened (may not on all platforms)
@@ -122,8 +129,12 @@ test.describe('Window Smoke Tests', () => {
     await sleep(4000); // Spaces Manager has async init
 
     const allWindows = electronApp.windows();
-    const spacesWindow = allWindows.find(w => {
-      try { return w.url().includes('clipboard-viewer.html'); } catch { return false; }
+    const spacesWindow = allWindows.find((w) => {
+      try {
+        return w.url().includes('clipboard-viewer.html');
+      } catch {
+        return false;
+      }
     });
 
     const errors = filterBenignErrors(await checkNewErrors(snap));
@@ -181,8 +192,12 @@ test.describe('Window Smoke Tests', () => {
     await sleep(3000);
 
     const allWindows = electronApp.windows();
-    const dashWindow = allWindows.find(w => {
-      try { return w.url().includes('app-health-dashboard.html'); } catch { return false; }
+    const dashWindow = allWindows.find((w) => {
+      try {
+        return w.url().includes('app-health-dashboard.html');
+      } catch {
+        return false;
+      }
     });
 
     const errors = filterBenignErrors(await checkNewErrors(snap));
@@ -211,8 +226,12 @@ test.describe('Window Smoke Tests', () => {
     await sleep(3000);
 
     const allWindows = electronApp.windows();
-    const agentWindow = allWindows.find(w => {
-      try { return w.url().includes('agent-manager.html'); } catch { return false; }
+    const agentWindow = allWindows.find((w) => {
+      try {
+        return w.url().includes('agent-manager.html');
+      } catch {
+        return false;
+      }
     });
 
     const errors = filterBenignErrors(await checkNewErrors(snap));

@@ -1,7 +1,7 @@
 /**
  * MarkerManager - CRUD operations and data model for markers
  * Handles marker creation, editing, deletion, and sorting
- * 
+ *
  * Extended for Line Script System with:
  * - Event emitter for cross-view sync
  * - Content-type specific marker types
@@ -15,68 +15,68 @@ export const LINE_SCRIPT_MARKER_TYPES = {
   // Universal types
   spot: { id: 'spot', name: 'Marker', icon: '📍' },
   range: { id: 'range', name: 'Scene', icon: '🎬' },
-  
+
   // Podcast types
   quote: { id: 'quote', name: 'Quote', icon: '💬', template: 'podcast' },
   topic: { id: 'topic', name: 'Topic', icon: '📌', template: 'podcast' },
   clip: { id: 'clip', name: 'Clip', icon: '✂️', template: 'podcast' },
   'speaker-change': { id: 'speaker-change', name: 'Speaker', icon: '👤', template: 'podcast' },
-  
+
   // Product types
   feature: { id: 'feature', name: 'Feature', icon: '⭐', template: 'product' },
   demo: { id: 'demo', name: 'Demo', icon: '🎬', template: 'product' },
   broll: { id: 'broll', name: 'B-Roll', icon: '🎥', template: 'product' },
   testimonial: { id: 'testimonial', name: 'Testimonial', icon: '💬', template: 'product' },
-  
+
   // Promo types
   hook: { id: 'hook', name: 'Hook', icon: '🎣', template: 'promo' },
   beat: { id: 'beat', name: 'Beat', icon: '💥', template: 'promo' },
   transition: { id: 'transition', name: 'Transition', icon: '➡️', template: 'promo' },
   logo: { id: 'logo', name: 'Logo', icon: '🏷️', template: 'promo' },
-  
+
   // Learning types
   chapter: { id: 'chapter', name: 'Chapter', icon: '📖', template: 'learning' },
   keypoint: { id: 'keypoint', name: 'Key Point', icon: '💡', template: 'learning' },
   quiz: { id: 'quiz', name: 'Quiz', icon: '❓', template: 'learning' },
   concept: { id: 'concept', name: 'Concept', icon: '🧠', template: 'learning' },
   example: { id: 'example', name: 'Example', icon: '📝', template: 'learning' },
-  
+
   // Analysis types
   zzz: { id: 'zzz', name: 'ZZZ', icon: '💤', template: 'analysis' },
   highlight: { id: 'highlight', name: 'Highlight', icon: '⭐' },
-  cta: { id: 'cta', name: 'CTA', icon: '📢' }
+  cta: { id: 'cta', name: 'CTA', icon: '📢' },
 };
 
 export class MarkerManager {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // State
     this.markers = [];
     this.nextMarkerId = 1;
     this.colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
-    
+
     // Editing state
     this.editingMarkerId = null;
     this.selectedColor = this.colors[0];
     this.selectedType = 'spot';
     this.rangeInTime = 0;
     this.rangeOutTime = 5;
-    
+
     // Pending range marker
     this.pendingRangeMarker = null;
-    
+
     // Event emitter for cross-view sync
     this.eventListeners = {};
-    
+
     // Line Script marker types reference
     this.markerTypes = LINE_SCRIPT_MARKER_TYPES;
   }
-  
+
   // ==========================================
   // Event Emitter Methods (for cross-view sync)
   // ==========================================
-  
+
   /**
    * Subscribe to an event
    * @param {string} event - Event name
@@ -88,7 +88,7 @@ export class MarkerManager {
     }
     this.eventListeners[event].push(callback);
   }
-  
+
   /**
    * Unsubscribe from an event
    * @param {string} event - Event name
@@ -96,10 +96,10 @@ export class MarkerManager {
    */
   off(event, callback) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+      this.eventListeners[event] = this.eventListeners[event].filter((cb) => cb !== callback);
     }
   }
-  
+
   /**
    * Emit an event
    * @param {string} event - Event name
@@ -107,7 +107,7 @@ export class MarkerManager {
    */
   emit(event, data = {}) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event].forEach(callback => {
+      this.eventListeners[event].forEach((callback) => {
         try {
           callback(data);
         } catch (e) {
@@ -128,7 +128,7 @@ export class MarkerManager {
    * Get marker by ID
    */
   getById(id) {
-    return this.markers.find(m => m.id === id);
+    return this.markers.find((m) => m.id === id);
   }
 
   /**
@@ -140,7 +140,7 @@ export class MarkerManager {
    */
   addSpotMarker(time, name, color, metadata = {}) {
     const markerTypeInfo = this.markerTypes[metadata.markerType] || this.markerTypes.spot;
-    
+
     const marker = {
       id: this.nextMarkerId++,
       type: 'spot',
@@ -153,23 +153,23 @@ export class MarkerManager {
       notes: metadata.notes || '',
       createdAt: new Date().toISOString(),
       modifiedAt: new Date().toISOString(),
-      
+
       // Line Script extended fields
       markerType: metadata.markerType || 'spot',
-      source: metadata.source || 'manual',  // 'manual', 'keyboard', 'voice', 'ai-suggested'
+      source: metadata.source || 'manual', // 'manual', 'keyboard', 'voice', 'ai-suggested'
       templateId: metadata.templateId || null,
       confidence: metadata.confidence || null,
-      
+
       // Line Script metadata object
-      lineScript: metadata.lineScript || null
+      lineScript: metadata.lineScript || null,
     };
-    
+
     this.markers.push(marker);
     this._sort();
-    
+
     // Emit event for cross-view sync
     this.emit('markerAdded', { marker, type: 'spot' });
-    
+
     return marker;
   }
 
@@ -185,7 +185,7 @@ export class MarkerManager {
     if (outTime <= inTime) {
       throw new Error('OUT point must be after IN point');
     }
-    
+
     const marker = {
       id: this.nextMarkerId++,
       type: 'range',
@@ -200,23 +200,23 @@ export class MarkerManager {
       notes: metadata.notes || '',
       createdAt: new Date().toISOString(),
       modifiedAt: new Date().toISOString(),
-      
+
       // Line Script extended fields
       markerType: metadata.markerType || 'range',
       source: metadata.source || 'manual',
       templateId: metadata.templateId || null,
       confidence: metadata.confidence || null,
-      
+
       // Line Script metadata object (can include AI-generated content)
-      lineScript: metadata.lineScript || null
+      lineScript: metadata.lineScript || null,
     };
-    
+
     this.markers.push(marker);
     this._sort();
-    
+
     // Emit event for cross-view sync
     this.emit('markerAdded', { marker, type: 'range' });
-    
+
     return marker;
   }
 
@@ -228,23 +228,23 @@ export class MarkerManager {
   updateMarker(id, updates) {
     const marker = this.getById(id);
     if (!marker) return null;
-    
+
     const previousState = { ...marker };
-    
+
     Object.assign(marker, updates, {
-      modifiedAt: new Date().toISOString()
+      modifiedAt: new Date().toISOString(),
     });
-    
+
     // Recalculate duration for range markers
     if (marker.type === 'range') {
       marker.duration = marker.outTime - marker.inTime;
     }
-    
+
     this._sort();
-    
+
     // Emit event for cross-view sync
     this.emit('markerUpdated', { marker, previousState, updates });
-    
+
     return marker;
   }
 
@@ -253,15 +253,15 @@ export class MarkerManager {
    * @param {number} id - Marker ID
    */
   deleteMarker(id) {
-    const index = this.markers.findIndex(m => m.id === id);
+    const index = this.markers.findIndex((m) => m.id === id);
     if (index === -1) return false;
-    
+
     const deletedMarker = this.markers[index];
     this.markers.splice(index, 1);
-    
+
     // Emit event for cross-view sync
     this.emit('markerDeleted', { marker: deletedMarker, id });
-    
+
     return true;
   }
 
@@ -278,16 +278,16 @@ export class MarkerManager {
    */
   importMarkers(markersData) {
     if (!Array.isArray(markersData)) return;
-    
-    this.markers = markersData.map(m => ({
+
+    this.markers = markersData.map((m) => ({
       ...m,
-      id: m.id || this.nextMarkerId++
+      id: m.id || this.nextMarkerId++,
     }));
-    
+
     // Update nextMarkerId to be higher than any imported ID
-    const maxId = Math.max(...this.markers.map(m => m.id), 0);
+    const maxId = Math.max(...this.markers.map((m) => m.id), 0);
     this.nextMarkerId = maxId + 1;
-    
+
     this._sort();
   }
 
@@ -304,25 +304,25 @@ export class MarkerManager {
   generateReelMarkers(videoDuration, intervalMinutes = 10) {
     const intervalSeconds = intervalMinutes * 60;
     let numReels = Math.floor(videoDuration / intervalSeconds);
-    
+
     // Handle case where video is shorter than one interval
     if (numReels === 0 && videoDuration > 0) {
       numReels = 1;
     }
-    
+
     const newMarkers = [];
     for (let i = 0; i < numReels; i++) {
       const inTime = i * intervalSeconds;
       let outTime = (i + 1) * intervalSeconds;
-      
+
       // Make sure last reel doesn't exceed video duration
       if (outTime > videoDuration) {
         outTime = videoDuration;
       }
-      
+
       // Skip if reel would be too short (less than 10 seconds)
       if (outTime - inTime < 10) continue;
-      
+
       const marker = {
         id: this.nextMarkerId++,
         type: 'range',
@@ -336,15 +336,15 @@ export class MarkerManager {
         tags: ['auto-reel'],
         notes: '',
         createdAt: new Date().toISOString(),
-        modifiedAt: new Date().toISOString()
+        modifiedAt: new Date().toISOString(),
       };
-      
+
       newMarkers.push(marker);
     }
-    
+
     this.markers.push(...newMarkers);
     this._sort();
-    
+
     return newMarkers.length;
   }
 
@@ -352,28 +352,28 @@ export class MarkerManager {
    * Export markers as beats JSON format
    */
   exportBeatsJSON() {
-    return this.markers.map(marker => {
+    return this.markers.map((marker) => {
       const base = {
         name: marker.name,
         color: marker.color,
         description: marker.description,
         transcription: marker.transcription,
-        tags: marker.tags
+        tags: marker.tags,
       };
-      
+
       if (marker.type === 'range') {
         return {
           ...base,
           type: 'range',
           inTime: marker.inTime,
           outTime: marker.outTime,
-          duration: marker.duration
+          duration: marker.duration,
         };
       } else {
         return {
           ...base,
           type: 'spot',
-          time: marker.time
+          time: marker.time,
         };
       }
     });
@@ -385,7 +385,7 @@ export class MarkerManager {
   startPendingRange(time) {
     this.pendingRangeMarker = {
       inTime: time,
-      color: this.colors[Math.floor(Math.random() * this.colors.length)]
+      color: this.colors[Math.floor(Math.random() * this.colors.length)],
     };
     return this.pendingRangeMarker;
   }
@@ -395,16 +395,16 @@ export class MarkerManager {
    */
   completePendingRange(outTime) {
     if (!this.pendingRangeMarker) return null;
-    
+
     const inTime = this.pendingRangeMarker.inTime;
     const color = this.pendingRangeMarker.color;
-    
+
     this.pendingRangeMarker = null;
-    
+
     return {
       inTime,
       outTime: outTime,
-      color
+      color,
     };
   }
 
@@ -419,7 +419,7 @@ export class MarkerManager {
    * Get markers at a specific time
    */
   getMarkersAtTime(time) {
-    return this.markers.filter(m => {
+    return this.markers.filter((m) => {
       if (m.type === 'range') {
         return time >= m.inTime && time <= m.outTime;
       }
@@ -432,7 +432,7 @@ export class MarkerManager {
    * Get markers in a time range
    */
   getMarkersInRange(startTime, endTime) {
-    return this.markers.filter(m => {
+    return this.markers.filter((m) => {
       if (m.type === 'range') {
         return m.inTime < endTime && m.outTime > startTime;
       }
@@ -472,49 +472,46 @@ export class MarkerManager {
     this.rangeInTime = inTime;
     this.rangeOutTime = outTime;
   }
-  
+
   // ==========================================
   // Line Script Extended Methods
   // ==========================================
-  
+
   /**
    * Get markers by marker type (Line Script feature)
    * @param {string} markerType - Marker type ID
    * @returns {Array} Markers of specified type
    */
   getByMarkerType(markerType) {
-    return this.markers.filter(m => m.markerType === markerType);
+    return this.markers.filter((m) => m.markerType === markerType);
   }
-  
+
   /**
    * Get markers by source
    * @param {string} source - Source ('manual', 'keyboard', 'voice', 'ai-suggested')
    * @returns {Array} Markers from specified source
    */
   getBySource(source) {
-    return this.markers.filter(m => m.source === source);
+    return this.markers.filter((m) => m.source === source);
   }
-  
+
   /**
    * Get markers by template
    * @param {string} templateId - Template ID
    * @returns {Array} Markers for specified template
    */
   getByTemplate(templateId) {
-    return this.markers.filter(m => m.templateId === templateId);
+    return this.markers.filter((m) => m.templateId === templateId);
   }
-  
+
   /**
    * Get AI-generated markers
    * @returns {Array} AI-generated markers
    */
   getAIGenerated() {
-    return this.markers.filter(m => 
-      m.source === 'ai-suggested' || 
-      (m.lineScript && m.lineScript.aiGenerated)
-    );
+    return this.markers.filter((m) => m.source === 'ai-suggested' || (m.lineScript && m.lineScript.aiGenerated));
   }
-  
+
   /**
    * Update Line Script metadata for a marker
    * @param {number} id - Marker ID
@@ -523,20 +520,20 @@ export class MarkerManager {
   updateLineScriptData(id, lineScriptData) {
     const marker = this.getById(id);
     if (!marker) return null;
-    
+
     marker.lineScript = {
       ...(marker.lineScript || {}),
       ...lineScriptData,
-      modifiedAt: new Date().toISOString()
+      modifiedAt: new Date().toISOString(),
     };
-    
+
     marker.modifiedAt = new Date().toISOString();
-    
+
     this.emit('markerUpdated', { marker, updates: { lineScript: lineScriptData } });
-    
+
     return marker;
   }
-  
+
   /**
    * Get marker type info
    * @param {string} markerType - Marker type ID
@@ -545,43 +542,41 @@ export class MarkerManager {
   getMarkerTypeInfo(markerType) {
     return this.markerTypes[markerType] || null;
   }
-  
+
   /**
    * Get all marker types for a template
    * @param {string} templateId - Template ID
    * @returns {Array} Marker types
    */
   getMarkerTypesForTemplate(templateId) {
-    return Object.values(this.markerTypes).filter(
-      mt => !mt.template || mt.template === templateId
-    );
+    return Object.values(this.markerTypes).filter((mt) => !mt.template || mt.template === templateId);
   }
-  
+
   /**
    * Batch update markers (for AI-generated metadata)
    * @param {Array} updates - Array of { id, updates } objects
    */
   batchUpdate(updates) {
     const results = [];
-    
+
     updates.forEach(({ id, updates: markerUpdates }) => {
       const result = this.updateMarker(id, markerUpdates);
       if (result) results.push(result);
     });
-    
+
     this.emit('markersBatchUpdated', { markers: results, count: results.length });
-    
+
     return results;
   }
-  
+
   /**
    * Export markers with Line Script metadata
    * @returns {Array} Markers with full metadata
    */
   exportWithLineScript() {
-    return this.markers.map(marker => ({
+    return this.markers.map((marker) => ({
       ...marker,
-      exportedAt: new Date().toISOString()
+      exportedAt: new Date().toISOString(),
     }));
   }
 
@@ -600,9 +595,14 @@ export class MarkerManager {
 
     // Get marker time range
     const inTime = marker.time || marker.inTime || 0;
-    const outTime = marker.outTime || (inTime + 5); // Default 5 second duration
+    const outTime = marker.outTime || inTime + 5; // Default 5 second duration
 
-    window.logging.info('video', 'MarkerManager starting record replacement', { markerId, inTime, outTime, duration: outTime - inTime });
+    window.logging.info('video', 'MarkerManager starting record replacement', {
+      markerId,
+      inTime,
+      outTime,
+      duration: outTime - inTime,
+    });
 
     // Check if recorder window exists
     if (window.videoEditor?.openRecorderWithPreset) {
@@ -616,7 +616,7 @@ export class MarkerManager {
           videoPath: this.app.videoPath,
           onComplete: (recordingPath) => {
             this._handleReplacementRecorded(markerId, recordingPath);
-          }
+          },
         });
 
         return result;
@@ -627,21 +627,24 @@ export class MarkerManager {
       }
     } else {
       // Fallback: Show instructions
-      this.app.showToast?.('info', `Record replacement for ${inTime.toFixed(1)}s - ${outTime.toFixed(1)}s\nUse the recorder window.`);
-      
+      this.app.showToast?.(
+        'info',
+        `Record replacement for ${inTime.toFixed(1)}s - ${outTime.toFixed(1)}s\nUse the recorder window.`
+      );
+
       // Store preset for later
       this._pendingRecordReplacement = {
         markerId,
         inTime,
         outTime,
-        markerName: marker.name
+        markerName: marker.name,
       };
 
       return {
         markerId,
         inTime,
         outTime,
-        pending: true
+        pending: true,
       };
     }
   }
@@ -666,20 +669,20 @@ export class MarkerManager {
 
     // Add the recording as a clip to the ADR track
     const inTime = marker.time || marker.inTime || 0;
-    
+
     this.app.addClipToTrack?.(adrTrack.id, {
       path: recordingPath,
       name: `ADR: ${marker.name || 'Unnamed'}`,
       startTime: inTime,
       source: 'recording',
-      markerId
+      markerId,
     });
 
     // Update marker with replacement info
     this.updateMarker(markerId, {
       hasReplacement: true,
       replacementPath: recordingPath,
-      replacementRecordedAt: new Date().toISOString()
+      replacementRecordedAt: new Date().toISOString(),
     });
 
     this.app.showToast?.('success', 'Replacement recording added to ADR track');
@@ -706,7 +709,7 @@ export class MarkerManager {
    */
   async quickRecord(trackId = null) {
     const currentTime = this.app.video?.currentTime || 0;
-    
+
     window.logging.info('video', 'MarkerManager starting quick record', { time: currentTime });
 
     // Determine target track
@@ -729,11 +732,11 @@ export class MarkerManager {
                 path: recordingPath,
                 name: `Recording ${new Date().toLocaleTimeString()}`,
                 startTime: currentTime,
-                source: 'recording'
+                source: 'recording',
               });
               this.app.showToast?.('success', 'Recording added to track');
             }
-          }
+          },
         });
 
         return result;
@@ -759,13 +762,21 @@ export class MarkerManager {
       { icon: '✏️', label: 'Edit Marker', action: 'edit' },
       { icon: '🎯', label: 'Go to Marker', action: 'goto' },
       { type: 'divider' },
-      { icon: '🎤', label: 'Record Replacement', action: 'record-replacement', 
-        description: 'Open recorder to record ADR' },
-      { icon: '📥', label: 'Import Replacement', action: 'import-replacement',
-        description: 'Import audio file as replacement' },
+      {
+        icon: '🎤',
+        label: 'Record Replacement',
+        action: 'record-replacement',
+        description: 'Open recorder to record ADR',
+      },
+      {
+        icon: '📥',
+        label: 'Import Replacement',
+        action: 'import-replacement',
+        description: 'Import audio file as replacement',
+      },
       { type: 'divider' },
       { icon: '📋', label: 'Duplicate', action: 'duplicate' },
-      { icon: '🗑️', label: 'Delete', action: 'delete', danger: true }
+      { icon: '🗑️', label: 'Delete', action: 'delete', danger: true },
     ];
 
     // Add replacement status if exists
@@ -774,7 +785,7 @@ export class MarkerManager {
         icon: '✅',
         label: 'Has Replacement',
         action: 'view-replacement',
-        disabled: false
+        disabled: false,
       });
     }
 
@@ -789,30 +800,30 @@ export class MarkerManager {
       case 'edit':
         this.app.markerModal?.showEditModal?.(markerId);
         break;
-        
+
       case 'goto':
         const marker = this.getById(markerId);
         if (marker && this.app.video) {
           this.app.video.currentTime = marker.time || marker.inTime || 0;
         }
         break;
-        
+
       case 'record-replacement':
         await this.startRecordReplacement(markerId);
         break;
-        
+
       case 'import-replacement':
         await this._importReplacement(markerId);
         break;
-        
+
       case 'view-replacement':
         await this._viewReplacement(markerId);
         break;
-        
+
       case 'duplicate':
         this.duplicateMarker(markerId);
         break;
-        
+
       case 'delete':
         if (confirm('Delete this marker?')) {
           this.deleteMarker(markerId);
@@ -830,7 +841,7 @@ export class MarkerManager {
 
     try {
       const result = await window.videoEditor?.selectAudioFile?.();
-      
+
       if (result && !result.canceled && result.filePath) {
         await this._handleReplacementRecorded(markerId, result.filePath);
       }
@@ -854,21 +865,3 @@ export class MarkerManager {
     this.app.showToast?.('info', `Replacement: ${marker.replacementPath}`);
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

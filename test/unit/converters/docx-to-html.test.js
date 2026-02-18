@@ -31,7 +31,7 @@ const { DocxToHtmlAgent } = require('../../../lib/converters/docx-to-html.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(DocxToHtmlAgent, {
-  sampleInput: Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)]),
+  sampleInput: Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)]),
   expectedFromFormats: ['docx'],
   expectedToFormats: ['html'],
   expectedStrategies: ['mammoth', 'styled', 'clean'],
@@ -68,8 +68,6 @@ describe('DocxToHtmlAgent (specific)', () => {
 
   it('styled strategy uses custom style map', async () => {
     await agent.execute(Buffer.from('mock-docx'), 'styled');
-    expect(mammothMock.convertToHtml).toHaveBeenCalledWith(
-      expect.objectContaining({ styleMap: expect.any(Array) }),
-    );
+    expect(mammothMock.convertToHtml).toHaveBeenCalledWith(expect.objectContaining({ styleMap: expect.any(Array) }));
   });
 });

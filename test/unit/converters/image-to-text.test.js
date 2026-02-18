@@ -15,7 +15,7 @@ const { ImageToTextAgent } = require('../../../lib/converters/image-to-text.js')
 
 // Run the standard lifecycle test harness
 testConverterAgent(ImageToTextAgent, {
-  sampleInput: Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+  sampleInput: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   expectedFromFormats: ['png', 'jpg', 'webp'],
   expectedToFormats: ['text'],
   expectedStrategies: ['describe', 'ocr', 'detailed'],
@@ -32,8 +32,7 @@ describe('ImageToTextAgent (specific)', () => {
   });
 
   it('rejects empty buffer in execute', async () => {
-    await expect(agent.execute(Buffer.alloc(0), 'describe'))
-      .rejects.toThrow('Input image buffer is empty');
+    await expect(agent.execute(Buffer.alloc(0), 'describe')).rejects.toThrow('Input image buffer is empty');
   });
 
   it('returns appropriate max tokens per strategy', () => {
@@ -48,7 +47,7 @@ describe('ImageToTextAgent (specific)', () => {
     expect(mockAI.vision).toHaveBeenCalledWith(
       expect.any(String),
       expect.stringContaining('Extract all visible text'),
-      expect.objectContaining({ profile: 'vision', temperature: 0 }),
+      expect.objectContaining({ profile: 'vision', temperature: 0 })
     );
   });
 });

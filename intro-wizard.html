@@ -1,859 +1,862 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: file:;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data: file:;"
+    />
     <title>Welcome to GSX Power User</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-        body {
-            background-color: #141414;
-            color: #ffffff;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            -webkit-font-smoothing: antialiased;
-            overflow: hidden;
-            height: 100vh;
-        }
+      body {
+        background-color: #141414;
+        color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+        height: 100vh;
+      }
 
-        /* ============================================
+      /* ============================================
            MAIN CONTAINER
            ============================================ */
-        .wizard-container {
-            max-width: 720px;
-            margin: 0 auto;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            padding: 32px;
-        }
+      .wizard-container {
+        max-width: 720px;
+        margin: 0 auto;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        padding: 32px;
+      }
 
-        /* ============================================
+      /* ============================================
            HEADER
            ============================================ */
-        .wizard-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 24px;
-            flex-shrink: 0;
-        }
+      .wizard-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+        flex-shrink: 0;
+      }
 
-        .app-logo {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
+      .app-logo {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
 
-        .logo-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, #0099ff 0%, #0066cc 100%);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+      .logo-icon {
+        width: 40px;
+        height: 40px;
+        background: linear-gradient(135deg, #0099ff 0%, #0066cc 100%);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
 
-        .logo-icon svg {
-            width: 24px;
-            height: 24px;
-            color: white;
-        }
+      .logo-icon svg {
+        width: 24px;
+        height: 24px;
+        color: white;
+      }
 
-        .app-title {
-            font-size: 18px;
-            font-weight: 600;
-        }
+      .app-title {
+        font-size: 18px;
+        font-weight: 600;
+      }
 
-        .version-badge {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.5);
-            background: rgba(255, 255, 255, 0.06);
-            padding: 4px 10px;
-            border-radius: 12px;
-        }
+      .version-badge {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.5);
+        background: rgba(255, 255, 255, 0.06);
+        padding: 4px 10px;
+        border-radius: 12px;
+      }
 
-        .close-btn {
-            background: transparent;
-            border: none;
-            color: rgba(255, 255, 255, 0.5);
-            cursor: pointer;
-            padding: 8px;
-            border-radius: 6px;
-            transition: all 0.15s ease;
-        }
+      .close-btn {
+        background: transparent;
+        border: none;
+        color: rgba(255, 255, 255, 0.5);
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 6px;
+        transition: all 0.15s ease;
+      }
 
-        .close-btn:hover {
-            background: rgba(255, 255, 255, 0.06);
-            color: white;
-        }
+      .close-btn:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: white;
+      }
 
-        .close-btn svg {
-            width: 20px;
-            height: 20px;
-        }
+      .close-btn svg {
+        width: 20px;
+        height: 20px;
+      }
 
-        /* ============================================
+      /* ============================================
            INTRO MODE (First-time users)
            ============================================ */
-        .intro-mode {
-            display: none;
-            flex-direction: column;
-            flex: 1;
-            overflow: hidden;
-        }
+      .intro-mode {
+        display: none;
+        flex-direction: column;
+        flex: 1;
+        overflow: hidden;
+      }
 
-        .intro-mode.active {
-            display: flex;
-        }
+      .intro-mode.active {
+        display: flex;
+      }
 
-        .intro-progress {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 32px;
-        }
+      .intro-progress {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 32px;
+      }
 
-        .intro-progress .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.15);
-            transition: all 0.2s ease;
-        }
+      .intro-progress .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.15);
+        transition: all 0.2s ease;
+      }
 
-        .intro-progress .dot.active {
-            background: #0099ff;
-            width: 24px;
-            border-radius: 4px;
-        }
+      .intro-progress .dot.active {
+        background: #0099ff;
+        width: 24px;
+        border-radius: 4px;
+      }
 
-        .intro-slides {
-            flex: 1;
-            position: relative;
-            overflow: hidden;
-        }
+      .intro-slides {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+      }
 
-        .intro-slide {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            padding: 24px;
-            opacity: 0;
-            transform: translateX(20px);
-            transition: all 0.3s ease;
-            pointer-events: none;
-        }
+      .intro-slide {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 24px;
+        opacity: 0;
+        transform: translateX(20px);
+        transition: all 0.3s ease;
+        pointer-events: none;
+      }
 
-        .intro-slide.active {
-            opacity: 1;
-            transform: translateX(0);
-            pointer-events: auto;
-        }
+      .intro-slide.active {
+        opacity: 1;
+        transform: translateX(0);
+        pointer-events: auto;
+      }
 
-        .intro-slide.previous {
-            transform: translateX(-20px);
-        }
+      .intro-slide.previous {
+        transform: translateX(-20px);
+      }
 
-        .slide-icon {
-            width: 80px;
-            height: 80px;
-            background: rgba(0, 153, 255, 0.1);
-            border-radius: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 24px;
-        }
+      .slide-icon {
+        width: 80px;
+        height: 80px;
+        background: rgba(0, 153, 255, 0.1);
+        border-radius: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 24px;
+      }
 
-        .slide-icon svg {
-            width: 40px;
-            height: 40px;
-            color: #0099ff;
-        }
+      .slide-icon svg {
+        width: 40px;
+        height: 40px;
+        color: #0099ff;
+      }
 
-        .slide-banner {
-            width: 100%;
-            max-width: 500px;
-            height: 200px;
-            margin-bottom: 24px;
-            border-radius: 12px;
-            overflow: hidden;
-            position: relative;
-            background: rgba(0, 153, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-        }
+      .slide-banner {
+        width: 100%;
+        max-width: 500px;
+        height: 200px;
+        margin-bottom: 24px;
+        border-radius: 12px;
+        overflow: hidden;
+        position: relative;
+        background: rgba(0, 153, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
 
-        .slide-banner img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            opacity: 0.9;
-        }
+      .slide-banner img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0.9;
+      }
 
-        .slide-banner::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(180deg, transparent 50%, rgba(20, 20, 20, 0.8) 100%);
-            pointer-events: none;
-        }
+      .slide-banner::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, transparent 50%, rgba(20, 20, 20, 0.8) 100%);
+        pointer-events: none;
+      }
 
-        .slide-title {
-            font-size: 28px;
-            font-weight: 600;
-            margin-bottom: 12px;
-        }
+      .slide-title {
+        font-size: 28px;
+        font-weight: 600;
+        margin-bottom: 12px;
+      }
 
-        .slide-description {
-            font-size: 16px;
-            color: rgba(255, 255, 255, 0.7);
-            max-width: 480px;
-            line-height: 1.6;
-        }
+      .slide-description {
+        font-size: 16px;
+        color: rgba(255, 255, 255, 0.7);
+        max-width: 480px;
+        line-height: 1.6;
+      }
 
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 16px;
-            margin-top: 24px;
-            text-align: left;
-            width: 100%;
-            max-width: 480px;
-        }
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+        margin-top: 24px;
+        text-align: left;
+        width: 100%;
+        max-width: 480px;
+      }
 
-        .feature-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.04);
-        }
+      .feature-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.04);
+      }
 
-        .feature-item svg {
-            width: 20px;
-            height: 20px;
-            color: #0099ff;
-            flex-shrink: 0;
-            margin-top: 2px;
-        }
+      .feature-item svg {
+        width: 20px;
+        height: 20px;
+        color: #0099ff;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
 
-        .feature-item-content h4 {
-            font-size: 13px;
-            font-weight: 500;
-            margin-bottom: 2px;
-        }
+      .feature-item-content h4 {
+        font-size: 13px;
+        font-weight: 500;
+        margin-bottom: 2px;
+      }
 
-        .feature-item-content p {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.5);
-        }
+      .feature-item-content p {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.5);
+      }
 
-        .intro-nav {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 24px;
-            border-top: 1px solid rgba(255, 255, 255, 0.04);
-            flex-shrink: 0;
-        }
+      .intro-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 24px;
+        border-top: 1px solid rgba(255, 255, 255, 0.04);
+        flex-shrink: 0;
+      }
 
-        .skip-btn {
-            background: transparent;
-            border: none;
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 14px;
-            cursor: pointer;
-            padding: 10px 16px;
-            border-radius: 8px;
-            transition: all 0.15s ease;
-        }
+      .skip-btn {
+        background: transparent;
+        border: none;
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 14px;
+        cursor: pointer;
+        padding: 10px 16px;
+        border-radius: 8px;
+        transition: all 0.15s ease;
+      }
 
-        .skip-btn:hover {
-            color: white;
-            background: rgba(255, 255, 255, 0.05);
-        }
+      .skip-btn:hover {
+        color: white;
+        background: rgba(255, 255, 255, 0.05);
+      }
 
-        .nav-buttons {
-            display: flex;
-            gap: 8px;
-        }
+      .nav-buttons {
+        display: flex;
+        gap: 8px;
+      }
 
-        .nav-btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
+      .nav-btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
 
-        .nav-btn.secondary {
-            background: rgba(255, 255, 255, 0.06);
-            color: white;
-        }
+      .nav-btn.secondary {
+        background: rgba(255, 255, 255, 0.06);
+        color: white;
+      }
 
-        .nav-btn.secondary:hover {
-            background: rgba(255, 255, 255, 0.1);
-        }
+      .nav-btn.secondary:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
 
-        .nav-btn.primary {
-            background: #0099ff;
-            color: white;
-        }
+      .nav-btn.primary {
+        background: #0099ff;
+        color: white;
+      }
 
-        .nav-btn.primary:hover {
-            background: #0080dd;
-        }
+      .nav-btn.primary:hover {
+        background: #0080dd;
+      }
 
-        /* ============================================
+      /* ============================================
            UPDATES MODE (Returning users)
            ============================================ */
-        .updates-mode {
-            display: none;
-            flex-direction: column;
-            flex: 1;
-            overflow: hidden;
-        }
+      .updates-mode {
+        display: none;
+        flex-direction: column;
+        flex: 1;
+        overflow: hidden;
+      }
 
-        .updates-mode.active {
-            display: flex;
-        }
+      .updates-mode.active {
+        display: flex;
+      }
 
-        .updates-header {
-            margin-bottom: 24px;
-            flex-shrink: 0;
-        }
+      .updates-header {
+        margin-bottom: 24px;
+        flex-shrink: 0;
+      }
 
-        .updates-banner {
-            width: 100%;
-            height: 120px;
-            border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 20px;
-            position: relative;
-            background: rgba(0, 153, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-        }
+      .updates-banner {
+        width: 100%;
+        height: 120px;
+        border-radius: 12px;
+        overflow: hidden;
+        margin-bottom: 20px;
+        position: relative;
+        background: rgba(0, 153, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
 
-        .updates-banner img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            object-position: center;
-            opacity: 0.7;
-        }
+      .updates-banner img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center;
+        opacity: 0.7;
+      }
 
-        .updates-banner::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(90deg, rgba(20, 20, 20, 0.9) 0%, transparent 50%, rgba(20, 20, 20, 0.9) 100%);
-            pointer-events: none;
-        }
+      .updates-banner::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, rgba(20, 20, 20, 0.9) 0%, transparent 50%, rgba(20, 20, 20, 0.9) 100%);
+        pointer-events: none;
+      }
 
-        .updates-title {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
+      .updates-title {
+        font-size: 24px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
 
-        .updates-subtitle {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.5);
-        }
+      .updates-subtitle {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.5);
+      }
 
-        .updates-content {
-            flex: 1;
-            overflow-y: auto;
-            padding-right: 8px;
-        }
+      .updates-content {
+        flex: 1;
+        overflow-y: auto;
+        padding-right: 8px;
+      }
 
-        .updates-content::-webkit-scrollbar {
-            width: 6px;
-        }
+      .updates-content::-webkit-scrollbar {
+        width: 6px;
+      }
 
-        .updates-content::-webkit-scrollbar-track {
-            background: transparent;
-        }
+      .updates-content::-webkit-scrollbar-track {
+        background: transparent;
+      }
 
-        .updates-content::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
-        }
+      .updates-content::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+      }
 
-        .updates-content::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.2);
-        }
+      .updates-content::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
 
-        /* Version entry (blog post style) */
-        .version-entry {
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid rgba(255, 255, 255, 0.04);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 16px;
-            transition: all 0.15s ease;
-        }
+      /* Version entry (blog post style) */
+      .version-entry {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 16px;
+        transition: all 0.15s ease;
+      }
 
-        .version-entry:hover {
-            background: rgba(255, 255, 255, 0.03);
-            border-color: rgba(255, 255, 255, 0.06);
-        }
+      .version-entry:hover {
+        background: rgba(255, 255, 255, 0.03);
+        border-color: rgba(255, 255, 255, 0.06);
+      }
 
-        .version-entry.current {
-            border-color: rgba(0, 153, 255, 0.3);
-            background: rgba(0, 153, 255, 0.05);
-        }
+      .version-entry.current {
+        border-color: rgba(0, 153, 255, 0.3);
+        background: rgba(0, 153, 255, 0.05);
+      }
 
-        .version-entry.current .version-header::before {
-            content: 'NEW';
-            font-size: 10px;
-            font-weight: 600;
-            background: #0099ff;
-            color: white;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-right: 8px;
-        }
+      .version-entry.current .version-header::before {
+        content: 'NEW';
+        font-size: 10px;
+        font-weight: 600;
+        background: #0099ff;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-right: 8px;
+      }
 
-        .version-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 12px;
-        }
+      .version-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
 
-        .version-number {
-            font-size: 16px;
-            font-weight: 600;
-        }
+      .version-number {
+        font-size: 16px;
+        font-weight: 600;
+      }
 
-        .version-date {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.4);
-        }
+      .version-date {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.4);
+      }
 
-        .version-title {
-            font-size: 14px;
-            font-weight: 500;
-            margin-bottom: 12px;
-            color: rgba(255, 255, 255, 0.9);
-        }
+      .version-title {
+        font-size: 14px;
+        font-weight: 500;
+        margin-bottom: 12px;
+        color: rgba(255, 255, 255, 0.9);
+      }
 
-        .version-changes {
-            list-style: none;
-        }
+      .version-changes {
+        list-style: none;
+      }
 
-        .version-changes li {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.6);
-            padding: 6px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-            display: flex;
-            align-items: flex-start;
-            gap: 8px;
-        }
+      .version-changes li {
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.6);
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
 
-        .version-changes li:last-child {
-            border-bottom: none;
-        }
+      .version-changes li:last-child {
+        border-bottom: none;
+      }
 
-        .version-changes li svg {
-            width: 14px;
-            height: 14px;
-            color: #0099ff;
-            flex-shrink: 0;
-            margin-top: 2px;
-        }
+      .version-changes li svg {
+        width: 14px;
+        height: 14px;
+        color: #0099ff;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
 
-        .change-tag {
-            font-size: 10px;
-            font-weight: 500;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-left: auto;
-            flex-shrink: 0;
-        }
+      .change-tag {
+        font-size: 10px;
+        font-weight: 500;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-left: auto;
+        flex-shrink: 0;
+      }
 
-        .change-tag.new {
-            background: rgba(0, 153, 255, 0.15);
-            color: #0099ff;
-        }
+      .change-tag.new {
+        background: rgba(0, 153, 255, 0.15);
+        color: #0099ff;
+      }
 
-        .change-tag.improved {
-            background: rgba(0, 200, 100, 0.15);
-            color: #00c864;
-        }
+      .change-tag.improved {
+        background: rgba(0, 200, 100, 0.15);
+        color: #00c864;
+      }
 
-        .change-tag.fixed {
-            background: rgba(255, 170, 0, 0.15);
-            color: #ffaa00;
-        }
+      .change-tag.fixed {
+        background: rgba(255, 170, 0, 0.15);
+        color: #ffaa00;
+      }
 
-        .updates-footer {
-            padding-top: 20px;
-            border-top: 1px solid rgba(255, 255, 255, 0.04);
-            display: flex;
-            justify-content: flex-end;
-            flex-shrink: 0;
-        }
+      .updates-footer {
+        padding-top: 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.04);
+        display: flex;
+        justify-content: flex-end;
+        flex-shrink: 0;
+      }
 
-        .continue-btn {
-            padding: 12px 32px;
-            background: #0099ff;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
+      .continue-btn {
+        padding: 12px 32px;
+        background: #0099ff;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
 
-        .continue-btn:hover {
-            background: #0080dd;
-        }
+      .continue-btn:hover {
+        background: #0080dd;
+      }
 
-        /* ============================================
+      /* ============================================
            ICONS (inline SVGs)
            ============================================ */
-        .icon {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
+      .icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="wizard-container">
-        <!-- Header -->
-        <div class="wizard-header">
-            <div class="app-logo">
-                <div class="logo-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polygon points="12 2 2 7 12 12 22 7 12 2"/>
-                        <polyline points="2 17 12 22 22 17"/>
-                        <polyline points="2 12 12 17 22 12"/>
-                    </svg>
-                </div>
-                <span class="app-title">GSX Power User</span>
+      <!-- Header -->
+      <div class="wizard-header">
+        <div class="app-logo">
+          <div class="logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 2 7 12 12 22 7 12 2" />
+              <polyline points="2 17 12 22 22 17" />
+              <polyline points="2 12 12 17 22 12" />
+            </svg>
+          </div>
+          <span class="app-title">GSX Power User</span>
+        </div>
+        <span class="version-badge" id="versionBadge">v3.8.15</span>
+        <button class="close-btn" onclick="closeWizard()" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- INTRO MODE (First-time users) -->
+      <div class="intro-mode" id="introMode">
+        <!-- Progress dots -->
+        <div class="intro-progress" id="introProgress">
+          <div class="dot active"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+        </div>
+
+        <!-- Slides -->
+        <div class="intro-slides">
+          <!-- Slide 1: Welcome -->
+          <div class="intro-slide active" data-slide="0">
+            <div class="slide-banner">
+              <img src="product-page/assets/AgentOrchetration.webp" alt="GSX Power User" />
             </div>
-            <span class="version-badge" id="versionBadge">v3.8.15</span>
-            <button class="close-btn" onclick="closeWizard()" title="Close">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
+            <h2 class="slide-title">Welcome to GSX Power User</h2>
+            <p class="slide-description">
+              Your AI-powered creative workstation that unifies digital workers, content creation, and intelligent
+              automation into a single desktop experience.
+            </p>
+          </div>
+
+          <!-- Slide 2: Key Features -->
+          <div class="intro-slide" data-slide="1">
+            <div class="slide-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+            </div>
+            <h2 class="slide-title">Powerful Features</h2>
+            <p class="slide-description">Everything you need to supercharge your workflow.</p>
+            <div class="feature-grid">
+              <div class="feature-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <circle cx="12" cy="12" r="8" />
                 </svg>
-            </button>
+                <div class="feature-item-content">
+                  <h4>Spaces</h4>
+                  <p>Organize all your content</p>
+                </div>
+              </div>
+              <div class="feature-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <polyline points="16 18 22 12 16 6" />
+                  <polyline points="8 6 2 12 8 18" />
+                </svg>
+                <div class="feature-item-content">
+                  <h4>GSX Create</h4>
+                  <p>AI-powered development</p>
+                </div>
+              </div>
+              <div class="feature-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="2" y="5" width="20" height="14" rx="2" />
+                  <polygon points="10 8 16 12 10 16" />
+                </svg>
+                <div class="feature-item-content">
+                  <h4>Video Editor</h4>
+                  <p>Edit with AI assistance</p>
+                </div>
+              </div>
+              <div class="feature-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <circle cx="12" cy="12" r="3" />
+                  <path
+                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                  />
+                </svg>
+                <div class="feature-item-content">
+                  <h4>AI Agents</h4>
+                  <p>ChatGPT, Claude & more</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Slide 3: IDW Hub -->
+          <div class="intro-slide" data-slide="2">
+            <div class="slide-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </div>
+            <h2 class="slide-title">Intelligent Digital Workers</h2>
+            <p class="slide-description">
+              Connect and manage your OneReach.ai digital workers. Configure GSX links, explore agents, and automate
+              your workflows from a single hub.
+            </p>
+          </div>
+
+          <!-- Slide 4: Get Started -->
+          <div class="intro-slide" data-slide="3">
+            <div class="slide-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            </div>
+            <h2 class="slide-title">Ready to Go</h2>
+            <p class="slide-description">
+              Start by setting up your IDWs and AI agents in the Settings menu. Your clipboard content will
+              automatically be saved to Spaces. Press <strong>Cmd+Shift+Space</strong> to access Spaces anytime.
+            </p>
+          </div>
         </div>
 
-        <!-- INTRO MODE (First-time users) -->
-        <div class="intro-mode" id="introMode">
-            <!-- Progress dots -->
-            <div class="intro-progress" id="introProgress">
-                <div class="dot active"></div>
-                <div class="dot"></div>
-                <div class="dot"></div>
-                <div class="dot"></div>
-            </div>
+        <!-- Navigation -->
+        <div class="intro-nav">
+          <button class="skip-btn" onclick="closeWizard()">Skip intro</button>
+          <div class="nav-buttons">
+            <button class="nav-btn secondary" id="prevBtn" onclick="prevSlide()" style="display: none">Back</button>
+            <button class="nav-btn primary" id="nextBtn" onclick="nextSlide()">Next</button>
+          </div>
+        </div>
+      </div>
 
-            <!-- Slides -->
-            <div class="intro-slides">
-                <!-- Slide 1: Welcome -->
-                <div class="intro-slide active" data-slide="0">
-                    <div class="slide-banner">
-                        <img src="product-page/assets/AgentOrchetration.webp" alt="GSX Power User">
-                    </div>
-                    <h2 class="slide-title">Welcome to GSX Power User</h2>
-                    <p class="slide-description">
-                        Your AI-powered creative workstation that unifies digital workers, 
-                        content creation, and intelligent automation into a single desktop experience.
-                    </p>
-                </div>
-
-                <!-- Slide 2: Key Features -->
-                <div class="intro-slide" data-slide="1">
-                    <div class="slide-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <rect x="3" y="3" width="7" height="7"/>
-                            <rect x="14" y="3" width="7" height="7"/>
-                            <rect x="14" y="14" width="7" height="7"/>
-                            <rect x="3" y="14" width="7" height="7"/>
-                        </svg>
-                    </div>
-                    <h2 class="slide-title">Powerful Features</h2>
-                    <p class="slide-description">Everything you need to supercharge your workflow.</p>
-                    <div class="feature-grid">
-                        <div class="feature-item">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <circle cx="12" cy="12" r="8"/>
-                            </svg>
-                            <div class="feature-item-content">
-                                <h4>Spaces</h4>
-                                <p>Organize all your content</p>
-                            </div>
-                        </div>
-                        <div class="feature-item">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <polyline points="16 18 22 12 16 6"/>
-                                <polyline points="8 6 2 12 8 18"/>
-                            </svg>
-                            <div class="feature-item-content">
-                                <h4>GSX Create</h4>
-                                <p>AI-powered development</p>
-                            </div>
-                        </div>
-                        <div class="feature-item">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <rect x="2" y="5" width="20" height="14" rx="2"/>
-                                <polygon points="10 8 16 12 10 16"/>
-                            </svg>
-                            <div class="feature-item-content">
-                                <h4>Video Editor</h4>
-                                <p>Edit with AI assistance</p>
-                            </div>
-                        </div>
-                        <div class="feature-item">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <circle cx="12" cy="12" r="3"/>
-                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                            </svg>
-                            <div class="feature-item-content">
-                                <h4>AI Agents</h4>
-                                <p>ChatGPT, Claude & more</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Slide 3: IDW Hub -->
-                <div class="intro-slide" data-slide="2">
-                    <div class="slide-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                            <circle cx="9" cy="7" r="4"/>
-                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                        </svg>
-                    </div>
-                    <h2 class="slide-title">Intelligent Digital Workers</h2>
-                    <p class="slide-description">
-                        Connect and manage your OneReach.ai digital workers. 
-                        Configure GSX links, explore agents, and automate your workflows 
-                        from a single hub.
-                    </p>
-                </div>
-
-                <!-- Slide 4: Get Started -->
-                <div class="intro-slide" data-slide="3">
-                    <div class="slide-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <polygon points="5 3 19 12 5 21 5 3"/>
-                        </svg>
-                    </div>
-                    <h2 class="slide-title">Ready to Go</h2>
-                    <p class="slide-description">
-                        Start by setting up your IDWs and AI agents in the Settings menu.
-                        Your clipboard content will automatically be saved to Spaces.
-                        Press <strong>Cmd+Shift+Space</strong> to access Spaces anytime.
-                    </p>
-                </div>
-            </div>
-
-            <!-- Navigation -->
-            <div class="intro-nav">
-                <button class="skip-btn" onclick="closeWizard()">Skip intro</button>
-                <div class="nav-buttons">
-                    <button class="nav-btn secondary" id="prevBtn" onclick="prevSlide()" style="display: none;">Back</button>
-                    <button class="nav-btn primary" id="nextBtn" onclick="nextSlide()">Next</button>
-                </div>
-            </div>
+      <!-- UPDATES MODE (Returning users) -->
+      <div class="updates-mode" id="updatesMode">
+        <div class="updates-header">
+          <div class="updates-banner">
+            <img src="product-page/assets/AgentOrchetration.webp" alt="GSX Power User" />
+          </div>
+          <h2 class="updates-title">What's New</h2>
+          <p class="updates-subtitle">See what's been added and improved in GSX Power User</p>
         </div>
 
-        <!-- UPDATES MODE (Returning users) -->
-        <div class="updates-mode" id="updatesMode">
-            <div class="updates-header">
-                <div class="updates-banner">
-                    <img src="product-page/assets/AgentOrchetration.webp" alt="GSX Power User">
-                </div>
-                <h2 class="updates-title">What's New</h2>
-                <p class="updates-subtitle">See what's been added and improved in GSX Power User</p>
-            </div>
-
-            <div class="updates-content" id="updatesContent">
-                <!-- Version entries will be rendered here by JavaScript -->
-            </div>
-
-            <div class="updates-footer">
-                <button class="continue-btn" onclick="closeWizard()">Continue to App</button>
-            </div>
+        <div class="updates-content" id="updatesContent">
+          <!-- Version entries will be rendered here by JavaScript -->
         </div>
+
+        <div class="updates-footer">
+          <button class="continue-btn" onclick="closeWizard()">Continue to App</button>
+        </div>
+      </div>
     </div>
 
     <script>
-        // Changelog data - add new versions at the top
-        const CHANGELOG = [
-            {
-                version: '3.8.15',
-                date: 'January 2026',
-                title: 'Grok Integration & UI Polish',
-                changes: [
-                    { text: 'Added Grok external AI agent integration', tag: 'new' },
-                    { text: 'Conversation capture creates dedicated Grok Conversations Space', tag: 'new' },
-                    { text: 'Full support for x.ai and grok.x.com URL detection', tag: 'improved' }
-                ]
-            },
-            {
-                version: '3.8.14',
-                date: 'January 2026',
-                title: 'Spaces Upload & Bug Fixes',
-                changes: [
-                    { text: 'Upload files from Spaces directly into ChatGPT, Claude, and file pickers', tag: 'new' },
-                    { text: 'Native dialog wrapping: "Choose from Computer" or "Choose from Spaces"', tag: 'new' },
-                    { text: 'Fixed Video Editor crash when opening projects with no videos', tag: 'fixed' },
-                    { text: 'Fixed YouTube download status not updating to complete', tag: 'fixed' },
-                    { text: 'Fixed space filtering race condition', tag: 'fixed' }
-                ]
-            },
-            {
-                version: '3.8.13',
-                date: 'January 2026',
-                title: 'Tufte-Inspired Spaces Redesign',
-                changes: [
-                    { text: 'Replaced all emoji icons with clean SVG geometric shapes', tag: 'improved' },
-                    { text: 'Neutral gray palette replacing purple/blue accents', tag: 'improved' },
-                    { text: 'Standardized border-radius and removed gradients', tag: 'improved' },
-                    { text: 'Created reusable icon library with 40+ icons', tag: 'new' },
-                    { text: '15% more visible data density in Spaces view', tag: 'improved' }
-                ]
-            },
-            {
-                version: '3.8.12',
-                date: 'December 2025',
-                title: 'Graceful Shutdown & Stability',
-                changes: [
-                    { text: 'App lifecycle handlers for clean shutdown', tag: 'new' },
-                    { text: 'GSX window tracking system with forced close', tag: 'improved' },
-                    { text: 'IPC heartbeat system to prevent zombie windows', tag: 'new' },
-                    { text: 'Fixed app not quitting after hours open', tag: 'fixed' }
-                ]
-            },
-            {
-                version: '3.7.0',
-                date: 'November 2025',
-                title: 'GSX Create Enhancements',
-                changes: [
-                    { text: 'Task queue with 7-phase workflow', tag: 'new' },
-                    { text: 'Agent activity HUD with real-time updates', tag: 'new' },
-                    { text: 'LLM summarization of agent activities', tag: 'new' },
-                    { text: 'Budget integration & cost tracking', tag: 'new' },
-                    { text: 'Hardened release script with checksum verification', tag: 'improved' }
-                ]
-            },
-            {
-                version: '3.6.0',
-                date: 'October 2025',
-                title: 'Video Editor & Smart Export',
-                changes: [
-                    { text: 'ElevenLabs AI audio replacement in Video Editor', tag: 'new' },
-                    { text: 'Smart transcription with instant extraction', tag: 'new' },
-                    { text: 'Scene detection and waveform visualization', tag: 'new' },
-                    { text: 'Multiple export formats with style guide support', tag: 'new' }
-                ]
-            },
-            {
-                version: '3.5.0',
-                date: 'September 2025',
-                title: 'External AI Agents',
-                changes: [
-                    { text: 'ChatGPT, Claude, Perplexity, and Gemini integration', tag: 'new' },
-                    { text: 'AI conversation capture to Spaces', tag: 'new' },
-                    { text: 'Custom agent configuration support', tag: 'new' }
-                ]
-            },
-            {
-                version: '3.0.0',
-                date: 'August 2025',
-                title: 'Major Release - GSX Power User',
-                changes: [
-                    { text: 'Complete app redesign and rebranding', tag: 'new' },
-                    { text: 'Spaces content management system', tag: 'new' },
-                    { text: 'Clipboard Manager with source detection', tag: 'new' },
-                    { text: 'IDW Hub for digital worker management', tag: 'new' },
-                    { text: 'Browser extension integration', tag: 'new' }
-                ]
-            }
-        ];
+      // Changelog data - add new versions at the top
+      const CHANGELOG = [
+        {
+          version: '3.8.15',
+          date: 'January 2026',
+          title: 'Grok Integration & UI Polish',
+          changes: [
+            { text: 'Added Grok external AI agent integration', tag: 'new' },
+            { text: 'Conversation capture creates dedicated Grok Conversations Space', tag: 'new' },
+            { text: 'Full support for x.ai and grok.x.com URL detection', tag: 'improved' },
+          ],
+        },
+        {
+          version: '3.8.14',
+          date: 'January 2026',
+          title: 'Spaces Upload & Bug Fixes',
+          changes: [
+            { text: 'Upload files from Spaces directly into ChatGPT, Claude, and file pickers', tag: 'new' },
+            { text: 'Native dialog wrapping: "Choose from Computer" or "Choose from Spaces"', tag: 'new' },
+            { text: 'Fixed Video Editor crash when opening projects with no videos', tag: 'fixed' },
+            { text: 'Fixed YouTube download status not updating to complete', tag: 'fixed' },
+            { text: 'Fixed space filtering race condition', tag: 'fixed' },
+          ],
+        },
+        {
+          version: '3.8.13',
+          date: 'January 2026',
+          title: 'Tufte-Inspired Spaces Redesign',
+          changes: [
+            { text: 'Replaced all emoji icons with clean SVG geometric shapes', tag: 'improved' },
+            { text: 'Neutral gray palette replacing purple/blue accents', tag: 'improved' },
+            { text: 'Standardized border-radius and removed gradients', tag: 'improved' },
+            { text: 'Created reusable icon library with 40+ icons', tag: 'new' },
+            { text: '15% more visible data density in Spaces view', tag: 'improved' },
+          ],
+        },
+        {
+          version: '3.8.12',
+          date: 'December 2025',
+          title: 'Graceful Shutdown & Stability',
+          changes: [
+            { text: 'App lifecycle handlers for clean shutdown', tag: 'new' },
+            { text: 'GSX window tracking system with forced close', tag: 'improved' },
+            { text: 'IPC heartbeat system to prevent zombie windows', tag: 'new' },
+            { text: 'Fixed app not quitting after hours open', tag: 'fixed' },
+          ],
+        },
+        {
+          version: '3.7.0',
+          date: 'November 2025',
+          title: 'GSX Create Enhancements',
+          changes: [
+            { text: 'Task queue with 7-phase workflow', tag: 'new' },
+            { text: 'Agent activity HUD with real-time updates', tag: 'new' },
+            { text: 'LLM summarization of agent activities', tag: 'new' },
+            { text: 'Budget integration & cost tracking', tag: 'new' },
+            { text: 'Hardened release script with checksum verification', tag: 'improved' },
+          ],
+        },
+        {
+          version: '3.6.0',
+          date: 'October 2025',
+          title: 'Video Editor & Smart Export',
+          changes: [
+            { text: 'ElevenLabs AI audio replacement in Video Editor', tag: 'new' },
+            { text: 'Smart transcription with instant extraction', tag: 'new' },
+            { text: 'Scene detection and waveform visualization', tag: 'new' },
+            { text: 'Multiple export formats with style guide support', tag: 'new' },
+          ],
+        },
+        {
+          version: '3.5.0',
+          date: 'September 2025',
+          title: 'External AI Agents',
+          changes: [
+            { text: 'ChatGPT, Claude, Perplexity, and Gemini integration', tag: 'new' },
+            { text: 'AI conversation capture to Spaces', tag: 'new' },
+            { text: 'Custom agent configuration support', tag: 'new' },
+          ],
+        },
+        {
+          version: '3.0.0',
+          date: 'August 2025',
+          title: 'Major Release - GSX Power User',
+          changes: [
+            { text: 'Complete app redesign and rebranding', tag: 'new' },
+            { text: 'Spaces content management system', tag: 'new' },
+            { text: 'Clipboard Manager with source detection', tag: 'new' },
+            { text: 'IDW Hub for digital worker management', tag: 'new' },
+            { text: 'Browser extension integration', tag: 'new' },
+          ],
+        },
+      ];
 
-        // State
-        let currentSlide = 0;
-        let mode = 'intro'; // 'intro' or 'updates'
-        let currentVersion = '3.8.15';
-        let lastSeenVersion = null;
+      // State
+      let currentSlide = 0;
+      let mode = 'intro'; // 'intro' or 'updates'
+      let currentVersion = '3.8.15';
+      let lastSeenVersion = null;
 
-        // Icons for change tags
-        const ICONS = {
-            check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`,
-            plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
-            star: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
-            wrench: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`
-        };
+      // Icons for change tags
+      const ICONS = {
+        check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`,
+        plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+        star: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+        wrench: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`,
+      };
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', async () => {
-            // Get initialization data from preload
-            if (window.introWizard) {
-                const data = await window.introWizard.getInitData();
-                currentVersion = data.currentVersion;
-                lastSeenVersion = data.lastSeenVersion;
-                
-                // Update version badge
-                document.getElementById('versionBadge').textContent = `v${currentVersion}`;
-                
-                // Determine mode
-                if (!lastSeenVersion) {
-                    // First time user
-                    setMode('intro');
-                } else {
-                    // Returning user with update
-                    setMode('updates');
-                }
-            } else {
-                // Fallback for testing without preload
-                setMode('intro');
-            }
-        });
+      // Initialize
+      document.addEventListener('DOMContentLoaded', async () => {
+        // Get initialization data from preload
+        if (window.introWizard) {
+          const data = await window.introWizard.getInitData();
+          currentVersion = data.currentVersion;
+          lastSeenVersion = data.lastSeenVersion;
 
-        function setMode(newMode) {
-            mode = newMode;
-            document.getElementById('introMode').classList.toggle('active', mode === 'intro');
-            document.getElementById('updatesMode').classList.toggle('active', mode === 'updates');
-            
-            if (mode === 'updates') {
-                renderChangelog();
-            }
+          // Update version badge
+          document.getElementById('versionBadge').textContent = `v${currentVersion}`;
+
+          // Determine mode
+          if (!lastSeenVersion) {
+            // First time user
+            setMode('intro');
+          } else {
+            // Returning user with update
+            setMode('updates');
+          }
+        } else {
+          // Fallback for testing without preload
+          setMode('intro');
         }
+      });
 
-        function renderChangelog() {
-            const container = document.getElementById('updatesContent');
-            container.innerHTML = CHANGELOG.map((entry, index) => {
-                const isCurrent = entry.version === currentVersion;
-                const isNew = lastSeenVersion && compareVersions(entry.version, lastSeenVersion) > 0;
-                
-                return `
+      function setMode(newMode) {
+        mode = newMode;
+        document.getElementById('introMode').classList.toggle('active', mode === 'intro');
+        document.getElementById('updatesMode').classList.toggle('active', mode === 'updates');
+
+        if (mode === 'updates') {
+          renderChangelog();
+        }
+      }
+
+      function renderChangelog() {
+        const container = document.getElementById('updatesContent');
+        container.innerHTML = CHANGELOG.map((entry, index) => {
+          const isCurrent = entry.version === currentVersion;
+          const isNew = lastSeenVersion && compareVersions(entry.version, lastSeenVersion) > 0;
+
+          return `
                     <div class="version-entry ${isCurrent ? 'current' : ''}">
                         <div class="version-header">
                             <span class="version-number">Version ${entry.version}</span>
@@ -861,111 +864,119 @@
                         </div>
                         <div class="version-title">${entry.title}</div>
                         <ul class="version-changes">
-                            ${entry.changes.map(change => `
+                            ${entry.changes
+                              .map(
+                                (change) => `
                                 <li>
                                     ${getChangeIcon(change.tag)}
                                     <span>${change.text}</span>
                                     <span class="change-tag ${change.tag}">${change.tag}</span>
                                 </li>
-                            `).join('')}
+                            `
+                              )
+                              .join('')}
                         </ul>
                     </div>
                 `;
-            }).join('');
+        }).join('');
+      }
+
+      function getChangeIcon(tag) {
+        switch (tag) {
+          case 'new':
+            return ICONS.plus;
+          case 'improved':
+            return ICONS.star;
+          case 'fixed':
+            return ICONS.wrench;
+          default:
+            return ICONS.check;
         }
+      }
 
-        function getChangeIcon(tag) {
-            switch (tag) {
-                case 'new': return ICONS.plus;
-                case 'improved': return ICONS.star;
-                case 'fixed': return ICONS.wrench;
-                default: return ICONS.check;
-            }
+      function compareVersions(a, b) {
+        const partsA = a.split('.').map(Number);
+        const partsB = b.split('.').map(Number);
+        for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+          const numA = partsA[i] || 0;
+          const numB = partsB[i] || 0;
+          if (numA > numB) return 1;
+          if (numA < numB) return -1;
         }
+        return 0;
+      }
 
-        function compareVersions(a, b) {
-            const partsA = a.split('.').map(Number);
-            const partsB = b.split('.').map(Number);
-            for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-                const numA = partsA[i] || 0;
-                const numB = partsB[i] || 0;
-                if (numA > numB) return 1;
-                if (numA < numB) return -1;
-            }
-            return 0;
-        }
+      // Intro slide navigation
+      function updateSlide() {
+        const slides = document.querySelectorAll('.intro-slide');
+        const dots = document.querySelectorAll('.intro-progress .dot');
 
-        // Intro slide navigation
-        function updateSlide() {
-            const slides = document.querySelectorAll('.intro-slide');
-            const dots = document.querySelectorAll('.intro-progress .dot');
-            
-            slides.forEach((slide, index) => {
-                slide.classList.remove('active', 'previous');
-                if (index === currentSlide) {
-                    slide.classList.add('active');
-                } else if (index < currentSlide) {
-                    slide.classList.add('previous');
-                }
-            });
-            
-            dots.forEach((dot, index) => {
-                dot.classList.toggle('active', index === currentSlide);
-            });
-
-            // Update buttons
-            const prevBtn = document.getElementById('prevBtn');
-            const nextBtn = document.getElementById('nextBtn');
-            
-            prevBtn.style.display = currentSlide > 0 ? 'block' : 'none';
-            
-            if (currentSlide === slides.length - 1) {
-                nextBtn.textContent = 'Get Started';
-            } else {
-                nextBtn.textContent = 'Next';
-            }
-        }
-
-        function nextSlide() {
-            const slides = document.querySelectorAll('.intro-slide');
-            if (currentSlide < slides.length - 1) {
-                currentSlide++;
-                updateSlide();
-            } else {
-                closeWizard();
-            }
-        }
-
-        function prevSlide() {
-            if (currentSlide > 0) {
-                currentSlide--;
-                updateSlide();
-            }
-        }
-
-        function closeWizard() {
-            if (window.introWizard) {
-                window.introWizard.markAsSeen();
-                window.introWizard.close();
-            } else {
-                // Fallback for testing
-                window.close();
-            }
-        }
-
-        // Keyboard navigation
-        document.addEventListener('keydown', (e) => {
-            if (mode === 'intro') {
-                if (e.key === 'ArrowRight' || e.key === 'Enter') {
-                    nextSlide();
-                } else if (e.key === 'ArrowLeft') {
-                    prevSlide();
-                }
-            }
-            if (e.key === 'Escape') {
-                closeWizard();
-            }
+        slides.forEach((slide, index) => {
+          slide.classList.remove('active', 'previous');
+          if (index === currentSlide) {
+            slide.classList.add('active');
+          } else if (index < currentSlide) {
+            slide.classList.add('previous');
+          }
         });
+
+        dots.forEach((dot, index) => {
+          dot.classList.toggle('active', index === currentSlide);
+        });
+
+        // Update buttons
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+
+        prevBtn.style.display = currentSlide > 0 ? 'block' : 'none';
+
+        if (currentSlide === slides.length - 1) {
+          nextBtn.textContent = 'Get Started';
+        } else {
+          nextBtn.textContent = 'Next';
+        }
+      }
+
+      function nextSlide() {
+        const slides = document.querySelectorAll('.intro-slide');
+        if (currentSlide < slides.length - 1) {
+          currentSlide++;
+          updateSlide();
+        } else {
+          closeWizard();
+        }
+      }
+
+      function prevSlide() {
+        if (currentSlide > 0) {
+          currentSlide--;
+          updateSlide();
+        }
+      }
+
+      function closeWizard() {
+        if (window.introWizard) {
+          window.introWizard.markAsSeen();
+          window.introWizard.close();
+        } else {
+          // Fallback for testing
+          window.close();
+        }
+      }
+
+      // Keyboard navigation
+      document.addEventListener('keydown', (e) => {
+        if (mode === 'intro') {
+          if (e.key === 'ArrowRight' || e.key === 'Enter') {
+            nextSlide();
+          } else if (e.key === 'ArrowLeft') {
+            prevSlide();
+          }
+        }
+        if (e.key === 'Escape') {
+          closeWizard();
+        }
+      });
     </script>
-</body>
+  </body>
 </html>

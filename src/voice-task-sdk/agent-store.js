@@ -1,6 +1,6 @@
 /**
  * Agent Store
- * 
+ *
  * Manages user-defined agents stored in Spaces.
  * Supports both local LLM-powered agents and GSX/MCS connections.
  */
@@ -11,6 +11,7 @@ const fs = require('fs').promises;
 const { app } = require('electron');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
+const exchangeBus = require('../../lib/exchange/event-bus');
 
 // Agent type constants
 const AGENT_TYPE = {
@@ -18,15 +19,42 @@ const AGENT_TYPE = {
   GSX: 'gsx',
 };
 
-// Default agent schema
+// Schema version - bump when adding new fields
+const AGENT_SCHEMA_VERSION = 2;
+
+// Default agent schema (v2 - first-class agent support)
 const DEFAULT_LOCAL_AGENT = {
   type: AGENT_TYPE.LOCAL,
+  schemaVersion: AGENT_SCHEMA_VERSION,
   name: '',
   version: '1.0.0',
   enabled: true,
   keywords: [],
   categories: [],
   prompt: '',
+  executionType: 'llm',
+  // Voice personality (see VOICE-GUIDE.md: 'verse', 'ember', 'alloy', etc.)
+  voice: null,
+  // Acknowledgment phrases spoken while agent is working
+  acks: [],
+  // Estimated execution time in ms (hint for exchange timeout)
+  estimatedExecutionMs: 5000,
+  // Data sources this agent can access
+  dataSources: [],
+  // Memory configuration (thinking-agent pattern)
+  memory: {
+    enabled: false,
+    sections: ['Learned Preferences'],
+  },
+  // Daily briefing contribution
+  briefing: {
+    enabled: false,
+    priority: 5,
+    section: '',
+    prompt: '',
+  },
+  // Whether agent supports multi-turn clarification via needsInput
+  multiTurn: false,
   settings: {
     confidenceThreshold: 0.7,
     maxConcurrent: 5,
@@ -81,7 +109,7 @@ class AgentStore {
     try {
       await fs.mkdir(this.storePath, { recursive: true });
       await fs.mkdir(this.versionsPath, { recursive: true });
-    } catch (e) {
+    } catch (_e) {
       // Directories may already exist
     }
 
@@ -91,11 +119,16 @@ class AgentStore {
     await this.loadVersions();
 
     this.initialized = true;
-    log.info('voice', '[AgentStore] Initialized with', { arg0: this.agents.size, arg1: 'local agents, arg2: ', arg3: this.gsxConnections.size, arg4: 'GSX connections, arg5: and version history' });
+    log.info('voice', '[AgentStore] Initialized with', {
+      arg0: this.agents.size,
+      arg1: 'local agents, arg2: ',
+      arg3: this.gsxConnections.size,
+      arg4: 'GSX connections, arg5: and version history',
+    });
   }
 
   /**
-   * Load local agents from storage
+   * Load local agents from storage, migrating old schemas to current version.
    */
   async loadAgents() {
     try {
@@ -103,13 +136,44 @@ class AgentStore {
       const data = await fs.readFile(agentsFile, 'utf-8');
       const agents = JSON.parse(data);
 
+      let needsSave = false;
       for (const agent of agents) {
-        this.agents.set(agent.id, agent);
+        // Migrate agents missing v2 fields
+        const migrated = this._migrateAgent(agent);
+        if (migrated !== agent) needsSave = true;
+        this.agents.set(migrated.id, migrated);
       }
-    } catch (e) {
+
+      // Persist migration changes
+      if (needsSave) {
+        await this.saveAgents();
+        log.info('voice', '[AgentStore] Migrated agents to schema v2');
+      }
+    } catch (_e) {
       // File may not exist yet
       log.info('voice', '[AgentStore] No existing local agents found');
     }
+  }
+
+  /**
+   * Migrate an agent to the current schema version.
+   * Returns the original object if already current, or a new object with defaults filled in.
+   */
+  _migrateAgent(agent) {
+    if (agent.schemaVersion === AGENT_SCHEMA_VERSION) return agent;
+
+    // Fill in any missing v2 fields from defaults
+    const migrated = {
+      ...DEFAULT_LOCAL_AGENT,
+      ...agent,
+      schemaVersion: AGENT_SCHEMA_VERSION,
+      // Deep-merge nested objects so existing sub-keys aren't lost
+      memory: { ...DEFAULT_LOCAL_AGENT.memory, ...(agent.memory || {}) },
+      briefing: { ...DEFAULT_LOCAL_AGENT.briefing, ...(agent.briefing || {}) },
+      settings: { ...DEFAULT_LOCAL_AGENT.settings, ...(agent.settings || {}) },
+    };
+
+    return migrated;
   }
 
   /**
@@ -124,7 +188,7 @@ class AgentStore {
       for (const conn of connections) {
         this.gsxConnections.set(conn.id, conn);
       }
-    } catch (e) {
+    } catch (_e) {
       // File may not exist yet
       log.info('voice', '[AgentStore] No existing GSX connections found');
     }
@@ -162,7 +226,7 @@ class AgentStore {
           this.agentVersions.set(agentId, JSON.parse(data));
         }
       }
-    } catch (e) {
+    } catch (_e) {
       // Versions directory may be empty
     }
   }
@@ -181,7 +245,7 @@ class AgentStore {
    */
   async addVersion(agentId, agentSnapshot, reason = VERSION_REASONS.UPDATE, description = '') {
     const versions = this.agentVersions.get(agentId) || [];
-    
+
     const version = {
       versionNumber: versions.length + 1,
       timestamp: new Date().toISOString(),
@@ -189,17 +253,17 @@ class AgentStore {
       description,
       snapshot: { ...agentSnapshot },
     };
-    
+
     versions.push(version);
-    
+
     // Trim to max versions
     if (versions.length > MAX_VERSIONS_PER_AGENT) {
       versions.shift();
     }
-    
+
     this.agentVersions.set(agentId, versions);
     await this.saveVersions(agentId);
-    
+
     log.info('voice', '[AgentStore] Version saved for agent :', { v0: version.versionNumber, v1: agentId, v2: reason });
     return version;
   }
@@ -229,22 +293,17 @@ class AgentStore {
 
     this.agents.set(agent.id, agent);
     await this.saveAgents();
-    
+
     // Save initial version
     await this.addVersion(agent.id, agent, VERSION_REASONS.CREATE, 'Initial creation');
 
     log.info('voice', '[AgentStore] Created local agent', { data: agent.name });
-    
-    // Hot-connect the new agent to the running exchange
-    try {
-      const { hotConnectAgent } = require('./exchange-bridge');
-      if (agent.enabled) {
-        await hotConnectAgent(agent);
-      }
-    } catch (e) {
-      log.info('voice', '[AgentStore] Could not hot-connect agent (exchange may not be running)', { data: e.message });
+
+    // Signal the exchange to connect this new agent (decoupled via event bus)
+    if (agent.enabled) {
+      exchangeBus.emit('agent:hot-connect', agent);
     }
-    
+
     return agent;
   }
 
@@ -278,29 +337,24 @@ class AgentStore {
     this.agents.set(id, updated);
     await this.saveAgents();
 
-    // Handle enabled state changes
-    try {
-      const { hotConnectAgent, disconnectAgent } = require('./exchange-bridge');
-      
-      if (wasEnabled && !willBeEnabled) {
-        // Agent was disabled - disconnect
-        disconnectAgent(id);
-        log.info('voice', '[AgentStore] Disconnected disabled agent', { data: updated.name });
-      } else if (!wasEnabled && willBeEnabled) {
-        // Agent was enabled - connect
-        await hotConnectAgent(updated);
-        log.info('voice', '[AgentStore] Reconnected enabled agent', { data: updated.name });
-      } else if (willBeEnabled) {
-        // Agent is still enabled but may have changed keywords/etc - reconnect
-        disconnectAgent(id);
-        await hotConnectAgent(updated);
-        log.info('voice', '[AgentStore] Reconnected updated agent', { data: updated.name });
-      }
-    } catch (e) {
-      log.info('voice', '[AgentStore] Could not update agent connection', { data: e.message });
+    // Signal the exchange about enabled-state changes (decoupled via event bus)
+    if (wasEnabled && !willBeEnabled) {
+      exchangeBus.emit('agent:disconnect', id);
+      log.info('voice', '[AgentStore] Disconnected disabled agent', { data: updated.name });
+    } else if (!wasEnabled && willBeEnabled) {
+      exchangeBus.emit('agent:hot-connect', updated);
+      log.info('voice', '[AgentStore] Reconnected enabled agent', { data: updated.name });
+    } else if (willBeEnabled) {
+      exchangeBus.emit('agent:disconnect', id);
+      exchangeBus.emit('agent:hot-connect', updated);
+      log.info('voice', '[AgentStore] Reconnected updated agent', { data: updated.name });
     }
 
-    log.info('voice', '[AgentStore] Updated local agent', { arg0: updated.name, arg1: '-> version', arg2: updated.version });
+    log.info('voice', '[AgentStore] Updated local agent', {
+      arg0: updated.name,
+      arg1: '-> version',
+      arg2: updated.version,
+    });
     return updated;
   }
 
@@ -311,13 +365,8 @@ class AgentStore {
     const agent = this.agents.get(id);
     if (!agent) throw new Error('Agent not found');
 
-    // Disconnect from exchange before deleting
-    try {
-      const { disconnectAgent } = require('./exchange-bridge');
-      disconnectAgent(id);
-    } catch (e) {
-      // Exchange may not be running
-    }
+    // Signal the exchange to disconnect this agent (decoupled via event bus)
+    exchangeBus.emit('agent:disconnect', id);
 
     this.agents.delete(id);
     await this.saveAgents();
@@ -344,7 +393,7 @@ class AgentStore {
    * Get enabled local agents
    */
   getEnabledLocalAgents() {
-    return this.getLocalAgents().filter(a => a.enabled);
+    return this.getLocalAgents().filter((a) => a.enabled);
   }
 
   // ==================== GSX CONNECTIONS ====================
@@ -427,7 +476,7 @@ class AgentStore {
    * Get enabled GSX connections
    */
   getEnabledGSXConnections() {
-    return this.getGSXConnections().filter(c => c.enabled);
+    return this.getGSXConnections().filter((c) => c.enabled);
   }
 
   /**
@@ -443,7 +492,12 @@ class AgentStore {
     this.gsxConnections.set(connectionId, connection);
     await this.saveGSXConnections();
 
-    log.info('voice', '[AgentStore] Updated GSX agents for', { arg0: connection.name, arg1: ':', arg2: agents.length, arg3: 'agents' });
+    log.info('voice', '[AgentStore] Updated GSX agents for', {
+      arg0: connection.name,
+      arg1: ':',
+      arg2: agents.length,
+      arg3: 'agents',
+    });
     return connection;
   }
 
@@ -458,7 +512,7 @@ class AgentStore {
     // Flatten GSX connection agents
     const gsxAgents = [];
     for (const conn of this.getEnabledGSXConnections()) {
-      for (const agent of (conn.agents || [])) {
+      for (const agent of conn.agents || []) {
         gsxAgents.push({
           ...agent,
           type: AGENT_TYPE.GSX,
@@ -479,9 +533,7 @@ class AgentStore {
     const matches = [];
 
     for (const agent of this.getEnabledLocalAgents()) {
-      const matchedKeywords = agent.keywords.filter(kw => 
-        lowerText.includes(kw.toLowerCase())
-      );
+      const matchedKeywords = agent.keywords.filter((kw) => lowerText.includes(kw.toLowerCase()));
 
       if (matchedKeywords.length > 0) {
         matches.push({
@@ -516,7 +568,7 @@ class AgentStore {
    */
   getVersion(agentId, versionNumber) {
     const versions = this.agentVersions.get(agentId) || [];
-    return versions.find(v => v.versionNumber === versionNumber);
+    return versions.find((v) => v.versionNumber === versionNumber);
   }
 
   /**
@@ -524,14 +576,14 @@ class AgentStore {
    */
   async undoAgent(agentId) {
     const versions = this.agentVersions.get(agentId) || [];
-    
+
     if (versions.length < 2) {
       throw new Error('No previous version to undo to');
     }
 
     // Get the second-to-last version (the one before current)
     const previousVersion = versions[versions.length - 2];
-    
+
     // Restore agent to that state
     const agent = this.agents.get(agentId);
     if (!agent) throw new Error('Agent not found');
@@ -550,7 +602,11 @@ class AgentStore {
     // Add an "undo" entry to version history
     await this.addVersion(agentId, restored, 'undo', `Reverted to version ${previousVersion.versionNumber}`);
 
-    log.info('voice', '[AgentStore] Undid agent', { arg0: restored.name, arg1: '-> restored from version', arg2: previousVersion.versionNumber });
+    log.info('voice', '[AgentStore] Undid agent', {
+      arg0: restored.name,
+      arg1: '-> restored from version',
+      arg2: previousVersion.versionNumber,
+    });
     return restored;
   }
 
@@ -588,12 +644,12 @@ class AgentStore {
   compareVersions(agentId, versionA, versionB) {
     const a = this.getVersion(agentId, versionA);
     const b = this.getVersion(agentId, versionB);
-    
+
     if (!a || !b) throw new Error('One or both versions not found');
 
     const changes = {};
     const allKeys = new Set([...Object.keys(a.snapshot), ...Object.keys(b.snapshot)]);
-    
+
     for (const key of allKeys) {
       const valA = JSON.stringify(a.snapshot[key]);
       const valB = JSON.stringify(b.snapshot[key]);
@@ -621,7 +677,7 @@ class AgentStore {
     const versionFile = path.join(this.versionsPath, `${agentId}.json`);
     try {
       await fs.unlink(versionFile);
-    } catch (e) {
+    } catch (_e) {
       // File may not exist
     }
     log.info('voice', '[AgentStore] Cleared version history for agent', { data: agentId });
@@ -652,6 +708,7 @@ module.exports = {
   getAgentStore,
   initAgentStore,
   AGENT_TYPE,
+  AGENT_SCHEMA_VERSION,
   VERSION_REASONS,
   DEFAULT_LOCAL_AGENT,
   DEFAULT_GSX_CONNECTION,

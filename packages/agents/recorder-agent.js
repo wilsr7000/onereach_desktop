@@ -1,9 +1,9 @@
 /**
  * Recorder Agent - Video Capture Assistant
- * 
- * Launches the GSX Capture tool for recording videos from camera or screen.
+ *
+ * Launches WISER Meeting for recording videos from camera or screen.
  * Helps users record content and save it to Spaces.
- * 
+ *
  * Capabilities:
  * - "Record a video" / "Start recording" - opens the recorder
  * - "Capture my screen" / "Screen recording" - opens recorder with screen mode hint
@@ -31,25 +31,50 @@ function getSpacesAPI() {
 const recorderAgent = {
   id: 'recorder-agent',
   name: 'Video Recorder',
-  description: 'Records video from your camera or screen. Say "record a video" or "capture my screen" to start recording. Recordings can be saved directly to Spaces.',
+  description:
+    'Records meetings and video. Say "start a meeting", "record a video", or "capture my screen" to begin. The go-to agent for starting, recording, or capturing any live session.',
   voice: 'nova',
   acks: ['Opening the recorder.', 'Let me get that ready for you.', 'Starting the capture tool.'],
-  categories: ['media', 'video', 'recording', 'capture'],
+  categories: ['media', 'video', 'recording', 'capture', 'meeting'],
   keywords: [
-    'record', 'recording', 'capture', 'video', 'screen', 'webcam', 'camera',
-    'screencast', 'screen capture', 'record myself', 'take a video',
-    'record my screen', 'capture screen', 'film', 'shoot video'
+    'record',
+    'recording',
+    'capture',
+    'video',
+    'screen',
+    'webcam',
+    'camera',
+    'screencast',
+    'screen capture',
+    'record myself',
+    'take a video',
+    'record my screen',
+    'capture screen',
+    'film',
+    'shoot video',
+    'start a meeting',
+    'begin a meeting',
+    'start meeting',
+    'start the meeting',
+    "let's start a meeting",
+    'hop on a call',
+    'start a call',
+    'begin recording',
   ],
-  executionType: 'action',  // Launches GSX Capture recorder
+  executionType: 'action', // Launches WISER Meeting recorder
 
   // Prompt for LLM evaluation
-  prompt: `Video Recorder Agent launches the GSX Capture tool to record video from camera or screen.
+  prompt: `Video Recorder Agent launches WISER Meeting to record meetings, video, and screen.
 
 HIGH CONFIDENCE (0.85+) for:
-- Direct recording requests: "Record a video", "Start recording", "Record myself"
+- Starting a meeting: "Start a meeting", "Let's start a meeting", "Begin a meeting", "Start the meeting"
+- Starting a call: "Start a call", "Hop on a call", "Begin a call"
+- Direct recording: "Record a video", "Start recording", "Record myself", "Begin recording"
 - Screen capture: "Capture my screen", "Screen recording", "Record my desktop"
 - Camera recording: "Take a video", "Film something", "Record with webcam"
 - Recording for a space: "Record a video for my Work space"
+
+CRITICAL: "Start a meeting" means "begin a meeting session NOW" -- this is a recording/capture action, NOT a calendar scheduling action. This agent handles all "start/begin/launch" + meeting/call/session commands.
 
 MEDIUM CONFIDENCE (0.50-0.70) for:
 - Ambiguous "capture" requests that might be screenshots instead of video
@@ -61,8 +86,9 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
 - Screenshots: "Take a screenshot" (not video)
 - Music/audio only: "Record audio" (might want different tool)
 - Photos: "Take a photo", "Capture image"
+- SCHEDULING a meeting: "Schedule a meeting", "Add a meeting to calendar", "Book a meeting" (that's calendar agent)
 
-This agent opens the recorder window. For video editing, the video editor is more appropriate. For playing videos, use media controls.`,
+This agent opens the recorder window. For scheduling/creating calendar events, the calendar agent is appropriate.`,
 
   // Memory for tracking user patterns
   memory: null,
@@ -128,6 +154,15 @@ This agent opens the recorder window. For video editing, the video editor is mor
         }
       }
 
+      // For meeting intents without an explicit space, find or create a meetings space
+      const isMeetingIntent = /\b(meeting|call|conference|standup|sync|huddle)\b/i.test(lower);
+      if (isMeetingIntent && !options.spaceId) {
+        const meetingSpaceId = await this._findOrCreateMeetingSpace();
+        if (meetingSpaceId) {
+          options.spaceId = meetingSpaceId;
+        }
+      }
+
       // Check for screen recording hint
       if (lower.includes('screen') || lower.includes('desktop') || lower.includes('window')) {
         options.mode = 'screen';
@@ -137,7 +172,12 @@ This agent opens the recorder window. For video editing, the video editor is mor
       }
 
       // Check for camera/webcam hint
-      if (lower.includes('camera') || lower.includes('webcam') || lower.includes('myself') || lower.includes('selfie')) {
+      if (
+        lower.includes('camera') ||
+        lower.includes('webcam') ||
+        lower.includes('myself') ||
+        lower.includes('selfie')
+      ) {
         options.mode = 'camera';
         if (!options.instructions) {
           options.instructions = 'Camera recording - position yourself in frame';
@@ -181,22 +221,21 @@ This agent opens the recorder window. For video editing, the video editor is mor
           message,
           data: {
             action: { type: 'recorder-opened' },
-            options
-          }
+            options,
+          },
         };
       } else {
         return {
           success: false,
           message: result.error || 'Sorry, I could not open the recorder right now. Please try again.',
-          suggestion: 'You can also open the recorder from the Video Editor using the camera button.'
+          suggestion: 'You can also open the recorder from the Video Editor using the camera button.',
         };
       }
-
     } catch (error) {
       log.error('agent', 'Execute error', { error });
       return {
         success: false,
-        message: 'Sorry, I had trouble opening the recorder. Please try again.'
+        message: 'Sorry, I had trouble opening the recorder. Please try again.',
       };
     }
   },
@@ -222,10 +261,10 @@ This agent opens the recorder window. For video editing, the video editor is mor
       }
 
       log.error('agent', 'Recorder not available - global.recorder', { recorder: !!global.recorder });
-      return { success: false, error: 'Recorder not initialized' };
+      return { success: false, message: 'Recorder not initialized' };
     } catch (error) {
       log.error('agent', 'Error opening recorder', { error });
-      return { success: false, error: error.message };
+      return { success: false, message: error.message };
     }
   },
 
@@ -268,21 +307,54 @@ This agent opens the recorder window. For video editing, the video editor is mor
     try {
       const spaces = await api.list();
       const normalizedName = name.toLowerCase();
-      
+
       // Try exact match first
-      let match = spaces.find(s => s.name.toLowerCase() === normalizedName);
-      
+      let match = spaces.find((s) => s.name.toLowerCase() === normalizedName);
+
       // Try partial match
       if (!match) {
-        match = spaces.find(s => 
-          s.name.toLowerCase().includes(normalizedName) ||
-          normalizedName.includes(s.name.toLowerCase())
+        match = spaces.find(
+          (s) => s.name.toLowerCase().includes(normalizedName) || normalizedName.includes(s.name.toLowerCase())
         );
       }
 
       return match?.id || null;
     } catch (error) {
       log.error('agent', 'Error finding space', { error });
+      return null;
+    }
+  },
+
+  /**
+   * Find an existing meeting space or create one.
+   * Looks for spaces whose name matches common meeting-related terms.
+   * @returns {Promise<string|null>} - Space ID or null
+   */
+  async _findOrCreateMeetingSpace() {
+    const api = getSpacesAPI();
+    if (!api) return null;
+
+    try {
+      const spaces = await api.list();
+
+      // Look for existing meeting-related spaces
+      const meetingKeywords = ['meeting', 'meetings', 'wsr', 'wiser'];
+      let meetingSpace = spaces.find((s) => meetingKeywords.some((kw) => s.name.toLowerCase().includes(kw)));
+
+      if (meetingSpace) {
+        return meetingSpace.id;
+      }
+
+      // No meeting space found -- create one
+      const created = await api.create('Meetings');
+      if (created?.id) {
+        log.info('agent', 'Created Meetings space for recorder', { spaceId: created.id });
+        return created.id;
+      }
+
+      return null;
+    } catch (error) {
+      log.error('agent', 'Error finding/creating meeting space', { error: error.message });
       return null;
     }
   },
@@ -311,7 +383,7 @@ This agent opens the recorder window. For video editing, the video editor is mor
     }
 
     return null;
-  }
+  },
 };
 
 module.exports = recorderAgent;

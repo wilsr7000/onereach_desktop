@@ -32,7 +32,7 @@ class VersionTree {
    */
   getChildren(versionId) {
     const childIds = this.tree.children[versionId] || [];
-    return childIds.map(id => this.tree.nodes[id]).filter(v => v);
+    return childIds.map((id) => this.tree.nodes[id]).filter((v) => v);
   }
 
   /**
@@ -54,12 +54,12 @@ class VersionTree {
   getLineage(versionId) {
     const lineage = [];
     let current = this.tree.nodes[versionId];
-    
+
     while (current) {
       lineage.unshift(current);
       current = current.parentVersionId ? this.tree.nodes[current.parentVersionId] : null;
     }
-    
+
     return lineage;
   }
 
@@ -71,7 +71,7 @@ class VersionTree {
   getDescendants(versionId) {
     const descendants = [];
     const stack = [...(this.tree.children[versionId] || [])];
-    
+
     while (stack.length > 0) {
       const id = stack.pop();
       const version = this.tree.nodes[id];
@@ -80,7 +80,7 @@ class VersionTree {
         stack.push(...(this.tree.children[id] || []));
       }
     }
-    
+
     return descendants;
   }
 
@@ -101,7 +101,7 @@ class VersionTree {
    */
   isAncestorOf(ancestorId, descendantId) {
     const lineage = this.getLineage(descendantId);
-    return lineage.some(v => v.id === ancestorId);
+    return lineage.some((v) => v.id === ancestorId);
   }
 
   /**
@@ -119,29 +119,29 @@ class VersionTree {
    */
   toFlatRenderList() {
     const result = [];
-    
+
     const traverse = (versionId, depth = 0, branchIndex = 0) => {
       const version = this.tree.nodes[versionId];
       if (!version) return;
-      
+
       result.push({
         ...version,
         depth,
         branchIndex,
         hasChildren: (this.tree.children[versionId] || []).length > 0,
-        isRoot: versionId === this.tree.root
+        isRoot: versionId === this.tree.root,
       });
-      
+
       const children = this.tree.children[versionId] || [];
       children.forEach((childId, index) => {
         traverse(childId, depth + 1, index);
       });
     };
-    
+
     if (this.tree.root) {
       traverse(this.tree.root);
     }
-    
+
     return result;
   }
 
@@ -155,30 +155,30 @@ class VersionTree {
     const paths = [];
     const nodes = this.toFlatRenderList();
     const nodePositions = {};
-    
+
     // Calculate positions
     nodes.forEach((node, index) => {
       nodePositions[node.id] = {
         x: node.depth * levelIndent + 12,
-        y: index * nodeHeight + nodeHeight / 2
+        y: index * nodeHeight + nodeHeight / 2,
       };
     });
-    
+
     // Generate paths
-    nodes.forEach(node => {
+    nodes.forEach((node) => {
       if (node.parentVersionId && nodePositions[node.parentVersionId]) {
         const parent = nodePositions[node.parentVersionId];
         const child = nodePositions[node.id];
-        
+
         // Create an L-shaped path
         paths.push({
           from: node.parentVersionId,
           to: node.id,
-          d: `M ${parent.x} ${parent.y} L ${parent.x} ${child.y} L ${child.x} ${child.y}`
+          d: `M ${parent.x} ${parent.y} L ${parent.x} ${child.y} L ${child.x} ${child.y}`,
         });
       }
     });
-    
+
     return paths;
   }
 
@@ -193,34 +193,34 @@ class VersionTree {
       onVersionClick = 'app.selectVersion',
       onBranchClick = 'app.branchVersion',
       onDeleteClick = 'app.deleteVersion',
-      showActions = true
+      showActions = true,
     } = options;
 
     const nodes = this.toFlatRenderList();
-    
+
     if (nodes.length === 0) {
       return '<div class="version-tree-empty">No versions yet</div>';
     }
 
     let html = '<div class="version-tree">';
-    
+
     // Add SVG for connection lines
     const paths = this.generateConnectionPaths();
     if (paths.length > 0) {
       const maxY = nodes.length * 40;
-      const maxX = Math.max(...nodes.map(n => n.depth)) * 24 + 50;
+      const maxX = Math.max(...nodes.map((n) => n.depth)) * 24 + 50;
       html += `<svg class="version-tree-lines" width="${maxX}" height="${maxY}" style="position: absolute; top: 0; left: 0; pointer-events: none;">`;
-      paths.forEach(path => {
+      paths.forEach((path) => {
         html += `<path d="${path.d}" stroke="var(--border-color)" fill="none" stroke-width="1"/>`;
       });
       html += '</svg>';
     }
 
     // Render nodes
-    nodes.forEach(node => {
+    nodes.forEach((node) => {
       const isSelected = node.id === selectedVersionId;
       const indent = node.depth * 24;
-      
+
       html += `
         <div class="version-tree-node ${isSelected ? 'selected' : ''}" 
              style="padding-left: ${indent + 24}px"
@@ -230,7 +230,9 @@ class VersionTree {
             <span class="version-tree-name">${this.escapeHtml(node.name)}</span>
             ${node.hasChildren ? '<span class="version-tree-badge">' + this.getChildren(node.id).length + '</span>' : ''}
           </div>
-          ${showActions ? `
+          ${
+            showActions
+              ? `
             <div class="version-tree-actions">
               <button class="btn btn-ghost btn-sm" onclick="${onBranchClick}('${node.id}')" title="Branch from this version">
                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
@@ -240,16 +242,22 @@ class VersionTree {
                   <path d="M18 9a9 9 0 0 1-9 9"></path>
                 </svg>
               </button>
-              ${!node.isRoot ? `
+              ${
+                !node.isRoot
+                  ? `
                 <button class="btn btn-ghost btn-sm" onclick="${onDeleteClick}('${node.id}')" title="Delete version">
                   <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
                     <polyline points="3 6 5 6 21 6"></polyline>
                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                   </svg>
                 </button>
-              ` : ''}
+              `
+                  : ''
+              }
             </div>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
       `;
     });
@@ -265,13 +273,13 @@ class VersionTree {
    */
   renderDropdownList(selectedVersionId = null) {
     const nodes = this.toFlatRenderList();
-    
+
     let html = '';
-    nodes.forEach(node => {
+    nodes.forEach((node) => {
       const isSelected = node.id === selectedVersionId;
       const indent = '&nbsp;'.repeat(node.depth * 4);
       const prefix = node.depth > 0 ? '└─ ' : '';
-      
+
       html += `
         <div class="version-dropdown-item ${isSelected ? 'selected' : ''}" 
              data-version-id="${node.id}"
@@ -282,7 +290,7 @@ class VersionTree {
         </div>
       `;
     });
-    
+
     return html;
   }
 
@@ -307,22 +315,22 @@ class VersionTree {
    */
   toTextTree() {
     const lines = [];
-    
+
     const traverse = (versionId, prefix = '', isLast = true) => {
       const version = this.tree.nodes[versionId];
       if (!version) return;
-      
+
       const connector = isLast ? '└── ' : '├── ';
       lines.push(prefix + connector + version.name);
-      
+
       const children = this.tree.children[versionId] || [];
       const newPrefix = prefix + (isLast ? '    ' : '│   ');
-      
+
       children.forEach((childId, index) => {
         traverse(childId, newPrefix, index === children.length - 1);
       });
     };
-    
+
     if (this.tree.root) {
       const root = this.tree.nodes[this.tree.root];
       lines.push(root ? root.name : 'Root');
@@ -331,21 +339,10 @@ class VersionTree {
         traverse(childId, '', index === children.length - 1);
       });
     }
-    
+
     return lines.join('\n');
   }
 }
 
 // Make available globally for the video editor
 window.VersionTree = VersionTree;
-
-
-
-
-
-
-
-
-
-
-

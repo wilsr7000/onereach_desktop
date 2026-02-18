@@ -1,6 +1,6 @@
 /**
  * ExportPresets.js
- * 
+ *
  * Template-specific export formats for the Line Script system.
  * Each content type (Podcast, Product, Promo, Learning) has specialized
  * export formats optimized for that content type.
@@ -20,7 +20,7 @@ export const EXPORT_FORMATS = {
       icon: '📝',
       extension: 'md',
       mimeType: 'text/markdown',
-      description: 'Formatted show notes with timestamps, topics, and highlights'
+      description: 'Formatted show notes with timestamps, topics, and highlights',
     },
     'audiogram-timestamps': {
       id: 'audiogram-timestamps',
@@ -28,7 +28,7 @@ export const EXPORT_FORMATS = {
       icon: '🎧',
       extension: 'json',
       mimeType: 'application/json',
-      description: 'Timestamps for creating audiograms and social clips'
+      description: 'Timestamps for creating audiograms and social clips',
     },
     'transcript-with-speakers': {
       id: 'transcript-with-speakers',
@@ -36,7 +36,7 @@ export const EXPORT_FORMATS = {
       icon: '👥',
       extension: 'txt',
       mimeType: 'text/plain',
-      description: 'Full transcript with speaker identification'
+      description: 'Full transcript with speaker identification',
     },
     'quote-cards': {
       id: 'quote-cards',
@@ -44,7 +44,7 @@ export const EXPORT_FORMATS = {
       icon: '💬',
       extension: 'json',
       mimeType: 'application/json',
-      description: 'Quotable moments formatted for social media cards'
+      description: 'Quotable moments formatted for social media cards',
     },
     'youtube-chapters': {
       id: 'youtube-chapters',
@@ -52,8 +52,8 @@ export const EXPORT_FORMATS = {
       icon: '📺',
       extension: 'txt',
       mimeType: 'text/plain',
-      description: 'Chapter timestamps for YouTube description'
-    }
+      description: 'Chapter timestamps for YouTube description',
+    },
   },
 
   // ==================== PRODUCT EXPORTS ====================
@@ -64,7 +64,7 @@ export const EXPORT_FORMATS = {
       icon: '🎬',
       extension: 'csv',
       mimeType: 'text/csv',
-      description: 'Detailed shot list with timecodes and descriptions'
+      description: 'Detailed shot list with timecodes and descriptions',
     },
     'feature-matrix': {
       id: 'feature-matrix',
@@ -72,15 +72,15 @@ export const EXPORT_FORMATS = {
       icon: '📊',
       extension: 'csv',
       mimeType: 'text/csv',
-      description: 'Product features with timestamps and demo notes'
+      description: 'Product features with timestamps and demo notes',
     },
-    'storyboard': {
+    storyboard: {
       id: 'storyboard',
       name: 'Storyboard Export',
       icon: '🎨',
       extension: 'html',
       mimeType: 'text/html',
-      description: 'Visual storyboard with thumbnails and descriptions'
+      description: 'Visual storyboard with thumbnails and descriptions',
     },
     'social-cuts': {
       id: 'social-cuts',
@@ -88,7 +88,7 @@ export const EXPORT_FORMATS = {
       icon: '📱',
       extension: 'json',
       mimeType: 'application/json',
-      description: 'Suggested cuts for social media platforms'
+      description: 'Suggested cuts for social media platforms',
     },
     'youtube-chapters': {
       id: 'youtube-chapters',
@@ -96,27 +96,27 @@ export const EXPORT_FORMATS = {
       icon: '📺',
       extension: 'txt',
       mimeType: 'text/plain',
-      description: 'Chapter timestamps for YouTube description'
-    }
+      description: 'Chapter timestamps for YouTube description',
+    },
   },
 
   // ==================== PROMO EXPORTS ====================
   promo: {
-    'edl': {
+    edl: {
       id: 'edl',
       name: 'EDL (Edit Decision List)',
       icon: '🎞️',
       extension: 'edl',
       mimeType: 'text/plain',
-      description: 'CMX 3600 format EDL for NLE import'
+      description: 'CMX 3600 format EDL for NLE import',
     },
-    'storyboard': {
+    storyboard: {
       id: 'storyboard',
       name: 'Storyboard Export',
       icon: '🎨',
       extension: 'html',
       mimeType: 'text/html',
-      description: 'Visual storyboard with timing and beat notes'
+      description: 'Visual storyboard with timing and beat notes',
     },
     'timing-sheet': {
       id: 'timing-sheet',
@@ -124,7 +124,7 @@ export const EXPORT_FORMATS = {
       icon: '⏱️',
       extension: 'csv',
       mimeType: 'text/csv',
-      description: 'Precise timing for beats, transitions, and CTAs'
+      description: 'Precise timing for beats, transitions, and CTAs',
     },
     'social-versions': {
       id: 'social-versions',
@@ -132,7 +132,7 @@ export const EXPORT_FORMATS = {
       icon: '📱',
       extension: 'json',
       mimeType: 'application/json',
-      description: 'Edit points for 15s, 30s, 60s versions'
+      description: 'Edit points for 15s, 30s, 60s versions',
     },
     'hook-analysis': {
       id: 'hook-analysis',
@@ -140,8 +140,8 @@ export const EXPORT_FORMATS = {
       icon: '🎣',
       extension: 'md',
       mimeType: 'text/markdown',
-      description: 'Analysis of hooks and opening recommendations'
-    }
+      description: 'Analysis of hooks and opening recommendations',
+    },
   },
 
   // ==================== LEARNING EXPORTS ====================
@@ -152,7 +152,7 @@ export const EXPORT_FORMATS = {
       icon: '📺',
       extension: 'txt',
       mimeType: 'text/plain',
-      description: 'Chapter timestamps for YouTube description'
+      description: 'Chapter timestamps for YouTube description',
     },
     'course-outline': {
       id: 'course-outline',
@@ -160,7 +160,7 @@ export const EXPORT_FORMATS = {
       icon: '📚',
       extension: 'md',
       mimeType: 'text/markdown',
-      description: 'Structured outline with learning objectives'
+      description: 'Structured outline with learning objectives',
     },
     'study-guide': {
       id: 'study-guide',
@@ -168,15 +168,15 @@ export const EXPORT_FORMATS = {
       icon: '📖',
       extension: 'md',
       mimeType: 'text/markdown',
-      description: 'Key points, definitions, and review questions'
+      description: 'Key points, definitions, and review questions',
     },
-    'flashcards': {
+    flashcards: {
       id: 'flashcards',
       name: 'Flashcards (Anki)',
       icon: '🗂️',
       extension: 'csv',
       mimeType: 'text/csv',
-      description: 'Flashcard data for Anki or Quizlet import'
+      description: 'Flashcard data for Anki or Quizlet import',
     },
     'quiz-questions': {
       id: 'quiz-questions',
@@ -184,9 +184,9 @@ export const EXPORT_FORMATS = {
       icon: '❓',
       extension: 'json',
       mimeType: 'application/json',
-      description: 'Generated quiz questions from key points'
-    }
-  }
+      description: 'Generated quiz questions from key points',
+    },
+  },
 };
 
 /**
@@ -225,27 +225,27 @@ export class ExportPresets {
       'audiogram-timestamps': this.generateAudiogramTimestamps,
       'transcript-with-speakers': this.generateSpeakerTranscript,
       'quote-cards': this.generateQuoteCards,
-      
+
       // Product formats
       'shot-list': this.generateShotList,
       'feature-matrix': this.generateFeatureMatrix,
-      'storyboard': this.generateStoryboard,
+      storyboard: this.generateStoryboard,
       'social-cuts': this.generateSocialCuts,
-      
+
       // Promo formats
-      'edl': this.generateEDL,
+      edl: this.generateEDL,
       'timing-sheet': this.generateTimingSheet,
       'social-versions': this.generateSocialVersions,
       'hook-analysis': this.generateHookAnalysis,
-      
+
       // Learning formats
       'youtube-chapters': this.generateYouTubeChapters,
       'course-outline': this.generateCourseOutline,
       'study-guide': this.generateStudyGuide,
-      'flashcards': this.generateFlashcards,
-      'quiz-questions': this.generateQuizQuestions
+      flashcards: this.generateFlashcards,
+      'quiz-questions': this.generateQuizQuestions,
     };
-    
+
     return generators[formatId];
   }
 
@@ -256,14 +256,14 @@ export class ExportPresets {
    */
   generateShowNotes(data) {
     const { title, markers, topics, quotes, duration } = data;
-    
+
     let output = `# ${title || 'Episode Show Notes'}\n\n`;
     output += `Duration: ${this.formatDuration(duration)}\n\n`;
-    
+
     // Topics/Chapters
     if (topics?.length) {
       output += `## Topics Discussed\n\n`;
-      topics.forEach((topic, i) => {
+      topics.forEach((topic, _i) => {
         output += `### ${this.formatTimecode(topic.startTime)} - ${topic.title}\n`;
         if (topic.summary) {
           output += `${topic.summary}\n`;
@@ -271,26 +271,26 @@ export class ExportPresets {
         output += '\n';
       });
     }
-    
+
     // Key Quotes
     if (quotes?.length) {
       output += `## Notable Quotes\n\n`;
-      quotes.slice(0, 5).forEach(quote => {
+      quotes.slice(0, 5).forEach((quote) => {
         output += `> "${quote.text}"\n`;
         output += `> — ${quote.speaker || 'Speaker'} (${this.formatTimecode(quote.startTime)})\n\n`;
       });
     }
-    
+
     // Timestamps
     if (markers?.length) {
       output += `## Timestamps\n\n`;
       markers
-        .filter(m => m.markerType === 'topic' || m.markerType === 'chapter')
-        .forEach(marker => {
+        .filter((m) => m.markerType === 'topic' || m.markerType === 'chapter')
+        .forEach((marker) => {
           output += `- ${this.formatTimecode(marker.time)} ${marker.name}\n`;
         });
     }
-    
+
     return output;
   }
 
@@ -299,9 +299,9 @@ export class ExportPresets {
    */
   generateAudiogramTimestamps(data) {
     const { markers, quotes } = data;
-    
+
     const audiogramClips = [];
-    
+
     // From quote markers
     if (quotes?.length) {
       quotes.forEach((quote, i) => {
@@ -314,15 +314,15 @@ export class ExportPresets {
           endTime: quote.endTime,
           duration: quote.endTime - quote.startTime,
           score: quote.score,
-          suggestedCaption: quote.text.length <= 280 ? quote.text : quote.text.slice(0, 277) + '...'
+          suggestedCaption: quote.text.length <= 280 ? quote.text : quote.text.slice(0, 277) + '...',
         });
       });
     }
-    
+
     // From clip markers
     if (markers?.length) {
       markers
-        .filter(m => m.markerType === 'clip' || m.markerType === 'highlight')
+        .filter((m) => m.markerType === 'clip' || m.markerType === 'highlight')
         .forEach((marker, i) => {
           audiogramClips.push({
             id: `clip-${i}`,
@@ -331,42 +331,46 @@ export class ExportPresets {
             startTime: marker.time,
             endTime: marker.endTime || marker.time + 30,
             duration: (marker.endTime || marker.time + 30) - marker.time,
-            notes: marker.description
+            notes: marker.description,
           });
         });
     }
-    
-    return JSON.stringify({
-      version: '1.0',
-      clips: audiogramClips.sort((a, b) => (b.score || 0) - (a.score || 0))
-    }, null, 2);
+
+    return JSON.stringify(
+      {
+        version: '1.0',
+        clips: audiogramClips.sort((a, b) => (b.score || 0) - (a.score || 0)),
+      },
+      null,
+      2
+    );
   }
 
   /**
    * Generate transcript with speaker identification
    */
   generateSpeakerTranscript(data) {
-    const { segments, speakers } = data;
-    
+    const { segments } = data;
+
     if (!segments?.length) {
       return 'No transcript available.';
     }
-    
+
     let output = '';
     let currentSpeaker = null;
-    
-    segments.forEach(segment => {
+
+    segments.forEach((segment) => {
       const speaker = segment.speaker || 'Speaker';
-      
+
       if (speaker !== currentSpeaker) {
         if (currentSpeaker !== null) output += '\n\n';
         output += `[${this.formatTimecode(segment.start)}] ${speaker}:\n`;
         currentSpeaker = speaker;
       }
-      
+
       output += segment.text + ' ';
     });
-    
+
     return output.trim();
   }
 
@@ -374,38 +378,42 @@ export class ExportPresets {
    * Generate quote card data for social media
    */
   generateQuoteCards(data) {
-    const { quotes, title, speakers } = data;
-    
+    const { quotes, title } = data;
+
     if (!quotes?.length) {
       return JSON.stringify({ cards: [] }, null, 2);
     }
-    
+
     const cards = quotes.map((quote, i) => ({
       id: `card-${i}`,
       quote: quote.text,
       speaker: quote.speaker,
       timestamp: this.formatTimecode(quote.startTime),
       showTitle: title,
-      
+
       // Social media optimized versions
       twitter: quote.text.length <= 280 ? quote.text : null,
       instagram: quote.text,
       linkedin: `"${quote.text}" — ${quote.speaker}`,
-      
+
       // Suggested hashtags based on content
       suggestedHashtags: this.extractHashtags(quote.text),
-      
+
       // Visual suggestions
       visualStyle: quote.score >= 8 ? 'bold' : 'standard',
-      backgroundColor: this.suggestQuoteColor(quote)
+      backgroundColor: this.suggestQuoteColor(quote),
     }));
-    
-    return JSON.stringify({
-      version: '1.0',
-      showTitle: title,
-      totalCards: cards.length,
-      cards
-    }, null, 2);
+
+    return JSON.stringify(
+      {
+        version: '1.0',
+        showTitle: title,
+        totalCards: cards.length,
+        cards,
+      },
+      null,
+      2
+    );
   }
 
   // ==================== PRODUCT GENERATORS ====================
@@ -414,25 +422,25 @@ export class ExportPresets {
    * Generate shot list in CSV format
    */
   generateShotList(data) {
-    const { markers, duration, title } = data;
-    
+    const { markers } = data;
+
     let csv = 'Shot #,Timecode In,Timecode Out,Duration,Type,Description,Notes\n';
-    
+
     let shotNum = 1;
     markers
       .sort((a, b) => a.time - b.time)
-      .forEach(marker => {
+      .forEach((marker) => {
         const tcIn = this.formatTimecode(marker.time);
         const tcOut = this.formatTimecode(marker.endTime || marker.time + 5);
         const dur = this.formatDuration((marker.endTime || marker.time + 5) - marker.time);
         const type = marker.markerType || 'shot';
         const desc = (marker.name || '').replace(/,/g, ';');
         const notes = (marker.description || '').replace(/,/g, ';').replace(/\n/g, ' ');
-        
+
         csv += `${shotNum},${tcIn},${tcOut},${dur},${type},${desc},${notes}\n`;
         shotNum++;
       });
-    
+
     return csv;
   }
 
@@ -440,23 +448,23 @@ export class ExportPresets {
    * Generate feature matrix for product videos
    */
   generateFeatureMatrix(data) {
-    const { markers, title } = data;
-    
+    const { markers } = data;
+
     let csv = 'Feature,Timestamp,Demo Duration,Demo Type,Key Benefit,CTA\n';
-    
+
     markers
-      .filter(m => m.markerType === 'feature' || m.markerType === 'demo')
-      .forEach(marker => {
+      .filter((m) => m.markerType === 'feature' || m.markerType === 'demo')
+      .forEach((marker) => {
         const feature = (marker.name || '').replace(/,/g, ';');
         const timestamp = this.formatTimecode(marker.time);
         const duration = this.formatDuration((marker.endTime || marker.time + 10) - marker.time);
         const demoType = marker.markerType || 'feature';
         const benefit = (marker.lineScript?.visualDescription || '').replace(/,/g, ';');
         const cta = marker.tags?.includes('cta') ? 'Yes' : 'No';
-        
+
         csv += `${feature},${timestamp},${duration},${demoType},${benefit},${cta}\n`;
       });
-    
+
     return csv;
   }
 
@@ -465,7 +473,7 @@ export class ExportPresets {
    */
   generateStoryboard(data) {
     const { markers, title, duration } = data;
-    
+
     let html = `<!DOCTYPE html>
 <html>
 <head>
@@ -492,13 +500,13 @@ export class ExportPresets {
   <p>Duration: ${this.formatDuration(duration)} | Scenes: ${markers.length}</p>
   <div class="grid">
 `;
-    
+
     markers.forEach((marker, i) => {
       const color = marker.color || '#4a9eff';
-      const thumbnail = marker.lineScript?.snapshotBase64 
+      const thumbnail = marker.lineScript?.snapshotBase64
         ? `<img src="data:image/jpeg;base64,${marker.lineScript.snapshotBase64}" alt="Frame">`
         : `🎬 Scene ${i + 1}`;
-      
+
       html += `
     <div class="card" style="--accent: ${color}">
       <div class="card-header">
@@ -514,12 +522,12 @@ export class ExportPresets {
     </div>
 `;
     });
-    
+
     html += `
   </div>
 </body>
 </html>`;
-    
+
     return html;
   }
 
@@ -527,26 +535,26 @@ export class ExportPresets {
    * Generate social media cut suggestions
    */
   generateSocialCuts(data) {
-    const { markers, hooks, duration } = data;
-    
+    const { markers } = data;
+
     const platforms = {
       tiktok: { maxDuration: 60, idealDuration: 30, aspectRatio: '9:16' },
       instagram_reels: { maxDuration: 90, idealDuration: 30, aspectRatio: '9:16' },
       youtube_shorts: { maxDuration: 60, idealDuration: 45, aspectRatio: '9:16' },
       twitter: { maxDuration: 140, idealDuration: 45, aspectRatio: '16:9' },
-      linkedin: { maxDuration: 600, idealDuration: 90, aspectRatio: '16:9' }
+      linkedin: { maxDuration: 600, idealDuration: 90, aspectRatio: '16:9' },
     };
-    
+
     const cuts = [];
-    
+
     // Generate cuts from hooks and highlight markers
-    const highlights = markers.filter(m => 
-      m.markerType === 'hook' || m.markerType === 'highlight' || m.markerType === 'cta'
+    const highlights = markers.filter(
+      (m) => m.markerType === 'hook' || m.markerType === 'highlight' || m.markerType === 'cta'
     );
-    
+
     highlights.forEach((marker, i) => {
       const duration = (marker.endTime || marker.time + 30) - marker.time;
-      
+
       Object.entries(platforms).forEach(([platform, specs]) => {
         if (duration <= specs.maxDuration) {
           cuts.push({
@@ -557,18 +565,22 @@ export class ExportPresets {
             duration: Math.min(duration, specs.idealDuration),
             sourceMarker: marker.name,
             aspectRatio: specs.aspectRatio,
-            suggestedCaption: marker.description || marker.name
+            suggestedCaption: marker.description || marker.name,
           });
         }
       });
     });
-    
-    return JSON.stringify({
-      version: '1.0',
-      sourceDuration: duration,
-      platforms,
-      suggestedCuts: cuts
-    }, null, 2);
+
+    return JSON.stringify(
+      {
+        version: '1.0',
+        sourceDuration: duration,
+        platforms,
+        suggestedCuts: cuts,
+      },
+      null,
+      2
+    );
   }
 
   // ==================== PROMO GENERATORS ====================
@@ -577,23 +589,23 @@ export class ExportPresets {
    * Generate EDL (Edit Decision List) in CMX 3600 format
    */
   generateEDL(data) {
-    const { title, markers, duration } = data;
-    
+    const { title, markers } = data;
+
     let edl = `TITLE: ${title || 'Video'}\n`;
     edl += `FCM: NON-DROP FRAME\n\n`;
-    
+
     let editNum = 1;
     markers
       .sort((a, b) => a.time - b.time)
-      .forEach(marker => {
+      .forEach((marker) => {
         const srcIn = this.formatTimecodeEDL(marker.time);
         const srcOut = this.formatTimecodeEDL(marker.endTime || marker.time + 5);
         const recIn = this.formatTimecodeEDL(marker.time);
         const recOut = this.formatTimecodeEDL(marker.endTime || marker.time + 5);
-        
+
         // EDL format: edit# reel channel transition srcIn srcOut recIn recOut
         edl += `${String(editNum).padStart(3, '0')}  AX       V     C        ${srcIn} ${srcOut} ${recIn} ${recOut}\n`;
-        
+
         if (marker.name) {
           edl += `* FROM CLIP NAME: ${marker.name}\n`;
         }
@@ -603,7 +615,7 @@ export class ExportPresets {
         edl += '\n';
         editNum++;
       });
-    
+
     return edl;
   }
 
@@ -611,14 +623,14 @@ export class ExportPresets {
    * Generate timing sheet for commercial production
    */
   generateTimingSheet(data) {
-    const { markers, duration, title } = data;
-    
+    const { markers } = data;
+
     let csv = 'Beat #,Timecode,Duration,Beat Type,Element,Audio Cue,Visual Cue,Notes\n';
-    
+
     let beatNum = 1;
     markers
       .sort((a, b) => a.time - b.time)
-      .forEach(marker => {
+      .forEach((marker) => {
         const tc = this.formatTimecode(marker.time);
         const dur = ((marker.endTime || marker.time + 2) - marker.time).toFixed(2) + 's';
         const type = marker.markerType || 'beat';
@@ -626,11 +638,11 @@ export class ExportPresets {
         const audio = (marker.lineScript?.mood || '').replace(/,/g, ';');
         const visual = (marker.lineScript?.visualDescription || '').replace(/,/g, ';');
         const notes = (marker.description || '').replace(/,/g, ';').replace(/\n/g, ' ');
-        
+
         csv += `${beatNum},${tc},${dur},${type},${element},${audio},${visual},${notes}\n`;
         beatNum++;
       });
-    
+
     return csv;
   }
 
@@ -639,37 +651,41 @@ export class ExportPresets {
    */
   generateSocialVersions(data) {
     const { markers, hooks, duration } = data;
-    
+
     // Define version lengths
     const versions = [
       { id: '6s', duration: 6, name: '6-Second Bumper', platforms: ['instagram-story', 'youtube-bumper'] },
       { id: '15s', duration: 15, name: '15-Second Spot', platforms: ['tiktok', 'instagram-reels'] },
       { id: '30s', duration: 30, name: '30-Second Spot', platforms: ['tv', 'youtube', 'facebook'] },
-      { id: '60s', duration: 60, name: '60-Second Long Form', platforms: ['youtube', 'linkedin'] }
+      { id: '60s', duration: 60, name: '60-Second Long Form', platforms: ['youtube', 'linkedin'] },
     ];
-    
+
     // Find best segments for each version
-    const versionPlans = versions.map(version => {
+    const versionPlans = versions.map((version) => {
       const segments = this.findBestSegmentsForDuration(markers, hooks, version.duration);
-      
+
       return {
         ...version,
         segments,
-        editPoints: segments.map(s => ({
+        editPoints: segments.map((s) => ({
           inPoint: this.formatTimecode(s.startTime),
           outPoint: this.formatTimecode(s.endTime),
           type: s.type,
-          reason: s.reason
+          reason: s.reason,
         })),
-        estimatedDuration: segments.reduce((sum, s) => sum + (s.endTime - s.startTime), 0)
+        estimatedDuration: segments.reduce((sum, s) => sum + (s.endTime - s.startTime), 0),
       };
     });
-    
-    return JSON.stringify({
-      version: '1.0',
-      sourceDuration: duration,
-      versions: versionPlans
-    }, null, 2);
+
+    return JSON.stringify(
+      {
+        version: '1.0',
+        sourceDuration: duration,
+        versions: versionPlans,
+      },
+      null,
+      2
+    );
   }
 
   /**
@@ -677,18 +693,18 @@ export class ExportPresets {
    */
   generateHookAnalysis(data) {
     const { hooks, title, duration } = data;
-    
+
     let md = `# Hook Analysis: ${title || 'Video'}\n\n`;
     md += `Source Duration: ${this.formatDuration(duration)}\n\n`;
-    
+
     if (!hooks?.length) {
       md += `*No hooks analyzed. Run hook detection first.*\n`;
       return md;
     }
-    
+
     // Current opening analysis
     md += `## Current Opening\n\n`;
-    const currentOpening = hooks.find(h => h.startTime < 10);
+    const currentOpening = hooks.find((h) => h.startTime < 10);
     if (currentOpening) {
       md += `- **Score**: ${currentOpening.score}/10\n`;
       md += `- **Text**: "${currentOpening.transcript}"\n`;
@@ -696,7 +712,7 @@ export class ExportPresets {
     } else {
       md += `*Opening not analyzed*\n\n`;
     }
-    
+
     // Best hooks found
     md += `## Top Hooks Found\n\n`;
     hooks
@@ -713,7 +729,7 @@ export class ExportPresets {
         }
         md += `**Suggested Use**: ${hook.suggestedUse || 'general'}\n\n`;
       });
-    
+
     // Recommendations
     md += `## Recommendations\n\n`;
     const bestHook = hooks.sort((a, b) => b.score - a.score)[0];
@@ -721,7 +737,7 @@ export class ExportPresets {
       md += `⭐ **Consider using the hook at ${this.formatTimecode(bestHook.startTime)} as your opening.**\n`;
       md += `This would improve your opening score from ${currentOpening?.score || 'N/A'} to ${bestHook.score}.\n\n`;
     }
-    
+
     return md;
   }
 
@@ -732,31 +748,31 @@ export class ExportPresets {
    */
   generateYouTubeChapters(data) {
     const { markers, topics } = data;
-    
+
     let output = '';
-    
+
     // Use topics if available, otherwise use chapter markers
-    const chapters = topics?.length 
+    const chapters = topics?.length
       ? topics
-      : markers.filter(m => m.markerType === 'chapter' || m.markerType === 'topic');
-    
+      : markers.filter((m) => m.markerType === 'chapter' || m.markerType === 'topic');
+
     if (!chapters.length) {
       // Auto-generate from any available markers
       markers
-        .filter(m => m.name)
+        .filter((m) => m.name)
         .sort((a, b) => a.time - b.time)
-        .forEach(marker => {
+        .forEach((marker) => {
           const tc = this.formatYouTubeTimestamp(marker.time);
           output += `${tc} ${marker.name}\n`;
         });
     } else {
-      chapters.forEach(chapter => {
+      chapters.forEach((chapter) => {
         const tc = this.formatYouTubeTimestamp(chapter.startTime || chapter.time);
         const title = chapter.title || chapter.name;
         output += `${tc} ${title}\n`;
       });
     }
-    
+
     return output || '0:00 Introduction\n';
   }
 
@@ -765,12 +781,12 @@ export class ExportPresets {
    */
   generateCourseOutline(data) {
     const { markers, topics, title, duration } = data;
-    
+
     let md = `# Course Outline: ${title || 'Course'}\n\n`;
     md += `Total Duration: ${this.formatDuration(duration)}\n\n`;
-    
+
     // Learning Objectives
-    const keyPoints = markers.filter(m => m.markerType === 'keypoint');
+    const keyPoints = markers.filter((m) => m.markerType === 'keypoint');
     if (keyPoints.length) {
       md += `## Learning Objectives\n\n`;
       md += `By the end of this course, you will be able to:\n\n`;
@@ -779,39 +795,35 @@ export class ExportPresets {
       });
       md += '\n';
     }
-    
+
     // Course Structure
     md += `## Course Structure\n\n`;
-    
-    const chapters = topics?.length 
-      ? topics 
-      : markers.filter(m => m.markerType === 'chapter');
-    
+
+    const chapters = topics?.length ? topics : markers.filter((m) => m.markerType === 'chapter');
+
     chapters.forEach((chapter, i) => {
       const startTime = chapter.startTime || chapter.time;
       const endTime = chapter.endTime || chapters[i + 1]?.startTime || duration;
       const dur = this.formatDuration(endTime - startTime);
-      
+
       md += `### Module ${i + 1}: ${chapter.title || chapter.name}\n`;
       md += `Duration: ${dur} | Start: ${this.formatTimecode(startTime)}\n\n`;
-      
+
       if (chapter.summary) {
         md += `${chapter.summary}\n\n`;
       }
-      
+
       // Key points within this chapter
-      const chapterKeyPoints = keyPoints.filter(kp => 
-        kp.time >= startTime && kp.time < endTime
-      );
+      const chapterKeyPoints = keyPoints.filter((kp) => kp.time >= startTime && kp.time < endTime);
       if (chapterKeyPoints.length) {
         md += `**Key Points:**\n`;
-        chapterKeyPoints.forEach(kp => {
+        chapterKeyPoints.forEach((kp) => {
           md += `- ${kp.name}\n`;
         });
         md += '\n';
       }
     });
-    
+
     return md;
   }
 
@@ -820,14 +832,14 @@ export class ExportPresets {
    */
   generateStudyGuide(data) {
     const { markers, topics, title } = data;
-    
+
     let md = `# Study Guide: ${title || 'Course'}\n\n`;
-    
+
     // Key Concepts
-    const concepts = markers.filter(m => m.markerType === 'concept' || m.markerType === 'keypoint');
+    const concepts = markers.filter((m) => m.markerType === 'concept' || m.markerType === 'keypoint');
     if (concepts.length) {
       md += `## Key Concepts\n\n`;
-      concepts.forEach(concept => {
+      concepts.forEach((concept) => {
         md += `### ${concept.name}\n`;
         md += `*Timestamp: ${this.formatTimecode(concept.time)}*\n\n`;
         if (concept.description) {
@@ -835,12 +847,12 @@ export class ExportPresets {
         }
       });
     }
-    
+
     // Examples
-    const examples = markers.filter(m => m.markerType === 'example');
+    const examples = markers.filter((m) => m.markerType === 'example');
     if (examples.length) {
       md += `## Examples & Demonstrations\n\n`;
-      examples.forEach(example => {
+      examples.forEach((example) => {
         md += `- **${example.name}** (${this.formatTimecode(example.time)})\n`;
         if (example.description) {
           md += `  ${example.description}\n`;
@@ -848,9 +860,9 @@ export class ExportPresets {
       });
       md += '\n';
     }
-    
+
     // Review Questions
-    const quizPoints = markers.filter(m => m.markerType === 'quiz');
+    const quizPoints = markers.filter((m) => m.markerType === 'quiz');
     if (quizPoints.length) {
       md += `## Review Questions\n\n`;
       quizPoints.forEach((quiz, i) => {
@@ -858,15 +870,15 @@ export class ExportPresets {
       });
       md += '\n';
     }
-    
+
     // Summary
     md += `## Summary\n\n`;
     md += `This ${topics?.length ? `${topics.length}-topic` : ''} course covers:\n\n`;
-    
-    (topics || markers.filter(m => m.markerType === 'chapter')).forEach(topic => {
+
+    (topics || markers.filter((m) => m.markerType === 'chapter')).forEach((topic) => {
       md += `- ${topic.title || topic.name}\n`;
     });
-    
+
     return md;
   }
 
@@ -875,31 +887,33 @@ export class ExportPresets {
    */
   generateFlashcards(data) {
     const { markers, title } = data;
-    
+
     let csv = 'Front,Back,Tags\n';
-    
+
     // From key points
     markers
-      .filter(m => m.markerType === 'keypoint' || m.markerType === 'concept')
-      .forEach(marker => {
+      .filter((m) => m.markerType === 'keypoint' || m.markerType === 'concept')
+      .forEach((marker) => {
         const front = `What is ${marker.name.toLowerCase()}?`.replace(/,/g, ';');
-        const back = (marker.description || marker.lineScript?.visualDescription || marker.name).replace(/,/g, ';').replace(/\n/g, ' ');
+        const back = (marker.description || marker.lineScript?.visualDescription || marker.name)
+          .replace(/,/g, ';')
+          .replace(/\n/g, ' ');
         const tags = [title || 'course', marker.markerType].join(' ');
-        
+
         csv += `"${front}","${back}","${tags}"\n`;
       });
-    
+
     // From quiz points
     markers
-      .filter(m => m.markerType === 'quiz')
-      .forEach(marker => {
+      .filter((m) => m.markerType === 'quiz')
+      .forEach((marker) => {
         const front = (marker.name || 'Review this concept').replace(/,/g, ';');
         const back = (marker.description || `See video at ${this.formatTimecode(marker.time)}`).replace(/,/g, ';');
         const tags = [title || 'course', 'quiz'].join(' ');
-        
+
         csv += `"${front}","${back}","${tags}"\n`;
       });
-    
+
     return csv;
   }
 
@@ -908,12 +922,12 @@ export class ExportPresets {
    */
   generateQuizQuestions(data) {
     const { markers, topics, title } = data;
-    
+
     const questions = [];
-    
+
     // From quiz markers
     markers
-      .filter(m => m.markerType === 'quiz')
+      .filter((m) => m.markerType === 'quiz')
       .forEach((marker, i) => {
         questions.push({
           id: `q-${i}`,
@@ -921,13 +935,13 @@ export class ExportPresets {
           question: marker.name || `Explain the concept discussed at ${this.formatTimecode(marker.time)}`,
           timestamp: marker.time,
           topic: this.findTopicForTime(marker.time, topics),
-          hints: marker.description ? [marker.description] : []
+          hints: marker.description ? [marker.description] : [],
         });
       });
-    
+
     // From key points (multiple choice style)
     markers
-      .filter(m => m.markerType === 'keypoint')
+      .filter((m) => m.markerType === 'keypoint')
       .slice(0, 10)
       .forEach((marker, i) => {
         questions.push({
@@ -936,16 +950,20 @@ export class ExportPresets {
           question: `What is the key takeaway about "${marker.name}"?`,
           timestamp: marker.time,
           topic: this.findTopicForTime(marker.time, topics),
-          expectedAnswer: marker.description || marker.lineScript?.visualDescription
+          expectedAnswer: marker.description || marker.lineScript?.visualDescription,
         });
       });
-    
-    return JSON.stringify({
-      version: '1.0',
-      courseTitle: title,
-      totalQuestions: questions.length,
-      questions
-    }, null, 2);
+
+    return JSON.stringify(
+      {
+        version: '1.0',
+        courseTitle: title,
+        totalQuestions: questions.length,
+        questions,
+      },
+      null,
+      2
+    );
   }
 
   // ==================== HELPER METHODS ====================
@@ -955,16 +973,12 @@ export class ExportPresets {
    */
   formatTimecode(seconds) {
     if (!seconds || isNaN(seconds)) return '00:00:00';
-    
+
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-    
-    return [
-      h.toString().padStart(2, '0'),
-      m.toString().padStart(2, '0'),
-      s.toString().padStart(2, '0')
-    ].join(':');
+
+    return [h.toString().padStart(2, '0'), m.toString().padStart(2, '0'), s.toString().padStart(2, '0')].join(':');
   }
 
   /**
@@ -972,17 +986,17 @@ export class ExportPresets {
    */
   formatTimecodeEDL(seconds, fps = 30) {
     if (!seconds || isNaN(seconds)) return '00:00:00:00';
-    
+
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
     const f = Math.floor((seconds % 1) * fps);
-    
+
     return [
       h.toString().padStart(2, '0'),
       m.toString().padStart(2, '0'),
       s.toString().padStart(2, '0'),
-      f.toString().padStart(2, '0')
+      f.toString().padStart(2, '0'),
     ].join(':');
   }
 
@@ -991,11 +1005,11 @@ export class ExportPresets {
    */
   formatYouTubeTimestamp(seconds) {
     if (!seconds || isNaN(seconds)) return '0:00';
-    
+
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-    
+
     if (h > 0) {
       return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
@@ -1007,16 +1021,16 @@ export class ExportPresets {
    */
   formatDuration(seconds) {
     if (!seconds || isNaN(seconds)) return '0:00';
-    
+
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
-    
+
     if (m >= 60) {
       const h = Math.floor(m / 60);
       const mins = m % 60;
       return `${h}h ${mins}m`;
     }
-    
+
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
@@ -1025,16 +1039,126 @@ export class ExportPresets {
    */
   extractHashtags(text) {
     // Simple keyword extraction for hashtags
-    const commonWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just', 'and', 'but', 'or', 'if', 'because', 'until', 'while', 'about', 'that', 'this', 'these', 'those', 'what', 'which', 'who', 'whom', 'it', 'its', 'they', 'them', 'their', 'we', 'us', 'our', 'you', 'your', 'i', 'me', 'my', 'he', 'him', 'his', 'she', 'her']);
-    
-    const words = text.toLowerCase()
+    const commonWords = new Set([
+      'the',
+      'a',
+      'an',
+      'is',
+      'are',
+      'was',
+      'were',
+      'be',
+      'been',
+      'being',
+      'have',
+      'has',
+      'had',
+      'do',
+      'does',
+      'did',
+      'will',
+      'would',
+      'could',
+      'should',
+      'may',
+      'might',
+      'must',
+      'shall',
+      'can',
+      'need',
+      'to',
+      'of',
+      'in',
+      'for',
+      'on',
+      'with',
+      'at',
+      'by',
+      'from',
+      'as',
+      'into',
+      'through',
+      'during',
+      'before',
+      'after',
+      'above',
+      'below',
+      'between',
+      'under',
+      'again',
+      'further',
+      'then',
+      'once',
+      'here',
+      'there',
+      'when',
+      'where',
+      'why',
+      'how',
+      'all',
+      'each',
+      'few',
+      'more',
+      'most',
+      'other',
+      'some',
+      'such',
+      'no',
+      'nor',
+      'not',
+      'only',
+      'own',
+      'same',
+      'so',
+      'than',
+      'too',
+      'very',
+      'just',
+      'and',
+      'but',
+      'or',
+      'if',
+      'because',
+      'until',
+      'while',
+      'about',
+      'that',
+      'this',
+      'these',
+      'those',
+      'what',
+      'which',
+      'who',
+      'whom',
+      'it',
+      'its',
+      'they',
+      'them',
+      'their',
+      'we',
+      'us',
+      'our',
+      'you',
+      'your',
+      'i',
+      'me',
+      'my',
+      'he',
+      'him',
+      'his',
+      'she',
+      'her',
+    ]);
+
+    const words = text
+      .toLowerCase()
       .replace(/[^a-z0-9\s]/g, '')
       .split(/\s+/)
-      .filter(w => w.length > 3 && !commonWords.has(w));
-    
+      .filter((w) => w.length > 3 && !commonWords.has(w));
+
     // Get unique words and format as hashtags
     const unique = [...new Set(words)].slice(0, 5);
-    return unique.map(w => `#${w}`);
+    return unique.map((w) => `#${w}`);
   }
 
   /**
@@ -1042,7 +1166,7 @@ export class ExportPresets {
    */
   suggestQuoteColor(quote) {
     const text = quote.text.toLowerCase();
-    
+
     if (text.includes('love') || text.includes('heart') || text.includes('passion')) {
       return '#e84c3d';
     }
@@ -1055,7 +1179,7 @@ export class ExportPresets {
     if (text.includes('money') || text.includes('business') || text.includes('work')) {
       return '#f59e0b';
     }
-    
+
     return '#8b5cf6'; // Default purple
   }
 
@@ -1065,10 +1189,10 @@ export class ExportPresets {
   findBestSegmentsForDuration(markers, hooks, targetDuration) {
     const segments = [];
     let totalDuration = 0;
-    
+
     // Prioritize hooks
     const sortedHooks = (hooks || []).sort((a, b) => (b.score || 0) - (a.score || 0));
-    
+
     for (const hook of sortedHooks) {
       const segDuration = (hook.endTime || hook.startTime + 5) - hook.startTime;
       if (totalDuration + segDuration <= targetDuration) {
@@ -1076,18 +1200,18 @@ export class ExportPresets {
           startTime: hook.startTime,
           endTime: hook.endTime || hook.startTime + 5,
           type: 'hook',
-          reason: `Hook score: ${hook.score}`
+          reason: `Hook score: ${hook.score}`,
         });
         totalDuration += segDuration;
       }
       if (totalDuration >= targetDuration * 0.9) break;
     }
-    
+
     // Fill with important markers
     const importantMarkers = markers
-      .filter(m => m.markerType === 'cta' || m.markerType === 'highlight')
+      .filter((m) => m.markerType === 'cta' || m.markerType === 'highlight')
       .sort((a, b) => a.time - b.time);
-    
+
     for (const marker of importantMarkers) {
       const segDuration = (marker.endTime || marker.time + 3) - marker.time;
       if (totalDuration + segDuration <= targetDuration) {
@@ -1095,13 +1219,13 @@ export class ExportPresets {
           startTime: marker.time,
           endTime: marker.endTime || marker.time + 3,
           type: marker.markerType,
-          reason: marker.name
+          reason: marker.name,
         });
         totalDuration += segDuration;
       }
       if (totalDuration >= targetDuration) break;
     }
-    
+
     return segments.sort((a, b) => a.startTime - b.startTime);
   }
 
@@ -1110,7 +1234,7 @@ export class ExportPresets {
    */
   findTopicForTime(time, topics) {
     if (!topics?.length) return null;
-    
+
     for (const topic of topics) {
       if (time >= topic.startTime && time < (topic.endTime || Infinity)) {
         return topic.title || topic.name;
@@ -1125,7 +1249,7 @@ export class ExportPresets {
   downloadExport(content, filename, mimeType) {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
-    
+
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
@@ -1150,14 +1274,3 @@ export class ExportPresets {
 }
 
 export default ExportPresets;
-
-
-
-
-
-
-
-
-
-
-

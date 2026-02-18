@@ -1,6 +1,6 @@
 /**
  * ProductionScriptUI.js
- * 
+ *
  * UI components for adding and managing production script elements
  * (camera angles, shots, movements) in the Line Script panel.
  */
@@ -10,9 +10,7 @@ import {
   SHOT_TYPES,
   CAMERA_MOVEMENTS,
   TECHNICAL_DIRECTIONS,
-  LIGHTING_NOTES,
-  TRANSITIONS,
-  ProductionDirection
+  ProductionDirection,
 } from './ProductionScript.js';
 
 /**
@@ -26,7 +24,7 @@ export class ProductionScriptUI {
     this.visible = false;
     this.selectedCategory = 'shots'; // 'shots', 'angles', 'movements', 'technical'
   }
-  
+
   /**
    * Render the production controls sidebar
    */
@@ -77,14 +75,14 @@ export class ProductionScriptUI {
       </div>
     `;
   }
-  
+
   /**
    * Render buttons for current category
    */
   renderCategoryButtons() {
     let items = [];
     let title = '';
-    
+
     switch (this.selectedCategory) {
       case 'shots':
         items = Object.values(SHOT_TYPES);
@@ -103,11 +101,13 @@ export class ProductionScriptUI {
         title = 'Technical Directions';
         break;
     }
-    
+
     return `
       <h4>${title}</h4>
       <div class="production-button-grid">
-        ${items.map(item => `
+        ${items
+          .map(
+            (item) => `
           <button class="production-btn" 
                   data-type="${this.selectedCategory}"
                   data-id="${item.id}"
@@ -116,11 +116,13 @@ export class ProductionScriptUI {
             <span class="btn-abbr">${item.abbr}</span>
             <span class="btn-name">${item.name}</span>
           </button>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
     `;
   }
-  
+
   /**
    * Render list of existing directions
    */
@@ -128,9 +130,10 @@ export class ProductionScriptUI {
     if (this.manager.directions.length === 0) {
       return '<p class="empty-message">No directions yet. Click a button to add one.</p>';
     }
-    
+
     return this.manager.directions
-      .map(direction => `
+      .map(
+        (direction) => `
         <div class="direction-item" data-direction-id="${direction.id}">
           <span class="direction-icon">${direction.getIcon()}</span>
           <span class="direction-time">${this.formatTimecode(direction.time)}</span>
@@ -138,9 +141,11 @@ export class ProductionScriptUI {
           <button class="direction-goto-btn" data-time="${direction.time}" title="Go to">▶</button>
           <button class="direction-delete-btn" data-id="${direction.id}" title="Delete">✕</button>
         </div>
-      `).join('');
+      `
+      )
+      .join('');
   }
-  
+
   /**
    * Handle adding a direction from button click
    */
@@ -152,50 +157,53 @@ export class ProductionScriptUI {
       cameraAngle: type === 'angles' ? id : null,
       cameraMovement: type === 'movements' ? id : null,
       technicalDirection: type === 'technical' ? id : null,
-      description
+      description,
     });
-    
+
     this.manager.addDirection(direction);
-    
+
     // Show feedback
     if (this.app.showToast) {
-      this.app.showToast(`${direction.getIcon()} ${direction.getFullName()} added at ${this.formatTimecode(this.currentTime)}`, 'success');
+      this.app.showToast(
+        `${direction.getIcon()} ${direction.getFullName()} added at ${this.formatTimecode(this.currentTime)}`,
+        'success'
+      );
     }
-    
+
     return direction;
   }
-  
+
   /**
    * Attach event listeners to UI elements
    */
   attachEventListeners(container) {
     // Category tabs
-    container.querySelectorAll('.category-tab').forEach(tab => {
+    container.querySelectorAll('.category-tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         this.selectedCategory = tab.dataset.category;
         this.refresh(container);
       });
     });
-    
+
     // Production buttons
-    container.querySelectorAll('.production-btn').forEach(btn => {
+    container.querySelectorAll('.production-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const type = btn.dataset.type;
         const id = btn.dataset.id;
         const descriptionInput = container.querySelector('#productionDirectionDescription');
         const description = descriptionInput ? descriptionInput.value : '';
-        
+
         this.handleDirectionButtonClick(type, id, description);
-        
+
         // Clear description
         if (descriptionInput) {
           descriptionInput.value = '';
         }
-        
+
         this.refresh(container);
       });
     });
-    
+
     // Add direction button
     const addBtn = container.querySelector('#addProductionDirection');
     if (addBtn) {
@@ -208,24 +216,24 @@ export class ProductionScriptUI {
           }
           return;
         }
-        
+
         const type = selectedBtn.dataset.type;
         const id = selectedBtn.dataset.id;
         const descriptionInput = container.querySelector('#productionDirectionDescription');
         const description = descriptionInput ? descriptionInput.value : '';
-        
+
         this.handleDirectionButtonClick(type, id, description);
-        
+
         if (descriptionInput) {
           descriptionInput.value = '';
         }
-        
+
         this.refresh(container);
       });
     }
-    
+
     // Direction goto buttons
-    container.querySelectorAll('.direction-goto-btn').forEach(btn => {
+    container.querySelectorAll('.direction-goto-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const time = parseFloat(btn.dataset.time);
         if (this.app.seekTo) {
@@ -233,50 +241,50 @@ export class ProductionScriptUI {
         }
       });
     });
-    
+
     // Direction delete buttons
-    container.querySelectorAll('.direction-delete-btn').forEach(btn => {
+    container.querySelectorAll('.direction-delete-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = parseFloat(btn.dataset.id);
         this.manager.deleteDirection(id);
         this.refresh(container);
-        
+
         if (this.app.showToast) {
           this.app.showToast('Direction removed', 'info');
         }
       });
     });
-    
+
     // Make production buttons selectable
-    container.querySelectorAll('.production-btn').forEach(btn => {
+    container.querySelectorAll('.production-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         // Toggle selection
-        container.querySelectorAll('.production-btn').forEach(b => b.classList.remove('selected'));
+        container.querySelectorAll('.production-btn').forEach((b) => b.classList.remove('selected'));
         btn.classList.add('selected');
       });
     });
   }
-  
+
   /**
    * Update current time
    */
   setCurrentTime(time) {
     this.currentTime = time;
   }
-  
+
   /**
    * Refresh the UI
    */
   refresh(container) {
     if (!container) return;
-    
+
     // Re-render sidebar
     container.innerHTML = this.renderSidebar();
-    
+
     // Re-attach listeners
     this.attachEventListeners(container);
   }
-  
+
   /**
    * Format timecode
    */
@@ -287,7 +295,7 @@ export class ProductionScriptUI {
     const f = Math.floor((seconds % 1) * 10);
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${f}`;
   }
-  
+
   /**
    * Escape HTML
    */
@@ -301,41 +309,40 @@ export class ProductionScriptUI {
 /**
  * Render production script format with camera directions inline
  */
-export function renderProductionScriptFormat(words, dialogueBlocks, directions, markers, speakers, template) {
+export function renderProductionScriptFormat(words, dialogueBlocks, directions, markers, speakers, _template) {
   let html = '<div class="production-script-content">';
   let lineNumber = 1;
   let sceneNumber = 0;
   let lastMarkerId = null;
-  
+
   // Sort directions by time
   const sortedDirections = [...directions].sort((a, b) => a.time - b.time);
   let directionIndex = 0;
-  
-  dialogueBlocks.forEach((block, blockIdx) => {
+
+  dialogueBlocks.forEach((block, _blockIdx) => {
     const blockTime = block.startTime;
-    
+
     // Check for scene marker
-    const sceneMarker = markers.find(m => m.type === 'range' && Math.abs(m.inTime - blockTime) < 1);
+    const sceneMarker = markers.find((m) => m.type === 'range' && Math.abs(m.inTime - blockTime) < 1);
     if (sceneMarker && sceneMarker.id !== lastMarkerId) {
       sceneNumber++;
       html += renderSceneHeader(sceneMarker, sceneNumber);
       lastMarkerId = sceneMarker.id;
     }
-    
+
     // Add any directions that come before this block
-    while (directionIndex < sortedDirections.length && 
-           sortedDirections[directionIndex].time <= blockTime) {
+    while (directionIndex < sortedDirections.length && sortedDirections[directionIndex].time <= blockTime) {
       html += renderCameraDirection(sortedDirections[directionIndex], lineNumber);
       lineNumber++;
       directionIndex++;
     }
-    
+
     // Render speaker cue
     if (block.speaker) {
       html += renderSpeakerCue(block.speaker, lineNumber, speakers);
       lineNumber++;
     }
-    
+
     // Render dialogue
     const dialogueLines = splitIntoLines(block.text, 50);
     dialogueLines.forEach((lineText, lineIdx) => {
@@ -343,17 +350,17 @@ export function renderProductionScriptFormat(words, dialogueBlocks, directions, 
       html += renderDialogueLine(lineNumber, lineTime, lineText, block.speaker, speakers);
       lineNumber++;
     });
-    
+
     html += '<div class="block-spacer"></div>';
   });
-  
+
   // Add any remaining directions
   while (directionIndex < sortedDirections.length) {
     html += renderCameraDirection(sortedDirections[directionIndex], lineNumber);
     lineNumber++;
     directionIndex++;
   }
-  
+
   html += '</div>';
   return html;
 }
@@ -401,7 +408,7 @@ function renderSceneHeader(marker, sceneNumber) {
 function renderSpeakerCue(speaker, lineNumber, speakers) {
   const speakerIdx = speakers.indexOf(speaker);
   const speakerClass = speakerIdx >= 0 ? `speaker-${speakerIdx % 6}` : '';
-  
+
   return `
     <div class="speaker-cue ${speakerClass}" data-line="${lineNumber}">
       <span class="speaker-avatar">${speaker.charAt(0).toUpperCase()}</span>
@@ -416,7 +423,7 @@ function renderSpeakerCue(speaker, lineNumber, speakers) {
 function renderDialogueLine(lineNumber, time, text, speaker, speakers) {
   const speakerIdx = speaker ? speakers.indexOf(speaker) : -1;
   const speakerClass = speakerIdx >= 0 ? `speaker-${speakerIdx % 6}` : '';
-  
+
   return `
     <div class="dialogue-line ${speakerClass}" data-line="${lineNumber}" data-time="${time}">
       <span class="line-number">${lineNumber}</span>
@@ -446,8 +453,8 @@ function splitIntoLines(text, maxChars) {
   const lines = [];
   let currentLine = [];
   let currentLength = 0;
-  
-  words.forEach(word => {
+
+  words.forEach((word) => {
     if (currentLength + word.length + 1 > maxChars && currentLine.length > 0) {
       lines.push(currentLine.join(' '));
       currentLine = [word];
@@ -457,20 +464,20 @@ function splitIntoLines(text, maxChars) {
       currentLength += word.length + 1;
     }
   });
-  
+
   if (currentLine.length > 0) {
     lines.push(currentLine.join(' '));
   }
-  
+
   return lines;
 }
 
 function interpolateTime(block, lineIdx, totalLines) {
   const duration = block.endTime - block.startTime;
-  return block.startTime + (duration * lineIdx / totalLines);
+  return block.startTime + (duration * lineIdx) / totalLines;
 }
 
 export default {
   ProductionScriptUI,
-  renderProductionScriptFormat
+  renderProductionScriptFormat,
 };

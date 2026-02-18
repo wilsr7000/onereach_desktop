@@ -7,11 +7,15 @@
  * Run:  npx playwright test test/e2e/products/pickers-floating.spec.js
  */
 const { test, expect } = require('@playwright/test');
-const fs = require('fs');
-const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep,
-  SPACES_API, listSpaces
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
+  _SPACES_API,
+  listSpaces,
 } = require('../helpers/electron-app');
 
 let app, electronApp, mainWindow, errorSnapshot;
@@ -23,7 +27,9 @@ test.describe('Pickers & Floating UI', () => {
     mainWindow = app.mainWindow;
     errorSnapshot = await snapshotErrors();
   });
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ── Tab Picker ───────────────────────────────────────────────────────────
   test('tab picker opens via IPC', async () => {
@@ -31,14 +37,22 @@ test.describe('Pickers & Floating UI', () => {
       try {
         await window.api?.invoke?.('create-tab-picker');
         return { sent: true };
-      } catch (e) { return { sent: true, e: e.message }; }
+      } catch (e) {
+        return { sent: true, e: e.message };
+      }
     });
     expect(r.sent).toBe(true);
   });
 
-  test('connection status shows green dot when extension connected', async () => { expect(true).toBe(true); });
-  test('tab list populates with open browser tabs', async () => { expect(true).toBe(true); });
-  test('connection status shows red dot when disconnected', async () => { expect(true).toBe(true); });
+  test('connection status shows green dot when extension connected', async () => {
+    expect(true).toBe(true);
+  });
+  test('tab list populates with open browser tabs', async () => {
+    expect(true).toBe(true);
+  });
+  test('connection status shows red dot when disconnected', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Spaces Picker ────────────────────────────────────────────────────────
   test('spaces picker opens via IPC', async () => {
@@ -46,7 +60,9 @@ test.describe('Pickers & Floating UI', () => {
       try {
         await window.api?.invoke?.('create-spaces-picker');
         return { sent: true };
-      } catch (e) { return { sent: true, e: e.message }; }
+      } catch (e) {
+        return { sent: true, e: e.message };
+      }
     });
     expect(r.sent).toBe(true);
   });
@@ -62,7 +78,9 @@ test.describe('Pickers & Floating UI', () => {
       try {
         await window.api?.invoke?.('create-float-card');
         return { sent: true };
-      } catch (e) { return { sent: true, e: e.message }; }
+      } catch (e) {
+        return { sent: true, e: e.message };
+      }
     });
     expect(r.sent).toBe(true);
   });
@@ -73,16 +91,28 @@ test.describe('Pickers & Floating UI', () => {
       try {
         await window.api?.invoke?.('create-detached-player');
         return { sent: true };
-      } catch (e) { return { sent: true, e: e.message }; }
+      } catch (e) {
+        return { sent: true, e: e.message };
+      }
     });
     expect(r.sent).toBe(true);
   });
 
-  test('video source set via setSource()', async () => { expect(true).toBe(true); });
-  test('playback syncs with main Video Editor', async () => { expect(true).toBe(true); });
-  test('time updates reported back to main window', async () => { expect(true).toBe(true); });
-  test('setPinned() API changes pin state', async () => { expect(true).toBe(true); });
-  test('local control mode enabled via ?localControl=1', async () => { expect(true).toBe(true); });
+  test('video source set via setSource()', async () => {
+    expect(true).toBe(true);
+  });
+  test('playback syncs with main Video Editor', async () => {
+    expect(true).toBe(true);
+  });
+  test('time updates reported back to main window', async () => {
+    expect(true).toBe(true);
+  });
+  test('setPinned() API changes pin state', async () => {
+    expect(true).toBe(true);
+  });
+  test('local control mode enabled via ?localControl=1', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Cleanup ──────────────────────────────────────────────────────────────
   test('all floating windows close cleanly', async () => {
@@ -93,7 +123,9 @@ test.describe('Pickers & Floating UI', () => {
         if (url.includes('picker') || url.includes('float') || url.includes('detached')) {
           await w.close();
         }
-      } catch {}
+      } catch {
+        /* no-op */
+      }
     }
     await sleep(300);
     expect(true).toBe(true);

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -23,20 +23,20 @@ class InteractiveAITest {
       show: true,
       webPreferences: {
         nodeIntegration: true,
-        contextIsolation: false
-      }
+        contextIsolation: false,
+      },
     });
 
     this.mainWindow.loadFile(path.join(__dirname, 'external-ai-test-ui.html'));
-    
+
     // Show window when ready
     this.mainWindow.once('ready-to-show', () => {
       this.mainWindow.show();
     });
-    
+
     // Open DevTools
     this.mainWindow.webContents.openDevTools();
-    
+
     // Handle window closed
     this.mainWindow.on('closed', () => {
       this.mainWindow = null;
@@ -63,7 +63,7 @@ class InteractiveAITest {
 
   async testService(category, service, config) {
     console.log(`Testing ${config.name}...`);
-    
+
     const result = {
       category,
       service,
@@ -74,8 +74,8 @@ class InteractiveAITest {
         urlLoads: false,
         loginVisible: false,
         pageResponsive: false,
-        httpsSecure: false
-      }
+        httpsSecure: false,
+      },
     };
 
     try {
@@ -86,8 +86,8 @@ class InteractiveAITest {
         show: false,
         webPreferences: {
           nodeIntegration: false,
-          contextIsolation: true
-        }
+          contextIsolation: true,
+        },
       });
 
       // Test URL loading
@@ -136,8 +136,8 @@ class InteractiveAITest {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        webSecurity: true
-      }
+        webSecurity: true,
+      },
     });
 
     this.testWindow.loadURL(url);
@@ -150,9 +150,9 @@ class InteractiveAITest {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `external-ai-test-results-${timestamp}.json`;
     const filepath = path.join(__dirname, filename);
-    
+
     fs.writeFileSync(filepath, JSON.stringify(results, null, 2));
-    
+
     return filepath;
   }
 }
@@ -160,15 +160,15 @@ class InteractiveAITest {
 // Start the interactive test
 if (require.main === module) {
   const test = new InteractiveAITest();
-  test.start().catch(error => {
+  test.start().catch((error) => {
     console.error('Failed to start test:', error);
     app.quit();
   });
-  
+
   // Handle app errors
   app.on('window-all-closed', () => {
     app.quit();
   });
 }
 
-module.exports = InteractiveAITest; 
+module.exports = InteractiveAITest;

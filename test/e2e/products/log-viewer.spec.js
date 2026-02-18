@@ -7,14 +7,17 @@
  * Run:  npx playwright test test/e2e/products/log-viewer.spec.js
  */
 const { test, expect } = require('@playwright/test');
-const fs = require('fs');
-const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep,
-  LOG_SERVER
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  _sleep,
+  LOG_SERVER,
 } = require('../helpers/electron-app');
 
-let app, electronApp, mainWindow, errorSnapshot;
+let app, _electronApp, mainWindow, errorSnapshot;
 
 test.describe('Log Viewer', () => {
   test.beforeAll(async () => {
@@ -23,7 +26,9 @@ test.describe('Log Viewer', () => {
     mainWindow = app.mainWindow;
     errorSnapshot = await snapshotErrors();
   });
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ── Window ───────────────────────────────────────────────────────────────
   test('window opens via IPC', async () => {
@@ -31,7 +36,9 @@ test.describe('Log Viewer', () => {
       try {
         await window.api?.invoke?.('open-log-viewer');
         return { sent: true };
-      } catch (e) { return { sent: true, e: e.message }; }
+      } catch (e) {
+        return { sent: true, e: e.message };
+      }
     });
     expect(r.sent).toBe(true);
   });
@@ -50,7 +57,7 @@ test.describe('Log Viewer', () => {
 
   test('level badges have correct colors (gray/blue/yellow/red)', async () => {
     // Level colors are CSS -- validate that all levels exist in log data
-    const stats = await fetch(`${LOG_SERVER}/logs/stats`).then(r => r.json());
+    const stats = await fetch(`${LOG_SERVER}/logs/stats`).then((r) => r.json());
     expect(stats.byLevel).toBeDefined();
   });
 
@@ -65,9 +72,15 @@ test.describe('Log Viewer', () => {
     expect(true).toBe(true);
   });
 
-  test('window dropdown populates from log data', async () => { expect(true).toBe(true); });
-  test('function dropdown populates from log data', async () => { expect(true).toBe(true); });
-  test('test area dropdown populates from log data', async () => { expect(true).toBe(true); });
+  test('window dropdown populates from log data', async () => {
+    expect(true).toBe(true);
+  });
+  test('function dropdown populates from log data', async () => {
+    expect(true).toBe(true);
+  });
+  test('test area dropdown populates from log data', async () => {
+    expect(true).toBe(true);
+  });
 
   test('selecting a filter narrows displayed entries', async () => {
     // Test filtering via query param
@@ -75,18 +88,22 @@ test.describe('Log Viewer', () => {
     expect(r.ok).toBe(true);
     const data = await r.json();
     const entries = data.data || [];
-    entries.forEach(e => expect(e.level).toBe('error'));
+    entries.forEach((e) => expect(e.level).toBe('error'));
   });
 
   // ── Stats & File Info ────────────────────────────────────────────────────
   test('total entries count is accurate', async () => {
-    const stats = await fetch(`${LOG_SERVER}/logs/stats`).then(r => r.json());
+    const stats = await fetch(`${LOG_SERVER}/logs/stats`).then((r) => r.json());
     const total = Object.values(stats.byLevel || {}).reduce((s, c) => s + c, 0);
     expect(total).toBeGreaterThanOrEqual(0);
   });
 
-  test('current file name displays', async () => { expect(true).toBe(true); });
-  test('file size displays', async () => { expect(true).toBe(true); });
+  test('current file name displays', async () => {
+    expect(true).toBe(true);
+  });
+  test('file size displays', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Export ───────────────────────────────────────────────────────────────
   test('downloaded file contains correct log data in JSON', async () => {
@@ -104,18 +121,30 @@ test.describe('Log Viewer', () => {
   });
 
   // ── AI Analysis ──────────────────────────────────────────────────────────
-  test('analysis modal opens with loading state', async () => { expect(true).toBe(true); });
-  test('summary section displays findings', async () => { expect(true).toBe(true); });
-  test('issues list shows severity badges', async () => { expect(true).toBe(true); });
-  test('patterns section displays identified patterns', async () => { expect(true).toBe(true); });
-  test('recommendations section shows actionable items', async () => { expect(true).toBe(true); });
+  test('analysis modal opens with loading state', async () => {
+    expect(true).toBe(true);
+  });
+  test('summary section displays findings', async () => {
+    expect(true).toBe(true);
+  });
+  test('issues list shows severity badges', async () => {
+    expect(true).toBe(true);
+  });
+  test('patterns section displays identified patterns', async () => {
+    expect(true).toBe(true);
+  });
+  test('recommendations section shows actionable items', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Logging Level ────────────────────────────────────────────────────────
   test('logging level can be queried', async () => {
     const r = await mainWindow.evaluate(async () => {
       try {
         return { ok: true, level: await window.logging?.getLevel?.() };
-      } catch (e) { return { ok: false, e: e.message }; }
+      } catch (e) {
+        return { ok: false, e: e.message };
+      }
     });
     expect(r.ok).toBe(true);
   });

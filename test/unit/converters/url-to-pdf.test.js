@@ -6,11 +6,13 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 const mockWebContents = {
   loadURL: vi.fn().mockResolvedValue(undefined),
   on: vi.fn(),
-  once: vi.fn((event, handler) => { if (event === 'did-finish-load') handler(); }),
+  once: vi.fn((event, handler) => {
+    if (event === 'did-finish-load') handler();
+  }),
   executeJavaScript: vi.fn().mockResolvedValue(''),
   printToPDF: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 mock content')),
   capturePage: vi.fn().mockResolvedValue({
-    toPNG: vi.fn().mockReturnValue(Buffer.from([0x89, 0x50, 0x4E, 0x47])),
+    toPNG: vi.fn().mockReturnValue(Buffer.from([0x89, 0x50, 0x4e, 0x47])),
   }),
 };
 const MockBrowserWindow = vi.fn().mockImplementation(() => ({
@@ -59,7 +61,7 @@ describe('UrlToPdfAgent (specific)', () => {
 
   it('defines exactly 2 strategies', () => {
     expect(agent.strategies.length).toBe(2);
-    expect(agent.strategies.map(s => s.id)).toEqual(['print', 'screenshot']);
+    expect(agent.strategies.map((s) => s.id)).toEqual(['print', 'screenshot']);
   });
 
   it('accepts BrowserWindow via config', () => {

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * Local Update Server for Testing Auto-Update
- * 
+ *
  * This serves update files locally so you can test auto-update
  * without publishing to GitHub.
- * 
+ *
  * Usage:
  *   1. Build your app: npm run package:mac
  *   2. Copy files to updates/ folder
@@ -27,21 +27,21 @@ if (!fs.existsSync(UPDATES_DIR)) {
 
 const server = http.createServer((req, res) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  
+
   // Handle CORS for local testing
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
+
   if (req.method === 'OPTIONS') {
     res.writeHead(200);
     res.end();
     return;
   }
-  
+
   // Serve files from updates directory
   let filePath = path.join(UPDATES_DIR, req.url === '/' ? 'latest-mac.yml' : req.url);
-  
+
   // Check if file exists
   if (!fs.existsSync(filePath)) {
     console.log(`  ✗ File not found: ${filePath}`);
@@ -49,7 +49,7 @@ const server = http.createServer((req, res) => {
     res.end('File not found');
     return;
   }
-  
+
   // Determine content type
   const ext = path.extname(filePath);
   const contentTypes = {
@@ -57,11 +57,11 @@ const server = http.createServer((req, res) => {
     '.yaml': 'text/yaml',
     '.zip': 'application/zip',
     '.dmg': 'application/x-apple-diskimage',
-    '.blockmap': 'application/octet-stream'
+    '.blockmap': 'application/octet-stream',
   };
-  
+
   const contentType = contentTypes[ext] || 'application/octet-stream';
-  
+
   // Read and serve file
   fs.readFile(filePath, (err, data) => {
     if (err) {
@@ -70,11 +70,11 @@ const server = http.createServer((req, res) => {
       res.end('Internal server error');
       return;
     }
-    
+
     console.log(`  ✓ Served: ${path.basename(filePath)} (${data.length} bytes)`);
-    res.writeHead(200, { 
+    res.writeHead(200, {
       'Content-Type': contentType,
-      'Content-Length': data.length
+      'Content-Length': data.length,
     });
     res.end(data);
   });
@@ -88,22 +88,22 @@ server.listen(PORT, () => {
   console.log(`📁 Serving: ${UPDATES_DIR}`);
   console.log('');
   console.log('📋 Files available:');
-  
+
   try {
     const files = fs.readdirSync(UPDATES_DIR);
     if (files.length === 0) {
       console.log('  (No files yet - add your build files to updates/ folder)');
     } else {
-      files.forEach(file => {
+      files.forEach((file) => {
         const stats = fs.statSync(path.join(UPDATES_DIR, file));
         const size = (stats.size / 1024 / 1024).toFixed(2);
         console.log(`  ✓ ${file} (${size} MB)`);
       });
     }
-  } catch (err) {
+  } catch (_err) {
     console.log('  (Error reading directory)');
   }
-  
+
   console.log('');
   console.log('🔄 To test auto-update:');
   console.log('  1. Uncomment lines in dev-app-update.yml');
@@ -125,7 +125,3 @@ server.on('error', (err) => {
   }
   process.exit(1);
 });
-
-
-
-

@@ -1,6 +1,6 @@
 /**
  * CustomBeatPrompts.js - Template Library of Story Beat Detectors
- * 
+ *
  * Pre-made beat detector templates that users can customize:
  * - Emotional Peaks
  * - Humor & Levity
@@ -23,7 +23,7 @@ export const BEAT_CATEGORIES = {
   INFORMATION: 'information',
   NARRATIVE: 'narrative',
   MARKETING: 'marketing',
-  CUSTOM: 'custom'
+  CUSTOM: 'custom',
 };
 
 /**
@@ -49,9 +49,9 @@ export const BEAT_TEMPLATE_LIBRARY = {
     audioSignals: ['volume_spike', 'pitch_change', 'pace_change'],
     markerType: 'highlight',
     markerColor: '#ef4444',
-    sensitivity: 0.7
+    sensitivity: 0.7,
   },
-  
+
   humor_levity: {
     id: 'humor_levity',
     name: 'Humor & Levity',
@@ -70,9 +70,9 @@ export const BEAT_TEMPLATE_LIBRARY = {
     audioSignals: ['laughter_detection'],
     markerType: 'clip',
     markerColor: '#eab308',
-    sensitivity: 0.6
+    sensitivity: 0.6,
   },
-  
+
   // Information beats
   stats_data: {
     id: 'stats_data',
@@ -92,9 +92,9 @@ export const BEAT_TEMPLATE_LIBRARY = {
     patterns: [/\d+%/, /\$\d+/, /\d+ (times|percent|million|billion|thousand)/i],
     markerType: 'keypoint',
     markerColor: '#3b82f6',
-    sensitivity: 0.8
+    sensitivity: 0.8,
   },
-  
+
   aha_moments: {
     id: 'aha_moments',
     name: 'Aha Moments',
@@ -109,13 +109,13 @@ export const BEAT_TEMPLATE_LIBRARY = {
       - "What I learned was..."`,
     analyzeAudio: true,
     analyzeTranscript: true,
-    keywords: ['realized', 'key is', 'secret is', 'insight', 'discovered', 'turns out', 'the thing is', 'here\'s what'],
+    keywords: ['realized', 'key is', 'secret is', 'insight', 'discovered', 'turns out', 'the thing is', "here's what"],
     audioSignals: ['emphasis', 'pace_slow'],
     markerType: 'highlight',
     markerColor: '#8b5cf6',
-    sensitivity: 0.7
+    sensitivity: 0.7,
   },
-  
+
   // Narrative beats
   conflict: {
     id: 'conflict',
@@ -135,9 +135,9 @@ export const BEAT_TEMPLATE_LIBRARY = {
     audioSignals: ['tension', 'volume_increase'],
     markerType: 'beat',
     markerColor: '#f97316',
-    sensitivity: 0.6
+    sensitivity: 0.6,
   },
-  
+
   resolution: {
     id: 'resolution',
     name: 'Resolution',
@@ -156,9 +156,9 @@ export const BEAT_TEMPLATE_LIBRARY = {
     audioSignals: ['relief', 'positive_tone'],
     markerType: 'highlight',
     markerColor: '#22c55e',
-    sensitivity: 0.7
+    sensitivity: 0.7,
   },
-  
+
   // Marketing beats
   pain_points: {
     id: 'pain_points',
@@ -177,9 +177,9 @@ export const BEAT_TEMPLATE_LIBRARY = {
     audioSignals: ['frustration', 'emphasis'],
     markerType: 'beat',
     markerColor: '#ef4444',
-    sensitivity: 0.7
+    sensitivity: 0.7,
   },
-  
+
   social_proof: {
     id: 'social_proof',
     name: 'Social Proof',
@@ -198,7 +198,7 @@ export const BEAT_TEMPLATE_LIBRARY = {
     patterns: [/\d+ (customers|clients|people|users)/i],
     markerType: 'testimonial',
     markerColor: '#eab308',
-    sensitivity: 0.8
+    sensitivity: 0.8,
   },
 
   // Additional useful beats
@@ -218,7 +218,7 @@ export const BEAT_TEMPLATE_LIBRARY = {
     keywords: ['click', 'subscribe', 'download', 'sign up', 'join', 'get started', 'try', 'buy', 'link'],
     markerType: 'cta',
     markerColor: '#22c55e',
-    sensitivity: 0.9
+    sensitivity: 0.9,
   },
 
   question_answer: {
@@ -238,8 +238,8 @@ export const BEAT_TEMPLATE_LIBRARY = {
     patterns: [/\?$/],
     markerType: 'quiz',
     markerColor: '#06b6d4',
-    sensitivity: 0.6
-  }
+    sensitivity: 0.6,
+  },
 };
 
 /**
@@ -248,22 +248,22 @@ export const BEAT_TEMPLATE_LIBRARY = {
 export class CustomBeatPrompts {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Built-in templates
     this.builtInTemplates = { ...BEAT_TEMPLATE_LIBRARY };
-    
+
     // User custom templates
     this.customTemplates = {};
-    
+
     // Detection results
     this.detectedBeats = [];
-    
+
     // Analysis state
     this.isAnalyzing = false;
-    
+
     // Event listeners
     this.eventListeners = {};
-    
+
     // Load custom templates from storage
     this.loadCustomTemplates();
   }
@@ -283,7 +283,7 @@ export class CustomBeatPrompts {
    */
   getTemplatesByCategory(category) {
     const all = this.getAllTemplates();
-    return Object.values(all).filter(t => t.category === category);
+    return Object.values(all).filter((t) => t.category === category);
   }
 
   /**
@@ -307,14 +307,14 @@ export class CustomBeatPrompts {
       id,
       category: BEAT_CATEGORIES.CUSTOM,
       isCustom: true,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
-    
+
     this.customTemplates[id] = customTemplate;
     this.saveCustomTemplates();
-    
+
     this.emit('templateCreated', { template: customTemplate });
-    
+
     return customTemplate;
   }
 
@@ -326,17 +326,17 @@ export class CustomBeatPrompts {
    */
   updateCustomTemplate(templateId, updates) {
     if (!this.customTemplates[templateId]) return null;
-    
+
     this.customTemplates[templateId] = {
       ...this.customTemplates[templateId],
       ...updates,
-      modifiedAt: new Date().toISOString()
+      modifiedAt: new Date().toISOString(),
     };
-    
+
     this.saveCustomTemplates();
-    
+
     this.emit('templateUpdated', { template: this.customTemplates[templateId] });
-    
+
     return this.customTemplates[templateId];
   }
 
@@ -347,12 +347,12 @@ export class CustomBeatPrompts {
    */
   deleteCustomTemplate(templateId) {
     if (!this.customTemplates[templateId]) return false;
-    
+
     delete this.customTemplates[templateId];
     this.saveCustomTemplates();
-    
+
     this.emit('templateDeleted', { templateId });
-    
+
     return true;
   }
 
@@ -365,11 +365,11 @@ export class CustomBeatPrompts {
   copyTemplate(templateId, newName) {
     const source = this.getTemplate(templateId);
     if (!source) return null;
-    
+
     return this.createCustomTemplate({
       ...source,
       name: newName || `${source.name} (Copy)`,
-      icon: source.icon
+      icon: source.icon,
     });
   }
 
@@ -385,59 +385,58 @@ export class CustomBeatPrompts {
     if (!template) {
       throw new Error(`Template not found: ${templateId}`);
     }
-    
+
     this.isAnalyzing = true;
     this.emit('detectionStarted', { templateId });
-    
+
     try {
       const words = this.expandToWords(transcriptSegments);
       const beats = [];
-      
+
       // Analyze with transcript keywords
       if (template.analyzeTranscript) {
         const keywordBeats = this.detectByKeywords(words, template);
         beats.push(...keywordBeats);
-        
+
         // Check patterns if defined
         if (template.patterns) {
           const patternBeats = this.detectByPatterns(words, template);
           beats.push(...patternBeats);
         }
       }
-      
+
       // Analyze with audio signals (if available)
       if (template.analyzeAudio && audioAnalysis) {
         const audioBeats = this.detectByAudio(audioAnalysis, template);
         beats.push(...audioBeats);
       }
-      
+
       // Merge nearby beats
       const mergedBeats = this.mergeNearbyBeats(beats, 3); // 3 second threshold
-      
+
       // Apply sensitivity filter
-      const filteredBeats = mergedBeats.filter(b => b.confidence >= template.sensitivity);
-      
+      const filteredBeats = mergedBeats.filter((b) => b.confidence >= template.sensitivity);
+
       // Add template info to each beat
-      const finalBeats = filteredBeats.map(beat => ({
+      const finalBeats = filteredBeats.map((beat) => ({
         ...beat,
         templateId,
         templateName: template.name,
         templateIcon: template.icon,
         markerType: template.markerType,
-        markerColor: template.markerColor
+        markerColor: template.markerColor,
       }));
-      
+
       this.detectedBeats = finalBeats;
       this.isAnalyzing = false;
-      
-      this.emit('detectionComplete', { 
-        templateId, 
+
+      this.emit('detectionComplete', {
+        templateId,
         beats: finalBeats,
-        count: finalBeats.length 
+        count: finalBeats.length,
       });
-      
+
       return finalBeats;
-      
     } catch (error) {
       this.isAnalyzing = false;
       this.emit('detectionError', { error });
@@ -454,40 +453,44 @@ export class CustomBeatPrompts {
   detectByKeywords(words, template) {
     const beats = [];
     const keywords = template.keywords || [];
-    
+
     for (let i = 0; i < words.length; i++) {
       const windowSize = 10; // Words to check
       const windowEnd = Math.min(i + windowSize, words.length);
-      const windowText = words.slice(i, windowEnd).map(w => w.text).join(' ').toLowerCase();
-      
+      const windowText = words
+        .slice(i, windowEnd)
+        .map((w) => w.text)
+        .join(' ')
+        .toLowerCase();
+
       let matchCount = 0;
       let matchedKeywords = [];
-      
-      keywords.forEach(keyword => {
+
+      keywords.forEach((keyword) => {
         const keywordLower = keyword.toLowerCase();
         if (windowText.includes(keywordLower)) {
           matchCount++;
           matchedKeywords.push(keyword);
         }
       });
-      
+
       if (matchCount > 0) {
         const confidence = Math.min(1, matchCount / 3); // 3 matches = max confidence
-        
+
         beats.push({
           startTime: words[i].start,
           endTime: words[Math.min(i + windowSize - 1, words.length - 1)].end,
           text: windowText.substring(0, 200),
           matchedKeywords,
           confidence,
-          detectionMethod: 'keywords'
+          detectionMethod: 'keywords',
         });
-        
+
         // Skip ahead to avoid duplicate detections
         i += windowSize / 2;
       }
     }
-    
+
     return beats;
   }
 
@@ -500,17 +503,17 @@ export class CustomBeatPrompts {
   detectByPatterns(words, template) {
     const beats = [];
     const patterns = template.patterns || [];
-    const fullText = words.map(w => w.text).join(' ');
-    
-    patterns.forEach(pattern => {
+    const fullText = words.map((w) => w.text).join(' ');
+
+    patterns.forEach((pattern) => {
       let match;
       const regex = new RegExp(pattern, 'gi');
-      
+
       while ((match = regex.exec(fullText)) !== null) {
         // Find word index for this position
         let charCount = 0;
         let startWordIdx = 0;
-        
+
         for (let i = 0; i < words.length; i++) {
           if (charCount >= match.index) {
             startWordIdx = i;
@@ -518,18 +521,18 @@ export class CustomBeatPrompts {
           }
           charCount += words[i].text.length + 1;
         }
-        
+
         beats.push({
           startTime: words[startWordIdx].start,
           endTime: words[Math.min(startWordIdx + 5, words.length - 1)].end,
           text: match[0],
           matchedPattern: pattern.toString(),
           confidence: 0.9,
-          detectionMethod: 'pattern'
+          detectionMethod: 'pattern',
         });
       }
     });
-    
+
     return beats;
   }
 
@@ -542,25 +545,25 @@ export class CustomBeatPrompts {
   detectByAudio(audioAnalysis, template) {
     const beats = [];
     const signals = template.audioSignals || [];
-    
+
     // Check for volume spikes
     if (signals.includes('volume_spike') && audioAnalysis.rmsTimeline) {
       const avgRMS = audioAnalysis.averageRMS || 0.5;
-      const spikes = audioAnalysis.rmsTimeline.filter(r => r.value > avgRMS * 1.5);
-      
-      spikes.forEach(spike => {
+      const spikes = audioAnalysis.rmsTimeline.filter((r) => r.value > avgRMS * 1.5);
+
+      spikes.forEach((spike) => {
         beats.push({
           startTime: spike.time,
           endTime: spike.time + 2,
           text: '[Audio spike detected]',
           confidence: 0.7,
-          detectionMethod: 'audio_spike'
+          detectionMethod: 'audio_spike',
         });
       });
     }
-    
+
     // Add more audio signal detection as available
-    
+
     return beats;
   }
 
@@ -572,16 +575,16 @@ export class CustomBeatPrompts {
    */
   mergeNearbyBeats(beats, threshold) {
     if (beats.length < 2) return beats;
-    
+
     // Sort by start time
     beats.sort((a, b) => a.startTime - b.startTime);
-    
+
     const merged = [];
     let current = beats[0];
-    
+
     for (let i = 1; i < beats.length; i++) {
       const next = beats[i];
-      
+
       if (next.startTime - current.endTime < threshold) {
         // Merge
         current = {
@@ -589,17 +592,16 @@ export class CustomBeatPrompts {
           endTime: Math.max(current.endTime, next.endTime),
           text: current.text,
           confidence: Math.max(current.confidence, next.confidence),
-          matchedKeywords: [
-            ...(current.matchedKeywords || []),
-            ...(next.matchedKeywords || [])
-          ].filter((v, i, a) => a.indexOf(v) === i) // Unique
+          matchedKeywords: [...(current.matchedKeywords || []), ...(next.matchedKeywords || [])].filter(
+            (v, i, a) => a.indexOf(v) === i
+          ), // Unique
         };
       } else {
         merged.push(current);
         current = next;
       }
     }
-    
+
     merged.push(current);
     return merged;
   }
@@ -610,21 +612,16 @@ export class CustomBeatPrompts {
    */
   convertToMarkers(markerManager) {
     if (!markerManager) return;
-    
-    this.detectedBeats.forEach(beat => {
-      markerManager.addSpotMarker(
-        beat.startTime,
-        `${beat.templateIcon} ${beat.templateName}`,
-        beat.markerColor,
-        {
-          description: beat.text.substring(0, 100),
-          markerType: beat.markerType,
-          detectedBy: beat.templateId,
-          confidence: beat.confidence
-        }
-      );
+
+    this.detectedBeats.forEach((beat) => {
+      markerManager.addSpotMarker(beat.startTime, `${beat.templateIcon} ${beat.templateName}`, beat.markerColor, {
+        description: beat.text.substring(0, 100),
+        markerType: beat.markerType,
+        detectedBy: beat.templateId,
+        confidence: beat.confidence,
+      });
     });
-    
+
     this.emit('markersCreated', { count: this.detectedBeats.length });
   }
 
@@ -635,32 +632,32 @@ export class CustomBeatPrompts {
    */
   expandToWords(segments) {
     const words = [];
-    
-    segments.forEach(segment => {
+
+    segments.forEach((segment) => {
       const text = (segment.text || segment.word || '').trim();
       const startTime = segment.start || 0;
-      const endTime = segment.end || (startTime + 1);
-      
+      const endTime = segment.end || startTime + 1;
+
       if (!text.includes(' ')) {
         if (text.length > 0) {
           words.push({ text, start: startTime, end: endTime });
         }
         return;
       }
-      
-      const segmentWords = text.split(/\s+/).filter(w => w.length > 0);
+
+      const segmentWords = text.split(/\s+/).filter((w) => w.length > 0);
       const duration = endTime - startTime;
       const wordDuration = duration / segmentWords.length;
-      
+
       segmentWords.forEach((word, i) => {
         words.push({
           text: word,
-          start: startTime + (i * wordDuration),
-          end: startTime + ((i + 1) * wordDuration)
+          start: startTime + i * wordDuration,
+          end: startTime + (i + 1) * wordDuration,
         });
       });
     });
-    
+
     return words;
   }
 
@@ -690,7 +687,7 @@ export class CustomBeatPrompts {
   }
 
   // Event emitter methods
-  
+
   on(event, callback) {
     if (!this.eventListeners[event]) {
       this.eventListeners[event] = [];
@@ -700,13 +697,13 @@ export class CustomBeatPrompts {
 
   emit(event, data = {}) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event].forEach(callback => callback(data));
+      this.eventListeners[event].forEach((callback) => callback(data));
     }
   }
 
   off(event, callback) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+      this.eventListeners[event] = this.eventListeners[event].filter((cb) => cb !== callback);
     }
   }
 
@@ -720,14 +717,3 @@ export class CustomBeatPrompts {
 }
 
 export default CustomBeatPrompts;
-
-
-
-
-
-
-
-
-
-
-

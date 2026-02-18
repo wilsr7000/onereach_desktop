@@ -1,298 +1,302 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Black Hole Button Test</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            padding: 40px;
-            background: #2a2a2a;
-            color: white;
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        padding: 40px;
+        background: #2a2a2a;
+        color: white;
+      }
+
+      h1 {
+        margin-bottom: 30px;
+      }
+
+      .test-container {
+        background: #1a1a1a;
+        border-radius: 12px;
+        padding: 30px;
+        max-width: 600px;
+        margin: 0 auto;
+      }
+
+      #black-hole-button {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s;
+        margin: 20px auto;
+        position: relative;
+      }
+
+      #black-hole-button:hover {
+        transform: scale(1.1);
+        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+      }
+
+      #black-hole-button:active {
+        transform: scale(0.95);
+      }
+
+      #black-hole-button.hovering {
+        animation: pulse-slow 1.5s ease-in-out;
+      }
+
+      #black-hole-button.black-hole-active {
+        box-shadow: 0 0 30px rgba(102, 126, 234, 0.8);
+        background: linear-gradient(135deg, #667eea 0%, #9f7aea 100%);
+      }
+
+      #black-hole-button.viewer-active {
+        box-shadow: 0 0 30px rgba(76, 175, 80, 0.8);
+        background: linear-gradient(135deg, #667eea 0%, #4caf50 100%);
+      }
+
+      #black-hole-button.clicked {
+        animation: click-pulse 0.2s ease-out;
+      }
+
+      @keyframes pulse-slow {
+        0% {
+          box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
         }
-        
-        h1 {
-            margin-bottom: 30px;
+        50% {
+          box-shadow: 0 4px 30px rgba(102, 126, 234, 0.6);
         }
-        
-        .test-container {
-            background: #1a1a1a;
-            border-radius: 12px;
-            padding: 30px;
-            max-width: 600px;
-            margin: 0 auto;
+        100% {
+          box-shadow: 0 4px 40px rgba(102, 126, 234, 0.8);
         }
-        
-        #black-hole-button {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: transform 0.2s, box-shadow 0.2s;
-            margin: 20px auto;
-            position: relative;
+      }
+
+      @keyframes click-pulse {
+        0% {
+          transform: scale(1);
         }
-        
-        #black-hole-button:hover {
-            transform: scale(1.1);
-            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+        50% {
+          transform: scale(0.9);
         }
-        
-        #black-hole-button:active {
-            transform: scale(0.95);
+        100% {
+          transform: scale(1);
         }
-        
-        #black-hole-button.hovering {
-            animation: pulse-slow 1.5s ease-in-out;
-        }
-        
-        #black-hole-button.black-hole-active {
-            box-shadow: 0 0 30px rgba(102, 126, 234, 0.8);
-            background: linear-gradient(135deg, #667eea 0%, #9f7aea 100%);
-        }
-        
-        #black-hole-button.viewer-active {
-            box-shadow: 0 0 30px rgba(76, 175, 80, 0.8);
-            background: linear-gradient(135deg, #667eea 0%, #4caf50 100%);
-        }
-        
-        #black-hole-button.clicked {
-            animation: click-pulse 0.2s ease-out;
-        }
-        
-        @keyframes pulse-slow {
-            0% {
-                box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
-            }
-            50% {
-                box-shadow: 0 4px 30px rgba(102, 126, 234, 0.6);
-            }
-            100% {
-                box-shadow: 0 4px 40px rgba(102, 126, 234, 0.8);
-            }
-        }
-        
-        @keyframes click-pulse {
-            0% {
-                transform: scale(1);
-            }
-            50% {
-                transform: scale(0.9);
-            }
-            100% {
-                transform: scale(1);
-            }
-        }
-        
-        .status {
-            background: #333;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 20px 0;
-            font-family: 'Monaco', 'Courier New', monospace;
-            font-size: 13px;
-            min-height: 200px;
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        
-        .status-line {
-            margin: 4px 0;
-            padding: 2px 0;
-        }
-        
-        .success {
-            color: #4ade80;
-        }
-        
-        .error {
-            color: #f87171;
-        }
-        
-        .warning {
-            color: #fbbf24;
-        }
-        
-        .info {
-            color: #60a5fa;
-        }
-        
-        .controls {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            margin-top: 20px;
-        }
-        
-        button {
-            padding: 10px 20px;
-            background: #4a5568;
-            border: none;
-            border-radius: 6px;
-            color: white;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        
-        button:hover {
-            background: #5a6578;
-        }
+      }
+
+      .status {
+        background: #333;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 20px 0;
+        font-family: 'Monaco', 'Courier New', monospace;
+        font-size: 13px;
+        min-height: 200px;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .status-line {
+        margin: 4px 0;
+        padding: 2px 0;
+      }
+
+      .success {
+        color: #4ade80;
+      }
+
+      .error {
+        color: #f87171;
+      }
+
+      .warning {
+        color: #fbbf24;
+      }
+
+      .info {
+        color: #60a5fa;
+      }
+
+      .controls {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        margin-top: 20px;
+      }
+
+      button {
+        padding: 10px 20px;
+        background: #4a5568;
+        border: none;
+        border-radius: 6px;
+        color: white;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+
+      button:hover {
+        background: #5a6578;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="test-container">
-        <h1>🕳️ Black Hole Button Test - Dual Purpose</h1>
-        
-        <div style="text-align: center;">
-            <button id="black-hole-button">
-                <span style="font-size: 24px; filter: invert(1);">⭘</span>
-            </button>
-            <div style="margin-top: 20px;">
-                <p><strong>HOVER</strong> for 1.5 seconds → Opens Black Hole Widget (quick capture)</p>
-                <p><strong>CLICK</strong> → Opens Space Asset Manager (manage all assets)</p>
-            </div>
+      <h1>🕳️ Black Hole Button Test - Dual Purpose</h1>
+
+      <div style="text-align: center">
+        <button id="black-hole-button">
+          <span style="font-size: 24px; filter: invert(1)">⭘</span>
+        </button>
+        <div style="margin-top: 20px">
+          <p><strong>HOVER</strong> for 1.5 seconds → Opens Black Hole Widget (quick capture)</p>
+          <p><strong>CLICK</strong> → Opens Space Asset Manager (manage all assets)</p>
         </div>
-        
-        <div id="status" class="status">
-            <div class="status-line info">Test module loaded...</div>
-        </div>
-        
-        <div class="controls">
-            <button onclick="clearStatus()">Clear Log</button>
-            <button onclick="testAPI()">Test API</button>
-            <button onclick="testHover()">Test Hover</button>
-            <button onclick="testClick()">Test Click</button>
-        </div>
+      </div>
+
+      <div id="status" class="status">
+        <div class="status-line info">Test module loaded...</div>
+      </div>
+
+      <div class="controls">
+        <button onclick="clearStatus()">Clear Log</button>
+        <button onclick="testAPI()">Test API</button>
+        <button onclick="testHover()">Test Hover</button>
+        <button onclick="testClick()">Test Click</button>
+      </div>
     </div>
-    
+
     <script src="black-hole-button-correct.js"></script>
     <!-- Removed black-hole-button-module.js to avoid conflicts -->
     <script>
-        // Check API availability immediately
-        console.log('[Renderer] Initial check - window.api:', typeof window.api);
-        console.log('[Renderer] Initial check - window.minimalTest:', typeof window.minimalTest);
-        console.log('[Renderer] Initial check - window.testAPI:', typeof window.testAPI);
-        
-        // Try to use minimalTest if available
+      // Check API availability immediately
+      console.log('[Renderer] Initial check - window.api:', typeof window.api);
+      console.log('[Renderer] Initial check - window.minimalTest:', typeof window.minimalTest);
+      console.log('[Renderer] Initial check - window.testAPI:', typeof window.testAPI);
+
+      // Try to use minimalTest if available
+      if (window.minimalTest && window.minimalTest.hello) {
+        console.log('[Renderer] minimalTest.hello():', window.minimalTest.hello());
+      }
+
+      // Initialize the correct button controller on DOM ready
+      document.addEventListener('DOMContentLoaded', () => {
+        console.log('[Test] DOM Ready, initializing button controller');
+        console.log('[Test] window.api at DOMContentLoaded:', typeof window.api);
+        console.log('[Test] window.testAPI at DOMContentLoaded:', typeof window.testAPI);
+
+        // Also check after a delay
+        setTimeout(() => {
+          console.log('[Test] Delayed check - window.api:', typeof window.api);
+          console.log('[Test] Delayed check - window.testAPI:', typeof window.testAPI);
+          if (window.testAPI && window.testAPI.test) {
+            console.log('[Test] testAPI.test() result:', window.testAPI.test());
+          }
+        }, 500);
+
+        const button = document.getElementById('black-hole-button');
+        if (button) {
+          window.buttonController = new BlackHoleButtonController(button);
+
+          // Log to status
+          const statusEl = document.getElementById('status');
+          if (statusEl) {
+            const line = document.createElement('div');
+            line.className = 'status-line success';
+            line.textContent = 'Button controller initialized with dual functionality';
+            statusEl.appendChild(line);
+          }
+        }
+      });
+
+      // Test functions
+      function clearStatus() {
+        const statusEl = document.getElementById('status');
+        if (statusEl) {
+          statusEl.innerHTML = '<div class="status-line info">Log cleared</div>';
+        }
+      }
+
+      function testAPIAvailability() {
+        const statusEl = document.getElementById('status');
+        const addLine = (text, type = 'info') => {
+          if (statusEl) {
+            const line = document.createElement('div');
+            line.className = `status-line ${type}`;
+            line.textContent = text;
+            statusEl.appendChild(line);
+            statusEl.scrollTop = statusEl.scrollHeight;
+          }
+        };
+
+        addLine('=== API Test ===', 'info');
+        addLine(`window.api: ${typeof window.api}`, window.api ? 'success' : 'error');
+        addLine(`window.api.send: ${typeof window.api?.send}`, window.api?.send ? 'success' : 'error');
+        addLine(`window.api.receive: ${typeof window.api?.receive}`, window.api?.receive ? 'success' : 'error');
+        addLine(`window.minimalTest: ${typeof window.minimalTest}`, window.minimalTest ? 'success' : 'error');
         if (window.minimalTest && window.minimalTest.hello) {
-            console.log('[Renderer] minimalTest.hello():', window.minimalTest.hello());
+          addLine(`minimalTest.hello(): ${window.minimalTest.hello()}`, 'success');
         }
-        
-        // Initialize the correct button controller on DOM ready
-        document.addEventListener('DOMContentLoaded', () => {
-            console.log('[Test] DOM Ready, initializing button controller');
-            console.log('[Test] window.api at DOMContentLoaded:', typeof window.api);
-            console.log('[Test] window.testAPI at DOMContentLoaded:', typeof window.testAPI);
-            
-            // Also check after a delay
-            setTimeout(() => {
-                console.log('[Test] Delayed check - window.api:', typeof window.api);
-                console.log('[Test] Delayed check - window.testAPI:', typeof window.testAPI);
-                if (window.testAPI && window.testAPI.test) {
-                    console.log('[Test] testAPI.test() result:', window.testAPI.test());
-                }
-            }, 500);
-            
-            const button = document.getElementById('black-hole-button');
-            if (button) {
-                window.buttonController = new BlackHoleButtonController(button);
-                
-                // Log to status
-                const statusEl = document.getElementById('status');
-                if (statusEl) {
-                    const line = document.createElement('div');
-                    line.className = 'status-line success';
-                    line.textContent = 'Button controller initialized with dual functionality';
-                    statusEl.appendChild(line);
-                }
-            }
-        });
-        
-        // Test functions
-        function clearStatus() {
-            const statusEl = document.getElementById('status');
-            if (statusEl) {
-                statusEl.innerHTML = '<div class="status-line info">Log cleared</div>';
-            }
+        addLine(`window.testAPI: ${typeof window.testAPI}`, 'info');
+        if (window.testAPI && window.testAPI.test) {
+          addLine(`window.testAPI.test(): ${window.testAPI.test()}`, 'success');
         }
-        
-        function testAPIAvailability() {
-            const statusEl = document.getElementById('status');
-            const addLine = (text, type = 'info') => {
-                if (statusEl) {
-                    const line = document.createElement('div');
-                    line.className = `status-line ${type}`;
-                    line.textContent = text;
-                    statusEl.appendChild(line);
-                    statusEl.scrollTop = statusEl.scrollHeight;
-                }
-            };
-            
-            addLine('=== API Test ===', 'info');
-            addLine(`window.api: ${typeof window.api}`, window.api ? 'success' : 'error');
-            addLine(`window.api.send: ${typeof window.api?.send}`, window.api?.send ? 'success' : 'error');
-            addLine(`window.api.receive: ${typeof window.api?.receive}`, window.api?.receive ? 'success' : 'error');
-            addLine(`window.minimalTest: ${typeof window.minimalTest}`, window.minimalTest ? 'success' : 'error');
-            if (window.minimalTest && window.minimalTest.hello) {
-                addLine(`minimalTest.hello(): ${window.minimalTest.hello()}`, 'success');
-            }
-            addLine(`window.testAPI: ${typeof window.testAPI}`, 'info');
-            if (window.testAPI && window.testAPI.test) {
-                addLine(`window.testAPI.test(): ${window.testAPI.test()}`, 'success');
-            }
+      }
+
+      // Alias for button
+      function testAPI() {
+        testAPIAvailability();
+      }
+
+      function testHover() {
+        const statusEl = document.getElementById('status');
+        const addLine = (text, type = 'info') => {
+          if (statusEl) {
+            const line = document.createElement('div');
+            line.className = `status-line ${type}`;
+            line.textContent = text;
+            statusEl.appendChild(line);
+          }
+        };
+
+        addLine('Simulating hover for 1.5 seconds...', 'warning');
+        if (window.buttonController) {
+          // Simulate mouse enter
+          const event = new MouseEvent('mouseenter');
+          document.getElementById('black-hole-button').dispatchEvent(event);
+
+          setTimeout(() => {
+            addLine('Hover complete - Black Hole should open if API available', 'success');
+          }, 1600);
         }
-        
-        // Alias for button
-        function testAPI() { testAPIAvailability(); }
-        
-        function testHover() {
-            const statusEl = document.getElementById('status');
-            const addLine = (text, type = 'info') => {
-                if (statusEl) {
-                    const line = document.createElement('div');
-                    line.className = `status-line ${type}`;
-                    line.textContent = text;
-                    statusEl.appendChild(line);
-                }
-            };
-            
-            addLine('Simulating hover for 1.5 seconds...', 'warning');
-            if (window.buttonController) {
-                // Simulate mouse enter
-                const event = new MouseEvent('mouseenter');
-                document.getElementById('black-hole-button').dispatchEvent(event);
-                
-                setTimeout(() => {
-                    addLine('Hover complete - Black Hole should open if API available', 'success');
-                }, 1600);
-            }
+      }
+
+      function testClick() {
+        const statusEl = document.getElementById('status');
+        const addLine = (text, type = 'info') => {
+          if (statusEl) {
+            const line = document.createElement('div');
+            line.className = `status-line ${type}`;
+            line.textContent = text;
+            statusEl.appendChild(line);
+          }
+        };
+
+        addLine('Simulating button click...', 'warning');
+        if (window.buttonController) {
+          // Simulate click
+          const event = new MouseEvent('click');
+          document.getElementById('black-hole-button').dispatchEvent(event);
+          addLine('Click simulated - Clipboard Viewer should open', 'success');
         }
-        
-        function testClick() {
-            const statusEl = document.getElementById('status');
-            const addLine = (text, type = 'info') => {
-                if (statusEl) {
-                    const line = document.createElement('div');
-                    line.className = `status-line ${type}`;
-                    line.textContent = text;
-                    statusEl.appendChild(line);
-                }
-            };
-            
-            addLine('Simulating button click...', 'warning');
-            if (window.buttonController) {
-                // Simulate click
-                const event = new MouseEvent('click');
-                document.getElementById('black-hole-button').dispatchEvent(event);
-                addLine('Click simulated - Clipboard Viewer should open', 'success');
-            }
-        }
+      }
     </script>
-</body>
+  </body>
 </html>

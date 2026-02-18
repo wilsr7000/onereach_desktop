@@ -30,7 +30,7 @@ class ProjectManager {
     // Create the project
     const project = this.storage.createProject({
       name,
-      spaceId
+      spaceId,
     });
 
     // Add initial video as asset if provided
@@ -43,14 +43,14 @@ class ProjectManager {
     // Create the initial "Main" version
     const version = this.storage.createVersion(project.id, {
       name: 'Main',
-      primaryVideoAssetId: primaryAssetId
+      primaryVideoAssetId: primaryAssetId,
     });
 
     log.info('app', '[ProjectManager] Created project', { arg0: project.id, arg1: 'with version:', arg2: version.id });
-    
+
     return {
       project: this.storage.getProject(project.id),
-      version
+      version,
     };
   }
 
@@ -125,7 +125,7 @@ class ProjectManager {
       path: filePath,
       name: path.basename(filePath),
       size,
-      duration
+      duration,
     });
 
     return asset;
@@ -167,7 +167,7 @@ class ProjectManager {
       return null;
     }
 
-    return project.assets.find(a => a.id === version.primaryVideoAssetId) || null;
+    return project.assets.find((a) => a.id === version.primaryVideoAssetId) || null;
   }
 
   // ==================== VERSION OPERATIONS ====================
@@ -188,8 +188,8 @@ class ProjectManager {
       playlist: options.playlist || [],
       timeline: options.timeline || { zoom: 1, scrollOffset: 0 },
       transcriptSegments: options.transcriptSegments || [],
-      transcriptSource: options.transcriptSource || null,  // Preserve transcript source
-      planning: options.planning || null  // Planning data for Line Script
+      transcriptSource: options.transcriptSource || null, // Preserve transcript source
+      planning: options.planning || null, // Planning data for Line Script
     });
   }
 
@@ -235,11 +235,11 @@ class ProjectManager {
       playlist: state.playlist || [],
       timeline: state.timeline || { zoom: 1, scrollOffset: 0 },
       transcriptSegments: state.transcriptSegments || [],
-      transcriptSource: state.transcriptSource || null,  // Save transcript source to avoid regeneration
+      transcriptSource: state.transcriptSource || null, // Save transcript source to avoid regeneration
       fades: state.fades || { fadeIn: 0, fadeOut: 0 },
       trimStart: state.trimStart || 0,
       trimEnd: state.trimEnd || 0,
-      planning: state.planning || null  // Planning data for Line Script
+      planning: state.planning || null, // Planning data for Line Script
     });
   }
 
@@ -333,7 +333,7 @@ class ProjectManager {
     return {
       project,
       version,
-      primaryAsset: this.getPrimaryVideoAsset(version.id)
+      primaryAsset: this.getPrimaryVideoAsset(version.id),
     };
   }
 
@@ -382,7 +382,7 @@ class ProjectManager {
 
     return {
       version,
-      primaryAsset: this.getPrimaryVideoAsset(version.id)
+      primaryAsset: this.getPrimaryVideoAsset(version.id),
     };
   }
 
@@ -398,7 +398,7 @@ class ProjectManager {
     return {
       project: this.currentProject,
       version: this.currentVersion,
-      primaryAsset: this.getPrimaryVideoAsset(this.currentVersion.id)
+      primaryAsset: this.getPrimaryVideoAsset(this.currentVersion.id),
     };
   }
 
@@ -447,14 +447,3 @@ class ProjectManager {
 }
 
 module.exports = ProjectManager;
-
-
-
-
-
-
-
-
-
-
-

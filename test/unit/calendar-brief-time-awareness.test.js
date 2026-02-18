@@ -44,6 +44,11 @@ vi.mock('../../lib/log-event-queue', () => ({
 
 const { CalendarStore } = require('../../lib/calendar-store');
 
+// daily-brief-agent loaded at top level for the _getUserName test.
+// The function accepts a profile getter for testability since Vitest 4.x
+// cannot intercept transitive CJS require() calls via vi.mock.
+const _dailyBriefAgent = require('../../packages/agents/daily-brief-agent');
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -106,7 +111,6 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('generateMorningBrief()', () => {
-
     it('should mark all events as upcoming when brief is early morning', () => {
       // It's 7:00 AM, events are at 9, 11, 2 PM
       vi.setSystemTime(new Date(2026, 1, 10, 7, 0, 0)); // Feb 10 2026 7:00 AM
@@ -126,7 +130,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
       expect(brief.summary.timedEvents).toBe(3);
 
       // All timeline items should be upcoming
-      expect(brief.timeline.every(e => e.status === 'upcoming')).toBe(true);
+      expect(brief.timeline.every((e) => e.status === 'upcoming')).toBe(true);
 
       // nextMeeting should be the first event
       expect(brief.nextMeeting).not.toBeNull();
@@ -154,7 +158,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
       expect(brief.summary.upcomingCount).toBe(0);
 
       // All timeline items should be completed
-      expect(brief.timeline.every(e => e.status === 'completed')).toBe(true);
+      expect(brief.timeline.every((e) => e.status === 'completed')).toBe(true);
 
       // No next meeting, no current meeting
       expect(brief.nextMeeting).toBeNull();
@@ -178,9 +182,9 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
       expect(brief.summary.upcomingCount).toBe(1);
 
       // Check individual statuses
-      expect(brief.timeline[0].status).toBe('completed');   // Standup
+      expect(brief.timeline[0].status).toBe('completed'); // Standup
       expect(brief.timeline[1].status).toBe('in-progress'); // Design Review
-      expect(brief.timeline[2].status).toBe('upcoming');     // Client Call
+      expect(brief.timeline[2].status).toBe('upcoming'); // Client Call
 
       // Current meeting should be Design Review
       expect(brief.currentMeeting).not.toBeNull();
@@ -197,9 +201,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
       // Event ends exactly at 10:00 AM, time is 10:00 AM
       vi.setSystemTime(new Date(2026, 1, 10, 10, 0, 0));
 
-      const events = [
-        makeEvent('Morning Standup', 2026, 2, 10, 9, 30, 10, 0),
-      ];
+      const events = [makeEvent('Morning Standup', 2026, 2, 10, 9, 30, 10, 0)];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
 
@@ -213,9 +215,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
       // Event starts exactly at 10:00 AM, time is 10:00 AM
       vi.setSystemTime(new Date(2026, 1, 10, 10, 0, 0));
 
-      const events = [
-        makeEvent('Team Sync', 2026, 2, 10, 10, 0, 10, 30),
-      ];
+      const events = [makeEvent('Team Sync', 2026, 2, 10, 10, 0, 10, 30)];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
 
@@ -241,7 +241,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
       expect(brief.summary.completedCount).toBe(0);
       expect(brief.summary.inProgressCount).toBe(0);
       expect(brief.summary.upcomingCount).toBe(2);
-      expect(brief.timeline.every(e => e.status === 'upcoming')).toBe(true);
+      expect(brief.timeline.every((e) => e.status === 'upcoming')).toBe(true);
     });
 
     it('should return empty brief for a day with no events', () => {
@@ -282,15 +282,13 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
       // It's 1:00 PM. Morning was free (9-11), there's a meeting 11-12, afternoon free 1-5
       vi.setSystemTime(new Date(2026, 1, 10, 13, 0, 0));
 
-      const events = [
-        makeEvent('Late Morning Meeting', 2026, 2, 10, 11, 0, 12, 0),
-      ];
+      const events = [makeEvent('Late Morning Meeting', 2026, 2, 10, 11, 0, 12, 0)];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
 
       // Free slots should NOT include the 9-11 AM slot (it's past)
       // Should only include slots that end after now
-      for (const slot of brief.freeTime.freeSlots) {
+      for (const _slot of brief.freeTime.freeSlots) {
         // Parse the end time and verify it's after now
         // freeSlots have formatted times, but the filter works on the raw Date objects
         // We check that remainingFreeHours is less than totalFreeHours
@@ -331,9 +329,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
       // It's 2:45 PM, meeting is 2:00 - 3:00 PM (15 min remaining)
       vi.setSystemTime(new Date(2026, 1, 10, 14, 45, 0));
 
-      const events = [
-        makeEvent('Current Session', 2026, 2, 10, 14, 0, 15, 0),
-      ];
+      const events = [makeEvent('Current Session', 2026, 2, 10, 14, 0, 15, 0)];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
 
@@ -348,14 +344,10 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('renderBriefForSpeech()', () => {
-
     it('should use future tense when all events are upcoming (morning)', () => {
       vi.setSystemTime(new Date(2026, 1, 10, 7, 0, 0));
 
-      const events = [
-        makeEvent('Standup', 2026, 2, 10, 9, 0, 9, 30),
-        makeEvent('Planning', 2026, 2, 10, 10, 0, 11, 0),
-      ];
+      const events = [makeEvent('Standup', 2026, 2, 10, 9, 0, 9, 30), makeEvent('Planning', 2026, 2, 10, 10, 0, 11, 0)];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
       const speech = store.renderBriefForSpeech(brief);
@@ -372,10 +364,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
     it('should use past tense when all events are completed (evening)', () => {
       vi.setSystemTime(new Date(2026, 1, 10, 18, 0, 0));
 
-      const events = [
-        makeEvent('Standup', 2026, 2, 10, 9, 0, 9, 30),
-        makeEvent('Planning', 2026, 2, 10, 10, 0, 11, 0),
-      ];
+      const events = [makeEvent('Standup', 2026, 2, 10, 9, 0, 9, 30), makeEvent('Planning', 2026, 2, 10, 10, 0, 11, 0)];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
       const speech = store.renderBriefForSpeech(brief);
@@ -410,9 +399,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
     it('should mention in-progress meeting', () => {
       vi.setSystemTime(new Date(2026, 1, 10, 11, 30, 0)); // 11:30 AM
 
-      const events = [
-        makeEvent('Design Review', 2026, 2, 10, 11, 0, 12, 0, { location: 'Room 42' }),
-      ];
+      const events = [makeEvent('Design Review', 2026, 2, 10, 11, 0, 12, 0, { location: 'Room 42' })];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
       const speech = store.renderBriefForSpeech(brief);
@@ -452,9 +439,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
     it('should use future tense for a future day (not today)', () => {
       vi.setSystemTime(new Date(2026, 1, 10, 15, 0, 0)); // Feb 10 3 PM
 
-      const events = [
-        makeEvent('Early Call', 2026, 2, 12, 8, 0, 9, 0),
-      ];
+      const events = [makeEvent('Early Call', 2026, 2, 12, 8, 0, 9, 0)];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 12)); // Feb 12
       const speech = store.renderBriefForSpeech(brief);
@@ -506,9 +491,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
       // Next meeting is in 3 hours
       vi.setSystemTime(new Date(2026, 1, 10, 11, 0, 0));
 
-      const events = [
-        makeEvent('Afternoon Meeting', 2026, 2, 10, 14, 0, 15, 0),
-      ];
+      const events = [makeEvent('Afternoon Meeting', 2026, 2, 10, 14, 0, 15, 0)];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
       const speech = store.renderBriefForSpeech(brief);
@@ -525,7 +508,6 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('End-to-End: Full Brief Pipeline', () => {
-
     it('busy day at 2 PM should produce a coherent time-aware speech', () => {
       vi.setSystemTime(new Date(2026, 1, 10, 14, 0, 0)); // 2:00 PM
 
@@ -542,7 +524,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
 
       // Verify structured data
       expect(brief.summary.completedCount).toBe(3); // standup, planning, lunch
-      expect(brief.summary.upcomingCount).toBe(2);   // code review, retro
+      expect(brief.summary.upcomingCount).toBe(2); // code review, retro
       expect(brief.nextMeeting.title).toBe('Code Review');
       expect(brief.nextMeeting.minutesUntil).toBe(60);
 
@@ -570,9 +552,7 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
     it('single meeting completed at 5 PM produces done speech', () => {
       vi.setSystemTime(new Date(2026, 1, 10, 17, 0, 0));
 
-      const events = [
-        makeEvent('Morning Standup', 2026, 2, 10, 9, 0, 9, 15),
-      ];
+      const events = [makeEvent('Morning Standup', 2026, 2, 10, 9, 0, 9, 15)];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
       const speech = store.renderBriefForSpeech(brief);
@@ -603,9 +583,9 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
 
       const events = [
         makeEvent('Past A', 2026, 2, 10, 9, 0, 10, 0),
-        makeEvent('Past B', 2026, 2, 10, 10, 0, 11, 0),   // back-to-back with Past A (but both done)
+        makeEvent('Past B', 2026, 2, 10, 10, 0, 11, 0), // back-to-back with Past A (but both done)
         makeEvent('Future A', 2026, 2, 10, 14, 0, 15, 0),
-        makeEvent('Future B', 2026, 2, 10, 15, 0, 16, 0),  // back-to-back with Future A
+        makeEvent('Future B', 2026, 2, 10, 15, 0, 16, 0), // back-to-back with Future A
       ];
       const store = createStoreWithEvents(events);
       const brief = store.generateMorningBrief(new Date(2026, 1, 10));
@@ -622,7 +602,6 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('User Name in Briefing', () => {
-
     /**
      * Tests the _getUserName logic directly (same algorithm as daily-brief-agent.js lines 132-141).
      * We test the extraction logic in isolation rather than fighting with CommonJS module caching.
@@ -654,30 +633,15 @@ describe('CalendarStore Morning Brief: Time Awareness', () => {
     });
 
     it('daily-brief-agent _getUserName matches this logic', async () => {
-      // Verify the actual agent module has _getUserName and it uses the same pattern
-      vi.resetModules();
-      vi.doMock('../../lib/agent-memory-store', () => ({
-        getAgentMemory: vi.fn(() => ({
-          load: vi.fn(), getSectionNames: vi.fn(() => []),
-          updateSection: vi.fn(), isDirty: vi.fn(() => false), save: vi.fn(),
-          getSection: vi.fn(() => ''), parseSectionAsKeyValue: vi.fn(() => ({})),
-        })),
-      }));
-      vi.doMock('../../lib/ai-service', () => ({ complete: vi.fn(), chat: vi.fn() }));
-      vi.doMock('../../lib/log-event-queue', () => ({
-        getLogQueue: vi.fn(() => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() })),
-      }));
-      vi.doMock('../../lib/user-profile-store', () => ({
-        getUserProfile: () => ({
-          isLoaded: () => true,
-          load: vi.fn(),
-          getFacts: () => ({ Name: 'Robb' }),
-        }),
-      }));
-
-      const agent = require('../../packages/agents/daily-brief-agent');
-      expect(typeof agent._getUserName).toBe('function');
-      const name = await agent._getUserName();
+      // _getUserName accepts an optional profile getter for testability,
+      // since Vitest cannot intercept transitive CJS require() calls.
+      const mockProfileGetter = () => ({
+        isLoaded: () => true,
+        load: vi.fn(),
+        getFacts: () => ({ Name: 'Robb' }),
+      });
+      expect(typeof _dailyBriefAgent._getUserName).toBe('function');
+      const name = await _dailyBriefAgent._getUserName(mockProfileGetter);
       expect(name).toBe('Robb');
     });
 

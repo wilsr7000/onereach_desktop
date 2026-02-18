@@ -1,16 +1,16 @@
 /**
  * Universal Logger for Onereach.ai
- * 
+ *
  * Thin producer that pushes all log events onto the central LogEventQueue.
  * Works in both main process and renderer contexts.
- * 
+ *
  * Usage:
  *   const logger = require('./src/logger');
  *   logger.info('spaces', 'Space created', { spaceId: '123' });
  *   logger.error('agent', 'Agent failed', { error: err.message });
  *   logger.logEvent('video:loaded', { duration: 5.2 });
  *   logger.logUserAction('click', { target: 'save-button' });
- * 
+ *
  * In main process: pushes directly to LogEventQueue
  * In renderer: pushes via window.logging IPC bridge
  * Fallback: console output if neither available
@@ -29,7 +29,7 @@ function _getQueue() {
     try {
       const { getLogQueue } = require('../lib/log-event-queue');
       _queue = getLogQueue();
-    } catch (e) {
+    } catch (_e) {
       // Queue not available yet
     }
   }
@@ -136,7 +136,7 @@ const logger = {
       endpoint,
       error: error.message || String(error),
       stack: error.stack,
-      ...metadata
+      ...metadata,
     });
   },
 
@@ -152,7 +152,7 @@ const logger = {
    */
   logFileOperation(operation, filePath, metadata) {
     this.info('file', `File ${operation}: ${filePath}`, { operation, filePath, ...metadata });
-  }
+  },
 };
 
 module.exports = logger;

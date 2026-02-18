@@ -22,7 +22,7 @@ class ModuleAPIBridge {
       return this.claudeAPI.analyze(prompt, options);
     });
 
-    ipcMain.handle('module:claude:testConnection', async (event) => {
+    ipcMain.handle('module:claude:testConnection', async (_event) => {
       const apiKey = this.getClaudeApiKey();
       if (!apiKey) {
         return false;
@@ -32,12 +32,7 @@ class ModuleAPIBridge {
 
     // Generic Claude API request handler
     ipcMain.handle('module:claude:request', async (event, messages, options = {}) => {
-      const {
-        maxTokens = 1000,
-        temperature = 0.7,
-        system = null,
-        profile = 'standard'
-      } = options;
+      const { maxTokens = 1000, temperature = 0.7, system = null, profile = 'standard' } = options;
 
       const result = await ai.chat({
         profile,
@@ -45,7 +40,7 @@ class ModuleAPIBridge {
         maxTokens,
         temperature,
         system,
-        feature: 'api-bridge'
+        feature: 'api-bridge',
       });
 
       return result;
@@ -90,7 +85,7 @@ class ModuleAPIBridge {
     if (llmConfig && llmConfig.anthropic && llmConfig.anthropic.apiKey) {
       return llmConfig.anthropic.apiKey;
     }
-    
+
     // Fallback to legacy structure
     return this.settingsManager.get('llmApiKey') || '';
   }
@@ -100,12 +95,12 @@ class ModuleAPIBridge {
     if (llmConfig && llmConfig[provider] && llmConfig[provider].apiKey) {
       return llmConfig[provider].apiKey;
     }
-    
+
     // Legacy fallback
     if (provider === 'anthropic') {
       return this.settingsManager.get('llmApiKey') || '';
     }
-    
+
     return '';
   }
 }
@@ -122,5 +117,5 @@ function getModuleAPIBridge() {
 
 module.exports = {
   getModuleAPIBridge,
-  ModuleAPIBridge
-}; 
+  ModuleAPIBridge,
+};

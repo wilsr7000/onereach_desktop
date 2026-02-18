@@ -10,11 +10,16 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep,
-  SPACES_API
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  _sleep,
+  _SPACES_API,
 } = require('../helpers/electron-app');
 
-let app, electronApp, mainWindow, errorSnapshot;
+let app, _electronApp, mainWindow, errorSnapshot;
 
 test.describe('Agentic Player', () => {
   test.beforeAll(async () => {
@@ -23,7 +28,9 @@ test.describe('Agentic Player', () => {
     mainWindow = app.mainWindow;
     errorSnapshot = await snapshotErrors();
   });
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ── Window / File ────────────────────────────────────────────────────────
   test('server module exists', async () => {
@@ -44,34 +51,70 @@ test.describe('Agentic Player', () => {
     const r = await mainWindow.evaluate(async () => {
       try {
         return { hasInvoke: typeof window.api?.invoke === 'function' };
-      } catch { return {}; }
+      } catch {
+        return {};
+      }
     });
     expect(r.hasInvoke).toBe(true);
   });
 
-  test('first scene batch is received and queued', async () => { expect(true).toBe(true); });
-  test('video begins playing first scene', async () => { expect(true).toBe(true); });
-  test('session status updates to active', async () => { expect(true).toBe(true); });
+  test('first scene batch is received and queued', async () => {
+    expect(true).toBe(true);
+  });
+  test('video begins playing first scene', async () => {
+    expect(true).toBe(true);
+  });
+  test('session status updates to active', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Scene Queue / Progress ───────────────────────────────────────────────
-  test('progress bar shows markers at scene boundaries', async () => { expect(true).toBe(true); });
-  test('AI thinking overlay appears between scenes', async () => { expect(true).toBe(true); });
-  test('spinner displays during scene selection', async () => { expect(true).toBe(true); });
-  test('overlay disappears when next scene is ready', async () => { expect(true).toBe(true); });
-  test('queue count badge shows queued scene count', async () => { expect(true).toBe(true); });
-  test('scene queue list displays queued scenes', async () => { expect(true).toBe(true); });
-  test('pre-fetching triggers before current scene ends', async () => { expect(true).toBe(true); });
+  test('progress bar shows markers at scene boundaries', async () => {
+    expect(true).toBe(true);
+  });
+  test('AI thinking overlay appears between scenes', async () => {
+    expect(true).toBe(true);
+  });
+  test('spinner displays during scene selection', async () => {
+    expect(true).toBe(true);
+  });
+  test('overlay disappears when next scene is ready', async () => {
+    expect(true).toBe(true);
+  });
+  test('queue count badge shows queued scene count', async () => {
+    expect(true).toBe(true);
+  });
+  test('scene queue list displays queued scenes', async () => {
+    expect(true).toBe(true);
+  });
+  test('pre-fetching triggers before current scene ends', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Now Playing / Decisions ──────────────────────────────────────────────
-  test('"Now Playing" card shows scene details', async () => { expect(true).toBe(true); });
-  test('decision logs display for each scene selection', async () => { expect(true).toBe(true); });
-  test('context and reasoning text are visible', async () => { expect(true).toBe(true); });
+  test('"Now Playing" card shows scene details', async () => {
+    expect(true).toBe(true);
+  });
+  test('decision logs display for each scene selection', async () => {
+    expect(true).toBe(true);
+  });
+  test('context and reasoning text are visible', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Session End ──────────────────────────────────────────────────────────
-  test('session ends when API returns done: true', async () => { expect(true).toBe(true); });
-  test('session status updates to ended', async () => { expect(true).toBe(true); });
-  test('session with time limit stops at duration', async () => { expect(true).toBe(true); });
-  test('no-limit session continues until all scenes played', async () => { expect(true).toBe(true); });
+  test('session ends when API returns done: true', async () => {
+    expect(true).toBe(true);
+  });
+  test('session status updates to ended', async () => {
+    expect(true).toBe(true);
+  });
+  test('session with time limit stops at duration', async () => {
+    expect(true).toBe(true);
+  });
+  test('no-limit session continues until all scenes played', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Error Check ──────────────────────────────────────────────────────────
   test('no unexpected errors', async () => {

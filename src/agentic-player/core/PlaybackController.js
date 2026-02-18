@@ -13,7 +13,7 @@ export class PlaybackController {
     this.video = videoElement;
     this.currentClip = null;
     this.currentEndTime = null;
-    
+
     this.onClipEnd = null; // Callback when clip ends
     this.onTimeUpdate = null; // Callback for time updates
   }
@@ -51,15 +51,20 @@ export class PlaybackController {
     }
 
     // Check if we need to change source
-    const needsNewSource = !this.video.src || 
+    const needsNewSource =
+      !this.video.src ||
       (videoUrl.startsWith('http') ? this.video.src !== videoUrl : !this.video.src.endsWith(videoUrl));
 
     if (needsNewSource) {
       this.video.src = videoUrl;
-      this.video.addEventListener('loadedmetadata', () => {
-        this.video.currentTime = startTime;
-        this.play();
-      }, { once: true });
+      this.video.addEventListener(
+        'loadedmetadata',
+        () => {
+          this.video.currentTime = startTime;
+          this.play();
+        },
+        { once: true }
+      );
     } else {
       this.video.currentTime = startTime;
       this.play();
@@ -70,7 +75,9 @@ export class PlaybackController {
    * Play video
    */
   play() {
-    this.video.play().catch(e => log.warn('agent', '[PlaybackController] Autoplay blocked', { error: e.message || e }));
+    this.video
+      .play()
+      .catch((e) => log.warn('agent', '[PlaybackController] Autoplay blocked', { error: e.message || e }));
   }
 
   /**
@@ -104,7 +111,7 @@ export class PlaybackController {
    */
   handleTimeUpdate() {
     const currentTime = this.video.currentTime;
-    
+
     // Check if clip should end
     if (this.currentEndTime && currentTime >= this.currentEndTime - 0.1) {
       this.handleEnded();
@@ -116,7 +123,7 @@ export class PlaybackController {
       this.onTimeUpdate({
         currentTime,
         duration: this.video.duration,
-        remainingInClip: this.currentEndTime ? this.currentEndTime - currentTime : null
+        remainingInClip: this.currentEndTime ? this.currentEndTime - currentTime : null,
       });
     }
   }
@@ -165,23 +172,7 @@ export class PlaybackController {
       isMuted: this.video.muted,
       currentTime: this.video.currentTime,
       duration: this.video.duration,
-      currentClip: this.currentClip
+      currentClip: this.currentClip,
     };
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

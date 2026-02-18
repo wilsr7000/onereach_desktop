@@ -357,9 +357,9 @@ async function cmdFailed(orch) {
   for (const plan of st.plans) {
     if (plan.failed > 0) {
       const items = orch._state._items
-        .filter(i => i.planNumber === plan.number)
-        .map(i => ({ ...i, state: orch._state._state.items[i.id] }))
-        .filter(i => i.state && i.state.status === 'failed');
+        .filter((i) => i.planNumber === plan.number)
+        .map((i) => ({ ...i, state: orch._state._state.items[i.id] }))
+        .filter((i) => i.state && i.state.status === 'failed');
       failedItems.push(...items);
     }
   }
@@ -426,11 +426,22 @@ async function cmdPlan(orch, planNumber) {
   for (const r of result.results) {
     const item = r.item;
     const status = r.result ? r.result.status : 'pending';
-    const icon = r.action === 'manual' ? 'M' : r.action === 'verify' ? 'V' : status === 'passed' ? '+' : status === 'failed' ? 'X' : '-';
+    const icon =
+      r.action === 'manual'
+        ? 'M'
+        : r.action === 'verify'
+          ? 'V'
+          : status === 'passed'
+            ? '+'
+            : status === 'failed'
+              ? 'X'
+              : '-';
     console.log(`  [${icon}] ${colorStatus(status).padEnd(18)} ${item.description.slice(0, 60)}`);
   }
   console.log(`${'─'.repeat(50)}`);
-  console.log(`  Total: ${result.summary.total}, Passed: ${C.green}${result.summary.passed}${C.reset}, Failed: ${C.red}${result.summary.failed}${C.reset}, Manual: ${C.yellow}${result.summary.manual}${C.reset}, Skipped: ${result.summary.skipped}`);
+  console.log(
+    `  Total: ${result.summary.total}, Passed: ${C.green}${result.summary.passed}${C.reset}, Failed: ${C.red}${result.summary.failed}${C.reset}, Manual: ${C.yellow}${result.summary.manual}${C.reset}, Skipped: ${result.summary.skipped}`
+  );
   console.log('');
 }
 
@@ -475,8 +486,8 @@ async function cmdItem(orch, itemId) {
   if (!item || !item.state) {
     // Try partial match
     const st = orch.status();
-    const matches = st.plans.flatMap(p => {
-      const items = orch._state ? [] : [];
+    const _matches = st.plans.flatMap((_p) => {
+      const _items = orch._state ? [] : [];
       return [];
     });
     console.error(`${C.red}Item not found: ${itemId}${C.reset}`);
@@ -497,7 +508,9 @@ async function cmdItem(orch, itemId) {
   if (item.state.runs.length > 0) {
     console.log(`\n  ${C.bold}Run History:${C.reset}`);
     for (const run of item.state.runs) {
-      console.log(`    ${C.dim}${run.timestamp}${C.reset} ${colorStatus(run.status)} (${run.durationMs}ms)${run.notes ? ' -- ' + run.notes : ''}${run.error ? ' ERROR: ' + run.error : ''}`);
+      console.log(
+        `    ${C.dim}${run.timestamp}${C.reset} ${colorStatus(run.status)} (${run.durationMs}ms)${run.notes ? ' -- ' + run.notes : ''}${run.error ? ' ERROR: ' + run.error : ''}`
+      );
     }
   }
 
@@ -599,7 +612,7 @@ async function cmdDiagnose(orch, itemId) {
 }
 
 // ─── Run ───
-main().catch(err => {
+main().catch((err) => {
   console.error(`${C.red}Fatal error: ${err.message}${C.reset}`);
   if (process.env.DEBUG) console.error(err.stack);
   process.exit(1);

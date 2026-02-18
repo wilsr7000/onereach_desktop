@@ -23,7 +23,7 @@ export const RELEASE_DESTINATION = {
   SPACE: 'space',
   YOUTUBE: 'youtube',
   VIMEO: 'vimeo',
-  LOCAL: 'local'
+  LOCAL: 'local',
 };
 
 /**
@@ -35,7 +35,7 @@ export const RELEASE_STATUS = {
   UPLOADING: 'uploading',
   COMPLETED: 'completed',
   FAILED: 'failed',
-  CANCELLED: 'cancelled'
+  CANCELLED: 'cancelled',
 };
 
 /**
@@ -46,11 +46,11 @@ export class ReleaseManager {
     this.versionManager = new VersionManager();
     this.branchRenderer = new BranchRenderer();
     this.stateDetector = new ProjectStateDetector();
-    
+
     this.releasesDir = path.join(app.getPath('userData'), 'releases');
     this.releaseHistory = [];
     this.activeRelease = null;
-    
+
     this.ensureDirectories();
     this.loadReleaseHistory();
   }
@@ -96,11 +96,11 @@ export class ReleaseManager {
     const project = this.versionManager.loadProject(projectPath);
     const branches = this.stateDetector.getReleasableBranches(projectPath, project);
     const summary = this.stateDetector.getReleaseSummary(projectPath, project);
-    
+
     return {
       projectId: project.id,
       projectName: project.name,
-      branches: branches.map(b => ({
+      branches: branches.map((b) => ({
         id: b.branchId,
         name: b.branchName,
         type: b.branchType,
@@ -109,15 +109,15 @@ export class ReleaseManager {
         version: b.latestVersion?.version || null,
         hasRenderedFile: b.hasRenderedRelease,
         canRelease: b.finalized,
-        needsRender: b.needsRender
+        needsRender: b.needsRender,
       })),
       summary: summary,
       destinations: [
         { id: RELEASE_DESTINATION.SPACE, name: 'Space', icon: '📁', available: true },
         { id: RELEASE_DESTINATION.YOUTUBE, name: 'YouTube', icon: '▶️', available: true },
         { id: RELEASE_DESTINATION.VIMEO, name: 'Vimeo', icon: '🎬', available: true },
-        { id: RELEASE_DESTINATION.LOCAL, name: 'Local File', icon: '💾', available: true }
-      ]
+        { id: RELEASE_DESTINATION.LOCAL, name: 'Local File', icon: '💾', available: true },
+      ],
     };
   }
 
@@ -131,7 +131,7 @@ export class ReleaseManager {
       [RELEASE_STATE.NEEDS_RENDER]: 'Needs Rendering',
       [RELEASE_STATE.HAS_UNSAVED_CHANGES]: 'Has Unsaved Changes',
       [RELEASE_STATE.NO_VERSIONS]: 'No Versions',
-      [RELEASE_STATE.ERROR]: 'Error'
+      [RELEASE_STATE.ERROR]: 'Error',
     };
     return labels[state] || state;
   }
@@ -147,11 +147,11 @@ export class ReleaseManager {
    */
   async startRelease(projectPath, branchId, destination, metadata = {}, progressCallback = null) {
     const releaseId = `release_${Date.now()}`;
-    
+
     try {
       const project = this.versionManager.loadProject(projectPath);
       const branchStatus = this.stateDetector.isBranchFinalized(projectPath, project, branchId);
-      
+
       if (!branchStatus.finalized) {
         throw new Error(`Branch not ready for release: ${branchStatus.error}`);
       }
@@ -170,7 +170,7 @@ export class ReleaseManager {
         startedAt: new Date().toISOString(),
         completedAt: null,
         error: null,
-        result: null
+        result: null,
       };
 
       this.activeRelease = release;
@@ -182,10 +182,10 @@ export class ReleaseManager {
 
       // Check if we need to render first
       let videoPath = branchStatus.fullReleasePath;
-      
+
       if (branchStatus.needsRender || !fs.existsSync(videoPath)) {
         release.status = RELEASE_STATUS.RENDERING;
-        
+
         if (progressCallback) {
           progressCallback({ status: 'Rendering video...', percent: 5 });
         }
@@ -200,7 +200,7 @@ export class ReleaseManager {
             if (progressCallback) {
               progressCallback({
                 status: `Rendering: ${progress.status}`,
-                percent: 5 + (progress.percent * 0.4)
+                percent: 5 + progress.percent * 0.4,
               });
             }
           }
@@ -220,33 +220,28 @@ export class ReleaseManager {
           'releases',
           `v${branchStatus.latestVersion.version}.mp4`
         );
-        
+
         // Ensure releases directory exists
         fs.mkdirSync(path.dirname(releasePath), { recursive: true });
-        
+
         // Copy rendered file to releases folder
         fs.copyFileSync(videoPath, releasePath);
-        
+
         // Update version with release path
-        this.versionManager.markVersionReleased(
-          projectPath,
-          branchId,
-          branchStatus.latestVersion.version,
-          releasePath
-        );
+        this.versionManager.markVersionReleased(projectPath, branchId, branchStatus.latestVersion.version, releasePath);
 
         videoPath = releasePath;
       }
 
       // Now handle the destination
       release.status = RELEASE_STATUS.UPLOADING;
-      
+
       if (progressCallback) {
         progressCallback({ status: `Releasing to ${destination}...`, percent: 50 });
       }
 
       let result;
-      
+
       switch (destination) {
         case RELEASE_DESTINATION.SPACE:
           result = await this._releaseToSpace(projectPath, project, branchId, videoPath, metadata, progressCallback);
@@ -280,19 +275,18 @@ export class ReleaseManager {
         success: true,
         releaseId: releaseId,
         destination: destination,
-        result: result
+        result: result,
       };
-
     } catch (error) {
       log.error('video', '[ReleaseManager] Release failed', { error: error });
-      
+
       if (this.activeRelease) {
         this.activeRelease.status = RELEASE_STATUS.FAILED;
         this.activeRelease.error = error.message;
         this.activeRelease.completedAt = new Date().toISOString();
         this.saveReleaseHistory();
       }
-      
+
       this.activeRelease = null;
       throw error;
     }
@@ -310,24 +304,24 @@ export class ReleaseManager {
     let releasesSpace;
     try {
       const spaces = await spacesAPI.list();
-      releasesSpace = spaces.find(s => s.name === 'Releases');
+      releasesSpace = spaces.find((s) => s.name === 'Releases');
       if (!releasesSpace) {
         releasesSpace = await spacesAPI.create('Releases');
       }
-    } catch (e) {
+    } catch (_e) {
       // Fallback: create the space
       releasesSpace = await spacesAPI.create('Releases');
     }
 
-    const fileName = metadata.title 
+    const fileName = metadata.title
       ? `${metadata.title.replace(/[^a-zA-Z0-9-_]/g, '_')}.mp4`
       : path.basename(videoPath);
-    
+
     // Copy to spaces storage directory
     const spacesReleasesDir = path.join(spacesAPI.storage.spacesDir, releasesSpace.id);
     fs.mkdirSync(spacesReleasesDir, { recursive: true });
     const destPath = path.join(spacesReleasesDir, fileName);
-    
+
     if (progressCallback) {
       progressCallback({ status: 'Copying to Space...', percent: 70 });
     }
@@ -345,8 +339,8 @@ export class ReleaseManager {
           ...metadata,
           projectId: project.id,
           projectName: project.name,
-          filePath: destPath
-        }
+          filePath: destPath,
+        },
       });
     } catch (e) {
       log.error('release', 'Failed to add release to space', { error: e.message });
@@ -354,14 +348,21 @@ export class ReleaseManager {
 
     // Create metadata file
     const metadataPath = destPath.replace('.mp4', '.json');
-    fs.writeFileSync(metadataPath, JSON.stringify({
-      ...metadata,
-      projectId: project.id,
-      projectName: project.name,
-      branchId: branchId,
-      releasedAt: new Date().toISOString(),
-      sourcePath: videoPath
-    }, null, 2));
+    fs.writeFileSync(
+      metadataPath,
+      JSON.stringify(
+        {
+          ...metadata,
+          projectId: project.id,
+          projectName: project.name,
+          branchId: branchId,
+          releasedAt: new Date().toISOString(),
+          sourcePath: videoPath,
+        },
+        null,
+        2
+      )
+    );
 
     if (progressCallback) {
       progressCallback({ status: 'Saved to Space!', percent: 100 });
@@ -370,7 +371,7 @@ export class ReleaseManager {
     return {
       destination: 'space',
       path: destPath,
-      metadataPath: metadataPath
+      metadataPath: metadataPath,
     };
   }
 
@@ -381,27 +382,27 @@ export class ReleaseManager {
   async _releaseToYouTube(videoPath, metadata, progressCallback) {
     // Check if YouTube uploader is available and authenticated
     // If not, fall back to browser upload
-    
+
     try {
       // Try to use YouTubeUploader if available
       const { YouTubeUploader } = await import('./YouTubeUploader.js');
       const uploader = new YouTubeUploader();
-      
+
       if (await uploader.isAuthenticated()) {
         if (progressCallback) {
           progressCallback({ status: 'Uploading to YouTube...', percent: 55 });
         }
-        
+
         return await uploader.upload(videoPath, metadata, (progress) => {
           if (progressCallback) {
             progressCallback({
               status: `Uploading: ${progress.percent}%`,
-              percent: 55 + (progress.percent * 0.4)
+              percent: 55 + progress.percent * 0.4,
             });
           }
         });
       }
-    } catch (e) {
+    } catch (_e) {
       log.info('video', '[ReleaseManager] YouTube API not available, using browser fallback');
     }
 
@@ -415,7 +416,7 @@ export class ReleaseManager {
    */
   async _openYouTubeBrowserUpload(videoPath, metadata, progressCallback) {
     const { clipboard } = require('electron');
-    
+
     if (progressCallback) {
       progressCallback({ status: 'Opening YouTube Studio...', percent: 80 });
     }
@@ -435,7 +436,7 @@ export class ReleaseManager {
       method: 'browser',
       videoPath: videoPath,
       message: 'Video path copied to clipboard. Upload manually in YouTube Studio.',
-      metadata: metadata
+      metadata: metadata,
     };
   }
 
@@ -446,27 +447,27 @@ export class ReleaseManager {
   async _releaseToVimeo(videoPath, metadata, progressCallback) {
     // Check if Vimeo uploader is available and authenticated
     // If not, fall back to browser upload
-    
+
     try {
       // Try to use VimeoUploader if available
       const { VimeoUploader } = await import('./VimeoUploader.js');
       const uploader = new VimeoUploader();
-      
+
       if (await uploader.isAuthenticated()) {
         if (progressCallback) {
           progressCallback({ status: 'Uploading to Vimeo...', percent: 55 });
         }
-        
+
         return await uploader.upload(videoPath, metadata, (progress) => {
           if (progressCallback) {
             progressCallback({
               status: `Uploading: ${progress.percent}%`,
-              percent: 55 + (progress.percent * 0.4)
+              percent: 55 + progress.percent * 0.4,
             });
           }
         });
       }
-    } catch (e) {
+    } catch (_e) {
       log.info('video', '[ReleaseManager] Vimeo API not available, using browser fallback');
     }
 
@@ -480,7 +481,7 @@ export class ReleaseManager {
    */
   async _openVimeoBrowserUpload(videoPath, metadata, progressCallback) {
     const { clipboard } = require('electron');
-    
+
     if (progressCallback) {
       progressCallback({ status: 'Opening Vimeo...', percent: 80 });
     }
@@ -500,7 +501,7 @@ export class ReleaseManager {
       method: 'browser',
       videoPath: videoPath,
       message: 'Video path copied to clipboard. Upload manually on Vimeo.',
-      metadata: metadata
+      metadata: metadata,
     };
   }
 
@@ -510,12 +511,12 @@ export class ReleaseManager {
    */
   async _releaseToLocal(videoPath, metadata, progressCallback) {
     const { dialog } = require('electron');
-    
+
     if (progressCallback) {
       progressCallback({ status: 'Selecting save location...', percent: 60 });
     }
 
-    const defaultName = metadata.title 
+    const defaultName = metadata.title
       ? `${metadata.title.replace(/[^a-zA-Z0-9-_]/g, '_')}.mp4`
       : path.basename(videoPath);
 
@@ -523,15 +524,13 @@ export class ReleaseManager {
     const result = await dialog.showSaveDialog({
       title: 'Save Released Video',
       defaultPath: path.join(app.getPath('videos'), defaultName),
-      filters: [
-        { name: 'Video Files', extensions: ['mp4', 'mov', 'webm'] }
-      ]
+      filters: [{ name: 'Video Files', extensions: ['mp4', 'mov', 'webm'] }],
     });
 
     if (result.canceled || !result.filePath) {
       return {
         destination: 'local',
-        cancelled: true
+        cancelled: true,
       };
     }
 
@@ -549,7 +548,7 @@ export class ReleaseManager {
     return {
       destination: 'local',
       path: result.filePath,
-      fileName: path.basename(result.filePath)
+      fileName: path.basename(result.filePath),
     };
   }
 
@@ -568,7 +567,7 @@ export class ReleaseManager {
    * @returns {Array<Object>} Release history for project
    */
   getProjectReleaseHistory(projectId) {
-    return this.releaseHistory.filter(r => r.projectId === projectId);
+    return this.releaseHistory.filter((r) => r.projectId === projectId);
   }
 
   /**
@@ -606,7 +605,7 @@ export class ReleaseManager {
    */
   clearReleaseHistory(projectId = null) {
     if (projectId) {
-      this.releaseHistory = this.releaseHistory.filter(r => r.projectId !== projectId);
+      this.releaseHistory = this.releaseHistory.filter((r) => r.projectId !== projectId);
     } else {
       this.releaseHistory = [];
     }
@@ -636,7 +635,7 @@ export class ReleaseManager {
    */
   async _releaseVideoDirectly(videoPath, destination, metadata = {}, progressCallback = null) {
     const releaseId = `release_${Date.now()}`;
-    
+
     try {
       if (!fs.existsSync(videoPath)) {
         throw new Error(`Video file not found: ${videoPath}`);
@@ -656,7 +655,7 @@ export class ReleaseManager {
         startedAt: new Date().toISOString(),
         completedAt: null,
         error: null,
-        result: null
+        result: null,
       };
 
       this.activeRelease = release;
@@ -667,10 +666,17 @@ export class ReleaseManager {
       }
 
       let result;
-      
+
       switch (destination) {
         case RELEASE_DESTINATION.SPACE:
-          result = await this._releaseToSpace(null, { name: path.basename(videoPath) }, null, videoPath, metadata, progressCallback);
+          result = await this._releaseToSpace(
+            null,
+            { name: path.basename(videoPath) },
+            null,
+            videoPath,
+            metadata,
+            progressCallback
+          );
           break;
         case RELEASE_DESTINATION.YOUTUBE:
           result = await this._releaseToYouTube(videoPath, metadata, progressCallback);
@@ -701,32 +707,20 @@ export class ReleaseManager {
         success: true,
         releaseId: releaseId,
         destination: destination,
-        result: result
+        result: result,
       };
-
     } catch (error) {
       log.error('video', '[ReleaseManager] Direct release failed', { error: error });
-      
+
       if (this.activeRelease) {
         this.activeRelease.status = RELEASE_STATUS.FAILED;
         this.activeRelease.error = error.message;
         this.activeRelease.completedAt = new Date().toISOString();
         this.saveReleaseHistory();
       }
-      
+
       this.activeRelease = null;
       throw error;
     }
   }
 }
-
-
-
-
-
-
-
-
-
-
-

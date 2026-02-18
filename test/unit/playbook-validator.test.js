@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../lib/ai-service', () => ({ default: null }));
 vi.mock('../../lib/log-event-queue', () => ({
@@ -9,7 +9,11 @@ vi.mock('../../lib/log-event-queue', () => ({
   }),
 }));
 
-const { validatePlaybook, validateStructural, validateGraphReadiness } = require('../../lib/converters/playbook-validator');
+const {
+  validatePlaybook,
+  validateStructural,
+  validateGraphReadiness,
+} = require('../../lib/converters/playbook-validator');
 
 /**
  * Create a fully valid playbook object for testing.
@@ -69,7 +73,7 @@ describe('validateStructural', () => {
     delete pb.title;
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'title' && e.code === 'MISSING_FIELD')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'title' && e.code === 'MISSING_FIELD')).toBe(true);
   });
 
   it('fails when title is null', () => {
@@ -77,7 +81,7 @@ describe('validateStructural', () => {
     pb.title = null;
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'title' && e.code === 'MISSING_FIELD')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'title' && e.code === 'MISSING_FIELD')).toBe(true);
   });
 
   it('fails when content is empty', () => {
@@ -85,7 +89,7 @@ describe('validateStructural', () => {
     pb.content = '   ';
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'content' && e.code === 'EMPTY_FIELD')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'content' && e.code === 'EMPTY_FIELD')).toBe(true);
   });
 
   it('fails when content is missing', () => {
@@ -93,7 +97,7 @@ describe('validateStructural', () => {
     delete pb.content;
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'content' && e.code === 'MISSING_FIELD')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'content' && e.code === 'MISSING_FIELD')).toBe(true);
   });
 
   it('fails when framework is missing', () => {
@@ -101,7 +105,7 @@ describe('validateStructural', () => {
     delete pb.framework;
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'framework' && e.code === 'MISSING_FIELD')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'framework' && e.code === 'MISSING_FIELD')).toBe(true);
   });
 
   it('fails when keywords is wrong type', () => {
@@ -109,7 +113,7 @@ describe('validateStructural', () => {
     pb.keywords = 'not-an-array';
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'keywords' && e.code === 'WRONG_TYPE')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'keywords' && e.code === 'WRONG_TYPE')).toBe(true);
   });
 
   it('fails when framework is an array instead of object', () => {
@@ -117,7 +121,7 @@ describe('validateStructural', () => {
     pb.framework = ['not', 'an', 'object'];
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'framework' && e.code === 'WRONG_TYPE')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'framework' && e.code === 'WRONG_TYPE')).toBe(true);
   });
 
   it('detects missing framework pillar fields', () => {
@@ -125,7 +129,7 @@ describe('validateStructural', () => {
     delete pb.framework.who.primary;
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'framework.who.primary' && e.code === 'MISSING_FIELD')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'framework.who.primary' && e.code === 'MISSING_FIELD')).toBe(true);
   });
 
   it('detects empty framework pillar string', () => {
@@ -133,7 +137,7 @@ describe('validateStructural', () => {
     pb.framework.why.coreValue = '   ';
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'framework.why.coreValue' && e.code === 'EMPTY_FIELD')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'framework.why.coreValue' && e.code === 'EMPTY_FIELD')).toBe(true);
   });
 
   it('detects wrong type on framework pillar array field', () => {
@@ -141,7 +145,9 @@ describe('validateStructural', () => {
     pb.framework.who.characteristics = 'not-an-array';
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'framework.who.characteristics' && e.code === 'WRONG_TYPE')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'framework.who.characteristics' && e.code === 'WRONG_TYPE')).toBe(
+      true
+    );
   });
 
   it('collects multiple errors', () => {
@@ -151,8 +157,8 @@ describe('validateStructural', () => {
     const result = validateStructural(pb);
     expect(result.pass).toBe(false);
     expect(result.errors.length).toBeGreaterThanOrEqual(2);
-    expect(result.errors.some(e => e.field === 'title')).toBe(true);
-    expect(result.errors.some(e => e.field === 'content')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'title')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'content')).toBe(true);
   });
 });
 
@@ -174,7 +180,7 @@ describe('validateGraphReadiness', () => {
     delete pb.status;
     const result = validateGraphReadiness(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'status' && e.code === 'MISSING_GRAPH_FIELD')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'status' && e.code === 'MISSING_GRAPH_FIELD')).toBe(true);
   });
 
   it('fails when stage is missing', () => {
@@ -182,7 +188,7 @@ describe('validateGraphReadiness', () => {
     delete pb.stage;
     const result = validateGraphReadiness(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.field === 'stage' && e.code === 'MISSING_GRAPH_FIELD')).toBe(true);
+    expect(result.errors.some((e) => e.field === 'stage' && e.code === 'MISSING_GRAPH_FIELD')).toBe(true);
   });
 
   it('fails when keywords array is empty', () => {
@@ -190,7 +196,7 @@ describe('validateGraphReadiness', () => {
     pb.keywords = [];
     const result = validateGraphReadiness(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.code === 'EMPTY_KEYWORDS')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'EMPTY_KEYWORDS')).toBe(true);
   });
 
   it('fails when framework is missing', () => {
@@ -198,7 +204,7 @@ describe('validateGraphReadiness', () => {
     delete pb.framework;
     const result = validateGraphReadiness(pb);
     expect(result.pass).toBe(false);
-    expect(result.errors.some(e => e.code === 'MISSING_FRAMEWORK')).toBe(true);
+    expect(result.errors.some((e) => e.code === 'MISSING_FRAMEWORK')).toBe(true);
   });
 
   it('collects multiple graph readiness errors', () => {

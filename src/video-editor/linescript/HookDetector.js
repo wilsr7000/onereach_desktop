@@ -1,6 +1,6 @@
 /**
  * HookDetector.js - Find Hook-Worthy Moments Throughout Video
- * 
+ *
  * Features:
  * - Analyzes entire video for attention-grabbing moments
  * - Multi-factor scoring (curiosity gap, energy, pattern interrupt, emotion)
@@ -13,11 +13,11 @@
  */
 const HOOK_FACTORS = {
   CURIOSITY_GAP: { weight: 0.25, label: 'Curiosity Gap' },
-  ENERGY_SPIKE: { weight: 0.20, label: 'Energy Spike' },
-  PATTERN_INTERRUPT: { weight: 0.20, label: 'Pattern Interrupt' },
+  ENERGY_SPIKE: { weight: 0.2, label: 'Energy Spike' },
+  PATTERN_INTERRUPT: { weight: 0.2, label: 'Pattern Interrupt' },
   EMOTIONAL_PEAK: { weight: 0.15, label: 'Emotional Peak' },
-  VISUAL_INTEREST: { weight: 0.10, label: 'Visual Interest' },
-  BOLDNESS: { weight: 0.10, label: 'Boldness' }
+  VISUAL_INTEREST: { weight: 0.1, label: 'Visual Interest' },
+  BOLDNESS: { weight: 0.1, label: 'Boldness' },
 };
 
 /**
@@ -30,8 +30,8 @@ const HOOK_PATTERNS = {
     /the (secret|truth|real|biggest|one thing)/i,
     /you won'?t believe/i,
     /this (changed|will change)/i,
-    /\?$/,  // Questions
-    /let me (tell|show|explain)/i
+    /\?$/, // Questions
+    /let me (tell|show|explain)/i,
   ],
   patternInterrupt: [
     /wait/i,
@@ -41,7 +41,7 @@ const HOOK_PATTERNS = {
     /wrong/i,
     /mistake/i,
     /completely/i,
-    /forget (everything|what)/i
+    /forget (everything|what)/i,
   ],
   emotional: [
     /honestly/i,
@@ -49,20 +49,11 @@ const HOOK_PATTERNS = {
     /amazing/i,
     /terrible/i,
     /passionate/i,
-    /\!/,  // Exclamations
+    /\!/, // Exclamations
     /crazy/i,
-    /unbelievable/i
+    /unbelievable/i,
   ],
-  boldness: [
-    /never/i,
-    /always/i,
-    /best/i,
-    /worst/i,
-    /only way/i,
-    /guaranteed/i,
-    /definitely/i,
-    /absolutely/i
-  ]
+  boldness: [/never/i, /always/i, /best/i, /worst/i, /only way/i, /guaranteed/i, /definitely/i, /absolutely/i],
 };
 
 /**
@@ -71,16 +62,16 @@ const HOOK_PATTERNS = {
 export class HookDetector {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Analysis state
     this.hooks = [];
     this.currentOpeningScore = null;
     this.isAnalyzing = false;
-    
+
     // Configuration
     this.windowSize = 5; // Seconds per analysis window
     this.hookThreshold = 5; // Minimum score to be considered a hook (out of 10)
-    
+
     // Event listeners
     this.eventListeners = {};
   }
@@ -95,22 +86,22 @@ export class HookDetector {
   async analyzeVideo(videoPath, transcriptSegments, audioAnalysis = null) {
     this.isAnalyzing = true;
     this.hooks = [];
-    
+
     this.emit('analysisStarted');
-    
+
     try {
       // Get words with timing
       const words = this.expandToWords(transcriptSegments);
       const totalDuration = words.length > 0 ? words[words.length - 1].end : 0;
-      
+
       // Create analysis windows
       const windows = this.createAnalysisWindows(words, totalDuration);
-      
+
       // Analyze each window
       for (let i = 0; i < windows.length; i++) {
         const window = windows[i];
         const score = await this.scoreHookPotential(window, audioAnalysis);
-        
+
         if (score.total >= this.hookThreshold) {
           this.hooks.push({
             id: `hook-${i}`,
@@ -120,39 +111,38 @@ export class HookDetector {
             score: score.total,
             breakdown: score.factors,
             classification: this.classifyHook(score),
-            thumbnail: null // Can be populated later
+            thumbnail: null, // Can be populated later
           });
         }
-        
+
         this.emit('windowAnalyzed', {
           index: i,
           total: windows.length,
-          progress: ((i + 1) / windows.length) * 100
+          progress: ((i + 1) / windows.length) * 100,
         });
       }
-      
+
       // Sort by score
       this.hooks.sort((a, b) => b.score - a.score);
-      
+
       // Score current opening
       this.currentOpeningScore = await this.scoreCurrentOpening(windows.slice(0, 2));
-      
+
       // Find best opening suggestion
       const bestOpening = this.findBestOpening();
-      
+
       const results = {
         hooks: this.hooks,
         currentOpeningScore: this.currentOpeningScore,
         openingSuggestion: bestOpening,
         totalHooksFound: this.hooks.length,
-        analysisComplete: true
+        analysisComplete: true,
       };
-      
+
       this.isAnalyzing = false;
       this.emit('analysisComplete', results);
-      
+
       return results;
-      
     } catch (error) {
       this.isAnalyzing = false;
       this.emit('analysisError', { error });
@@ -168,23 +158,24 @@ export class HookDetector {
    */
   createAnalysisWindows(words, totalDuration) {
     const windows = [];
-    
-    for (let t = 0; t < totalDuration; t += this.windowSize / 2) { // 50% overlap
+
+    for (let t = 0; t < totalDuration; t += this.windowSize / 2) {
+      // 50% overlap
       const windowStart = t;
       const windowEnd = Math.min(t + this.windowSize, totalDuration);
-      
-      const windowWords = words.filter(w => w.start >= windowStart && w.end <= windowEnd);
-      
+
+      const windowWords = words.filter((w) => w.start >= windowStart && w.end <= windowEnd);
+
       if (windowWords.length > 0) {
         windows.push({
           start: windowStart,
           end: windowEnd,
           words: windowWords,
-          text: windowWords.map(w => w.text).join(' ')
+          text: windowWords.map((w) => w.text).join(' '),
         });
       }
     }
-    
+
     return windows;
   }
 
@@ -196,25 +187,25 @@ export class HookDetector {
    */
   async scoreHookPotential(window, audioAnalysis) {
     const factors = {};
-    
+
     // Score curiosity gap
     factors.curiosityGap = this.scoreCuriosityGap(window.text);
-    
+
     // Score energy spike
     factors.energySpike = this.scoreEnergySpike(window, audioAnalysis);
-    
+
     // Score pattern interrupt
     factors.patternInterrupt = this.scorePatternInterrupt(window.text);
-    
+
     // Score emotional peak
     factors.emotionalPeak = this.scoreEmotionalPeak(window.text);
-    
+
     // Score visual interest (if available)
     factors.visualInterest = await this.scoreVisualInterest(window);
-    
+
     // Score boldness
     factors.boldness = this.scoreBoldness(window.text);
-    
+
     // Calculate weighted total
     let total = 0;
     Object.entries(HOOK_FACTORS).forEach(([key, config]) => {
@@ -222,10 +213,10 @@ export class HookDetector {
       const score = factors[factorKey] || 0;
       total += score * config.weight;
     });
-    
+
     // Scale to 0-10
     total = Math.min(10, total);
-    
+
     return { total, factors };
   }
 
@@ -236,20 +227,20 @@ export class HookDetector {
    */
   scoreCuriosityGap(text) {
     let score = 0;
-    
-    HOOK_PATTERNS.curiosityGap.forEach(pattern => {
+
+    HOOK_PATTERNS.curiosityGap.forEach((pattern) => {
       if (pattern.test(text)) {
         score += 3;
       }
     });
-    
+
     // Bonus for questions
     const questionCount = (text.match(/\?/g) || []).length;
     score += questionCount * 2;
-    
+
     // Bonus for incomplete thoughts (ellipsis, trailing)
     if (/\.\.\./.test(text)) score += 2;
-    
+
     return Math.min(10, score);
   }
 
@@ -261,28 +252,28 @@ export class HookDetector {
    */
   scoreEnergySpike(window, audioAnalysis) {
     let score = 5; // Base score
-    
+
     // Check audio analysis if available
     if (audioAnalysis) {
       const windowRMS = this.getAudioRMSForWindow(window, audioAnalysis);
       const averageRMS = audioAnalysis.averageRMS || 0.5;
-      
+
       if (windowRMS > averageRMS * 1.5) {
         score += 3;
       } else if (windowRMS > averageRMS * 1.2) {
         score += 2;
       }
     }
-    
+
     // Text-based energy indicators
     const exclamations = (window.text.match(/!/g) || []).length;
     score += Math.min(2, exclamations);
-    
+
     // Word intensity
     const intensiveWords = /incredible|amazing|fantastic|absolutely|definitely/gi;
     const intensityMatches = window.text.match(intensiveWords) || [];
     score += Math.min(2, intensityMatches.length);
-    
+
     return Math.min(10, score);
   }
 
@@ -293,23 +284,23 @@ export class HookDetector {
    */
   scorePatternInterrupt(text) {
     let score = 0;
-    
-    HOOK_PATTERNS.patternInterrupt.forEach(pattern => {
+
+    HOOK_PATTERNS.patternInterrupt.forEach((pattern) => {
       if (pattern.test(text)) {
         score += 3;
       }
     });
-    
+
     // Contradictions
     if (/but actually|however|on the contrary/i.test(text)) {
       score += 3;
     }
-    
+
     // Surprising starts
     if (/^(wait|stop|no|actually)/i.test(text.trim())) {
       score += 2;
     }
-    
+
     return Math.min(10, score);
   }
 
@@ -320,23 +311,23 @@ export class HookDetector {
    */
   scoreEmotionalPeak(text) {
     let score = 0;
-    
-    HOOK_PATTERNS.emotional.forEach(pattern => {
+
+    HOOK_PATTERNS.emotional.forEach((pattern) => {
       if (pattern.test(text)) {
         score += 2;
       }
     });
-    
+
     // Personal stories
     if (/I (remember|felt|realized|discovered|learned)/i.test(text)) {
       score += 2;
     }
-    
+
     // Vulnerability
     if (/scared|nervous|worried|excited|thrilled/i.test(text)) {
       score += 2;
     }
-    
+
     return Math.min(10, score);
   }
 
@@ -348,17 +339,17 @@ export class HookDetector {
   async scoreVisualInterest(window) {
     // Without actual frame analysis, use heuristics
     let score = 5; // Base score
-    
+
     // Text mentions of visual elements
     if (/look at|watch|see|show|demonstrate/i.test(window.text)) {
       score += 2;
     }
-    
+
     // Action words suggesting movement
     if (/moving|running|jumping|dancing|gesturing/i.test(window.text)) {
       score += 2;
     }
-    
+
     return Math.min(10, score);
   }
 
@@ -369,23 +360,23 @@ export class HookDetector {
    */
   scoreBoldness(text) {
     let score = 0;
-    
-    HOOK_PATTERNS.boldness.forEach(pattern => {
+
+    HOOK_PATTERNS.boldness.forEach((pattern) => {
       if (pattern.test(text)) {
         score += 2;
       }
     });
-    
+
     // Strong claims
     if (/you (must|need to|should|have to)/i.test(text)) {
       score += 2;
     }
-    
+
     // Definitive statements
     if (/the (only|best|worst|most important)/i.test(text)) {
       score += 2;
     }
-    
+
     return Math.min(10, score);
   }
 
@@ -399,14 +390,12 @@ export class HookDetector {
     if (!audioAnalysis || !audioAnalysis.rmsTimeline) {
       return 0.5; // Default mid-value
     }
-    
+
     // Find RMS values within window
-    const rmsInWindow = audioAnalysis.rmsTimeline.filter(
-      r => r.time >= window.start && r.time <= window.end
-    );
-    
+    const rmsInWindow = audioAnalysis.rmsTimeline.filter((r) => r.time >= window.start && r.time <= window.end);
+
     if (rmsInWindow.length === 0) return 0.5;
-    
+
     return rmsInWindow.reduce((sum, r) => sum + r.value, 0) / rmsInWindow.length;
   }
 
@@ -417,13 +406,13 @@ export class HookDetector {
    */
   classifyHook(score) {
     const factors = score.factors;
-    
+
     if (factors.curiosityGap >= 8) return 'teaser-opening';
     if (factors.emotionalPeak >= 8) return 'emotional-hook';
     if (factors.energySpike >= 8) return 'high-energy-cut';
     if (factors.patternInterrupt >= 8) return 'pattern-interrupt';
     if (factors.boldness >= 8) return 'bold-statement';
-    
+
     return 'strong-moment';
   }
 
@@ -436,20 +425,20 @@ export class HookDetector {
     if (!openingWindows || openingWindows.length === 0) {
       return { score: 0, issues: ['No opening content found'] };
     }
-    
+
     // Combine first windows
-    const combinedText = openingWindows.map(w => w.text).join(' ');
+    const combinedText = openingWindows.map((w) => w.text).join(' ');
     const combinedWindow = {
       start: openingWindows[0].start,
       end: openingWindows[openingWindows.length - 1].end,
-      text: combinedText
+      text: combinedText,
     };
-    
+
     const hookScore = await this.scoreHookPotential(combinedWindow);
-    
+
     // Identify issues
     const issues = [];
-    
+
     if (hookScore.factors.curiosityGap < 5) {
       issues.push('Low curiosity - consider opening with a question or mystery');
     }
@@ -462,13 +451,13 @@ export class HookDetector {
     if (hookScore.total < 5) {
       issues.push('Overall weak hook - viewers may not stay past first few seconds');
     }
-    
+
     return {
       score: hookScore.total,
       breakdown: hookScore.factors,
       issues,
       text: combinedText.substring(0, 200),
-      recommendation: hookScore.total < 6 ? 'Consider using a different opening' : 'Opening is acceptable'
+      recommendation: hookScore.total < 6 ? 'Consider using a different opening' : 'Opening is acceptable',
     };
   }
 
@@ -480,26 +469,26 @@ export class HookDetector {
     if (this.hooks.length === 0) {
       return null;
     }
-    
+
     // Get top hook
     const topHook = this.hooks[0];
-    
+
     // Check if current opening is already good enough
     if (this.currentOpeningScore && this.currentOpeningScore.score >= 7) {
       return {
         hook: null,
         recommendation: 'Current opening is strong - no change recommended',
         currentScore: this.currentOpeningScore.score,
-        bestAvailableScore: topHook.score
+        bestAvailableScore: topHook.score,
       };
     }
-    
+
     return {
       hook: topHook,
       recommendation: `Consider opening with: "${topHook.transcript.substring(0, 100)}..."`,
       currentScore: this.currentOpeningScore?.score || 0,
       bestAvailableScore: topHook.score,
-      improvement: topHook.score - (this.currentOpeningScore?.score || 0)
+      improvement: topHook.score - (this.currentOpeningScore?.score || 0),
     };
   }
 
@@ -510,32 +499,32 @@ export class HookDetector {
    */
   expandToWords(segments) {
     const words = [];
-    
-    segments.forEach(segment => {
+
+    segments.forEach((segment) => {
       const text = (segment.text || segment.word || '').trim();
       const startTime = segment.start || 0;
-      const endTime = segment.end || (startTime + 1);
-      
+      const endTime = segment.end || startTime + 1;
+
       if (!text.includes(' ')) {
         if (text.length > 0) {
           words.push({ text, start: startTime, end: endTime });
         }
         return;
       }
-      
-      const segmentWords = text.split(/\s+/).filter(w => w.length > 0);
+
+      const segmentWords = text.split(/\s+/).filter((w) => w.length > 0);
       const duration = endTime - startTime;
       const wordDuration = duration / segmentWords.length;
-      
+
       segmentWords.forEach((word, i) => {
         words.push({
           text: word,
-          start: startTime + (i * wordDuration),
-          end: startTime + ((i + 1) * wordDuration)
+          start: startTime + i * wordDuration,
+          end: startTime + (i + 1) * wordDuration,
         });
       });
     });
-    
+
     return words;
   }
 
@@ -562,11 +551,11 @@ export class HookDetector {
    * @returns {Array} Hooks of that type
    */
   getHooksByType(classification) {
-    return this.hooks.filter(h => h.classification === classification);
+    return this.hooks.filter((h) => h.classification === classification);
   }
 
   // Event emitter methods
-  
+
   on(event, callback) {
     if (!this.eventListeners[event]) {
       this.eventListeners[event] = [];
@@ -576,13 +565,13 @@ export class HookDetector {
 
   emit(event, data = {}) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event].forEach(callback => callback(data));
+      this.eventListeners[event].forEach((callback) => callback(data));
     }
   }
 
   off(event, callback) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+      this.eventListeners[event] = this.eventListeners[event].filter((cb) => cb !== callback);
     }
   }
 
@@ -597,14 +586,3 @@ export class HookDetector {
 }
 
 export default HookDetector;
-
-
-
-
-
-
-
-
-
-
-

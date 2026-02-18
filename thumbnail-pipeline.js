@@ -1,6 +1,6 @@
 /**
  * Thumbnail Pipeline
- * 
+ *
  * Unified thumbnail generation for all asset types.
  * Consolidates thumbnail generation from various sources:
  * - Images: resize using nativeImage
@@ -20,7 +20,7 @@ const CONFIG = {
   maxHeight: 400,
   quality: 'good',
   jpegQuality: 85,
-  pngCompression: 6
+  pngCompression: 6,
 };
 
 class ThumbnailPipeline {
@@ -28,7 +28,7 @@ class ThumbnailPipeline {
     this.config = { ...CONFIG, ...options };
     this.thumbnailDir = path.join(app.getPath('userData'), 'thumbnails');
     this._ensureDir(this.thumbnailDir);
-    
+
     // Cache for generated thumbnails
     this.cache = new Map();
     this.maxCacheSize = 100;
@@ -50,7 +50,7 @@ class ThumbnailPipeline {
     try {
       const type = this._determineType(item);
       console.log(`[ThumbnailPipeline] Generating thumbnail for type: ${type}, item: ${item.id || 'unknown'}`);
-      
+
       switch (type) {
         case 'image':
           return await this.generateImageThumbnail(item, options);
@@ -93,7 +93,7 @@ class ThumbnailPipeline {
   }
 
   // ==================== IMAGE THUMBNAIL ====================
-  
+
   async generateImageThumbnail(item, options = {}) {
     try {
       const imageData = item.content || item.dataUrl;
@@ -128,13 +128,12 @@ class ThumbnailPipeline {
       const resized = image.resize({
         width: newWidth,
         height: newHeight,
-        quality: this.config.quality
+        quality: this.config.quality,
       });
 
       // Convert to JPEG for smaller size
       const buffer = resized.toJPEG(this.config.jpegQuality);
       return `data:image/jpeg;base64,${buffer.toString('base64')}`;
-
     } catch (error) {
       console.error('[ThumbnailPipeline] Image thumbnail error:', error);
       return item.content || item.dataUrl || null;
@@ -142,7 +141,7 @@ class ThumbnailPipeline {
   }
 
   // ==================== IMAGE FILE THUMBNAIL ====================
-  
+
   async generateImageFileThumbnail(item, options = {}) {
     try {
       // If we have fileData (base64), use it
@@ -169,7 +168,7 @@ class ThumbnailPipeline {
   }
 
   // ==================== VIDEO THUMBNAIL ====================
-  
+
   async generateVideoThumbnail(item, options = {}) {
     try {
       // Check if we already have a thumbnail from YouTube or elsewhere
@@ -189,27 +188,26 @@ class ThumbnailPipeline {
 
       // Generate placeholder for videos without thumbnail
       return this._generatePlaceholder('video', item.fileName || 'Video');
-
     } catch (error) {
       console.error('[ThumbnailPipeline] Video thumbnail error:', error);
       return this._generatePlaceholder('video', item.fileName || 'Video');
     }
   }
 
-  async _generateVideoThumbnailWithFFmpeg(videoPath, options = {}) {
+  async _generateVideoThumbnailWithFFmpeg(videoPath, _options = {}) {
     try {
       const ffmpeg = require('fluent-ffmpeg');
       const os = require('os');
-      
+
       const outputPath = path.join(os.tmpdir(), `thumb-${Date.now()}.jpg`);
-      
-      return new Promise((resolve, reject) => {
+
+      return new Promise((resolve, _reject) => {
         ffmpeg(videoPath)
           .screenshots({
             timestamps: ['10%'],
             filename: path.basename(outputPath),
             folder: path.dirname(outputPath),
-            size: `${this.config.maxWidth}x?`
+            size: `${this.config.maxWidth}x?`,
           })
           .on('end', () => {
             if (fs.existsSync(outputPath)) {
@@ -233,13 +231,13 @@ class ThumbnailPipeline {
   }
 
   // ==================== PDF THUMBNAIL ====================
-  
-  async generatePDFThumbnail(item, options = {}) {
+
+  async generatePDFThumbnail(item, _options = {}) {
     try {
       // Generate SVG placeholder for PDF
       const fileName = item.fileName || 'Document';
       const fileSize = item.fileSize ? this._formatBytes(item.fileSize) : '';
-      
+
       return this._generatePDFPlaceholder(fileName, fileSize);
     } catch (error) {
       console.error('[ThumbnailPipeline] PDF thumbnail error:', error);
@@ -267,13 +265,13 @@ class ThumbnailPipeline {
   }
 
   // ==================== HTML THUMBNAIL ====================
-  
-  async generateHTMLThumbnail(item, options = {}) {
+
+  async generateHTMLThumbnail(item, _options = {}) {
     try {
       // Use Chrome for HTML screenshots if available
       const HTMLPreviewSystem = require('./html-preview-system');
       const previewSystem = new HTMLPreviewSystem();
-      
+
       const thumbnail = await previewSystem.generateHTMLThumbnail(item);
       if (thumbnail) {
         return thumbnail;
@@ -281,7 +279,6 @@ class ThumbnailPipeline {
 
       // Fallback to placeholder
       return this._generateHTMLPlaceholder(item.preview || 'HTML Document');
-
     } catch (error) {
       console.error('[ThumbnailPipeline] HTML thumbnail error:', error);
       return this._generateHTMLPlaceholder(item.preview || 'HTML Document');
@@ -307,15 +304,14 @@ class ThumbnailPipeline {
   }
 
   // ==================== CODE THUMBNAIL ====================
-  
-  async generateCodeThumbnail(item, options = {}) {
+
+  async generateCodeThumbnail(item, _options = {}) {
     try {
       const ext = item.fileExt || '.txt';
       const language = this._getLanguageFromExt(ext);
       const preview = this._getCodePreview(item.content, 10);
-      
-      return this._generateCodePlaceholder(language, item.fileName || 'Code', preview);
 
+      return this._generateCodePlaceholder(language, item.fileName || 'Code', preview);
     } catch (error) {
       console.error('[ThumbnailPipeline] Code thumbnail error:', error);
       return this._generatePlaceholder('code', item.fileName || 'Code');
@@ -324,20 +320,20 @@ class ThumbnailPipeline {
 
   _generateCodePlaceholder(language, fileName, preview) {
     const langColors = {
-      'javascript': '#f7df1e',
-      'typescript': '#3178c6',
-      'python': '#3776ab',
-      'java': '#b07219',
-      'cpp': '#f34b7d',
-      'go': '#00add8',
-      'rust': '#dea584',
-      'ruby': '#cc342d',
-      'php': '#4f5d95',
-      'default': '#6e7681'
+      javascript: '#f7df1e',
+      typescript: '#3178c6',
+      python: '#3776ab',
+      java: '#b07219',
+      cpp: '#f34b7d',
+      go: '#00add8',
+      rust: '#dea584',
+      ruby: '#cc342d',
+      php: '#4f5d95',
+      default: '#6e7681',
     };
-    
+
     const color = langColors[language] || langColors.default;
-    
+
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150">
         <rect width="200" height="150" fill="#0d1117" rx="8"/>
@@ -361,7 +357,7 @@ class ThumbnailPipeline {
   _getCodePreview(content, lines = 5) {
     if (!content) return [];
     const allLines = content.split('\n').slice(0, lines);
-    return allLines.map(line => line.substring(0, 35));
+    return allLines.map((line) => line.substring(0, 35));
   }
 
   _getLanguageFromExt(ext) {
@@ -380,20 +376,19 @@ class ThumbnailPipeline {
       '.rb': 'ruby',
       '.php': 'php',
       '.swift': 'swift',
-      '.kt': 'kotlin'
+      '.kt': 'kotlin',
     };
     return languages[ext?.toLowerCase()] || 'code';
   }
 
   // ==================== TEXT THUMBNAIL ====================
-  
-  async generateTextThumbnail(item, options = {}) {
+
+  async generateTextThumbnail(item, _options = {}) {
     try {
       const content = item.content || item.text || '';
       const preview = content.substring(0, 200).split('\n').slice(0, 5);
-      
-      return this._generateTextPlaceholder(item.fileName || 'Text', preview);
 
+      return this._generateTextPlaceholder(item.fileName || 'Text', preview);
     } catch (error) {
       console.error('[ThumbnailPipeline] Text thumbnail error:', error);
       return this._generatePlaceholder('text', item.fileName || 'Text');
@@ -402,7 +397,7 @@ class ThumbnailPipeline {
 
   _generateTextPlaceholder(fileName, preview) {
     const lines = Array.isArray(preview) ? preview : [preview];
-    
+
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150">
         <rect width="200" height="150" fill="#1a1a2e" rx="8"/>
@@ -420,20 +415,20 @@ class ThumbnailPipeline {
   }
 
   // ==================== GENERIC PLACEHOLDER ====================
-  
+
   _generatePlaceholder(type, name) {
     const icons = {
-      'video': '🎬',
-      'audio': '🎵',
-      'pdf': '📄',
-      'code': '💻',
-      'text': '📝',
-      'file': '📁',
-      'unknown': '📎'
+      video: '🎬',
+      audio: '🎵',
+      pdf: '📄',
+      code: '💻',
+      text: '📝',
+      file: '📁',
+      unknown: '📎',
     };
-    
+
     const icon = icons[type] || icons.unknown;
-    
+
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150">
         <rect width="200" height="150" fill="#1a1a2e" rx="8"/>
@@ -454,7 +449,7 @@ class ThumbnailPipeline {
       '.png': 'image/png',
       '.gif': 'image/gif',
       '.webp': 'image/webp',
-      '.svg': 'image/svg+xml'
+      '.svg': 'image/svg+xml',
     };
     return mimeTypes[ext?.toLowerCase()] || 'image/png';
   }
@@ -503,6 +498,5 @@ module.exports = {
   ThumbnailPipeline,
   getThumbnailPipeline,
   resetThumbnailPipeline,
-  CONFIG
+  CONFIG,
 };
-

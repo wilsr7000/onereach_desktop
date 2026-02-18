@@ -1,6 +1,6 @@
 /**
  * SpaceAssetPicker - Modal for browsing and selecting assets from Spaces
- * 
+ *
  * Features:
  * - Space dropdown selector
  * - Filter by media type (audio/video/all)
@@ -14,7 +14,7 @@ export class SpaceAssetPicker {
     this.app = appContext;
     this.modalElement = null;
     this.isVisible = false;
-    
+
     // State
     this.spaces = [];
     this.selectedSpaceId = null;
@@ -25,7 +25,7 @@ export class SpaceAssetPicker {
     this.selectedItem = null;
     this.onSelectCallback = null;
     this.targetTrackId = null;
-    
+
     // Create modal on construction
     this._createModal();
   }
@@ -36,18 +36,18 @@ export class SpaceAssetPicker {
   _createModal() {
     // Check if modal already exists
     this.modalElement = document.getElementById('spaceAssetPickerModal');
-    
+
     if (!this.modalElement) {
       this.modalElement = document.createElement('div');
       this.modalElement.id = 'spaceAssetPickerModal';
       this.modalElement.className = 'modal-overlay space-asset-picker-overlay';
       this.modalElement.innerHTML = this._getModalHTML();
       document.body.appendChild(this.modalElement);
-      
+
       // Add styles if not already present
       this._addStyles();
     }
-    
+
     this._setupEventListeners();
   }
 
@@ -125,7 +125,7 @@ export class SpaceAssetPicker {
    */
   _addStyles() {
     if (document.getElementById('spaceAssetPickerStyles')) return;
-    
+
     const styleSheet = document.createElement('style');
     styleSheet.id = 'spaceAssetPickerStyles';
     styleSheet.textContent = `
@@ -467,23 +467,23 @@ export class SpaceAssetPicker {
    */
   _setupEventListeners() {
     if (!this.modalElement) return;
-    
+
     // Close button and cancel
     this.modalElement.addEventListener('click', (e) => {
       const action = e.target.dataset?.action || e.target.closest('[data-action]')?.dataset?.action;
-      
+
       if (action === 'close' || action === 'cancel') {
         this.hide();
       } else if (action === 'import') {
         this._handleImport();
       }
-      
+
       // Close on backdrop click
       if (e.target === this.modalElement) {
         this.hide();
       }
     });
-    
+
     // Space selector
     const spaceSelector = this.modalElement.querySelector('#spaceSelector');
     if (spaceSelector) {
@@ -492,7 +492,7 @@ export class SpaceAssetPicker {
         this._loadSpaceItems();
       });
     }
-    
+
     // Media type filter
     const mediaTypeFilter = this.modalElement.querySelector('#mediaTypeFilter');
     if (mediaTypeFilter) {
@@ -501,7 +501,7 @@ export class SpaceAssetPicker {
         this._filterItems();
       });
     }
-    
+
     // Search input
     const searchInput = this.modalElement.querySelector('#assetSearchInput');
     if (searchInput) {
@@ -510,7 +510,7 @@ export class SpaceAssetPicker {
         this._filterItems();
       });
     }
-    
+
     // Escape key to close
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.isVisible) {
@@ -525,28 +525,28 @@ export class SpaceAssetPicker {
    */
   async show(options = {}) {
     const { mediaType = 'all', trackId = null, onSelect = null } = options;
-    
+
     this.mediaType = mediaType;
     this.targetTrackId = trackId;
     this.onSelectCallback = onSelect;
     this.selectedItem = null;
-    
+
     // Update media type filter
     const mediaTypeFilter = this.modalElement.querySelector('#mediaTypeFilter');
     if (mediaTypeFilter) {
       mediaTypeFilter.value = mediaType;
     }
-    
+
     // Update import button state
     this._updateImportButton();
-    
+
     // Load spaces
     await this._loadSpaces();
-    
+
     // Show modal
     this.modalElement.classList.add('visible');
     this.isVisible = true;
-    
+
     // Focus search input
     setTimeout(() => {
       const searchInput = this.modalElement.querySelector('#assetSearchInput');
@@ -562,7 +562,7 @@ export class SpaceAssetPicker {
     this.isVisible = false;
     this.selectedItem = null;
     this.onSelectCallback = null;
-    
+
     // Clear search
     const searchInput = this.modalElement.querySelector('#assetSearchInput');
     if (searchInput) searchInput.value = '';
@@ -574,15 +574,14 @@ export class SpaceAssetPicker {
    */
   async _loadSpaces() {
     try {
-      this.spaces = await window.spaces?.getAll() || [];
-      
+      this.spaces = (await window.spaces?.getAll()) || [];
+
       const spaceSelector = this.modalElement.querySelector('#spaceSelector');
       if (spaceSelector) {
-        spaceSelector.innerHTML = '<option value="">Select a Space...</option>' +
-          this.spaces.map(space => 
-            `<option value="${space.id}">${this._escapeHtml(space.name)}</option>`
-          ).join('');
-        
+        spaceSelector.innerHTML =
+          '<option value="">Select a Space...</option>' +
+          this.spaces.map((space) => `<option value="${space.id}">${this._escapeHtml(space.name)}</option>`).join('');
+
         // Auto-select if only one space
         if (this.spaces.length === 1) {
           spaceSelector.value = this.spaces[0].id;
@@ -604,31 +603,32 @@ export class SpaceAssetPicker {
       this._renderEmptyState('Select a Space to browse assets');
       return;
     }
-    
+
     // Show loading
     const grid = this.modalElement.querySelector('#pickerItemsGrid');
     if (grid) {
       grid.innerHTML = '<div class="picker-loading">Loading assets</div>';
     }
-    
+
     try {
       // Get items based on media type filter
       if (this.mediaType === 'audio') {
-        this.items = await window.spaces?.getAudio(this.selectedSpaceId) || [];
+        this.items = (await window.spaces?.getAudio(this.selectedSpaceId)) || [];
       } else if (this.mediaType === 'video') {
-        this.items = await window.spaces?.getVideos(this.selectedSpaceId) || [];
+        this.items = (await window.spaces?.getVideos(this.selectedSpaceId)) || [];
       } else {
         const result = await window.spaces?.getItems(this.selectedSpaceId);
         // Handle both { success, items } format and raw array format
-        this.items = (result && result.items) ? result.items : (Array.isArray(result) ? result : []);
+        this.items = result && result.items ? result.items : Array.isArray(result) ? result : [];
         // Filter to only media files
-        this.items = this.items.filter(item => 
-          item.fileType === 'audio' || 
-          item.fileType === 'video' ||
-          /\.(mp3|wav|m4a|aac|ogg|flac|mp4|mov|avi|mkv|webm)$/i.test(item.content || '')
+        this.items = this.items.filter(
+          (item) =>
+            item.fileType === 'audio' ||
+            item.fileType === 'video' ||
+            /\.(mp3|wav|m4a|aac|ogg|flac|mp4|mov|avi|mkv|webm)$/i.test(item.content || '')
         );
       }
-      
+
       this._filterItems();
     } catch (error) {
       window.logging.error('video', 'SpaceAssetPicker Error loading items', { error: { error: error } });
@@ -643,13 +643,13 @@ export class SpaceAssetPicker {
     if (!this.searchQuery) {
       this.filteredItems = [...this.items];
     } else {
-      this.filteredItems = this.items.filter(item => {
+      this.filteredItems = this.items.filter((item) => {
         const name = (item.name || item.content || '').toLowerCase();
         const description = (item.description || '').toLowerCase();
         return name.includes(this.searchQuery) || description.includes(this.searchQuery);
       });
     }
-    
+
     this._renderItems();
   }
 
@@ -659,25 +659,21 @@ export class SpaceAssetPicker {
   _renderItems() {
     const grid = this.modalElement.querySelector('#pickerItemsGrid');
     if (!grid) return;
-    
+
     if (this.filteredItems.length === 0) {
-      this._renderEmptyState(
-        this.searchQuery 
-          ? 'No assets match your search' 
-          : 'No media assets in this Space'
-      );
+      this._renderEmptyState(this.searchQuery ? 'No assets match your search' : 'No media assets in this Space');
       return;
     }
-    
-    grid.innerHTML = this.filteredItems.map(item => this._renderItem(item)).join('');
-    
+
+    grid.innerHTML = this.filteredItems.map((item) => this._renderItem(item)).join('');
+
     // Add click handlers
-    grid.querySelectorAll('.picker-item').forEach(el => {
+    grid.querySelectorAll('.picker-item').forEach((el) => {
       el.addEventListener('click', () => {
         const itemId = el.dataset.itemId;
         this._selectItem(itemId);
       });
-      
+
       // Double-click to import
       el.addEventListener('dblclick', () => {
         const itemId = el.dataset.itemId;
@@ -697,14 +693,11 @@ export class SpaceAssetPicker {
     const name = item.name || item.content?.split('/').pop() || 'Unnamed';
     const fileSize = item.fileSize ? this._formatFileSize(item.fileSize) : '';
     const isSelected = this.selectedItem?.id === item.id;
-    
+
     return `
       <div class="picker-item ${isSelected ? 'selected' : ''}" data-item-id="${item.id}">
         <div class="picker-item-thumbnail">
-          ${item.thumbnail 
-            ? `<img src="${item.thumbnail}" alt="${this._escapeHtml(name)}">`
-            : icon
-          }
+          ${item.thumbnail ? `<img src="${item.thumbnail}" alt="${this._escapeHtml(name)}">` : icon}
         </div>
         <div class="picker-item-name" title="${this._escapeHtml(name)}">${this._escapeHtml(name)}</div>
         <div class="picker-item-meta">
@@ -728,7 +721,7 @@ export class SpaceAssetPicker {
         </div>
       `;
     }
-    
+
     // Hide preview
     const preview = this.modalElement.querySelector('#pickerPreview');
     if (preview) preview.classList.add('hidden');
@@ -739,16 +732,16 @@ export class SpaceAssetPicker {
    */
   _selectItem(itemId) {
     // Update selection
-    this.selectedItem = this.filteredItems.find(item => item.id === itemId);
-    
+    this.selectedItem = this.filteredItems.find((item) => item.id === itemId);
+
     // Update UI
-    this.modalElement.querySelectorAll('.picker-item').forEach(el => {
+    this.modalElement.querySelectorAll('.picker-item').forEach((el) => {
       el.classList.toggle('selected', el.dataset.itemId === itemId);
     });
-    
+
     // Update preview
     this._updatePreview();
-    
+
     // Update import button
     this._updateImportButton();
   }
@@ -761,32 +754,30 @@ export class SpaceAssetPicker {
     const thumbnailEl = this.modalElement.querySelector('#previewThumbnail');
     const nameEl = this.modalElement.querySelector('#previewName');
     const metaEl = this.modalElement.querySelector('#previewMeta');
-    
+
     if (!preview) return;
-    
+
     if (!this.selectedItem) {
       preview.classList.add('hidden');
       return;
     }
-    
+
     preview.classList.remove('hidden');
-    
+
     const item = this.selectedItem;
     const isAudio = item.fileType === 'audio' || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(item.content || '');
     const isVideo = item.fileType === 'video' || /\.(mp4|mov|avi|mkv|webm)$/i.test(item.content || '');
     const icon = isAudio ? '🎵' : isVideo ? '🎬' : '📄';
     const name = item.name || item.content?.split('/').pop() || 'Unnamed';
-    
+
     if (thumbnailEl) {
-      thumbnailEl.innerHTML = item.thumbnail 
-        ? `<img src="${item.thumbnail}" alt="${this._escapeHtml(name)}">`
-        : icon;
+      thumbnailEl.innerHTML = item.thumbnail ? `<img src="${item.thumbnail}" alt="${this._escapeHtml(name)}">` : icon;
     }
-    
+
     if (nameEl) {
       nameEl.textContent = name;
     }
-    
+
     if (metaEl) {
       const parts = [];
       if (isAudio) parts.push('Audio');
@@ -812,15 +803,15 @@ export class SpaceAssetPicker {
    */
   async _handleImport() {
     if (!this.selectedItem) return;
-    
+
     try {
       // Get the file path for the selected item
       const filePath = await window.spaces?.getItemPath(this.selectedItem.id);
-      
+
       if (!filePath) {
         throw new Error('Could not get file path');
       }
-      
+
       // Create asset object
       const asset = {
         id: this.selectedItem.id,
@@ -829,17 +820,16 @@ export class SpaceAssetPicker {
         type: this.selectedItem.fileType,
         source: 'space',
         spaceId: this.selectedSpaceId,
-        startTime: this.app.video?.currentTime || 0
+        startTime: this.app.video?.currentTime || 0,
       };
-      
+
       // Call the callback
       if (this.onSelectCallback) {
         this.onSelectCallback(asset);
       }
-      
+
       this.app.showToast?.('success', `Imported "${asset.name}"`);
       this.hide();
-      
     } catch (error) {
       window.logging.error('video', 'SpaceAssetPicker Import error', { error: { error: error } });
       this.app.showToast?.('error', 'Failed to import asset');
@@ -883,15 +873,3 @@ export class SpaceAssetPicker {
 
 // Export for module usage
 export default SpaceAssetPicker;
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, Menu, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, _Menu, dialog, clipboard } = require('electron');
 const unzipper = require('unzipper');
 const https = require('https');
 const http = require('http');
@@ -11,14 +11,14 @@ class ModuleManager {
     this.modulesDataPath = path.join(app.getPath('userData'), 'modules-data');
     this.installedModules = new Map();
     this.moduleWindows = new Map();
-    
+
     // Ensure directories exist
     this.ensureDirectories();
-    
+
     // Load installed modules on startup
     this.loadInstalledModules();
   }
-  
+
   ensureDirectories() {
     if (!fs.existsSync(this.modulesPath)) {
       fs.mkdirSync(this.modulesPath, { recursive: true });
@@ -27,22 +27,22 @@ class ModuleManager {
       fs.mkdirSync(this.modulesDataPath, { recursive: true });
     }
   }
-  
+
   async loadInstalledModules() {
     try {
       const modulesDirs = fs.readdirSync(this.modulesPath);
-      
+
       for (const dir of modulesDirs) {
         const modulePath = path.join(this.modulesPath, dir);
         const manifestPath = path.join(modulePath, 'manifest.json');
-        
+
         if (fs.existsSync(manifestPath)) {
           try {
             const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
             manifest.path = modulePath;
             this.installedModules.set(manifest.id, manifest);
             console.log(`Loaded module: ${manifest.name} (${manifest.id})`);
-            
+
             // Load main process script if exists
             if (manifest.mainProcess) {
               const mainScriptPath = path.join(modulePath, manifest.mainProcess);
@@ -64,24 +64,24 @@ class ModuleManager {
       console.error('Error loading installed modules:', error);
     }
   }
-  
+
   async installModuleFromUrl(url) {
     return new Promise((resolve, reject) => {
       const tempPath = path.join(app.getPath('temp'), `module-${Date.now()}.zip`);
       const file = fs.createWriteStream(tempPath);
-      
+
       const protocol = url.startsWith('https') ? https : http;
-      
+
       console.log(`Downloading module from: ${url}`);
-      
+
       const request = protocol.get(url, (response) => {
         if (response.statusCode !== 200) {
           reject(new Error(`Failed to download: ${response.statusCode}`));
           return;
         }
-        
+
         response.pipe(file);
-        
+
         file.on('finish', () => {
           file.close(async () => {
             try {
@@ -99,39 +99,40 @@ class ModuleManager {
           });
         });
       });
-      
+
       request.on('error', (error) => {
         fs.unlinkSync(tempPath);
         reject(error);
       });
     });
   }
-  
+
   async installModuleFromZip(zipPath) {
     console.log(`Installing module from: ${zipPath}`);
-    
+
     // First, extract to temp directory to validate
     const tempExtractPath = path.join(app.getPath('temp'), `module-extract-${Date.now()}`);
-    
+
     try {
       // Extract zip
-      await fs.createReadStream(zipPath)
+      await fs
+        .createReadStream(zipPath)
         .pipe(unzipper.Extract({ path: tempExtractPath }))
         .promise();
-      
+
       // Read and validate manifest
       const manifestPath = path.join(tempExtractPath, 'manifest.json');
       if (!fs.existsSync(manifestPath)) {
         throw new Error('No manifest.json found in module');
       }
-      
+
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      
+
       // Validate required fields
       if (!manifest.id || !manifest.name || !manifest.main) {
         throw new Error('Invalid manifest: missing required fields (id, name, main)');
       }
-      
+
       // Check if module already exists
       const moduleInstallPath = path.join(this.modulesPath, manifest.id);
       if (fs.existsSync(moduleInstallPath)) {
@@ -140,33 +141,33 @@ class ModuleManager {
           type: 'question',
           buttons: ['Update', 'Cancel'],
           defaultId: 0,
-          message: `Module "${manifest.name}" is already installed. Update it?`
+          message: `Module "${manifest.name}" is already installed. Update it?`,
         });
-        
+
         if (response.response !== 0) {
           throw new Error('Installation cancelled');
         }
-        
+
         // Remove old version
         this.removeModule(manifest.id);
       }
-      
+
       // Move to final location
       fs.renameSync(tempExtractPath, moduleInstallPath);
-      
+
       // Create data directory for module
       const moduleDataPath = path.join(this.modulesDataPath, manifest.dataDirectory || manifest.id);
       if (!fs.existsSync(moduleDataPath)) {
         fs.mkdirSync(moduleDataPath, { recursive: true });
       }
-      
+
       // Install npm dependencies if package.json exists
       const packageJsonPath = path.join(moduleInstallPath, 'package.json');
       if (fs.existsSync(packageJsonPath)) {
         console.log(`Installing npm dependencies for ${manifest.id}...`);
         const { exec } = require('child_process');
         await new Promise((resolve, reject) => {
-          exec('npm install --production', { cwd: moduleInstallPath }, (error, stdout, stderr) => {
+          exec('npm install --production', { cwd: moduleInstallPath }, (error, _stdout, _stderr) => {
             if (error) {
               console.error(`Error installing dependencies: ${error}`);
               reject(error);
@@ -177,11 +178,11 @@ class ModuleManager {
           });
         });
       }
-      
+
       // Add to installed modules
       manifest.path = moduleInstallPath;
       this.installedModules.set(manifest.id, manifest);
-      
+
       // Load main process script if exists
       if (manifest.mainProcess) {
         const mainScriptPath = path.join(moduleInstallPath, manifest.mainProcess);
@@ -194,13 +195,12 @@ class ModuleManager {
           }
         }
       }
-      
+
       // Update menu
       this.updateApplicationMenu();
-      
+
       console.log(`Successfully installed module: ${manifest.name}`);
       return manifest;
-      
     } catch (error) {
       // Clean up on error
       if (fs.existsSync(tempExtractPath)) {
@@ -209,47 +209,47 @@ class ModuleManager {
       throw error;
     }
   }
-  
+
   removeModule(moduleId) {
     const module = this.installedModules.get(moduleId);
     if (!module) {
       throw new Error(`Module ${moduleId} not found`);
     }
-    
+
     // Close any open windows for this module
     const window = this.moduleWindows.get(moduleId);
     if (window && !window.isDestroyed()) {
       window.close();
     }
-    
+
     // Remove module directory
     if (fs.existsSync(module.path)) {
       fs.rmSync(module.path, { recursive: true, force: true });
     }
-    
+
     // Remove from installed modules
     this.installedModules.delete(moduleId);
-    
+
     // Update menu
     this.updateApplicationMenu();
-    
+
     console.log(`Removed module: ${module.name}`);
   }
-  
+
   openModule(moduleId) {
     const module = this.installedModules.get(moduleId);
     if (!module) {
       console.error(`Module ${moduleId} not found`);
       return;
     }
-    
+
     // Check if window already exists
     let window = this.moduleWindows.get(moduleId);
     if (window && !window.isDestroyed()) {
       window.focus();
       return;
     }
-    
+
     // Create new window
     const windowOptions = {
       width: 1200,
@@ -258,16 +258,16 @@ class ModuleManager {
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
-        webSecurity: false
+        webSecurity: false,
       },
-      ...module.windowOptions
+      ...module.windowOptions,
     };
-    
+
     // Add preload script if specified
     if (module.preload) {
       windowOptions.webPreferences.preload = path.join(module.path, module.preload);
     }
-    
+
     // Set icon if exists
     if (module.icon) {
       const iconPath = path.join(module.path, module.icon);
@@ -275,30 +275,32 @@ class ModuleManager {
         windowOptions.icon = iconPath;
       }
     }
-    
+
     window = new BrowserWindow(windowOptions);
-    
+
     // Store window reference
     this.moduleWindows.set(moduleId, window);
-    
+
     // Clean up reference when window is closed
     window.on('closed', () => {
       this.moduleWindows.delete(moduleId);
     });
-    
+
     // Make module data path available to the module
     window.moduleDataPath = path.join(this.modulesDataPath, module.dataDirectory || moduleId);
     window.moduleInfo = module;
-    
+
     // Inject module API client when DOM is ready
     window.webContents.on('dom-ready', () => {
       // Read the module API client file
       const apiClientPath = path.join(__dirname, 'module-api-client.js');
       if (fs.existsSync(apiClientPath)) {
         const apiClientCode = fs.readFileSync(apiClientPath, 'utf8');
-        
+
         // Inject the API client code
-        window.webContents.executeJavaScript(`
+        window.webContents
+          .executeJavaScript(
+            `
           // Inject module data path
           window.moduleDataPath = ${JSON.stringify(window.moduleDataPath)};
           window.moduleInfo = ${JSON.stringify(module)};
@@ -307,46 +309,48 @@ class ModuleManager {
           ${apiClientCode}
           
           console.log('Module API client injected successfully');
-        `).catch(error => {
-          console.error('Error injecting module API client:', error);
-        });
+        `
+          )
+          .catch((error) => {
+            console.error('Error injecting module API client:', error);
+          });
       }
     });
-    
+
     // Load module HTML
     const htmlPath = path.join(module.path, module.main);
     window.loadFile(htmlPath);
-    
+
     console.log(`Opened module: ${module.name}`);
   }
-  
+
   getModuleMenuItems() {
     const items = [];
-    
+
     for (const [id, module] of this.installedModules) {
       items.push({
         label: module.menuLabel || module.name,
-        click: () => this.openModule(id)
+        click: () => this.openModule(id),
       });
     }
-    
+
     return items;
   }
-  
+
   getWebToolMenuItems() {
     const items = [];
     const webTools = this.loadWebTools();
-    
+
     for (const tool of webTools) {
       items.push({
         label: tool.name,
-        click: () => this.openWebTool(tool.id)
+        click: () => this.openWebTool(tool.id),
       });
     }
-    
+
     return items;
   }
-  
+
   updateApplicationMenu() {
     // This will be called to refresh the app menu with module items
     // The main app will need to integrate this
@@ -354,12 +358,12 @@ class ModuleManager {
       global.updateApplicationMenu();
     }
   }
-  
+
   // Get list of all installed modules
   getInstalledModules() {
     return Array.from(this.installedModules.values());
   }
-  
+
   // Get module data directory path
   getModuleDataPath(moduleId) {
     const module = this.installedModules.get(moduleId);
@@ -368,12 +372,12 @@ class ModuleManager {
     }
     return path.join(this.modulesDataPath, module.dataDirectory || moduleId);
   }
-  
+
   // Web Tools Management
   getWebToolsPath() {
     return path.join(app.getPath('userData'), 'web-tools.json');
   }
-  
+
   loadWebTools() {
     try {
       const webToolsPath = this.getWebToolsPath();
@@ -386,7 +390,7 @@ class ModuleManager {
     }
     return [];
   }
-  
+
   saveWebTools(tools) {
     try {
       const webToolsPath = this.getWebToolsPath();
@@ -397,17 +401,17 @@ class ModuleManager {
       return false;
     }
   }
-  
+
   getWebTools() {
     return this.loadWebTools();
   }
-  
+
   async addWebTool(tool) {
     const tools = this.loadWebTools();
     tools.push(tool);
     this.saveWebTools(tools);
     this.updateApplicationMenu();
-    
+
     // Auto-generate agent if docs URL provided
     let agentCreated = false;
     if (tool.docsUrl) {
@@ -422,39 +426,39 @@ class ModuleManager {
         // Don't fail the tool addition if agent creation fails
       }
     }
-    
+
     return { ...tool, agentCreated };
   }
-  
+
   openWebTool(toolId) {
     const tools = this.loadWebTools();
-    const tool = tools.find(t => t.id === toolId);
-    
+    const tool = tools.find((t) => t.id === toolId);
+
     if (!tool) {
       throw new Error(`Web tool not found: ${toolId}`);
     }
-    
+
     // Get screen dimensions
     const { screen } = require('electron');
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
-    
+
     // Define window sizes
     const windowSizes = {
       fullscreen: { width: screenWidth, height: screenHeight },
       large: { width: 1400, height: 900 },
       medium: { width: 1200, height: 800 },
       small: { width: 1000, height: 700 },
-      mobile: { width: 375, height: 812 }
+      mobile: { width: 375, height: 812 },
     };
-    
+
     // Get the selected window size or default to medium
     const size = windowSizes[tool.windowSize] || windowSizes.medium;
-    
+
     // Create new window for the web tool
     // Use preload-spaces.js to give tools access to the full Spaces API (window.spaces)
     // clipboard is imported at module level
-    
+
     const window = new BrowserWindow({
       width: size.width,
       height: size.height,
@@ -466,45 +470,47 @@ class ModuleManager {
         preload: path.join(__dirname, 'preload-spaces.js'),
         // Enable features needed for speech recognition and media
         enableBlinkFeatures: 'MediaStreamAPI,WebRTC,AudioWorklet,WebAudio,MediaRecorder',
-        experimentalFeatures: true
-      }
+        experimentalFeatures: true,
+      },
     });
-    
+
     console.log(`[WebTool] Created window for: ${tool.name} (${tool.id})`);
     console.log(`[WebTool] Window ID: ${window.id}`);
     console.log(`[WebTool] Setting up keyboard event handlers...`);
-    
+
     // Test clipboard access
     const testClipboard = clipboard.readText();
-    console.log(`[WebTool] Clipboard test on window create: "${testClipboard ? testClipboard.substring(0, 30) + '...' : '(empty)'}"`);
-    
+    console.log(
+      `[WebTool] Clipboard test on window create: "${testClipboard ? testClipboard.substring(0, 30) + '...' : '(empty)'}"`
+    );
+
     // Log focus events
     window.on('focus', () => {
       console.log(`[WebTool] Window FOCUSED: ${tool.name} (ID: ${window.id})`);
     });
-    
+
     window.on('blur', () => {
       console.log(`[WebTool] Window BLURRED: ${tool.name} (ID: ${window.id})`);
     });
-    
+
     // Set up permission handlers for microphone, speech recognition, etc.
     window.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
       console.log(`[WebTool] Permission requested: ${permission} from ${webContents.getURL()}`);
-      
+
       // Allow media permissions (microphone, camera, speech recognition)
       const allowedPermissions = [
         'media',
-        'audioCapture', 
+        'audioCapture',
         'microphone',
         'camera',
         'geolocation',
         'notifications',
         'clipboard-read',
         'clipboard-write',
-        'speech',           // For Web Speech API
-        'background-sync'
+        'speech', // For Web Speech API
+        'background-sync',
       ];
-      
+
       if (allowedPermissions.includes(permission)) {
         console.log(`[WebTool] Allowing ${permission} permission`);
         callback(true);
@@ -513,30 +519,30 @@ class ModuleManager {
         callback(false);
       }
     });
-    
+
     // Also set permission check handler
     window.webContents.session.setPermissionCheckHandler((webContents, permission) => {
       const allowedPermissions = [
         'media',
         'audioCapture',
-        'microphone', 
+        'microphone',
         'camera',
         'geolocation',
         'notifications',
         'clipboard-read',
         'clipboard-write',
         'speech',
-        'background-sync'
+        'background-sync',
       ];
-      
+
       return allowedPermissions.includes(permission);
     });
-    
+
     // Set Chrome user agent (important for Web Speech API - Google may reject Electron)
     const chromeVersion = process.versions.chrome || '120.0.0.0';
     const userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
     window.webContents.setUserAgent(userAgent);
-    
+
     // Modify request headers to look like Chrome (not Electron)
     window.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
       const headers = { ...details.requestHeaders };
@@ -547,14 +553,14 @@ class ModuleManager {
       }
       callback({ requestHeaders: headers });
     });
-    
+
     console.log(`[WebTool] Set Chrome user agent: ${chromeVersion}`);
-    
+
     // Center the window for non-fullscreen sizes
     if (tool.windowSize !== 'fullscreen') {
       window.center();
     }
-    
+
     // Define the speech polyfill code once, inject it multiple times to ensure it's available
     const speechPolyfillCode = `
       (function() {
@@ -758,26 +764,30 @@ class ModuleManager {
         console.log('[Speech Polyfill] Web Speech API polyfill installed successfully');
       })();
     `;
-    
+
     // Inject Web Speech API polyfill as early as possible
     // Try multiple times to ensure it's available before page scripts run
     window.webContents.on('did-start-loading', () => {
       // Initial attempt (speechBridge might not be ready yet)
       setTimeout(() => {
-        window.webContents.executeJavaScript(speechPolyfillCode)
-          .catch(err => console.log('[WebTool] Early speech polyfill injection pending...'));
+        window.webContents
+          .executeJavaScript(speechPolyfillCode)
+          .catch((_err) => console.log('[WebTool] Early speech polyfill injection pending...'));
       }, 50);
     });
-    
+
     // Also try at dom-ready to ensure speechBridge is available
     window.webContents.on('dom-ready', () => {
-      window.webContents.executeJavaScript(speechPolyfillCode)
-        .catch(err => console.error('[WebTool] Error injecting speech polyfill:', err));
+      window.webContents
+        .executeJavaScript(speechPolyfillCode)
+        .catch((err) => console.error('[WebTool] Error injecting speech polyfill:', err));
     });
-    
+
     // Inject the minimal toolbar after page loads
     window.webContents.on('did-finish-load', () => {
-      window.webContents.executeJavaScript(`
+      window.webContents
+        .executeJavaScript(
+          `
         (function() {
           // Check if toolbar already exists
           if (document.getElementById('gsx-minimal-toolbar')) return;
@@ -1049,24 +1059,28 @@ class ModuleManager {
           
           console.log('[WebTool] Clipboard keyboard shortcuts enabled');
         })();
-      `).catch(err => console.error('[Web Tool] Error injecting toolbar:', err));
+      `
+        )
+        .catch((err) => console.error('[Web Tool] Error injecting toolbar:', err));
     });
-    
+
     // Handle keyboard shortcuts at the Electron level for reliable paste/copy/cut
     // clipboard is already imported at the top of this function
-    
+
     // Log ALL keyboard events to see what's happening
     window.webContents.on('before-input-event', (event, input) => {
       // Log every keydown with modifier to debug
       if (input.type === 'keyDown') {
-        console.log(`[WebTool KB] Key: "${input.key}" | meta: ${input.meta} | ctrl: ${input.control} | shift: ${input.shift} | alt: ${input.alt}`);
+        console.log(
+          `[WebTool KB] Key: "${input.key}" | meta: ${input.meta} | ctrl: ${input.control} | shift: ${input.shift} | alt: ${input.alt}`
+        );
       }
-      
+
       // Only handle when modifier key is pressed
       if (input.meta || input.control) {
         const key = input.key.toLowerCase();
         console.log(`[WebTool KB] Modifier key combo detected: ${input.meta ? 'Cmd' : 'Ctrl'}+${key}`);
-        
+
         // Paste - Cmd+V / Ctrl+V
         // Use native webContents.paste() which properly handles Universal Clipboard/Handoff
         if (key === 'v' && input.type === 'keyDown') {
@@ -1074,41 +1088,45 @@ class ModuleManager {
           event.preventDefault();
           window.webContents.paste();
         }
-        
-        // Copy - Cmd+C / Ctrl+C  
+
+        // Copy - Cmd+C / Ctrl+C
         if (key === 'c' && input.type === 'keyDown') {
           // Let the page handle copy, but also sync to Electron clipboard
-          window.webContents.executeJavaScript(`
+          window.webContents
+            .executeJavaScript(
+              `
             (function() {
               const selection = window.getSelection();
               return selection ? selection.toString() : '';
             })();
-          `).then(selectedText => {
-            if (selectedText) {
-              clipboard.writeText(selectedText);
-              console.log('[WebTool] Copied to clipboard:', selectedText.substring(0, 50) + '...');
-            }
-          });
+          `
+            )
+            .then((selectedText) => {
+              if (selectedText) {
+                clipboard.writeText(selectedText);
+                console.log('[WebTool] Copied to clipboard:', selectedText.substring(0, 50) + '...');
+              }
+            });
         }
-        
+
         // Cut - Cmd+X / Ctrl+X
         if (key === 'x' && input.type === 'keyDown') {
           event.preventDefault();
           window.webContents.cut();
         }
-        
+
         // Select All - Cmd+A / Ctrl+A
         if (key === 'a' && input.type === 'keyDown') {
           event.preventDefault();
           window.webContents.selectAll();
         }
-        
+
         // Undo - Cmd+Z / Ctrl+Z
         if (key === 'z' && input.type === 'keyDown' && !input.shift) {
           event.preventDefault();
           window.webContents.undo();
         }
-        
+
         // Redo - Cmd+Shift+Z / Ctrl+Shift+Z or Cmd+Y / Ctrl+Y
         if ((key === 'z' && input.shift) || key === 'y') {
           if (input.type === 'keyDown') {
@@ -1118,7 +1136,7 @@ class ModuleManager {
         }
       }
     });
-    
+
     window.loadURL(tool.url);
     console.log(`[WebTool] ========================================`);
     console.log(`[WebTool] Opened: ${tool.name}`);
@@ -1128,11 +1146,11 @@ class ModuleManager {
     console.log(`[WebTool] Try pressing Cmd+V - you should see logs in this terminal`);
     console.log(`[WebTool] ========================================`);
   }
-  
+
   async deleteWebTool(toolId) {
     const tools = this.loadWebTools();
-    const toolToDelete = tools.find(t => t.id === toolId);
-    const filteredTools = tools.filter(t => t.id !== toolId);
+    const toolToDelete = tools.find((t) => t.id === toolId);
+    const filteredTools = tools.filter((t) => t.id !== toolId);
 
     if (tools.length === filteredTools.length) {
       throw new Error(`Web tool not found: ${toolId}`);
@@ -1140,7 +1158,7 @@ class ModuleManager {
 
     this.saveWebTools(filteredTools);
     this.updateApplicationMenu();
-    
+
     // Clean up any auto-generated agent for this tool
     if (toolToDelete && toolToDelete.docsUrl) {
       try {
@@ -1152,9 +1170,9 @@ class ModuleManager {
         // Don't fail the tool deletion if agent cleanup fails
       }
     }
-    
+
     return true;
   }
 }
 
-module.exports = ModuleManager; 
+module.exports = ModuleManager;

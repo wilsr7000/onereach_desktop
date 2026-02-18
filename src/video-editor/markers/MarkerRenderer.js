@@ -5,14 +5,14 @@
 export class MarkerRenderer {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Drag state
     this.draggingMarker = null;
     this.wasDragging = false;
-    
+
     // Details panel state
     this.selectedMarkerForDetails = null;
-    
+
     // Bind event handlers
     this.handleDrag = this._handleDrag.bind(this);
     this.handleDragEnd = this._handleDragEnd.bind(this);
@@ -24,23 +24,25 @@ export class MarkerRenderer {
   renderTimeline() {
     const track = document.getElementById('markersTrack');
     const video = document.getElementById('videoPlayer');
-    
+
     if (!track || !video || !video.duration) {
       if (track) track.innerHTML = '';
       return;
     }
-    
+
     const markers = this.app.markerManager?.getAll() || this.app.markers || [];
     const zoom = this.app.timelineZoom || 1;
     track.style.width = `calc((100% - 108px) * ${zoom})`;
-    
-    track.innerHTML = markers.map(marker => {
-      if (marker.type === 'range') {
-        return this._renderRangeMarker(marker, video.duration);
-      } else {
-        return this._renderSpotMarker(marker, video.duration);
-      }
-    }).join('');
+
+    track.innerHTML = markers
+      .map((marker) => {
+        if (marker.type === 'range') {
+          return this._renderRangeMarker(marker, video.duration);
+        } else {
+          return this._renderSpotMarker(marker, video.duration);
+        }
+      })
+      .join('');
   }
 
   /**
@@ -51,7 +53,7 @@ export class MarkerRenderer {
     const endPercent = (marker.outTime / videoDuration) * 100;
     const width = endPercent - startPercent;
     const duration = marker.outTime - marker.inTime;
-    
+
     return `
       <div class="marker-range" style="left: ${startPercent}%; width: ${width}%; background: ${marker.color};" 
            data-id="${marker.id}"
@@ -82,7 +84,7 @@ export class MarkerRenderer {
    */
   _renderSpotMarker(marker, videoDuration) {
     const percent = (marker.time / videoDuration) * 100;
-    
+
     return `
       <div class="marker" style="left: ${percent}%; background: ${marker.color}; cursor: ew-resize;" 
            data-id="${marker.id}"
@@ -102,29 +104,31 @@ export class MarkerRenderer {
     const list = document.getElementById('markersList');
     const count = document.getElementById('markersCount');
     const markers = this.app.markerManager?.getAll() || this.app.markers || [];
-    
+
     if (count) {
       count.textContent = markers.length;
     }
-    
+
     if (!list) return;
-    
+
     if (markers.length === 0) {
       list.innerHTML = '<div class="markers-empty">No markers yet.<br>Click "Add Marker" or press <kbd>N</kbd></div>';
       return;
     }
-    
-    list.innerHTML = markers.map((marker, index) => {
-      const hasMetadata = marker.description || marker.transcription || (marker.tags && marker.tags.length > 0);
-      const metaIcon = hasMetadata ? '📝' : '';
-      
-      if (marker.type === 'range') {
-        return this._renderRangeListItem(marker, index, metaIcon);
-      } else {
-        return this._renderSpotListItem(marker, index, metaIcon);
-      }
-    }).join('');
-    
+
+    list.innerHTML = markers
+      .map((marker, index) => {
+        const hasMetadata = marker.description || marker.transcription || (marker.tags && marker.tags.length > 0);
+        const metaIcon = hasMetadata ? '📝' : '';
+
+        if (marker.type === 'range') {
+          return this._renderRangeListItem(marker, index, metaIcon);
+        } else {
+          return this._renderSpotListItem(marker, index, metaIcon);
+        }
+      })
+      .join('');
+
     // Update details panel if visible
     if (this.selectedMarkerForDetails) {
       this.showDetails(this.selectedMarkerForDetails);
@@ -185,17 +189,16 @@ export class MarkerRenderer {
    * Show marker details panel
    */
   showDetails(markerId) {
-    const marker = this.app.markerManager?.getById(markerId) || 
-                   this.app.markers?.find(m => m.id === markerId);
+    const marker = this.app.markerManager?.getById(markerId) || this.app.markers?.find((m) => m.id === markerId);
     if (!marker) return;
-    
+
     this.selectedMarkerForDetails = markerId;
-    
+
     // Highlight in list
-    document.querySelectorAll('.marker-item').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.marker-item').forEach((el) => el.classList.remove('active'));
     const listItem = document.querySelector(`.marker-item[data-id="${markerId}"]`);
     if (listItem) listItem.classList.add('active');
-    
+
     // Delegate to app's showMarkerDetails for full panel rendering
     this.app.showMarkerDetails?.(markerId);
   }
@@ -217,21 +220,21 @@ export class MarkerRenderer {
   startDragSpot(event, markerId) {
     event.preventDefault();
     event.stopPropagation();
-    
+
     const markers = this.app.markerManager?.getAll() || this.app.markers || [];
-    const marker = markers.find(m => m.id === markerId);
+    const marker = markers.find((m) => m.id === markerId);
     if (!marker) return;
-    
+
     this.draggingMarker = {
       id: markerId,
       type: 'spot',
       startX: event.clientX,
-      startTime: marker.time
+      startTime: marker.time,
     };
-    
+
     const el = document.querySelector(`.marker[data-id="${markerId}"]`);
     if (el) el.classList.add('dragging');
-    
+
     document.addEventListener('mousemove', this.handleDrag);
     document.addEventListener('mouseup', this.handleDragEnd);
   }
@@ -242,21 +245,21 @@ export class MarkerRenderer {
   startDragRangeIn(event, markerId) {
     event.preventDefault();
     event.stopPropagation();
-    
+
     const markers = this.app.markerManager?.getAll() || this.app.markers || [];
-    const marker = markers.find(m => m.id === markerId);
+    const marker = markers.find((m) => m.id === markerId);
     if (!marker || marker.type !== 'range') return;
-    
+
     this.draggingMarker = {
       id: markerId,
       type: 'range-in',
       startX: event.clientX,
-      startTime: marker.inTime
+      startTime: marker.inTime,
     };
-    
+
     const el = document.querySelector(`.marker[data-id="${markerId}-in"]`);
     if (el) el.classList.add('dragging');
-    
+
     document.addEventListener('mousemove', this.handleDrag);
     document.addEventListener('mouseup', this.handleDragEnd);
   }
@@ -267,21 +270,21 @@ export class MarkerRenderer {
   startDragRangeOut(event, markerId) {
     event.preventDefault();
     event.stopPropagation();
-    
+
     const markers = this.app.markerManager?.getAll() || this.app.markers || [];
-    const marker = markers.find(m => m.id === markerId);
+    const marker = markers.find((m) => m.id === markerId);
     if (!marker || marker.type !== 'range') return;
-    
+
     this.draggingMarker = {
       id: markerId,
       type: 'range-out',
       startX: event.clientX,
-      startTime: marker.outTime
+      startTime: marker.outTime,
     };
-    
+
     const el = document.querySelector(`.marker[data-id="${markerId}-out"]`);
     if (el) el.classList.add('dragging');
-    
+
     document.addEventListener('mousemove', this.handleDrag);
     document.addEventListener('mouseup', this.handleDragEnd);
   }
@@ -291,26 +294,26 @@ export class MarkerRenderer {
    */
   startDragRangeMove(event, markerId) {
     if (event.target.classList.contains('marker-range-handle')) return;
-    
+
     event.preventDefault();
     event.stopPropagation();
-    
+
     const markers = this.app.markerManager?.getAll() || this.app.markers || [];
-    const marker = markers.find(m => m.id === markerId);
+    const marker = markers.find((m) => m.id === markerId);
     if (!marker || marker.type !== 'range') return;
-    
+
     this.draggingMarker = {
       id: markerId,
       type: 'range-move',
       startX: event.clientX,
       startInTime: marker.inTime,
       startOutTime: marker.outTime,
-      duration: marker.outTime - marker.inTime
+      duration: marker.outTime - marker.inTime,
     };
-    
+
     const el = document.querySelector(`.marker-range[data-id="${markerId}"]`);
     if (el) el.classList.add('dragging');
-    
+
     document.addEventListener('mousemove', this.handleDrag);
     document.addEventListener('mouseup', this.handleDragEnd);
   }
@@ -320,37 +323,40 @@ export class MarkerRenderer {
    */
   _handleDrag(event) {
     if (!this.draggingMarker) return;
-    
+
     const track = document.getElementById('markersTrack');
     const video = document.getElementById('videoPlayer');
     if (!track || !video || !video.duration) return;
-    
+
     const markers = this.app.markerManager?.getAll() || this.app.markers || [];
-    const marker = markers.find(m => m.id === this.draggingMarker.id);
+    const marker = markers.find((m) => m.id === this.draggingMarker.id);
     if (!marker) return;
-    
+
     const rect = track.getBoundingClientRect();
     const trackWidth = rect.width;
     const deltaX = event.clientX - this.draggingMarker.startX;
     const deltaTime = (deltaX / trackWidth) * video.duration;
-    
+
     switch (this.draggingMarker.type) {
       case 'spot':
         marker.time = Math.max(0, Math.min(video.duration, this.draggingMarker.startTime + deltaTime));
         break;
-        
+
       case 'range-in':
         marker.inTime = Math.max(0, Math.min(marker.outTime - 0.1, this.draggingMarker.startTime + deltaTime));
         break;
-        
+
       case 'range-out':
-        marker.outTime = Math.max(marker.inTime + 0.1, Math.min(video.duration, this.draggingMarker.startTime + deltaTime));
+        marker.outTime = Math.max(
+          marker.inTime + 0.1,
+          Math.min(video.duration, this.draggingMarker.startTime + deltaTime)
+        );
         break;
-        
+
       case 'range-move':
         let newIn = this.draggingMarker.startInTime + deltaTime;
         let newOut = this.draggingMarker.startOutTime + deltaTime;
-        
+
         if (newIn < 0) {
           newIn = 0;
           newOut = this.draggingMarker.duration;
@@ -359,12 +365,12 @@ export class MarkerRenderer {
           newOut = video.duration;
           newIn = video.duration - this.draggingMarker.duration;
         }
-        
+
         marker.inTime = newIn;
         marker.outTime = newOut;
         break;
     }
-    
+
     // Re-render and re-apply dragging class
     this.render();
     this._reapplyDraggingClass(marker.id);
@@ -375,17 +381,17 @@ export class MarkerRenderer {
    */
   _handleDragEnd(event) {
     if (!this.draggingMarker) return;
-    
+
     const deltaX = Math.abs(event.clientX - this.draggingMarker.startX);
     if (deltaX > 5) {
       this.wasDragging = true;
     }
-    
+
     // Remove dragging classes
-    document.querySelectorAll('.marker.dragging, .marker-range.dragging').forEach(el => {
+    document.querySelectorAll('.marker.dragging, .marker-range.dragging').forEach((el) => {
       el.classList.remove('dragging');
     });
-    
+
     // Sort markers
     const markers = this.app.markerManager?.getAll() || this.app.markers || [];
     markers.sort((a, b) => {
@@ -393,12 +399,12 @@ export class MarkerRenderer {
       const timeB = b.type === 'range' ? b.inTime : b.time;
       return timeA - timeB;
     });
-    
+
     this.draggingMarker = null;
-    
+
     document.removeEventListener('mousemove', this.handleDrag);
     document.removeEventListener('mouseup', this.handleDragEnd);
-    
+
     this.render();
     this.app.showToast?.('success', 'Marker moved');
   }
@@ -408,7 +414,7 @@ export class MarkerRenderer {
    */
   _reapplyDraggingClass(markerId) {
     if (!this.draggingMarker) return;
-    
+
     let el;
     switch (this.draggingMarker.type) {
       case 'spot':
@@ -424,25 +430,7 @@ export class MarkerRenderer {
         el = document.querySelector(`.marker-range[data-id="${markerId}"]`);
         break;
     }
-    
+
     if (el) el.classList.add('dragging');
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

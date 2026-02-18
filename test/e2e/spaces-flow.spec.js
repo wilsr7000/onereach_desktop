@@ -31,12 +31,11 @@ let mainWindow;
 let testSpaceId;
 
 test.describe('Spaces Manager Flow', () => {
-
   test.beforeAll(async () => {
     electronApp = await electron.launch({
       args: [path.join(__dirname, '../../main.js')],
       env: { ...process.env, NODE_ENV: 'test', TEST_MODE: 'true' },
-      timeout: 30000
+      timeout: 30000,
     });
     mainWindow = await electronApp.firstWindow();
     await mainWindow.waitForLoadState('domcontentloaded');
@@ -47,9 +46,17 @@ test.describe('Spaces Manager Flow', () => {
   test.afterAll(async () => {
     // Clean up test space if it still exists
     if (testSpaceId) {
-      try { await deleteSpace(testSpaceId); } catch (e) { /* ok */ }
+      try {
+        await deleteSpace(testSpaceId);
+      } catch (_e) {
+        /* ok */
+      }
     }
-    try { await setLogLevel('info'); } catch (e) { /* ok */ }
+    try {
+      await setLogLevel('info');
+    } catch (_e) {
+      /* ok */
+    }
     await closeApp({ electronApp });
   });
 
@@ -77,7 +84,7 @@ test.describe('Spaces Manager Flow', () => {
 
   test('test space appears in list', async () => {
     const spaces = await listSpaces();
-    const found = spaces.find(s => (s.id || s.spaceId) === testSpaceId);
+    const found = spaces.find((s) => (s.id || s.spaceId) === testSpaceId);
     expect(found).toBeTruthy();
   });
 
@@ -106,8 +113,12 @@ test.describe('Spaces Manager Flow', () => {
     await sleep(4000);
 
     const allWindows = electronApp.windows();
-    const spacesWindow = allWindows.find(w => {
-      try { return w.url().includes('clipboard-viewer.html'); } catch { return false; }
+    const spacesWindow = allWindows.find((w) => {
+      try {
+        return w.url().includes('clipboard-viewer.html');
+      } catch {
+        return false;
+      }
     });
 
     expect(spacesWindow).toBeTruthy();
@@ -145,7 +156,7 @@ test.describe('Spaces Manager Flow', () => {
     // Verify it's gone
     await sleep(300);
     const spaces = await listSpaces();
-    const stillThere = spaces.find(s => (s.id || s.spaceId) === testSpaceId);
+    const stillThere = spaces.find((s) => (s.id || s.spaceId) === testSpaceId);
     expect(stillThere).toBeFalsy();
 
     testSpaceId = null; // Prevent double-delete in afterAll

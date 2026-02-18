@@ -22,10 +22,10 @@ class CredentialManager {
     // Temporary storage for credentials captured during login
     // Cleared after save prompt is dismissed or after timeout
     this.pendingCredentials = new Map();
-    
+
     // Timeout for pending credentials (5 minutes)
     this.PENDING_TIMEOUT = 5 * 60 * 1000;
-    
+
     console.log('[CredentialManager] Initialized');
   }
 
@@ -38,7 +38,7 @@ class CredentialManager {
     try {
       const urlObj = new URL(url);
       return urlObj.hostname;
-    } catch (e) {
+    } catch (_e) {
       console.error('[CredentialManager] Invalid URL:', url);
       return url;
     }
@@ -75,19 +75,19 @@ class CredentialManager {
   storePendingCredentials(url, username, password, idwName = null) {
     const domain = this.extractDomain(url);
     const key = this.createAccountKey(domain, username);
-    
+
     // Clear any existing timeout for this key
     const existing = this.pendingCredentials.get(key);
     if (existing && existing.timeout) {
       clearTimeout(existing.timeout);
     }
-    
+
     // Store with auto-clear timeout
     const timeout = setTimeout(() => {
       this.clearPendingCredentials(key);
       console.log('[CredentialManager] Pending credentials expired for:', domain);
     }, this.PENDING_TIMEOUT);
-    
+
     this.pendingCredentials.set(key, {
       domain,
       username,
@@ -95,9 +95,9 @@ class CredentialManager {
       idwName: idwName || domain,
       url,
       capturedAt: Date.now(),
-      timeout
+      timeout,
     });
-    
+
     console.log('[CredentialManager] Stored pending credentials for:', domain);
     return key;
   }
@@ -109,7 +109,7 @@ class CredentialManager {
    */
   getPendingCredentials(url) {
     const domain = this.extractDomain(url);
-    
+
     // Find any pending credentials for this domain
     for (const [key, creds] of this.pendingCredentials) {
       if (creds.domain === domain) {
@@ -143,23 +143,23 @@ class CredentialManager {
     try {
       const domain = this.extractDomain(url);
       const accountKey = this.createAccountKey(domain, username);
-      
+
       // Store password in keychain
       await keytar.setPassword(SERVICE_NAME, accountKey, password);
-      
+
       // Store metadata (IDW name, URL) as a separate entry
       const metadata = JSON.stringify({
         idwName: idwName || domain,
         url,
-        savedAt: Date.now()
+        savedAt: Date.now(),
       });
       await keytar.setPassword(`${SERVICE_NAME}-meta`, accountKey, metadata);
-      
+
       console.log('[CredentialManager] Saved credentials for:', domain, 'user:', username);
-      
+
       // Clear any pending credentials for this key
       this.clearPendingCredentials(accountKey);
-      
+
       return true;
     } catch (error) {
       console.error('[CredentialManager] Failed to save credentials:', error);
@@ -177,24 +177,24 @@ class CredentialManager {
     try {
       const domain = this.extractDomain(url);
       const allCredentials = await this.listCredentials();
-      
+
       // Find credentials for this domain
-      const match = allCredentials.find(cred => cred.domain === domain);
+      const match = allCredentials.find((cred) => cred.domain === domain);
       if (!match) {
         return null;
       }
-      
+
       // Get the actual password
       const password = await keytar.getPassword(SERVICE_NAME, match.accountKey);
       if (!password) {
         return null;
       }
-      
+
       return {
         username: match.username,
         password,
         idwName: match.idwName,
-        domain: match.domain
+        domain: match.domain,
       };
     } catch (error) {
       console.error('[CredentialManager] Failed to get credential:', error);
@@ -212,23 +212,25 @@ class CredentialManager {
     try {
       const domain = this.extractDomain(url);
       const allCredentials = await this.listCredentials();
-      
+
       // Filter for this domain
-      const matches = allCredentials.filter(cred => cred.domain === domain);
-      
+      const matches = allCredentials.filter((cred) => cred.domain === domain);
+
       // Get passwords for each
-      const results = await Promise.all(matches.map(async (match) => {
-        const password = await keytar.getPassword(SERVICE_NAME, match.accountKey);
-        return {
-          username: match.username,
-          password,
-          idwName: match.idwName,
-          domain: match.domain,
-          accountKey: match.accountKey
-        };
-      }));
-      
-      return results.filter(r => r.password !== null);
+      const results = await Promise.all(
+        matches.map(async (match) => {
+          const password = await keytar.getPassword(SERVICE_NAME, match.accountKey);
+          return {
+            username: match.username,
+            password,
+            idwName: match.idwName,
+            domain: match.domain,
+            accountKey: match.accountKey,
+          };
+        })
+      );
+
+      return results.filter((r) => r.password !== null);
     } catch (error) {
       console.error('[CredentialManager] Failed to get credentials for domain:', error);
       return [];
@@ -243,30 +245,32 @@ class CredentialManager {
     try {
       // Get all credentials from keytar
       const credentials = await keytar.findCredentials(SERVICE_NAME);
-      
-      const results = await Promise.all(credentials.map(async (cred) => {
-        const { domain, username } = this.parseAccountKey(cred.account);
-        
-        // Try to get metadata
-        let idwName = domain;
-        try {
-          const metaStr = await keytar.getPassword(`${SERVICE_NAME}-meta`, cred.account);
-          if (metaStr) {
-            const meta = JSON.parse(metaStr);
-            idwName = meta.idwName || domain;
+
+      const results = await Promise.all(
+        credentials.map(async (cred) => {
+          const { domain, username } = this.parseAccountKey(cred.account);
+
+          // Try to get metadata
+          let idwName = domain;
+          try {
+            const metaStr = await keytar.getPassword(`${SERVICE_NAME}-meta`, cred.account);
+            if (metaStr) {
+              const meta = JSON.parse(metaStr);
+              idwName = meta.idwName || domain;
+            }
+          } catch (_e) {
+            // Metadata might not exist for older entries
           }
-        } catch (e) {
-          // Metadata might not exist for older entries
-        }
-        
-        return {
-          domain,
-          username,
-          idwName,
-          accountKey: cred.account
-        };
-      }));
-      
+
+          return {
+            domain,
+            username,
+            idwName,
+            accountKey: cred.account,
+          };
+        })
+      );
+
       return results;
     } catch (error) {
       console.error('[CredentialManager] Failed to list credentials:', error);
@@ -283,14 +287,14 @@ class CredentialManager {
     try {
       // Delete password
       const deleted = await keytar.deletePassword(SERVICE_NAME, accountKey);
-      
+
       // Also try to delete metadata
       try {
         await keytar.deletePassword(`${SERVICE_NAME}-meta`, accountKey);
-      } catch (e) {
+      } catch (_e) {
         // Metadata might not exist
       }
-      
+
       console.log('[CredentialManager] Deleted credential:', accountKey);
       return deleted;
     } catch (error) {
@@ -307,13 +311,13 @@ class CredentialManager {
     try {
       const credentials = await this.listCredentials();
       let deleted = 0;
-      
+
       for (const cred of credentials) {
         if (await this.deleteCredential(cred.accountKey)) {
           deleted++;
         }
       }
-      
+
       console.log('[CredentialManager] Deleted all credentials, count:', deleted);
       return deleted;
     } catch (error) {
@@ -367,13 +371,13 @@ class CredentialManager {
       const metadata = JSON.stringify({
         email,
         savedAt: Date.now(),
-        has2FA: !!totpSecret
+        has2FA: !!totpSecret,
       });
       await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, metadata);
-      
+
       // Save password
       await keytar.setPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY, password);
-      
+
       // Save TOTP secret if provided
       if (totpSecret) {
         await keytar.setPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY, totpSecret);
@@ -381,7 +385,7 @@ class CredentialManager {
       } else {
         console.log('[CredentialManager] Saved OneReach credentials (no 2FA) for:', email);
       }
-      
+
       return true;
     } catch (error) {
       console.error('[CredentialManager] Failed to save OneReach credentials:', error);
@@ -400,29 +404,29 @@ class CredentialManager {
       if (!metaStr) {
         return null;
       }
-      
+
       const meta = JSON.parse(metaStr);
-      
+
       // Get password
       const password = await keytar.getPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
       if (!password) {
         return null;
       }
-      
+
       // Try to get TOTP secret
       let totpSecret = null;
       try {
         totpSecret = await keytar.getPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
-      } catch (e) {
+      } catch (_e) {
         // TOTP might not be configured
       }
-      
+
       return {
         email: meta.email,
         password,
         totpSecret,
         has2FA: !!totpSecret,
-        savedAt: meta.savedAt
+        savedAt: meta.savedAt,
       };
     } catch (error) {
       console.error('[CredentialManager] Failed to get OneReach credentials:', error);
@@ -439,9 +443,9 @@ class CredentialManager {
       const creds = await this.getOneReachCredentials();
       return {
         hasCredentials: creds !== null,
-        has2FA: creds?.has2FA || false
+        has2FA: creds?.has2FA || false,
       };
-    } catch (error) {
+    } catch (_error) {
       return { hasCredentials: false, has2FA: false };
     }
   }
@@ -454,7 +458,7 @@ class CredentialManager {
   async saveTOTPSecret(totpSecret) {
     try {
       await keytar.setPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY, totpSecret);
-      
+
       // Update metadata to reflect 2FA is now enabled
       const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
       if (metaStr) {
@@ -463,7 +467,7 @@ class CredentialManager {
         meta.totpAddedAt = Date.now();
         await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
       }
-      
+
       console.log('[CredentialManager] Saved TOTP secret');
       return true;
     } catch (error) {
@@ -492,7 +496,7 @@ class CredentialManager {
   async deleteTOTPSecret() {
     try {
       await keytar.deletePassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
-      
+
       // Update metadata
       const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
       if (metaStr) {
@@ -501,7 +505,7 @@ class CredentialManager {
         delete meta.totpAddedAt;
         await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
       }
-      
+
       console.log('[CredentialManager] Deleted TOTP secret');
       return true;
     } catch (error) {
@@ -518,13 +522,13 @@ class CredentialManager {
     try {
       await keytar.deletePassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
       await keytar.deletePassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
-      
+
       try {
         await keytar.deletePassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
-      } catch (e) {
+      } catch (_e) {
         // TOTP might not exist
       }
-      
+
       console.log('[CredentialManager] Deleted OneReach credentials');
       return true;
     } catch (error) {
@@ -575,7 +579,3 @@ class CredentialManager {
 
 // Export singleton instance
 module.exports = new CredentialManager();
-
-
-
-

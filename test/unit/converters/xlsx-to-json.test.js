@@ -13,8 +13,24 @@ const mockSheet = {
   name: 'Sheet1',
   addRow: vi.fn().mockReturnValue(mockRow),
   eachRow: vi.fn((opts, fn) => {
-    fn({ eachCell: vi.fn((o, cb) => { cb({ value: 'Name' }, 1); cb({ value: 'Age' }, 2); }) }, 1);
-    fn({ eachCell: vi.fn((o, cb) => { cb({ value: 'Alice' }, 1); cb({ value: 30 }, 2); }) }, 2);
+    fn(
+      {
+        eachCell: vi.fn((o, cb) => {
+          cb({ value: 'Name' }, 1);
+          cb({ value: 'Age' }, 2);
+        }),
+      },
+      1
+    );
+    fn(
+      {
+        eachCell: vi.fn((o, cb) => {
+          cb({ value: 'Alice' }, 1);
+          cb({ value: 30 }, 2);
+        }),
+      },
+      2
+    );
   }),
   columns: [],
   views: [],
@@ -27,7 +43,7 @@ vi.mock('exceljs', () => ({
       addWorksheet: vi.fn().mockReturnValue(mockSheet),
       worksheets: [mockSheet],
       xlsx: {
-        writeBuffer: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)])),
+        writeBuffer: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)])),
         load: vi.fn().mockResolvedValue(undefined),
       },
       getWorksheet: vi.fn().mockReturnValue(mockSheet),
@@ -48,7 +64,7 @@ const { XlsxToJsonAgent } = require('../../../lib/converters/xlsx-to-json.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(XlsxToJsonAgent, {
-  sampleInput: Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)]),
+  sampleInput: Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)]),
   expectedFromFormats: ['xlsx'],
   expectedToFormats: ['json'],
   expectedStrategies: ['rows-as-objects', 'raw-arrays', 'typed'],

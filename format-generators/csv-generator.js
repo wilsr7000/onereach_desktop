@@ -9,7 +9,7 @@ class CsvGenerator {
       includeMetadata: true,
       delimiter: ',',
       quoteStrings: true,
-      includeHeader: true
+      includeHeader: true,
     };
   }
 
@@ -34,7 +34,7 @@ class CsvGenerator {
         { key: 'content', header: 'Content' },
         { key: 'fileName', header: 'File Name' },
         { key: 'fileSize', header: 'File Size' },
-        { key: 'timestamp', header: 'Created' }
+        { key: 'timestamp', header: 'Created' },
       ];
 
       if (includeMetadata) {
@@ -49,13 +49,13 @@ class CsvGenerator {
 
       // Header row
       if (includeHeader) {
-        rows.push(columns.map(col => this.formatCell(col.header, quoteStrings)).join(delimiter));
+        rows.push(columns.map((col) => this.formatCell(col.header, quoteStrings)).join(delimiter));
       }
 
       // Data rows
       for (const item of items) {
         const rowData = this.extractItemData(item, columns, includeMetadata);
-        const row = columns.map(col => {
+        const row = columns.map((col) => {
           const value = rowData[col.key] ?? '';
           return this.formatCell(value, quoteStrings);
         });
@@ -74,14 +74,13 @@ class CsvGenerator {
         buffer: Buffer.from(contentWithBom, 'utf-8'),
         mimeType: 'text/csv',
         extension: 'csv',
-        filename: `${this.sanitizeFilename(space.name)}.csv`
+        filename: `${this.sanitizeFilename(space.name)}.csv`,
       };
-
     } catch (error) {
       console.error('[CsvGenerator] Error generating CSV:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -96,7 +95,7 @@ class CsvGenerator {
       content: this.cleanContent(item.content || item.plainText || ''),
       fileName: item.fileName || item.metadata?.filename || '',
       fileSize: item.fileSize ? this.formatFileSize(item.fileSize) : '',
-      timestamp: item.timestamp ? new Date(item.timestamp).toISOString() : ''
+      timestamp: item.timestamp ? new Date(item.timestamp).toISOString() : '',
     };
 
     if (includeMetadata) {
@@ -115,7 +114,7 @@ class CsvGenerator {
    */
   cleanContent(content) {
     if (!content) return '';
-    
+
     // Remove binary data indicators
     if (content.startsWith('data:') || content.match(/^[A-Za-z0-9+/]{100,}={0,2}$/)) {
       return '[Binary data]';
@@ -142,9 +141,10 @@ class CsvGenerator {
     const stringValue = String(value);
 
     // Always quote if contains special characters
-    const needsQuotes = quoteStrings || 
-      stringValue.includes(',') || 
-      stringValue.includes('"') || 
+    const needsQuotes =
+      quoteStrings ||
+      stringValue.includes(',') ||
+      stringValue.includes('"') ||
       stringValue.includes('\n') ||
       stringValue.includes('\r');
 
@@ -164,7 +164,7 @@ class CsvGenerator {
     if (!bytes) return '';
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
   }
 
   /**
@@ -176,7 +176,3 @@ class CsvGenerator {
 }
 
 module.exports = CsvGenerator;
-
-
-
-

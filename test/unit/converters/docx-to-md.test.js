@@ -21,7 +21,12 @@ beforeAll(() => {
   require2.cache[mammothPath] = { id: mammothPath, filename: mammothPath, loaded: true, exports: mammothMock };
 
   const turndownPath = require2.resolve('turndown');
-  require2.cache[turndownPath] = { id: turndownPath, filename: turndownPath, loaded: true, exports: MockTurndownService };
+  require2.cache[turndownPath] = {
+    id: turndownPath,
+    filename: turndownPath,
+    loaded: true,
+    exports: MockTurndownService,
+  };
 });
 
 // Mock internal dependencies used by base-converter-agent
@@ -37,7 +42,7 @@ const { DocxToMdAgent } = require('../../../lib/converters/docx-to-md.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(DocxToMdAgent, {
-  sampleInput: Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)]),
+  sampleInput: Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)]),
   expectedFromFormats: ['docx'],
   expectedToFormats: ['md', 'markdown'],
   expectedStrategies: ['mammoth-md', 'direct', 'semantic'],
@@ -67,7 +72,7 @@ describe('DocxToMdAgent (specific)', () => {
     await agent.execute(Buffer.from('mock-docx'), 'semantic');
     expect(mockAI.complete).toHaveBeenCalledWith(
       expect.stringContaining('Clean up the following Markdown'),
-      expect.objectContaining({ profile: 'fast' }),
+      expect.objectContaining({ profile: 'fast' })
     );
   });
 

@@ -15,14 +15,19 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors,
-  sleep, SPACES_API, LOG_SERVER
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
+  SPACES_API,
+  _LOG_SERVER,
 } = require('./helpers/electron-app');
 
 let app, electronApp, mainWindow, errorSnapshot;
 
 test.describe('Remaining Plans', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -30,7 +35,9 @@ test.describe('Remaining Plans', () => {
     errorSnapshot = await snapshotErrors();
   });
 
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Plan 12: Main Window / Tabs
@@ -54,7 +61,9 @@ test.describe('Remaining Plans', () => {
           return { success: true, tab };
         }
         return { success: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
@@ -63,11 +72,15 @@ test.describe('Remaining Plans', () => {
     const result = await mainWindow.evaluate(async () => {
       try {
         if (window.api?.invoke) {
-          const blocked = await window.api.invoke('check-url-allowed', 'http://malicious-site.example.com').catch(() => null);
+          const blocked = await window.api
+            .invoke('check-url-allowed', 'http://malicious-site.example.com')
+            .catch(() => null);
           return { checked: true, result: blocked };
         }
         return { checked: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
@@ -84,7 +97,9 @@ test.describe('Remaining Plans', () => {
           return { sent: true };
         }
         return { sent: true, note: 'No invoke' };
-      } catch (e) { return { sent: true, note: e.message }; }
+      } catch (e) {
+        return { sent: true, note: e.message };
+      }
     });
     await sleep(500);
     expect(result.sent).toBe(true);
@@ -98,7 +113,9 @@ test.describe('Remaining Plans', () => {
           return { sent: true };
         }
         return { sent: true };
-      } catch (e) { return { sent: true, note: e.message }; }
+      } catch (e) {
+        return { sent: true, note: e.message };
+      }
     });
     await sleep(500);
     expect(result.sent).toBe(true);
@@ -117,7 +134,7 @@ test.describe('Remaining Plans', () => {
     const res = await fetch(`${SPACES_API}/api/spaces`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
+      body: JSON.stringify({}),
     });
     // Missing name should cause an error
     expect([400, 422, 500]).toContain(res.status);
@@ -141,12 +158,16 @@ test.describe('Remaining Plans', () => {
 
   test('[05] spaces window renders sidebar with spaces list', async () => {
     const windows = await electronApp.windows();
-    const spacesPage = windows.find(p => {
-      try { return p.url().includes('clipboard-viewer'); } catch { return false; }
+    const spacesPage = windows.find((p) => {
+      try {
+        return p.url().includes('clipboard-viewer');
+      } catch {
+        return false;
+      }
     });
     if (spacesPage) {
       const result = await spacesPage.evaluate(() => ({
-        hasContent: document.body.innerHTML.length > 100
+        hasContent: document.body.innerHTML.length > 100,
       }));
       expect(result.hasContent).toBe(true);
     }
@@ -160,7 +181,9 @@ test.describe('Remaining Plans', () => {
           return { hasSpaces: true, count: Array.isArray(spaces) ? spaces.length : 0 };
         }
         return { hasSpaces: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
@@ -174,7 +197,9 @@ test.describe('Remaining Plans', () => {
     await mainWindow.evaluate(async () => {
       try {
         if (window.api?.invoke) await window.api.invoke('open-health-dashboard').catch(() => null);
-      } catch {}
+      } catch {
+        /* no-op */
+      }
     });
     await sleep(1000);
     const afterWindows = await electronApp.windows();
@@ -185,12 +210,18 @@ test.describe('Remaining Plans', () => {
     await mainWindow.evaluate(async () => {
       try {
         if (window.api?.invoke) await window.api.invoke('open-settings').catch(() => null);
-      } catch {}
+      } catch {
+        /* no-op */
+      }
     });
     await sleep(1000);
     const windows = await electronApp.windows();
-    const settings = windows.find(p => {
-      try { return p.url().includes('settings'); } catch { return false; }
+    const settings = windows.find((p) => {
+      try {
+        return p.url().includes('settings');
+      } catch {
+        return false;
+      }
     });
     expect(settings || windows.length > 1).toBeTruthy();
   });
@@ -207,7 +238,9 @@ test.describe('Remaining Plans', () => {
           return { success: true, modules };
         }
         return { success: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
@@ -224,7 +257,9 @@ test.describe('Remaining Plans', () => {
           return { success: true, count: agents ? Object.keys(agents).length : 0 };
         }
         return { success: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
@@ -241,7 +276,9 @@ test.describe('Remaining Plans', () => {
           return { hasIdw: !!settings?.idws, count: settings?.idws?.length || 0 };
         }
         return { hasIdw: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
@@ -249,7 +286,7 @@ test.describe('Remaining Plans', () => {
   test('[11] menu rebuilds after IDW list changes', async () => {
     const result = await mainWindow.evaluate(() => ({
       hasApi: typeof window.api !== 'undefined',
-      hasSaveSettings: typeof window.api?.saveSettings === 'function'
+      hasSaveSettings: typeof window.api?.saveSettings === 'function',
     }));
     expect(result.hasApi).toBe(true);
   });
@@ -266,7 +303,9 @@ test.describe('Remaining Plans', () => {
           return { autoMetadata: settings?.autoAIMetadata ?? settings?.['ai.autoMetadata'] };
         }
         return {};
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
@@ -305,7 +344,9 @@ test.describe('Remaining Plans', () => {
           return { success: true, monitors };
         }
         return { success: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
@@ -318,14 +359,22 @@ test.describe('Remaining Plans', () => {
           return { success: true, checkResult };
         }
         return { success: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
 
-  test('[17] first check establishes baseline hash', async () => { expect(true).toBe(true); });
-  test('[17] second check of unchanged page returns same hash', async () => { expect(true).toBe(true); });
-  test('[17] paused monitor does not run periodic checks', async () => { expect(true).toBe(true); });
+  test('[17] first check establishes baseline hash', async () => {
+    expect(true).toBe(true);
+  });
+  test('[17] second check of unchanged page returns same hash', async () => {
+    expect(true).toBe(true);
+  });
+  test('[17] paused monitor does not run periodic checks', async () => {
+    expect(true).toBe(true);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Plan 21: GSX Create
@@ -333,10 +382,17 @@ test.describe('Remaining Plans', () => {
 
   test('[21] GSX Create window closes cleanly', async () => {
     const windows = await electronApp.windows();
-    const gsxPage = windows.find(p => {
-      try { return p.url().includes('aider-ui'); } catch { return false; }
+    const gsxPage = windows.find((p) => {
+      try {
+        return p.url().includes('aider-ui');
+      } catch {
+        return false;
+      }
     });
-    if (gsxPage) { await gsxPage.close(); await sleep(300); }
+    if (gsxPage) {
+      await gsxPage.close();
+      await sleep(300);
+    }
     expect(true).toBe(true);
   });
 
@@ -348,7 +404,9 @@ test.describe('Remaining Plans', () => {
           return { success: true, count: spaces?.length || 0 };
         }
         return { success: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
@@ -364,23 +422,36 @@ test.describe('Remaining Plans', () => {
           }
         }
         return { success: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
 
   test('[21] aider runPrompt is callable', async () => {
     const result = await mainWindow.evaluate(() => ({
-      hasUnifiedClaude: typeof window.api?.unifiedClaude === 'function' || typeof window.api?.runHeadlessClaudePrompt === 'function'
+      hasUnifiedClaude:
+        typeof window.api?.unifiedClaude === 'function' || typeof window.api?.runHeadlessClaudePrompt === 'function',
     }));
     expect(result).toBeDefined();
   });
 
-  test('[21] aider addFiles is callable', async () => { expect(true).toBe(true); });
-  test('[21] aider removeFiles is callable', async () => { expect(true).toBe(true); });
-  test('[21] aider gitCreateBranch is callable', async () => { expect(true).toBe(true); });
-  test('[21] aider gitListBranches is callable', async () => { expect(true).toBe(true); });
-  test('[21] aider gitDiffBranches is callable', async () => { expect(true).toBe(true); });
+  test('[21] aider addFiles is callable', async () => {
+    expect(true).toBe(true);
+  });
+  test('[21] aider removeFiles is callable', async () => {
+    expect(true).toBe(true);
+  });
+  test('[21] aider gitCreateBranch is callable', async () => {
+    expect(true).toBe(true);
+  });
+  test('[21] aider gitListBranches is callable', async () => {
+    expect(true).toBe(true);
+  });
+  test('[21] aider gitDiffBranches is callable', async () => {
+    expect(true).toBe(true);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Plan 22: Agent Composer
@@ -394,7 +465,9 @@ test.describe('Remaining Plans', () => {
           return { sent: true };
         }
         return { sent: true };
-      } catch (e) { return { sent: true, note: e.message }; }
+      } catch (e) {
+        return { sent: true, note: e.message };
+      }
     });
     await sleep(500);
     expect(result.sent).toBe(true);
@@ -402,16 +475,28 @@ test.describe('Remaining Plans', () => {
 
   test('[22] agent composer has custom titlebar', async () => {
     const windows = await electronApp.windows();
-    const composer = windows.find(p => {
-      try { return p.url().includes('claude-code') || p.url().includes('agent-composer'); } catch { return false; }
+    const composer = windows.find((p) => {
+      try {
+        return p.url().includes('claude-code') || p.url().includes('agent-composer');
+      } catch {
+        return false;
+      }
     });
-    if (composer) { await composer.close(); }
+    if (composer) {
+      await composer.close();
+    }
     expect(true).toBe(true);
   });
 
-  test('[22] agent composer window closes cleanly', async () => { expect(true).toBe(true); });
-  test('[22] saved agent appears in Agent Manager', async () => { expect(true).toBe(true); });
-  test('[22] saved agent has correct fields', async () => { expect(true).toBe(true); });
+  test('[22] agent composer window closes cleanly', async () => {
+    expect(true).toBe(true);
+  });
+  test('[22] saved agent appears in Agent Manager', async () => {
+    expect(true).toBe(true);
+  });
+  test('[22] saved agent has correct fields', async () => {
+    expect(true).toBe(true);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Plan 23: Recorder
@@ -425,7 +510,9 @@ test.describe('Remaining Plans', () => {
           return { sent: true };
         }
         return { sent: true };
-      } catch (e) { return { sent: true, note: e.message }; }
+      } catch (e) {
+        return { sent: true, note: e.message };
+      }
     });
     await sleep(500);
     expect(result.sent).toBe(true);
@@ -433,15 +520,26 @@ test.describe('Remaining Plans', () => {
 
   test('[23] recorder window closes cleanly', async () => {
     const windows = await electronApp.windows();
-    const recorder = windows.find(p => {
-      try { return p.url().includes('recorder'); } catch { return false; }
+    const recorder = windows.find((p) => {
+      try {
+        return p.url().includes('recorder');
+      } catch {
+        return false;
+      }
     });
-    if (recorder) { await recorder.close(); await sleep(300); }
+    if (recorder) {
+      await recorder.close();
+      await sleep(300);
+    }
     expect(true).toBe(true);
   });
 
-  test('[23] microphone permission status checked', async () => { expect(true).toBe(true); });
-  test('[23] saved recording appears in Space', async () => { expect(true).toBe(true); });
+  test('[23] microphone permission status checked', async () => {
+    expect(true).toBe(true);
+  });
+  test('[23] saved recording appears in Space', async () => {
+    expect(true).toBe(true);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Plan 24: Black Hole
@@ -452,9 +550,15 @@ test.describe('Remaining Plans', () => {
     expect(fs.existsSync(bhPath)).toBe(true);
   });
 
-  test('[24] black hole window closes cleanly', async () => { expect(true).toBe(true); });
-  test('[24] saved content appears in target Space', async () => { expect(true).toBe(true); });
-  test('[24] content type is correctly identified', async () => { expect(true).toBe(true); });
+  test('[24] black hole window closes cleanly', async () => {
+    expect(true).toBe(true);
+  });
+  test('[24] saved content appears in target Space', async () => {
+    expect(true).toBe(true);
+  });
+  test('[24] content type is correctly identified', async () => {
+    expect(true).toBe(true);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Plan 30: Documentation
@@ -468,16 +572,28 @@ test.describe('Remaining Plans', () => {
           return { sent: true };
         }
         return { sent: true };
-      } catch (e) { return { sent: true, note: e.message }; }
+      } catch (e) {
+        return { sent: true, note: e.message };
+      }
     });
     expect(result.sent).toBe(true);
   });
 
-  test('[30] documentation window closes cleanly', async () => { expect(true).toBe(true); });
-  test('[30] AI Run Times Guide opens via Help menu', async () => { expect(true).toBe(true); });
-  test('[30] Spaces API Guide opens via Help menu', async () => { expect(true).toBe(true); });
-  test('[30] tutorials open via Agentic University', async () => { expect(true).toBe(true); });
-  test('[30] AI Run Times feed opens', async () => { expect(true).toBe(true); });
+  test('[30] documentation window closes cleanly', async () => {
+    expect(true).toBe(true);
+  });
+  test('[30] AI Run Times Guide opens via Help menu', async () => {
+    expect(true).toBe(true);
+  });
+  test('[30] Spaces API Guide opens via Help menu', async () => {
+    expect(true).toBe(true);
+  });
+  test('[30] tutorials open via Agentic University', async () => {
+    expect(true).toBe(true);
+  });
+  test('[30] AI Run Times feed opens', async () => {
+    expect(true).toBe(true);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Plan 31: Agentic Player
@@ -490,8 +606,12 @@ test.describe('Remaining Plans', () => {
     expect(fs.existsSync(playerPath) || fs.existsSync(altPath)).toBe(true);
   });
 
-  test('[31] player page loads without console errors', async () => { expect(true).toBe(true); });
-  test('[31] player initializes correctly', async () => { expect(true).toBe(true); });
+  test('[31] player page loads without console errors', async () => {
+    expect(true).toBe(true);
+  });
+  test('[31] player initializes correctly', async () => {
+    expect(true).toBe(true);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Plan 32: GSX Sync
@@ -505,16 +625,28 @@ test.describe('Remaining Plans', () => {
           return { success: true, status };
         }
         return { success: false };
-      } catch (e) { return { error: e.message }; }
+      } catch (e) {
+        return { error: e.message };
+      }
     });
     expect(result).toBeDefined();
   });
 
-  test('[32] sync-progress reset clears progress', async () => { expect(true).toBe(true); });
-  test('[32] sync-progress start initializes display', async () => { expect(true).toBe(true); });
-  test('[32] sync-progress file updates current file count', async () => { expect(true).toBe(true); });
-  test('[32] sync-progress complete shows success', async () => { expect(true).toBe(true); });
-  test('[32] sync-progress error shows error state', async () => { expect(true).toBe(true); });
+  test('[32] sync-progress reset clears progress', async () => {
+    expect(true).toBe(true);
+  });
+  test('[32] sync-progress start initializes display', async () => {
+    expect(true).toBe(true);
+  });
+  test('[32] sync-progress file updates current file count', async () => {
+    expect(true).toBe(true);
+  });
+  test('[32] sync-progress complete shows success', async () => {
+    expect(true).toBe(true);
+  });
+  test('[32] sync-progress error shows error state', async () => {
+    expect(true).toBe(true);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Plan 35: Shortcuts
@@ -528,17 +660,29 @@ test.describe('Remaining Plans', () => {
           return { sent: true };
         }
         return { sent: true };
-      } catch (e) { return { sent: true }; }
+      } catch (_e) {
+        return { sent: true };
+      }
     });
     await sleep(500);
     expect(result.sent).toBe(true);
   });
 
-  test('[35] Cmd+Shift+G opens Agent Composer', async () => { expect(true).toBe(true); });
-  test('[35] Cmd+Shift+H opens Health Dashboard', async () => { expect(true).toBe(true); });
-  test('[35] Cmd+Shift+U opens Black Hole', async () => { expect(true).toBe(true); });
-  test('[35] Cmd+Shift+T opens Test Runner', async () => { expect(true).toBe(true); });
-  test('[35] Cmd+Shift+L opens Log Viewer', async () => { expect(true).toBe(true); });
+  test('[35] Cmd+Shift+G opens Agent Composer', async () => {
+    expect(true).toBe(true);
+  });
+  test('[35] Cmd+Shift+H opens Health Dashboard', async () => {
+    expect(true).toBe(true);
+  });
+  test('[35] Cmd+Shift+U opens Black Hole', async () => {
+    expect(true).toBe(true);
+  });
+  test('[35] Cmd+Shift+T opens Test Runner', async () => {
+    expect(true).toBe(true);
+  });
+  test('[35] Cmd+Shift+L opens Log Viewer', async () => {
+    expect(true).toBe(true);
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Error check

@@ -18,8 +18,10 @@ vi.mock('../../../lib/log-event-queue', () => ({
 }));
 
 const mockAI = createMockAIService({
-  completeResponse: '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><h1>Document Title</h1><p>This is the body content.</p></body></html>',
-  chatResponse: '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><h1>Document Title</h1><p>This is the body content.</p></body></html>',
+  completeResponse:
+    '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><h1>Document Title</h1><p>This is the body content.</p></body></html>',
+  chatResponse:
+    '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><h1>Document Title</h1><p>This is the body content.</p></body></html>',
 });
 
 // Import the agent class (CJS)
@@ -48,7 +50,7 @@ describe('PdfToHtmlAgent (specific)', () => {
   });
 
   it('offers three HTML generation strategies', () => {
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toEqual(['simple', 'styled', 'semantic']);
   });
 

@@ -1,13 +1,13 @@
 /**
  * Evaluation HUD Component
  * Part of the Governed Self-Improving Agent Runtime
- * 
+ *
  * Multi-agent evaluation panel with epistemic framing
- * 
+ *
  * @version 2.0.0 - Added learning visibility, weighting selector, A/B comparison
  */
 
-(function() {
+(function () {
   'use strict';
 
   const EVAL_HUD_VERSION = '2.0.0';
@@ -25,13 +25,13 @@
       this.currentEvaluation = null;
       this.position = options.position || { bottom: 20, right: 340 };
       this.previouslyFocusedElement = null;
-      
+
       // Learning state
       this.learningSummary = null;
       this.isLearningPanelExpanded = localStorage.getItem('eval.showLearningPanel') !== 'false';
       this.weightingMode = localStorage.getItem('eval.weightingMode') || 'contextual';
       this.selectedProfile = localStorage.getItem('eval.profile') || 'standard';
-      
+
       console.log(`[EvaluationHUD] v${EVAL_HUD_VERSION} initializing...`);
       this.init();
     }
@@ -51,7 +51,7 @@
      */
     setupLiveRegion() {
       if (document.getElementById('eval-hud-live')) return;
-      
+
       const liveRegion = document.createElement('div');
       liveRegion.id = 'eval-hud-live';
       liveRegion.setAttribute('role', 'status');
@@ -79,7 +79,7 @@
      */
     createStyles() {
       if (document.getElementById('eval-hud-styles')) return;
-      
+
       const styles = document.createElement('style');
       styles.id = 'eval-hud-styles';
       styles.textContent = `
@@ -1096,13 +1096,13 @@
         </div>
       `;
       document.body.appendChild(this.container);
-      
+
       // Set initial weighting mode from localStorage
       const select = this.container.querySelector('#evalWeightingMode');
       if (select) {
         select.value = this.weightingMode;
       }
-      
+
       // Fetch and display initial learning status
       this.fetchLearningSummary();
     }
@@ -1115,7 +1115,7 @@
       this.container.querySelector('[data-action="minimize"]').addEventListener('click', () => {
         this.toggleMinimize();
       });
-      
+
       this.container.querySelector('[data-action="close"]').addEventListener('click', () => {
         this.hide();
       });
@@ -1124,22 +1124,22 @@
       this.container.querySelector('#evalWeightingMode').addEventListener('change', (e) => {
         this.weightingMode = e.target.value;
         localStorage.setItem('eval.weightingMode', this.weightingMode);
-        
+
         // Dispatch event for parent to handle
         const event = new CustomEvent('eval:weighting-change', {
-          detail: { mode: this.weightingMode }
+          detail: { mode: this.weightingMode },
         });
         document.dispatchEvent(event);
-        
+
         this.announce(`Weighting mode changed to ${this.weightingMode}`);
       });
 
       // Run evaluation CTA
       this.container.addEventListener('click', (e) => {
         if (e.target.closest('[data-action="run-eval"]')) {
-          const event = new CustomEvent('eval:run', { 
+          const event = new CustomEvent('eval:run', {
             bubbles: true,
-            detail: { weightingMode: this.weightingMode }
+            detail: { weightingMode: this.weightingMode },
           });
           document.dispatchEvent(event);
         }
@@ -1150,15 +1150,15 @@
         if (e.key === 'Escape') {
           this.hide();
         }
-        
+
         // Arrow key navigation for agent cards
         if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
           const cards = Array.from(this.container.querySelectorAll('.eval-agent-card'));
           if (cards.length === 0) return;
-          
+
           const currentIndex = cards.indexOf(document.activeElement);
           if (currentIndex === -1) return;
-          
+
           let nextIndex;
           if (e.key === 'ArrowRight') {
             nextIndex = (currentIndex + 1) % cards.length;
@@ -1173,9 +1173,9 @@
       // Drag to reposition
       let isDragging = false;
       let startX, startY, startRight, startBottom;
-      
+
       const header = this.container.querySelector('.eval-hud-header');
-      
+
       header.addEventListener('mousedown', (e) => {
         if (e.target.closest('.eval-hud-btn')) return; // Don't drag from buttons
         isDragging = true;
@@ -1190,8 +1190,8 @@
         if (!isDragging) return;
         const dx = startX - e.clientX;
         const dy = startY - e.clientY;
-        this.container.style.right = (startRight + dx) + 'px';
-        this.container.style.bottom = (startBottom + dy) + 'px';
+        this.container.style.right = startRight + dx + 'px';
+        this.container.style.bottom = startBottom + dy + 'px';
       });
 
       document.addEventListener('mouseup', () => {
@@ -1239,7 +1239,7 @@
     displayLoading(options = {}) {
       const content = this.container.querySelector('.eval-hud-content');
       const agentCount = options.agentCount || 'multiple';
-      
+
       content.innerHTML = `
         <div class="eval-loading" role="status" aria-label="Loading evaluation">
           <div class="eval-loading-spinner" aria-hidden="true"></div>
@@ -1264,7 +1264,7 @@
           </div>
         </div>
       `;
-      
+
       this.announce('Evaluation in progress');
       this.show();
     }
@@ -1276,7 +1276,7 @@
     displayError(error) {
       const content = this.container.querySelector('.eval-hud-content');
       const message = error?.message || 'An unexpected error occurred';
-      
+
       content.innerHTML = `
         <div class="eval-error" role="alert">
           <div class="eval-error-icon" aria-hidden="true">⚠️</div>
@@ -1290,17 +1290,17 @@
           </button>
         </div>
       `;
-      
+
       // Set up handlers
       content.querySelector('[data-action="retry"]').addEventListener('click', () => {
         const event = new CustomEvent('eval:retry', { bubbles: true });
         document.dispatchEvent(event);
       });
-      
+
       content.querySelector('[data-action="dismiss"]').addEventListener('click', () => {
         this.clear();
       });
-      
+
       this.announce('Evaluation failed: ' + message);
       this.show();
     }
@@ -1321,22 +1321,22 @@
       const duration = 600;
       const startTime = performance.now();
       const startScore = 0;
-      
+
       const animate = (currentTime) => {
         const elapsed = currentTime - startTime;
         const progress = Math.min(elapsed / duration, 1);
-        
+
         // Ease out cubic
         const eased = 1 - Math.pow(1 - progress, 3);
         const currentScore = Math.round(startScore + (targetScore - startScore) * eased);
-        
+
         element.textContent = currentScore;
-        
+
         if (progress < 1) {
           requestAnimationFrame(animate);
         }
       };
-      
+
       requestAnimationFrame(animate);
     }
 
@@ -1347,10 +1347,9 @@
     displayEvaluation(evaluation) {
       this.currentEvaluation = evaluation;
       const content = this.container.querySelector('.eval-hud-content');
-      
-      const scoreClass = evaluation.aggregateScore >= 70 ? 'high' : 
-                         evaluation.aggregateScore >= 50 ? 'medium' : 'low';
-      
+
+      const scoreClass = evaluation.aggregateScore >= 70 ? 'high' : evaluation.aggregateScore >= 50 ? 'medium' : 'low';
+
       content.innerHTML = `
         <!-- Score Display -->
         <div class="eval-score-container" role="region" aria-label="Evaluation score">
@@ -1360,22 +1359,31 @@
               Confidence: 
               <span class="eval-confidence-badge ${evaluation.confidence}">${evaluation.confidence}</span>
             </div>
-            ${evaluation.epistemicFraming?.recommendsHumanReview ? 
-              '<div style="font-size: 10px; color: #eab308;">⚠️ Human review recommended</div>' : ''}
+            ${
+              evaluation.epistemicFraming?.recommendsHumanReview
+                ? '<div style="font-size: 10px; color: #eab308;">⚠️ Human review recommended</div>'
+                : ''
+            }
           </div>
         </div>
         
         <!-- Epistemic Rationale -->
-        ${evaluation.epistemicFraming?.rationale ? `
+        ${
+          evaluation.epistemicFraming?.rationale
+            ? `
           <div class="eval-rationale" role="note">
             💡 ${this.escapeHtml(evaluation.epistemicFraming.rationale)}
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Agent Cards -->
         <div class="eval-agents-title" id="eval-agents-heading">Evaluating Agents (${evaluation.agentScores?.length || 0})</div>
         <div class="eval-agents-grid" role="list" aria-labelledby="eval-agents-heading">
-          ${(evaluation.agentScores || []).map((agent, index) => `
+          ${(evaluation.agentScores || [])
+            .map(
+              (agent, _index) => `
             <div class="eval-agent-card ${agent.trend}" 
                  role="listitem" 
                  tabindex="0"
@@ -1384,36 +1392,50 @@
               <span class="eval-agent-score">${Math.round(agent.score)}</span>
               <span class="eval-agent-type">${this.escapeHtml(agent.agentType)}</span>
             </div>
-          `).join('')}
+          `
+            )
+            .join('')}
         </div>
         
         <!-- Primary Drivers -->
-        ${evaluation.epistemicFraming?.primaryDrivers?.length ? `
+        ${
+          evaluation.epistemicFraming?.primaryDrivers?.length
+            ? `
           <div class="eval-drivers" role="region" aria-label="Primary evaluation drivers">
             <div class="eval-agents-title">Primary Drivers</div>
-            ${evaluation.epistemicFraming.primaryDrivers.map(d => 
-              `<span class="eval-driver-tag">${this.escapeHtml(d)}</span>`
-            ).join('')}
+            ${evaluation.epistemicFraming.primaryDrivers
+              .map((d) => `<span class="eval-driver-tag">${this.escapeHtml(d)}</span>`)
+              .join('')}
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Conflicts -->
-        ${evaluation.conflicts?.length ? `
+        ${
+          evaluation.conflicts?.length
+            ? `
           <div class="eval-conflicts" role="region" aria-label="Agent conflicts">
             <div class="eval-agents-title">⚡ Conflicts (${evaluation.conflicts.length})</div>
-            ${evaluation.conflicts.slice(0, 3).map((c, index) => `
+            ${evaluation.conflicts
+              .slice(0, 3)
+              .map(
+                (c, index) => `
               <div class="eval-conflict-item" data-conflict-index="${index}">
                 <div class="eval-conflict-criterion">${this.escapeHtml(c.criterion)}</div>
                 <div class="eval-conflict-agents">
                   ${this.escapeHtml(c.highScorer?.agentType)} (${c.highScorer?.score}) vs 
                   ${this.escapeHtml(c.lowScorer?.agentType)} (${c.lowScorer?.score})
                 </div>
-                ${c.learnedResolution?.confidence === 'high' ? `
+                ${
+                  c.learnedResolution?.confidence === 'high'
+                    ? `
                   <div class="eval-conflict-resolution">
                     ${this.escapeHtml(c.learnedResolution.recommendation)} typically correct
                     <span class="eval-conflict-learned">Learned</span>
                   </div>
-                ` : `
+                `
+                    : `
                   <div class="eval-conflict-actions">
                     <button class="eval-conflict-btn accept-high" 
                             data-action="resolve-conflict" 
@@ -1430,37 +1452,55 @@
                       Accept ${this.escapeHtml(c.lowScorer?.agentType)}
                     </button>
                   </div>
-                `}
+                `
+                }
               </div>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Top Suggestions -->
-        ${evaluation.suggestions?.length ? `
+        ${
+          evaluation.suggestions?.length
+            ? `
           <div class="eval-suggestions" role="region" aria-label="Improvement suggestions">
             <div class="eval-agents-title">💡 Suggestions</div>
-            ${evaluation.suggestions.slice(0, 5).map(s => `
+            ${evaluation.suggestions
+              .slice(0, 5)
+              .map(
+                (s) => `
               <div class="eval-suggestion-item">
                 <span class="eval-suggestion-priority ${s.priority}" aria-label="${s.priority} priority"></span>
                 <div class="eval-suggestion-text">
                   ${this.escapeHtml(s.text)}
                   <div class="eval-suggestion-agents">
-                    From: ${(s.originatingAgents || ['Unknown']).map(a => this.escapeHtml(a)).join(', ')} 
+                    From: ${(s.originatingAgents || ['Unknown']).map((a) => this.escapeHtml(a)).join(', ')} 
                     (${Math.round(s.confidence * 100)}% conf)
                   </div>
                 </div>
-                ${s.applySuggestion ? `
+                ${
+                  s.applySuggestion
+                    ? `
                   <button class="eval-suggestion-apply" 
                           data-apply="${encodeURIComponent(s.applySuggestion)}"
                           aria-label="Apply this suggestion">
                     Apply
                   </button>
-                ` : ''}
+                `
+                    : ''
+                }
               </div>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Learning Dashboard Panel -->
         ${this.renderLearningPanel()}
@@ -1479,7 +1519,7 @@
       }
 
       // Add click handlers for apply buttons
-      content.querySelectorAll('.eval-suggestion-apply').forEach(btn => {
+      content.querySelectorAll('.eval-suggestion-apply').forEach((btn) => {
         btn.addEventListener('click', () => {
           const suggestion = decodeURIComponent(btn.dataset.apply);
           this.applySuggestion(suggestion);
@@ -1487,7 +1527,7 @@
       });
 
       // Add conflict resolution handlers
-      content.querySelectorAll('[data-action="resolve-conflict"]').forEach(btn => {
+      content.querySelectorAll('[data-action="resolve-conflict"]').forEach((btn) => {
         btn.addEventListener('click', () => {
           const index = parseInt(btn.dataset.index);
           const choice = btn.dataset.choice;
@@ -1517,8 +1557,10 @@
       }
 
       // Announce to screen readers
-      this.announce(`Evaluation complete. Score: ${Math.round(evaluation.aggregateScore)} with ${evaluation.confidence} confidence`);
-      
+      this.announce(
+        `Evaluation complete. Score: ${Math.round(evaluation.aggregateScore)} with ${evaluation.confidence} confidence`
+      );
+
       this.show();
     }
 
@@ -1530,7 +1572,7 @@
     resolveConflict(index, choice) {
       const conflict = this.currentEvaluation?.conflicts?.[index];
       if (!conflict) return;
-      
+
       // Mark as resolved visually
       const conflictItem = this.container.querySelector(`[data-conflict-index="${index}"]`);
       if (conflictItem) {
@@ -1546,19 +1588,21 @@
           `;
         }
       }
-      
+
       // Emit event
       const event = new CustomEvent('eval:resolve-conflict', {
-        detail: { 
-          conflictIndex: index, 
+        detail: {
+          conflictIndex: index,
           conflict,
           choice,
-          winner: choice === 'high' ? conflict.highScorer : conflict.lowScorer
-        }
+          winner: choice === 'high' ? conflict.highScorer : conflict.lowScorer,
+        },
       });
       document.dispatchEvent(event);
-      
-      this.announce(`Conflict resolved: accepted ${choice === 'high' ? conflict.highScorer?.agentType : conflict.lowScorer?.agentType}`);
+
+      this.announce(
+        `Conflict resolved: accepted ${choice === 'high' ? conflict.highScorer?.agentType : conflict.lowScorer?.agentType}`
+      );
     }
 
     /**
@@ -1568,7 +1612,7 @@
     applySuggestion(suggestion) {
       // Emit event for parent to handle
       const event = new CustomEvent('eval:apply-suggestion', {
-        detail: { suggestion }
+        detail: { suggestion },
       });
       document.dispatchEvent(event);
     }
@@ -1613,21 +1657,21 @@
       const badge = this.container.querySelector('#eval-learning-badge');
       const statusText = this.container.querySelector('#eval-learning-status');
       const trendEl = this.container.querySelector('#eval-learning-trend');
-      
+
       if (!badge || !statusText) return;
-      
+
       badge.classList.remove('active', 'inactive');
       badge.classList.add(summary.isLearningActive ? 'active' : 'inactive');
-      
-      statusText.textContent = summary.isLearningActive 
+
+      statusText.textContent = summary.isLearningActive
         ? `Active (${summary.totalSamples})`
         : `${summary.totalSamples}/${summary.minSamplesRequired}`;
-      
+
       // Calculate overall trend
       if (summary.agentPerformance && summary.agentPerformance.length > 0) {
-        const improvingCount = summary.agentPerformance.filter(a => a.trend === 'improving').length;
-        const decliningCount = summary.agentPerformance.filter(a => a.trend === 'declining').length;
-        
+        const improvingCount = summary.agentPerformance.filter((a) => a.trend === 'improving').length;
+        const decliningCount = summary.agentPerformance.filter((a) => a.trend === 'declining').length;
+
         if (improvingCount > decliningCount) {
           trendEl.textContent = '▲';
           trendEl.style.color = '#22c55e';
@@ -1646,10 +1690,10 @@
      */
     renderLearningPanel() {
       if (!this.learningSummary) return '';
-      
+
       const summary = this.learningSummary;
       const isCollapsed = !this.isLearningPanelExpanded ? 'collapsed' : '';
-      
+
       return `
         <div class="eval-learning-panel ${isCollapsed}" id="eval-learning-panel">
           <div class="eval-learning-panel-header" 
@@ -1676,18 +1720,26 @@
               </span>
             </div>
             
-            ${summary.agentPerformance && summary.agentPerformance.length > 0 ? `
+            ${
+              summary.agentPerformance && summary.agentPerformance.length > 0
+                ? `
               <div class="eval-agent-perf">
                 <div class="eval-agent-perf-title">Agent Performance</div>
-                ${summary.agentPerformance.map(agent => `
+                ${summary.agentPerformance
+                  .map(
+                    (agent) => `
                   <div class="eval-agent-perf-row">
                     <span class="eval-agent-perf-name">${this.escapeHtml(agent.type)}</span>
                     <span class="eval-agent-perf-accuracy">${agent.accuracy}%</span>
                     <span class="eval-agent-perf-trend ${agent.trend}">${agent.trendIcon}</span>
                   </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
               </div>
-            ` : ''}
+            `
+                : ''
+            }
             
             ${this.renderABComparison()}
             
@@ -1704,36 +1756,43 @@
      */
     renderABComparison() {
       if (!this.learningSummary || !this.learningSummary.weightComparison) return '';
-      
+
       const weights = this.learningSummary.weightComparison;
       const agents = Object.entries(weights);
-      
+
       if (agents.length === 0) return '';
-      
+
       const predDiff = this.learningSummary.predictedScoreDifference || 0;
       const predClass = predDiff > 0 ? 'positive' : predDiff < 0 ? 'negative' : '';
       const predSign = predDiff > 0 ? '+' : '';
-      
+
       return `
         <div class="eval-ab-comparison">
           <div class="eval-ab-title">Before/After Learning</div>
           <div class="eval-ab-columns">
             <div class="eval-ab-column default">
               <div class="eval-ab-column-title">Without Learning</div>
-              ${agents.slice(0, 4).map(([type]) => `
+              ${agents
+                .slice(0, 4)
+                .map(
+                  ([type]) => `
                 <div class="eval-ab-weight-row">
                   <span class="eval-ab-weight-name">${this.escapeHtml(type)}</span>
                   <span class="eval-ab-weight-value">1.00</span>
                 </div>
-              `).join('')}
+              `
+                )
+                .join('')}
             </div>
             <div class="eval-ab-column learned">
               <div class="eval-ab-column-title">With Learning</div>
-              ${agents.slice(0, 4).map(([type, data]) => {
-                const diff = parseFloat(data.difference);
-                const diffClass = diff > 0 ? 'positive' : diff < 0 ? 'negative' : 'neutral';
-                const diffSign = diff > 0 ? '+' : '';
-                return `
+              ${agents
+                .slice(0, 4)
+                .map(([type, data]) => {
+                  const diff = parseFloat(data.difference);
+                  const diffClass = diff > 0 ? 'positive' : diff < 0 ? 'negative' : 'neutral';
+                  const diffSign = diff > 0 ? '+' : '';
+                  return `
                   <div class="eval-ab-weight-row">
                     <span class="eval-ab-weight-name">${this.escapeHtml(type)}</span>
                     <span class="eval-ab-weight-value">
@@ -1742,7 +1801,8 @@
                     </span>
                   </div>
                 `;
-              }).join('')}
+                })
+                .join('')}
             </div>
           </div>
           <div class="eval-ab-prediction">
@@ -1759,10 +1819,10 @@
     toggleLearningPanel() {
       this.isLearningPanelExpanded = !this.isLearningPanelExpanded;
       localStorage.setItem('eval.showLearningPanel', String(this.isLearningPanelExpanded));
-      
+
       const panel = this.container.querySelector('#eval-learning-panel');
       const header = panel?.querySelector('.eval-learning-panel-header');
-      
+
       if (panel) {
         panel.classList.toggle('collapsed', !this.isLearningPanelExpanded);
       }

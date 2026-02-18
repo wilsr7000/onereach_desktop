@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -13,12 +13,9 @@ const AI_TEST_CONFIGS = {
         loginButton: 'button:contains("Log in")',
         emailInput: 'input[name="username"], input[type="email"]',
         passwordInput: 'input[name="password"], input[type="password"]',
-        submitButton: 'button[type="submit"]'
+        submitButton: 'button[type="submit"]',
       },
-      expectedElements: [
-        'textarea[placeholder*="Message"]',
-        'button[data-testid="send-button"]'
-      ]
+      expectedElements: ['textarea[placeholder*="Message"]', 'button[data-testid="send-button"]'],
     },
     claude: {
       name: 'Claude',
@@ -28,12 +25,9 @@ const AI_TEST_CONFIGS = {
         loginButton: 'button:contains("Log in")',
         emailInput: 'input[type="email"]',
         passwordInput: 'input[type="password"]',
-        submitButton: 'button[type="submit"]'
+        submitButton: 'button[type="submit"]',
       },
-      expectedElements: [
-        'textarea[placeholder*="Talk to Claude"]',
-        'button[aria-label="Send"]'
-      ]
+      expectedElements: ['textarea[placeholder*="Talk to Claude"]', 'button[aria-label="Send"]'],
     },
     perplexity: {
       name: 'Perplexity',
@@ -41,12 +35,9 @@ const AI_TEST_CONFIGS = {
       apiUrl: 'https://docs.perplexity.ai/',
       loginSelectors: {
         loginButton: 'button:contains("Sign in")',
-        googleButton: 'button:contains("Continue with Google")'
+        googleButton: 'button:contains("Continue with Google")',
       },
-      expectedElements: [
-        'textarea[placeholder*="Ask anything"]',
-        'button[aria-label="Submit"]'
-      ]
+      expectedElements: ['textarea[placeholder*="Ask anything"]', 'button[aria-label="Submit"]'],
     },
     gemini: {
       name: 'Google Gemini',
@@ -54,15 +45,12 @@ const AI_TEST_CONFIGS = {
       apiUrl: 'https://ai.google.dev/docs',
       loginSelectors: {
         loginButton: 'a:contains("Sign in")',
-        googleAccount: true
+        googleAccount: true,
       },
-      expectedElements: [
-        'div[contenteditable="true"]',
-        'button[aria-label="Send message"]'
-      ]
-    }
+      expectedElements: ['div[contenteditable="true"]', 'button[aria-label="Send message"]'],
+    },
   },
-  
+
   imageCreators: {
     midjourney: {
       name: 'Midjourney',
@@ -70,12 +58,9 @@ const AI_TEST_CONFIGS = {
       apiUrl: 'https://docs.midjourney.com/',
       loginSelectors: {
         loginButton: 'a:contains("Sign In")',
-        discordAuth: true
+        discordAuth: true,
       },
-      expectedElements: [
-        'input[placeholder*="Imagine"]',
-        'button:contains("Generate")'
-      ]
+      expectedElements: ['input[placeholder*="Imagine"]', 'button:contains("Generate")'],
     },
     stableDiffusion: {
       name: 'Stable Diffusion',
@@ -83,12 +68,9 @@ const AI_TEST_CONFIGS = {
       apiUrl: 'https://stability.ai/developers',
       loginSelectors: {
         // Often no login required for web version
-        optional: true
+        optional: true,
       },
-      expectedElements: [
-        'textarea[placeholder*="prompt"]',
-        'button:contains("Generate")'
-      ]
+      expectedElements: ['textarea[placeholder*="prompt"]', 'button:contains("Generate")'],
     },
     ideogram: {
       name: 'Ideogram',
@@ -96,12 +78,9 @@ const AI_TEST_CONFIGS = {
       apiUrl: 'https://ideogram.ai/api',
       loginSelectors: {
         loginButton: 'button:contains("Sign in")',
-        googleButton: 'button:contains("Continue with Google")'
+        googleButton: 'button:contains("Continue with Google")',
       },
-      expectedElements: [
-        'textarea[placeholder*="Describe"]',
-        'button:contains("Generate")'
-      ]
+      expectedElements: ['textarea[placeholder*="Describe"]', 'button:contains("Generate")'],
     },
     dalle: {
       name: 'DALL-E 3',
@@ -109,12 +88,9 @@ const AI_TEST_CONFIGS = {
       apiUrl: 'https://platform.openai.com/docs/guides/images',
       loginSelectors: {
         loginButton: 'button:contains("Log in")',
-        openAIAccount: true
+        openAIAccount: true,
       },
-      expectedElements: [
-        'input[placeholder*="prompt"]',
-        'button:contains("Generate")'
-      ]
+      expectedElements: ['input[placeholder*="prompt"]', 'button:contains("Generate")'],
     },
     firefly: {
       name: 'Adobe Firefly',
@@ -122,27 +98,21 @@ const AI_TEST_CONFIGS = {
       apiUrl: 'https://developer.adobe.com/firefly-apis/docs/',
       loginSelectors: {
         loginButton: 'button:contains("Sign in")',
-        adobeAccount: true
+        adobeAccount: true,
       },
-      expectedElements: [
-        'textarea[placeholder*="Describe"]',
-        'button:contains("Generate")'
-      ]
-    }
+      expectedElements: ['textarea[placeholder*="Describe"]', 'button:contains("Generate")'],
+    },
   },
-  
+
   videoCreators: {
     veo3: {
       name: 'Google Veo3',
       url: 'https://veo.google.com/',
       apiUrl: 'https://developers.google.com/veo',
       loginSelectors: {
-        googleAccount: true
+        googleAccount: true,
       },
-      expectedElements: [
-        'textarea[placeholder*="Describe"]',
-        'button:contains("Create")'
-      ]
+      expectedElements: ['textarea[placeholder*="Describe"]', 'button:contains("Create")'],
     },
     runway: {
       name: 'Runway',
@@ -151,12 +121,9 @@ const AI_TEST_CONFIGS = {
       loginSelectors: {
         loginButton: 'a:contains("Log in")',
         emailInput: 'input[type="email"]',
-        passwordInput: 'input[type="password"]'
+        passwordInput: 'input[type="password"]',
       },
-      expectedElements: [
-        'div[class*="workspace"]',
-        'button:contains("Generate")'
-      ]
+      expectedElements: ['div[class*="workspace"]', 'button:contains("Generate")'],
     },
     pika: {
       name: 'Pika',
@@ -164,12 +131,9 @@ const AI_TEST_CONFIGS = {
       apiUrl: 'https://docs.pika.art/',
       loginSelectors: {
         loginButton: 'button:contains("Sign in")',
-        googleButton: 'button:contains("Continue with Google")'
+        googleButton: 'button:contains("Continue with Google")',
       },
-      expectedElements: [
-        'textarea[placeholder*="prompt"]',
-        'button:contains("Generate")'
-      ]
+      expectedElements: ['textarea[placeholder*="prompt"]', 'button:contains("Generate")'],
     },
     synthesia: {
       name: 'Synthesia',
@@ -178,12 +142,9 @@ const AI_TEST_CONFIGS = {
       loginSelectors: {
         loginButton: 'a:contains("Log in")',
         emailInput: 'input[name="email"]',
-        passwordInput: 'input[name="password"]'
+        passwordInput: 'input[name="password"]',
       },
-      expectedElements: [
-        'div[class*="editor"]',
-        'button:contains("Generate")'
-      ]
+      expectedElements: ['div[class*="editor"]', 'button:contains("Generate")'],
     },
     heygen: {
       name: 'HeyGen',
@@ -192,15 +153,12 @@ const AI_TEST_CONFIGS = {
       loginSelectors: {
         loginButton: 'button:contains("Sign in")',
         emailInput: 'input[type="email"]',
-        passwordInput: 'input[type="password"]'
+        passwordInput: 'input[type="password"]',
       },
-      expectedElements: [
-        'div[class*="studio"]',
-        'button:contains("Create")'
-      ]
-    }
+      expectedElements: ['div[class*="studio"]', 'button:contains("Create")'],
+    },
   },
-  
+
   audioGenerators: {
     suno: {
       name: 'Suno AI',
@@ -209,12 +167,9 @@ const AI_TEST_CONFIGS = {
       category: 'music',
       loginSelectors: {
         loginButton: 'button:contains("Sign in")',
-        googleButton: 'button:contains("Continue with Google")'
+        googleButton: 'button:contains("Continue with Google")',
       },
-      expectedElements: [
-        'textarea[placeholder*="song"]',
-        'button:contains("Create")'
-      ]
+      expectedElements: ['textarea[placeholder*="song"]', 'button:contains("Create")'],
     },
     udio: {
       name: 'Udio',
@@ -223,12 +178,9 @@ const AI_TEST_CONFIGS = {
       category: 'music',
       loginSelectors: {
         loginButton: 'button:contains("Sign in")',
-        emailInput: 'input[type="email"]'
+        emailInput: 'input[type="email"]',
       },
-      expectedElements: [
-        'input[placeholder*="Describe"]',
-        'button:contains("Generate")'
-      ]
+      expectedElements: ['input[placeholder*="Describe"]', 'button:contains("Generate")'],
     },
     elevenlabs: {
       name: 'ElevenLabs',
@@ -238,12 +190,9 @@ const AI_TEST_CONFIGS = {
       loginSelectors: {
         loginButton: 'a:contains("Log in")',
         emailInput: 'input[type="email"]',
-        passwordInput: 'input[type="password"]'
+        passwordInput: 'input[type="password"]',
       },
-      expectedElements: [
-        'textarea[placeholder*="text"]',
-        'button:contains("Generate")'
-      ]
+      expectedElements: ['textarea[placeholder*="text"]', 'button:contains("Generate")'],
     },
     playht: {
       name: 'Play.ht',
@@ -253,14 +202,11 @@ const AI_TEST_CONFIGS = {
       loginSelectors: {
         loginButton: 'a:contains("Sign in")',
         emailInput: 'input[name="email"]',
-        passwordInput: 'input[name="password"]'
+        passwordInput: 'input[name="password"]',
       },
-      expectedElements: [
-        'textarea[placeholder*="text"]',
-        'button:contains("Generate")'
-      ]
-    }
-  }
+      expectedElements: ['textarea[placeholder*="text"]', 'button:contains("Generate")'],
+    },
+  },
 };
 
 class ExternalAITestSuite {
@@ -273,26 +219,25 @@ class ExternalAITestSuite {
   async runAllTests() {
     console.log('🧪 Starting External AI Test Suite');
     console.log('📘 ================================');
-    
+
     const startTime = Date.now();
-    
+
     try {
       // Test Chat Bots
       await this.testCategory('chatBots', 'Chat Bots');
-      
+
       // Test Image Creators
       await this.testCategory('imageCreators', 'Image Creators');
-      
+
       // Test Video Creators
       await this.testCategory('videoCreators', 'Video Creators');
-      
+
       // Test Audio Generators
       await this.testCategory('audioGenerators', 'Audio Generators');
-      
     } catch (error) {
       console.error('❌ Test suite error:', error);
     }
-    
+
     // Print summary
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     this.printSummary(duration);
@@ -300,9 +245,9 @@ class ExternalAITestSuite {
 
   async testCategory(category, categoryName) {
     console.log(`\n📂 Testing ${categoryName}...`);
-    
+
     const services = AI_TEST_CONFIGS[category];
-    
+
     for (const [key, config] of Object.entries(services)) {
       await this.testService(category, key, config);
     }
@@ -310,7 +255,7 @@ class ExternalAITestSuite {
 
   async testService(category, serviceKey, config) {
     console.log(`\n🔍 Testing ${config.name}...`);
-    
+
     const testResult = {
       category,
       service: config.name,
@@ -320,8 +265,8 @@ class ExternalAITestSuite {
         urlLoads: false,
         loginAvailable: false,
         expectedElements: false,
-        apiDocumentationUrl: false
-      }
+        apiDocumentationUrl: false,
+      },
     };
 
     try {
@@ -333,8 +278,8 @@ class ExternalAITestSuite {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          webSecurity: true
-        }
+          webSecurity: true,
+        },
       });
 
       // Test 1: URL loads
@@ -358,7 +303,9 @@ class ExternalAITestSuite {
         try {
           const apiResponse = await fetch(config.apiUrl, { method: 'HEAD' });
           testResult.tests.apiDocumentationUrl = apiResponse.ok;
-          console.log(`  ${apiResponse.ok ? '✅' : '❌'} API documentation ${apiResponse.ok ? 'accessible' : 'not accessible'}`);
+          console.log(
+            `  ${apiResponse.ok ? '✅' : '❌'} API documentation ${apiResponse.ok ? 'accessible' : 'not accessible'}`
+          );
         } catch (error) {
           testResult.tests.apiDocumentationUrl = false;
           console.log(`  ❌ API documentation check failed:`, error.message);
@@ -368,7 +315,6 @@ class ExternalAITestSuite {
       // Test 4: Expected elements (would need actual login)
       console.log(`  ℹ️  Expected elements test requires login credentials`);
       testResult.tests.expectedElements = 'requires-login';
-
     } catch (error) {
       console.error(`  ❌ Error testing ${config.name}:`, error.message);
       testResult.error = error.message;
@@ -416,7 +362,7 @@ class ExternalAITestSuite {
           return Object.values(found).some(v => v === true);
         })();
       `);
-      
+
       return result;
     } catch (error) {
       console.log('    Login element check error:', error.message);
@@ -430,38 +376,47 @@ class ExternalAITestSuite {
     console.log('📘 ================================');
     console.log(`📘 Duration: ${duration} seconds`);
     console.log(`📘 Total services tested: ${this.testResults.length}`);
-    
+
     // Count successes by category
     const categories = {
       chatBots: { total: 0, passed: 0 },
       imageCreators: { total: 0, passed: 0 },
       videoCreators: { total: 0, passed: 0 },
-      audioGenerators: { total: 0, passed: 0 }
+      audioGenerators: { total: 0, passed: 0 },
     };
-    
-    this.testResults.forEach(result => {
+
+    this.testResults.forEach((result) => {
       categories[result.category].total++;
-      if (result.tests.urlLoads && 
-          (result.tests.loginAvailable === true || result.tests.loginAvailable === 'optional')) {
+      if (
+        result.tests.urlLoads &&
+        (result.tests.loginAvailable === true || result.tests.loginAvailable === 'optional')
+      ) {
         categories[result.category].passed++;
       }
     });
-    
+
     console.log('\n📊 Results by Category:');
     Object.entries(categories).forEach(([cat, stats]) => {
       const categoryName = cat.replace(/([A-Z])/g, ' $1').trim();
       console.log(`  ${categoryName}: ${stats.passed}/${stats.total} passed`);
     });
-    
+
     // Save detailed report
     const reportPath = path.join(__dirname, `external-ai-test-report-${Date.now()}.json`);
-    fs.writeFileSync(reportPath, JSON.stringify({
-      timestamp: new Date().toISOString(),
-      duration: duration,
-      summary: categories,
-      details: this.testResults
-    }, null, 2));
-    
+    fs.writeFileSync(
+      reportPath,
+      JSON.stringify(
+        {
+          timestamp: new Date().toISOString(),
+          duration: duration,
+          summary: categories,
+          details: this.testResults,
+        },
+        null,
+        2
+      )
+    );
+
     console.log(`\n📘 Detailed report saved to: ${reportPath}`);
   }
 }
@@ -475,4 +430,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = ExternalAITestSuite; 
+module.exports = ExternalAITestSuite;

@@ -1,437 +1,449 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Quick Starts - Agentic University</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+        background: #000;
+        color: #fff;
+        overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      /* Hero Section */
+      .hero-section {
+        height: 60vh;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        overflow: hidden;
+      }
+
+      .hero-content {
+        text-align: center;
+        z-index: 2;
+        padding: 0 20px;
+      }
+
+      .hero-title {
+        font-size: 4rem;
+        font-weight: 700;
+        margin-bottom: 20px;
+        letter-spacing: -0.02em;
+        text-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+      }
+
+      .hero-subtitle {
+        font-size: 1.5rem;
+        font-weight: 300;
+        opacity: 0.95;
+        max-width: 600px;
+        margin: 0 auto;
+      }
+
+      /* Navigation Bar */
+      .nav-bar {
+        position: sticky;
+        top: 0;
+        background: rgba(30, 30, 30, 0.98);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        z-index: 100;
+        padding: 15px 40px;
+      }
+
+      .nav-items {
+        display: flex;
+        gap: 30px;
+        justify-content: center;
+        list-style: none;
+      }
+
+      .nav-item {
+        color: rgba(255, 255, 255, 0.7);
+        cursor: pointer;
+        transition: color 0.3s ease;
+        font-size: 16px;
+        font-weight: 500;
+      }
+
+      .nav-item:hover {
+        color: #fff;
+      }
+
+      .nav-item.active {
+        color: #fff;
+        position: relative;
+      }
+
+      .nav-item.active::after {
+        content: '';
+        position: absolute;
+        bottom: -15px;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: #fff;
+        border-radius: 1.5px;
+      }
+
+      /* Content Sections */
+      .content-section {
+        padding: 40px;
+        min-height: 100vh;
+      }
+
+      .section-title {
+        font-size: 2rem;
+        font-weight: 600;
+        margin-bottom: 30px;
+        letter-spacing: -0.01em;
+      }
+
+      /* Tutorial Grid */
+      .tutorial-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+        gap: 25px;
+        margin-bottom: 60px;
+      }
+
+      /* Tutorial Card */
+      .tutorial-card {
+        position: relative;
+        border-radius: 16px;
+        overflow: hidden;
+        background: #1a1a1a;
+        transition:
+          transform 0.3s ease,
+          box-shadow 0.3s ease;
+        cursor: pointer;
+        aspect-ratio: 16/9;
+      }
+
+      .tutorial-card:hover {
+        transform: scale(1.05);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        z-index: 10;
+      }
+
+      .tutorial-thumbnail {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+
+      .tutorial-overlay {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, transparent 100%);
+        padding: 30px 20px 20px;
+      }
+
+      .tutorial-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin-bottom: 5px;
+      }
+
+      .tutorial-description {
+        font-size: 0.9rem;
+        opacity: 0.8;
+        line-height: 1.4;
+      }
+
+      .tutorial-duration {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(10px);
+        padding: 5px 10px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        font-weight: 500;
+      }
+
+      /* Feature Carousel */
+      .feature-carousel {
+        display: flex;
+        gap: 20px;
+        overflow-x: auto;
+        padding-bottom: 20px;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .feature-carousel::-webkit-scrollbar {
+        height: 8px;
+      }
+
+      .feature-carousel::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+      }
+
+      .feature-carousel::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 4px;
+      }
+
+      .feature-card {
+        flex: 0 0 600px;
+        height: 350px;
+        border-radius: 20px;
+        overflow: hidden;
+        position: relative;
+        scroll-snap-align: start;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+
+      .feature-content {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 40px;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, transparent 100%);
+      }
+
+      .feature-title {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 15px;
+      }
+
+      .feature-description {
+        font-size: 1.1rem;
+        opacity: 0.9;
+        line-height: 1.5;
+      }
+
+      .play-button {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 80px;
+        height: 80px;
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition:
+          transform 0.3s ease,
+          background 0.3s ease;
+      }
+
+      .play-button:hover {
+        transform: translate(-50%, -50%) scale(1.1);
+        background: #fff;
+      }
+
+      .play-icon {
+        width: 0;
+        height: 0;
+        border-left: 25px solid #000;
+        border-top: 15px solid transparent;
+        border-bottom: 15px solid transparent;
+        margin-left: 5px;
+      }
+
+      /* Badges */
+      .badge {
+        position: absolute;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        z-index: 2;
+      }
+
+      .badge.new {
+        top: 15px;
+        left: 15px;
+        background: #ff5722;
+        color: white;
+      }
+
+      .badge.completed {
+        top: 15px;
+        left: 15px;
+        background: #4caf50;
+        color: white;
+        font-size: 1rem;
+      }
+
+      .badge.recommended {
+        top: 15px;
+        left: 60px;
+        background: #ffc107;
+        color: #000;
+      }
+
+      .feature-content .badge.recommended {
+        position: relative;
+        top: auto;
+        left: auto;
+        display: inline-block;
+        margin-left: 10px;
+        background: rgba(255, 193, 7, 0.2);
+        color: #ffc107;
+        border: 1px solid #ffc107;
+      }
+
+      /* Progress Bar */
+      .progress-bar {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: rgba(0, 0, 0, 0.3);
+      }
+
+      /* Loading Overlay */
+      #loadingOverlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.95);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+      }
+
+      .loading-spinner {
+        width: 50px;
+        height: 50px;
+        border: 3px solid rgba(255, 255, 255, 0.1);
+        border-top-color: #4caf50;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
         }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
-            background: #000;
-            color: #fff;
-            overflow-x: hidden;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+      }
+
+      /* Loading State */
+      .loading-placeholder {
+        background: linear-gradient(90deg, #2a2a2a 0%, #3a3a3a 50%, #2a2a2a 100%);
+        background-size: 200% 100%;
+        animation: shimmer 2s infinite;
+        border-radius: 16px;
+        aspect-ratio: 16/9;
+      }
+
+      @keyframes shimmer {
+        0% {
+          background-position: 200% 0;
         }
-        
-        /* Hero Section */
-        .hero-section {
-            height: 60vh;
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            overflow: hidden;
+        100% {
+          background-position: -200% 0;
         }
-        
-        .hero-content {
-            text-align: center;
-            z-index: 2;
-            padding: 0 20px;
-        }
-        
+      }
+
+      /* Error Container */
+      #errorContainer {
+        display: none;
+        padding: 40px;
+      }
+
+      /* Responsive */
+      @media (max-width: 768px) {
         .hero-title {
-            font-size: 4rem;
-            font-weight: 700;
-            margin-bottom: 20px;
-            letter-spacing: -0.02em;
-            text-shadow: 0 4px 20px rgba(0,0,0,0.2);
+          font-size: 2.5rem;
         }
-        
+
         .hero-subtitle {
-            font-size: 1.5rem;
-            font-weight: 300;
-            opacity: 0.95;
-            max-width: 600px;
-            margin: 0 auto;
+          font-size: 1.2rem;
         }
-        
-        /* Navigation Bar */
-        .nav-bar {
-            position: sticky;
-            top: 0;
-            background: rgba(30, 30, 30, 0.98);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            z-index: 100;
-            padding: 15px 40px;
-        }
-        
-        .nav-items {
-            display: flex;
-            gap: 30px;
-            justify-content: center;
-            list-style: none;
-        }
-        
-        .nav-item {
-            color: rgba(255, 255, 255, 0.7);
-            cursor: pointer;
-            transition: color 0.3s ease;
-            font-size: 16px;
-            font-weight: 500;
-        }
-        
-        .nav-item:hover {
-            color: #fff;
-        }
-        
-        .nav-item.active {
-            color: #fff;
-            position: relative;
-        }
-        
-        .nav-item.active::after {
-            content: '';
-            position: absolute;
-            bottom: -15px;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: #fff;
-            border-radius: 1.5px;
-        }
-        
-        /* Content Sections */
-        .content-section {
-            padding: 40px;
-            min-height: 100vh;
-        }
-        
-        .section-title {
-            font-size: 2rem;
-            font-weight: 600;
-            margin-bottom: 30px;
-            letter-spacing: -0.01em;
-        }
-        
-        /* Tutorial Grid */
+
         .tutorial-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-            gap: 25px;
-            margin-bottom: 60px;
+          grid-template-columns: 1fr;
         }
-        
-        /* Tutorial Card */
-        .tutorial-card {
-            position: relative;
-            border-radius: 16px;
-            overflow: hidden;
-            background: #1a1a1a;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            cursor: pointer;
-            aspect-ratio: 16/9;
-        }
-        
-        .tutorial-card:hover {
-            transform: scale(1.05);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
-            z-index: 10;
-        }
-        
-        .tutorial-thumbnail {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-        
-        .tutorial-overlay {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%);
-            padding: 30px 20px 20px;
-        }
-        
-        .tutorial-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .tutorial-description {
-            font-size: 0.9rem;
-            opacity: 0.8;
-            line-height: 1.4;
-        }
-        
-        .tutorial-duration {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            background: rgba(0, 0, 0, 0.7);
-            backdrop-filter: blur(10px);
-            padding: 5px 10px;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            font-weight: 500;
-        }
-        
-        /* Feature Carousel */
-        .feature-carousel {
-            display: flex;
-            gap: 20px;
-            overflow-x: auto;
-            padding-bottom: 20px;
-            scroll-snap-type: x mandatory;
-            -webkit-overflow-scrolling: touch;
-        }
-        
-        .feature-carousel::-webkit-scrollbar {
-            height: 8px;
-        }
-        
-        .feature-carousel::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
-        }
-        
-        .feature-carousel::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 4px;
-        }
-        
+
         .feature-card {
-            flex: 0 0 600px;
-            height: 350px;
-            border-radius: 20px;
-            overflow: hidden;
-            position: relative;
-            scroll-snap-align: start;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          flex: 0 0 90vw;
         }
-        
-        .feature-content {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 40px;
-            background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%);
+
+        .nav-bar {
+          padding: 15px 20px;
         }
-        
-        .feature-title {
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin-bottom: 15px;
+
+        .content-section {
+          padding: 20px;
         }
-        
-        .feature-description {
-            font-size: 1.1rem;
-            opacity: 0.9;
-            line-height: 1.5;
-        }
-        
-        .play-button {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 80px;
-            height: 80px;
-            background: rgba(255, 255, 255, 0.9);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: transform 0.3s ease, background 0.3s ease;
-        }
-        
-        .play-button:hover {
-            transform: translate(-50%, -50%) scale(1.1);
-            background: #fff;
-        }
-        
-        .play-icon {
-            width: 0;
-            height: 0;
-            border-left: 25px solid #000;
-            border-top: 15px solid transparent;
-            border-bottom: 15px solid transparent;
-            margin-left: 5px;
-        }
-        
-        /* Badges */
-        .badge {
-            position: absolute;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            z-index: 2;
-        }
-        
-        .badge.new {
-            top: 15px;
-            left: 15px;
-            background: #ff5722;
-            color: white;
-        }
-        
-        .badge.completed {
-            top: 15px;
-            left: 15px;
-            background: #4CAF50;
-            color: white;
-            font-size: 1rem;
-        }
-        
-        .badge.recommended {
-            top: 15px;
-            left: 60px;
-            background: #ffc107;
-            color: #000;
-        }
-        
-        .feature-content .badge.recommended {
-            position: relative;
-            top: auto;
-            left: auto;
-            display: inline-block;
-            margin-left: 10px;
-            background: rgba(255, 193, 7, 0.2);
-            color: #ffc107;
-            border: 1px solid #ffc107;
-        }
-        
-        /* Progress Bar */
-        .progress-bar {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: rgba(0, 0, 0, 0.3);
-        }
-        
-        /* Loading Overlay */
-        #loadingOverlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.95);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10000;
-        }
-        
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 3px solid rgba(255, 255, 255, 0.1);
-            border-top-color: #4CAF50;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        /* Loading State */
-        .loading-placeholder {
-            background: linear-gradient(90deg, #2a2a2a 0%, #3a3a3a 50%, #2a2a2a 100%);
-            background-size: 200% 100%;
-            animation: shimmer 2s infinite;
-            border-radius: 16px;
-            aspect-ratio: 16/9;
-        }
-        
-        @keyframes shimmer {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
-        }
-        
-        /* Error Container */
-        #errorContainer {
-            display: none;
-            padding: 40px;
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            .hero-title {
-                font-size: 2.5rem;
-            }
-            
-            .hero-subtitle {
-                font-size: 1.2rem;
-            }
-            
-            .tutorial-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .feature-card {
-                flex: 0 0 90vw;
-            }
-            
-            .nav-bar {
-                padding: 15px 20px;
-            }
-            
-            .content-section {
-                padding: 20px;
-            }
-        }
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <!-- Loading Overlay -->
     <div id="loadingOverlay">
-        <div style="text-align: center;">
-            <div class="loading-spinner"></div>
-            <p style="color: rgba(255, 255, 255, 0.7); margin-top: 20px;">Loading personalized content...</p>
-        </div>
+      <div style="text-align: center">
+        <div class="loading-spinner"></div>
+        <p style="color: rgba(255, 255, 255, 0.7); margin-top: 20px">Loading personalized content...</p>
+      </div>
     </div>
-    
+
     <!-- Error Container -->
     <div id="errorContainer"></div>
     <!-- Hero Section -->
     <div class="hero-section">
-        <div class="hero-content">
-            <h1 class="hero-title">Quick Starts</h1>
-            <p class="hero-subtitle">Learn the fundamentals and master advanced techniques with our interactive tutorials</p>
-        </div>
+      <div class="hero-content">
+        <h1 class="hero-title">Quick Starts</h1>
+        <p class="hero-subtitle">
+          Learn the fundamentals and master advanced techniques with our interactive tutorials
+        </p>
+      </div>
     </div>
-    
+
     <!-- Navigation -->
     <nav class="nav-bar">
-        <ul class="nav-items">
-            <!-- Dynamically populated -->
-        </ul>
+      <ul class="nav-items">
+        <!-- Dynamically populated -->
+      </ul>
     </nav>
-    
+
     <!-- Featured Content -->
     <div class="content-section">
-        <h2 class="section-title">Featured</h2>
-        <div class="feature-carousel">
-            <!-- Dynamically populated -->
-        </div>
+      <h2 class="section-title">Featured</h2>
+      <div class="feature-carousel">
+        <!-- Dynamically populated -->
+      </div>
     </div>
-    
+
     <!-- Dynamic Content Sections -->
     <div id="contentSections">
-        <!-- Dynamically populated with category sections -->
+      <!-- Dynamically populated with category sections -->
     </div>
-    
+
     <!-- Load the dynamic tutorials script -->
     <script src="tutorials.js"></script>
-</body>
+  </body>
 </html>

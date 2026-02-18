@@ -30,8 +30,8 @@ export class SpeedService {
   async changeSpeed(inputPath, options = {}, progressCallback = null) {
     const {
       speed = 1.0, // 0.5 = half speed, 2.0 = double speed
-      preservePitch = true, // Keep audio pitch when changing speed
-      outputPath = null
+      preservePitch: _preservePitch = true, // Keep audio pitch when changing speed
+      outputPath = null,
     } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
@@ -43,7 +43,7 @@ export class SpeedService {
       // Calculate filter values
       // For video: setpts=PTS/speed (higher speed = lower PTS multiplier)
       const videoSpeed = 1 / speed;
-      
+
       // Build audio tempo filters
       // atempo only accepts values between 0.5 and 2.0
       // So we need to chain multiple atempo filters for extreme speeds
@@ -51,13 +51,13 @@ export class SpeedService {
       const audioFilterString = audioFilters.join(',');
 
       let command = ffmpeg(inputPath);
-      
+
       // Apply video speed filter
       command = command.videoFilters(`setpts=${videoSpeed}*PTS`);
-      
+
       // Apply audio speed filter (if video has audio)
       command = command.audioFilters(audioFilterString);
-      
+
       command
         .videoCodec('libx264')
         .audioCodec('aac')
@@ -72,7 +72,7 @@ export class SpeedService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -97,7 +97,7 @@ export class SpeedService {
   buildTempoFilters(speed) {
     const audioFilters = [];
     let remainingSpeed = speed;
-    
+
     while (remainingSpeed > 2.0) {
       audioFilters.push('atempo=2.0');
       remainingSpeed /= 2.0;
@@ -107,7 +107,7 @@ export class SpeedService {
       remainingSpeed /= 0.5;
     }
     audioFilters.push(`atempo=${remainingSpeed}`);
-    
+
     return audioFilters;
   }
 
@@ -119,25 +119,21 @@ export class SpeedService {
    * @returns {Promise<Object>} Result with output path
    */
   async reverseVideo(inputPath, options = {}, progressCallback = null) {
-    const {
-      includeAudio = true,
-      outputPath = null
-    } = options;
+    const { includeAudio = true, outputPath = null } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
     const output = outputPath || path.join(this.outputDir, `${baseName}_reversed.mp4`);
     const jobId = `reverse_${Date.now()}`;
 
     return new Promise((resolve, reject) => {
-      let command = ffmpeg(inputPath)
-        .videoFilters('reverse');
-      
+      let command = ffmpeg(inputPath).videoFilters('reverse');
+
       if (includeAudio) {
         command = command.audioFilters('areverse');
       } else {
         command = command.noAudio();
       }
-      
+
       command
         .videoCodec('libx264')
         .audioCodec('aac')
@@ -152,7 +148,7 @@ export class SpeedService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -168,19 +164,3 @@ export class SpeedService {
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

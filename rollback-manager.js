@@ -7,7 +7,7 @@ class RollbackManager {
     this.backupDir = null;
     this.maxBackups = 3;
   }
-  
+
   _ensureBackupDir() {
     if (!this.backupDir) {
       this.backupDir = path.join(app.getPath('userData'), 'app-backups');
@@ -47,11 +47,13 @@ class RollbackManager {
       this._ensureBackupDir();
       await fs.mkdir(this.backupDir, { recursive: true });
       const files = await fs.readdir(this.backupDir);
-      return files.filter(f => f.startsWith('v')).map(f => ({
-        version: f.substring(1),
-        path: path.join(this.backupDir, f)
-      }));
-    } catch (error) {
+      return files
+        .filter((f) => f.startsWith('v'))
+        .map((f) => ({
+          version: f.substring(1),
+          path: path.join(this.backupDir, f),
+        }));
+    } catch (_error) {
       return [];
     }
   }
@@ -78,11 +80,17 @@ class RollbackManager {
           await fs.rm(backup.path, { recursive: true, force: true });
         }
       }
-    } catch (error) {}
+    } catch (err) {
+      console.warn('[RollbackManager] cleanupOldBackups:', err.message);
+    }
   }
 
-  async createRestoreScript() { return null; }
-  formatSize(bytes) { return `${(bytes/1024).toFixed(1)} KB`; }
+  async createRestoreScript() {
+    return null;
+  }
+  formatSize(bytes) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
 }
 
 module.exports = new RollbackManager();

@@ -1,356 +1,381 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
+  <head>
     <title>Spaces API Guide - Developer Documentation</title>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
     <style>
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 1100px; 
-            margin: 0 auto; 
-            padding: 40px 20px;
-            line-height: 1.7;
-            color: #e2e8f0;
-            background: #0f1419;
-        }
-        .logo {
-            width: 60px;
-            height: 60px;
-            vertical-align: middle;
-            margin-right: 15px;
-            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
-        }
-        .header-nav {
-            background: linear-gradient(135deg, #065f46 0%, #047857 100%);
-            color: white;
-            padding: 40px;
-            border-radius: 16px;
-            margin-bottom: 40px;
-            text-align: center;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-        }
-        .header-nav h1 {
-            margin: 0;
-            font-size: 2.5em;
-            font-weight: 300;
-            letter-spacing: -1px;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-        }
-        .header-nav p {
-            margin: 15px 0 0 0;
-            opacity: 0.95;
-            font-size: 1.2em;
-        }
-        .ai-actions {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin-top: 25px;
-            flex-wrap: wrap;
-        }
-        .ai-btn {
-            background: rgba(0, 0, 0, 0.3);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            font-size: 0.95em;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .ai-btn:hover {
-            background: rgba(0, 0, 0, 0.5);
-            border-color: rgba(255, 255, 255, 0.6);
-            transform: translateY(-2px);
-        }
-        .ai-btn.success {
-            background: #059669;
-            border-color: #10b981;
-        }
-        .ai-btn svg {
-            width: 18px;
-            height: 18px;
-        }
-        .ai-notice {
-            background: rgba(0, 0, 0, 0.2);
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            margin-top: 15px;
-            display: inline-block;
-        }
-        .nav-pills {
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-            margin: 30px 0 0 0;
-            flex-wrap: wrap;
-        }
-        .nav-pill {
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 25px;
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.9em;
-            transition: all 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            backdrop-filter: blur(10px);
-        }
-        .nav-pill:hover {
-            transform: translateY(-2px);
-            background: rgba(255, 255, 255, 0.2);
-            box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
-        }
-        h1 { 
-            color: #f1f5f9; 
-            border-bottom: 3px solid #10b981; 
-            padding-bottom: 15px;
-            margin-top: 50px;
-            font-size: 2em;
-            position: relative;
-        }
-        h2 { 
-            color: #e2e8f0; 
-            border-bottom: 2px solid #334155; 
-            padding-bottom: 10px;
-            margin-top: 40px;
-            font-size: 1.5em;
-        }
-        h3 { 
-            color: #cbd5e1; 
-            margin-top: 30px;
-            font-size: 1.3em;
-        }
-        h4 {
-            color: #94a3b8;
-            margin-top: 25px;
-            font-size: 1.1em;
-        }
-        .info-box {
-            background: #065f46;
-            padding: 25px;
-            border-radius: 10px;
-            margin: 20px 0;
-            border-left: 4px solid #10b981;
-            color: #d1fae5;
-        }
-        .info-box strong {
-            color: #ffffff;
-        }
-        .warning-box {
-            background: #422006;
-            padding: 25px;
-            border-radius: 10px;
-            margin: 20px 0;
-            border-left: 4px solid #f59e0b;
-            color: #fef3c7;
-        }
-        .warning-box h3, .warning-box h4 {
-            color: #fbbf24;
-            margin-top: 0;
-        }
-        .tip-box {
-            background: #312e81;
-            padding: 20px;
-            border-radius: 10px;
-            margin: 20px 0;
-            border-left: 4px solid #8b5cf6;
-            color: #e9d5ff;
-        }
-        .tip-box strong {
-            color: #c4b5fd;
-        }
-        table {
-            width: 100%;
-            background: #1a202c;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            margin: 20px 0;
-            border: 1px solid #2d3748;
-            border-collapse: collapse;
-        }
-        th {
-            background: #047857;
-            color: white;
-            padding: 12px 15px;
-            text-align: left;
-            font-size: 0.9em;
-        }
-        td {
-            padding: 12px 15px;
-            border-bottom: 1px solid #2d3748;
-            color: #cbd5e1;
-            font-size: 0.9em;
-        }
-        tr:last-child td {
-            border-bottom: none;
-        }
-        tr:hover td {
-            background: #0f1419;
-        }
-        code {
-            background: #1e293b;
-            color: #10b981;
-            padding: 3px 6px;
-            border-radius: 4px;
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-            font-size: 0.85em;
-            border: 1px solid #334155;
-        }
-        pre {
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 20px;
-            overflow-x: auto;
-            margin: 15px 0;
-        }
-        pre code {
-            background: none;
-            border: none;
-            padding: 0;
-            color: #e2e8f0;
-            font-size: 0.85em;
-            line-height: 1.5;
-        }
-        .http-method {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-weight: bold;
-            font-size: 0.8em;
-            margin-right: 10px;
-        }
-        .method-get { background: #065f46; color: #10b981; }
-        .method-post { background: #1e3a8a; color: #60a5fa; }
-        .method-put { background: #78350f; color: #fbbf24; }
-        .method-delete { background: #7f1d1d; color: #f87171; }
-        .endpoint {
-            background: #1a202c;
-            padding: 15px 20px;
-            border-radius: 8px;
-            margin: 15px 0;
-            border: 1px solid #334155;
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-        }
-        .endpoint-path {
-            color: #10b981;
-            font-size: 0.95em;
-        }
-        ul, ol {
-            padding-left: 25px;
-            margin: 15px 0;
-            color: #cbd5e1;
-        }
-        li {
-            margin: 8px 0;
-        }
-        .architecture-box {
-            background: #1a202c;
-            padding: 25px;
-            border-radius: 12px;
-            margin: 25px 0;
-            border: 1px solid #2d3748;
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-            font-size: 0.9em;
-            line-height: 1.6;
-            color: #94a3b8;
-            text-align: center;
-        }
-        .section-card {
-            background: #1a202c;
-            padding: 25px;
-            border-radius: 12px;
-            margin: 20px 0;
-            border: 1px solid #2d3748;
-            border-top: 4px solid #10b981;
-        }
-        .section-card h3 {
-            margin-top: 0;
-            color: #10b981;
-        }
-        /* Syntax highlighting */
-        .keyword { color: #c792ea; }
-        .string { color: #c3e88d; }
-        .number { color: #f78c6c; }
-        .comment { color: #676e95; }
-        .property { color: #82aaff; }
-        /* Scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 12px;
-            height: 12px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #1a202c;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #4b5563;
-            border-radius: 6px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #6b7280;
-        }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 40px 20px;
+        line-height: 1.7;
+        color: #e2e8f0;
+        background: #0f1419;
+      }
+      .logo {
+        width: 60px;
+        height: 60px;
+        vertical-align: middle;
+        margin-right: 15px;
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+      }
+      .header-nav {
+        background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+        color: white;
+        padding: 40px;
+        border-radius: 16px;
+        margin-bottom: 40px;
+        text-align: center;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      }
+      .header-nav h1 {
+        margin: 0;
+        font-size: 2.5em;
+        font-weight: 300;
+        letter-spacing: -1px;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+      }
+      .header-nav p {
+        margin: 15px 0 0 0;
+        opacity: 0.95;
+        font-size: 1.2em;
+      }
+      .ai-actions {
+        display: flex;
+        justify-content: center;
+        gap: 15px;
+        margin-top: 25px;
+        flex-wrap: wrap;
+      }
+      .ai-btn {
+        background: rgba(0, 0, 0, 0.3);
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        font-size: 0.95em;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .ai-btn:hover {
+        background: rgba(0, 0, 0, 0.5);
+        border-color: rgba(255, 255, 255, 0.6);
+        transform: translateY(-2px);
+      }
+      .ai-btn.success {
+        background: #059669;
+        border-color: #10b981;
+      }
+      .ai-btn svg {
+        width: 18px;
+        height: 18px;
+      }
+      .ai-notice {
+        background: rgba(0, 0, 0, 0.2);
+        padding: 10px 20px;
+        border-radius: 20px;
+        font-size: 0.85em;
+        margin-top: 15px;
+        display: inline-block;
+      }
+      .nav-pills {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        margin: 30px 0 0 0;
+        flex-wrap: wrap;
+      }
+      .nav-pill {
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 25px;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9em;
+        transition: all 0.3s ease;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(10px);
+      }
+      .nav-pill:hover {
+        transform: translateY(-2px);
+        background: rgba(255, 255, 255, 0.2);
+        box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
+      }
+      h1 {
+        color: #f1f5f9;
+        border-bottom: 3px solid #10b981;
+        padding-bottom: 15px;
+        margin-top: 50px;
+        font-size: 2em;
+        position: relative;
+      }
+      h2 {
+        color: #e2e8f0;
+        border-bottom: 2px solid #334155;
+        padding-bottom: 10px;
+        margin-top: 40px;
+        font-size: 1.5em;
+      }
+      h3 {
+        color: #cbd5e1;
+        margin-top: 30px;
+        font-size: 1.3em;
+      }
+      h4 {
+        color: #94a3b8;
+        margin-top: 25px;
+        font-size: 1.1em;
+      }
+      .info-box {
+        background: #065f46;
+        padding: 25px;
+        border-radius: 10px;
+        margin: 20px 0;
+        border-left: 4px solid #10b981;
+        color: #d1fae5;
+      }
+      .info-box strong {
+        color: #ffffff;
+      }
+      .warning-box {
+        background: #422006;
+        padding: 25px;
+        border-radius: 10px;
+        margin: 20px 0;
+        border-left: 4px solid #f59e0b;
+        color: #fef3c7;
+      }
+      .warning-box h3,
+      .warning-box h4 {
+        color: #fbbf24;
+        margin-top: 0;
+      }
+      .tip-box {
+        background: #312e81;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 20px 0;
+        border-left: 4px solid #8b5cf6;
+        color: #e9d5ff;
+      }
+      .tip-box strong {
+        color: #c4b5fd;
+      }
+      table {
+        width: 100%;
+        background: #1a202c;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        margin: 20px 0;
+        border: 1px solid #2d3748;
+        border-collapse: collapse;
+      }
+      th {
+        background: #047857;
+        color: white;
+        padding: 12px 15px;
+        text-align: left;
+        font-size: 0.9em;
+      }
+      td {
+        padding: 12px 15px;
+        border-bottom: 1px solid #2d3748;
+        color: #cbd5e1;
+        font-size: 0.9em;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      tr:hover td {
+        background: #0f1419;
+      }
+      code {
+        background: #1e293b;
+        color: #10b981;
+        padding: 3px 6px;
+        border-radius: 4px;
+        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+        font-size: 0.85em;
+        border: 1px solid #334155;
+      }
+      pre {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 20px;
+        overflow-x: auto;
+        margin: 15px 0;
+      }
+      pre code {
+        background: none;
+        border: none;
+        padding: 0;
+        color: #e2e8f0;
+        font-size: 0.85em;
+        line-height: 1.5;
+      }
+      .http-method {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-weight: bold;
+        font-size: 0.8em;
+        margin-right: 10px;
+      }
+      .method-get {
+        background: #065f46;
+        color: #10b981;
+      }
+      .method-post {
+        background: #1e3a8a;
+        color: #60a5fa;
+      }
+      .method-put {
+        background: #78350f;
+        color: #fbbf24;
+      }
+      .method-delete {
+        background: #7f1d1d;
+        color: #f87171;
+      }
+      .endpoint {
+        background: #1a202c;
+        padding: 15px 20px;
+        border-radius: 8px;
+        margin: 15px 0;
+        border: 1px solid #334155;
+        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+      }
+      .endpoint-path {
+        color: #10b981;
+        font-size: 0.95em;
+      }
+      ul,
+      ol {
+        padding-left: 25px;
+        margin: 15px 0;
+        color: #cbd5e1;
+      }
+      li {
+        margin: 8px 0;
+      }
+      .architecture-box {
+        background: #1a202c;
+        padding: 25px;
+        border-radius: 12px;
+        margin: 25px 0;
+        border: 1px solid #2d3748;
+        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+        font-size: 0.9em;
+        line-height: 1.6;
+        color: #94a3b8;
+        text-align: center;
+      }
+      .section-card {
+        background: #1a202c;
+        padding: 25px;
+        border-radius: 12px;
+        margin: 20px 0;
+        border: 1px solid #2d3748;
+        border-top: 4px solid #10b981;
+      }
+      .section-card h3 {
+        margin-top: 0;
+        color: #10b981;
+      }
+      /* Syntax highlighting */
+      .keyword {
+        color: #c792ea;
+      }
+      .string {
+        color: #c3e88d;
+      }
+      .number {
+        color: #f78c6c;
+      }
+      .comment {
+        color: #676e95;
+      }
+      .property {
+        color: #82aaff;
+      }
+      /* Scrollbar styling */
+      ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #1a202c;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #4b5563;
+        border-radius: 6px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #6b7280;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="header-nav">
-        <h1>🔌 Spaces API Guide</h1>
-        <p>Developer Documentation for External Tool Integration</p>
-        
-        <div class="ai-actions">
-            <button class="ai-btn" onclick="copyForAI()" id="copyBtn">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-                <span id="copyText">Copy for AI (Markdown)</span>
-            </button>
-            <button class="ai-btn" onclick="downloadMarkdown()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                Download .md File
-            </button>
-            <button class="ai-btn" onclick="openSourceFile()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                    <polyline points="14 2 14 8 20 8"></polyline>
-                </svg>
-                Open Source File
-            </button>
-        </div>
-        <div class="ai-notice">🤖 Designed for AI consumption — copy the full markdown to feed to any LLM</div>
-        
-        <div class="nav-pills">
-            <a href="#overview" class="nav-pill">Overview</a>
-            <a href="#spaces" class="nav-pill">Spaces</a>
-            <a href="#items" class="nav-pill">Items</a>
-            <a href="#tags" class="nav-pill">Tags</a>
-            <a href="#search" class="nav-pill">Search</a>
-            <a href="#metadata" class="nav-pill">Metadata</a>
-            <a href="#examples" class="nav-pill">Code Examples</a>
-            <a href="#troubleshooting" class="nav-pill">Troubleshooting</a>
-        </div>
+      <h1>🔌 Spaces API Guide</h1>
+      <p>Developer Documentation for External Tool Integration</p>
+
+      <div class="ai-actions">
+        <button class="ai-btn" onclick="copyForAI()" id="copyBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span id="copyText">Copy for AI (Markdown)</span>
+        </button>
+        <button class="ai-btn" onclick="downloadMarkdown()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Download .md File
+        </button>
+        <button class="ai-btn" onclick="openSourceFile()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+          </svg>
+          Open Source File
+        </button>
+      </div>
+      <div class="ai-notice">🤖 Designed for AI consumption — copy the full markdown to feed to any LLM</div>
+
+      <div class="nav-pills">
+        <a href="#overview" class="nav-pill">Overview</a>
+        <a href="#spaces" class="nav-pill">Spaces</a>
+        <a href="#items" class="nav-pill">Items</a>
+        <a href="#tags" class="nav-pill">Tags</a>
+        <a href="#search" class="nav-pill">Search</a>
+        <a href="#metadata" class="nav-pill">Metadata</a>
+        <a href="#examples" class="nav-pill">Code Examples</a>
+        <a href="#troubleshooting" class="nav-pill">Troubleshooting</a>
+      </div>
     </div>
 
     <div class="info-box">
-        <strong>What is the Spaces API?</strong><br>
-        The Spaces API allows external tool applications to save content to and interact with the OneReach Spaces system via HTTP. Your tools can create, read, update, and delete content in Spaces.
+      <strong>What is the Spaces API?</strong><br />
+      The Spaces API allows external tool applications to save content to and interact with the OneReach Spaces system
+      via HTTP. Your tools can create, read, update, and delete content in Spaces.
     </div>
 
     <h1 id="overview">🏗️ Architecture Overview</h1>
-    
+
     <div class="architecture-box">
-        <pre style="background: none; border: none; padding: 0; margin: 0; text-align: left;">
+      <pre style="background: none; border: none; padding: 0; margin: 0; text-align: left">
 ┌─────────────────────┐
 │   Your Tool App     │
 │   (Any language)    │
@@ -366,22 +391,32 @@
 ┌─────────────────────┐
 │  OR-Spaces Storage  │
 │  ~/Documents/OR-Spaces/
-└─────────────────────┘</pre>
+└─────────────────────┘</pre
+      >
     </div>
 
     <div class="section-card">
-        <h3>Connection Details</h3>
-        <table>
-            <tr><td><strong>Base URL</strong></td><td><code>http://127.0.0.1:47291</code></td></tr>
-            <tr><td><strong>Security</strong></td><td>Localhost connections only</td></tr>
-            <tr><td><strong>Requirement</strong></td><td>OneReach app must be running</td></tr>
-        </table>
+      <h3>Connection Details</h3>
+      <table>
+        <tr>
+          <td><strong>Base URL</strong></td>
+          <td><code>http://127.0.0.1:47291</code></td>
+        </tr>
+        <tr>
+          <td><strong>Security</strong></td>
+          <td>Localhost connections only</td>
+        </tr>
+        <tr>
+          <td><strong>Requirement</strong></td>
+          <td>OneReach app must be running</td>
+        </tr>
+      </table>
     </div>
 
     <h2>Check Server Status</h2>
     <div class="endpoint">
-        <span class="http-method method-get">GET</span>
-        <span class="endpoint-path">/api/status</span>
+      <span class="http-method method-get">GET</span>
+      <span class="endpoint-path">/api/status</span>
     </div>
     <p>Response:</p>
     <pre><code>{
@@ -395,8 +430,8 @@
 
     <h2>List All Spaces</h2>
     <div class="endpoint">
-        <span class="http-method method-get">GET</span>
-        <span class="endpoint-path">/api/spaces</span>
+      <span class="http-method method-get">GET</span>
+      <span class="endpoint-path">/api/spaces</span>
     </div>
     <p>Response:</p>
     <pre><code>{
@@ -420,14 +455,14 @@
 
     <h2>Get Space Details</h2>
     <div class="endpoint">
-        <span class="http-method method-get">GET</span>
-        <span class="endpoint-path">/api/spaces/:spaceId</span>
+      <span class="http-method method-get">GET</span>
+      <span class="endpoint-path">/api/spaces/:spaceId</span>
     </div>
 
     <h2>Create Space</h2>
     <div class="endpoint">
-        <span class="http-method method-post">POST</span>
-        <span class="endpoint-path">/api/spaces</span>
+      <span class="http-method method-post">POST</span>
+      <span class="endpoint-path">/api/spaces</span>
     </div>
     <p>Request body:</p>
     <pre><code>{
@@ -438,53 +473,81 @@
 
     <h2>Update Space</h2>
     <div class="endpoint">
-        <span class="http-method method-put">PUT</span>
-        <span class="endpoint-path">/api/spaces/:spaceId</span>
+      <span class="http-method method-put">PUT</span>
+      <span class="endpoint-path">/api/spaces/:spaceId</span>
     </div>
 
     <h2>Delete Space</h2>
     <div class="endpoint">
-        <span class="http-method method-delete">DELETE</span>
-        <span class="endpoint-path">/api/spaces/:spaceId</span>
+      <span class="http-method method-delete">DELETE</span>
+      <span class="endpoint-path">/api/spaces/:spaceId</span>
     </div>
     <div class="tip-box">
-        <strong>Note:</strong> Items are moved to "Unclassified" when a space is deleted - they are not removed.
+      <strong>Note:</strong> Items are moved to "Unclassified" when a space is deleted - they are not removed.
     </div>
 
     <h1 id="items">📦 Items CRUD Operations</h1>
 
     <h2>List Items in Space</h2>
     <div class="endpoint">
-        <span class="http-method method-get">GET</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items</span>
+      <span class="http-method method-get">GET</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items</span>
     </div>
-    
+
     <h3>Query Parameters</h3>
     <table>
-        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-        <tr><td><code>limit</code></td><td>number</td><td>Max items to return (default: all)</td></tr>
-        <tr><td><code>offset</code></td><td>number</td><td>Skip items for pagination</td></tr>
-        <tr><td><code>type</code></td><td>string</td><td>Filter: text, image, file, html, code, video, audio</td></tr>
-        <tr><td><code>pinned</code></td><td>boolean</td><td>Filter by pinned status</td></tr>
-        <tr><td><code>tags</code></td><td>string</td><td>Comma-separated tags (ALL must match)</td></tr>
-        <tr><td><code>includeContent</code></td><td>boolean</td><td>Include full content (slower)</td></tr>
+      <tr>
+        <th>Parameter</th>
+        <th>Type</th>
+        <th>Description</th>
+      </tr>
+      <tr>
+        <td><code>limit</code></td>
+        <td>number</td>
+        <td>Max items to return (default: all)</td>
+      </tr>
+      <tr>
+        <td><code>offset</code></td>
+        <td>number</td>
+        <td>Skip items for pagination</td>
+      </tr>
+      <tr>
+        <td><code>type</code></td>
+        <td>string</td>
+        <td>Filter: text, image, file, html, code, video, audio</td>
+      </tr>
+      <tr>
+        <td><code>pinned</code></td>
+        <td>boolean</td>
+        <td>Filter by pinned status</td>
+      </tr>
+      <tr>
+        <td><code>tags</code></td>
+        <td>string</td>
+        <td>Comma-separated tags (ALL must match)</td>
+      </tr>
+      <tr>
+        <td><code>includeContent</code></td>
+        <td>boolean</td>
+        <td>Include full content (slower)</td>
+      </tr>
     </table>
 
     <h2>Get Single Item</h2>
     <div class="endpoint">
-        <span class="http-method method-get">GET</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId</span>
+      <span class="http-method method-get">GET</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId</span>
     </div>
 
     <h2>Add Item to Space (CREATE)</h2>
     <div class="endpoint">
-        <span class="http-method method-post">POST</span>
-        <span class="endpoint-path">/api/send-to-space</span>
+      <span class="http-method method-post">POST</span>
+      <span class="endpoint-path">/api/send-to-space</span>
     </div>
-    
+
     <div class="warning-box">
-        <h4>Important</h4>
-        Use <code>/api/send-to-space</code> to add new items, NOT <code>/api/spaces/:id/items</code>.
+      <h4>Important</h4>
+      Use <code>/api/send-to-space</code> to add new items, NOT <code>/api/spaces/:id/items</code>.
     </div>
 
     <p>Request body:</p>
@@ -503,96 +566,152 @@
 
     <h3>Supported Types</h3>
     <table>
-        <tr><th>Type</th><th>Content Format</th><th>Description</th></tr>
-        <tr><td><code>text</code></td><td>Plain string</td><td>Text content</td></tr>
-        <tr><td><code>html</code></td><td>HTML string</td><td>Rich text/HTML content</td></tr>
-        <tr><td><code>code</code></td><td>Code string</td><td>Source code</td></tr>
-        <tr><td><code>image</code></td><td>Base64 or URL</td><td>Image data or URL</td></tr>
-        <tr><td><code>file</code></td><td>Base64 or path</td><td>File data</td></tr>
-        <tr><td><code>video</code></td><td>File path</td><td>Video file reference</td></tr>
-        <tr><td><code>audio</code></td><td>File path</td><td>Audio file reference</td></tr>
+      <tr>
+        <th>Type</th>
+        <th>Content Format</th>
+        <th>Description</th>
+      </tr>
+      <tr>
+        <td><code>text</code></td>
+        <td>Plain string</td>
+        <td>Text content</td>
+      </tr>
+      <tr>
+        <td><code>html</code></td>
+        <td>HTML string</td>
+        <td>Rich text/HTML content</td>
+      </tr>
+      <tr>
+        <td><code>code</code></td>
+        <td>Code string</td>
+        <td>Source code</td>
+      </tr>
+      <tr>
+        <td><code>image</code></td>
+        <td>Base64 or URL</td>
+        <td>Image data or URL</td>
+      </tr>
+      <tr>
+        <td><code>file</code></td>
+        <td>Base64 or path</td>
+        <td>File data</td>
+      </tr>
+      <tr>
+        <td><code>video</code></td>
+        <td>File path</td>
+        <td>Video file reference</td>
+      </tr>
+      <tr>
+        <td><code>audio</code></td>
+        <td>File path</td>
+        <td>Audio file reference</td>
+      </tr>
     </table>
 
     <h2>Update Item</h2>
     <div class="endpoint">
-        <span class="http-method method-put">PUT</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId</span>
+      <span class="http-method method-put">PUT</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId</span>
     </div>
 
     <h2>Delete Item</h2>
     <div class="endpoint">
-        <span class="http-method method-delete">DELETE</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId</span>
+      <span class="http-method method-delete">DELETE</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId</span>
     </div>
 
     <h2>Move Item</h2>
     <div class="endpoint">
-        <span class="http-method method-post">POST</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/move</span>
+      <span class="http-method method-post">POST</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/move</span>
     </div>
     <pre><code>{ "toSpaceId": "another-space" }</code></pre>
 
     <h2>Toggle Pin</h2>
     <div class="endpoint">
-        <span class="http-method method-post">POST</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/pin</span>
+      <span class="http-method method-post">POST</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/pin</span>
     </div>
 
     <h1 id="tags">🏷️ Tags Operations</h1>
 
     <h2>Get Item Tags</h2>
     <div class="endpoint">
-        <span class="http-method method-get">GET</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/tags</span>
+      <span class="http-method method-get">GET</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/tags</span>
     </div>
 
     <h2>Set Item Tags (Replace All)</h2>
     <div class="endpoint">
-        <span class="http-method method-put">PUT</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/tags</span>
+      <span class="http-method method-put">PUT</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/tags</span>
     </div>
     <pre><code>{ "tags": ["new-tag", "another-tag"] }</code></pre>
 
     <h2>Add Tag to Item</h2>
     <div class="endpoint">
-        <span class="http-method method-post">POST</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/tags</span>
+      <span class="http-method method-post">POST</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/tags</span>
     </div>
     <pre><code>{ "tag": "urgent" }</code></pre>
 
     <h2>Remove Tag from Item</h2>
     <div class="endpoint">
-        <span class="http-method method-delete">DELETE</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/tags/:tagName</span>
+      <span class="http-method method-delete">DELETE</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/items/:itemId/tags/:tagName</span>
     </div>
 
     <h2>List All Tags in Space</h2>
     <div class="endpoint">
-        <span class="http-method method-get">GET</span>
-        <span class="endpoint-path">/api/spaces/:spaceId/tags</span>
+      <span class="http-method method-get">GET</span>
+      <span class="endpoint-path">/api/spaces/:spaceId/tags</span>
     </div>
 
     <h2>Find Items by Tags</h2>
     <div class="endpoint">
-        <span class="http-method method-get">GET</span>
-        <span class="endpoint-path">/api/tags/search?tags=important,urgent&matchAll=true</span>
+      <span class="http-method method-get">GET</span>
+      <span class="endpoint-path">/api/tags/search?tags=important,urgent&matchAll=true</span>
     </div>
 
     <h1 id="search">🔍 Search</h1>
 
     <div class="endpoint">
-        <span class="http-method method-get">GET</span>
-        <span class="endpoint-path">/api/search?q=meeting+notes&spaceId=work-project&limit=20</span>
+      <span class="http-method method-get">GET</span>
+      <span class="endpoint-path">/api/search?q=meeting+notes&spaceId=work-project&limit=20</span>
     </div>
 
     <h3>Query Parameters</h3>
     <table>
-        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-        <tr><td><code>q</code></td><td>string</td><td>Search query</td></tr>
-        <tr><td><code>spaceId</code></td><td>string</td><td>Limit to specific space</td></tr>
-        <tr><td><code>type</code></td><td>string</td><td>Filter by item type</td></tr>
-        <tr><td><code>searchTags</code></td><td>boolean</td><td>Also search in tags (default: true)</td></tr>
-        <tr><td><code>limit</code></td><td>number</td><td>Max results</td></tr>
+      <tr>
+        <th>Parameter</th>
+        <th>Type</th>
+        <th>Description</th>
+      </tr>
+      <tr>
+        <td><code>q</code></td>
+        <td>string</td>
+        <td>Search query</td>
+      </tr>
+      <tr>
+        <td><code>spaceId</code></td>
+        <td>string</td>
+        <td>Limit to specific space</td>
+      </tr>
+      <tr>
+        <td><code>type</code></td>
+        <td>string</td>
+        <td>Filter by item type</td>
+      </tr>
+      <tr>
+        <td><code>searchTags</code></td>
+        <td>boolean</td>
+        <td>Also search in tags (default: true)</td>
+      </tr>
+      <tr>
+        <td><code>limit</code></td>
+        <td>number</td>
+        <td>Max results</td>
+      </tr>
     </table>
 
     <h1 id="examples">💻 Code Examples</h1>
@@ -732,15 +851,15 @@ curl "http://127.0.0.1:47291/api/spaces/unclassified/items?limit=10"
 curl -X DELETE http://127.0.0.1:47291/api/spaces/unclassified/items/item-abc123</code></pre>
 
     <h1 id="metadata">🏷️ Metadata Operations</h1>
-    
+
     <p>Metadata endpoints allow you to manage rich metadata for spaces, files, and assets.</p>
 
     <h2>Space Metadata</h2>
-    
+
     <h3><span class="http-method method-get">GET</span> Get Space Metadata</h3>
     <pre><code>GET /api/spaces/:spaceId/metadata</code></pre>
     <p>Returns the full metadata object for a space including assets, versions, approvals, and project config.</p>
-    
+
     <h3><span class="http-method method-put">PUT</span> Update Space Metadata</h3>
     <pre><code>PUT /api/spaces/:spaceId/metadata
 Content-Type: application/json
@@ -752,11 +871,11 @@ Content-Type: application/json
     <p><strong>Note:</strong> This merges with existing metadata, not replaces.</p>
 
     <h2>File Metadata</h2>
-    
+
     <h3><span class="http-method method-get">GET</span> Get File Metadata</h3>
     <pre><code>GET /api/spaces/:spaceId/metadata/files/:filePath</code></pre>
     <p>Example: <code>GET /api/spaces/my-project/metadata/files/videos/intro.mp4</code></p>
-    
+
     <h3><span class="http-method method-put">PUT</span> Set File Metadata</h3>
     <pre><code>PUT /api/spaces/:spaceId/metadata/files/:filePath
 Content-Type: application/json
@@ -769,12 +888,15 @@ Content-Type: application/json
 }</code></pre>
 
     <h2>Asset Metadata</h2>
-    
-    <p><strong>Asset Types:</strong> <code>logo</code>, <code>banner</code>, <code>thumbnail</code>, <code>icon</code>, or any custom type.</p>
-    
+
+    <p>
+      <strong>Asset Types:</strong> <code>logo</code>, <code>banner</code>, <code>thumbnail</code>, <code>icon</code>,
+      or any custom type.
+    </p>
+
     <h3><span class="http-method method-get">GET</span> Get Asset Metadata</h3>
     <pre><code>GET /api/spaces/:spaceId/metadata/assets/:assetType</code></pre>
-    
+
     <h3><span class="http-method method-put">PUT</span> Set Asset Metadata</h3>
     <pre><code>PUT /api/spaces/:spaceId/metadata/assets/:assetType
 Content-Type: application/json
@@ -787,7 +909,7 @@ Content-Type: application/json
 }</code></pre>
 
     <h2>Approvals</h2>
-    
+
     <h3><span class="http-method method-put">PUT</span> Set Approval Status</h3>
     <pre><code>PUT /api/spaces/:spaceId/metadata/approvals/:itemType/:itemId
 Content-Type: application/json
@@ -798,10 +920,10 @@ Content-Type: application/json
     <p><strong>Use Cases:</strong> Approve video segments, mark assets as client-approved, track review status.</p>
 
     <h2>Version History</h2>
-    
+
     <h3><span class="http-method method-get">GET</span> Get Versions</h3>
     <pre><code>GET /api/spaces/:spaceId/metadata/versions</code></pre>
-    
+
     <h3><span class="http-method method-post">POST</span> Add Version</h3>
     <pre><code>POST /api/spaces/:spaceId/metadata/versions
 Content-Type: application/json
@@ -813,10 +935,10 @@ Content-Type: application/json
 }</code></pre>
 
     <h2>Project Configuration</h2>
-    
+
     <h3><span class="http-method method-get">GET</span> Get Project Config</h3>
     <pre><code>GET /api/spaces/:spaceId/metadata/project-config</code></pre>
-    
+
     <h3><span class="http-method method-put">PUT</span> Update Project Config</h3>
     <pre><code>PUT /api/spaces/:spaceId/metadata/project-config
 Content-Type: application/json
@@ -833,20 +955,44 @@ Content-Type: application/json
 
     <h2>Common Issues</h2>
     <table>
-        <tr><th>Issue</th><th>Solution</th></tr>
-        <tr><td>Connection refused</td><td>Ensure OneReach app is running</td></tr>
-        <tr><td>"Space not found"</td><td>Use <code>/api/spaces</code> to list valid space IDs</td></tr>
-        <tr><td>Content not appearing</td><td>Check the response for error messages</td></tr>
-        <tr><td>Large file fails</td><td>Send file path instead of base64 content</td></tr>
-        <tr><td>500 Internal Server Error</td><td>Check the main app console for detailed logs</td></tr>
-        <tr><td>404 Not Found on valid routes</td><td>Verify endpoint spelling; check console for logs</td></tr>
+      <tr>
+        <th>Issue</th>
+        <th>Solution</th>
+      </tr>
+      <tr>
+        <td>Connection refused</td>
+        <td>Ensure OneReach app is running</td>
+      </tr>
+      <tr>
+        <td>"Space not found"</td>
+        <td>Use <code>/api/spaces</code> to list valid space IDs</td>
+      </tr>
+      <tr>
+        <td>Content not appearing</td>
+        <td>Check the response for error messages</td>
+      </tr>
+      <tr>
+        <td>Large file fails</td>
+        <td>Send file path instead of base64 content</td>
+      </tr>
+      <tr>
+        <td>500 Internal Server Error</td>
+        <td>Check the main app console for detailed logs</td>
+      </tr>
+      <tr>
+        <td>404 Not Found on valid routes</td>
+        <td>Verify endpoint spelling; check console for logs</td>
+      </tr>
     </table>
 
     <h2>Debugging API Issues</h2>
     <div class="info-box">
-        <strong>Check the Console</strong><br>
-        Open the OneReach app's Developer Tools (<code>View → Toggle Developer Tools</code>) and check the main process console for detailed error messages. Unmatched routes are logged with format:
-        <pre style="background: rgba(0,0,0,0.2); margin: 10px 0; padding: 10px;"><code>[SpacesAPI] Unmatched route: { pathname: '/api/...', method: 'GET', pathParts: [...] }</code></pre>
+      <strong>Check the Console</strong><br />
+      Open the OneReach app's Developer Tools (<code>View → Toggle Developer Tools</code>) and check the main process
+      console for detailed error messages. Unmatched routes are logged with format:
+      <pre
+        style="background: rgba(0, 0, 0, 0.2); margin: 10px 0; padding: 10px"
+      ><code>[SpacesAPI] Unmatched route: { pathname: '/api/...', method: 'GET', pathParts: [...] }</code></pre>
     </div>
 
     <h2>Error Responses</h2>
@@ -857,83 +1003,280 @@ Content-Type: application/json
 }</code></pre>
 
     <table>
-        <tr><th>Code</th><th>HTTP Status</th><th>Description</th></tr>
-        <tr><td><code>MISSING_REQUIRED_FIELD</code></td><td>400</td><td>Required field not provided</td></tr>
-        <tr><td><code>INVALID_SPACE_ID</code></td><td>400</td><td>Space ID not found</td></tr>
-        <tr><td><code>INVALID_ITEM_TYPE</code></td><td>400</td><td>Unsupported content type</td></tr>
-        <tr><td><code>EMPTY_CONTENT</code></td><td>400</td><td>Content cannot be empty</td></tr>
-        <tr><td><code>NOT_FOUND</code></td><td>404</td><td>Resource not found</td></tr>
-        <tr><td><code>SERVER_ERROR</code></td><td>500</td><td>Internal server error</td></tr>
+      <tr>
+        <th>Code</th>
+        <th>HTTP Status</th>
+        <th>Description</th>
+      </tr>
+      <tr>
+        <td><code>MISSING_REQUIRED_FIELD</code></td>
+        <td>400</td>
+        <td>Required field not provided</td>
+      </tr>
+      <tr>
+        <td><code>INVALID_SPACE_ID</code></td>
+        <td>400</td>
+        <td>Space ID not found</td>
+      </tr>
+      <tr>
+        <td><code>INVALID_ITEM_TYPE</code></td>
+        <td>400</td>
+        <td>Unsupported content type</td>
+      </tr>
+      <tr>
+        <td><code>EMPTY_CONTENT</code></td>
+        <td>400</td>
+        <td>Content cannot be empty</td>
+      </tr>
+      <tr>
+        <td><code>NOT_FOUND</code></td>
+        <td>404</td>
+        <td>Resource not found</td>
+      </tr>
+      <tr>
+        <td><code>SERVER_ERROR</code></td>
+        <td>500</td>
+        <td>Internal server error</td>
+      </tr>
     </table>
 
     <h1>📋 Quick Reference</h1>
-    
+
     <table>
-        <tr><th>Operation</th><th>Method</th><th>Endpoint</th></tr>
-        <tr><td colspan="3" style="background: #065f46; color: white;"><strong>Server</strong></td></tr>
-        <tr><td>Status</td><td><span class="http-method method-get">GET</span></td><td><code>/api/status</code></td></tr>
-        <tr><td colspan="3" style="background: #065f46; color: white;"><strong>Spaces</strong></td></tr>
-        <tr><td>List Spaces</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces</code></td></tr>
-        <tr><td>Get Space</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id</code></td></tr>
-        <tr><td>Create Space</td><td><span class="http-method method-post">POST</span></td><td><code>/api/spaces</code></td></tr>
-        <tr><td>Update Space</td><td><span class="http-method method-put">PUT</span></td><td><code>/api/spaces/:id</code></td></tr>
-        <tr><td>Delete Space</td><td><span class="http-method method-delete">DELETE</span></td><td><code>/api/spaces/:id</code></td></tr>
-        <tr><td colspan="3" style="background: #065f46; color: white;"><strong>Items</strong></td></tr>
-        <tr><td>List Items</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id/items</code></td></tr>
-        <tr><td>Get Item</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id/items/:itemId</code></td></tr>
-        <tr><td>Add Item</td><td><span class="http-method method-post">POST</span></td><td><code>/api/send-to-space</code></td></tr>
-        <tr><td>Update Item</td><td><span class="http-method method-put">PUT</span></td><td><code>/api/spaces/:id/items/:itemId</code></td></tr>
-        <tr><td>Delete Item</td><td><span class="http-method method-delete">DELETE</span></td><td><code>/api/spaces/:id/items/:itemId</code></td></tr>
-        <tr><td>Move Item</td><td><span class="http-method method-post">POST</span></td><td><code>/api/spaces/:id/items/:itemId/move</code></td></tr>
-        <tr><td>Pin/Unpin</td><td><span class="http-method method-post">POST</span></td><td><code>/api/spaces/:id/items/:itemId/pin</code></td></tr>
-        <tr><td colspan="3" style="background: #065f46; color: white;"><strong>Tags</strong></td></tr>
-        <tr><td>Get Tags</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id/items/:itemId/tags</code></td></tr>
-        <tr><td>Set Tags</td><td><span class="http-method method-put">PUT</span></td><td><code>/api/spaces/:id/items/:itemId/tags</code></td></tr>
-        <tr><td>Add Tag</td><td><span class="http-method method-post">POST</span></td><td><code>/api/spaces/:id/items/:itemId/tags</code></td></tr>
-        <tr><td>Remove Tag</td><td><span class="http-method method-delete">DELETE</span></td><td><code>/api/spaces/:id/items/:itemId/tags/:tag</code></td></tr>
-        <tr><td>List Space Tags</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id/tags</code></td></tr>
-        <tr><td>Search by Tags</td><td><span class="http-method method-get">GET</span></td><td><code>/api/tags/search</code></td></tr>
-        <tr><td colspan="3" style="background: #065f46; color: white;"><strong>Search</strong></td></tr>
-        <tr><td>Search Items</td><td><span class="http-method method-get">GET</span></td><td><code>/api/search?q=...</code></td></tr>
-        <tr><td colspan="3" style="background: #065f46; color: white;"><strong>Smart Folders</strong></td></tr>
-        <tr><td>List Folders</td><td><span class="http-method method-get">GET</span></td><td><code>/api/smart-folders</code></td></tr>
-        <tr><td>Create Folder</td><td><span class="http-method method-post">POST</span></td><td><code>/api/smart-folders</code></td></tr>
-        <tr><td>Get Folder Items</td><td><span class="http-method method-get">GET</span></td><td><code>/api/smart-folders/:id/items</code></td></tr>
-        <tr><td>Delete Folder</td><td><span class="http-method method-delete">DELETE</span></td><td><code>/api/smart-folders/:id</code></td></tr>
-        <tr><td colspan="3" style="background: #065f46; color: white;"><strong>Metadata</strong></td></tr>
-        <tr><td>Get Space Metadata</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id/metadata</code></td></tr>
-        <tr><td>Update Space Metadata</td><td><span class="http-method method-put">PUT</span></td><td><code>/api/spaces/:id/metadata</code></td></tr>
-        <tr><td>Get File Metadata</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id/metadata/files/:path</code></td></tr>
-        <tr><td>Set File Metadata</td><td><span class="http-method method-put">PUT</span></td><td><code>/api/spaces/:id/metadata/files/:path</code></td></tr>
-        <tr><td>Get Asset Metadata</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id/metadata/assets/:type</code></td></tr>
-        <tr><td>Set Asset Metadata</td><td><span class="http-method method-put">PUT</span></td><td><code>/api/spaces/:id/metadata/assets/:type</code></td></tr>
-        <tr><td>Set Approval</td><td><span class="http-method method-put">PUT</span></td><td><code>/api/spaces/:id/metadata/approvals/:type/:itemId</code></td></tr>
-        <tr><td>Get Versions</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id/metadata/versions</code></td></tr>
-        <tr><td>Add Version</td><td><span class="http-method method-post">POST</span></td><td><code>/api/spaces/:id/metadata/versions</code></td></tr>
-        <tr><td>Get Project Config</td><td><span class="http-method method-get">GET</span></td><td><code>/api/spaces/:id/metadata/project-config</code></td></tr>
-        <tr><td>Update Project Config</td><td><span class="http-method method-put">PUT</span></td><td><code>/api/spaces/:id/metadata/project-config</code></td></tr>
+      <tr>
+        <th>Operation</th>
+        <th>Method</th>
+        <th>Endpoint</th>
+      </tr>
+      <tr>
+        <td colspan="3" style="background: #065f46; color: white"><strong>Server</strong></td>
+      </tr>
+      <tr>
+        <td>Status</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/status</code></td>
+      </tr>
+      <tr>
+        <td colspan="3" style="background: #065f46; color: white"><strong>Spaces</strong></td>
+      </tr>
+      <tr>
+        <td>List Spaces</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces</code></td>
+      </tr>
+      <tr>
+        <td>Get Space</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id</code></td>
+      </tr>
+      <tr>
+        <td>Create Space</td>
+        <td><span class="http-method method-post">POST</span></td>
+        <td><code>/api/spaces</code></td>
+      </tr>
+      <tr>
+        <td>Update Space</td>
+        <td><span class="http-method method-put">PUT</span></td>
+        <td><code>/api/spaces/:id</code></td>
+      </tr>
+      <tr>
+        <td>Delete Space</td>
+        <td><span class="http-method method-delete">DELETE</span></td>
+        <td><code>/api/spaces/:id</code></td>
+      </tr>
+      <tr>
+        <td colspan="3" style="background: #065f46; color: white"><strong>Items</strong></td>
+      </tr>
+      <tr>
+        <td>List Items</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id/items</code></td>
+      </tr>
+      <tr>
+        <td>Get Item</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id/items/:itemId</code></td>
+      </tr>
+      <tr>
+        <td>Add Item</td>
+        <td><span class="http-method method-post">POST</span></td>
+        <td><code>/api/send-to-space</code></td>
+      </tr>
+      <tr>
+        <td>Update Item</td>
+        <td><span class="http-method method-put">PUT</span></td>
+        <td><code>/api/spaces/:id/items/:itemId</code></td>
+      </tr>
+      <tr>
+        <td>Delete Item</td>
+        <td><span class="http-method method-delete">DELETE</span></td>
+        <td><code>/api/spaces/:id/items/:itemId</code></td>
+      </tr>
+      <tr>
+        <td>Move Item</td>
+        <td><span class="http-method method-post">POST</span></td>
+        <td><code>/api/spaces/:id/items/:itemId/move</code></td>
+      </tr>
+      <tr>
+        <td>Pin/Unpin</td>
+        <td><span class="http-method method-post">POST</span></td>
+        <td><code>/api/spaces/:id/items/:itemId/pin</code></td>
+      </tr>
+      <tr>
+        <td colspan="3" style="background: #065f46; color: white"><strong>Tags</strong></td>
+      </tr>
+      <tr>
+        <td>Get Tags</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id/items/:itemId/tags</code></td>
+      </tr>
+      <tr>
+        <td>Set Tags</td>
+        <td><span class="http-method method-put">PUT</span></td>
+        <td><code>/api/spaces/:id/items/:itemId/tags</code></td>
+      </tr>
+      <tr>
+        <td>Add Tag</td>
+        <td><span class="http-method method-post">POST</span></td>
+        <td><code>/api/spaces/:id/items/:itemId/tags</code></td>
+      </tr>
+      <tr>
+        <td>Remove Tag</td>
+        <td><span class="http-method method-delete">DELETE</span></td>
+        <td><code>/api/spaces/:id/items/:itemId/tags/:tag</code></td>
+      </tr>
+      <tr>
+        <td>List Space Tags</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id/tags</code></td>
+      </tr>
+      <tr>
+        <td>Search by Tags</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/tags/search</code></td>
+      </tr>
+      <tr>
+        <td colspan="3" style="background: #065f46; color: white"><strong>Search</strong></td>
+      </tr>
+      <tr>
+        <td>Search Items</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/search?q=...</code></td>
+      </tr>
+      <tr>
+        <td colspan="3" style="background: #065f46; color: white"><strong>Smart Folders</strong></td>
+      </tr>
+      <tr>
+        <td>List Folders</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/smart-folders</code></td>
+      </tr>
+      <tr>
+        <td>Create Folder</td>
+        <td><span class="http-method method-post">POST</span></td>
+        <td><code>/api/smart-folders</code></td>
+      </tr>
+      <tr>
+        <td>Get Folder Items</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/smart-folders/:id/items</code></td>
+      </tr>
+      <tr>
+        <td>Delete Folder</td>
+        <td><span class="http-method method-delete">DELETE</span></td>
+        <td><code>/api/smart-folders/:id</code></td>
+      </tr>
+      <tr>
+        <td colspan="3" style="background: #065f46; color: white"><strong>Metadata</strong></td>
+      </tr>
+      <tr>
+        <td>Get Space Metadata</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id/metadata</code></td>
+      </tr>
+      <tr>
+        <td>Update Space Metadata</td>
+        <td><span class="http-method method-put">PUT</span></td>
+        <td><code>/api/spaces/:id/metadata</code></td>
+      </tr>
+      <tr>
+        <td>Get File Metadata</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id/metadata/files/:path</code></td>
+      </tr>
+      <tr>
+        <td>Set File Metadata</td>
+        <td><span class="http-method method-put">PUT</span></td>
+        <td><code>/api/spaces/:id/metadata/files/:path</code></td>
+      </tr>
+      <tr>
+        <td>Get Asset Metadata</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id/metadata/assets/:type</code></td>
+      </tr>
+      <tr>
+        <td>Set Asset Metadata</td>
+        <td><span class="http-method method-put">PUT</span></td>
+        <td><code>/api/spaces/:id/metadata/assets/:type</code></td>
+      </tr>
+      <tr>
+        <td>Set Approval</td>
+        <td><span class="http-method method-put">PUT</span></td>
+        <td><code>/api/spaces/:id/metadata/approvals/:type/:itemId</code></td>
+      </tr>
+      <tr>
+        <td>Get Versions</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id/metadata/versions</code></td>
+      </tr>
+      <tr>
+        <td>Add Version</td>
+        <td><span class="http-method method-post">POST</span></td>
+        <td><code>/api/spaces/:id/metadata/versions</code></td>
+      </tr>
+      <tr>
+        <td>Get Project Config</td>
+        <td><span class="http-method method-get">GET</span></td>
+        <td><code>/api/spaces/:id/metadata/project-config</code></td>
+      </tr>
+      <tr>
+        <td>Update Project Config</td>
+        <td><span class="http-method method-put">PUT</span></td>
+        <td><code>/api/spaces/:id/metadata/project-config</code></td>
+      </tr>
     </table>
 
     <h1>⚠️ Important Notes</h1>
-    
+
     <div class="section-card">
-        <ol>
-            <li><strong>Localhost Only:</strong> The API only accepts connections from <code>127.0.0.1</code> for security.</li>
-            <li><strong>App Must Be Running:</strong> The OneReach app must be running for the API to be available.</li>
-            <li><strong>Content Size:</strong> Large content (images, files) should be sent as file paths when possible, not base64.</li>
-            <li><strong>Atomic Operations:</strong> All write operations are atomic - they either succeed completely or fail.</li>
-            <li><strong>Default Space:</strong> Use <code>"unclassified"</code> as the default space ID if no specific space is needed.</li>
-        </ol>
+      <ol>
+        <li>
+          <strong>Localhost Only:</strong> The API only accepts connections from <code>127.0.0.1</code> for security.
+        </li>
+        <li><strong>App Must Be Running:</strong> The OneReach app must be running for the API to be available.</li>
+        <li>
+          <strong>Content Size:</strong> Large content (images, files) should be sent as file paths when possible, not
+          base64.
+        </li>
+        <li>
+          <strong>Atomic Operations:</strong> All write operations are atomic - they either succeed completely or fail.
+        </li>
+        <li>
+          <strong>Default Space:</strong> Use <code>"unclassified"</code> as the default space ID if no specific space
+          is needed.
+        </li>
+      </ol>
     </div>
 
-    <div class="info-box" style="text-align: center; margin-top: 40px;">
-        <strong>Need Help?</strong><br>
-        Check the OneReach app console for detailed logs, or see the full documentation in <code>TOOL-APP-SPACES-API-GUIDE.md</code>
+    <div class="info-box" style="text-align: center; margin-top: 40px">
+      <strong>Need Help?</strong><br />
+      Check the OneReach app console for detailed logs, or see the full documentation in
+      <code>TOOL-APP-SPACES-API-GUIDE.md</code>
     </div>
 
     <script>
-    // The full markdown documentation for AI consumption
-    const MARKDOWN_DOCS = `# Tool App Spaces API Guide
+      // The full markdown documentation for AI consumption
+      const MARKDOWN_DOCS = `# Tool App Spaces API Guide
 
 This document explains how external tool applications can save content to and interact with the OneReach Spaces system via HTTP API.
 
@@ -1503,37 +1846,37 @@ All endpoints return consistent error responses:
 6. **Space ID "unclassified"**: Use "unclassified" as the default space ID if no specific space is needed.
 `;
 
-    // Copy markdown to clipboard for AI consumption
-    async function copyForAI() {
+      // Copy markdown to clipboard for AI consumption
+      async function copyForAI() {
         try {
-            await navigator.clipboard.writeText(MARKDOWN_DOCS);
-            const btn = document.getElementById('copyBtn');
-            const text = document.getElementById('copyText');
-            btn.classList.add('success');
-            text.textContent = '✓ Copied to Clipboard!';
-            setTimeout(() => {
-                btn.classList.remove('success');
-                text.textContent = 'Copy for AI (Markdown)';
-            }, 2000);
+          await navigator.clipboard.writeText(MARKDOWN_DOCS);
+          const btn = document.getElementById('copyBtn');
+          const text = document.getElementById('copyText');
+          btn.classList.add('success');
+          text.textContent = '✓ Copied to Clipboard!';
+          setTimeout(() => {
+            btn.classList.remove('success');
+            text.textContent = 'Copy for AI (Markdown)';
+          }, 2000);
         } catch (err) {
-            // Fallback for older browsers
-            const textarea = document.createElement('textarea');
-            textarea.value = MARKDOWN_DOCS;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-            
-            const text = document.getElementById('copyText');
-            text.textContent = '✓ Copied!';
-            setTimeout(() => {
-                text.textContent = 'Copy for AI (Markdown)';
-            }, 2000);
-        }
-    }
+          // Fallback for older browsers
+          const textarea = document.createElement('textarea');
+          textarea.value = MARKDOWN_DOCS;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
 
-    // Download as markdown file
-    function downloadMarkdown() {
+          const text = document.getElementById('copyText');
+          text.textContent = '✓ Copied!';
+          setTimeout(() => {
+            text.textContent = 'Copy for AI (Markdown)';
+          }, 2000);
+        }
+      }
+
+      // Download as markdown file
+      function downloadMarkdown() {
         const blob = new Blob([MARKDOWN_DOCS], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1543,23 +1886,21 @@ All endpoints return consistent error responses:
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-    }
+      }
 
-    // Open the source markdown file in the system
-    function openSourceFile() {
+      // Open the source markdown file in the system
+      function openSourceFile() {
         // This uses the Electron shell to open the file
         if (window.require) {
-            const { shell } = window.require('electron');
-            const path = window.require('path');
-            const filePath = path.join(__dirname, 'TOOL-APP-SPACES-API-GUIDE.md');
-            shell.openPath(filePath);
+          const { shell } = window.require('electron');
+          const path = window.require('path');
+          const filePath = path.join(__dirname, 'TOOL-APP-SPACES-API-GUIDE.md');
+          shell.openPath(filePath);
         } else {
-            // Fallback - just download
-            downloadMarkdown();
+          // Fallback - just download
+          downloadMarkdown();
         }
-    }
+      }
     </script>
-
-</body>
+  </body>
 </html>
-

@@ -3,16 +3,12 @@
  * Creates Word documents from space assets using the docx library
  */
 
-const { 
-  Document, 
-  Packer, 
-  Paragraph, 
-  TextRun, 
-  HeadingLevel, 
-  Table, 
-  TableRow, 
-  TableCell, 
-  WidthType,
+const {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  HeadingLevel,
   AlignmentType,
   BorderStyle,
   ImageRun,
@@ -22,10 +18,8 @@ const {
   Header,
   Footer,
   PageNumber,
-  NumberFormat
 } = require('docx');
 const fs = require('fs');
-const path = require('path');
 
 class DocxGenerator {
   constructor() {
@@ -38,7 +32,7 @@ class DocxGenerator {
       fontFamily: 'Calibri',
       headingFont: 'Calibri Light',
       primaryColor: '2B579A', // Word blue
-      secondaryColor: '5B5B5B'
+      secondaryColor: '5B5B5B',
     };
   }
 
@@ -50,52 +44,54 @@ class DocxGenerator {
    * @returns {Promise<Object>} Result with buffer
    */
   async generate(space, items, options = {}) {
-    const {
-      includeImages = true,
-      includeMetadata = true,
-      includeTableOfContents = false,
-      template = 'auto',
-      aiStructure = null
-    } = options;
+    const { includeImages = true, includeMetadata = true, includeTableOfContents = false } = options;
 
     try {
       // Build document sections
       const sections = [];
-      
+
       // Title section
       sections.push(this.createTitleParagraph(space.name));
-      
+
       if (space.description) {
         sections.push(this.createSubtitleParagraph(space.description));
       }
-      
+
       sections.push(this.createMetadataParagraph(space, items));
-      
+
       // Table of contents (if requested)
       if (includeTableOfContents) {
         sections.push(new Paragraph({ text: '' })); // Spacer
-        sections.push(new Paragraph({
-          children: [new TextRun({ text: 'Table of Contents', bold: true, size: this.defaultStyles.heading1Size })],
-          heading: HeadingLevel.HEADING_1
-        }));
-        sections.push(new TableOfContents('Table of Contents', {
-          hyperlink: true,
-          headingStyleRange: '1-3'
-        }));
+        sections.push(
+          new Paragraph({
+            children: [new TextRun({ text: 'Table of Contents', bold: true, size: this.defaultStyles.heading1Size })],
+            heading: HeadingLevel.HEADING_1,
+          })
+        );
+        sections.push(
+          new TableOfContents('Table of Contents', {
+            hyperlink: true,
+            headingStyleRange: '1-3',
+          })
+        );
         sections.push(new Paragraph({ children: [new PageBreak()] }));
       }
 
       // Group items by type for organized output
       const groupedItems = this.groupItemsByType(items);
-      
+
       // Process each group
       for (const [type, typeItems] of Object.entries(groupedItems)) {
         // Section header
-        sections.push(new Paragraph({
-          children: [new TextRun({ text: this.formatTypeName(type), bold: true, size: this.defaultStyles.heading1Size })],
-          heading: HeadingLevel.HEADING_1,
-          spacing: { before: 400, after: 200 }
-        }));
+        sections.push(
+          new Paragraph({
+            children: [
+              new TextRun({ text: this.formatTypeName(type), bold: true, size: this.defaultStyles.heading1Size }),
+            ],
+            heading: HeadingLevel.HEADING_1,
+            spacing: { before: 400, after: 200 },
+          })
+        );
 
         // Process items in this group
         for (const item of typeItems) {
@@ -114,9 +110,9 @@ class DocxGenerator {
             document: {
               run: {
                 font: this.defaultStyles.fontFamily,
-                size: this.defaultStyles.bodySize
-              }
-            }
+                size: this.defaultStyles.bodySize,
+              },
+            },
           },
           paragraphStyles: [
             {
@@ -128,11 +124,11 @@ class DocxGenerator {
                 font: this.defaultStyles.headingFont,
                 size: this.defaultStyles.titleSize,
                 bold: true,
-                color: this.defaultStyles.primaryColor
+                color: this.defaultStyles.primaryColor,
               },
               paragraph: {
-                spacing: { after: 300 }
-              }
+                spacing: { after: 300 },
+              },
             },
             {
               id: 'Heading1',
@@ -143,11 +139,11 @@ class DocxGenerator {
                 font: this.defaultStyles.headingFont,
                 size: this.defaultStyles.heading1Size,
                 bold: true,
-                color: this.defaultStyles.primaryColor
+                color: this.defaultStyles.primaryColor,
               },
               paragraph: {
-                spacing: { before: 400, after: 200 }
-              }
+                spacing: { before: 400, after: 200 },
+              },
             },
             {
               id: 'Heading2',
@@ -158,51 +154,55 @@ class DocxGenerator {
                 font: this.defaultStyles.headingFont,
                 size: this.defaultStyles.heading2Size,
                 bold: true,
-                color: this.defaultStyles.secondaryColor
+                color: this.defaultStyles.secondaryColor,
               },
               paragraph: {
-                spacing: { before: 300, after: 150 }
-              }
-            }
-          ]
+                spacing: { before: 300, after: 150 },
+              },
+            },
+          ],
         },
-        sections: [{
-          properties: {
-            page: {
-              margin: {
-                top: 1440, // 1 inch
-                right: 1440,
-                bottom: 1440,
-                left: 1440
-              }
-            }
-          },
-          headers: {
-            default: new Header({
-              children: [new Paragraph({
+        sections: [
+          {
+            properties: {
+              page: {
+                margin: {
+                  top: 1440, // 1 inch
+                  right: 1440,
+                  bottom: 1440,
+                  left: 1440,
+                },
+              },
+            },
+            headers: {
+              default: new Header({
                 children: [
-                  new TextRun({ text: space.name, italics: true, size: 18, color: '888888' })
+                  new Paragraph({
+                    children: [new TextRun({ text: space.name, italics: true, size: 18, color: '888888' })],
+                    alignment: AlignmentType.RIGHT,
+                  }),
                 ],
-                alignment: AlignmentType.RIGHT
-              })]
-            })
-          },
-          footers: {
-            default: new Footer({
-              children: [new Paragraph({
+              }),
+            },
+            footers: {
+              default: new Footer({
                 children: [
-                  new TextRun({ text: 'Page ', size: 18 }),
-                  new TextRun({ children: [PageNumber.CURRENT], size: 18 }),
-                  new TextRun({ text: ' of ', size: 18 }),
-                  new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 18 }),
-                  new TextRun({ text: '  •  Generated by Onereach.ai', size: 18, color: '888888' })
+                  new Paragraph({
+                    children: [
+                      new TextRun({ text: 'Page ', size: 18 }),
+                      new TextRun({ children: [PageNumber.CURRENT], size: 18 }),
+                      new TextRun({ text: ' of ', size: 18 }),
+                      new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 18 }),
+                      new TextRun({ text: '  •  Generated by Onereach.ai', size: 18, color: '888888' }),
+                    ],
+                    alignment: AlignmentType.CENTER,
+                  }),
                 ],
-                alignment: AlignmentType.CENTER
-              })]
-            })
+              }),
+            },
+            children: sections,
           },
-          children: sections
-        }]
+        ],
       });
 
       // Generate buffer
@@ -213,14 +213,13 @@ class DocxGenerator {
         buffer,
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         extension: 'docx',
-        filename: `${this.sanitizeFilename(space.name)}.docx`
+        filename: `${this.sanitizeFilename(space.name)}.docx`,
       };
-
     } catch (error) {
       console.error('[DocxGenerator] Error generating document:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -236,10 +235,10 @@ class DocxGenerator {
           bold: true,
           size: this.defaultStyles.titleSize,
           font: this.defaultStyles.headingFont,
-          color: this.defaultStyles.primaryColor
-        })
+          color: this.defaultStyles.primaryColor,
+        }),
       ],
-      spacing: { after: 200 }
+      spacing: { after: 200 },
     });
   }
 
@@ -253,10 +252,10 @@ class DocxGenerator {
           text: subtitle,
           size: this.defaultStyles.heading2Size,
           color: this.defaultStyles.secondaryColor,
-          italics: true
-        })
+          italics: true,
+        }),
       ],
-      spacing: { after: 300 }
+      spacing: { after: 300 },
     });
   }
 
@@ -264,10 +263,10 @@ class DocxGenerator {
    * Create metadata paragraph
    */
   createMetadataParagraph(space, items) {
-    const date = new Date().toLocaleDateString('en-US', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
+    const date = new Date().toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
     });
 
     return new Paragraph({
@@ -275,13 +274,13 @@ class DocxGenerator {
         new TextRun({
           text: `Generated on ${date}  •  ${items.length} items`,
           size: this.defaultStyles.captionSize,
-          color: '888888'
-        })
+          color: '888888',
+        }),
       ],
       spacing: { after: 400 },
       border: {
-        bottom: { style: BorderStyle.SINGLE, size: 6, color: 'CCCCCC' }
-      }
+        bottom: { style: BorderStyle.SINGLE, size: 6, color: 'CCCCCC' },
+      },
     });
   }
 
@@ -294,17 +293,19 @@ class DocxGenerator {
 
     // Item title/header
     if (item.metadata?.title || item.fileName) {
-      paragraphs.push(new Paragraph({
-        children: [
-          new TextRun({
-            text: item.metadata?.title || item.fileName || 'Untitled',
-            bold: true,
-            size: this.defaultStyles.heading2Size
-          })
-        ],
-        heading: HeadingLevel.HEADING_2,
-        spacing: { before: 300, after: 100 }
-      }));
+      paragraphs.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: item.metadata?.title || item.fileName || 'Untitled',
+              bold: true,
+              size: this.defaultStyles.heading2Size,
+            }),
+          ],
+          heading: HeadingLevel.HEADING_2,
+          spacing: { before: 300, after: 100 },
+        })
+      );
     }
 
     // Content based on type
@@ -321,55 +322,61 @@ class DocxGenerator {
             paragraphs.push(imageParagraph);
           }
         }
-        paragraphs.push(new Paragraph({
-          children: [
-            new TextRun({
-              text: `[Image: ${item.fileName || item.metadata?.filename || 'Untitled'}]`,
-              italics: true,
-              size: this.defaultStyles.captionSize,
-              color: '666666'
-            })
-          ],
-          spacing: { after: 200 }
-        }));
+        paragraphs.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: `[Image: ${item.fileName || item.metadata?.filename || 'Untitled'}]`,
+                italics: true,
+                size: this.defaultStyles.captionSize,
+                color: '666666',
+              }),
+            ],
+            spacing: { after: 200 },
+          })
+        );
         break;
 
       case 'file':
-        paragraphs.push(new Paragraph({
-          children: [
-            new TextRun({ text: '📎 ', size: this.defaultStyles.bodySize }),
-            new TextRun({
-              text: item.fileName || 'Attached File',
-              bold: true,
-              size: this.defaultStyles.bodySize
-            }),
-            new TextRun({
-              text: item.fileSize ? ` (${this.formatFileSize(item.fileSize)})` : '',
-              size: this.defaultStyles.captionSize,
-              color: '888888'
-            })
-          ],
-          spacing: { after: 200 }
-        }));
+        paragraphs.push(
+          new Paragraph({
+            children: [
+              new TextRun({ text: '📎 ', size: this.defaultStyles.bodySize }),
+              new TextRun({
+                text: item.fileName || 'Attached File',
+                bold: true,
+                size: this.defaultStyles.bodySize,
+              }),
+              new TextRun({
+                text: item.fileSize ? ` (${this.formatFileSize(item.fileSize)})` : '',
+                size: this.defaultStyles.captionSize,
+                color: '888888',
+              }),
+            ],
+            spacing: { after: 200 },
+          })
+        );
         break;
 
       case 'url':
       case 'link':
-        paragraphs.push(new Paragraph({
-          children: [
-            new TextRun({ text: '🔗 ', size: this.defaultStyles.bodySize }),
-            new ExternalHyperlink({
-              children: [
-                new TextRun({
-                  text: item.metadata?.title || item.content || item.url,
-                  style: 'Hyperlink'
-                })
-              ],
-              link: item.url || item.content
-            })
-          ],
-          spacing: { after: 200 }
-        }));
+        paragraphs.push(
+          new Paragraph({
+            children: [
+              new TextRun({ text: '🔗 ', size: this.defaultStyles.bodySize }),
+              new ExternalHyperlink({
+                children: [
+                  new TextRun({
+                    text: item.metadata?.title || item.content || item.url,
+                    style: 'Hyperlink',
+                  }),
+                ],
+                link: item.url || item.content,
+              }),
+            ],
+            spacing: { after: 200 },
+          })
+        );
         break;
 
       default:
@@ -381,26 +388,28 @@ class DocxGenerator {
     // Metadata footer
     if (includeMetadata && (item.timestamp || item.tags?.length)) {
       const metaParts = [];
-      
+
       if (item.timestamp) {
         metaParts.push(new Date(item.timestamp).toLocaleString());
       }
-      
+
       if (item.tags?.length) {
         metaParts.push(`Tags: ${item.tags.join(', ')}`);
       }
 
-      paragraphs.push(new Paragraph({
-        children: [
-          new TextRun({
-            text: metaParts.join('  •  '),
-            size: this.defaultStyles.captionSize,
-            color: '999999',
-            italics: true
-          })
-        ],
-        spacing: { after: 300 }
-      }));
+      paragraphs.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: metaParts.join('  •  '),
+              size: this.defaultStyles.captionSize,
+              color: '999999',
+              italics: true,
+            }),
+          ],
+          spacing: { after: 300 },
+        })
+      );
     }
 
     return paragraphs;
@@ -413,17 +422,20 @@ class DocxGenerator {
     if (!content) return [];
 
     // Split by double newlines for paragraphs
-    const paragraphs = content.split(/\n\n+/).filter(p => p.trim());
-    
-    return paragraphs.map(text => new Paragraph({
-      children: [
-        new TextRun({
-          text: text.trim(),
-          size: this.defaultStyles.bodySize
+    const paragraphs = content.split(/\n\n+/).filter((p) => p.trim());
+
+    return paragraphs.map(
+      (text) =>
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: text.trim(),
+              size: this.defaultStyles.bodySize,
+            }),
+          ],
+          spacing: { after: 200 },
         })
-      ],
-      spacing: { after: 200 }
-    }));
+    );
   }
 
   /**
@@ -470,13 +482,12 @@ class DocxGenerator {
             data: imageData,
             transformation: {
               width,
-              height
-            }
-          })
+              height,
+            },
+          }),
         ],
-        spacing: { after: 100 }
+        spacing: { after: 100 },
       });
-
     } catch (error) {
       console.error('[DocxGenerator] Error processing image:', error);
       return null;
@@ -488,7 +499,7 @@ class DocxGenerator {
    */
   groupItemsByType(items) {
     const groups = {};
-    
+
     for (const item of items) {
       const type = item.type || 'other';
       if (!groups[type]) {
@@ -500,13 +511,13 @@ class DocxGenerator {
     // Sort groups by importance
     const sortOrder = ['text', 'html', 'image', 'file', 'url', 'link', 'code', 'other'];
     const sortedGroups = {};
-    
+
     for (const type of sortOrder) {
       if (groups[type]) {
         sortedGroups[type] = groups[type];
       }
     }
-    
+
     // Add any remaining types
     for (const [type, items] of Object.entries(groups)) {
       if (!sortedGroups[type]) {
@@ -529,7 +540,7 @@ class DocxGenerator {
       url: 'Links',
       link: 'Links',
       code: 'Code Snippets',
-      other: 'Other Items'
+      other: 'Other Items',
     };
     return names[type] || type.charAt(0).toUpperCase() + type.slice(1);
   }
@@ -541,7 +552,7 @@ class DocxGenerator {
     if (!bytes) return 'Unknown size';
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
   }
 
   /**
@@ -553,7 +564,3 @@ class DocxGenerator {
 }
 
 module.exports = DocxGenerator;
-
-
-
-

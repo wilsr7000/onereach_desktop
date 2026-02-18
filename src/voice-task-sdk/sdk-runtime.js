@@ -1,6 +1,6 @@
 /**
  * Voice Task SDK - JavaScript Runtime
- * 
+ *
  * Complete task queuing system with:
  * - Named queues with concurrency control
  * - Priority-based task ordering
@@ -79,7 +79,7 @@ function createQueueManager() {
   }
 
   function list() {
-    return Array.from(queues.values()).map(s => s.queue);
+    return Array.from(queues.values()).map((s) => s.queue);
   }
 
   function pause(name) {
@@ -148,7 +148,7 @@ function createQueueManager() {
     }
 
     // Insert by priority (higher priority = earlier in queue)
-    const insertIndex = state.tasks.findIndex(t => t.priority < task.priority);
+    const insertIndex = state.tasks.findIndex((t) => t.priority < task.priority);
     if (insertIndex === -1) {
       state.tasks.push(task);
     } else {
@@ -291,13 +291,13 @@ function createTaskStore() {
     if (filter) {
       if (filter.status) {
         const statuses = Array.isArray(filter.status) ? filter.status : [filter.status];
-        result = result.filter(t => statuses.includes(t.status));
+        result = result.filter((t) => statuses.includes(t.status));
       }
       if (filter.queue) {
-        result = result.filter(t => t.queue === filter.queue);
+        result = result.filter((t) => t.queue === filter.queue);
       }
       if (filter.action) {
-        result = result.filter(t => t.action === filter.action);
+        result = result.filter((t) => t.action === filter.action);
       }
       if (filter.limit) {
         result = result.slice(0, filter.limit);
@@ -510,7 +510,7 @@ function createAgentRegistry() {
   function list(enabledOnly = false) {
     const all = Array.from(agents.values());
     if (enabledOnly) {
-      return all.filter(a => a.enabled);
+      return all.filter((a) => a.enabled);
     }
     return all;
   }
@@ -531,7 +531,7 @@ function createAgentRegistry() {
 
   function findForTask(task) {
     return Array.from(agents.values())
-      .filter(agent => {
+      .filter((agent) => {
         if (!agent.enabled) return false;
         const matchesQueue = agent.queues?.includes(task.queue);
         const matchesAction = agent.actions?.includes(task.action);
@@ -595,8 +595,7 @@ function createRouter() {
   }
 
   function listRules() {
-    return Array.from(rules.values())
-      .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+    return Array.from(rules.values()).sort((a, b) => (b.priority || 0) - (a.priority || 0));
   }
 
   function route(task) {
@@ -650,18 +649,9 @@ function createRouter() {
 // ============================================================================
 
 function createDispatcher(deps, config = {}) {
-  const {
-    queueManager,
-    agentRegistry,
-    taskStore,
-    router,
-    getContext,
-  } = deps;
+  const { queueManager, agentRegistry, taskStore, router, getContext } = deps;
 
-  const {
-    pollIntervalMs = 100,
-    defaultTimeoutMs = 30000,
-  } = config;
+  const { pollIntervalMs = 100, defaultTimeoutMs = 30000 } = config;
 
   let running = false;
   let pollTimer = null;
@@ -693,7 +683,7 @@ function createDispatcher(deps, config = {}) {
     eventHandlers.get(event)?.delete(handler);
   }
 
-  async function dispatch(classified, ctx) {
+  async function dispatch(classified, _ctx) {
     // Route to queue
     const queueName = router.route(classified);
     if (!queueName) {
@@ -740,7 +730,7 @@ function createDispatcher(deps, config = {}) {
         if (!task) break;
 
         queueManager.incrementRunning(queue.name);
-        processTask(task).catch(error => {
+        processTask(task).catch((error) => {
           log.error('voice', '[Dispatcher] Error processing task', { error: error });
         });
       }
@@ -804,14 +794,13 @@ function createDispatcher(deps, config = {}) {
         queueManager.incrementCompleted(task.queue);
         log.info('voice', '[Dispatcher] Task completed:', { v0: task.id });
       }
-
     } catch (error) {
       if (timeoutId) clearTimeout(timeoutId);
       runningTasks.delete(task.id);
 
       const errorMessage = error instanceof Error ? error.message : String(error);
       const failedTask = taskStore.fail(task.id, errorMessage);
-      
+
       if (failedTask) {
         emit('task:failed', failedTask, error);
         queueManager.incrementFailed(task.queue);
@@ -909,16 +898,19 @@ function createVoiceTaskSDK(config = {}) {
     metadata: {},
   };
 
-  const dispatcher = createDispatcher({
-    queueManager,
-    agentRegistry,
-    taskStore,
-    router,
-    getContext: () => appContext,
-  }, {
-    pollIntervalMs: config.pollIntervalMs || 100,
-    defaultTimeoutMs: config.defaultTimeoutMs || 30000,
-  });
+  const dispatcher = createDispatcher(
+    {
+      queueManager,
+      agentRegistry,
+      taskStore,
+      router,
+      getContext: () => appContext,
+    },
+    {
+      pollIntervalMs: config.pollIntervalMs || 100,
+      defaultTimeoutMs: config.defaultTimeoutMs || 30000,
+    }
+  );
 
   // Event handling
   const eventHandlers = new Map();
@@ -959,7 +951,7 @@ function createVoiceTaskSDK(config = {}) {
       });
       router.setDefaultQueue(config.defaultQueue);
       log.info('voice', '[SDK] Created default queue:', { v0: config.defaultQueue });
-    } catch (e) {
+    } catch (_e) {
       // Queue might already exist
     }
   }
@@ -1026,8 +1018,12 @@ function createVoiceTaskSDK(config = {}) {
     },
 
     // Context
-    setContext: (ctx) => { appContext = { ...ctx }; },
-    updateContext: (ctx) => { appContext = { ...appContext, ...ctx }; },
+    setContext: (ctx) => {
+      appContext = { ...ctx };
+    },
+    updateContext: (ctx) => {
+      appContext = { ...appContext, ...ctx };
+    },
     getContext: () => ({ ...appContext }),
 
     // Events

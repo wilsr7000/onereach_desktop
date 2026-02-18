@@ -1,6 +1,6 @@
 /**
  * OAuthFlowHandler - Manages OAuth authentication flows for YouTube and Vimeo
- * 
+ *
  * Features:
  * - Opens OAuth window
  * - Handles callback
@@ -13,7 +13,7 @@ const log = getLogQueue();
 export class OAuthFlowHandler {
   constructor(options = {}) {
     this.options = options;
-    
+
     // OAuth configuration
     this.config = {
       youtube: {
@@ -21,11 +21,8 @@ export class OAuthFlowHandler {
         clientSecret: options.youtubeClientSecret || '',
         authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
         tokenUrl: 'https://oauth2.googleapis.com/token',
-        scopes: [
-          'https://www.googleapis.com/auth/youtube.upload',
-          'https://www.googleapis.com/auth/youtube.readonly'
-        ],
-        redirectUri: 'http://localhost:8080/oauth/youtube/callback'
+        scopes: ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly'],
+        redirectUri: 'http://localhost:8080/oauth/youtube/callback',
       },
       vimeo: {
         clientId: options.vimeoClientId || '',
@@ -33,16 +30,16 @@ export class OAuthFlowHandler {
         authUrl: 'https://api.vimeo.com/oauth/authorize',
         tokenUrl: 'https://api.vimeo.com/oauth/access_token',
         scopes: ['upload', 'public', 'private', 'video_files'],
-        redirectUri: 'http://localhost:8080/oauth/vimeo/callback'
-      }
+        redirectUri: 'http://localhost:8080/oauth/vimeo/callback',
+      },
     };
-    
+
     // Token storage (should be encrypted in production)
     this.tokens = {
       youtube: null,
-      vimeo: null
+      vimeo: null,
     };
-    
+
     // State for CSRF protection
     this.pendingStates = new Map();
   }
@@ -56,10 +53,11 @@ export class OAuthFlowHandler {
       if (typeof window !== 'undefined' && window.videoEditor?.getOAuthTokens) {
         this.tokens = await window.videoEditor.getOAuthTokens();
       }
-      
-      log.info('video', '[OAuth] Initialized', { arg0: {
-        youtubeConnected: !!this.tokens.youtube, arg1: vimeoConnected: !!this.tokens.vimeo
-      } });
+
+      log.info('video', '[OAuth] Initialized', {
+        youtubeConnected: !!this.tokens.youtube,
+        vimeoConnected: !!this.tokens.vimeo,
+      });
     } catch (error) {
       log.error('video', '[OAuth] Init error', { error: error });
     }
@@ -81,13 +79,13 @@ export class OAuthFlowHandler {
       youtube: {
         connected: this.isConnected('youtube'),
         email: this.tokens.youtube?.email || null,
-        expiresAt: this.tokens.youtube?.expires_at || null
+        expiresAt: this.tokens.youtube?.expires_at || null,
       },
       vimeo: {
         connected: this.isConnected('vimeo'),
         name: this.tokens.vimeo?.user?.name || null,
-        expiresAt: this.tokens.vimeo?.expires_at || null
-      }
+        expiresAt: this.tokens.vimeo?.expires_at || null,
+      },
     };
   }
 
@@ -117,7 +115,7 @@ export class OAuthFlowHandler {
       scope: config.scopes.join(' '),
       state,
       access_type: 'offline', // For refresh tokens (Google-specific)
-      prompt: 'consent' // Force consent screen to get refresh token
+      prompt: 'consent', // Force consent screen to get refresh token
     });
 
     const authUrl = `${config.authUrl}?${params.toString()}`;
@@ -135,12 +133,11 @@ export class OAuthFlowHandler {
     return new Promise((resolve, reject) => {
       // In Electron context, use BrowserWindow
       if (typeof window !== 'undefined' && window.videoEditor?.openOAuthWindow) {
-        window.videoEditor.openOAuthWindow(url)
-          .then(result => {
+        window.videoEditor
+          .openOAuthWindow(url)
+          .then((result) => {
             if (result.success) {
-              this._handleCallback(result.code, result.state, service)
-                .then(resolve)
-                .catch(reject);
+              this._handleCallback(result.code, result.state, service).then(resolve).catch(reject);
             } else {
               reject(new Error(result.error || 'Auth cancelled'));
             }
@@ -153,11 +150,7 @@ export class OAuthFlowHandler {
         const left = window.screenX + (window.innerWidth - width) / 2;
         const top = window.screenY + (window.innerHeight - height) / 2;
 
-        const popup = window.open(
-          url,
-          `${service}OAuth`,
-          `width=${width},height=${height},left=${left},top=${top}`
-        );
+        const popup = window.open(url, `${service}OAuth`, `width=${width},height=${height},left=${left},top=${top}`);
 
         if (!popup) {
           reject(new Error('Popup blocked. Please allow popups for this site.'));
@@ -168,13 +161,11 @@ export class OAuthFlowHandler {
         const messageHandler = (event) => {
           if (event.data?.type === 'oauth_callback' && event.data?.service === service) {
             window.removeEventListener('message', messageHandler);
-            
+
             if (event.data.error) {
               reject(new Error(event.data.error));
             } else {
-              this._handleCallback(event.data.code, event.data.state, service)
-                .then(resolve)
-                .catch(reject);
+              this._handleCallback(event.data.code, event.data.state, service).then(resolve).catch(reject);
             }
           }
         };
@@ -206,12 +197,12 @@ export class OAuthFlowHandler {
 
     // Exchange code for tokens
     const tokens = await this._exchangeCodeForTokens(code, service);
-    
+
     // Store tokens
     this.tokens[service] = {
       ...tokens,
       obtained_at: Date.now(),
-      expires_at: Date.now() + (tokens.expires_in * 1000)
+      expires_at: Date.now() + tokens.expires_in * 1000,
     };
 
     // Save to secure storage
@@ -220,11 +211,11 @@ export class OAuthFlowHandler {
     }
 
     log.info('video', '[OAuth] Successfully authenticated with', { arg0: service });
-    
+
     return {
       success: true,
       service,
-      email: tokens.email || null
+      email: tokens.email || null,
     };
   }
 
@@ -239,14 +230,14 @@ export class OAuthFlowHandler {
       client_secret: config.clientSecret,
       code,
       redirect_uri: config.redirectUri,
-      grant_type: 'authorization_code'
+      grant_type: 'authorization_code',
     });
 
     // Use IPC if available (Electron)
     if (typeof window !== 'undefined' && window.videoEditor?.exchangeOAuthCode) {
       return await window.videoEditor.exchangeOAuthCode(service, {
         code,
-        redirectUri: config.redirectUri
+        redirectUri: config.redirectUri,
       });
     }
 
@@ -254,9 +245,9 @@ export class OAuthFlowHandler {
     const response = await fetch(config.tokenUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: params.toString()
+      body: params.toString(),
     });
 
     if (!response.ok) {
@@ -281,11 +272,11 @@ export class OAuthFlowHandler {
     // Use IPC if available
     if (typeof window !== 'undefined' && window.videoEditor?.refreshOAuthToken) {
       const newTokens = await window.videoEditor.refreshOAuthToken(service, token.refresh_token);
-      
+
       this.tokens[service] = {
         ...this.tokens[service],
         access_token: newTokens.access_token,
-        expires_at: Date.now() + (newTokens.expires_in * 1000)
+        expires_at: Date.now() + newTokens.expires_in * 1000,
       };
 
       await window.videoEditor?.saveOAuthTokens?.(this.tokens);
@@ -297,15 +288,15 @@ export class OAuthFlowHandler {
       client_id: config.clientId,
       client_secret: config.clientSecret,
       refresh_token: token.refresh_token,
-      grant_type: 'refresh_token'
+      grant_type: 'refresh_token',
     });
 
     const response = await fetch(config.tokenUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: params.toString()
+      body: params.toString(),
     });
 
     if (!response.ok) {
@@ -313,11 +304,11 @@ export class OAuthFlowHandler {
     }
 
     const newTokens = await response.json();
-    
+
     this.tokens[service] = {
       ...this.tokens[service],
       access_token: newTokens.access_token,
-      expires_at: Date.now() + (newTokens.expires_in * 1000)
+      expires_at: Date.now() + newTokens.expires_in * 1000,
     };
 
     return this.tokens[service];
@@ -352,7 +343,7 @@ export class OAuthFlowHandler {
       try {
         if (service === 'youtube') {
           await fetch(`https://oauth2.googleapis.com/revoke?token=${token.access_token}`, {
-            method: 'POST'
+            method: 'POST',
           });
         }
         // Vimeo doesn't have a revoke endpoint
@@ -363,7 +354,7 @@ export class OAuthFlowHandler {
 
     // Clear stored token
     this.tokens[service] = null;
-    
+
     if (typeof window !== 'undefined' && window.videoEditor?.saveOAuthTokens) {
       await window.videoEditor.saveOAuthTokens(this.tokens);
     }
@@ -377,7 +368,7 @@ export class OAuthFlowHandler {
   _generateState() {
     const array = new Uint8Array(32);
     crypto.getRandomValues(array);
-    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    return Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
   /**
@@ -402,15 +393,19 @@ export class OAuthFlowHandler {
             </div>
           </div>
           <div class="oauth-service-actions">
-            ${status.youtube.connected ? `
+            ${
+              status.youtube.connected
+                ? `
               <button class="oauth-btn oauth-btn-disconnect" data-service="youtube" data-action="disconnect">
                 Disconnect
               </button>
-            ` : `
+            `
+                : `
               <button class="oauth-btn oauth-btn-connect" data-service="youtube" data-action="connect">
                 Connect YouTube
               </button>
-            `}
+            `
+            }
           </div>
         </div>
         
@@ -426,15 +421,19 @@ export class OAuthFlowHandler {
             </div>
           </div>
           <div class="oauth-service-actions">
-            ${status.vimeo.connected ? `
+            ${
+              status.vimeo.connected
+                ? `
               <button class="oauth-btn oauth-btn-disconnect" data-service="vimeo" data-action="disconnect">
                 Disconnect
               </button>
-            ` : `
+            `
+                : `
               <button class="oauth-btn oauth-btn-connect" data-service="vimeo" data-action="connect">
                 Connect Vimeo
               </button>
-            `}
+            `
+            }
           </div>
         </div>
         
@@ -477,7 +476,7 @@ export class OAuthFlowHandler {
     if (typeof window !== 'undefined' && window.videoEditor?.saveOAuthConfig) {
       await window.videoEditor.saveOAuthConfig({
         youtubeClientId: this.config.youtube.clientId,
-        vimeoClientId: this.config.vimeo.clientId
+        vimeoClientId: this.config.vimeo.clientId,
       });
     }
 
@@ -627,14 +626,3 @@ export class OAuthFlowHandler {
 }
 
 export default OAuthFlowHandler;
-
-
-
-
-
-
-
-
-
-
-

@@ -1,7 +1,7 @@
 /**
  * MediaCapture - Camera and screen capture handling
  * @module src/recorder/core/MediaCapture
- * 
+ *
  * Integrates with unified MicrophoneManager for mic conflict detection
  */
 
@@ -15,7 +15,7 @@ export class MediaCapture {
     this.cameraStream = null;
     this.screenStream = null;
     this.combinedStream = null;
-    this.hasMicClaim = false;  // Track if we've claimed the mic
+    this.hasMicClaim = false; // Track if we've claimed the mic
   }
 
   /**
@@ -26,7 +26,7 @@ export class MediaCapture {
     if (typeof window !== 'undefined' && window.micManager) {
       return !window.micManager.isInUse();
     }
-    return true;  // If no micManager, assume available
+    return true; // If no micManager, assume available
   }
 
   /**
@@ -46,12 +46,7 @@ export class MediaCapture {
    * @returns {Promise<MediaStream>} Camera stream
    */
   async requestCamera(options = {}) {
-    const {
-      video = true,
-      audio = true,
-      width = 1920,
-      height = 1080
-    } = options;
+    const { video = true, audio = true, width = 1920, height = 1080 } = options;
 
     // Check for mic conflict if audio is requested
     if (audio && !this.isMicAvailable()) {
@@ -62,12 +57,14 @@ export class MediaCapture {
 
     try {
       this.cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: video ? {
-          width: { ideal: width },
-          height: { ideal: height },
-          facingMode: 'user'
-        } : false,
-        audio: audio
+        video: video
+          ? {
+              width: { ideal: width },
+              height: { ideal: height },
+              facingMode: 'user',
+            }
+          : false,
+        audio: audio,
       });
 
       // If we got audio, mark that we're using the mic
@@ -77,9 +74,8 @@ export class MediaCapture {
       } else {
         log.info('recorder', '[MediaCapture] Camera stream acquired (video only)');
       }
-      
-      return this.cameraStream;
 
+      return this.cameraStream;
     } catch (error) {
       log.error('recorder', '[MediaCapture] Camera access denied', { error: error });
       throw error;
@@ -92,22 +88,18 @@ export class MediaCapture {
    * @returns {Promise<MediaStream>} Screen stream
    */
   async requestScreen(options = {}) {
-    const {
-      audio = true,
-      systemAudio = true
-    } = options;
+    const { audio: _audio = true, systemAudio = true } = options;
 
     try {
       this.screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
-          cursor: 'always'
+          cursor: 'always',
         },
-        audio: systemAudio
+        audio: systemAudio,
       });
 
       log.info('recorder', '[MediaCapture] Screen stream acquired');
       return this.screenStream;
-
     } catch (error) {
       log.error('recorder', '[MediaCapture] Screen capture denied', { error: error });
       throw error;
@@ -156,11 +148,11 @@ export class MediaCapture {
    */
   async getDevices() {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    
+
     return {
-      cameras: devices.filter(d => d.kind === 'videoinput'),
-      microphones: devices.filter(d => d.kind === 'audioinput'),
-      speakers: devices.filter(d => d.kind === 'audiooutput')
+      cameras: devices.filter((d) => d.kind === 'videoinput'),
+      microphones: devices.filter((d) => d.kind === 'audioinput'),
+      speakers: devices.filter((d) => d.kind === 'audiooutput'),
     };
   }
 
@@ -178,9 +170,9 @@ export class MediaCapture {
    */
   async stopCamera() {
     if (this.cameraStream) {
-      this.cameraStream.getTracks().forEach(track => track.stop());
+      this.cameraStream.getTracks().forEach((track) => track.stop());
       this.cameraStream = null;
-      
+
       // Clear mic claim
       if (this.hasMicClaim) {
         this.hasMicClaim = false;
@@ -196,7 +188,7 @@ export class MediaCapture {
    */
   stopScreen() {
     if (this.screenStream) {
-      this.screenStream.getTracks().forEach(track => track.stop());
+      this.screenStream.getTracks().forEach((track) => track.stop());
       this.screenStream = null;
       log.info('recorder', '[MediaCapture] Screen stopped');
     }
@@ -209,19 +201,3 @@ export class MediaCapture {
     return !!(this.cameraStream || this.screenStream);
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,18 +1,18 @@
 /**
  * Shared HUD API Preload Module
- * 
+ *
  * Provides IPC wrappers for the centralized HUD API.
  * Each tool's preload script requires this module and exposes
  * the methods via contextBridge under their chosen namespace.
- * 
+ *
  * Usage in a tool's preload:
  *   const { getHudApiMethods } = require('./preload-hud-api');
  *   contextBridge.exposeInMainWorld('agentHUD', getHudApiMethods());
- * 
+ *
  * Or merge into existing API:
  *   const hudMethods = getHudApiMethods();
  *   contextBridge.exposeInMainWorld('myToolAPI', { ...toolMethods, hud: hudMethods });
- * 
+ *
  * @module PreloadHudApi
  */
 
@@ -22,7 +22,7 @@ const { ipcRenderer } = require('electron');
  * Get all HUD API methods as IPC-backed functions.
  * Each method returns a Promise (via ipcRenderer.invoke) or sets up
  * an event listener (via ipcRenderer.on).
- * 
+ *
  * @returns {Object} HUD API methods ready for contextBridge
  */
 function getHudApiMethods() {
@@ -114,8 +114,7 @@ function getHudApiMethods() {
      * @param {string} spaceId
      * @returns {Promise<{ success }>}
      */
-    setDefaultSpace: (toolId, spaceId) =>
-      ipcRenderer.invoke('hud-api:set-default-space', toolId, spaceId),
+    setDefaultSpace: (toolId, spaceId) => ipcRenderer.invoke('hud-api:set-default-space', toolId, spaceId),
 
     /**
      * Create a new agent space.
@@ -123,8 +122,7 @@ function getHudApiMethods() {
      * @param {Object} config - { description, agentIds, defaultForTools, allowAllAgents }
      * @returns {Promise<Object>} Created space config
      */
-    createAgentSpace: (name, config) =>
-      ipcRenderer.invoke('hud-api:create-agent-space', name, config),
+    createAgentSpace: (name, config) => ipcRenderer.invoke('hud-api:create-agent-space', name, config),
 
     /**
      * Assign an agent to a space.
@@ -133,8 +131,7 @@ function getHudApiMethods() {
      * @param {Object} config - Optional: { type, endpoint, authToken }
      * @returns {Promise<{ success }>}
      */
-    assignAgent: (agentId, spaceId, config) =>
-      ipcRenderer.invoke('hud-api:assign-agent', agentId, spaceId, config),
+    assignAgent: (agentId, spaceId, config) => ipcRenderer.invoke('hud-api:assign-agent', agentId, spaceId, config),
 
     /**
      * Remove an agent from a space.
@@ -142,8 +139,7 @@ function getHudApiMethods() {
      * @param {string} spaceId
      * @returns {Promise<{ success }>}
      */
-    removeAgent: (agentId, spaceId) =>
-      ipcRenderer.invoke('hud-api:remove-agent', agentId, spaceId),
+    removeAgent: (agentId, spaceId) => ipcRenderer.invoke('hud-api:remove-agent', agentId, spaceId),
 
     // ==================== REMOTE AGENTS ====================
 
@@ -152,16 +148,14 @@ function getHudApiMethods() {
      * @param {Object} definition - { id, name, endpoint, authType, authToken, metadata, spaceId }
      * @returns {Promise<Object>} Created agent entry
      */
-    registerRemoteAgent: (definition) =>
-      ipcRenderer.invoke('hud-api:register-remote-agent', definition),
+    registerRemoteAgent: (definition) => ipcRenderer.invoke('hud-api:register-remote-agent', definition),
 
     /**
      * Test a remote agent's health endpoint.
      * @param {string} agentId
      * @returns {Promise<{ status, latency, error? }>}
      */
-    testRemoteAgent: (agentId) =>
-      ipcRenderer.invoke('hud-api:test-remote-agent', agentId),
+    testRemoteAgent: (agentId) => ipcRenderer.invoke('hud-api:test-remote-agent', agentId),
 
     // ==================== DISAMBIGUATION ====================
 
@@ -171,16 +165,14 @@ function getHudApiMethods() {
      * @param {number} index - Selected option index
      * @returns {Promise<{ taskId, queued }>}
      */
-    selectDisambiguationOption: (stateId, index) =>
-      ipcRenderer.invoke('hud-api:select-disambiguation', stateId, index),
+    selectDisambiguationOption: (stateId, index) => ipcRenderer.invoke('hud-api:select-disambiguation', stateId, index),
 
     /**
      * Cancel a disambiguation prompt.
      * @param {string} stateId
      * @returns {Promise<{ success }>}
      */
-    cancelDisambiguation: (stateId) =>
-      ipcRenderer.invoke('hud-api:cancel-disambiguation', stateId),
+    cancelDisambiguation: (stateId) => ipcRenderer.invoke('hud-api:cancel-disambiguation', stateId),
 
     // ==================== MULTI-TURN CONVERSATION ====================
 
@@ -190,8 +182,7 @@ function getHudApiMethods() {
      * @param {string} response - User's follow-up input
      * @returns {Promise<{ success }>}
      */
-    respondToInput: (taskId, response) =>
-      ipcRenderer.invoke('hud-api:respond-to-input', taskId, response),
+    respondToInput: (taskId, response) => ipcRenderer.invoke('hud-api:respond-to-input', taskId, response),
 
     // ==================== QUEUE STATISTICS ====================
 
@@ -209,8 +200,7 @@ function getHudApiMethods() {
      * @param {Object} opts - { language, filename }
      * @returns {Promise<{ text, error? }>}
      */
-    transcribeAudio: (audioData, opts) =>
-      ipcRenderer.invoke('hud-api:transcribe-audio', audioData, opts),
+    transcribeAudio: (audioData, opts) => ipcRenderer.invoke('hud-api:transcribe-audio', audioData, opts),
 
     // ==================== SPEECH STATE (mic gating) ====================
 

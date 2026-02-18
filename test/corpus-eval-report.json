@@ -1,0 +1,516 @@
+{
+  "timestamp": "2026-02-17T03:54:50.661Z",
+  "summary": {
+    "total": 63,
+    "passed": 38,
+    "partial": 19,
+    "failed": 6,
+    "crashed": 0
+  },
+  "results": [
+    {
+      "conversation": "Time: basic queries",
+      "agentId": "time-agent",
+      "user": "What time is it?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "It's 7:54 PM"
+    },
+    {
+      "conversation": "Time: basic queries",
+      "agentId": "time-agent",
+      "user": "And what day is it today?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "It's Monday, February 16, 2026"
+    },
+    {
+      "conversation": "Time: basic queries",
+      "agentId": "time-agent",
+      "user": "What is the date?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "It's Monday, February 16, 2026"
+    },
+    {
+      "conversation": "Time: timezone awareness",
+      "agentId": "time-agent",
+      "user": "What time is it in Tokyo?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Which timezone would you like? Your saved timezones are: {options}"
+    },
+    {
+      "conversation": "Time: timezone awareness",
+      "agentId": "time-agent",
+      "user": "And in London?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "It's 7:54 PM"
+    },
+    {
+      "conversation": "Weather: city provided",
+      "agentId": "weather-agent",
+      "user": "What is the weather in Denver?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "It's 51°F and clear in Denver"
+    },
+    {
+      "conversation": "Weather: no city triggers follow-up",
+      "agentId": "weather-agent",
+      "user": "What's the weather?",
+      "grade": "fail",
+      "reason": "Expected needsInput but agent returned a final response",
+      "response": "It's 52°F and overcast in Berkeley, feels like 47°F. Humidity is 83%"
+    },
+    {
+      "conversation": "Weather: no city triggers follow-up",
+      "agentId": "weather-agent",
+      "user": "San Francisco",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "It's 52°F and overcast in Berkeley, feels like 47°F. Humidity is 83%"
+    },
+    {
+      "conversation": "Weather: forecast request",
+      "agentId": "weather-agent",
+      "user": "Will it rain tomorrow in Seattle?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "It's 52°F and overcast in Berkeley, feels like 47°F. Humidity is 83%"
+    },
+    {
+      "conversation": "Spelling: common words",
+      "agentId": "spelling-agent",
+      "user": "How do you spell necessary?",
+      "grade": "partial",
+      "reason": "Response \"NECESSARY: N - E - C - E - S - S - A - R - Y\" did not match pattern /n.e.c.e.s.s.a.r.y/i",
+      "response": "NECESSARY: N - E - C - E - S - S - A - R - Y"
+    },
+    {
+      "conversation": "Spelling: common words",
+      "agentId": "spelling-agent",
+      "user": "And accommodation?",
+      "grade": "partial",
+      "reason": "Response \"ACCOMMODATION: A - C - C - O - M - M - O - D - A - T - I - O\" did not match pattern /a.c.c.o.m.m.o.d.a.t.i.o.n/i",
+      "response": "ACCOMMODATION: A - C - C - O - M - M - O - D - A - T - I - O - N"
+    },
+    {
+      "conversation": "Spelling: common words",
+      "agentId": "spelling-agent",
+      "user": "Spell entrepreneur",
+      "grade": "partial",
+      "reason": "Response \"ENTREPRENEUR: E - N - T - R - E - P - R - E - N - E - U - R\" did not match pattern /e.n.t.r.e.p.r.e.n.e.u.r/i",
+      "response": "ENTREPRENEUR: E - N - T - R - E - P - R - E - N - E - U - R"
+    },
+    {
+      "conversation": "Spelling: misspelling correction",
+      "agentId": "spelling-agent",
+      "user": "Is recieve spelled correctly?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "\"recieve\" is misspelled. The correct spelling is \"receive\"."
+    },
+    {
+      "conversation": "Spelling: misspelling correction",
+      "agentId": "spelling-agent",
+      "user": "How about definately?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Note: \"definately\" is commonly misspelled. The correct spelling is:\nDEFINITELY: D - E - F - I - N - "
+    },
+    {
+      "conversation": "Smalltalk: greeting flow",
+      "agentId": "smalltalk-agent",
+      "user": "Hello there",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "How can I assist you?"
+    },
+    {
+      "conversation": "Smalltalk: greeting flow",
+      "agentId": "smalltalk-agent",
+      "user": "How are you doing?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "I'm doing well, doing! How can I help you?"
+    },
+    {
+      "conversation": "Smalltalk: greeting flow",
+      "agentId": "smalltalk-agent",
+      "user": "Thanks for your help",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "You're welcome!"
+    },
+    {
+      "conversation": "Smalltalk: greeting flow",
+      "agentId": "smalltalk-agent",
+      "user": "Goodbye",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "See you later, doing!"
+    },
+    {
+      "conversation": "Smalltalk: casual greetings",
+      "agentId": "smalltalk-agent",
+      "user": "Hey",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Hi doing! I'm here to help."
+    },
+    {
+      "conversation": "Smalltalk: casual greetings",
+      "agentId": "smalltalk-agent",
+      "user": "Good morning",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Good morning, doing! How can I help you today?"
+    },
+    {
+      "conversation": "Smalltalk: casual greetings",
+      "agentId": "smalltalk-agent",
+      "user": "Good night",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Good night, doing! Sleep well."
+    },
+    {
+      "conversation": "Help: capabilities inquiry",
+      "agentId": "help-agent",
+      "user": "What can you do?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "I can help you with several things. Ask me the time or date. Check the weather in any city. Control "
+    },
+    {
+      "conversation": "Help: capabilities inquiry",
+      "agentId": "help-agent",
+      "user": "Tell me more about the agents",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "I can help you with several things. Ask me the time or date. Check the weather in any city. Control "
+    },
+    {
+      "conversation": "Help: feature questions",
+      "agentId": "help-agent",
+      "user": "Help",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "What would you like help with? I can help with time, weather, music, or just tell you what I can do."
+    },
+    {
+      "conversation": "Help: feature questions",
+      "agentId": "help-agent",
+      "user": "How do I use voice commands?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Say 'cancel' to stop what I'm doing, 'repeat' to hear my last response again, or 'undo' within 60 se"
+    },
+    {
+      "conversation": "Calendar: schedule queries",
+      "agentId": "calendar-query-agent",
+      "user": "What meetings do I have today?",
+      "grade": "partial",
+      "reason": "success: false but has message: \"What would you like to know about your calendar?\"",
+      "response": "What would you like to know about your calendar?"
+    },
+    {
+      "conversation": "Calendar: schedule queries",
+      "agentId": "calendar-query-agent",
+      "user": "Am I free at 3pm?",
+      "grade": "partial",
+      "reason": "success: false but has message: \"What would you like to know about your calendar?\"",
+      "response": "What would you like to know about your calendar?"
+    },
+    {
+      "conversation": "Calendar: schedule queries",
+      "agentId": "calendar-query-agent",
+      "user": "Show my schedule for this week",
+      "grade": "partial",
+      "reason": "success: false but has message: \"What would you like to know about your calendar?\"",
+      "response": "What would you like to know about your calendar?"
+    },
+    {
+      "conversation": "Calendar: create with full details",
+      "agentId": "calendar-create-agent",
+      "user": "Schedule a meeting with Bob at 2pm tomorrow",
+      "grade": "fail",
+      "reason": "Expected needsInput but agent returned a final response",
+      "response": "What event would you like to create?"
+    },
+    {
+      "conversation": "Calendar: create with full details",
+      "agentId": "calendar-create-agent",
+      "user": "One hour, in the conference room",
+      "grade": "partial",
+      "reason": "success: false but has message: \"What event would you like to create?\"",
+      "response": "What event would you like to create?"
+    },
+    {
+      "conversation": "Calendar: create with missing details",
+      "agentId": "calendar-create-agent",
+      "user": "Add a dentist appointment",
+      "grade": "fail",
+      "reason": "Expected needsInput but agent returned a final response",
+      "response": "What event would you like to create?"
+    },
+    {
+      "conversation": "Calendar: create with missing details",
+      "agentId": "calendar-create-agent",
+      "user": "Next Monday at 10am",
+      "grade": "partial",
+      "reason": "success: false but has message: \"What event would you like to create?\"",
+      "response": "What event would you like to create?"
+    },
+    {
+      "conversation": "Calendar: reschedule",
+      "agentId": "calendar-edit-agent",
+      "user": "Move my 3pm meeting to 4pm",
+      "grade": "fail",
+      "reason": "Expected needsInput but agent returned a final response",
+      "response": "What would you like to change about an event?"
+    },
+    {
+      "conversation": "Calendar: cancel event",
+      "agentId": "calendar-delete-agent",
+      "user": "Cancel my meeting tomorrow at noon",
+      "grade": "fail",
+      "reason": "Expected needsInput but agent returned a final response",
+      "response": "Which event would you like to cancel?"
+    },
+    {
+      "conversation": "Search: document queries",
+      "agentId": "search-agent",
+      "user": "Search for quarterly revenue reports",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Here's what I found: Earnings Calendar - Nasdaq. Access detailed earnings reports for companies list"
+    },
+    {
+      "conversation": "Search: document queries",
+      "agentId": "search-agent",
+      "user": "Find documents about project alpha",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Here's what I found: The Project Alpha Papers. Welcome to The Project Alpha Papers, an archive of ar"
+    },
+    {
+      "conversation": "Email: compose flow",
+      "agentId": "email-agent",
+      "user": "Send an email to John about the meeting tomorrow",
+      "grade": "fail",
+      "reason": "Expected needsInput but agent returned a final response",
+      "response": "Your inbox is clear. Email API not fully connected yet - connect your email provider in Settings."
+    },
+    {
+      "conversation": "DJ: music requests",
+      "agentId": "dj-agent",
+      "user": "Play some jazz music",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Let me find that for you..."
+    },
+    {
+      "conversation": "DJ: music requests",
+      "agentId": "dj-agent",
+      "user": "Something more upbeat",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Let me find that for you..."
+    },
+    {
+      "conversation": "Recorder: start recording",
+      "agentId": "recorder-agent",
+      "user": "Start recording the meeting",
+      "grade": "partial",
+      "reason": "success: false but has message: \"Sorry, I could not open the recorder right now. Please try a\"",
+      "response": "Sorry, I could not open the recorder right now. Please try again."
+    },
+    {
+      "conversation": "Action items: capture from conversation",
+      "agentId": "action-item-agent",
+      "user": "Bob will send the report by Friday",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Action item captured: Bob will send the report by Friday"
+    },
+    {
+      "conversation": "Action items: capture from conversation",
+      "agentId": "action-item-agent",
+      "user": "Sarah needs to review the budget proposal by next week",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Action item captured: Sarah needs to review the budget proposal by next week"
+    },
+    {
+      "conversation": "Decisions: log team decisions",
+      "agentId": "decision-agent",
+      "user": "We decided to go with vendor A for the cloud migration",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Decision recorded: We decided to go with vendor A for the cloud migration"
+    },
+    {
+      "conversation": "Decisions: log team decisions",
+      "agentId": "decision-agent",
+      "user": "The team agreed to postpone the launch to March",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Decision recorded: The team agreed to postpone the launch to March"
+    },
+    {
+      "conversation": "Meeting notes: capture key points",
+      "agentId": "meeting-notes-agent",
+      "user": "Take note of this discussion about the Q2 budget",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Note captured: Take note of this discussion about the Q2 budget"
+    },
+    {
+      "conversation": "Meeting notes: capture key points",
+      "agentId": "meeting-notes-agent",
+      "user": "Bookmark this moment -- important agreement on pricing",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Bookmark captured: Bookmark this moment -- important agreement on pricing"
+    },
+    {
+      "conversation": "Docs: product questions",
+      "agentId": "docs-agent",
+      "user": "How do I configure the AI service?",
+      "grade": "partial",
+      "reason": "success: false but has message: \"I had trouble searching the documentation. Please try again.\"",
+      "response": "I had trouble searching the documentation. Please try again."
+    },
+    {
+      "conversation": "Docs: product questions",
+      "agentId": "docs-agent",
+      "user": "What are the keyboard shortcuts?",
+      "grade": "partial",
+      "reason": "success: false but has message: \"I had trouble searching the documentation. Please try again.\"",
+      "response": "I had trouble searching the documentation. Please try again."
+    },
+    {
+      "conversation": "Daily brief: morning briefing",
+      "agentId": "daily-brief-agent",
+      "user": "Give me my morning briefing",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Good evening, Isaac. Current time: 7:54 PM. Date: Monday, February 16, 2026. Time of day: evening. I"
+    },
+    {
+      "conversation": "Memory: store and recall preferences",
+      "agentId": "memory-agent",
+      "user": "Remember that I prefer dark mode",
+      "grade": "partial",
+      "reason": "success: false but has message: \"Sorry, I had trouble managing your memory. Please try again.\"",
+      "response": "Sorry, I had trouble managing your memory. Please try again."
+    },
+    {
+      "conversation": "Memory: store and recall preferences",
+      "agentId": "memory-agent",
+      "user": "My favorite programming language is Rust",
+      "grade": "partial",
+      "reason": "success: false but has message: \"Sorry, I had trouble managing your memory. Please try again.\"",
+      "response": "Sorry, I had trouble managing your memory. Please try again."
+    },
+    {
+      "conversation": "Memory: store and recall preferences",
+      "agentId": "memory-agent",
+      "user": "What do you know about me?",
+      "grade": "partial",
+      "reason": "success: false but has message: \"Sorry, I had trouble managing your memory. Please try again.\"",
+      "response": "Sorry, I had trouble managing your memory. Please try again."
+    },
+    {
+      "conversation": "Playbook: execute a playbook",
+      "agentId": "playbook-agent",
+      "user": "Run the onboarding playbook",
+      "grade": "partial",
+      "reason": "success: false but has message: \"No spaces found. Create a space with a playbook first.\"",
+      "response": "No spaces found. Create a space with a playbook first."
+    },
+    {
+      "conversation": "Browser: web navigation",
+      "agentId": "browser-agent",
+      "user": "Go to google.com and search for weather",
+      "grade": "partial",
+      "reason": "success: false but has message: \"Could not read the page: Cannot read properties of undefined\"",
+      "response": "Could not read the page: Cannot read properties of undefined (reading 'snapshot')"
+    },
+    {
+      "conversation": "App: navigation commands",
+      "agentId": "app-agent",
+      "user": "Open settings",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Opening Settings for you."
+    },
+    {
+      "conversation": "App: navigation commands",
+      "agentId": "app-agent",
+      "user": "Open the video editor",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Opening Video Editor for you."
+    },
+    {
+      "conversation": "Spaces: content management",
+      "agentId": "spaces-agent",
+      "user": "What spaces do I have?",
+      "grade": "partial",
+      "reason": "success: false but has message: \"Spaces is not available right now.\"",
+      "response": "Spaces is not available right now."
+    },
+    {
+      "conversation": "Spaces: content management",
+      "agentId": "spaces-agent",
+      "user": "Create a new space called project notes",
+      "grade": "partial",
+      "reason": "success: false but has message: \"Spaces is not available right now.\"",
+      "response": "Spaces is not available right now."
+    },
+    {
+      "conversation": "Error agent: graceful failure handling",
+      "agentId": "error-agent",
+      "user": "Something went wrong with my last request",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": ""
+    },
+    {
+      "conversation": "Orchestrator: composite request",
+      "agentId": "orchestrator-agent",
+      "user": "Check the weather and my calendar for today",
+      "grade": "partial",
+      "reason": "success: false but has message: \"I'm not sure how to help with that.\"",
+      "response": "I'm not sure how to help with that."
+    },
+    {
+      "conversation": "Edge: garbled input",
+      "agentId": "smalltalk-agent",
+      "user": "asdfghjkl",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Hmm, what's that?"
+    },
+    {
+      "conversation": "Edge: single word",
+      "agentId": "help-agent",
+      "user": "help",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "What would you like help with? I can help with time, weather, music, or just tell you what I can do."
+    },
+    {
+      "conversation": "Edge: very long input",
+      "agentId": "help-agent",
+      "user": "I need help understanding how to use all the different features of this application including the video editor the spaces manager the voice orb the agent system the calendar integration and everything else you offer",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "I can help you with several things. Ask me the time or date. Check the weather in any city. Control "
+    }
+  ]
+}

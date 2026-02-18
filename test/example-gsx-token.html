@@ -1,105 +1,103 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-    <meta charset="UTF-8">
+  <head>
+    <meta charset="UTF-8" />
     <title>GSX Token Example</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1e1e1e;
-            color: #e0e0e0;
-            padding: 20px;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        .example-box {
-            background: #2d2d2d;
-            border: 2px solid #0e639c;
-            border-radius: 8px;
-            padding: 20px;
-            margin: 20px 0;
-        }
-        .token-example {
-            background: #1e1e1e;
-            border: 1px solid #3e3e3e;
-            padding: 10px;
-            border-radius: 4px;
-            font-family: monospace;
-            word-break: break-all;
-            margin: 10px 0;
-        }
-        .highlight {
-            color: #00c853;
-            font-weight: bold;
-        }
-        .step {
-            margin: 15px 0;
-            padding-left: 20px;
-            border-left: 3px solid #0e639c;
-        }
-        h2 {
-            color: #0e639c;
-        }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #1e1e1e;
+        color: #e0e0e0;
+        padding: 20px;
+        max-width: 600px;
+        margin: 0 auto;
+      }
+      .example-box {
+        background: #2d2d2d;
+        border: 2px solid #0e639c;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+      }
+      .token-example {
+        background: #1e1e1e;
+        border: 1px solid #3e3e3e;
+        padding: 10px;
+        border-radius: 4px;
+        font-family: monospace;
+        word-break: break-all;
+        margin: 10px 0;
+      }
+      .highlight {
+        color: #00c853;
+        font-weight: bold;
+      }
+      .step {
+        margin: 15px 0;
+        padding-left: 20px;
+        border-left: 3px solid #0e639c;
+      }
+      h2 {
+        color: #0e639c;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <h1>🔐 How to Add Your GSX Token</h1>
-    
+
     <div class="example-box">
-        <h2>Step-by-Step Guide:</h2>
-        
-        <div class="step">
-            <h3>1. Get Your Token from OneReach</h3>
-            <p>Log into your OneReach account and get your API token.</p>
-            <p>It will look something like this:</p>
-            <div class="token-example">
-                eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Ik...
-            </div>
-        </div>
-        
-        <div class="step">
-            <h3>2. Open Settings in the App</h3>
-            <p>Press <span class="highlight">Cmd+,</span> (Mac) or <span class="highlight">Ctrl+,</span> (Windows)</p>
-        </div>
-        
-        <div class="step">
-            <h3>3. Find GSX File Sync Configuration</h3>
-            <p>Scroll down to the <span class="highlight">GSX File Sync Configuration</span> section</p>
-        </div>
-        
-        <div class="step">
-            <h3>4. Paste Your Token</h3>
-            <ul>
-                <li>Click in the <span class="highlight">GSX Token</span> field</li>
-                <li>Paste your token (Cmd+V or Ctrl+V)</li>
-                <li>Click the eye icon (👁) if you want to see the token</li>
-                <li>Click <span class="highlight">Test Connection</span> to verify it works</li>
-            </ul>
-        </div>
-        
-        <div class="step">
-            <h3>5. Save Settings</h3>
-            <p>Click the <span class="highlight">Save Settings</span> button at the bottom</p>
-        </div>
-    </div>
-    
-    <div class="example-box" style="background: #1e3a1e; border-color: #00c853;">
-        <h2>✅ Token Successfully Added!</h2>
-        <p>Once your token is saved and tested, you can:</p>
+      <h2>Step-by-Step Guide:</h2>
+
+      <div class="step">
+        <h3>1. Get Your Token from OneReach</h3>
+        <p>Log into your OneReach account and get your API token.</p>
+        <p>It will look something like this:</p>
+        <div class="token-example">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Ik...</div>
+      </div>
+
+      <div class="step">
+        <h3>2. Open Settings in the App</h3>
+        <p>Press <span class="highlight">Cmd+,</span> (Mac) or <span class="highlight">Ctrl+,</span> (Windows)</p>
+      </div>
+
+      <div class="step">
+        <h3>3. Find GSX File Sync Configuration</h3>
+        <p>Scroll down to the <span class="highlight">GSX File Sync Configuration</span> section</p>
+      </div>
+
+      <div class="step">
+        <h3>4. Paste Your Token</h3>
         <ul>
-            <li>Use <strong>GSX → File Sync</strong> menu to sync files</li>
-            <li>Click <strong>Sync Now</strong> button in settings</li>
-            <li>Enable <strong>Auto-Sync</strong> for automatic backups</li>
+          <li>Click in the <span class="highlight">GSX Token</span> field</li>
+          <li>Paste your token (Cmd+V or Ctrl+V)</li>
+          <li>Click the eye icon (👁) if you want to see the token</li>
+          <li>Click <span class="highlight">Test Connection</span> to verify it works</li>
         </ul>
+      </div>
+
+      <div class="step">
+        <h3>5. Save Settings</h3>
+        <p>Click the <span class="highlight">Save Settings</span> button at the bottom</p>
+      </div>
     </div>
-    
-    <div class="example-box" style="background: #3a1e1e; border-color: #f44336;">
-        <h2>⚠️ Common Issues:</h2>
-        <ul>
-            <li><strong>Token not working?</strong> Make sure you copied the entire token</li>
-            <li><strong>Connection failed?</strong> Check you selected the right environment (Production/Staging/QA)</li>
-            <li><strong>Can't see the field?</strong> Make sure you're in the Settings window, not the main app</li>
-        </ul>
+
+    <div class="example-box" style="background: #1e3a1e; border-color: #00c853">
+      <h2>✅ Token Successfully Added!</h2>
+      <p>Once your token is saved and tested, you can:</p>
+      <ul>
+        <li>Use <strong>GSX → File Sync</strong> menu to sync files</li>
+        <li>Click <strong>Sync Now</strong> button in settings</li>
+        <li>Enable <strong>Auto-Sync</strong> for automatic backups</li>
+      </ul>
     </div>
-</body>
+
+    <div class="example-box" style="background: #3a1e1e; border-color: #f44336">
+      <h2>⚠️ Common Issues:</h2>
+      <ul>
+        <li><strong>Token not working?</strong> Make sure you copied the entire token</li>
+        <li><strong>Connection failed?</strong> Check you selected the right environment (Production/Staging/QA)</li>
+        <li><strong>Can't see the field?</strong> Make sure you're in the Settings window, not the main app</li>
+      </ul>
+    </div>
+  </body>
 </html>

@@ -11,7 +11,10 @@ const mockAI = createMockAIService();
 const { JsonToMdAgent } = require('../../../lib/converters/json-to-md.js');
 
 testConverterAgent(JsonToMdAgent, {
-  sampleInput: JSON.stringify([{ name: 'Alice', age: 30 }, { name: 'Bob', age: 25 }]),
+  sampleInput: JSON.stringify([
+    { name: 'Alice', age: 30 },
+    { name: 'Bob', age: 25 },
+  ]),
   expectedFromFormats: ['json'],
   expectedToFormats: ['md', 'markdown'],
   expectedStrategies: ['table', 'yaml-block', 'list'],

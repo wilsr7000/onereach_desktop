@@ -35,17 +35,17 @@ const {
 const MEDIA_DIR = path.join(__dirname, '../fixtures/media');
 
 const FIXTURES = {
-  png:  { path: path.join(MEDIA_DIR, 'sample.png'),  type: 'image',  mime: 'image/png',          ext: '.png' },
-  jpg:  { path: path.join(MEDIA_DIR, 'sample.jpg'),  type: 'image',  mime: 'image/jpeg',         ext: '.jpg' },
-  gif:  { path: path.join(MEDIA_DIR, 'sample.gif'),  type: 'image',  mime: 'image/gif',          ext: '.gif' },
-  webp: { path: path.join(MEDIA_DIR, 'sample.webp'), type: 'image',  mime: 'image/webp',         ext: '.webp' },
-  svg:  { path: path.join(MEDIA_DIR, 'sample.svg'),  type: 'image',  mime: 'image/svg+xml',      ext: '.svg' },
-  bmp:  { path: path.join(MEDIA_DIR, 'sample.bmp'),  type: 'image',  mime: 'image/bmp',          ext: '.bmp' },
-  mp4:  { path: path.join(MEDIA_DIR, 'sample.mp4'),  type: 'video',  mime: 'video/mp4',          ext: '.mp4' },
-  wav:  { path: path.join(MEDIA_DIR, 'sample.wav'),  type: 'audio',  mime: 'audio/wav',          ext: '.wav' },
-  mp3:  { path: path.join(MEDIA_DIR, 'sample.mp3'),  type: 'audio',  mime: 'audio/mpeg',         ext: '.mp3' },
-  pdf:  { path: path.join(MEDIA_DIR, 'sample.pdf'),  type: 'pdf',    mime: 'application/pdf',    ext: '.pdf' },
-  txt:  { path: path.join(MEDIA_DIR, 'sample.txt'),  type: 'file',   mime: 'text/plain',         ext: '.txt' },
+  png: { path: path.join(MEDIA_DIR, 'sample.png'), type: 'image', mime: 'image/png', ext: '.png' },
+  jpg: { path: path.join(MEDIA_DIR, 'sample.jpg'), type: 'image', mime: 'image/jpeg', ext: '.jpg' },
+  gif: { path: path.join(MEDIA_DIR, 'sample.gif'), type: 'image', mime: 'image/gif', ext: '.gif' },
+  webp: { path: path.join(MEDIA_DIR, 'sample.webp'), type: 'image', mime: 'image/webp', ext: '.webp' },
+  svg: { path: path.join(MEDIA_DIR, 'sample.svg'), type: 'image', mime: 'image/svg+xml', ext: '.svg' },
+  bmp: { path: path.join(MEDIA_DIR, 'sample.bmp'), type: 'image', mime: 'image/bmp', ext: '.bmp' },
+  mp4: { path: path.join(MEDIA_DIR, 'sample.mp4'), type: 'video', mime: 'video/mp4', ext: '.mp4' },
+  wav: { path: path.join(MEDIA_DIR, 'sample.wav'), type: 'audio', mime: 'audio/wav', ext: '.wav' },
+  mp3: { path: path.join(MEDIA_DIR, 'sample.mp3'), type: 'audio', mime: 'audio/mpeg', ext: '.mp3' },
+  pdf: { path: path.join(MEDIA_DIR, 'sample.pdf'), type: 'pdf', mime: 'application/pdf', ext: '.pdf' },
+  txt: { path: path.join(MEDIA_DIR, 'sample.txt'), type: 'file', mime: 'text/plain', ext: '.txt' },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -62,18 +62,14 @@ function buildMultipart(fields, fileBuffer, fileName, fileMime) {
   // Text fields
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined || value === null) continue;
-    parts.push(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="${key}"\r\n\r\n` +
-      `${value}\r\n`
-    );
+    parts.push(`--${boundary}\r\n` + `Content-Disposition: form-data; name="${key}"\r\n\r\n` + `${value}\r\n`);
   }
 
   // File field
   parts.push(
     `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
-    `Content-Type: ${fileMime}\r\n\r\n`
+      `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+      `Content-Type: ${fileMime}\r\n\r\n`
   );
 
   const header = Buffer.from(parts.join(''));
@@ -151,7 +147,6 @@ let testSpaceId;
 const uploadedItems = []; // Track itemIds for cleanup verification
 
 test.describe('Spaces Import/Export', () => {
-
   test.beforeAll(async () => {
     electronApp = await electron.launch({
       args: [path.join(__dirname, '../../main.js')],
@@ -172,9 +167,17 @@ test.describe('Spaces Import/Export', () => {
   test.afterAll(async () => {
     // Clean up
     if (testSpaceId) {
-      try { await deleteSpace(testSpaceId); } catch { /* ok */ }
+      try {
+        await deleteSpace(testSpaceId);
+      } catch {
+        /* ok */
+      }
     }
-    try { await setLogLevel('info'); } catch { /* ok */ }
+    try {
+      await setLogLevel('info');
+    } catch {
+      /* ok */
+    }
     await closeApp({ electronApp });
   });
 
@@ -242,9 +245,8 @@ test.describe('Spaces Import/Export', () => {
 
     // Verify each uploaded item is findable
     for (const uploaded of uploadedItems) {
-      const found = items.find(i =>
-        (i.id === uploaded.id) ||
-        (i.fileName && i.fileName.includes(`sample${uploaded.fixture.ext}`))
+      const found = items.find(
+        (i) => i.id === uploaded.id || (i.fileName && i.fileName.includes(`sample${uploaded.fixture.ext}`))
       );
       expect(found).toBeTruthy();
     }
@@ -277,7 +279,9 @@ test.describe('Spaces Import/Export', () => {
         itemType !== '';
 
       if (!acceptable) {
-        console.log(`Type mismatch for ${uploaded.name}: expected="${expectedType}", got="${itemType}", mime="${mime}"`);
+        console.log(
+          `Type mismatch for ${uploaded.name}: expected="${expectedType}", got="${itemType}", mime="${mime}"`
+        );
       }
       expect(acceptable).toBe(true);
     }
@@ -313,8 +317,8 @@ test.describe('Spaces Import/Export', () => {
       // We sent tags: ['test', 'fixture', type]
       // Tags may be stored differently; at minimum we should have some
       if (Array.isArray(tags) && tags.length > 0) {
-        const tagStrings = tags.map(t => typeof t === 'string' ? t : t.name || t.tag || '');
-        expect(tagStrings.some(t => t === 'test' || t === 'fixture')).toBe(true);
+        const tagStrings = tags.map((t) => (typeof t === 'string' ? t : t.name || t.tag || ''));
+        expect(tagStrings.some((t) => t === 'test' || t === 'fixture')).toBe(true);
       }
       // If tags API doesn't return them, check the item directly
       else {
@@ -360,14 +364,11 @@ test.describe('Spaces Import/Export', () => {
       },
     };
 
-    const res = await fetch(
-      `${SPACES_API}/api/spaces/${testSpaceId}/items/${target.id}`,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatePayload),
-      }
-    );
+    const res = await fetch(`${SPACES_API}/api/spaces/${testSpaceId}/items/${target.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatePayload),
+    });
     const data = await res.json();
     expect(data.success).toBe(true);
 
@@ -379,20 +380,11 @@ test.describe('Spaces Import/Export', () => {
     // Title is stored in metadata (metadata.title, metadata.attributes.title,
     // or metadata.extensions). The top-level item.preview is not always updated.
     const meta = item.metadata || {};
-    const title =
-      meta.title ||
-      meta.attributes?.title ||
-      meta.extensions?.title ||
-      item.title ||
-      '';
+    const title = meta.title || meta.attributes?.title || meta.extensions?.title || item.title || '';
     expect(title).toContain('Updated Title');
 
     // Description should also be in metadata
-    const description =
-      meta.description ||
-      meta.attributes?.description ||
-      meta.extensions?.description ||
-      '';
+    const description = meta.description || meta.attributes?.description || meta.extensions?.description || '';
     expect(description).toContain('E2E test');
 
     const errors = filterBenignErrors(await checkNewErrors(snap));
@@ -405,14 +397,11 @@ test.describe('Spaces Import/Export', () => {
     const target = uploadedItems[0];
     const newTags = ['e2e-updated', 'regression', 'media'];
 
-    const res = await fetch(
-      `${SPACES_API}/api/spaces/${testSpaceId}/items/${target.id}/tags`,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: newTags }),
-      }
-    );
+    const res = await fetch(`${SPACES_API}/api/spaces/${testSpaceId}/items/${target.id}/tags`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags: newTags }),
+    });
     const data = await res.json();
     expect(data.success).toBe(true);
 
@@ -420,7 +409,7 @@ test.describe('Spaces Import/Export', () => {
     await sleep(300);
     const tags = await getItemTags(testSpaceId, target.id);
     if (Array.isArray(tags)) {
-      const tagStrings = tags.map(t => typeof t === 'string' ? t : t.name || '');
+      const tagStrings = tags.map((t) => (typeof t === 'string' ? t : t.name || ''));
       expect(tagStrings).toEqual(expect.arrayContaining(['e2e-updated']));
     }
   });
@@ -430,14 +419,11 @@ test.describe('Spaces Import/Export', () => {
 
     const target = uploadedItems[0];
 
-    const res = await fetch(
-      `${SPACES_API}/api/spaces/${testSpaceId}/items/${target.id}/tags`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tag: 'single-tag-test' }),
-      }
-    );
+    const res = await fetch(`${SPACES_API}/api/spaces/${testSpaceId}/items/${target.id}/tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag: 'single-tag-test' }),
+    });
     const data = await res.json();
     expect(data.success).toBe(true);
   });

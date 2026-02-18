@@ -18,7 +18,7 @@
  * Run:  npx vitest run test/unit/exchange-bridge-learning.test.js
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Silence logging
 vi.mock('../../lib/log-event-queue', () => ({
@@ -26,13 +26,11 @@ vi.mock('../../lib/log-event-queue', () => ({
 }));
 
 describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
-
   // ═══════════════════════════════════════════════════════════════════════════
   // Contract: memory-agent exports the right interface
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Memory Agent Contract', () => {
-
     it('should export observeConversation as a function', () => {
       const memoryAgent = require('../../packages/agents/memory-agent');
       expect(typeof memoryAgent.observeConversation).toBe('function');
@@ -53,17 +51,30 @@ describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
       // Inject a minimal mock to avoid real file access
       memoryAgent._setDeps({
         getUserProfile: () => ({
-          isLoaded: () => true, load: async () => {},
-          getFacts: () => ({}), updateFact: vi.fn(), save: vi.fn(),
+          isLoaded: () => true,
+          load: async () => {},
+          getFacts: () => ({}),
+          updateFact: vi.fn(),
+          save: vi.fn(),
           _store: { parseSectionAsKeyValue: () => ({}), updateSection: vi.fn(), updateSectionAsKeyValue: vi.fn() },
         }),
         getAgentMemory: () => ({
-          load: async () => {}, getRaw: () => '', getSection: () => null,
-          updateSection: vi.fn(), getSectionNames: () => [],
-          parseSectionAsKeyValue: () => ({}), isDirty: () => false, save: vi.fn(),
+          load: async () => {},
+          getRaw: () => '',
+          getSection: () => null,
+          updateSection: vi.fn(),
+          getSectionNames: () => [],
+          parseSectionAsKeyValue: () => ({}),
+          isDirty: () => false,
+          save: vi.fn(),
         }),
         listAgentMemories: () => [],
-        aiJson: async () => ({ shouldUpdate: false, reasoning: 'test', profileChanges: { facts: {} }, agentChanges: [] }),
+        aiJson: async () => ({
+          shouldUpdate: false,
+          reasoning: 'test',
+          profileChanges: { facts: {} },
+          agentChanges: [],
+        }),
       });
 
       const result = memoryAgent.observeConversation(
@@ -80,7 +91,6 @@ describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Hook Wiring Pattern', () => {
-
     /**
      * This function replicates the exact pattern used in exchange-bridge.js
      * at the task:settled handler (~line 3220):
@@ -101,12 +111,12 @@ describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
       if (result?.success !== false) {
         try {
           const memoryAgent = requireFn();
-          memoryAgent.observeConversation(task, result, agentId).catch(e => {
+          memoryAgent.observeConversation(task, result, agentId).catch((e) => {
             logFn?.('MemoryObserver error: ' + e.message);
           });
           usedPrimary = true;
-        } catch (e) {
-          fallbackFn(task, result, agentId).catch(e2 => {
+        } catch (_e) {
+          fallbackFn(task, result, agentId).catch((e2) => {
             logFn?.('LearningPipeline error: ' + e2.message);
           });
           usedFallback = true;
@@ -133,11 +143,7 @@ describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
 
       expect(usedPrimary).toBe(true);
       expect(usedFallback).toBe(false);
-      expect(mockObserve).toHaveBeenCalledWith(
-        { content: 'test' },
-        { success: true, message: 'ok' },
-        'time-agent'
-      );
+      expect(mockObserve).toHaveBeenCalledWith({ content: 'test' }, { success: true, message: 'ok' }, 'time-agent');
       expect(mockFallback).not.toHaveBeenCalled();
     });
 
@@ -149,7 +155,9 @@ describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
         { success: true, message: 'ok' },
         'time-agent',
         {
-          requireFn: () => { throw new Error('Module not found'); },
+          requireFn: () => {
+            throw new Error('Module not found');
+          },
           fallbackFn: mockFallback,
           logFn: vi.fn(),
         }
@@ -157,11 +165,7 @@ describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
 
       expect(usedPrimary).toBe(false);
       expect(usedFallback).toBe(true);
-      expect(mockFallback).toHaveBeenCalledWith(
-        { content: 'test' },
-        { success: true, message: 'ok' },
-        'time-agent'
-      );
+      expect(mockFallback).toHaveBeenCalledWith({ content: 'test' }, { success: true, message: 'ok' }, 'time-agent');
     });
 
     it('should skip entirely when result.success is false', () => {
@@ -188,21 +192,20 @@ describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
     it('should not throw when observeConversation rejects', async () => {
       const logFn = vi.fn();
 
-      simulateHook(
-        { content: 'test' },
-        { success: true, message: 'ok' },
-        'time-agent',
-        {
-          requireFn: () => ({
-            observeConversation: vi.fn(async () => { throw new Error('AI exploded'); }),
+      simulateHook({ content: 'test' }, { success: true, message: 'ok' }, 'time-agent', {
+        requireFn: () => ({
+          observeConversation: vi.fn(async () => {
+            throw new Error('AI exploded');
           }),
-          fallbackFn: vi.fn(async () => {}),
-          logFn,
-        }
-      );
+        }),
+        fallbackFn: vi.fn(async () => {}),
+        logFn,
+      });
 
       // Wait for the async rejection to be caught
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
       expect(logFn).toHaveBeenCalledWith(expect.stringContaining('AI exploded'));
     });
 
@@ -211,7 +214,7 @@ describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
 
       const { usedPrimary } = simulateHook(
         { content: 'test' },
-        { message: 'ok' },  // no success field
+        { message: 'ok' }, // no success field
         'time-agent',
         {
           requireFn: () => ({ observeConversation: mockObserve }),
@@ -227,16 +230,11 @@ describe('Exchange Bridge: Cross-Agent Learning Hook', () => {
     it('should proceed when result.success is true', () => {
       const mockObserve = vi.fn(async () => ({ learned: false, changes: [] }));
 
-      const { usedPrimary } = simulateHook(
-        { content: 'test' },
-        { success: true, message: 'ok' },
-        'weather-agent',
-        {
-          requireFn: () => ({ observeConversation: mockObserve }),
-          fallbackFn: vi.fn(async () => {}),
-          logFn: vi.fn(),
-        }
-      );
+      const { usedPrimary } = simulateHook({ content: 'test' }, { success: true, message: 'ok' }, 'weather-agent', {
+        requireFn: () => ({ observeConversation: mockObserve }),
+        fallbackFn: vi.fn(async () => {}),
+        logFn: vi.fn(),
+      });
 
       expect(usedPrimary).toBe(true);
     });

@@ -16,13 +16,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       setTimeout(() => resolve(null), 100);
     });
   },
-  
+
   // Generate export in specified format
   generateExport: (params) => ipcRenderer.invoke('smart-export:generate', params),
-  
+
   // Get available export formats
   getFormats: () => ipcRenderer.invoke('smart-export:get-formats'),
-  
+
   // Close the modal
   closeModal: () => {
     console.log('[Smart Export Preload] closeModal called');
@@ -37,19 +37,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       }
     }, 100);
   },
-  
+
   // Show success notification
   showExportSuccess: (result) => {
     ipcRenderer.send('show-notification', {
       title: 'Export Complete',
-      body: `Document saved to ${result.path}`
+      body: `Document saved to ${result.path}`,
     });
   },
-  
+
   // Listen for space data
   onSpaceData: (callback) => {
     ipcRenderer.on('space-data', (event, data) => callback(data));
-  }
+  },
 });
 
 // Also expose on window for direct access
@@ -59,7 +59,3 @@ window.addEventListener('DOMContentLoaded', () => {
     window.close();
   };
 });
-
-
-
-

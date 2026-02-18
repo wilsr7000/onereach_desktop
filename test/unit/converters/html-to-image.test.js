@@ -13,8 +13,8 @@ vi.mock('electron', () => ({
       this.webContents = {
         loadURL: vi.fn().mockResolvedValue(undefined),
         capturePage: vi.fn().mockResolvedValue({
-          toPNG: () => Buffer.from([0x89, 0x50, 0x4E, 0x47]),
-          toJPEG: () => Buffer.from([0xFF, 0xD8, 0xFF]),
+          toPNG: () => Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+          toJPEG: () => Buffer.from([0xff, 0xd8, 0xff]),
         }),
         executeJavaScript: vi.fn().mockResolvedValue({ scrollHeight: 800, scrollWidth: 1280 }),
         on: vi.fn(),
@@ -23,7 +23,9 @@ vi.mock('electron', () => ({
     }
     close() {}
     destroy() {}
-    isDestroyed() { return false; }
+    isDestroyed() {
+      return false;
+    }
   },
 }));
 
@@ -62,7 +64,7 @@ describe('HtmlToImageAgent (specific)', () => {
 
   it('has exactly two strategies', () => {
     expect(agent.strategies).toHaveLength(2);
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toEqual(['viewport', 'full-page']);
   });
 

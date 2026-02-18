@@ -11,7 +11,7 @@ class SlidesGenerator {
       includeImages: true,
       autoSlide: false,
       showProgress: true,
-      showSlideNumber: true
+      showSlideNumber: true,
     };
   }
 
@@ -28,7 +28,7 @@ class SlidesGenerator {
     try {
       // Group items into slides
       const slides = this.createSlides(space, items, opts);
-      
+
       // Generate HTML
       const html = this.generateHTML(space, slides, opts);
 
@@ -38,14 +38,13 @@ class SlidesGenerator {
         buffer: Buffer.from(html, 'utf-8'),
         mimeType: 'text/html',
         extension: 'html',
-        filename: `${this.sanitizeFilename(space.name)}_slides.html`
+        filename: `${this.sanitizeFilename(space.name)}_slides.html`,
       };
-
     } catch (error) {
       console.error('[SlidesGenerator] Error generating slides:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -53,7 +52,7 @@ class SlidesGenerator {
   /**
    * Create slides from items
    */
-  createSlides(space, items, options) {
+  createSlides(space, items, _options) {
     const slides = [];
 
     // Title slide
@@ -61,11 +60,11 @@ class SlidesGenerator {
       type: 'title',
       title: space.name,
       subtitle: space.description || `${items.length} items collected`,
-      date: new Date().toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      })
+      date: new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      }),
     });
 
     // Table of contents slide
@@ -75,8 +74,8 @@ class SlidesGenerator {
       title: 'Contents',
       items: Object.entries(typeGroups).map(([type, items]) => ({
         name: this.formatTypeName(type),
-        count: items.length
-      }))
+        count: items.length,
+      })),
     });
 
     // Content slides
@@ -85,7 +84,7 @@ class SlidesGenerator {
       slides.push({
         type: 'section',
         title: this.formatTypeName(type),
-        count: typeItems.length
+        count: typeItems.length,
       });
 
       // Individual content slides
@@ -95,7 +94,7 @@ class SlidesGenerator {
         slides.push({
           type: 'content',
           contentType: type,
-          items: slideItems
+          items: slideItems,
         });
       }
     }
@@ -105,7 +104,7 @@ class SlidesGenerator {
       type: 'closing',
       title: 'Thank You',
       subtitle: `Generated from "${space.name}"`,
-      footer: `${items.length} items • Onereach.ai Smart Export`
+      footer: `${items.length} items • Onereach.ai Smart Export`,
     });
 
     return slides;
@@ -115,8 +114,8 @@ class SlidesGenerator {
    * Generate HTML for slides presentation
    */
   generateHTML(space, slides, options) {
-    const { theme, transition, showProgress, showSlideNumber, autoSlide } = options;
-    
+    const { theme, showProgress, showSlideNumber, autoSlide } = options;
+
     const isDark = theme === 'dark';
     const bgColor = isDark ? '#0f0f0f' : '#ffffff';
     const textColor = isDark ? '#fafafa' : '#1a1a1a';
@@ -377,7 +376,9 @@ class SlidesGenerator {
         }
 
         /* Progress bar */
-        ${showProgress ? `
+        ${
+          showProgress
+            ? `
         .progress-bar {
             position: fixed;
             top: 0;
@@ -387,10 +388,14 @@ class SlidesGenerator {
             transition: width 0.3s ease;
             z-index: 100;
         }
-        ` : ''}
+        `
+            : ''
+        }
 
         /* Slide number */
-        ${showSlideNumber ? `
+        ${
+          showSlideNumber
+            ? `
         .slide-number {
             position: fixed;
             bottom: 20px;
@@ -399,7 +404,9 @@ class SlidesGenerator {
             color: var(--muted);
             font-family: 'JetBrains Mono', monospace;
         }
-        ` : ''}
+        `
+            : ''
+        }
 
         /* Keyboard hints */
         .keyboard-hint {
@@ -462,14 +469,22 @@ class SlidesGenerator {
                 }
             });
 
-            ${showProgress ? `
+            ${
+              showProgress
+                ? `
             const progress = ((currentSlide + 1) / totalSlides) * 100;
             progressBar.style.width = progress + '%';
-            ` : ''}
+            `
+                : ''
+            }
 
-            ${showSlideNumber ? `
+            ${
+              showSlideNumber
+                ? `
             slideNumber.textContent = (currentSlide + 1) + ' / ' + totalSlides;
-            ` : ''}
+            `
+                : ''
+            }
 
             prevBtn.disabled = currentSlide === 0;
             nextBtn.disabled = currentSlide === totalSlides - 1;
@@ -522,14 +537,18 @@ class SlidesGenerator {
         // Initialize
         updateSlide();
 
-        ${autoSlide ? `
+        ${
+          autoSlide
+            ? `
         // Auto-advance slides
         setInterval(() => {
             if (currentSlide < totalSlides - 1) {
                 nextSlide();
             }
         }, 5000);
-        ` : ''}
+        `
+            : ''
+        }
     </script>
 </body>
 </html>`;
@@ -553,13 +572,17 @@ class SlidesGenerator {
           <div class="slide slide-toc">
             <h2>${this.escapeHtml(slide.title)}</h2>
             <ul class="toc-list">
-              ${slide.items.map(item => `
+              ${slide.items
+                .map(
+                  (item) => `
                 <li class="toc-item">
                   <span class="toc-bullet"></span>
                   ${this.escapeHtml(item.name)}
                   <span class="toc-count">(${item.count})</span>
                 </li>
-              `).join('')}
+              `
+                )
+                .join('')}
             </ul>
           </div>`;
 
@@ -574,7 +597,7 @@ class SlidesGenerator {
         return `
           <div class="slide slide-content">
             <div class="content-grid">
-              ${slide.items.map(item => this.renderContentItem(item, slide.contentType)).join('')}
+              ${slide.items.map((item) => this.renderContentItem(item, slide.contentType)).join('')}
             </div>
           </div>`;
 
@@ -596,7 +619,7 @@ class SlidesGenerator {
    */
   renderContentItem(item, type) {
     const title = item.metadata?.title || item.fileName || 'Untitled';
-    
+
     switch (type) {
       case 'image':
         const imageSrc = item.dataUrl || item.filePath || '';
@@ -665,7 +688,7 @@ class SlidesGenerator {
       url: 'Links',
       link: 'Links',
       code: 'Code',
-      other: 'Other'
+      other: 'Other',
     };
     return names[type] || type.charAt(0).toUpperCase() + type.slice(1);
   }
@@ -677,7 +700,7 @@ class SlidesGenerator {
     if (!bytes) return '';
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + ' ' + sizes[i];
   }
 
   /**
@@ -702,7 +725,3 @@ class SlidesGenerator {
 }
 
 module.exports = SlidesGenerator;
-
-
-
-

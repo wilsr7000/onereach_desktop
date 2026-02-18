@@ -38,11 +38,11 @@ export function formatTimecodeWithFrames(seconds, fps = 30) {
  */
 export function formatTimeCompact(seconds) {
   if (!seconds || isNaN(seconds)) return '0:00';
-  
+
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
-  
+
   if (hrs > 0) {
     return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
@@ -56,11 +56,11 @@ export function formatTimeCompact(seconds) {
  */
 export function formatDuration(seconds) {
   if (!seconds || isNaN(seconds)) return '0s';
-  
+
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
-  
+
   if (hrs > 0) {
     return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
   }
@@ -79,10 +79,10 @@ export function formatDuration(seconds) {
 export function parseTime(timeStr) {
   if (typeof timeStr === 'number') return timeStr;
   if (!timeStr) return 0;
-  
+
   const str = String(timeStr).trim();
   const parts = str.split(':').map(Number);
-  
+
   if (parts.length === 3) {
     // HH:MM:SS
     return parts[0] * 3600 + parts[1] * 60 + parts[2];
@@ -90,7 +90,7 @@ export function parseTime(timeStr) {
     // MM:SS
     return parts[0] * 60 + parts[1];
   }
-  
+
   // Plain number (seconds)
   return parseFloat(str) || 0;
 }
@@ -102,11 +102,11 @@ export function parseTime(timeStr) {
  */
 export function formatBytes(bytes) {
   if (!bytes || bytes === 0) return '0 B';
-  
+
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   const size = bytes / Math.pow(1024, i);
-  
+
   return `${size.toFixed(i > 0 ? 1 : 0)} ${sizes[i]}`;
 }
 
@@ -117,7 +117,7 @@ export function formatBytes(bytes) {
  */
 export function formatBitrate(bps) {
   if (!bps || bps === 0) return '0 bps';
-  
+
   if (bps >= 1000000) {
     return `${(bps / 1000000).toFixed(1)} Mbps`;
   } else if (bps >= 1000) {
@@ -133,46 +133,28 @@ export class TimeFormatter {
   formatTime(seconds) {
     return formatTime(seconds);
   }
-  
+
   formatTimecodeWithFrames(seconds, fps = 30) {
     return formatTimecodeWithFrames(seconds, fps);
   }
-  
+
   formatTimeCompact(seconds) {
     return formatTimeCompact(seconds);
   }
-  
+
   formatDuration(seconds) {
     return formatDuration(seconds);
   }
-  
+
   parseTime(timeStr) {
     return parseTime(timeStr);
   }
-  
+
   formatBytes(bytes) {
     return formatBytes(bytes);
   }
-  
+
   formatBitrate(bps) {
     return formatBitrate(bps);
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

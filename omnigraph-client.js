@@ -1,17 +1,17 @@
 /**
  * OmniGraph Client
- * 
+ *
  * Client for the OmniGraph API (Cypher/RedisGraph) for managing
  * GSX ecosystem nodes: Spaces, Asset Types, and Assets.
- * 
+ *
  * Follows the Temporal Graph Honor System v2.0.0:
  * - All nodes have provenance fields (created_by_*, updated_by_*, _history)
  * - All changes are tracked with history entries
  * - App identity is required for all operations
- * 
+ *
  * Graph name: idw (fixed)
  * Timeout: 30 seconds
- * 
+ *
  * @module OmniGraphClient
  */
 
@@ -27,7 +27,7 @@ const crypto = require('crypto');
  */
 const APP_IDENTITY = {
   name: 'GSX-Desktop',
-  id: 'gsx-desktop-app'
+  id: 'gsx-desktop-app',
 };
 
 /**
@@ -46,7 +46,7 @@ function buildCreateProvenance(user) {
     updated_by_app_id: APP_IDENTITY.id,
     updated_by_user: user || 'system',
     updated_at: now,
-    _history: '[]'
+    _history: '[]',
   };
 }
 
@@ -60,7 +60,7 @@ function buildUpdateProvenance(user) {
     updated_by_app_name: APP_IDENTITY.name,
     updated_by_app_id: APP_IDENTITY.id,
     updated_by_user: user || 'system',
-    updated_at: Date.now()
+    updated_at: Date.now(),
   };
 }
 
@@ -78,7 +78,7 @@ function buildHistoryEntry(user, action, changes = []) {
     app_id: APP_IDENTITY.id,
     user: user || 'system',
     action,
-    changes
+    changes,
   };
 }
 
@@ -220,10 +220,12 @@ class OmniGraphClient {
     const cypher = `MATCH (s:Schema) RETURN s.entity, s.description ORDER BY s.entity`;
     try {
       const result = await this.executeQuery(cypher);
-      return result?.map(r => ({
-        entity: r['s.entity'],
-        description: r['s.description']
-      })) || [];
+      return (
+        result?.map((r) => ({
+          entity: r['s.entity'],
+          description: r['s.description'],
+        })) || []
+      );
     } catch (error) {
       console.warn('[OmniGraph] Could not list schemas:', error.message);
       return [];
@@ -304,7 +306,7 @@ class OmniGraphClient {
         read: 'View, list items, download files',
         write: 'Read + add/edit/delete items, upload files, edit metadata',
         admin: 'Write + share with others, change visibility, manage approvals',
-        owner: 'Implicit via CREATED edge. Full control, cannot be revoked.'
+        owner: 'Implicit via CREATED edge. Full control, cannot be revoked.',
       };
       const relProps = {
         permission: 'string (read|write|admin)',
@@ -312,33 +314,39 @@ class OmniGraphClient {
         grantedBy: 'string (email)',
         expiresAt: 'number|null (epoch ms, null=no expiry)',
         note: 'string (optional message)',
-        at: 'number (provenance timestamp)'
+        at: 'number (provenance timestamp)',
       };
       const crudEx = {
         share: 'MERGE Person-SHARED_WITH->Target with permission, grantedAt, grantedBy, expiresAt',
         revoke: 'DELETE SHARED_WITH relationship between Person and Target',
         list: 'MATCH all Person-SHARED_WITH->Target where not expired',
-        myShares: 'MATCH all Target<-SHARED_WITH-Person where not expired'
+        myShares: 'MATCH all Target<-SHARED_WITH-Person where not expired',
       };
       await this.upsertSchema({
         entity: 'Permission',
         version: '1.0.0',
-        description: 'Sharing permission model for SHARED_WITH relationships between Person and Space or Asset nodes with read write admin levels and optional TTL',
+        description:
+          'Sharing permission model for SHARED_WITH relationships between Person and Space or Asset nodes with read write admin levels and optional TTL',
         storagePattern: 'relationship',
-        instructions: 'SHARED_WITH relationship on Person to Space or Asset. Properties: permission (read or write or admin), grantedAt, grantedBy, expiresAt (null means forever). Owner is implicit via CREATED edge. Filter expired: WHERE r.expiresAt IS NULL OR r.expiresAt > timestamp. Admin can re-share. Write and read cannot.',
+        instructions:
+          'SHARED_WITH relationship on Person to Space or Asset. Properties: permission (read or write or admin), grantedAt, grantedBy, expiresAt (null means forever). Owner is implicit via CREATED edge. Filter expired: WHERE r.expiresAt IS NULL OR r.expiresAt > timestamp. Admin can re-share. Write and read cannot.',
         relationships: '{"SHARED_WITH":"Space,Asset"}',
         crudExamples: JSON.stringify(crudEx),
         extra: {
           permissionLevels: JSON.stringify(permLevels),
-          relationshipProperties: JSON.stringify(relProps)
-        }
+          relationshipProperties: JSON.stringify(relProps),
+        },
       });
 
       // 2. Patch Person schema to include SHARED_WITH in its relationships
       const personSchema = await this.getSchema('Person');
       if (personSchema) {
         let rels = {};
-        try { rels = JSON.parse(personSchema.relationships || '{}'); } catch (e) { /* ignore */ }
+        try {
+          rels = JSON.parse(personSchema.relationships || '{}');
+        } catch (_e) {
+          /* ignore */
+        }
         if (!rels.SHARED_WITH) {
           rels.SHARED_WITH = 'Space,Asset';
           const now = Date.now();
@@ -416,7 +424,7 @@ class OmniGraphClient {
       RETURN r
     `;
 
-    const result = await this.executeQuery(cypher);
+    const _result = await this.executeQuery(cypher);
     console.log(`[OmniGraph] Shared ${targetType} ${targetId} with ${email} (${permission})`);
     return {
       success: true,
@@ -425,7 +433,7 @@ class OmniGraphClient {
       grantedAt: now,
       grantedBy,
       expiresAt: expiresAt === 'NULL' ? null : expiresAt,
-      note: note || null
+      note: note || null,
     };
   }
 
@@ -466,7 +474,7 @@ class OmniGraphClient {
     const result = await this.executeQuery(cypher);
     if (!result || !Array.isArray(result)) return [];
 
-    return result.map(row => {
+    return result.map((row) => {
       const person = row.p?.properties || row.p || {};
       const rel = row.r?.properties || row.r || {};
       return {
@@ -477,7 +485,7 @@ class OmniGraphClient {
         grantedAt: rel.grantedAt,
         expiresAt: rel.expiresAt || null,
         grantedBy: rel.grantedBy || null,
-        note: rel.note || null
+        note: rel.note || null,
       };
     });
   }
@@ -498,7 +506,7 @@ class OmniGraphClient {
     const result = await this.executeQuery(cypher);
     if (!result || !Array.isArray(result)) return [];
 
-    return result.map(row => {
+    return result.map((row) => {
       const target = row.t?.properties || row.t || {};
       const rel = row.r?.properties || row.r || {};
       const labels = row.nodeLabels || [];
@@ -510,7 +518,7 @@ class OmniGraphClient {
         permission: rel.permission,
         grantedAt: rel.grantedAt,
         expiresAt: rel.expiresAt || null,
-        grantedBy: rel.grantedBy || null
+        grantedBy: rel.grantedBy || null,
       };
     });
   }
@@ -532,9 +540,9 @@ class OmniGraphClient {
 
     const token = await this.getAuthToken();
     const headers = {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     };
-    
+
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
@@ -544,18 +552,18 @@ class OmniGraphClient {
 
     try {
       console.log('[OmniGraph] Executing query:', cypher.substring(0, 100) + '...');
-      
+
       const response = await fetch(this.endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify({ graph: this.graphName, query: cypher }),
-        signal: controller.signal
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
       const data = await response.json();
-      
+
       if (!response.ok) {
         const errorMsg = data.error || data.message || `HTTP ${response.status}`;
         console.error('[OmniGraph] API error:', errorMsg);
@@ -570,11 +578,11 @@ class OmniGraphClient {
       return data.result;
     } catch (error) {
       clearTimeout(timeoutId);
-      
+
       if (error.name === 'AbortError') {
         throw new Error('OmniGraph query timed out (30s limit)');
       }
-      
+
       throw error;
     }
   }
@@ -597,12 +605,12 @@ class OmniGraphClient {
   async upsertSpace(space) {
     const now = Date.now();
     const user = this.currentUser;
-    
+
     // Build history entry for this operation
-    const historyEntry = buildHistoryEntry(user, 'UPSERT', [
-      { property: 'name', old_value: null, new_value: space.name }
+    const _historyEntry = buildHistoryEntry(user, 'UPSERT', [
+      { property: 'name', old_value: null, new_value: space.name },
     ]);
-    
+
     const cypher = `
       MERGE (s:Space {id: '${escapeCypher(space.id)}'})
       ON CREATE SET
@@ -646,6 +654,76 @@ class OmniGraphClient {
   }
 
   /**
+   * Get all active Space nodes created by a specific user.
+   * @param {string} email - The creator's email address
+   * @returns {Promise<Array>} Array of { id, name, icon, color, description, visibility, createdAt, source }
+   */
+  async getSpacesByUser(email) {
+    if (!email || !email.includes('@')) return [];
+
+    const cypher = `
+      MATCH (s:Space)
+      WHERE s.created_by_user = '${escapeCypher(email)}'
+        AND (s.active = true OR s.active IS NULL)
+      RETURN s
+    `;
+    const result = await this.executeQuery(cypher);
+    if (!result || !Array.isArray(result)) return [];
+
+    return result.map((row) => {
+      const s = row.s?.properties || row.s || {};
+      return {
+        id: s.id,
+        name: s.name || s.id,
+        icon: s.icon || '',
+        color: s.color || '#64c8ff',
+        description: s.description || '',
+        visibility: s.visibility || 'private',
+        createdAt: s.created_at || null,
+        source: 'owned',
+      };
+    });
+  }
+
+  /**
+   * Discover all spaces associated with an email -- both owned and shared.
+   * Merges getSpacesByUser + getSharedWithMe, deduplicating by space ID.
+   * @param {string} email - User email address
+   * @returns {Promise<Array>} Unified array of discovered spaces with source field ('owned' or 'shared')
+   */
+  async discoverSpaces(email) {
+    if (!email || !email.includes('@')) return [];
+
+    const [owned, shared] = await Promise.all([this.getSpacesByUser(email), this.getSharedWithMe(email)]);
+
+    const seen = new Map();
+
+    for (const space of owned) {
+      seen.set(space.id, space);
+    }
+
+    const sharedSpaces = (shared || []).filter((s) => s.type === 'space');
+    for (const s of sharedSpaces) {
+      if (!seen.has(s.id)) {
+        seen.set(s.id, {
+          id: s.id,
+          name: s.name,
+          icon: '',
+          color: '#64c8ff',
+          description: '',
+          visibility: 'private',
+          createdAt: s.grantedAt || null,
+          source: 'shared',
+          permission: s.permission,
+          grantedBy: s.grantedBy,
+        });
+      }
+    }
+
+    return Array.from(seen.values());
+  }
+
+  /**
    * Soft delete a Space node
    * @param {string} spaceId - Space ID
    * @param {boolean} includeAssets - Also soft-delete all assets in space
@@ -654,7 +732,7 @@ class OmniGraphClient {
   async softDeleteSpace(spaceId, includeAssets = false) {
     const now = Date.now();
     const user = this.currentUser;
-    
+
     // Soft-delete the space with provenance
     const spaceCypher = `
       MATCH (s:Space {id: '${escapeCypher(spaceId)}'})
@@ -705,7 +783,7 @@ class OmniGraphClient {
     const hubId = `${spaceId}_${assetType}`;
     const now = Date.now();
     const user = this.currentUser;
-    
+
     const cypher = `
       MATCH (s:Space {id: '${escapeCypher(spaceId)}'})
       MERGE (t:${typeLabel} {id: '${escapeCypher(hubId)}', spaceId: '${escapeCypher(spaceId)}'})
@@ -743,10 +821,10 @@ class OmniGraphClient {
       console.warn('[OmniGraph] Cannot create Person without email');
       return null;
     }
-    
+
     const now = Date.now();
     const displayName = name || email.split('@')[0]; // Use email prefix if no name
-    
+
     const cypher = `
       MERGE (p:Person {id: '${escapeCypher(email)}'})
       ON CREATE SET
@@ -795,7 +873,7 @@ class OmniGraphClient {
   /**
    * Create or update an Asset node with ALL metadata (two-layer: Files + Graph)
    * Following schema-first pattern from the ontology guide.
-   * 
+   *
    * @param {Object} asset - Asset data (all metadata stored in graph)
    * @param {string} asset.id - Asset ID
    * @param {string} asset.title - Asset title
@@ -822,7 +900,7 @@ class OmniGraphClient {
     const spaceInfo = spaceData || { id: spaceId, name: spaceId, visibility: asset.visibility };
     await this.upsertSpace(spaceInfo);
     await this.ensureAssetTypeHub(spaceId, assetType);
-    
+
     // Ensure the Person node exists for the current user (email is the key)
     const user = this.currentUser;
     if (user && user !== 'system' && user.includes('@')) {
@@ -833,7 +911,7 @@ class OmniGraphClient {
     const now = Date.now();
 
     // Prepare tags as comma-separated string for graph storage
-    const tagsString = Array.isArray(asset.tags) ? asset.tags.join(',') : (asset.tags || '');
+    const tagsString = Array.isArray(asset.tags) ? asset.tags.join(',') : asset.tags || '';
 
     const hasValidUser = user && user !== 'system' && user.includes('@');
 
@@ -918,7 +996,7 @@ class OmniGraphClient {
         ...assetProps,
         _graphNodeId: assetNode?.id, // Keep graph node ID separately if needed
         spaceId: result[0].spaceId,
-        spaceName: result[0].spaceName
+        spaceName: result[0].spaceName,
       };
     }
     return null;
@@ -934,28 +1012,28 @@ class OmniGraphClient {
   async verifyAsset(assetId, expectedHash) {
     try {
       const asset = await this.getAsset(assetId);
-      
+
       if (!asset) {
-        return { 
-          verified: false, 
+        return {
+          verified: false,
           reason: 'Asset not found in graph',
-          assetId
+          assetId,
         };
       }
-      
+
       // Check content hash matches
       if (expectedHash && asset.contentHash !== expectedHash) {
-        return { 
-          verified: false, 
+        return {
+          verified: false,
           reason: 'Content hash mismatch',
           expected: expectedHash,
           actual: asset.contentHash,
-          assetId
+          assetId,
         };
       }
-      
+
       // Verification successful
-      return { 
+      return {
         verified: true,
         assetId: asset.id,
         fileUrl: asset.fileUrl || null,
@@ -963,13 +1041,13 @@ class OmniGraphClient {
         spaceName: asset.spaceName,
         version: asset.version,
         contentHash: asset.contentHash,
-        title: asset.title
+        title: asset.title,
       };
     } catch (error) {
       return {
         verified: false,
         reason: `Verification query failed: ${error.message}`,
-        assetId
+        assetId,
       };
     }
   }
@@ -982,26 +1060,26 @@ class OmniGraphClient {
   async verifySpace(spaceId) {
     try {
       const space = await this.getSpace(spaceId);
-      
+
       if (!space) {
-        return { 
-          verified: false, 
+        return {
+          verified: false,
           reason: 'Space not found in graph',
-          spaceId
+          spaceId,
         };
       }
-      
-      return { 
+
+      return {
         verified: true,
         spaceId: space.id,
         name: space.name,
-        visibility: space.visibility
+        visibility: space.visibility,
       };
     } catch (error) {
       return {
         verified: false,
         reason: `Space verification failed: ${error.message}`,
-        spaceId
+        spaceId,
       };
     }
   }
@@ -1021,7 +1099,7 @@ class OmniGraphClient {
     `;
     const result = await this.executeQuery(cypher);
     // Extract properties from graph nodes - API returns { id, labels, properties }
-    return result?.map(r => r.a?.properties || r.a) || [];
+    return result?.map((r) => r.a?.properties || r.a) || [];
   }
 
   /**
@@ -1032,7 +1110,7 @@ class OmniGraphClient {
   async softDeleteAsset(assetId) {
     const now = Date.now();
     const user = this.currentUser;
-    
+
     const cypher = `
       MATCH (a:Asset {id: '${escapeCypher(assetId)}'})
       SET a.status = 'unpublished',
@@ -1055,7 +1133,7 @@ class OmniGraphClient {
   async reactivateAsset(assetId) {
     const now = Date.now();
     const user = this.currentUser;
-    
+
     const cypher = `
       MATCH (a:Asset {id: '${escapeCypher(assetId)}'})
       SET a.status = 'published',
@@ -1080,7 +1158,7 @@ class OmniGraphClient {
   async changeAssetVisibility(assetId, visibility) {
     const now = Date.now();
     const user = this.currentUser;
-    
+
     const cypher = `
       MATCH (a:Asset {id: '${escapeCypher(assetId)}'})
       SET a.visibility = '${escapeCypher(visibility)}',
@@ -1092,6 +1170,170 @@ class OmniGraphClient {
       RETURN a
     `;
     return this.executeQuery(cypher);
+  }
+
+  // ============================================
+  // IDW (Interactive Digital Worker) OPERATIONS
+  // ============================================
+
+  /**
+   * Fetch all active IDW nodes from the graph.
+   * Returns data in the IDW Store directory format:
+   *   { availableIDWs: { all, featured, categories }, installedIDWs }
+   *
+   * @param {Array} installedIds - Array of installed IDW IDs (from local settings)
+   * @returns {Promise<Object>} IDW directory object
+   */
+  async getIDWDirectory(installedIds = []) {
+    // Query all active IDW nodes
+    const cypher = `
+      MATCH (i:IDW)
+      WHERE i.active = true OR i.active IS NULL
+      RETURN i
+      ORDER BY i.name
+    `;
+
+    const result = await this.executeQuery(cypher);
+    const allIDWs = (result || []).map((row) => {
+      const node = row.i?.properties || row.i || {};
+      return this._mapGraphNodeToIDW(node);
+    });
+
+    // Build featured list (nodes explicitly marked, or top-rated as fallback)
+    const featured = allIDWs.filter((idw) => idw._featured).slice(0, 6);
+
+    // If nobody is explicitly featured, pick the top-rated
+    const featuredList =
+      featured.length > 0 ? featured : [...allIDWs].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 6);
+
+    // Build category summary
+    const categoryMap = {};
+    for (const idw of allIDWs) {
+      const cat = idw.category || 'Other';
+      if (!categoryMap[cat]) {
+        categoryMap[cat] = { name: cat, idwCount: 0, iconName: null };
+      }
+      categoryMap[cat].idwCount++;
+      // Use the first iconName encountered for the category
+      if (!categoryMap[cat].iconName && idw.iconName) {
+        categoryMap[cat].iconName = idw.iconName;
+      }
+    }
+    const categories = Object.values(categoryMap).sort((a, b) => b.idwCount - a.idwCount);
+
+    // Build installed list
+    const installedSet = new Set(installedIds);
+    const installedIDWs = allIDWs
+      .filter((idw) => installedSet.has(idw.id))
+      .map((idw) => ({ idwId: idw.id, installedAt: null }));
+
+    return {
+      availableIDWs: {
+        all: allIDWs,
+        featured: featuredList,
+        categories,
+      },
+      installedIDWs,
+      metadata: {
+        source: 'omnigraph',
+        fetchedAt: new Date().toISOString(),
+        totalCount: allIDWs.length,
+      },
+    };
+  }
+
+  /**
+   * Get a single IDW node by ID.
+   * @param {string} idwId - IDW ID
+   * @returns {Promise<Object|null>} IDW object or null
+   */
+  async getIDW(idwId) {
+    const cypher = `
+      MATCH (i:IDW {id: '${escapeCypher(idwId)}'})
+      WHERE i.active = true OR i.active IS NULL
+      RETURN i
+      LIMIT 1
+    `;
+    const result = await this.executeQuery(cypher);
+    if (!result || result.length === 0) return null;
+
+    const node = result[0].i?.properties || result[0].i || {};
+    return this._mapGraphNodeToIDW(node);
+  }
+
+  /**
+   * Map a raw graph node to the IDW Store data format.
+   * Handles property naming differences between graph storage and UI expectations.
+   * @param {Object} node - Raw graph node properties
+   * @returns {Object} IDW object in store format
+   * @private
+   */
+  _mapGraphNodeToIDW(node) {
+    // Parse tags: stored as comma-separated string or JSON array
+    let tags = [];
+    if (node.tags) {
+      try {
+        tags = JSON.parse(node.tags);
+      } catch (_) {
+        tags = String(node.tags)
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean);
+      }
+    }
+
+    // Parse screenshots: stored as comma-separated URLs or JSON array
+    let screenshots = [];
+    if (node.screenshots) {
+      try {
+        screenshots = JSON.parse(node.screenshots);
+      } catch (_) {
+        screenshots = String(node.screenshots)
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    }
+
+    // Parse pricing: stored as JSON string or individual fields
+    let pricing = null;
+    if (node.pricing) {
+      try {
+        pricing = typeof node.pricing === 'string' ? JSON.parse(node.pricing) : node.pricing;
+      } catch (_) {
+        pricing = { model: 'free', startingPrice: 0 };
+      }
+    } else if (node.pricingModel || node.startingPrice !== undefined) {
+      pricing = {
+        model: node.pricingModel || 'free',
+        startingPrice: parseFloat(node.startingPrice) || 0,
+      };
+    }
+
+    return {
+      id: node.id || '',
+      name: node.name || node.label || 'Untitled IDW',
+      developer: node.developer || node.publisher || '',
+      description: node.description || '',
+      category: node.category || 'Other',
+      url: node.url || node.chatUrl || '',
+      homePageURL: node.homePageURL || node.homePageUrl || node.homepageUrl || '',
+      rating: parseFloat(node.rating) || 0,
+      reviewCount: parseInt(node.reviewCount) || 0,
+      version: node.version || '1.0.0',
+      lastUpdated: node.lastUpdated || node.updated_at || node.created_at || null,
+      pricing,
+      tags,
+      screenshots,
+      apiEndpoint: node.apiEndpoint || null,
+      apiKeyRequired: node.apiKeyRequired === true || node.apiKeyRequired === 'true',
+      apiKeyName: node.apiKeyName || null,
+      thumbnailUrl: node.thumbnailUrl || node.thumbnail || null,
+      imageUrl: node.imageUrl || node.image || null,
+      iconName: node.iconName || null,
+      // Internal flag (not rendered by UI) -- used to build featured list
+      _featured: node.featured === true || node.featured === 'true',
+    };
   }
 
   // ============================================
@@ -1120,16 +1362,143 @@ class OmniGraphClient {
   async getStats() {
     const spacesCypher = `MATCH (s:Space) WHERE s.active = true OR s.active IS NULL RETURN count(s) as count`;
     const assetsCypher = `MATCH (a:Asset) WHERE a.active = true OR a.active IS NULL RETURN count(a) as count`;
-    
+
     const [spacesResult, assetsResult] = await Promise.all([
       this.executeQuery(spacesCypher).catch(() => [{ count: 0 }]),
-      this.executeQuery(assetsCypher).catch(() => [{ count: 0 }])
+      this.executeQuery(assetsCypher).catch(() => [{ count: 0 }]),
     ]);
 
     return {
       spaces: spacesResult?.[0]?.count || 0,
-      assets: assetsResult?.[0]?.count || 0
+      assets: assetsResult?.[0]?.count || 0,
     };
+  }
+
+  // ============================================
+  // CAPTURE SESSION SIGNALING (P2P Recording)
+  // ============================================
+
+  /**
+   * Create a CaptureSession node for WebRTC signaling.
+   * SDP offers are large (~9KB), so we split into 1500-char chunks
+   * stored as sdpOffer0, sdpOffer1, ... sdpOfferN plus sdpOfferChunks count.
+   * @param {string} code - Memorable session code word
+   * @param {string} sdpOffer - JSON-stringified SDP offer
+   * @returns {Promise<void>}
+   */
+  async createCaptureSession(code, sdpOffer) {
+    const now = Date.now();
+    const CHUNK = 1400; // safe under OmniGraph query size limit
+
+    // 1. Create node with metadata (no offer yet)
+    await this.executeQuery(`
+      CREATE (s:CaptureSession {
+        code: '${escapeCypher(code)}',
+        sdpAnswer: '',
+        status: 'waiting',
+        createdAt: ${now},
+        sdpOfferChunks: ${Math.ceil(sdpOffer.length / CHUNK)}
+      })
+      RETURN s.code
+    `);
+
+    // 2. SET each chunk in a separate query
+    for (let i = 0; i * CHUNK < sdpOffer.length; i++) {
+      const chunk = sdpOffer.slice(i * CHUNK, (i + 1) * CHUNK);
+      await this.executeQuery(`
+        MATCH (s:CaptureSession {code: '${escapeCypher(code)}'})
+        SET s.sdpOffer${i} = '${escapeCypher(chunk)}'
+        RETURN s.code
+      `);
+    }
+  }
+
+  /**
+   * Retrieve a CaptureSession by code word.
+   * @param {string} code - Session code word
+   * @returns {Promise<Object|null>} Session data or null
+   */
+  async getCaptureSession(code) {
+    const cypher = `
+      MATCH (s:CaptureSession {code: '${escapeCypher(code)}'})
+      WHERE s.status = 'waiting'
+      RETURN s
+    `;
+    const result = await this.executeQuery(cypher);
+    if (!result || result.length === 0) return null;
+
+    const node = result[0].s?.properties || result[0].s || result[0];
+    const chunks = parseInt(node.sdpOfferChunks) || 0;
+
+    // Reassemble chunked SDP offer
+    let sdpOffer = '';
+    if (chunks > 0) {
+      for (let i = 0; i < chunks; i++) {
+        sdpOffer += node[`sdpOffer${i}`] || '';
+      }
+    } else {
+      sdpOffer = node.sdpOffer || '';
+    }
+
+    return { code, sdpOffer, status: node.status, createdAt: node.createdAt };
+  }
+
+  /**
+   * Set the SDP answer on a CaptureSession (guest posts their answer).
+   * @param {string} code - Session code word
+   * @param {string} sdpAnswer - JSON-stringified SDP answer
+   * @returns {Promise<void>}
+   */
+  async setCaptureAnswer(code, sdpAnswer) {
+    const CHUNK = 1400;
+
+    // Set status + chunk count first
+    await this.executeQuery(`
+      MATCH (s:CaptureSession {code: '${escapeCypher(code)}'})
+      SET s.status = 'answered',
+          s.sdpAnswerChunks = ${Math.ceil(sdpAnswer.length / CHUNK)}
+      RETURN s.code
+    `);
+
+    // Set each answer chunk
+    for (let i = 0; i * CHUNK < sdpAnswer.length; i++) {
+      const chunk = sdpAnswer.slice(i * CHUNK, (i + 1) * CHUNK);
+      await this.executeQuery(`
+        MATCH (s:CaptureSession {code: '${escapeCypher(code)}'})
+        SET s.sdpAnswer${i} = '${escapeCypher(chunk)}'
+        RETURN s.code
+      `);
+    }
+  }
+
+  /**
+   * Poll for the SDP answer on a CaptureSession.
+   * @param {string} code - Session code word
+   * @returns {Promise<string|null>} SDP answer or null if not yet answered
+   */
+  async getCaptureAnswer(code) {
+    const cypher = `
+      MATCH (s:CaptureSession {code: '${escapeCypher(code)}', status: 'answered'})
+      RETURN s.sdpAnswer AS sdpAnswer
+    `;
+    const result = await this.executeQuery(cypher);
+    if (!result || result.length === 0 || !result[0].sdpAnswer) return null;
+    return result[0].sdpAnswer;
+  }
+
+  /**
+   * Delete a CaptureSession node (cleanup after connection or timeout).
+   * @param {string} code - Session code word
+   * @returns {Promise<void>}
+   */
+  async deleteCaptureSession(code) {
+    const cypher = `
+      MATCH (s:CaptureSession {code: '${escapeCypher(code)}'})
+      DELETE s
+    `;
+    await this.executeQuery(cypher).catch((_ignored) => {
+      /* deleteCaptureSession cleanup - node may not exist or DB unavailable */
+    });
   }
 }
 
@@ -1167,13 +1536,11 @@ function computeContentHashFromBuffer(buffer) {
  */
 function computeVersionNumber(history, newHash) {
   // Check if this hash already exists
-  const existing = history.find(v => v.contentHash === newHash);
+  const existing = history.find((v) => v.contentHash === newHash);
   if (existing) return existing.version; // Same content = same version
-  
+
   // New version
-  const latestVersion = history.length > 0 
-    ? parseInt(history[history.length - 1].version.replace('v', ''))
-    : 0;
+  const latestVersion = history.length > 0 ? parseInt(history[history.length - 1].version.replace('v', '')) : 0;
   return `v${latestVersion + 1}`;
 }
 
@@ -1202,5 +1569,5 @@ module.exports = {
   APP_IDENTITY,
   buildCreateProvenance,
   buildUpdateProvenance,
-  buildHistoryEntry
+  buildHistoryEntry,
 };

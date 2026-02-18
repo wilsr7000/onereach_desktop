@@ -2,22 +2,21 @@
 
 /**
  * Download Claude Code Binary Script
- * 
+ *
  * Downloads the Claude Code CLI binary for the current platform
  * or all platforms when building for release.
- * 
+ *
  * Usage:
  *   node scripts/download-claude-code.js           # Download for current platform
  *   node scripts/download-claude-code.js --all     # Download for all platforms
  */
 
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
 // Configuration
-const CLAUDE_CODE_VERSION = 'latest'; // or specific version like 'v1.0.0'
+const _CLAUDE_CODE_VERSION = 'latest'; // or specific version like 'v1.0.0'
 const RESOURCES_DIR = path.join(__dirname, '..', 'resources', 'claude-code');
 
 // Platform mapping
@@ -68,79 +67,23 @@ function checkGlobalInstall() {
  */
 async function installViaNpm(targetDir) {
   console.log('[download-claude-code] Installing Claude Code via npm...');
-  
+
   try {
     // Create a local node_modules in the target directory
     fs.mkdirSync(targetDir, { recursive: true });
-    
+
     // Install the package locally
     execSync('npm install @anthropic-ai/claude-code --prefix .', {
       cwd: targetDir,
       encoding: 'utf-8',
       stdio: 'inherit',
     });
-    
+
     console.log('[download-claude-code] npm install completed');
     return true;
   } catch (error) {
     console.error('[download-claude-code] npm install failed:', error.message);
     return false;
-  }
-}
-
-/**
- * Download a file from URL
- */
-function downloadFile(url, destPath) {
-  return new Promise((resolve, reject) => {
-    console.log(`[download-claude-code] Downloading from ${url}...`);
-    
-    const file = fs.createWriteStream(destPath);
-    
-    https.get(url, (response) => {
-      // Handle redirects
-      if (response.statusCode === 301 || response.statusCode === 302) {
-        file.close();
-        fs.unlinkSync(destPath);
-        return downloadFile(response.headers.location, destPath).then(resolve).catch(reject);
-      }
-      
-      if (response.statusCode !== 200) {
-        file.close();
-        fs.unlinkSync(destPath);
-        reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
-        return;
-      }
-      
-      response.pipe(file);
-      
-      file.on('finish', () => {
-        file.close();
-        console.log(`[download-claude-code] Downloaded to ${destPath}`);
-        resolve();
-      });
-    }).on('error', (err) => {
-      file.close();
-      fs.unlinkSync(destPath);
-      reject(err);
-    });
-  });
-}
-
-/**
- * Extract archive (tar.gz or zip)
- */
-function extractArchive(archivePath, destDir) {
-  console.log(`[download-claude-code] Extracting ${archivePath}...`);
-  
-  if (archivePath.endsWith('.tar.gz')) {
-    execSync(`tar -xzf "${archivePath}" -C "${destDir}"`, { stdio: 'inherit' });
-  } else if (archivePath.endsWith('.zip')) {
-    if (process.platform === 'win32') {
-      execSync(`powershell -command "Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}'"`, { stdio: 'inherit' });
-    } else {
-      execSync(`unzip -o "${archivePath}" -d "${destDir}"`, { stdio: 'inherit' });
-    }
   }
 }
 
@@ -163,32 +106,33 @@ async function downloadForPlatform(platformKey) {
     console.warn(`[download-claude-code] Unknown platform: ${platformKey}`);
     return false;
   }
-  
+
   const destDir = path.join(RESOURCES_DIR, platformKey);
   const binaryPath = path.join(destDir, platformInfo.binaryName);
-  
+
   // Check if already downloaded
   if (fs.existsSync(binaryPath)) {
     console.log(`[download-claude-code] Binary already exists: ${binaryPath}`);
     return true;
   }
-  
+
   // Create destination directory
   fs.mkdirSync(destDir, { recursive: true });
-  
+
   // For now, we'll use npm install as the primary method
   // Binary download can be implemented when Anthropic provides direct binary downloads
   console.log(`[download-claude-code] Platform: ${platformKey}`);
   console.log('[download-claude-code] Note: Direct binary download not yet available.');
   console.log('[download-claude-code] Using npm install method instead.');
-  
+
   // Create a wrapper script that calls the npm-installed CLI
-  const wrapperContent = process.platform === 'win32'
-    ? `@echo off\nnode "%~dp0node_modules\\@anthropic-ai\\claude-code\\cli.js" %*`
-    : `#!/bin/sh\nexec node "$(dirname "$0")/node_modules/@anthropic-ai/claude-code/cli.js" "$@"`;
-  
+  const wrapperContent =
+    process.platform === 'win32'
+      ? `@echo off\nnode "%~dp0node_modules\\@anthropic-ai\\claude-code\\cli.js" %*`
+      : `#!/bin/sh\nexec node "$(dirname "$0")/node_modules/@anthropic-ai/claude-code/cli.js" "$@"`;
+
   const wrapperPath = binaryPath;
-  
+
   // Install via npm
   const success = await installViaNpm(destDir);
   if (success) {
@@ -198,7 +142,7 @@ async function downloadForPlatform(platformKey) {
     console.log(`[download-claude-code] Created wrapper: ${wrapperPath}`);
     return true;
   }
-  
+
   return false;
 }
 
@@ -208,19 +152,19 @@ async function downloadForPlatform(platformKey) {
 async function main() {
   const args = process.argv.slice(2);
   const downloadAll = args.includes('--all');
-  
+
   console.log('[download-claude-code] Starting Claude Code download...');
   console.log(`[download-claude-code] Resources directory: ${RESOURCES_DIR}`);
-  
+
   // Check global install
   if (checkGlobalInstall()) {
     console.log('[download-claude-code] Global Claude Code found - development will use global install');
   }
-  
+
   if (downloadAll) {
     // Download for all platforms (for release builds)
     console.log('[download-claude-code] Downloading for all platforms...');
-    
+
     for (const platform of Object.keys(PLATFORMS)) {
       console.log(`\n[download-claude-code] === ${platform} ===`);
       try {
@@ -233,7 +177,7 @@ async function main() {
     // Download for current platform only
     const currentPlatform = getCurrentPlatform();
     console.log(`[download-claude-code] Current platform: ${currentPlatform}`);
-    
+
     try {
       await downloadForPlatform(currentPlatform);
     } catch (error) {
@@ -241,7 +185,7 @@ async function main() {
       process.exit(1);
     }
   }
-  
+
   console.log('\n[download-claude-code] Done!');
 }
 

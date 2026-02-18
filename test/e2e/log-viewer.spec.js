@@ -10,8 +10,13 @@
 
 const { test, expect } = require('@playwright/test');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors,
-  sleep, LOG_SERVER
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
+  LOG_SERVER,
 } = require('./helpers/electron-app');
 
 let app;
@@ -20,7 +25,6 @@ let mainWindow;
 let errorSnapshot;
 
 test.describe('Log Viewer', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -56,11 +60,13 @@ test.describe('Log Viewer', () => {
   test('log viewer window closes cleanly', async () => {
     // Find and close any log viewer windows via Playwright
     const windows = await electronApp.windows();
-    const logPage = windows.find(p => {
+    const logPage = windows.find((p) => {
       try {
         const url = p.url();
         return url.includes('log') && !url.includes('login');
-      } catch { return false; }
+      } catch {
+        return false;
+      }
     });
 
     if (logPage) {
@@ -252,7 +258,7 @@ test.describe('Log Viewer', () => {
 
   test('analyzeLogsWithAI is available via renderer API', async () => {
     const result = await mainWindow.evaluate(() => ({
-      hasAnalyze: typeof window.api?.analyzeLogsWithAI === 'function'
+      hasAnalyze: typeof window.api?.analyzeLogsWithAI === 'function',
     }));
 
     // The function should exist on the renderer API
@@ -267,7 +273,10 @@ test.describe('Log Viewer', () => {
     const errors = await checkNewErrors(errorSnapshot);
     const genuine = filterBenignErrors(errors);
     if (genuine.length > 0) {
-      console.log('Log viewer test errors:', genuine.map(e => e.message));
+      console.log(
+        'Log viewer test errors:',
+        genuine.map((e) => e.message)
+      );
     }
     expect(genuine.length).toBeLessThanOrEqual(5);
   });

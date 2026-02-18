@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parseAllPlans } = require('./plan-parser');
+const { _parseAllPlans } = require('./plan-parser');
 
 const STATE_DIR = path.join(__dirname, 'state');
 const STATE_FILE = path.join(STATE_DIR, 'audit-state.json');
@@ -76,7 +76,7 @@ class StateManager {
    * Reconcile state with parsed items: add new items, remove stale ones.
    */
   _reconcile(parsedItems) {
-    const itemIds = new Set(parsedItems.map(i => i.id));
+    const itemIds = new Set(parsedItems.map((i) => i.id));
     const stateIds = new Set(Object.keys(this._state.items));
 
     // Add new items not in state
@@ -194,10 +194,12 @@ class StateManager {
    * Get all items with a given status.
    */
   getItemsByStatus(status) {
-    return this._items.filter(item => {
-      const s = this._state.items[item.id];
-      return s && s.status === status;
-    }).map(item => ({ ...item, state: this._state.items[item.id] }));
+    return this._items
+      .filter((item) => {
+        const s = this._state.items[item.id];
+        return s && s.status === status;
+      })
+      .map((item) => ({ ...item, state: this._state.items[item.id] }));
   }
 
   /**
@@ -219,8 +221,8 @@ class StateManager {
    */
   getPlanItems(planNumber) {
     return this._items
-      .filter(item => item.planNumber === planNumber)
-      .map(item => ({ ...item, state: this._state.items[item.id] }));
+      .filter((item) => item.planNumber === planNumber)
+      .map((item) => ({ ...item, state: this._state.items[item.id] }));
   }
 
   /**
@@ -264,7 +266,7 @@ class StateManager {
       percentComplete: 0,
     };
 
-    for (const [id, item] of Object.entries(items)) {
+    for (const [item] of Object.entries(items)) {
       if (item._removed) continue;
       summary.total++;
       if (summary[item.status] !== undefined) {
@@ -273,9 +275,7 @@ class StateManager {
     }
 
     const tested = summary.passed + summary.failed;
-    summary.percentComplete = summary.total > 0
-      ? Math.round((tested / summary.total) * 1000) / 10
-      : 0;
+    summary.percentComplete = summary.total > 0 ? Math.round((tested / summary.total) * 1000) / 10 : 0;
 
     return summary;
   }
@@ -285,9 +285,7 @@ class StateManager {
    */
   _getAppVersion() {
     try {
-      const pkg = JSON.parse(fs.readFileSync(
-        path.join(__dirname, '..', '..', 'package.json'), 'utf-8'
-      ));
+      const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf-8'));
       return pkg.version || 'unknown';
     } catch {
       return 'unknown';

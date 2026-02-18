@@ -10,7 +10,7 @@ const mockFileSystem = new Map();
 
 export const fs = {
   // Sync methods
-  readFileSync: vi.fn((path, options) => {
+  readFileSync: vi.fn((path, _options) => {
     if (mockFileSystem.has(path)) {
       return mockFileSystem.get(path);
     }
@@ -18,15 +18,15 @@ export const fs = {
     error.code = 'ENOENT';
     throw error;
   }),
-  
+
   writeFileSync: vi.fn((path, data) => {
     mockFileSystem.set(path, data);
   }),
-  
+
   existsSync: vi.fn((path) => mockFileSystem.has(path)),
-  
+
   mkdirSync: vi.fn(),
-  
+
   readdirSync: vi.fn((path) => {
     const files = [];
     for (const key of mockFileSystem.keys()) {
@@ -40,11 +40,11 @@ export const fs = {
     }
     return files;
   }),
-  
+
   unlinkSync: vi.fn((path) => {
     mockFileSystem.delete(path);
   }),
-  
+
   statSync: vi.fn((path) => {
     if (!mockFileSystem.has(path)) {
       const error = new Error(`ENOENT: no such file or directory, stat '${path}'`);
@@ -57,16 +57,16 @@ export const fs = {
       isFile: () => true,
       size: content ? content.length : 0,
       mtime: new Date(),
-      ctime: new Date()
+      ctime: new Date(),
     };
   }),
-  
+
   copyFileSync: vi.fn((src, dest) => {
     if (mockFileSystem.has(src)) {
       mockFileSystem.set(dest, mockFileSystem.get(src));
     }
   }),
-  
+
   renameSync: vi.fn((oldPath, newPath) => {
     if (mockFileSystem.has(oldPath)) {
       mockFileSystem.set(newPath, mockFileSystem.get(oldPath));
@@ -84,11 +84,11 @@ export const fs = {
       error.code = 'ENOENT';
       throw error;
     }),
-    
+
     writeFile: vi.fn(async (path, data) => {
       mockFileSystem.set(path, data);
     }),
-    
+
     access: vi.fn(async (path) => {
       if (!mockFileSystem.has(path)) {
         const error = new Error(`ENOENT: no such file or directory, access '${path}'`);
@@ -96,25 +96,25 @@ export const fs = {
         throw error;
       }
     }),
-    
+
     mkdir: vi.fn(async () => {}),
-    
+
     readdir: vi.fn(async (path) => fs.readdirSync(path)),
-    
+
     unlink: vi.fn(async (path) => {
       mockFileSystem.delete(path);
     }),
-    
+
     stat: vi.fn(async (path) => fs.statSync(path)),
-    
+
     copyFile: vi.fn(async (src, dest) => {
       fs.copyFileSync(src, dest);
     }),
-    
+
     rename: vi.fn(async (oldPath, newPath) => {
       fs.renameSync(oldPath, newPath);
-    })
-  }
+    }),
+  },
 };
 
 // Helper to set up mock files
@@ -133,5 +133,3 @@ export function getMockFiles() {
 }
 
 export default fs;
-
-

@@ -43,7 +43,7 @@ export class AudioToVideoService {
       imagePaths = null,
       resolution = '1920x1080',
       transitionDuration = 1,
-      outputPath = null
+      outputPath = null,
     } = options;
 
     const baseName = path.basename(audioPath, path.extname(audioPath));
@@ -65,26 +65,26 @@ export class AudioToVideoService {
             resolution,
             duration,
             jobId,
-            progressCallback
+            progressCallback,
           });
-        
+
         case 'image':
           return await this.createFromImage(audioPath, imagePath, output, {
             resolution,
             duration,
             jobId,
-            progressCallback
+            progressCallback,
           });
-        
+
         case 'slideshow':
           return await this.createFromSlideshow(audioPath, imagePaths, output, {
             resolution,
             duration,
             transitionDuration,
             jobId,
-            progressCallback
+            progressCallback,
           });
-        
+
         default:
           throw new Error(`Unknown video type: ${type}`);
       }
@@ -124,14 +124,21 @@ export class AudioToVideoService {
         // Add audio
         .input(audioPath)
         .outputOptions([
-          '-c:v', 'libx264',
-          '-preset', 'medium',
-          '-crf', '23',
-          '-c:a', 'aac',
-          '-b:a', '192k',
+          '-c:v',
+          'libx264',
+          '-preset',
+          'medium',
+          '-crf',
+          '23',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '192k',
           '-shortest',
-          '-pix_fmt', 'yuv420p',
-          '-movflags', '+faststart'
+          '-pix_fmt',
+          'yuv420p',
+          '-movflags',
+          '+faststart',
         ])
         .output(outputPath)
         .on('start', (cmd) => {
@@ -142,7 +149,7 @@ export class AudioToVideoService {
           if (progressCallback) {
             progressCallback({
               percent: progress.percent || 0,
-              currentTime: progress.timemark
+              currentTime: progress.timemark,
             });
           }
         })
@@ -153,7 +160,7 @@ export class AudioToVideoService {
             success: true,
             outputPath,
             duration,
-            type: 'color'
+            type: 'color',
           });
         })
         .on('error', (err) => {
@@ -184,15 +191,24 @@ export class AudioToVideoService {
         // Add audio
         .input(audioPath)
         .outputOptions([
-          '-c:v', 'libx264',
-          '-preset', 'medium',
-          '-crf', '23',
-          '-c:a', 'aac',
-          '-b:a', '192k',
-          '-t', String(duration),
-          '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
-          '-pix_fmt', 'yuv420p',
-          '-movflags', '+faststart'
+          '-c:v',
+          'libx264',
+          '-preset',
+          'medium',
+          '-crf',
+          '23',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '192k',
+          '-t',
+          String(duration),
+          '-vf',
+          `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
+          '-pix_fmt',
+          'yuv420p',
+          '-movflags',
+          '+faststart',
         ])
         .output(outputPath)
         .on('start', (cmd) => {
@@ -203,7 +219,7 @@ export class AudioToVideoService {
           if (progressCallback) {
             progressCallback({
               percent: progress.percent || 0,
-              currentTime: progress.timemark
+              currentTime: progress.timemark,
             });
           }
         })
@@ -214,7 +230,7 @@ export class AudioToVideoService {
             success: true,
             outputPath,
             duration,
-            type: 'image'
+            type: 'image',
           });
         })
         .on('error', (err) => {
@@ -230,7 +246,7 @@ export class AudioToVideoService {
    * Create video with slideshow of images
    */
   async createFromSlideshow(audioPath, imagePaths, outputPath, options) {
-    const { resolution, duration, transitionDuration, jobId, progressCallback } = options;
+    const { resolution, duration, transitionDuration: _transitionDuration, jobId, progressCallback } = options;
     const [width, height] = resolution.split('x').map(Number);
 
     if (!imagePaths || imagePaths.length === 0) {
@@ -247,14 +263,15 @@ export class AudioToVideoService {
     // Calculate display time per image
     const imageCount = imagePaths.length;
     const displayTime = duration / imageCount;
-    
-    log.info('video', '[AudioToVideoService] Creating slideshow: images, s each', { v0: imageCount, v1: displayTime.toFixed(2) });
+
+    log.info('video', '[AudioToVideoService] Creating slideshow: images, s each', {
+      v0: imageCount,
+      v1: displayTime.toFixed(2),
+    });
 
     // Create concat file for slideshow
     const concatFile = path.join(this.outputDir, `slideshow_${jobId}.txt`);
-    const concatContent = imagePaths.map(imgPath => 
-      `file '${imgPath.replace(/'/g, "'\\''")}'`
-    ).join('\n');
+    const concatContent = imagePaths.map((imgPath) => `file '${imgPath.replace(/'/g, "'\\''")}'`).join('\n');
     fs.writeFileSync(concatFile, concatContent);
 
     return new Promise((resolve, reject) => {
@@ -262,21 +279,33 @@ export class AudioToVideoService {
       const command = ffmpeg()
         .input(concatFile)
         .inputOptions([
-          '-f', 'concat',
-          '-safe', '0',
-          '-r', `1/${displayTime}` // Frame rate to match display time
+          '-f',
+          'concat',
+          '-safe',
+          '0',
+          '-r',
+          `1/${displayTime}`, // Frame rate to match display time
         ])
         .input(audioPath)
         .outputOptions([
-          '-c:v', 'libx264',
-          '-preset', 'medium',
-          '-crf', '23',
-          '-c:a', 'aac',
-          '-b:a', '192k',
-          '-t', String(duration),
-          '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,fps=30`,
-          '-pix_fmt', 'yuv420p',
-          '-movflags', '+faststart'
+          '-c:v',
+          'libx264',
+          '-preset',
+          'medium',
+          '-crf',
+          '23',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '192k',
+          '-t',
+          String(duration),
+          '-vf',
+          `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,fps=30`,
+          '-pix_fmt',
+          'yuv420p',
+          '-movflags',
+          '+faststart',
         ])
         .output(outputPath)
         .on('start', (cmd) => {
@@ -287,27 +316,35 @@ export class AudioToVideoService {
           if (progressCallback) {
             progressCallback({
               percent: progress.percent || 0,
-              currentTime: progress.timemark
+              currentTime: progress.timemark,
             });
           }
         })
         .on('end', () => {
           this.activeJobs.delete(jobId);
           // Cleanup temp file
-          try { fs.unlinkSync(concatFile); } catch (e) {}
+          try {
+            fs.unlinkSync(concatFile);
+          } catch (_ignored) {
+            /* temp file may already be removed */
+          }
           log.info('video', '[AudioToVideoService] Slideshow created', { data: outputPath });
           resolve({
             success: true,
             outputPath,
             duration,
             type: 'slideshow',
-            imageCount
+            imageCount,
           });
         })
         .on('error', (err) => {
           this.activeJobs.delete(jobId);
           // Cleanup temp file
-          try { fs.unlinkSync(concatFile); } catch (e) {}
+          try {
+            fs.unlinkSync(concatFile);
+          } catch (_ignored) {
+            /* temp file may already be removed */
+          }
           reject(err);
         });
 
@@ -328,21 +365,3 @@ export class AudioToVideoService {
     return false;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

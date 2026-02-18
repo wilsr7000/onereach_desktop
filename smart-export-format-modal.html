@@ -1,804 +1,829 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Create Document - Smart Export</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap"
+      rel="stylesheet"
+    />
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-        :root {
-            --bg-primary: #0a0a0b;
-            --bg-secondary: #141416;
-            --bg-card: #1a1a1e;
-            --bg-card-hover: #242429;
-            --bg-card-selected: #2a2a32;
-            --border-color: #2a2a30;
-            --border-hover: #3a3a44;
-            --border-selected: #6366f1;
-            --text-primary: #fafafa;
-            --text-secondary: #a1a1aa;
-            --text-muted: #71717a;
-            --accent-primary: #6366f1;
-            --accent-secondary: #818cf8;
-            --accent-glow: rgba(99, 102, 241, 0.15);
-            --success: #22c55e;
-            --warning: #f59e0b;
-            --danger: #ef4444;
-            --radius-sm: 6px;
-            --radius-md: 10px;
-            --radius-lg: 14px;
-            --radius-xl: 20px;
-            --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
-            --shadow-glow: 0 0 40px var(--accent-glow);
-        }
+      :root {
+        --bg-primary: #0a0a0b;
+        --bg-secondary: #141416;
+        --bg-card: #1a1a1e;
+        --bg-card-hover: #242429;
+        --bg-card-selected: #2a2a32;
+        --border-color: #2a2a30;
+        --border-hover: #3a3a44;
+        --border-selected: #6366f1;
+        --text-primary: #fafafa;
+        --text-secondary: #a1a1aa;
+        --text-muted: #71717a;
+        --accent-primary: #6366f1;
+        --accent-secondary: #818cf8;
+        --accent-glow: rgba(99, 102, 241, 0.15);
+        --success: #22c55e;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+        --radius-sm: 6px;
+        --radius-md: 10px;
+        --radius-lg: 14px;
+        --radius-xl: 20px;
+        --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
+        --shadow-glow: 0 0 40px var(--accent-glow);
+      }
 
-        body {
-            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            background-image: 
-                radial-gradient(ellipse at top, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
-                radial-gradient(ellipse at bottom right, rgba(139, 92, 246, 0.05) 0%, transparent 50%);
-        }
+      body {
+        font-family:
+          'DM Sans',
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background-image:
+          radial-gradient(ellipse at top, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+          radial-gradient(ellipse at bottom right, rgba(139, 92, 246, 0.05) 0%, transparent 50%);
+      }
 
-        .modal-container {
-            width: 100%;
-            max-width: 720px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-xl);
-            box-shadow: var(--shadow-card);
-            overflow: hidden;
-        }
+      .modal-container {
+        width: 100%;
+        max-width: 720px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-xl);
+        box-shadow: var(--shadow-card);
+        overflow: hidden;
+      }
 
-        .modal-header {
-            padding: 28px 32px 20px;
-            border-bottom: 1px solid var(--border-color);
-        }
+      .modal-header {
+        padding: 28px 32px 20px;
+        border-bottom: 1px solid var(--border-color);
+      }
 
-        .modal-header h1 {
-            font-size: 22px;
-            font-weight: 600;
-            letter-spacing: -0.02em;
-            margin-bottom: 6px;
-        }
+      .modal-header h1 {
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin-bottom: 6px;
+      }
 
-        .modal-header p {
-            color: var(--text-secondary);
-            font-size: 14px;
-        }
+      .modal-header p {
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
 
-        .space-info {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
-            background: var(--bg-card);
-            border-radius: var(--radius-md);
-            margin-top: 12px;
-            font-size: 13px;
-        }
+      .space-info {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        background: var(--bg-card);
+        border-radius: var(--radius-md);
+        margin-top: 12px;
+        font-size: 13px;
+      }
 
-        .space-info .icon {
-            font-size: 16px;
-        }
+      .space-info .icon {
+        font-size: 16px;
+      }
 
-        .space-info .name {
-            color: var(--text-primary);
-            font-weight: 500;
-        }
+      .space-info .name {
+        color: var(--text-primary);
+        font-weight: 500;
+      }
 
-        .space-info .count {
-            color: var(--text-muted);
-        }
+      .space-info .count {
+        color: var(--text-muted);
+      }
 
-        .modal-body {
-            padding: 24px 32px;
-        }
+      .modal-body {
+        padding: 24px 32px;
+      }
 
-        .category-tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 24px;
-            padding: 4px;
-            background: var(--bg-card);
-            border-radius: var(--radius-md);
-        }
+      .category-tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 24px;
+        padding: 4px;
+        background: var(--bg-card);
+        border-radius: var(--radius-md);
+      }
 
-        .category-tab {
-            flex: 1;
-            padding: 10px 16px;
-            border: none;
-            background: transparent;
-            color: var(--text-secondary);
-            font-family: inherit;
-            font-size: 13px;
-            font-weight: 500;
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
+      .category-tab {
+        flex: 1;
+        padding: 10px 16px;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
 
-        .category-tab:hover {
-            color: var(--text-primary);
-            background: var(--bg-card-hover);
-        }
+      .category-tab:hover {
+        color: var(--text-primary);
+        background: var(--bg-card-hover);
+      }
 
-        .category-tab.active {
-            color: var(--text-primary);
-            background: var(--bg-secondary);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        }
+      .category-tab.active {
+        color: var(--text-primary);
+        background: var(--bg-secondary);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      }
 
+      .format-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+
+      .format-card {
+        position: relative;
+        padding: 20px;
+        background: var(--bg-card);
+        border: 2px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-align: center;
+      }
+
+      .format-card:hover {
+        background: var(--bg-card-hover);
+        border-color: var(--border-hover);
+        transform: translateY(-2px);
+      }
+
+      .format-card.selected {
+        background: var(--bg-card-selected);
+        border-color: var(--border-selected);
+        box-shadow: var(--shadow-glow);
+      }
+
+      .format-card.selected::after {
+        content: '✓';
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 20px;
+        height: 20px;
+        background: var(--accent-primary);
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .format-icon {
+        width: 48px;
+        height: 48px;
+        margin: 0 auto 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        border-radius: var(--radius-md);
+      }
+
+      .format-card[data-format='pdf'] .format-icon {
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      }
+      .format-card[data-format='docx'] .format-icon {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      }
+      .format-card[data-format='pptx'] .format-icon {
+        background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+      }
+      .format-card[data-format='xlsx'] .format-icon {
+        background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+      }
+      .format-card[data-format='csv'] .format-icon {
+        background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+      }
+      .format-card[data-format='html'] .format-icon {
+        background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+      }
+      .format-card[data-format='markdown'] .format-icon {
+        background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+      }
+      .format-card[data-format='txt'] .format-icon {
+        background: linear-gradient(135deg, #71717a 0%, #52525b 100%);
+      }
+      .format-card[data-format='slides'] .format-icon {
+        background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
+      }
+
+      .format-name {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 4px;
+        color: var(--text-primary);
+      }
+
+      .format-ext {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .options-section {
+        padding: 20px;
+        background: var(--bg-card);
+        border-radius: var(--radius-lg);
+        margin-bottom: 24px;
+      }
+
+      .options-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 16px;
+      }
+
+      .options-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+      }
+
+      .option-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px;
+        background: var(--bg-secondary);
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+
+      .option-item:hover {
+        background: var(--bg-card-hover);
+      }
+
+      .option-checkbox {
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--border-color);
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+        flex-shrink: 0;
+      }
+
+      .option-item.checked .option-checkbox {
+        background: var(--accent-primary);
+        border-color: var(--accent-primary);
+      }
+
+      .option-item.checked .option-checkbox::after {
+        content: '✓';
+        color: white;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .option-label {
+        font-size: 13px;
+        color: var(--text-primary);
+      }
+
+      .option-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+
+      .template-select {
+        margin-top: 16px;
+      }
+
+      .template-select label {
+        display: block;
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+      }
+
+      .template-select select {
+        width: 100%;
+        padding: 12px 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 14px;
+        cursor: pointer;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a1a1aa' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 16px center;
+      }
+
+      .template-select select:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+      }
+
+      .modal-footer {
+        padding: 20px 32px 28px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-top: 1px solid var(--border-color);
+      }
+
+      .footer-hint {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .footer-actions {
+        display: flex;
+        gap: 12px;
+      }
+
+      .btn {
+        padding: 12px 24px;
+        border: none;
+        border-radius: var(--radius-md);
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .btn-secondary {
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+      }
+
+      .btn-secondary:hover {
+        background: var(--bg-card-hover);
+        border-color: var(--border-hover);
+      }
+
+      .btn-primary {
+        background: var(--accent-primary);
+        color: white;
+      }
+
+      .btn-primary:hover {
+        background: var(--accent-secondary);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+      }
+
+      .btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+
+      /* Loading state */
+      .loading-overlay {
+        display: none;
+        position: absolute;
+        inset: 0;
+        background: rgba(10, 10, 11, 0.9);
+        backdrop-filter: blur(4px);
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 16px;
+        z-index: 100;
+        border-radius: var(--radius-xl);
+      }
+
+      .loading-overlay.visible {
+        display: flex;
+      }
+
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid var(--border-color);
+        border-top-color: var(--accent-primary);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .loading-text {
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+
+      /* Responsive */
+      @media (max-width: 640px) {
         .format-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-            margin-bottom: 24px;
-        }
-
-        .format-card {
-            position: relative;
-            padding: 20px;
-            background: var(--bg-card);
-            border: 2px solid var(--border-color);
-            border-radius: var(--radius-lg);
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-align: center;
-        }
-
-        .format-card:hover {
-            background: var(--bg-card-hover);
-            border-color: var(--border-hover);
-            transform: translateY(-2px);
-        }
-
-        .format-card.selected {
-            background: var(--bg-card-selected);
-            border-color: var(--border-selected);
-            box-shadow: var(--shadow-glow);
-        }
-
-        .format-card.selected::after {
-            content: '✓';
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 20px;
-            height: 20px;
-            background: var(--accent-primary);
-            color: white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
-            font-weight: 700;
-        }
-
-        .format-icon {
-            width: 48px;
-            height: 48px;
-            margin: 0 auto 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 28px;
-            border-radius: var(--radius-md);
-        }
-
-        .format-card[data-format="pdf"] .format-icon { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
-        .format-card[data-format="docx"] .format-icon { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
-        .format-card[data-format="pptx"] .format-icon { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); }
-        .format-card[data-format="xlsx"] .format-icon { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); }
-        .format-card[data-format="csv"] .format-icon { background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%); }
-        .format-card[data-format="html"] .format-icon { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); }
-        .format-card[data-format="markdown"] .format-icon { background: linear-gradient(135deg, #64748b 0%, #475569 100%); }
-        .format-card[data-format="txt"] .format-icon { background: linear-gradient(135deg, #71717a 0%, #52525b 100%); }
-        .format-card[data-format="slides"] .format-icon { background: linear-gradient(135deg, #ec4899 0%, #db2777 100%); }
-
-        .format-name {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 4px;
-            color: var(--text-primary);
-        }
-
-        .format-ext {
-            font-size: 11px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .options-section {
-            padding: 20px;
-            background: var(--bg-card);
-            border-radius: var(--radius-lg);
-            margin-bottom: 24px;
-        }
-
-        .options-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 16px;
+          grid-template-columns: repeat(2, 1fr);
         }
 
         .options-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 12px;
-        }
-
-        .option-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 12px;
-            background: var(--bg-secondary);
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            transition: background 0.2s ease;
-        }
-
-        .option-item:hover {
-            background: var(--bg-card-hover);
-        }
-
-        .option-checkbox {
-            width: 18px;
-            height: 18px;
-            border: 2px solid var(--border-color);
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s ease;
-            flex-shrink: 0;
-        }
-
-        .option-item.checked .option-checkbox {
-            background: var(--accent-primary);
-            border-color: var(--accent-primary);
-        }
-
-        .option-item.checked .option-checkbox::after {
-            content: '✓';
-            color: white;
-            font-size: 11px;
-            font-weight: 700;
-        }
-
-        .option-label {
-            font-size: 13px;
-            color: var(--text-primary);
-        }
-
-        .option-hint {
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: 2px;
-        }
-
-        .template-select {
-            margin-top: 16px;
-        }
-
-        .template-select label {
-            display: block;
-            font-size: 13px;
-            color: var(--text-secondary);
-            margin-bottom: 8px;
-        }
-
-        .template-select select {
-            width: 100%;
-            padding: 12px 16px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            color: var(--text-primary);
-            font-family: inherit;
-            font-size: 14px;
-            cursor: pointer;
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a1a1aa' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 16px center;
-        }
-
-        .template-select select:focus {
-            outline: none;
-            border-color: var(--accent-primary);
+          grid-template-columns: 1fr;
         }
 
         .modal-footer {
-            padding: 20px 32px 28px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-top: 1px solid var(--border-color);
+          flex-direction: column;
+          gap: 16px;
         }
 
         .footer-hint {
-            font-size: 12px;
-            color: var(--text-muted);
+          text-align: center;
         }
+      }
 
-        .footer-actions {
-            display: flex;
-            gap: 12px;
-        }
+      /* Hidden formats by category */
+      .format-card[data-category]:not([data-category='all']) {
+        display: none;
+      }
 
-        .btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: var(--radius-md);
-            font-family: inherit;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
+      [data-active-category='all'] .format-card,
+      [data-active-category='documents'] .format-card[data-category='documents'],
+      [data-active-category='presentations'] .format-card[data-category='presentations'],
+      [data-active-category='data'] .format-card[data-category='data'],
+      [data-active-category='web'] .format-card[data-category='web'] {
+        display: block;
+      }
 
-        .btn-secondary {
-            background: var(--bg-card);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
+      /* Dark scrollbar styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
 
-        .btn-secondary:hover {
-            background: var(--bg-card-hover);
-            border-color: var(--border-hover);
-        }
+      ::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+      }
 
-        .btn-primary {
-            background: var(--accent-primary);
-            color: white;
-        }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+      }
 
-        .btn-primary:hover {
-            background: var(--accent-secondary);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-        }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.15);
+      }
 
-        .btn-primary:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        /* Loading state */
-        .loading-overlay {
-            display: none;
-            position: absolute;
-            inset: 0;
-            background: rgba(10, 10, 11, 0.9);
-            backdrop-filter: blur(4px);
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            gap: 16px;
-            z-index: 100;
-            border-radius: var(--radius-xl);
-        }
-
-        .loading-overlay.visible {
-            display: flex;
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid var(--border-color);
-            border-top-color: var(--accent-primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .loading-text {
-            color: var(--text-secondary);
-            font-size: 14px;
-        }
-
-        /* Responsive */
-        @media (max-width: 640px) {
-            .format-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            .options-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .modal-footer {
-                flex-direction: column;
-                gap: 16px;
-            }
-
-            .footer-hint {
-                text-align: center;
-            }
-        }
-
-        /* Hidden formats by category */
-        .format-card[data-category]:not([data-category="all"]) {
-            display: none;
-        }
-
-        [data-active-category="all"] .format-card,
-        [data-active-category="documents"] .format-card[data-category="documents"],
-        [data-active-category="presentations"] .format-card[data-category="presentations"],
-        [data-active-category="data"] .format-card[data-category="data"],
-        [data-active-category="web"] .format-card[data-category="web"] {
-            display: block;
-        }
-
-        /* Dark scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.15);
-        }
-
-        /* Firefox scrollbar */
-        * {
-            scrollbar-width: thin;
-            scrollbar-color: rgba(255, 255, 255, 0.1) rgba(0, 0, 0, 0.2);
-        }
+      /* Firefox scrollbar */
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.1) rgba(0, 0, 0, 0.2);
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="modal-container" data-active-category="all">
-        <div class="loading-overlay" id="loadingOverlay">
-            <div class="spinner"></div>
-            <div class="loading-text">Generating your document...</div>
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <div class="loading-text">Generating your document...</div>
+      </div>
+
+      <div class="modal-header">
+        <h1>Create New Document</h1>
+        <p>Transform your collected assets into a professional document</p>
+        <div class="space-info" id="spaceInfo">
+          <span class="icon">📁</span>
+          <span class="name" id="spaceName">My Space</span>
+          <span class="count" id="itemCount">• 0 items</span>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <div class="category-tabs">
+          <button class="category-tab active" data-category="all">All Formats</button>
+          <button class="category-tab" data-category="documents">Documents</button>
+          <button class="category-tab" data-category="presentations">Presentations</button>
+          <button class="category-tab" data-category="data">Data</button>
+          <button class="category-tab" data-category="web">Web</button>
         </div>
 
-        <div class="modal-header">
-            <h1>Create New Document</h1>
-            <p>Transform your collected assets into a professional document</p>
-            <div class="space-info" id="spaceInfo">
-                <span class="icon">📁</span>
-                <span class="name" id="spaceName">My Space</span>
-                <span class="count" id="itemCount">• 0 items</span>
-            </div>
+        <div class="format-grid" id="formatGrid">
+          <!-- Documents -->
+          <div class="format-card" data-format="pdf" data-category="documents">
+            <div class="format-icon">📄</div>
+            <div class="format-name">PDF Document</div>
+            <div class="format-ext">.pdf</div>
+          </div>
+          <div class="format-card" data-format="docx" data-category="documents">
+            <div class="format-icon">📝</div>
+            <div class="format-name">Word Document</div>
+            <div class="format-ext">.docx</div>
+          </div>
+          <div class="format-card" data-format="txt" data-category="documents">
+            <div class="format-icon">📃</div>
+            <div class="format-name">Plain Text</div>
+            <div class="format-ext">.txt</div>
+          </div>
+
+          <!-- Presentations -->
+          <div class="format-card" data-format="pptx" data-category="presentations">
+            <div class="format-icon">📊</div>
+            <div class="format-name">PowerPoint</div>
+            <div class="format-ext">.pptx</div>
+          </div>
+          <div class="format-card" data-format="slides" data-category="presentations">
+            <div class="format-icon">🎭</div>
+            <div class="format-name">Web Slides</div>
+            <div class="format-ext">.html</div>
+          </div>
+
+          <!-- Data -->
+          <div class="format-card" data-format="xlsx" data-category="data">
+            <div class="format-icon">📈</div>
+            <div class="format-name">Excel Spreadsheet</div>
+            <div class="format-ext">.xlsx</div>
+          </div>
+          <div class="format-card" data-format="csv" data-category="data">
+            <div class="format-icon">📋</div>
+            <div class="format-name">CSV Data</div>
+            <div class="format-ext">.csv</div>
+          </div>
+
+          <!-- Web -->
+          <div class="format-card" data-format="html" data-category="web">
+            <div class="format-icon">🌐</div>
+            <div class="format-name">Web Page</div>
+            <div class="format-ext">.html</div>
+          </div>
+          <div class="format-card" data-format="markdown" data-category="web">
+            <div class="format-icon">✍️</div>
+            <div class="format-name">Markdown</div>
+            <div class="format-ext">.md</div>
+          </div>
         </div>
 
-        <div class="modal-body">
-            <div class="category-tabs">
-                <button class="category-tab active" data-category="all">All Formats</button>
-                <button class="category-tab" data-category="documents">Documents</button>
-                <button class="category-tab" data-category="presentations">Presentations</button>
-                <button class="category-tab" data-category="data">Data</button>
-                <button class="category-tab" data-category="web">Web</button>
+        <div class="options-section">
+          <div class="options-title">Export Options</div>
+          <div class="options-grid">
+            <div class="option-item checked" data-option="includeImages">
+              <div class="option-checkbox"></div>
+              <div>
+                <div class="option-label">Include Images</div>
+                <div class="option-hint">Embed images from your space</div>
+              </div>
             </div>
-
-            <div class="format-grid" id="formatGrid">
-                <!-- Documents -->
-                <div class="format-card" data-format="pdf" data-category="documents">
-                    <div class="format-icon">📄</div>
-                    <div class="format-name">PDF Document</div>
-                    <div class="format-ext">.pdf</div>
-                </div>
-                <div class="format-card" data-format="docx" data-category="documents">
-                    <div class="format-icon">📝</div>
-                    <div class="format-name">Word Document</div>
-                    <div class="format-ext">.docx</div>
-                </div>
-                <div class="format-card" data-format="txt" data-category="documents">
-                    <div class="format-icon">📃</div>
-                    <div class="format-name">Plain Text</div>
-                    <div class="format-ext">.txt</div>
-                </div>
-
-                <!-- Presentations -->
-                <div class="format-card" data-format="pptx" data-category="presentations">
-                    <div class="format-icon">📊</div>
-                    <div class="format-name">PowerPoint</div>
-                    <div class="format-ext">.pptx</div>
-                </div>
-                <div class="format-card" data-format="slides" data-category="presentations">
-                    <div class="format-icon">🎭</div>
-                    <div class="format-name">Web Slides</div>
-                    <div class="format-ext">.html</div>
-                </div>
-
-                <!-- Data -->
-                <div class="format-card" data-format="xlsx" data-category="data">
-                    <div class="format-icon">📈</div>
-                    <div class="format-name">Excel Spreadsheet</div>
-                    <div class="format-ext">.xlsx</div>
-                </div>
-                <div class="format-card" data-format="csv" data-category="data">
-                    <div class="format-icon">📋</div>
-                    <div class="format-name">CSV Data</div>
-                    <div class="format-ext">.csv</div>
-                </div>
-
-                <!-- Web -->
-                <div class="format-card" data-format="html" data-category="web">
-                    <div class="format-icon">🌐</div>
-                    <div class="format-name">Web Page</div>
-                    <div class="format-ext">.html</div>
-                </div>
-                <div class="format-card" data-format="markdown" data-category="web">
-                    <div class="format-icon">✍️</div>
-                    <div class="format-name">Markdown</div>
-                    <div class="format-ext">.md</div>
-                </div>
+            <div class="option-item checked" data-option="includeMetadata">
+              <div class="option-checkbox"></div>
+              <div>
+                <div class="option-label">Include Metadata</div>
+                <div class="option-hint">Source URLs, dates, tags</div>
+              </div>
             </div>
-
-            <div class="options-section">
-                <div class="options-title">Export Options</div>
-                <div class="options-grid">
-                    <div class="option-item checked" data-option="includeImages">
-                        <div class="option-checkbox"></div>
-                        <div>
-                            <div class="option-label">Include Images</div>
-                            <div class="option-hint">Embed images from your space</div>
-                        </div>
-                    </div>
-                    <div class="option-item checked" data-option="includeMetadata">
-                        <div class="option-checkbox"></div>
-                        <div>
-                            <div class="option-label">Include Metadata</div>
-                            <div class="option-hint">Source URLs, dates, tags</div>
-                        </div>
-                    </div>
-                    <div class="option-item" data-option="aiEnhanced">
-                        <div class="option-checkbox"></div>
-                        <div>
-                            <div class="option-label">AI-Enhanced Content</div>
-                            <div class="option-hint">Restructure and improve text</div>
-                        </div>
-                    </div>
-                    <div class="option-item" data-option="tableOfContents">
-                        <div class="option-checkbox"></div>
-                        <div>
-                            <div class="option-label">Table of Contents</div>
-                            <div class="option-hint">Auto-generate navigation</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="template-select">
-                    <label for="templateSelect">Document Template</label>
-                    <select id="templateSelect">
-                        <option value="auto">Auto-detect best template</option>
-                        <option value="article">Article / Blog Post</option>
-                        <option value="report">Business Report</option>
-                        <option value="documentation">Technical Documentation</option>
-                        <option value="one-pager">One-Pager Summary</option>
-                        <option value="design-brief">Design Brief</option>
-                        <option value="product-requirements">Product Requirements</option>
-                        <option value="infographic">Data Infographic</option>
-                        <option value="dashboard">Dashboard View</option>
-                    </select>
-                </div>
+            <div class="option-item" data-option="aiEnhanced">
+              <div class="option-checkbox"></div>
+              <div>
+                <div class="option-label">AI-Enhanced Content</div>
+                <div class="option-hint">Restructure and improve text</div>
+              </div>
             </div>
+            <div class="option-item" data-option="tableOfContents">
+              <div class="option-checkbox"></div>
+              <div>
+                <div class="option-label">Table of Contents</div>
+                <div class="option-hint">Auto-generate navigation</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="template-select">
+            <label for="templateSelect">Document Template</label>
+            <select id="templateSelect">
+              <option value="auto">Auto-detect best template</option>
+              <option value="article">Article / Blog Post</option>
+              <option value="report">Business Report</option>
+              <option value="documentation">Technical Documentation</option>
+              <option value="one-pager">One-Pager Summary</option>
+              <option value="design-brief">Design Brief</option>
+              <option value="product-requirements">Product Requirements</option>
+              <option value="infographic">Data Infographic</option>
+              <option value="dashboard">Dashboard View</option>
+            </select>
+          </div>
         </div>
+      </div>
 
-        <div class="modal-footer">
-            <div class="footer-hint">
-                <span id="formatHint">Select a format to continue</span>
-            </div>
-            <div class="footer-actions">
-                <button class="btn btn-secondary" id="cancelBtn" onclick="closeModal()">Cancel</button>
-                <button class="btn btn-primary" id="createBtn" disabled>Create Document</button>
-            </div>
+      <div class="modal-footer">
+        <div class="footer-hint">
+          <span id="formatHint">Select a format to continue</span>
         </div>
+        <div class="footer-actions">
+          <button class="btn btn-secondary" id="cancelBtn" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="createBtn" disabled>Create Document</button>
+        </div>
+      </div>
     </div>
 
     <script>
-        // State
-        let selectedFormat = null;
-        let spaceData = null;
-        let options = {
-            includeImages: true,
-            includeMetadata: true,
-            aiEnhanced: false,
-            tableOfContents: false,
-            template: 'auto'
-        };
+      // State
+      let selectedFormat = null;
+      let spaceData = null;
+      let options = {
+        includeImages: true,
+        includeMetadata: true,
+        aiEnhanced: false,
+        tableOfContents: false,
+        template: 'auto',
+      };
 
-        // DOM Elements
-        const formatGrid = document.getElementById('formatGrid');
-        const formatCards = document.querySelectorAll('.format-card');
-        const categoryTabs = document.querySelectorAll('.category-tab');
-        const optionItems = document.querySelectorAll('.option-item');
-        const templateSelect = document.getElementById('templateSelect');
-        const createBtn = document.getElementById('createBtn');
-        const cancelBtn = document.getElementById('cancelBtn');
-        const loadingOverlay = document.getElementById('loadingOverlay');
-        const formatHint = document.getElementById('formatHint');
-        const modalContainer = document.querySelector('.modal-container');
+      // DOM Elements
+      const formatGrid = document.getElementById('formatGrid');
+      const formatCards = document.querySelectorAll('.format-card');
+      const categoryTabs = document.querySelectorAll('.category-tab');
+      const optionItems = document.querySelectorAll('.option-item');
+      const templateSelect = document.getElementById('templateSelect');
+      const createBtn = document.getElementById('createBtn');
+      const cancelBtn = document.getElementById('cancelBtn');
+      const loadingOverlay = document.getElementById('loadingOverlay');
+      const formatHint = document.getElementById('formatHint');
+      const modalContainer = document.querySelector('.modal-container');
 
-        // Format descriptions
-        const formatDescriptions = {
-            pdf: 'Professional PDF document with formatting preserved',
-            docx: 'Editable Word document for Microsoft Office or Google Docs',
-            txt: 'Simple plain text file, universally compatible',
-            pptx: 'PowerPoint presentation with slides and bullet points',
-            slides: 'Interactive web-based presentation',
-            xlsx: 'Excel spreadsheet with structured data tables',
-            csv: 'Comma-separated values for data import/export',
-            html: 'Standalone web page with embedded styles',
-            markdown: 'Portable markdown for documentation and wikis'
-        };
+      // Format descriptions
+      const formatDescriptions = {
+        pdf: 'Professional PDF document with formatting preserved',
+        docx: 'Editable Word document for Microsoft Office or Google Docs',
+        txt: 'Simple plain text file, universally compatible',
+        pptx: 'PowerPoint presentation with slides and bullet points',
+        slides: 'Interactive web-based presentation',
+        xlsx: 'Excel spreadsheet with structured data tables',
+        csv: 'Comma-separated values for data import/export',
+        html: 'Standalone web page with embedded styles',
+        markdown: 'Portable markdown for documentation and wikis',
+      };
 
-        // Initialize
-        function init() {
-            // Get space data from URL params or window context
-            if (window.electronAPI) {
-                window.electronAPI.getSpaceForExport().then(data => {
-                    if (data) {
-                        spaceData = data;
-                        updateSpaceInfo();
-                    }
-                });
+      // Initialize
+      function init() {
+        // Get space data from URL params or window context
+        if (window.electronAPI) {
+          window.electronAPI.getSpaceForExport().then((data) => {
+            if (data) {
+              spaceData = data;
+              updateSpaceInfo();
             }
-
-            // Event listeners
-            formatCards.forEach(card => {
-                card.addEventListener('click', () => selectFormat(card));
-            });
-
-            categoryTabs.forEach(tab => {
-                tab.addEventListener('click', () => selectCategory(tab));
-            });
-
-            optionItems.forEach(item => {
-                item.addEventListener('click', () => toggleOption(item));
-            });
-
-            templateSelect.addEventListener('change', (e) => {
-                options.template = e.target.value;
-            });
-
-            createBtn.addEventListener('click', createDocument);
-            cancelBtn.addEventListener('click', closeModal);
-
-            // Keyboard shortcuts
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') closeModal();
-                if (e.key === 'Enter' && selectedFormat) createDocument();
-            });
+          });
         }
 
-        function updateSpaceInfo() {
-            if (spaceData) {
-                document.getElementById('spaceName').textContent = spaceData.name || 'My Space';
-                document.getElementById('itemCount').textContent = `• ${spaceData.itemCount || 0} items`;
+        // Event listeners
+        formatCards.forEach((card) => {
+          card.addEventListener('click', () => selectFormat(card));
+        });
+
+        categoryTabs.forEach((tab) => {
+          tab.addEventListener('click', () => selectCategory(tab));
+        });
+
+        optionItems.forEach((item) => {
+          item.addEventListener('click', () => toggleOption(item));
+        });
+
+        templateSelect.addEventListener('change', (e) => {
+          options.template = e.target.value;
+        });
+
+        createBtn.addEventListener('click', createDocument);
+        cancelBtn.addEventListener('click', closeModal);
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') closeModal();
+          if (e.key === 'Enter' && selectedFormat) createDocument();
+        });
+      }
+
+      function updateSpaceInfo() {
+        if (spaceData) {
+          document.getElementById('spaceName').textContent = spaceData.name || 'My Space';
+          document.getElementById('itemCount').textContent = `• ${spaceData.itemCount || 0} items`;
+        }
+      }
+
+      function selectFormat(card) {
+        // Deselect previous
+        formatCards.forEach((c) => c.classList.remove('selected'));
+
+        // Select new
+        card.classList.add('selected');
+        selectedFormat = card.dataset.format;
+
+        // Update UI
+        createBtn.disabled = false;
+        formatHint.textContent = formatDescriptions[selectedFormat] || 'Ready to create';
+      }
+
+      function selectCategory(tab) {
+        categoryTabs.forEach((t) => t.classList.remove('active'));
+        tab.classList.add('active');
+        modalContainer.dataset.activeCategory = tab.dataset.category;
+      }
+
+      function toggleOption(item) {
+        item.classList.toggle('checked');
+        const optionName = item.dataset.option;
+        options[optionName] = item.classList.contains('checked');
+      }
+
+      async function createDocument() {
+        if (!selectedFormat) return;
+
+        // Show loading
+        loadingOverlay.classList.add('visible');
+        document.querySelector('.loading-text').textContent =
+          `Creating ${formatDescriptions[selectedFormat].split(' ')[0]}...`;
+
+        try {
+          const result = await window.electronAPI.generateExport({
+            format: selectedFormat,
+            spaceId: spaceData?.id,
+            options: {
+              ...options,
+              template: templateSelect.value,
+            },
+          });
+
+          if (result.success) {
+            // Close modal and show success
+            closeModal();
+            if (window.electronAPI.showExportSuccess) {
+              window.electronAPI.showExportSuccess(result);
             }
+          } else {
+            throw new Error(result.error || 'Export failed');
+          }
+        } catch (error) {
+          console.error('Export error:', error);
+          loadingOverlay.classList.remove('visible');
+          alert('Failed to create document: ' + error.message);
         }
+      }
 
-        function selectFormat(card) {
-            // Deselect previous
-            formatCards.forEach(c => c.classList.remove('selected'));
-            
-            // Select new
-            card.classList.add('selected');
-            selectedFormat = card.dataset.format;
-            
-            // Update UI
-            createBtn.disabled = false;
-            formatHint.textContent = formatDescriptions[selectedFormat] || 'Ready to create';
+      function closeModal() {
+        console.log('[Create Document] closeModal called');
+        try {
+          if (window.electronAPI && window.electronAPI.closeModal) {
+            console.log('[Create Document] Using electronAPI.closeModal');
+            window.electronAPI.closeModal();
+          } else if (window.close) {
+            console.log('[Create Document] Using window.close');
+            window.close();
+          } else {
+            console.log('[Create Document] No close method available, hiding modal');
+            document.querySelector('.modal-container').style.display = 'none';
+          }
+        } catch (error) {
+          console.error('[Create Document] Error closing modal:', error);
+          // Last resort: try to hide the modal
+          document.querySelector('.modal-container').style.display = 'none';
         }
+      }
 
-        function selectCategory(tab) {
-            categoryTabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            modalContainer.dataset.activeCategory = tab.dataset.category;
-        }
+      // Initialize on load
+      document.addEventListener('DOMContentLoaded', init);
 
-        function toggleOption(item) {
-            item.classList.toggle('checked');
-            const optionName = item.dataset.option;
-            options[optionName] = item.classList.contains('checked');
-        }
-
-        async function createDocument() {
-            if (!selectedFormat) return;
-
-            // Show loading
-            loadingOverlay.classList.add('visible');
-            document.querySelector('.loading-text').textContent = `Creating ${formatDescriptions[selectedFormat].split(' ')[0]}...`;
-
-            try {
-                const result = await window.electronAPI.generateExport({
-                    format: selectedFormat,
-                    spaceId: spaceData?.id,
-                    options: {
-                        ...options,
-                        template: templateSelect.value
-                    }
-                });
-
-                if (result.success) {
-                    // Close modal and show success
-                    closeModal();
-                    if (window.electronAPI.showExportSuccess) {
-                        window.electronAPI.showExportSuccess(result);
-                    }
-                } else {
-                    throw new Error(result.error || 'Export failed');
-                }
-            } catch (error) {
-                console.error('Export error:', error);
-                loadingOverlay.classList.remove('visible');
-                alert('Failed to create document: ' + error.message);
-            }
-        }
-
-        function closeModal() {
-            console.log('[Create Document] closeModal called');
-            try {
-                if (window.electronAPI && window.electronAPI.closeModal) {
-                    console.log('[Create Document] Using electronAPI.closeModal');
-                    window.electronAPI.closeModal();
-                } else if (window.close) {
-                    console.log('[Create Document] Using window.close');
-                    window.close();
-                } else {
-                    console.log('[Create Document] No close method available, hiding modal');
-                    document.querySelector('.modal-container').style.display = 'none';
-                }
-            } catch (error) {
-                console.error('[Create Document] Error closing modal:', error);
-                // Last resort: try to hide the modal
-                document.querySelector('.modal-container').style.display = 'none';
-            }
-        }
-
-        // Initialize on load
-        document.addEventListener('DOMContentLoaded', init);
-
-        // Expose for testing
-        window.setSpaceData = (data) => {
-            spaceData = data;
-            updateSpaceInfo();
-        };
+      // Expose for testing
+      window.setSpaceData = (data) => {
+        spaceData = data;
+        updateSpaceInfo();
+      };
     </script>
-</body>
+  </body>
 </html>
-
-
-
-

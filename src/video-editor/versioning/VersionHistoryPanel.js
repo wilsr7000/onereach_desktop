@@ -1,6 +1,6 @@
 /**
  * VersionHistoryPanel - Timeline view of version history
- * 
+ *
  * Features:
  * - Timeline view of versions
  * - Version diff viewer
@@ -13,7 +13,7 @@ export class VersionHistoryPanel {
     this.app = appContext;
     this.panelElement = null;
     this.isVisible = false;
-    
+
     // State
     this.versions = [];
     this.selectedVersion = null;
@@ -35,16 +35,16 @@ export class VersionHistoryPanel {
   _createPanel() {
     // Check if panel already exists
     this.panelElement = document.getElementById('versionHistoryPanel');
-    
+
     if (!this.panelElement) {
       this.panelElement = document.createElement('div');
       this.panelElement.id = 'versionHistoryPanel';
       this.panelElement.className = 'version-history-panel-overlay';
       document.body.appendChild(this.panelElement);
-      
+
       this._addStyles();
     }
-    
+
     this._setupEventListeners();
   }
 
@@ -53,7 +53,7 @@ export class VersionHistoryPanel {
    */
   _addStyles() {
     if (document.getElementById('versionHistoryPanelStyles')) return;
-    
+
     const styles = document.createElement('style');
     styles.id = 'versionHistoryPanelStyles';
     styles.textContent = `
@@ -442,7 +442,7 @@ export class VersionHistoryPanel {
         this.hide();
       }
     });
-    
+
     // Escape to close
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.isVisible) {
@@ -456,7 +456,7 @@ export class VersionHistoryPanel {
    */
   async _loadVersions() {
     const versionManager = this.app.versionManager;
-    
+
     if (versionManager?.getVersionHistory) {
       this.versions = await versionManager.getVersionHistory();
     } else {
@@ -469,7 +469,7 @@ export class VersionHistoryPanel {
           isCurrent: true,
           branch: 'main',
           editCount: 0,
-          notes: 'Auto-saved current state'
+          notes: 'Auto-saved current state',
         },
         {
           id: 'v_initial',
@@ -478,8 +478,8 @@ export class VersionHistoryPanel {
           isCurrent: false,
           branch: 'main',
           editCount: 0,
-          notes: 'Project created'
-        }
+          notes: 'Project created',
+        },
       ];
     }
   }
@@ -491,7 +491,7 @@ export class VersionHistoryPanel {
     this.mode = options.mode || 'history';
     this._loadVersions();
     this.render();
-    
+
     this.panelElement.classList.add('visible');
     this.isVisible = true;
   }
@@ -510,7 +510,7 @@ export class VersionHistoryPanel {
    */
   render() {
     if (!this.panelElement) return;
-    
+
     this.panelElement.innerHTML = `
       <div class="version-history-panel">
         <div class="version-history-header">
@@ -547,7 +547,7 @@ export class VersionHistoryPanel {
         </div>
       </div>
     `;
-    
+
     this._bindRenderEvents();
   }
 
@@ -564,10 +564,10 @@ export class VersionHistoryPanel {
         </div>
       `;
     }
-    
+
     return `
       <div class="version-timeline">
-        ${this.versions.map(version => this._renderVersionItem(version)).join('')}
+        ${this.versions.map((version) => this._renderVersionItem(version)).join('')}
       </div>
     `;
   }
@@ -580,7 +580,7 @@ export class VersionHistoryPanel {
     const isCurrent = version.isCurrent;
     const date = new Date(version.timestamp);
     const timeAgo = this._formatTimeAgo(date);
-    
+
     return `
       <div class="version-item ${isSelected ? 'selected' : ''} ${isCurrent ? 'current' : ''}" 
            data-version-id="${version.id}">
@@ -594,16 +594,26 @@ export class VersionHistoryPanel {
             <span>🌿 ${version.branch || 'main'}</span>
             ${version.editCount > 0 ? `<span>✂️ ${version.editCount} edits</span>` : ''}
           </div>
-          ${version.notes ? `
+          ${
+            version.notes
+              ? `
             <div class="version-card-notes">${this._escapeHtml(version.notes)}</div>
-          ` : ''}
-          ${isSelected ? `
+          `
+              : ''
+          }
+          ${
+            isSelected
+              ? `
             <div class="version-card-actions">
-              ${!isCurrent ? `
+              ${
+                !isCurrent
+                  ? `
                 <button class="version-action-btn primary" data-action="restore" data-version-id="${version.id}">
                   ↩️ Restore
                 </button>
-              ` : ''}
+              `
+                  : ''
+              }
               <button class="version-action-btn" data-action="preview" data-version-id="${version.id}">
                 👁️ Preview
               </button>
@@ -614,7 +624,9 @@ export class VersionHistoryPanel {
                 📝 Add Note
               </button>
             </div>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
       </div>
     `;
@@ -630,11 +642,15 @@ export class VersionHistoryPanel {
           <div class="compare-column-header">
             <span class="compare-column-title">From Version</span>
             <select class="compare-column-select" id="compareFromSelect">
-              ${this.versions.map(v => `
+              ${this.versions
+                .map(
+                  (v) => `
                 <option value="${v.id}" ${v.id === this.compareVersions?.from?.id ? 'selected' : ''}>
                   ${this._escapeHtml(v.name)}
                 </option>
-              `).join('')}
+              `
+                )
+                .join('')}
             </select>
           </div>
           <div class="compare-diff-list" id="compareFromDiff">
@@ -646,11 +662,15 @@ export class VersionHistoryPanel {
           <div class="compare-column-header">
             <span class="compare-column-title">To Version</span>
             <select class="compare-column-select" id="compareToSelect">
-              ${this.versions.map(v => `
+              ${this.versions
+                .map(
+                  (v) => `
                 <option value="${v.id}" ${v.id === this.compareVersions?.to?.id ? 'selected' : ''}>
                   ${this._escapeHtml(v.name)}
                 </option>
-              `).join('')}
+              `
+                )
+                .join('')}
             </select>
           </div>
           <div class="compare-diff-list" id="compareToDiff">
@@ -679,17 +699,21 @@ export class VersionHistoryPanel {
   /**
    * Render diff items for compare view
    */
-  _renderDiffItems(side) {
+  _renderDiffItems(_side) {
     // Mock diff data - would come from version manager
     const diffs = [
       { type: 'removed', text: 'Removed segment at 0:45' },
       { type: 'added', text: 'Added transition at 1:30' },
-      { type: 'modified', text: 'Changed audio level at 2:15' }
+      { type: 'modified', text: 'Changed audio level at 2:15' },
     ];
-    
-    return diffs.map(diff => `
+
+    return diffs
+      .map(
+        (diff) => `
       <div class="compare-diff-item ${diff.type}">${diff.text}</div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   /**
@@ -705,48 +729,48 @@ export class VersionHistoryPanel {
    */
   _bindRenderEvents() {
     // Close button
-    this.panelElement.querySelectorAll('[data-action="close"]').forEach(btn => {
+    this.panelElement.querySelectorAll('[data-action="close"]').forEach((btn) => {
       btn.addEventListener('click', () => this.hide());
     });
-    
+
     // Tab switching
-    this.panelElement.querySelectorAll('.version-tab').forEach(tab => {
+    this.panelElement.querySelectorAll('.version-tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         this.mode = tab.dataset.mode;
         this.render();
       });
     });
-    
+
     // Version item click
-    this.panelElement.querySelectorAll('.version-item').forEach(item => {
+    this.panelElement.querySelectorAll('.version-item').forEach((item) => {
       item.addEventListener('click', (e) => {
         const action = e.target.closest('[data-action]');
         if (action) {
           this._handleAction(action.dataset.action, action.dataset.versionId);
           return;
         }
-        
+
         const versionId = item.dataset.versionId;
-        this.selectedVersion = this.versions.find(v => v.id === versionId);
+        this.selectedVersion = this.versions.find((v) => v.id === versionId);
         this.render();
       });
     });
-    
+
     // Create snapshot
     this.panelElement.querySelector('[data-action="create-snapshot"]')?.addEventListener('click', () => {
       this._createSnapshot();
     });
-    
+
     // Compare selects
     this.panelElement.querySelector('#compareFromSelect')?.addEventListener('change', (e) => {
       this.compareVersions = this.compareVersions || {};
-      this.compareVersions.from = this.versions.find(v => v.id === e.target.value);
+      this.compareVersions.from = this.versions.find((v) => v.id === e.target.value);
       this.render();
     });
-    
+
     this.panelElement.querySelector('#compareToSelect')?.addEventListener('change', (e) => {
       this.compareVersions = this.compareVersions || {};
-      this.compareVersions.to = this.versions.find(v => v.id === e.target.value);
+      this.compareVersions.to = this.versions.find((v) => v.id === e.target.value);
       this.render();
     });
   }
@@ -755,9 +779,9 @@ export class VersionHistoryPanel {
    * Handle version action
    */
   async _handleAction(action, versionId) {
-    const version = this.versions.find(v => v.id === versionId);
+    const version = this.versions.find((v) => v.id === versionId);
     if (!version) return;
-    
+
     switch (action) {
       case 'restore':
         if (confirm(`Restore to "${version.name}"? Current changes will be saved as a new version.`)) {
@@ -765,15 +789,15 @@ export class VersionHistoryPanel {
           this.hide();
         }
         break;
-        
+
       case 'preview':
         this.app.showToast?.('info', 'Preview coming soon');
         break;
-        
+
       case 'export':
         this.app.showToast?.('info', 'Export coming soon');
         break;
-        
+
       case 'note':
         const note = prompt('Add a note to this version:', version.notes || '');
         if (note !== null) {
@@ -792,7 +816,7 @@ export class VersionHistoryPanel {
     if (this.app.versionManager?.restoreVersion) {
       await this.app.versionManager.restoreVersion(versionId);
     }
-    
+
     this.app.showToast?.('success', 'Version restored');
     await this._loadVersions();
   }
@@ -803,9 +827,9 @@ export class VersionHistoryPanel {
   async _createSnapshot() {
     const name = prompt('Enter snapshot name:', `Snapshot ${new Date().toLocaleString()}`);
     if (!name?.trim()) return;
-    
+
     const notes = prompt('Add notes (optional):');
-    
+
     const snapshot = {
       id: `v_${Date.now()}`,
       name: name.trim(),
@@ -813,15 +837,15 @@ export class VersionHistoryPanel {
       isCurrent: false,
       branch: this.app.branchSwitcher?.getCurrentBranch()?.name || 'main',
       editCount: this.app.videoSyncEngine?.edits?.length || 0,
-      notes: notes?.trim() || ''
+      notes: notes?.trim() || '',
     };
-    
+
     if (this.app.versionManager?.createSnapshot) {
       await this.app.versionManager.createSnapshot(snapshot);
     } else {
       this.versions.unshift(snapshot);
     }
-    
+
     this.app.showToast?.('success', 'Snapshot created');
     this.render();
   }
@@ -836,7 +860,7 @@ export class VersionHistoryPanel {
     const diffMins = Math.floor(diffSecs / 60);
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
-    
+
     if (diffSecs < 60) return 'Just now';
     if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
     if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
@@ -855,14 +879,3 @@ export class VersionHistoryPanel {
 }
 
 export default VersionHistoryPanel;
-
-
-
-
-
-
-
-
-
-
-

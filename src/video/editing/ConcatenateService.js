@@ -29,10 +29,7 @@ export class ConcatenateService {
    * @returns {Promise<Object>} Result with output path
    */
   async concatenateVideos(inputPaths, options = {}, progressCallback = null) {
-    const {
-      outputPath = null,
-      format = 'mp4'
-    } = options;
+    const { outputPath = null, format = 'mp4' } = options;
 
     if (!inputPaths || inputPaths.length === 0) {
       throw new Error('No input paths provided');
@@ -44,7 +41,7 @@ export class ConcatenateService {
     return new Promise((resolve, reject) => {
       // Create temporary file list
       const listFile = path.join(this.outputDir, `concat_${jobId}.txt`);
-      const listContent = inputPaths.map(p => `file '${p}'`).join('\n');
+      const listContent = inputPaths.map((p) => `file '${p}'`).join('\n');
       fs.writeFileSync(listFile, listContent);
 
       ffmpeg()
@@ -61,7 +58,7 @@ export class ConcatenateService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -93,7 +90,7 @@ export class ConcatenateService {
       videoCodec = 'libx264',
       audioCodec = 'aac',
       preset = 'medium',
-      crf = 23
+      crf = 23,
     } = options;
 
     if (!inputPaths || inputPaths.length === 0) {
@@ -106,7 +103,7 @@ export class ConcatenateService {
     return new Promise((resolve, reject) => {
       // Create temporary file list
       const listFile = path.join(this.outputDir, `merge_${jobId}.txt`);
-      const listContent = inputPaths.map(p => `file '${p}'`).join('\n');
+      const listContent = inputPaths.map((p) => `file '${p}'`).join('\n');
       fs.writeFileSync(listFile, listContent);
 
       ffmpeg()
@@ -114,10 +111,7 @@ export class ConcatenateService {
         .inputOptions(['-f concat', '-safe 0'])
         .videoCodec(videoCodec)
         .audioCodec(audioCodec)
-        .outputOptions([
-          `-preset ${preset}`,
-          `-crf ${crf}`
-        ])
+        .outputOptions([`-preset ${preset}`, `-crf ${crf}`])
         .output(output)
         .on('start', (cmd) => {
           log.info('video', '[ConcatenateService] Merge started', { data: cmd });
@@ -128,7 +122,7 @@ export class ConcatenateService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -146,19 +140,3 @@ export class ConcatenateService {
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

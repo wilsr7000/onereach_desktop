@@ -20,11 +20,7 @@ export class SpaceSaver {
    * @returns {Promise<Object>} Save result
    */
   async save(blob, options = {}) {
-    const {
-      filename = `recording_${Date.now()}.webm`,
-      spaceId = this.currentSpaceId,
-      metadata = {}
-    } = options;
+    const { filename = `recording_${Date.now()}.webm`, spaceId = this.currentSpaceId, metadata = {} } = options;
 
     if (!spaceId) {
       throw new Error('No space selected');
@@ -32,13 +28,13 @@ export class SpaceSaver {
 
     // Convert blob to array buffer
     const buffer = await blob.arrayBuffer();
-    
+
     // Create file object
     const file = {
       name: filename,
       data: buffer,
       type: blob.type,
-      size: blob.size
+      size: blob.size,
     };
 
     // Call Electron IPC to save
@@ -58,12 +54,12 @@ export class SpaceSaver {
    */
   async saveLocal(blob, filename = 'recording.webm') {
     const url = URL.createObjectURL(blob);
-    
+
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
     a.click();
-    
+
     URL.revokeObjectURL(url);
     log.info('recorder', '[SpaceSaver] Downloaded', { data: filename });
   }
@@ -87,19 +83,3 @@ export class SpaceSaver {
     return [];
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

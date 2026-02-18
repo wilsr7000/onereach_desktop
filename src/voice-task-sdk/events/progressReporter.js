@@ -1,9 +1,9 @@
 /**
  * Progress Reporter
- * 
+ *
  * Allows agents to report progress updates during long-running operations.
  * The Router can listen to these events and speak updates to the user.
- * 
+ *
  * Usage:
  *   progressReporter.report('media-agent', 'Searching for jazz music...');
  *   progressReporter.report('media-agent', 'Found 5 results, picking best match...');
@@ -33,7 +33,7 @@ class ProgressReporter extends EventEmitter {
     const lastReport = this.lastReportTime.get(agentId) || 0;
 
     // Throttle unless forced
-    if (!options.force && (now - lastReport) < this.minInterval) {
+    if (!options.force && now - lastReport < this.minInterval) {
       log.info('voice', '[ProgressReporter] Throttled: -', { v0: agentId, v1: message });
       return false;
     }
@@ -44,19 +44,19 @@ class ProgressReporter extends EventEmitter {
       agentId,
       message,
       type: options.type || 'info',
-      timestamp: now
+      timestamp: now,
     };
 
     log.info('voice', '[ProgressReporter] :', { v0: agentId, v1: message });
     this.emit('progress', event);
-    
+
     return true;
   }
 
   /**
    * Report that an agent is starting work
-   * @param {string} agentId 
-   * @param {string} taskDescription 
+   * @param {string} agentId
+   * @param {string} taskDescription
    */
   started(agentId, taskDescription) {
     return this.report(agentId, taskDescription, { type: 'searching', force: true });
@@ -64,7 +64,7 @@ class ProgressReporter extends EventEmitter {
 
   /**
    * Report that an agent completed work
-   * @param {string} agentId 
+   * @param {string} agentId
    */
   completed(agentId) {
     this.lastReportTime.delete(agentId);
@@ -73,8 +73,8 @@ class ProgressReporter extends EventEmitter {
 
   /**
    * Report that an agent failed
-   * @param {string} agentId 
-   * @param {string} reason 
+   * @param {string} agentId
+   * @param {string} reason
    */
   failed(agentId, reason) {
     this.lastReportTime.delete(agentId);
@@ -83,7 +83,7 @@ class ProgressReporter extends EventEmitter {
 
   /**
    * Clear throttle for an agent (useful after long pauses)
-   * @param {string} agentId 
+   * @param {string} agentId
    */
   clearThrottle(agentId) {
     this.lastReportTime.delete(agentId);
@@ -91,7 +91,7 @@ class ProgressReporter extends EventEmitter {
 
   /**
    * Set minimum interval between reports
-   * @param {number} ms 
+   * @param {number} ms
    */
   setMinInterval(ms) {
     this.minInterval = ms;

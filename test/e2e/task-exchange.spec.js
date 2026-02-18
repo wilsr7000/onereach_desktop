@@ -22,13 +22,18 @@
 
 const { test, expect } = require('@playwright/test');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors,
-  checkExchangeHealth, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  checkExchangeHealth,
+  sleep,
 } = require('./helpers/electron-app');
 
 let app;
 let electronApp;
-let mainWindow;
+let _mainWindow;
 let errorSnapshot;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -110,7 +115,8 @@ const EDGE_CASE_CORPUS = [
   },
   {
     id: 'very-long-input',
-    query: 'I need you to help me with a very long and detailed request that goes on and on about multiple different things including the weather forecast for tomorrow, what time it currently is in Tokyo, and also please search for some information about machine learning algorithms and their applications in modern software development practices',
+    query:
+      'I need you to help me with a very long and detailed request that goes on and on about multiple different things including the weather forecast for tomorrow, what time it currently is in Tokyo, and also please search for some information about machine learning algorithms and their applications in modern software development practices',
     expectation: 'handled-or-decomposed',
     description: 'Long multi-topic input may be decomposed into subtasks',
   },
@@ -130,80 +136,87 @@ const EDGE_CASE_CORPUS = [
  * @returns {Promise<Object>} { submission, task, agentId, result, status, timedOut }
  */
 async function submitAndWaitForSettlement(electronApp, query, timeoutMs = 15000) {
-  return await electronApp.evaluate(async ({ query, timeoutMs }) => {
-    const bridge = require('./src/voice-task-sdk/exchange-bridge');
+  return await electronApp.evaluate(
+    async ({ query, timeoutMs }) => {
+      const bridge = require('./src/voice-task-sdk/exchange-bridge');
 
-    if (!bridge.isRunning()) {
-      return { error: 'Exchange not running', submission: null };
-    }
+      if (!bridge.isRunning()) {
+        return { error: 'Exchange not running', submission: null };
+      }
 
-    // Submit through the full pipeline
-    const submission = await bridge.processSubmit(query, {
-      toolId: 'e2e-test',
-      skipFilter: true,
-    });
+      // Submit through the full pipeline
+      const submission = await bridge.processSubmit(query, {
+        toolId: 'e2e-test',
+        skipFilter: true,
+      });
 
-    if (!submission.queued || !submission.taskId) {
-      // Task was handled directly (fast-path, router, etc.)
-      return {
-        submission,
-        task: null,
-        agentId: null,
-        result: submission.message ? { success: true, message: submission.message } : null,
-        status: submission.handled ? 'handled-directly' : 'not-queued',
-        timedOut: false,
-      };
-    }
-
-    // Poll for task settlement
-    const exchange = bridge.getExchange();
-    const taskId = submission.taskId;
-    const startTime = Date.now();
-    const pollInterval = 250;
-    const terminalStatuses = ['SETTLED', 'DEAD_LETTER', 'CANCELLED', 'HALTED', 'BUSTED'];
-
-    while (Date.now() - startTime < timeoutMs) {
-      const task = exchange.getTask(taskId);
-      if (task && terminalStatuses.includes(task.status)) {
+      if (!submission.queued || !submission.taskId) {
+        // Task was handled directly (fast-path, router, etc.)
         return {
           submission,
-          task: {
-            id: task.id,
-            status: task.status,
-            content: task.content,
-            assignedAgent: task.assignedAgent,
-            backupQueue: task.backupQueue,
-            executionMode: task.executionMode,
-            auctionAttempt: task.auctionAttempt,
-            createdAt: task.createdAt,
-            completedAt: task.completedAt,
-            durationMs: task.completedAt ? task.completedAt - task.createdAt : null,
-          },
-          agentId: task.assignedAgent,
-          result: task.result,
-          status: task.status,
+          task: null,
+          agentId: null,
+          result: submission.message ? { success: true, message: submission.message } : null,
+          status: submission.handled ? 'handled-directly' : 'not-queued',
           timedOut: false,
         };
       }
-      await new Promise(r => setTimeout(r, pollInterval));
-    }
 
-    // Timed out -- capture last known state
-    const task = exchange.getTask(taskId);
-    return {
-      submission,
-      task: task ? {
-        id: task.id,
-        status: task.status,
-        content: task.content,
-        assignedAgent: task.assignedAgent,
-      } : null,
-      agentId: task?.assignedAgent || null,
-      result: task?.result || null,
-      status: task?.status || 'UNKNOWN',
-      timedOut: true,
-    };
-  }, { query, timeoutMs });
+      // Poll for task settlement
+      const exchange = bridge.getExchange();
+      const taskId = submission.taskId;
+      const startTime = Date.now();
+      const pollInterval = 250;
+      const terminalStatuses = ['SETTLED', 'DEAD_LETTER', 'CANCELLED', 'HALTED', 'BUSTED'];
+
+      while (Date.now() - startTime < timeoutMs) {
+        const task = exchange.getTask(taskId);
+        if (task && terminalStatuses.includes(task.status)) {
+          return {
+            submission,
+            task: {
+              id: task.id,
+              status: task.status,
+              content: task.content,
+              assignedAgent: task.assignedAgent,
+              backupQueue: task.backupQueue,
+              executionMode: task.executionMode,
+              auctionAttempt: task.auctionAttempt,
+              createdAt: task.createdAt,
+              completedAt: task.completedAt,
+              durationMs: task.completedAt ? task.completedAt - task.createdAt : null,
+            },
+            agentId: task.assignedAgent,
+            result: task.result,
+            status: task.status,
+            timedOut: false,
+          };
+        }
+        await new Promise((r) => {
+          setTimeout(r, pollInterval);
+        });
+      }
+
+      // Timed out -- capture last known state
+      const task = exchange.getTask(taskId);
+      return {
+        submission,
+        task: task
+          ? {
+              id: task.id,
+              status: task.status,
+              content: task.content,
+              assignedAgent: task.assignedAgent,
+            }
+          : null,
+        agentId: task?.assignedAgent || null,
+        result: task?.result || null,
+        status: task?.status || 'UNKNOWN',
+        timedOut: true,
+      };
+    },
+    { query, timeoutMs }
+  );
 }
 
 /**
@@ -220,23 +233,23 @@ async function submitAndWaitForSettlement(electronApp, query, timeoutMs = 15000)
  * @returns {Promise<{score: number, pass: boolean, criteria: Array}>}
  */
 async function llmJudge(electronApp, { query, agentId, result, status, rubric }) {
-  return await electronApp.evaluate(async ({ query, agentId, result, status, rubric }) => {
-    try {
-      const ai = require('./lib/ai-service');
+  return await electronApp.evaluate(
+    async ({ query, agentId, result, status, rubric }) => {
+      try {
+        const ai = require('./lib/ai-service');
 
-      // Extract the response text from the result
-      let responseText = 'No response';
-      if (result?.data?.output) {
-        responseText = typeof result.data.output === 'string'
-          ? result.data.output
-          : JSON.stringify(result.data.output);
-      } else if (result?.message) {
-        responseText = result.message;
-      } else if (result?.data?.results) {
-        responseText = JSON.stringify(result.data.results);
-      }
+        // Extract the response text from the result
+        let responseText = 'No response';
+        if (result?.data?.output) {
+          responseText =
+            typeof result.data.output === 'string' ? result.data.output : JSON.stringify(result.data.output);
+        } else if (result?.message) {
+          responseText = result.message;
+        } else if (result?.data?.results) {
+          responseText = JSON.stringify(result.data.results);
+        }
 
-      const prompt = `You are a quality evaluator for a voice-command task routing system.
+        const prompt = `You are a quality evaluator for a voice-command task routing system.
 
 A user spoke a voice command, and the system routed it through an auction where AI agents bid to handle it. One agent won and produced a response.
 
@@ -268,42 +281,44 @@ Return ONLY valid JSON:
   ]
 }`;
 
-      const judgment = await ai.json(prompt, {
-        profile: 'fast',
-        feature: 'task-exchange-eval',
-        temperature: 0,
-        maxTokens: 800,
-      });
+        const judgment = await ai.json(prompt, {
+          profile: 'fast',
+          feature: 'task-exchange-eval',
+          temperature: 0,
+          maxTokens: 800,
+        });
 
-      return {
-        score: judgment.score || 0,
-        pass: (judgment.score || 0) >= 70,
-        criteria: judgment.criteria || [],
-        evaluatedBy: 'llm',
-      };
-    } catch (evalError) {
-      // AI service not available -- deterministic fallback
-      const hasAgent = !!agentId;
-      const hasResult = result?.success === true;
-      const isSettled = status === 'SETTLED' || status === 'handled-directly';
+        return {
+          score: judgment.score || 0,
+          pass: (judgment.score || 0) >= 70,
+          criteria: judgment.criteria || [],
+          evaluatedBy: 'llm',
+        };
+      } catch (evalError) {
+        // AI service not available -- deterministic fallback
+        const hasAgent = !!agentId;
+        const hasResult = result?.success === true;
+        const isSettled = status === 'SETTLED' || status === 'handled-directly';
 
-      let score = 0;
-      if (isSettled && hasAgent && hasResult) score = 75;
-      else if (isSettled && hasResult) score = 65;
-      else if (hasAgent) score = 50;
+        let score = 0;
+        if (isSettled && hasAgent && hasResult) score = 75;
+        else if (isSettled && hasResult) score = 65;
+        else if (hasAgent) score = 50;
 
-      return {
-        score,
-        pass: score >= 70,
-        criteria: rubric.map(c => ({
-          criterion: c,
+        return {
+          score,
           pass: score >= 70,
-          reasoning: `Deterministic fallback (AI unavailable: ${evalError.message})`,
-        })),
-        evaluatedBy: 'deterministic-fallback',
-      };
-    }
-  }, { query, agentId, result, status, rubric });
+          criteria: rubric.map((c) => ({
+            criterion: c,
+            pass: score >= 70,
+            reasoning: `Deterministic fallback (AI unavailable: ${evalError.message})`,
+          })),
+          evaluatedBy: 'deterministic-fallback',
+        };
+      }
+    },
+    { query, agentId, result, status, rubric }
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -311,7 +326,6 @@ Return ONLY valid JSON:
 // ═══════════════════════════════════════════════════════════════════════════════
 
 test.describe('Task Exchange', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -328,7 +342,6 @@ test.describe('Task Exchange', () => {
   // ═════════════════════════════════════════════════════════════════════════════
 
   test.describe('Tier 1: Exchange Infrastructure', () => {
-
     test('exchange bridge is initialized and running', async () => {
       const status = await checkExchangeHealth(electronApp);
       expect(status).toBeDefined();
@@ -379,7 +392,7 @@ test.describe('Task Exchange', () => {
         const agents = exchange.agents.getAll();
         return {
           count: agents.length,
-          agents: agents.slice(0, 20).map(a => ({
+          agents: agents.slice(0, 20).map((a) => ({
             id: a.id,
             name: a.name,
             enabled: a.enabled,
@@ -416,7 +429,6 @@ test.describe('Task Exchange', () => {
   // ═════════════════════════════════════════════════════════════════════════════
 
   test.describe('Tier 1: Task Submission Lifecycle', () => {
-
     test('processSubmit returns required fields on valid input', async () => {
       const result = await electronApp.evaluate(async () => {
         const bridge = require('./src/voice-task-sdk/exchange-bridge');
@@ -521,7 +533,9 @@ test.describe('Task Exchange', () => {
       expect(terminalStatuses).toContain(lifecycle.status);
 
       if (lifecycle.task) {
-        console.log(`  Task ${lifecycle.task.id}: ${lifecycle.status} by ${lifecycle.agentId || 'n/a'} in ${lifecycle.task.durationMs || '?'}ms`);
+        console.log(
+          `  Task ${lifecycle.task.id}: ${lifecycle.status} by ${lifecycle.agentId || 'n/a'} in ${lifecycle.task.durationMs || '?'}ms`
+        );
       }
     });
 
@@ -546,7 +560,6 @@ test.describe('Task Exchange', () => {
   // ═════════════════════════════════════════════════════════════════════════════
 
   test.describe('Tier 1: Edge Cases', () => {
-
     for (const tc of EDGE_CASE_CORPUS) {
       test(`[${tc.id}] ${tc.description}`, async () => {
         const lifecycle = await submitAndWaitForSettlement(electronApp, tc.query, 15000);
@@ -577,11 +590,7 @@ test.describe('Task Exchange', () => {
       const results = await electronApp.evaluate(async () => {
         const bridge = require('./src/voice-task-sdk/exchange-bridge');
         const submissions = [];
-        const queries = [
-          `rapid-fire-A-${Date.now()}`,
-          `rapid-fire-B-${Date.now()}`,
-          `rapid-fire-C-${Date.now()}`,
-        ];
+        const queries = [`rapid-fire-A-${Date.now()}`, `rapid-fire-B-${Date.now()}`, `rapid-fire-C-${Date.now()}`];
 
         for (const q of queries) {
           try {
@@ -597,8 +606,8 @@ test.describe('Task Exchange', () => {
 
         return {
           total: submissions.length,
-          errors: submissions.filter(s => s.error).length,
-          queued: submissions.filter(s => s.queued).length,
+          errors: submissions.filter((s) => s.error).length,
+          queued: submissions.filter((s) => s.queued).length,
           exchangeStillRunning: bridge.isRunning(),
         };
       });
@@ -614,7 +623,6 @@ test.describe('Task Exchange', () => {
   // ═════════════════════════════════════════════════════════════════════════════
 
   test.describe('Tier 2: LLM-Evaluated Routing Accuracy', () => {
-
     for (const tc of ROUTING_CORPUS) {
       test(`[${tc.id}] "${tc.query}" routes correctly`, async () => {
         // Unique-ify to avoid dedup
@@ -668,7 +676,6 @@ test.describe('Task Exchange', () => {
   // ═════════════════════════════════════════════════════════════════════════════
 
   test.describe('Tier 2: LLM-Evaluated Response Quality', () => {
-
     test('informational query produces useful response content', async () => {
       const query = `What is the current time? (test-${Date.now()})`;
       const lifecycle = await submitAndWaitForSettlement(electronApp, query, 15000);
@@ -704,8 +711,8 @@ test.describe('Task Exchange', () => {
           // Fast-path or normal result should have output
           expect(
             lifecycle.result.data.output !== undefined ||
-            lifecycle.result.data.results !== undefined ||
-            lifecycle.result.message !== undefined
+              lifecycle.result.data.results !== undefined ||
+              lifecycle.result.message !== undefined
           ).toBe(true);
         }
       }
@@ -746,7 +753,6 @@ test.describe('Task Exchange', () => {
   // ═════════════════════════════════════════════════════════════════════════════
 
   test.describe('Tier 2: Auction Integrity', () => {
-
     test('two different queries route to different agents', async () => {
       const timeQuery = `What time is it? (test-${Date.now()}-a)`;
       const weatherQuery = `What is the weather forecast? (test-${Date.now()}-b)`;
@@ -770,7 +776,10 @@ test.describe('Task Exchange', () => {
         const judgment = await llmJudge(electronApp, {
           query: `Two queries were submitted: (1) "What time is it?" routed to ${timeResult.agentId}, (2) "What is the weather forecast?" routed to ${weatherResult.agentId}`,
           agentId: `${timeResult.agentId} and ${weatherResult.agentId}`,
-          result: { success: true, data: { output: `Query 1 agent: ${timeResult.agentId}, Query 2 agent: ${weatherResult.agentId}` } },
+          result: {
+            success: true,
+            data: { output: `Query 1 agent: ${timeResult.agentId}, Query 2 agent: ${weatherResult.agentId}` },
+          },
           status: 'SETTLED',
           rubric: [
             'A time-related query should route to a time agent, not a weather agent',

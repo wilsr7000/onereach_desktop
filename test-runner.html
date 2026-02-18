@@ -1,2208 +1,2276 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GSX Power User - Comprehensive Test Runner</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css" />
     <style>
-        /* Test Runner Specific Styles */
-        .test-runner {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        .test-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #e0e0e0;
-        }
-        
-        .test-info {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
-            margin-bottom: 20px;
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-        }
-        
-        .test-info-item {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .test-info-item label {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 5px;
-        }
-        
-        .test-info-item input {
-            padding: 8px;
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        
-        .test-info-item .info-value {
-            font-size: 14px;
-            font-weight: 500;
-        }
-        
-        .test-categories {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .test-category {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 20px;
-            border: 1px solid #e0e0e0;
-        }
-        
-        .test-category.full-width {
-            grid-column: 1 / -1;
-        }
-        
-        .test-category h3 {
-            margin-top: 0;
-            color: #333;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .test-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
-        
-        .test-item {
-            display: flex;
-            align-items: center;
-            padding: 10px;
-            margin: 5px 0;
-            background: white;
-            border-radius: 5px;
-            border: 1px solid #e0e0e0;
-            transition: all 0.2s;
-        }
-        
-        .test-item:hover {
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .test-checkbox {
-            margin-right: 10px;
-        }
-        
-        .test-name {
-            flex: 1;
-        }
-        
-        .test-info {
-            display: inline-block;
-            margin: 0 10px;
-            color: #0099ff;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: normal;
-            user-select: none;
-            z-index: 10;
-            position: relative;
-        }
-        
-        .test-info:hover {
-            color: #0077cc;
-            transform: scale(1.1);
-        }
-        
-        .test-status {
-            padding: 3px 8px;
-            border-radius: 3px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        
-        .status-pending { background: #e0e0e0; color: #666; }
-        .status-running { background: #fff3cd; color: #856404; }
-        .status-passed { background: #d4edda; color: #155724; }
-        .status-failed { background: #f8d7da; color: #721c24; }
-        .status-skipped { background: #e2e3e5; color: #383d41; }
-        
-        .test-controls {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            display: flex;
-            gap: 10px;
-            z-index: 1000;
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-        
-        .test-results {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 20px;
-            margin-top: 30px;
-            display: none;
-        }
-        
-        .test-results.show {
-            display: block;
-        }
-        
-        .result-summary {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .summary-card {
-            background: white;
-            padding: 15px;
-            border-radius: 5px;
-            text-align: center;
-            border: 1px solid #e0e0e0;
-        }
-        
-        .summary-number {
-            font-size: 24px;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-        
-        .summary-label {
-            font-size: 12px;
-            color: #666;
-            text-transform: uppercase;
-        }
-        
-        .test-log {
-            background: white;
-            border: 1px solid #e0e0e0;
-            border-radius: 5px;
-            padding: 15px;
-            max-height: 400px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-        }
-        
-        .log-entry {
-            margin: 2px 0;
-            padding: 2px 5px;
-        }
-        
-        .log-pass { color: #155724; }
-        .log-fail { color: #721c24; }
-        .log-info { color: #004085; }
-        .log-warn { color: #856404; }
-        
-        .category-icon {
-            width: 20px;
-            height: 20px;
-        }
-        
-        .progress-bar {
-            width: 100%;
-            height: 20px;
-            background: #e0e0e0;
-            border-radius: 10px;
-            overflow: hidden;
-            margin: 20px 0;
-        }
-        
-        .progress-fill {
-            height: 100%;
-            background: #0099ff;
-            transition: width 0.3s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        
-        .test-tabs {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #e0e0e0;
-        }
-        
-        .test-tab {
-            padding: 10px 20px;
-            cursor: pointer;
-            border-bottom: 3px solid transparent;
-            transition: all 0.2s;
-        }
-        
-        .test-tab:hover {
-            background: #f0f0f0;
-        }
-        
-        .test-tab.active {
-            border-bottom-color: #0099ff;
-            font-weight: 500;
-        }
-        
-        .tab-content {
-            display: none;
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        /* Button styles */
-        .btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
-        
-        .btn-primary {
-            background: #0099ff;
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: #0077cc;
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .btn-secondary {
-            background: #6c757d;
-            color: white;
-        }
-        
-        .btn-secondary:hover {
-            background: #5a6268;
-        }
-        
-        .btn-success {
-            background: #28a745;
-            color: white;
-        }
-        
-        .btn-success:hover {
-            background: #218838;
-        }
-        
-        .btn-sm {
-            padding: 4px 8px;
-            font-size: 12px;
-        }
-        
-        /* Manual test notes */
-        .test-notes {
-            margin-top: 10px;
-            display: none;
-        }
-        
-        .test-notes.show {
-            display: block;
-        }
-        
-        .test-notes textarea {
-            width: 100%;
-            min-height: 60px;
-            padding: 8px;
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            font-size: 13px;
-            resize: vertical;
-        }
-        
-        /* Auto-save indicator */
-        .auto-save-indicator {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 8px 16px;
-            background: #28a745;
-            color: white;
-            border-radius: 20px;
-            font-size: 13px;
-            display: none;
-            animation: fadeInOut 2s ease-in-out;
-        }
-        
-        @keyframes fadeInOut {
-            0%, 100% { opacity: 0; }
-            10%, 90% { opacity: 1; }
-        }
-        
-        /* History item styles */
-        .test-history-item {
-            background: white;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 5px;
-            border: 1px solid #e0e0e0;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .test-history-item:hover {
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            transform: translateY(-1px);
-        }
-        
-        .history-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        
-        .history-meta {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            font-size: 13px;
-            color: #666;
-        }
-        
-        /* Loading spinner */
-        .loading-spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #0099ff;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-left: 10px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        /* Export modal */
-        .export-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 3000;
-        }
-        
-        .export-modal.show {
-            display: flex;
-        }
-        
-        .export-content {
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            max-width: 600px;
-            width: 90%;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-        
-        .export-format {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin: 20px 0;
-        }
-        
-        .format-option {
-            padding: 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 5px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .format-option:hover {
-            border-color: #0099ff;
-            background: #f0f8ff;
-        }
-        
-        .format-option.selected {
-            border-color: #0099ff;
-            background: #e6f3ff;
-        }
-        
-        /* Test Case modal */
-        .test-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 3000;
-        }
-        
-        .test-modal.show {
-            display: flex;
-        }
-        
-        .test-modal .modal-content {
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            max-width: 600px;
-            width: 90%;
-            max-height: 80vh;
-            overflow-y: auto;
-            position: relative;
-        }
-        
-        .test-modal .modal-close {
-            position: absolute;
-            top: 10px;
-            right: 15px;
-            font-size: 28px;
-            font-weight: bold;
-            color: #666;
-            cursor: pointer;
-            transition: color 0.2s;
-        }
-        
-        .test-modal .modal-close:hover {
-            color: #000;
-        }
-        
-        .test-case-section {
-            margin: 20px 0;
-        }
-        
-        .test-case-section h3 {
-            margin-bottom: 10px;
-            color: #333;
-        }
-        
-        .test-case-text {
-            color: #666;
-            line-height: 1.6;
-        }
-        
-        .test-case-steps {
-            margin-left: 20px;
-            color: #666;
-            line-height: 1.8;
-        }
-        
-        .test-case-actions {
-            margin-top: 30px;
-            text-align: center;
-        }
-        
-        .test-id {
-            color: #999;
-            font-size: 14px;
-            margin-bottom: 20px;
-        }
+      /* Test Runner Specific Styles */
+      .test-runner {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px;
+      }
 
-        /* Log Viewer Styles for Test Runner */
-        .log-viewer-container {
-            height: calc(100vh - 300px);
-            display: flex;
-            flex-direction: column;
-            background: #f5f5f5;
-            border-radius: 8px;
-            overflow: hidden;
-        }
+      .test-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #e0e0e0;
+      }
 
-        .log-header {
-            background: white;
-            padding: 15px;
-            border-bottom: 1px solid #e0e0e0;
-        }
+      .test-info {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 15px;
+        margin-bottom: 20px;
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+      }
 
-        .log-controls {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            margin-bottom: 10px;
-        }
+      .test-info-item {
+        display: flex;
+        flex-direction: column;
+      }
 
-        .log-search {
-            flex: 1;
-            display: flex;
-            gap: 10px;
-        }
+      .test-info-item label {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 5px;
+      }
 
-        .search-input {
-            flex: 1;
-            padding: 6px 10px;
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            font-size: 13px;
-        }
+      .test-info-item input {
+        padding: 8px;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        font-size: 14px;
+      }
 
-        .log-filters {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
+      .test-info-item .info-value {
+        font-size: 14px;
+        font-weight: 500;
+      }
 
-        .filter-group {
-            display: flex;
-            gap: 5px;
-            align-items: center;
-        }
+      .test-categories {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-bottom: 30px;
+      }
 
-        .log-level-filter {
-            display: flex;
-            gap: 3px;
-        }
+      .test-category {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 20px;
+        border: 1px solid #e0e0e0;
+      }
 
-        .level-toggle {
-            padding: 3px 6px;
-            border: 1px solid #e0e0e0;
-            border-radius: 3px;
-            background: white;
-            cursor: pointer;
-            font-size: 11px;
-            transition: all 0.2s;
-        }
+      .test-category.full-width {
+        grid-column: 1 / -1;
+      }
 
-        .level-toggle.active {
-            background: #0099ff;
-            color: white;
-            border-color: #0099ff;
-        }
+      .test-category h3 {
+        margin-top: 0;
+        color: #333;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
 
-        .level-toggle.debug { border-color: #6c757d; }
-        .level-toggle.debug.active { background: #6c757d; }
+      .test-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
 
-        .level-toggle.info { border-color: #0099ff; }
-        .level-toggle.info.active { background: #0099ff; }
+      .test-item {
+        display: flex;
+        align-items: center;
+        padding: 10px;
+        margin: 5px 0;
+        background: white;
+        border-radius: 5px;
+        border: 1px solid #e0e0e0;
+        transition: all 0.2s;
+      }
 
-        .level-toggle.warn { border-color: #ffc107; }
-        .level-toggle.warn.active { background: #ffc107; color: #000; }
+      .test-item:hover {
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
 
-        .level-toggle.error { border-color: #dc3545; }
-        .level-toggle.error.active { background: #dc3545; }
+      .test-checkbox {
+        margin-right: 10px;
+      }
 
-        .log-stats {
-            display: flex;
-            gap: 15px;
-            font-size: 12px;
-            color: #666;
-        }
+      .test-name {
+        flex: 1;
+      }
 
-        .stat-item {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
+      .test-info {
+        display: inline-block;
+        margin: 0 10px;
+        color: #0099ff;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: normal;
+        user-select: none;
+        z-index: 10;
+        position: relative;
+      }
 
-        .log-content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 10px;
-            background: white;
-        }
+      .test-info:hover {
+        color: #0077cc;
+        transform: scale(1.1);
+      }
 
-        .log-entry {
-            background: #f8f9fa;
-            margin-bottom: 6px;
-            padding: 8px;
-            border-radius: 4px;
-            border: 1px solid #e0e0e0;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
+      .test-status {
+        padding: 3px 8px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-weight: 500;
+      }
 
-        .log-entry:hover {
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
+      .status-pending {
+        background: #e0e0e0;
+        color: #666;
+      }
+      .status-running {
+        background: #fff3cd;
+        color: #856404;
+      }
+      .status-passed {
+        background: #d4edda;
+        color: #155724;
+      }
+      .status-failed {
+        background: #f8d7da;
+        color: #721c24;
+      }
+      .status-skipped {
+        background: #e2e3e5;
+        color: #383d41;
+      }
 
-        .log-entry.debug { border-left: 3px solid #6c757d; }
-        .log-entry.info { border-left: 3px solid #0099ff; }
-        .log-entry.warn { border-left: 3px solid #ffc107; }
-        .log-entry.error { border-left: 3px solid #dc3545; }
+      .test-controls {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        display: flex;
+        gap: 10px;
+        z-index: 1000;
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      }
 
-        .log-timestamp {
-            color: #999;
-            margin-right: 8px;
-            font-size: 11px;
-        }
+      .test-results {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 20px;
+        margin-top: 30px;
+        display: none;
+      }
 
-        .log-level {
-            font-weight: bold;
-            margin-right: 8px;
-            padding: 1px 4px;
-            border-radius: 2px;
-            font-size: 10px;
-        }
+      .test-results.show {
+        display: block;
+      }
 
-        .log-level.DEBUG { background: #e2e3e5; color: #383d41; }
-        .log-level.INFO { background: #cce5ff; color: #004085; }
-        .log-level.WARN { background: #fff3cd; color: #856404; }
-        .log-level.ERROR { background: #f8d7da; color: #721c24; }
+      .result-summary {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 15px;
+        margin-bottom: 20px;
+      }
 
-        .log-message {
-            color: #333;
-            margin-bottom: 3px;
-        }
+      .summary-card {
+        background: white;
+        padding: 15px;
+        border-radius: 5px;
+        text-align: center;
+        border: 1px solid #e0e0e0;
+      }
 
-        .log-data {
-            margin-top: 3px;
-            padding: 5px;
-            background: #f1f3f4;
-            border-radius: 3px;
-            overflow-x: auto;
-            white-space: pre-wrap;
-            word-break: break-word;
-            font-size: 11px;
-        }
+      .summary-number {
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 5px;
+      }
 
-        .log-data-toggle {
-            color: #0099ff;
-            cursor: pointer;
-            font-size: 10px;
-            text-decoration: underline;
-        }
+      .summary-label {
+        font-size: 12px;
+        color: #666;
+        text-transform: uppercase;
+      }
 
-        .log-footer {
-            background: white;
-            padding: 10px 15px;
-            border-top: 1px solid #e0e0e0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+      .test-log {
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 5px;
+        padding: 15px;
+        max-height: 400px;
+        overflow-y: auto;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+      }
 
-        .loading {
-            text-align: center;
-            padding: 20px;
-            color: #666;
-        }
+      .log-entry {
+        margin: 2px 0;
+        padding: 2px 5px;
+      }
 
-        .empty-state {
-            text-align: center;
-            padding: 30px;
-            color: #999;
-        }
+      .log-pass {
+        color: #155724;
+      }
+      .log-fail {
+        color: #721c24;
+      }
+      .log-info {
+        color: #004085;
+      }
+      .log-warn {
+        color: #856404;
+      }
 
-        /* Export modal for log viewer */
-        .export-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 3000;
+      .category-icon {
+        width: 20px;
+        height: 20px;
+      }
+
+      .progress-bar {
+        width: 100%;
+        height: 20px;
+        background: #e0e0e0;
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 20px 0;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: #0099ff;
+        transition: width 0.3s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 12px;
+        font-weight: bold;
+      }
+
+      .test-tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #e0e0e0;
+      }
+
+      .test-tab {
+        padding: 10px 20px;
+        cursor: pointer;
+        border-bottom: 3px solid transparent;
+        transition: all 0.2s;
+      }
+
+      .test-tab:hover {
+        background: #f0f0f0;
+      }
+
+      .test-tab.active {
+        border-bottom-color: #0099ff;
+        font-weight: 500;
+      }
+
+      .tab-content {
+        display: none;
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      /* Button styles */
+      .btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.2s;
+      }
+
+      .btn-primary {
+        background: #0099ff;
+        color: white;
+      }
+
+      .btn-primary:hover {
+        background: #0077cc;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .btn-secondary {
+        background: #6c757d;
+        color: white;
+      }
+
+      .btn-secondary:hover {
+        background: #5a6268;
+      }
+
+      .btn-success {
+        background: #28a745;
+        color: white;
+      }
+
+      .btn-success:hover {
+        background: #218838;
+      }
+
+      .btn-sm {
+        padding: 4px 8px;
+        font-size: 12px;
+      }
+
+      /* Manual test notes */
+      .test-notes {
+        margin-top: 10px;
+        display: none;
+      }
+
+      .test-notes.show {
+        display: block;
+      }
+
+      .test-notes textarea {
+        width: 100%;
+        min-height: 60px;
+        padding: 8px;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        font-size: 13px;
+        resize: vertical;
+      }
+
+      /* Auto-save indicator */
+      .auto-save-indicator {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 8px 16px;
+        background: #28a745;
+        color: white;
+        border-radius: 20px;
+        font-size: 13px;
+        display: none;
+        animation: fadeInOut 2s ease-in-out;
+      }
+
+      @keyframes fadeInOut {
+        0%,
+        100% {
+          opacity: 0;
         }
-        
-        .export-modal.show {
-            display: flex;
+        10%,
+        90% {
+          opacity: 1;
         }
-        
-        .export-modal .modal-content {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            width: 400px;
+      }
+
+      /* History item styles */
+      .test-history-item {
+        background: white;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+        border: 1px solid #e0e0e0;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .test-history-item:hover {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        transform: translateY(-1px);
+      }
+
+      .history-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .history-meta {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        font-size: 13px;
+        color: #666;
+      }
+
+      /* Loading spinner */
+      .loading-spinner {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #0099ff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-left: 10px;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
         }
-        
-        .export-modal .form-group {
-            margin-bottom: 15px;
+        100% {
+          transform: rotate(360deg);
         }
-        
-        .export-modal .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-size: 14px;
-            color: #333;
+      }
+
+      /* Export modal */
+      .export-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 3000;
+      }
+
+      .export-modal.show {
+        display: flex;
+      }
+
+      .export-content {
+        background: white;
+        padding: 30px;
+        border-radius: 8px;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+      }
+
+      .export-format {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin: 20px 0;
+      }
+
+      .format-option {
+        padding: 15px;
+        border: 2px solid #e0e0e0;
+        border-radius: 5px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .format-option:hover {
+        border-color: #0099ff;
+        background: #f0f8ff;
+      }
+
+      .format-option.selected {
+        border-color: #0099ff;
+        background: #e6f3ff;
+      }
+
+      /* Test Case modal */
+      .test-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 3000;
+      }
+
+      .test-modal.show {
+        display: flex;
+      }
+
+      .test-modal .modal-content {
+        background: white;
+        padding: 30px;
+        border-radius: 8px;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        position: relative;
+      }
+
+      .test-modal .modal-close {
+        position: absolute;
+        top: 10px;
+        right: 15px;
+        font-size: 28px;
+        font-weight: bold;
+        color: #666;
+        cursor: pointer;
+        transition: color 0.2s;
+      }
+
+      .test-modal .modal-close:hover {
+        color: #000;
+      }
+
+      .test-case-section {
+        margin: 20px 0;
+      }
+
+      .test-case-section h3 {
+        margin-bottom: 10px;
+        color: #333;
+      }
+
+      .test-case-text {
+        color: #666;
+        line-height: 1.6;
+      }
+
+      .test-case-steps {
+        margin-left: 20px;
+        color: #666;
+        line-height: 1.8;
+      }
+
+      .test-case-actions {
+        margin-top: 30px;
+        text-align: center;
+      }
+
+      .test-id {
+        color: #999;
+        font-size: 14px;
+        margin-bottom: 20px;
+      }
+
+      /* Log Viewer Styles for Test Runner */
+      .log-viewer-container {
+        height: calc(100vh - 300px);
+        display: flex;
+        flex-direction: column;
+        background: #f5f5f5;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .log-header {
+        background: white;
+        padding: 15px;
+        border-bottom: 1px solid #e0e0e0;
+      }
+
+      .log-controls {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .log-search {
+        flex: 1;
+        display: flex;
+        gap: 10px;
+      }
+
+      .search-input {
+        flex: 1;
+        padding: 6px 10px;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+
+      .log-filters {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .filter-group {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+
+      .log-level-filter {
+        display: flex;
+        gap: 3px;
+      }
+
+      .level-toggle {
+        padding: 3px 6px;
+        border: 1px solid #e0e0e0;
+        border-radius: 3px;
+        background: white;
+        cursor: pointer;
+        font-size: 11px;
+        transition: all 0.2s;
+      }
+
+      .level-toggle.active {
+        background: #0099ff;
+        color: white;
+        border-color: #0099ff;
+      }
+
+      .level-toggle.debug {
+        border-color: #6c757d;
+      }
+      .level-toggle.debug.active {
+        background: #6c757d;
+      }
+
+      .level-toggle.info {
+        border-color: #0099ff;
+      }
+      .level-toggle.info.active {
+        background: #0099ff;
+      }
+
+      .level-toggle.warn {
+        border-color: #ffc107;
+      }
+      .level-toggle.warn.active {
+        background: #ffc107;
+        color: #000;
+      }
+
+      .level-toggle.error {
+        border-color: #dc3545;
+      }
+      .level-toggle.error.active {
+        background: #dc3545;
+      }
+
+      .log-stats {
+        display: flex;
+        gap: 15px;
+        font-size: 12px;
+        color: #666;
+      }
+
+      .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .log-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px;
+        background: white;
+      }
+
+      .log-entry {
+        background: #f8f9fa;
+        margin-bottom: 6px;
+        padding: 8px;
+        border-radius: 4px;
+        border: 1px solid #e0e0e0;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 12px;
+        transition: all 0.2s;
+      }
+
+      .log-entry:hover {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .log-entry.debug {
+        border-left: 3px solid #6c757d;
+      }
+      .log-entry.info {
+        border-left: 3px solid #0099ff;
+      }
+      .log-entry.warn {
+        border-left: 3px solid #ffc107;
+      }
+      .log-entry.error {
+        border-left: 3px solid #dc3545;
+      }
+
+      .log-timestamp {
+        color: #999;
+        margin-right: 8px;
+        font-size: 11px;
+      }
+
+      .log-level {
+        font-weight: bold;
+        margin-right: 8px;
+        padding: 1px 4px;
+        border-radius: 2px;
+        font-size: 10px;
+      }
+
+      .log-level.DEBUG {
+        background: #e2e3e5;
+        color: #383d41;
+      }
+      .log-level.INFO {
+        background: #cce5ff;
+        color: #004085;
+      }
+      .log-level.WARN {
+        background: #fff3cd;
+        color: #856404;
+      }
+      .log-level.ERROR {
+        background: #f8d7da;
+        color: #721c24;
+      }
+
+      .log-message {
+        color: #333;
+        margin-bottom: 3px;
+      }
+
+      .log-data {
+        margin-top: 3px;
+        padding: 5px;
+        background: #f1f3f4;
+        border-radius: 3px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 11px;
+      }
+
+      .log-data-toggle {
+        color: #0099ff;
+        cursor: pointer;
+        font-size: 10px;
+        text-decoration: underline;
+      }
+
+      .log-footer {
+        background: white;
+        padding: 10px 15px;
+        border-top: 1px solid #e0e0e0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .loading {
+        text-align: center;
+        padding: 20px;
+        color: #666;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 30px;
+        color: #999;
+      }
+
+      /* Export modal for log viewer */
+      .export-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 3000;
+      }
+
+      .export-modal.show {
+        display: flex;
+      }
+
+      .export-modal .modal-content {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        width: 400px;
+      }
+
+      .export-modal .form-group {
+        margin-bottom: 15px;
+      }
+
+      .export-modal .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-size: 14px;
+        color: #333;
+      }
+
+      .export-modal .form-group input,
+      .export-modal .form-group select {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+
+      .export-modal .modal-footer {
+        margin-top: 20px;
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+
+      /* Finalize modal */
+      .finalize-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 3000;
+      }
+
+      .finalize-modal.show {
+        display: flex;
+      }
+
+      .finalize-content {
+        background: white;
+        padding: 30px;
+        border-radius: 8px;
+        max-width: 500px;
+        width: 90%;
+        text-align: center;
+      }
+
+      .finalize-icon {
+        font-size: 48px;
+        margin-bottom: 20px;
+      }
+
+      .report-summary {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        margin: 20px 0;
+        text-align: left;
+      }
+
+      .report-summary h4 {
+        margin-top: 0;
+        color: #333;
+      }
+
+      .summary-row {
+        display: flex;
+        justify-content: space-between;
+        margin: 10px 0;
+        padding: 5px 0;
+        border-bottom: 1px solid #e0e0e0;
+      }
+
+      .summary-row:last-child {
+        border-bottom: none;
+      }
+
+      .report-status {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 14px;
+        font-weight: 500;
+        margin-top: 15px;
+      }
+
+      .report-status.finalized {
+        background: #d4edda;
+        color: #155724;
+      }
+
+      /* Notification styles */
+      .notification {
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        padding: 12px 20px;
+        background: #333;
+        color: white;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        z-index: 5000;
+        animation: slideIn 0.3s ease-out;
+      }
+
+      .notification.success {
+        background: #28a745;
+      }
+
+      .notification.error {
+        background: #dc3545;
+      }
+
+      .notification.warning {
+        background: #ffc107;
+        color: #333;
+      }
+
+      .notification.info {
+        background: #17a2b8;
+      }
+
+      @keyframes slideIn {
+        from {
+          transform: translateX(100%);
+          opacity: 0;
         }
-        
-        .export-modal .form-group input,
-        .export-modal .form-group select {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            font-size: 14px;
+        to {
+          transform: translateX(0);
+          opacity: 1;
         }
-        
-        .export-modal .modal-footer {
-            margin-top: 20px;
-            display: flex;
-            gap: 10px;
-            justify-content: flex-end;
-        }
-        
-        /* Finalize modal */
-        .finalize-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 3000;
-        }
-        
-        .finalize-modal.show {
-            display: flex;
-        }
-        
-        .finalize-content {
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            max-width: 500px;
-            width: 90%;
-            text-align: center;
-        }
-        
-        .finalize-icon {
-            font-size: 48px;
-            margin-bottom: 20px;
-        }
-        
-        .report-summary {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-            text-align: left;
-        }
-        
-        .report-summary h4 {
-            margin-top: 0;
-            color: #333;
-        }
-        
-        .summary-row {
-            display: flex;
-            justify-content: space-between;
-            margin: 10px 0;
-            padding: 5px 0;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        
-        .summary-row:last-child {
-            border-bottom: none;
-        }
-        
-        .report-status {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 500;
-            margin-top: 15px;
-        }
-        
-        .report-status.finalized {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        /* Notification styles */
-        .notification {
-            position: fixed;
-            top: 80px;
-            right: 20px;
-            padding: 12px 20px;
-            background: #333;
-            color: white;
-            border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            z-index: 5000;
-            animation: slideIn 0.3s ease-out;
-        }
-        
-        .notification.success {
-            background: #28a745;
-        }
-        
-        .notification.error {
-            background: #dc3545;
-        }
-        
-        .notification.warning {
-            background: #ffc107;
-            color: #333;
-        }
-        
-        .notification.info {
-            background: #17a2b8;
-        }
-        
-        @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-        
-        /* Individual test run button */
-        .btn-run-test {
-            padding: 4px 12px;
-            font-size: 12px;
-            background: #0099ff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-left: 10px;
-            transition: all 0.2s;
-        }
-        
-        .btn-run-test:hover {
-            background: #0077cc;
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .btn-run-test:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        
-        /* Test Result Modal */
-        .test-result-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 3000;
-        }
-        
-        .test-result-modal.show {
-            display: flex;
-        }
-        
-        .test-result-content {
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            max-width: 800px;
-            width: 90%;
-            max-height: 80vh;
-            overflow-y: auto;
-            position: relative;
-        }
-        
-        .test-result-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #e0e0e0;
-        }
-        
-        .test-result-status {
-            font-size: 18px;
-            font-weight: bold;
-        }
-        
-        .test-result-status.passed {
-            color: #28a745;
-        }
-        
-        .test-result-status.failed {
-            color: #dc3545;
-        }
-        
-        .test-result-logs {
-            background: #f8f9fa;
-            border: 1px solid #e0e0e0;
-            border-radius: 5px;
-            padding: 20px;
-            font-family: 'Courier New', monospace;
-            font-size: 13px;
-            line-height: 1.5;
-            max-height: 400px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-        }
-        
-        .test-result-close {
-            position: absolute;
-            top: 10px;
-            right: 15px;
-            font-size: 28px;
-            font-weight: bold;
-            color: #666;
-            cursor: pointer;
-            transition: color 0.2s;
-        }
-        
-        .test-result-close:hover {
-            color: #000;
-        }
+      }
+
+      /* Individual test run button */
+      .btn-run-test {
+        padding: 4px 12px;
+        font-size: 12px;
+        background: #0099ff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-left: 10px;
+        transition: all 0.2s;
+      }
+
+      .btn-run-test:hover {
+        background: #0077cc;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .btn-run-test:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+
+      /* Test Result Modal */
+      .test-result-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 3000;
+      }
+
+      .test-result-modal.show {
+        display: flex;
+      }
+
+      .test-result-content {
+        background: white;
+        padding: 30px;
+        border-radius: 8px;
+        max-width: 800px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        position: relative;
+      }
+
+      .test-result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #e0e0e0;
+      }
+
+      .test-result-status {
+        font-size: 18px;
+        font-weight: bold;
+      }
+
+      .test-result-status.passed {
+        color: #28a745;
+      }
+
+      .test-result-status.failed {
+        color: #dc3545;
+      }
+
+      .test-result-logs {
+        background: #f8f9fa;
+        border: 1px solid #e0e0e0;
+        border-radius: 5px;
+        padding: 20px;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        max-height: 400px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+
+      .test-result-close {
+        position: absolute;
+        top: 10px;
+        right: 15px;
+        font-size: 28px;
+        font-weight: bold;
+        color: #666;
+        cursor: pointer;
+        transition: color 0.2s;
+      }
+
+      .test-result-close:hover {
+        color: #000;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="test-runner">
-        <div class="test-header">
-            <div>
-                <h1>🧪 Comprehensive Test Runner</h1>
-                <p style="color: #666;">Complete testing suite for Onereach.ai</p>
-            </div>
-            <div>
-                <button id="close-btn" class="btn btn-secondary">Close</button>
-            </div>
+      <div class="test-header">
+        <div>
+          <h1>🧪 Comprehensive Test Runner</h1>
+          <p style="color: #666">Complete testing suite for Onereach.ai</p>
         </div>
-
-        <!-- Tester Information -->
-        <div class="test-info">
-            <div class="test-info-item">
-                <label>Tester Name</label>
-                <input type="text" id="tester-name" placeholder="Enter your name">
-            </div>
-            <div class="test-info-item">
-                <label>App Version</label>
-                <div class="info-value" id="app-version">Loading...</div>
-            </div>
-            <div class="test-info-item">
-                <label>Operating System</label>
-                <div class="info-value" id="os-info">Loading...</div>
-            </div>
-            <div class="test-info-item">
-                <label>Test Date</label>
-                <div class="info-value" id="test-date">Loading...</div>
-            </div>
+        <div>
+          <button id="close-btn" class="btn btn-secondary">Close</button>
         </div>
+      </div>
 
-        <div class="test-tabs">
-                    <div class="test-tab active" data-tab="automated">Automated Tests</div>
+      <!-- Tester Information -->
+      <div class="test-info">
+        <div class="test-info-item">
+          <label>Tester Name</label>
+          <input type="text" id="tester-name" placeholder="Enter your name" />
+        </div>
+        <div class="test-info-item">
+          <label>App Version</label>
+          <div class="info-value" id="app-version">Loading...</div>
+        </div>
+        <div class="test-info-item">
+          <label>Operating System</label>
+          <div class="info-value" id="os-info">Loading...</div>
+        </div>
+        <div class="test-info-item">
+          <label>Test Date</label>
+          <div class="info-value" id="test-date">Loading...</div>
+        </div>
+      </div>
+
+      <div class="test-tabs">
+        <div class="test-tab active" data-tab="automated">Automated Tests</div>
         <div class="test-tab" data-tab="manual">Manual Checklist</div>
         <div class="test-tab" data-tab="history">Test History</div>
         <div class="test-tab" data-tab="logs">Event Logs</div>
+      </div>
+
+      <!-- Automated Tests Tab -->
+      <div class="tab-content active" id="automated-tab">
+        <div class="test-categories">
+          <!-- Core Functionality -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">📋</span>
+              Core Functionality
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="clipboard-text">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Clipboard Text Monitoring</span>
+                <span class="test-info" title="View test case details">ⓘ</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="clipboard-image">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Clipboard Image Detection</span>
+                <span class="test-info" title="View test details">ⓘ</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="source-detection">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Source Type Detection</span>
+                <span class="test-info" title="View test details">ⓘ</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="search-function">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Search Functionality</span>
+                <span class="test-info" title="View test details">ⓘ</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="drop-zone">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Drop Zone (Black Hole) Functionality</span>
+                <span class="test-info" title="View test details">ⓘ</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Authentication Tests -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">🔐</span>
+              Authentication & API Tests
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="google-auth">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Google Authentication</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="claude-connection">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Claude API Connection</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="openai-connection">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">OpenAI API Connection</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="api-key-encryption">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">API Key Encryption</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Spaces Management -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">📁</span>
+              Spaces Management
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="create-space">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Create New Space</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="move-item">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Move Item Between Spaces</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="delete-space">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Delete Space</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="space-filtering">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Space Filtering</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Settings & Storage -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">⚙️</span>
+              Settings & Storage
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="save-settings">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Save Settings</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="load-settings">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Load Settings</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="auto-update">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Auto-Update Check</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="rollback-system">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Rollback System</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- IDW Management -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">🌐</span>
+              IDW Management
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="get-idw-list">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Get IDW Environments</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="add-idw">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Add IDW Environment (Automated)</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="edit-idw">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Edit IDW Environment (Automated)</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="remove-idw">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Remove IDW Environment (Automated)</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="idw-navigation">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">IDW Navigation & Menu</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="idw-gsx-links">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">IDW GSX Links Generation</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- GSX Menu Tests -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">🔧</span>
+              GSX Menu & Tools
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="gsx-hitl">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">GSX HITL Access</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="gsx-action-desk">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">GSX Action Desk Access</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="gsx-designer">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">GSX Designer Access</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="gsx-tickets">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">GSX Tickets Access</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="gsx-calendar">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">GSX Calendar Access</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="gsx-developer">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">GSX Developer Docs Access</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- External AI Tests - Full Width -->
+          <div class="test-category full-width">
+            <h3>
+              <span class="category-icon">🤖</span>
+              External AI Integration Tests
+            </h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px">
+              <div>
+                <h4 style="margin-top: 0; color: #666">AI Agents</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="ai-google-gemini">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">Google Gemini</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="ai-perplexity">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">Perplexity</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="ai-chatgpt">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">ChatGPT</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="ai-claude">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">Claude</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4 style="margin-top: 0; color: #666">Image Creators</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="img-midjourney">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Midjourney</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="img-ideogram">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Ideogram</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="img-adobe-firefly">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Adobe Firefly</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="img-openai-dalle">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">OpenAI DALL-E 3</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4 style="margin-top: 0; color: #666">Video & Audio</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="vid-google-veo">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Google Veo3</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="vid-runway">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Runway</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="audio-elevenlabs">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">ElevenLabs</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI Run Times -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">📰</span>
+              AI Run Times (RSS Reader)
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="rss-feed-load">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">UXMag Feed Loading</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="reading-log">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Reading Log Storage</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="metadata-view">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Article Metadata View</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Help & Documentation -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">📚</span>
+              Help & Documentation
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="help-menu">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Help Menu Access</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="docs-complete">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Documentation Completeness</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="readme-access">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">README Access</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Export & Smart Export - Full Width -->
+          <div class="test-category full-width">
+            <h3>
+              <span class="category-icon">📤</span>
+              Export & Smart Export Tests
+            </h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px">
+              <div>
+                <h4 style="margin-top: 0; color: #666">Export Formats</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="export-pdf">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">Export to PDF</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="export-html">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">Export to HTML</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="export-markdown">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">Export to Markdown</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="export-json">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">Export to JSON</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4 style="margin-top: 0; color: #666">Smart Export Templates</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="template-journey-map">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Agent Journey Map</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="template-task-map">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Task Opportunity Map</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="template-workflow">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Problem Workflow Discovery</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="template-prd">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Product Requirements Doc</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4 style="margin-top: 0; color: #666">AI Generation</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="ai-content-gen">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">AI Content Generation</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="ai-asset-gen">
+                    <input type="checkbox" class="test-checkbox" checked />
+                    <span class="test-name">AI Asset Generation</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="style-guide-apply">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">Style Guide Application</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="url-style-import">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">URL Style Import</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- File Type Tests - Full Width -->
+          <div class="test-category full-width">
+            <h3>
+              <span class="category-icon">📄</span>
+              File Type Support Tests
+            </h3>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px">
+              <div>
+                <h4 style="margin-top: 0; color: #666">Text Files</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="file-txt">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.txt files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-md">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.md files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-rtf">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.rtf files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-csv">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.csv files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4 style="margin-top: 0; color: #666">Images</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="file-png">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.png files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-jpg">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.jpg/.jpeg files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-gif">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.gif files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-svg">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.svg files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4 style="margin-top: 0; color: #666">Documents</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="file-pdf">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.pdf files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-doc">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.doc/.docx files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-xls">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.xls/.xlsx files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-ppt">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.ppt/.pptx files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4 style="margin-top: 0; color: #666">Code & Data</h4>
+                <ul class="test-list">
+                  <li class="test-item" data-test="file-js">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.js files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-json">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.json files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-html">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.html files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                  <li class="test-item" data-test="file-css">
+                    <input type="checkbox" class="test-checkbox" />
+                    <span class="test-name">.css files</span>
+                    <span class="test-status status-pending">Pending</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Performance -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">⚡</span>
+              Performance Tests
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="search-speed">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Search Speed (1000 items)</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="memory-usage">
+                <input type="checkbox" class="test-checkbox" checked />
+                <span class="test-name">Memory Usage Check</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="startup-time">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Startup Time</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="large-clipboard">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Large Clipboard Data (10MB+)</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Security -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">🛡️</span>
+              Security Tests
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-test="secure-storage">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Secure Data Storage</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="https-only">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">HTTPS-Only Connections</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+              <li class="test-item" data-test="xss-protection">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">XSS Protection</span>
+                <span class="test-status status-pending">Pending</span>
+              </li>
+            </ul>
+          </div>
         </div>
 
-        <!-- Automated Tests Tab -->
-        <div class="tab-content active" id="automated-tab">
-            <div class="test-categories">
-                <!-- Core Functionality -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">📋</span>
-                        Core Functionality
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="clipboard-text">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Clipboard Text Monitoring</span>
-                            <span class="test-info" title="View test case details">ⓘ</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="clipboard-image">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Clipboard Image Detection</span>
-                            <span class="test-info" title="View test details">ⓘ</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="source-detection">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Source Type Detection</span>
-                            <span class="test-info" title="View test details">ⓘ</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="search-function">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Search Functionality</span>
-                            <span class="test-info" title="View test details">ⓘ</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="drop-zone">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Drop Zone (Black Hole) Functionality</span>
-                            <span class="test-info" title="View test details">ⓘ</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Authentication Tests -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">🔐</span>
-                        Authentication & API Tests
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="google-auth">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Google Authentication</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="claude-connection">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Claude API Connection</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="openai-connection">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">OpenAI API Connection</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="api-key-encryption">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">API Key Encryption</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Spaces Management -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">📁</span>
-                        Spaces Management
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="create-space">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Create New Space</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="move-item">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Move Item Between Spaces</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="delete-space">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Delete Space</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="space-filtering">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Space Filtering</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Settings & Storage -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">⚙️</span>
-                        Settings & Storage
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="save-settings">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Save Settings</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="load-settings">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Load Settings</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="auto-update">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Auto-Update Check</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="rollback-system">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Rollback System</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- IDW Management -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">🌐</span>
-                        IDW Management
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="get-idw-list">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Get IDW Environments</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="add-idw">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Add IDW Environment (Automated)</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="edit-idw">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Edit IDW Environment (Automated)</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="remove-idw">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Remove IDW Environment (Automated)</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="idw-navigation">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">IDW Navigation & Menu</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="idw-gsx-links">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">IDW GSX Links Generation</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- GSX Menu Tests -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">🔧</span>
-                        GSX Menu & Tools
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="gsx-hitl">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">GSX HITL Access</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="gsx-action-desk">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">GSX Action Desk Access</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="gsx-designer">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">GSX Designer Access</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="gsx-tickets">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">GSX Tickets Access</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="gsx-calendar">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">GSX Calendar Access</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="gsx-developer">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">GSX Developer Docs Access</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- External AI Tests - Full Width -->
-                <div class="test-category full-width">
-                    <h3>
-                        <span class="category-icon">🤖</span>
-                        External AI Integration Tests
-                    </h3>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">AI Agents</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="ai-google-gemini">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">Google Gemini</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="ai-perplexity">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">Perplexity</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="ai-chatgpt">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">ChatGPT</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="ai-claude">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">Claude</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">Image Creators</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="img-midjourney">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Midjourney</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="img-ideogram">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Ideogram</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="img-adobe-firefly">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Adobe Firefly</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="img-openai-dalle">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">OpenAI DALL-E 3</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">Video & Audio</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="vid-google-veo">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Google Veo3</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="vid-runway">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Runway</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="audio-elevenlabs">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">ElevenLabs</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- AI Run Times -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">📰</span>
-                        AI Run Times (RSS Reader)
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="rss-feed-load">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">UXMag Feed Loading</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="reading-log">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Reading Log Storage</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="metadata-view">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Article Metadata View</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Help & Documentation -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">📚</span>
-                        Help & Documentation
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="help-menu">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Help Menu Access</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="docs-complete">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Documentation Completeness</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="readme-access">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">README Access</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Export & Smart Export - Full Width -->
-                <div class="test-category full-width">
-                    <h3>
-                        <span class="category-icon">📤</span>
-                        Export & Smart Export Tests
-                    </h3>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">Export Formats</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="export-pdf">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">Export to PDF</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="export-html">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">Export to HTML</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="export-markdown">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">Export to Markdown</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="export-json">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">Export to JSON</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">Smart Export Templates</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="template-journey-map">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Agent Journey Map</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="template-task-map">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Task Opportunity Map</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="template-workflow">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Problem Workflow Discovery</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="template-prd">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Product Requirements Doc</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">AI Generation</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="ai-content-gen">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">AI Content Generation</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="ai-asset-gen">
-                                    <input type="checkbox" class="test-checkbox" checked>
-                                    <span class="test-name">AI Asset Generation</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="style-guide-apply">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">Style Guide Application</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="url-style-import">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">URL Style Import</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- File Type Tests - Full Width -->
-                <div class="test-category full-width">
-                    <h3>
-                        <span class="category-icon">📄</span>
-                        File Type Support Tests
-                    </h3>
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;">
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">Text Files</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="file-txt">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.txt files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-md">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.md files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-rtf">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.rtf files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-csv">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.csv files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">Images</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="file-png">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.png files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-jpg">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.jpg/.jpeg files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-gif">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.gif files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-svg">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.svg files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">Documents</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="file-pdf">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.pdf files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-doc">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.doc/.docx files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-xls">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.xls/.xlsx files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-ppt">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.ppt/.pptx files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 style="margin-top: 0; color: #666;">Code & Data</h4>
-                            <ul class="test-list">
-                                <li class="test-item" data-test="file-js">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.js files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-json">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.json files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-html">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.html files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                                <li class="test-item" data-test="file-css">
-                                    <input type="checkbox" class="test-checkbox">
-                                    <span class="test-name">.css files</span>
-                                    <span class="test-status status-pending">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Performance -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">⚡</span>
-                        Performance Tests
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="search-speed">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Search Speed (1000 items)</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="memory-usage">
-                            <input type="checkbox" class="test-checkbox" checked>
-                            <span class="test-name">Memory Usage Check</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="startup-time">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Startup Time</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="large-clipboard">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Large Clipboard Data (10MB+)</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Security -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">🛡️</span>
-                        Security Tests
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-test="secure-storage">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Secure Data Storage</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="https-only">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">HTTPS-Only Connections</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                        <li class="test-item" data-test="xss-protection">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">XSS Protection</span>
-                            <span class="test-status status-pending">Pending</span>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="progress-bar">
-                <div class="progress-fill" style="width: 0%">0%</div>
-            </div>
-
-            <div class="test-results">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 style="margin: 0;">Test Results Summary</h3>
-                    <div id="report-finalized-badge" class="report-status finalized" style="display: none;">
-                        ✓ Report Finalized
-                    </div>
-                </div>
-                <div class="result-summary">
-                    <div class="summary-card">
-                        <div class="summary-number" id="total-tests">0</div>
-                        <div class="summary-label">Total Tests</div>
-                    </div>
-                    <div class="summary-card" style="border-color: #28a745;">
-                        <div class="summary-number" id="passed-tests" style="color: #28a745;">0</div>
-                        <div class="summary-label">Passed</div>
-                    </div>
-                    <div class="summary-card" style="border-color: #dc3545;">
-                        <div class="summary-number" id="failed-tests" style="color: #dc3545;">0</div>
-                        <div class="summary-label">Failed</div>
-                    </div>
-                    <div class="summary-card" style="border-color: #6c757d;">
-                        <div class="summary-number" id="skipped-tests" style="color: #6c757d;">0</div>
-                        <div class="summary-label">Skipped</div>
-                    </div>
-                    <div class="summary-card" style="border-color: #0099ff;">
-                        <div class="summary-number" id="duration">0s</div>
-                        <div class="summary-label">Duration</div>
-                    </div>
-                </div>
-                <div class="test-log" id="test-log">
-                    <div class="log-entry log-info">Test runner initialized...</div>
-                </div>
-            </div>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: 0%">0%</div>
         </div>
 
-        <!-- Manual Checklist Tab -->
-        <div class="tab-content" id="manual-tab">
-            <div class="test-categories">
-                <!-- Visual & UX -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">🎨</span>
-                        Visual & UX
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-manual="ui-appearance">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">UI Appearance & Layout</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="animations">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Animations & Transitions</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="responsive">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Window Resizing & Responsiveness</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="dark-mode">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Dark Mode Support</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- OS Integration -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">💻</span>
-                        OS Integration
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-manual="drag-drop">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Drag & Drop from Finder/Explorer</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="tray-icon">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">System Tray/Dock Icon</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="notifications">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">System Notifications</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="shortcuts">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Keyboard Shortcuts</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="context-menu">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Right-Click Context Menu</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- IDW & External AI Manual Tests -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">🌐</span>
-                        IDW & AI Manual Tests
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-manual="idw-login">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">IDW Login Process</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="idw-navigation">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">IDW Navigation & Switching</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="external-ai-launch">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Launch External AI Services</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="gsx-tools">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">GSX Tools Access & Navigation</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="setup-wizard">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Setup Wizard Flow</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Drop Zone (Black Hole) Manual Tests -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">🕳️</span>
-                        Drop Zone Manual Tests
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-manual="drop-zone-appearance">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Drop Zone Visual Appearance</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="drop-zone-drag">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Drag Files to Drop Zone</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="drop-zone-modal">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Save to Space Modal</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="drop-zone-menu">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Drop Zone Menu Options</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- AI Run Times Manual Tests -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">📰</span>
-                        AI Run Times Manual Tests
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-manual="rss-article-load">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Load & Read UXMag Articles</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="article-navigation">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Article Navigation (Next/Previous)</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="reading-progress">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Reading Progress Tracking</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="metadata-modal">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Article Metadata Modal</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Export Functionality Manual Tests -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">📤</span>
-                        Export Manual Tests
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-manual="export-ui">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Export UI & Options</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="export-preview">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Export Preview Modal</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="template-selection">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Template Selection & Customization</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="export-download">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Download Exported Files</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="ai-generation">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">AI Content Generation Quality</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Update & Installation -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">⬆️</span>
-                        Update & Installation
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-manual="fresh-install">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Fresh Installation</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="auto-update-check">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Auto-Update Check</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="manual-update">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Manual Update Process</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="rollback">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Rollback to Previous Version</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="uninstall">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Clean Uninstall</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Edge Cases -->
-                <div class="test-category">
-                    <h3>
-                        <span class="category-icon">⚠️</span>
-                        Edge Cases & Error Handling
-                    </h3>
-                    <ul class="test-list">
-                        <li class="test-item" data-manual="no-network">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">No Network Connection</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="invalid-api-keys">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Invalid API Keys</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="large-data">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Large Data Handling (100+ items)</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="concurrent-operations">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Concurrent Operations</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                        <li class="test-item" data-manual="crash-recovery">
-                            <input type="checkbox" class="test-checkbox">
-                            <span class="test-name">Crash Recovery</span>
-                            <button class="btn btn-sm">Notes</button>
-                        </li>
-                    </ul>
-                </div>
+        <div class="test-results">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px">
+            <h3 style="margin: 0">Test Results Summary</h3>
+            <div id="report-finalized-badge" class="report-status finalized" style="display: none">
+              ✓ Report Finalized
             </div>
-        </div>
-
-        <!-- Test History Tab -->
-        <div class="tab-content" id="history-tab">
-            <div style="padding: 20px;">
-                <h3>Test History</h3>
-                <p style="color: #666;">Previous test runs and exported reports</p>
-                <div style="background: #e7f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-size: 14px;">
-                    <strong>ℹ️ Note:</strong> 
-                    <ul style="margin: 10px 0 0 20px;">
-                        <li><strong>Save Progress</strong> - Saves your current work so you can resume later</li>
-                        <li><strong>Finalize Report</strong> - Marks the test run as complete and prepares it for export</li>
-                        <li><strong>Export Report</strong> - Downloads the finalized report in your chosen format</li>
-                    </ul>
-                </div>
-                <div id="test-history-list">
-                    <!-- History items will be populated here -->
-                </div>
+          </div>
+          <div class="result-summary">
+            <div class="summary-card">
+              <div class="summary-number" id="total-tests">0</div>
+              <div class="summary-label">Total Tests</div>
             </div>
-        </div>
-
-        <!-- Event Logs Tab -->
-        <div class="tab-content" id="logs-tab">
-            <div class="log-viewer-container">
-                <div class="log-header">
-                    <h3 style="margin: 0 0 15px 0;">Event Logs</h3>
-                    
-                    <div class="log-controls">
-                        <div class="log-search">
-                            <input type="text" class="search-input" id="logSearchInput" placeholder="Search logs...">
-                            <button class="btn btn-secondary" onclick="searchLogsInTestRunner()">Search</button>
-                        </div>
-                        
-                        <div class="log-filters">
-                            <div class="filter-group">
-                                <label>Level:</label>
-                                <div class="log-level-filter">
-                                    <button class="level-toggle debug active" data-level="debug">Debug</button>
-                                    <button class="level-toggle info active" data-level="info">Info</button>
-                                    <button class="level-toggle warn active" data-level="warn">Warn</button>
-                                    <button class="level-toggle error active" data-level="error">Error</button>
-                                </div>
-                            </div>
-                            
-                            <div class="auto-refresh">
-                                <input type="checkbox" id="logAutoRefresh" checked>
-                                <label for="logAutoRefresh">Auto-refresh</label>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="log-stats">
-                        <div class="stat-item">
-                            <span>Total Entries:</span>
-                            <strong id="logTotalEntries">0</strong>
-                        </div>
-                        <div class="stat-item">
-                            <span>Current File:</span>
-                            <strong id="logCurrentFile">-</strong>
-                        </div>
-                        <div class="stat-item">
-                            <span>File Size:</span>
-                            <strong id="logFileSize">-</strong>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="log-content" id="logContent">
-                    <div class="loading">Loading logs...</div>
-                </div>
-                
-                <div class="log-footer">
-                    <div>
-                        <button class="btn btn-secondary" onclick="refreshLogsInTestRunner()">Refresh</button>
-                        <button class="btn btn-secondary" onclick="clearLogDisplay()">Clear Display</button>
-                    </div>
-                    <div>
-                        <button class="btn btn-primary" onclick="analyzeLogsWithAI()">🤖 Analyze with AI</button>
-                        <button class="btn btn-primary" onclick="showLogExportModal()">Export Logs</button>
-                        <button class="btn btn-secondary" onclick="viewLogFilesInTestRunner()">View Log Files</button>
-                    </div>
-                </div>
+            <div class="summary-card" style="border-color: #28a745">
+              <div class="summary-number" id="passed-tests" style="color: #28a745">0</div>
+              <div class="summary-label">Passed</div>
             </div>
+            <div class="summary-card" style="border-color: #dc3545">
+              <div class="summary-number" id="failed-tests" style="color: #dc3545">0</div>
+              <div class="summary-label">Failed</div>
+            </div>
+            <div class="summary-card" style="border-color: #6c757d">
+              <div class="summary-number" id="skipped-tests" style="color: #6c757d">0</div>
+              <div class="summary-label">Skipped</div>
+            </div>
+            <div class="summary-card" style="border-color: #0099ff">
+              <div class="summary-number" id="duration">0s</div>
+              <div class="summary-label">Duration</div>
+            </div>
+          </div>
+          <div class="test-log" id="test-log">
+            <div class="log-entry log-info">Test runner initialized...</div>
+          </div>
         </div>
+      </div>
+
+      <!-- Manual Checklist Tab -->
+      <div class="tab-content" id="manual-tab">
+        <div class="test-categories">
+          <!-- Visual & UX -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">🎨</span>
+              Visual & UX
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-manual="ui-appearance">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">UI Appearance & Layout</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="animations">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Animations & Transitions</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="responsive">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Window Resizing & Responsiveness</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="dark-mode">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Dark Mode Support</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+            </ul>
+          </div>
+
+          <!-- OS Integration -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">💻</span>
+              OS Integration
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-manual="drag-drop">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Drag & Drop from Finder/Explorer</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="tray-icon">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">System Tray/Dock Icon</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="notifications">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">System Notifications</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="shortcuts">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Keyboard Shortcuts</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="context-menu">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Right-Click Context Menu</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+            </ul>
+          </div>
+
+          <!-- IDW & External AI Manual Tests -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">🌐</span>
+              IDW & AI Manual Tests
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-manual="idw-login">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">IDW Login Process</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="idw-navigation">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">IDW Navigation & Switching</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="external-ai-launch">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Launch External AI Services</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="gsx-tools">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">GSX Tools Access & Navigation</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="setup-wizard">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Setup Wizard Flow</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Drop Zone (Black Hole) Manual Tests -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">🕳️</span>
+              Drop Zone Manual Tests
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-manual="drop-zone-appearance">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Drop Zone Visual Appearance</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="drop-zone-drag">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Drag Files to Drop Zone</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="drop-zone-modal">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Save to Space Modal</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="drop-zone-menu">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Drop Zone Menu Options</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+            </ul>
+          </div>
+
+          <!-- AI Run Times Manual Tests -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">📰</span>
+              AI Run Times Manual Tests
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-manual="rss-article-load">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Load & Read UXMag Articles</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="article-navigation">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Article Navigation (Next/Previous)</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="reading-progress">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Reading Progress Tracking</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="metadata-modal">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Article Metadata Modal</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Export Functionality Manual Tests -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">📤</span>
+              Export Manual Tests
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-manual="export-ui">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Export UI & Options</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="export-preview">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Export Preview Modal</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="template-selection">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Template Selection & Customization</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="export-download">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Download Exported Files</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="ai-generation">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">AI Content Generation Quality</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Update & Installation -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">⬆️</span>
+              Update & Installation
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-manual="fresh-install">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Fresh Installation</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="auto-update-check">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Auto-Update Check</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="manual-update">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Manual Update Process</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="rollback">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Rollback to Previous Version</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="uninstall">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Clean Uninstall</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Edge Cases -->
+          <div class="test-category">
+            <h3>
+              <span class="category-icon">⚠️</span>
+              Edge Cases & Error Handling
+            </h3>
+            <ul class="test-list">
+              <li class="test-item" data-manual="no-network">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">No Network Connection</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="invalid-api-keys">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Invalid API Keys</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="large-data">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Large Data Handling (100+ items)</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="concurrent-operations">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Concurrent Operations</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+              <li class="test-item" data-manual="crash-recovery">
+                <input type="checkbox" class="test-checkbox" />
+                <span class="test-name">Crash Recovery</span>
+                <button class="btn btn-sm">Notes</button>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Test History Tab -->
+      <div class="tab-content" id="history-tab">
+        <div style="padding: 20px">
+          <h3>Test History</h3>
+          <p style="color: #666">Previous test runs and exported reports</p>
+          <div style="background: #e7f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-size: 14px">
+            <strong>ℹ️ Note:</strong>
+            <ul style="margin: 10px 0 0 20px">
+              <li><strong>Save Progress</strong> - Saves your current work so you can resume later</li>
+              <li><strong>Finalize Report</strong> - Marks the test run as complete and prepares it for export</li>
+              <li><strong>Export Report</strong> - Downloads the finalized report in your chosen format</li>
+            </ul>
+          </div>
+          <div id="test-history-list">
+            <!-- History items will be populated here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Event Logs Tab -->
+      <div class="tab-content" id="logs-tab">
+        <div class="log-viewer-container">
+          <div class="log-header">
+            <h3 style="margin: 0 0 15px 0">Event Logs</h3>
+
+            <div class="log-controls">
+              <div class="log-search">
+                <input type="text" class="search-input" id="logSearchInput" placeholder="Search logs..." />
+                <button class="btn btn-secondary" onclick="searchLogsInTestRunner()">Search</button>
+              </div>
+
+              <div class="log-filters">
+                <div class="filter-group">
+                  <label>Level:</label>
+                  <div class="log-level-filter">
+                    <button class="level-toggle debug active" data-level="debug">Debug</button>
+                    <button class="level-toggle info active" data-level="info">Info</button>
+                    <button class="level-toggle warn active" data-level="warn">Warn</button>
+                    <button class="level-toggle error active" data-level="error">Error</button>
+                  </div>
+                </div>
+
+                <div class="auto-refresh">
+                  <input type="checkbox" id="logAutoRefresh" checked />
+                  <label for="logAutoRefresh">Auto-refresh</label>
+                </div>
+              </div>
+            </div>
+
+            <div class="log-stats">
+              <div class="stat-item">
+                <span>Total Entries:</span>
+                <strong id="logTotalEntries">0</strong>
+              </div>
+              <div class="stat-item">
+                <span>Current File:</span>
+                <strong id="logCurrentFile">-</strong>
+              </div>
+              <div class="stat-item">
+                <span>File Size:</span>
+                <strong id="logFileSize">-</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="log-content" id="logContent">
+            <div class="loading">Loading logs...</div>
+          </div>
+
+          <div class="log-footer">
+            <div>
+              <button class="btn btn-secondary" onclick="refreshLogsInTestRunner()">Refresh</button>
+              <button class="btn btn-secondary" onclick="clearLogDisplay()">Clear Display</button>
+            </div>
+            <div>
+              <button class="btn btn-primary" onclick="analyzeLogsWithAI()">🤖 Analyze with AI</button>
+              <button class="btn btn-primary" onclick="showLogExportModal()">Export Logs</button>
+              <button class="btn btn-secondary" onclick="viewLogFilesInTestRunner()">View Log Files</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Test Controls -->
     <div class="test-controls">
-        <span style="margin-right: 10px; color: #666; font-size: 13px;">
-            <span id="auto-save-status">Auto-save: ON</span>
-        </span>
-        <button id="run-selected" class="btn btn-primary">Run Selected</button>
-        <button id="run-all" class="btn btn-secondary">Run All</button>
-        <button id="pause-resume" class="btn btn-secondary" style="display: none;">Pause</button>
-        <button id="save-progress" class="btn btn-success">Save Progress</button>
-        <button id="finalize-report" class="btn btn-primary">Finalize Report</button>
-        <button id="export-results" class="btn btn-secondary">Export Report</button>
+      <span style="margin-right: 10px; color: #666; font-size: 13px">
+        <span id="auto-save-status">Auto-save: ON</span>
+      </span>
+      <button id="run-selected" class="btn btn-primary">Run Selected</button>
+      <button id="run-all" class="btn btn-secondary">Run All</button>
+      <button id="pause-resume" class="btn btn-secondary" style="display: none">Pause</button>
+      <button id="save-progress" class="btn btn-success">Save Progress</button>
+      <button id="finalize-report" class="btn btn-primary">Finalize Report</button>
+      <button id="export-results" class="btn btn-secondary">Export Report</button>
     </div>
 
     <!-- Auto-save indicator -->
-    <div class="auto-save-indicator" id="auto-save-indicator">
-        ✓ Progress saved
-    </div>
+    <div class="auto-save-indicator" id="auto-save-indicator">✓ Progress saved</div>
 
     <!-- Finalize Modal -->
     <div class="finalize-modal" id="finalize-modal">
-        <div class="finalize-content">
-            <div class="finalize-icon">📋</div>
-            <h2>Finalize Test Report</h2>
-            <p>Review your test results before finalizing:</p>
-            
-            <div class="report-summary">
-                <h4>Test Summary</h4>
-                <div class="summary-row">
-                    <span>Tester:</span>
-                    <strong id="final-tester-name">-</strong>
-                </div>
-                <div class="summary-row">
-                    <span>Date:</span>
-                    <strong id="final-test-date">-</strong>
-                </div>
-                <div class="summary-row">
-                    <span>Total Tests:</span>
-                    <strong id="final-total-tests">0</strong>
-                </div>
-                <div class="summary-row">
-                    <span>Passed:</span>
-                    <strong style="color: #28a745;" id="final-passed-tests">0</strong>
-                </div>
-                <div class="summary-row">
-                    <span>Failed:</span>
-                    <strong style="color: #dc3545;" id="final-failed-tests">0</strong>
-                </div>
-                <div class="summary-row">
-                    <span>Manual Tests Completed:</span>
-                    <strong id="final-manual-tests">0</strong>
-                </div>
-                <div class="summary-row">
-                    <span>Duration:</span>
-                    <strong id="final-duration">-</strong>
-                </div>
-            </div>
-            
-            <div id="finalize-status" style="display: none;">
-                <div class="report-status finalized">✓ Report Finalized</div>
-                <p style="margin-top: 10px; color: #666; font-size: 14px;">
-                    Your test report has been saved and is ready for export.
-                </p>
-            </div>
-            
-            <div style="margin-top: 30px;">
-                <button class="btn btn-primary" id="confirm-finalize" onclick="finalizeReport()">Finalize & Save</button>
-                <button class="btn btn-secondary" onclick="closeFinalizeModal()">Cancel</button>
-            </div>
+      <div class="finalize-content">
+        <div class="finalize-icon">📋</div>
+        <h2>Finalize Test Report</h2>
+        <p>Review your test results before finalizing:</p>
+
+        <div class="report-summary">
+          <h4>Test Summary</h4>
+          <div class="summary-row">
+            <span>Tester:</span>
+            <strong id="final-tester-name">-</strong>
+          </div>
+          <div class="summary-row">
+            <span>Date:</span>
+            <strong id="final-test-date">-</strong>
+          </div>
+          <div class="summary-row">
+            <span>Total Tests:</span>
+            <strong id="final-total-tests">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Passed:</span>
+            <strong style="color: #28a745" id="final-passed-tests">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Failed:</span>
+            <strong style="color: #dc3545" id="final-failed-tests">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Manual Tests Completed:</span>
+            <strong id="final-manual-tests">0</strong>
+          </div>
+          <div class="summary-row">
+            <span>Duration:</span>
+            <strong id="final-duration">-</strong>
+          </div>
         </div>
+
+        <div id="finalize-status" style="display: none">
+          <div class="report-status finalized">✓ Report Finalized</div>
+          <p style="margin-top: 10px; color: #666; font-size: 14px">
+            Your test report has been saved and is ready for export.
+          </p>
+        </div>
+
+        <div style="margin-top: 30px">
+          <button class="btn btn-primary" id="confirm-finalize" onclick="finalizeReport()">Finalize & Save</button>
+          <button class="btn btn-secondary" onclick="closeFinalizeModal()">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <!-- Export Modal -->
     <div class="export-modal" id="export-modal">
-        <div class="export-content">
-            <h2>Export Test Report</h2>
-            <p>Choose export format and options:</p>
-            
-            <div class="export-format">
-                <div class="format-option" data-format="pdf">
-                    <h4>PDF</h4>
-                    <p>Professional report</p>
-                </div>
-                <div class="format-option" data-format="html">
-                    <h4>HTML</h4>
-                    <p>Interactive report</p>
-                </div>
-                <div class="format-option" data-format="json">
-                    <h4>JSON</h4>
-                    <p>Machine-readable</p>
-                </div>
-                <div class="format-option" data-format="markdown">
-                    <h4>Markdown</h4>
-                    <p>Documentation</p>
-                </div>
-                <div class="format-option" data-format="csv">
-                    <h4>CSV</h4>
-                    <p>Spreadsheet</p>
-                </div>
-                <div class="format-option selected" data-format="complete">
-                    <h4>Complete Package</h4>
-                    <p>All formats + logs</p>
-                </div>
-            </div>
-            
-            <div style="margin-top: 20px;">
-                <label>
-                    <input type="checkbox" id="include-screenshots" checked>
-                    Include screenshots (if available)
-                </label>
-                <br>
-                <label>
-                    <input type="checkbox" id="include-logs" checked>
-                    Include detailed logs
-                </label>
-                <br>
-                <label>
-                    <input type="checkbox" id="include-notes" checked>
-                    Include manual test notes
-                </label>
-            </div>
-            
-            <div style="margin-top: 30px; text-align: center;">
-                <button class="btn btn-primary" onclick="exportReport()">Export</button>
-                <button class="btn btn-secondary" onclick="closeExportModal()">Cancel</button>
-            </div>
+      <div class="export-content">
+        <h2>Export Test Report</h2>
+        <p>Choose export format and options:</p>
+
+        <div class="export-format">
+          <div class="format-option" data-format="pdf">
+            <h4>PDF</h4>
+            <p>Professional report</p>
+          </div>
+          <div class="format-option" data-format="html">
+            <h4>HTML</h4>
+            <p>Interactive report</p>
+          </div>
+          <div class="format-option" data-format="json">
+            <h4>JSON</h4>
+            <p>Machine-readable</p>
+          </div>
+          <div class="format-option" data-format="markdown">
+            <h4>Markdown</h4>
+            <p>Documentation</p>
+          </div>
+          <div class="format-option" data-format="csv">
+            <h4>CSV</h4>
+            <p>Spreadsheet</p>
+          </div>
+          <div class="format-option selected" data-format="complete">
+            <h4>Complete Package</h4>
+            <p>All formats + logs</p>
+          </div>
         </div>
+
+        <div style="margin-top: 20px">
+          <label>
+            <input type="checkbox" id="include-screenshots" checked />
+            Include screenshots (if available)
+          </label>
+          <br />
+          <label>
+            <input type="checkbox" id="include-logs" checked />
+            Include detailed logs
+          </label>
+          <br />
+          <label>
+            <input type="checkbox" id="include-notes" checked />
+            Include manual test notes
+          </label>
+        </div>
+
+        <div style="margin-top: 30px; text-align: center">
+          <button class="btn btn-primary" onclick="exportReport()">Export</button>
+          <button class="btn btn-secondary" onclick="closeExportModal()">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <!-- Test Case Modal -->
     <div id="test-case-modal" class="test-modal">
-        <div class="modal-content">
-            <span class="modal-close" onclick="testRunner.closeTestCaseModal()">&times;</span>
-            <h2 id="test-case-title">Test Case Details</h2>
-            <p id="test-case-id" class="test-id">Test ID: </p>
-            
-            <div class="test-case-section">
-                <h3>Use Case</h3>
-                <p id="test-case-use-case" class="test-case-text"></p>
-            </div>
-            
-            <div class="test-case-section">
-                <h3>How to Test</h3>
-                <ol id="test-case-instructions" class="test-case-steps"></ol>
-            </div>
-            
-            <div class="test-case-actions">
-                <button class="btn btn-primary" onclick="testRunner.closeTestCaseModal()">Close</button>
-            </div>
+      <div class="modal-content">
+        <span class="modal-close" onclick="testRunner.closeTestCaseModal()">&times;</span>
+        <h2 id="test-case-title">Test Case Details</h2>
+        <p id="test-case-id" class="test-id">Test ID:</p>
+
+        <div class="test-case-section">
+          <h3>Use Case</h3>
+          <p id="test-case-use-case" class="test-case-text"></p>
         </div>
+
+        <div class="test-case-section">
+          <h3>How to Test</h3>
+          <ol id="test-case-instructions" class="test-case-steps"></ol>
+        </div>
+
+        <div class="test-case-actions">
+          <button class="btn btn-primary" onclick="testRunner.closeTestCaseModal()">Close</button>
+        </div>
+      </div>
     </div>
 
     <!-- Test Result Modal (will be created dynamically by JavaScript) -->
-    
+
     <script src="test-runner.js"></script>
     <script>
-        // Global functions for onclick handlers
-        function searchLogsInTestRunner() {
-            if (window.testRunner) {
-                testRunner.searchLogsInTestRunner();
-            }
+      // Global functions for onclick handlers
+      function searchLogsInTestRunner() {
+        if (window.testRunner) {
+          testRunner.searchLogsInTestRunner();
         }
-        
-        function refreshLogsInTestRunner() {
-            if (window.testRunner) {
-                testRunner.refreshLogsInTestRunner();
-            }
+      }
+
+      function refreshLogsInTestRunner() {
+        if (window.testRunner) {
+          testRunner.refreshLogsInTestRunner();
         }
-        
-        function clearLogDisplay() {
-            if (window.testRunner) {
-                testRunner.clearLogDisplay();
-            }
+      }
+
+      function clearLogDisplay() {
+        if (window.testRunner) {
+          testRunner.clearLogDisplay();
         }
-        
-        function showLogExportModal() {
-            if (window.testRunner) {
-                testRunner.showLogExportModal();
-            }
+      }
+
+      function showLogExportModal() {
+        if (window.testRunner) {
+          testRunner.showLogExportModal();
         }
-        
-        function viewLogFilesInTestRunner() {
-            if (window.testRunner) {
-                testRunner.viewLogFilesInTestRunner();
-            }
+      }
+
+      function viewLogFilesInTestRunner() {
+        if (window.testRunner) {
+          testRunner.viewLogFilesInTestRunner();
         }
-        
-        function analyzeLogsWithAI() {
-            if (window.testRunner) {
-                testRunner.analyzeLogsWithAI();
-            }
+      }
+
+      function analyzeLogsWithAI() {
+        if (window.testRunner) {
+          testRunner.analyzeLogsWithAI();
         }
+      }
     </script>
-</body>
-</html> 
+  </body>
+</html>

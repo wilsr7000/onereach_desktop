@@ -8,7 +8,7 @@ vi.mock('../../../lib/log-event-queue', () => ({
   getLogQueue: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-const mockImageBuffer = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ...Array(2000).fill(0)]);
+const mockImageBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...Array(2000).fill(0)]);
 
 const mockAI = createMockAIService({
   imageResponse: mockImageBuffer,
@@ -53,7 +53,7 @@ describe('TextToImageConverter (specific)', () => {
   });
 
   it('defines distinct strategies for different generation styles', () => {
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toContain('literal');
     expect(ids).toContain('artistic');
     expect(ids).toContain('diagram');

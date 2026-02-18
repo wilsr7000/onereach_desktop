@@ -40,7 +40,7 @@ module.exports = defineConfig({
   reporter: [
     ['html', { outputFolder: 'test-results/html' }],
     ['json', { outputFile: 'test-results/results.json' }],
-    ['list']
+    ['list'],
   ],
 
   /* Shared settings for all the projects below */

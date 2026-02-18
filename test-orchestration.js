@@ -1,18 +1,17 @@
 /**
  * LLM-Driven Orchestration Test Suite
- * 
+ *
  * End-to-end test that boots the Exchange, connects agents via WebSocket,
  * submits real tasks through the pipeline, captures every communication event,
  * and uses an LLM judge to evaluate whether user-facing communication is
  * appropriate, timely, and helpful.
- * 
+ *
  * Tests: bidding, fast-path instant answers, task decomposition, error handling,
  * event sequence correctness, and overall communication quality.
- * 
+ *
  * Run: node test-orchestration.js
  */
 
-const path = require('path');
 const WebSocket = require('ws');
 
 // ==================== MOCK SETTINGS MANAGER ====================
@@ -31,11 +30,9 @@ function setupMockSettings() {
     const { getSharedStorage } = require('./clipboard-storage-v2');
     const storage = getSharedStorage();
     const spaces = storage.index?.spaces || [];
-    const keysSpace = spaces.find(s =>
-      s.name?.toLowerCase() === 'keys' || s.id?.toLowerCase() === 'keys'
-    );
+    const keysSpace = spaces.find((s) => s.name?.toLowerCase() === 'keys' || s.id?.toLowerCase() === 'keys');
     if (keysSpace) {
-      const items = (storage.index?.items || []).filter(i => i.spaceId === keysSpace.id);
+      const items = (storage.index?.items || []).filter((i) => i.spaceId === keysSpace.id);
       for (const item of items) {
         const full = storage.loadItem(item.id);
         const content = full?.content || item.content || '';
@@ -51,7 +48,7 @@ function setupMockSettings() {
         }
       }
     }
-  } catch (e) {
+  } catch (_e) {
     // Clipboard storage not available -- rely on env vars
   }
 
@@ -70,7 +67,8 @@ function setupMockSettings() {
     // Only Anthropic available: route fast profile through Anthropic
     profileOverrides = {
       fast: {
-        provider: 'anthropic', model: 'claude-3-haiku-20240307',
+        provider: 'anthropic',
+        model: 'claude-3-haiku-20240307',
         fallback: null, // no fallback -- skip OpenAI entirely
       },
     };
@@ -154,21 +152,21 @@ class CommunicationTimeline {
   }
 
   getByChannel(channel) {
-    return this.events.filter(e => e.channel === channel);
+    return this.events.filter((e) => e.channel === channel);
   }
 
   getByType(type) {
-    return this.events.filter(e => e.type === type);
+    return this.events.filter((e) => e.type === type);
   }
 
   getOrderedTypes() {
-    return this.events.map(e => e.type);
+    return this.events.map((e) => e.type);
   }
 
   format() {
-    return this.events.map(e =>
-      `[${e.timestamp}ms] ${e.channel}::${e.type} ${JSON.stringify(e.data).slice(0, 200)}`
-    ).join('\n');
+    return this.events
+      .map((e) => `[${e.timestamp}ms] ${e.channel}::${e.type} ${JSON.stringify(e.data).slice(0, 200)}`)
+      .join('\n');
   }
 }
 
@@ -180,15 +178,22 @@ function resetAllCircuits() {
     const ai = require('./lib/ai-service');
     ai.resetCircuit('openai');
     ai.resetCircuit('anthropic');
-  } catch (e) { /* ignore */ }
+  } catch (_e) {
+    /* ignore */
+  }
 
   // Reset unified-bidder circuit breaker
   try {
     const { getCircuit } = require('./packages/agents/circuit-breaker');
     const cb = getCircuit('unified-bidder');
     if (cb && cb.reset) cb.reset();
-    else if (cb) { cb.state = 'closed'; cb.failureCount = 0; }
-  } catch (e) { /* ignore */ }
+    else if (cb) {
+      cb.state = 'closed';
+      cb.failureCount = 0;
+    }
+  } catch (_e) {
+    /* ignore */
+  }
 }
 
 // ==================== TEST SCENARIOS ====================
@@ -247,12 +252,12 @@ const TEST_SCENARIOS = [
 // ==================== LLM COMMUNICATION JUDGE ====================
 
 const RUBRIC_WEIGHTS = {
-  acknowledgment: 0.20,
-  agentSelection: 0.20,
+  acknowledgment: 0.2,
+  agentSelection: 0.2,
   resultClarity: 0.25,
   errorHandling: 0.15,
-  progressTransparency: 0.10,
-  eventCompleteness: 0.10,
+  progressTransparency: 0.1,
+  eventCompleteness: 0.1,
 };
 
 async function judgeScenario(scenario, timeline, taskResult) {
@@ -360,38 +365,41 @@ async function bootExchange() {
   const agentCategories = buildCategoryConfig();
 
   const storage = new MemoryStorage();
-  exchangeInstance = new Exchange({
-    port: TEST_PORT,
-    transport: 'websocket',
-    storage: 'memory',
+  exchangeInstance = new Exchange(
+    {
+      port: TEST_PORT,
+      transport: 'websocket',
+      storage: 'memory',
 
-    categories: agentCategories,
+      categories: agentCategories,
 
-    auction: {
-      defaultWindowMs: AUCTION_WINDOW_MS,
-      minWindowMs: 3000,
-      maxWindowMs: 5000,
-      instantWinThreshold: 0.9,
-      dominanceMargin: 0.3,
-      maxAuctionAttempts: 2,
-      executionTimeoutMs: 20000,
+      auction: {
+        defaultWindowMs: AUCTION_WINDOW_MS,
+        minWindowMs: 3000,
+        maxWindowMs: 5000,
+        instantWinThreshold: 0.9,
+        dominanceMargin: 0.3,
+        maxAuctionAttempts: 2,
+        executionTimeoutMs: 20000,
+      },
+
+      reputation: {
+        initialScore: 50,
+        maxScore: 100,
+        decayRate: 0.01,
+        flagThreshold: 20,
+      },
+
+      rateLimit: {
+        maxTasksPerMinute: 30,
+        maxTasksPerAgent: 10,
+      },
+
+      heartbeatIntervalMs: 30000,
+      heartbeatTimeoutMs: 60000,
     },
-
-    reputation: {
-      initialScore: 50,
-      maxScore: 100,
-      decayRate: 0.01,
-      flagThreshold: 20,
-    },
-
-    rateLimit: {
-      maxTasksPerMinute: 30,
-      maxTasksPerAgent: 10,
-    },
-
-    heartbeatIntervalMs: 30000,
-    heartbeatTimeoutMs: 60000,
-  }, storage);
+    storage
+  );
 
   transportInstance = new WebSocketTransport(exchangeInstance, {
     port: TEST_PORT,
@@ -406,21 +414,31 @@ async function bootExchange() {
 
 async function shutdownExchange() {
   // Disconnect all agents
-  for (const [id, conn] of agentConnections) {
+  for (const [_id, conn] of agentConnections) {
     try {
       if (conn.ws.readyState === WebSocket.OPEN) {
         conn.ws.close();
       }
       if (conn.heartbeat) clearInterval(conn.heartbeat);
-    } catch (e) { /* ignore */ }
+    } catch (_e) {
+      /* ignore */
+    }
   }
   agentConnections.clear();
 
   if (exchangeInstance) {
-    try { await exchangeInstance.stop(); } catch (e) { /* ignore */ }
+    try {
+      await exchangeInstance.stop();
+    } catch (_e) {
+      /* ignore */
+    }
   }
   if (transportInstance) {
-    try { await transportInstance.stop(); } catch (e) { /* ignore */ }
+    try {
+      await transportInstance.stop();
+    } catch (_e) {
+      /* ignore */
+    }
   }
   console.log('[Test] Exchange shut down');
 }
@@ -435,13 +453,15 @@ async function connectAgentToExchange(agent, timeline) {
     let heartbeat = null;
 
     ws.on('open', () => {
-      ws.send(JSON.stringify({
-        type: 'register',
-        agentId: agent.id,
-        agentVersion: agent.version || '1.0.0',
-        categories: agent.categories,
-        capabilities: { keywords: agent.keywords, executionType: agent.executionType || 'builtin' },
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'register',
+          agentId: agent.id,
+          agentVersion: agent.version || '1.0.0',
+          categories: agent.categories,
+          capabilities: { keywords: agent.keywords, executionType: agent.executionType || 'builtin' },
+        })
+      );
 
       heartbeat = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -463,14 +483,16 @@ async function connectAgentToExchange(agent, timeline) {
           try {
             const llmResult = await Promise.race([
               evaluateAgentBid(agent, msg.task),
-              new Promise((_, rej) => setTimeout(() => rej(new Error('LLM timeout')), 5000)),
+              new Promise((_, rej) => {
+                setTimeout(() => rej(new Error('LLM timeout')), 5000);
+              }),
             ]);
             evaluation = {
               confidence: llmResult.confidence || 0,
               plan: llmResult.plan || llmResult.reasoning || '',
               result: llmResult.result || null,
             };
-          } catch (e) {
+          } catch (_e) {
             // LLM failed, agent can't bid
           }
 
@@ -495,21 +517,25 @@ async function connectAgentToExchange(agent, timeline) {
                 result: evaluation.result,
               });
             }
-            ws.send(JSON.stringify({
-              type: 'bid_response',
-              auctionId: msg.auctionId,
-              agentId: agent.id,
-              agentVersion: agent.version || '1.0.0',
-              bid: bidPayload,
-            }));
+            ws.send(
+              JSON.stringify({
+                type: 'bid_response',
+                auctionId: msg.auctionId,
+                agentId: agent.id,
+                agentVersion: agent.version || '1.0.0',
+                bid: bidPayload,
+              })
+            );
           } else {
-            ws.send(JSON.stringify({
-              type: 'bid_response',
-              auctionId: msg.auctionId,
-              agentId: agent.id,
-              agentVersion: agent.version || '1.0.0',
-              bid: null,
-            }));
+            ws.send(
+              JSON.stringify({
+                type: 'bid_response',
+                auctionId: msg.auctionId,
+                agentId: agent.id,
+                agentVersion: agent.version || '1.0.0',
+                bid: null,
+              })
+            );
           }
         } else if (msg.type === 'task_assignment') {
           // Real agent execution
@@ -523,7 +549,9 @@ async function connectAgentToExchange(agent, timeline) {
             if (agent.execute && typeof agent.execute === 'function') {
               result = await Promise.race([
                 agent.execute(msg.task),
-                new Promise((_, rej) => setTimeout(() => rej(new Error('Execution timeout')), 15000)),
+                new Promise((_, rej) => {
+                  setTimeout(() => rej(new Error('Execution timeout')), 15000);
+                }),
               ]);
             } else {
               result = { success: false, error: 'Agent has no execute method' };
@@ -535,32 +563,36 @@ async function connectAgentToExchange(agent, timeline) {
               message: result.message || result.output || '',
             });
 
-            ws.send(JSON.stringify({
-              type: 'task_result',
-              taskId: msg.taskId,
-              result: {
-                success: result.success,
-                output: result.message || result.result,
-                data: result.data,
-                error: result.success ? undefined : result.error,
-                needsInput: result.needsInput,
-              },
-            }));
+            ws.send(
+              JSON.stringify({
+                type: 'task_result',
+                taskId: msg.taskId,
+                result: {
+                  success: result.success,
+                  output: result.message || result.result,
+                  data: result.data,
+                  error: result.success ? undefined : result.error,
+                  needsInput: result.needsInput,
+                },
+              })
+            );
           } catch (execError) {
             timeline.record('execution', 'execution:error', {
               agentId: agent.id,
               error: execError.message,
             });
-            ws.send(JSON.stringify({
-              type: 'task_result',
-              taskId: msg.taskId,
-              result: { success: false, error: execError.message },
-            }));
+            ws.send(
+              JSON.stringify({
+                type: 'task_result',
+                taskId: msg.taskId,
+                result: { success: false, error: execError.message },
+              })
+            );
           }
         } else if (msg.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
         }
-      } catch (error) {
+      } catch (_error) {
         // Message parse error
       }
     });
@@ -576,7 +608,7 @@ async function connectAgentToExchange(agent, timeline) {
 // ==================== TASK SUBMISSION & TRACKING ====================
 
 function submitAndTrack(input, timeline) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _reject) => {
     let settled = false;
     const timeout = setTimeout(() => {
       if (!settled) {
@@ -684,7 +716,7 @@ function submitAndTrack(input, timeline) {
       const errorAgent = getAgent('error-agent');
       if (errorAgent) {
         const errorTask = { content: input, metadata: { errorReason: reason } };
-        errorAgent.execute(errorTask).then(result => {
+        errorAgent.execute(errorTask).then((result) => {
           const msg = result?.output || 'Something went wrong.';
           timeline.record('voice', 'error-speech', { message: msg, agentId: 'error-agent' });
           timeline.record('hud', 'sendResult', { success: false, message: msg, agentId: 'error-agent' });
@@ -794,7 +826,7 @@ Respond with JSON only:
 async function testBiddingAndSelection(timeline) {
   section('Bidding & Agent Selection');
 
-  for (const scenario of TEST_SCENARIOS.filter(s => s.category === 'bidding')) {
+  for (const scenario of TEST_SCENARIOS.filter((s) => s.category === 'bidding')) {
     console.log(`\n  Scenario: ${scenario.id} -- "${scenario.input}"`);
     timeline.reset();
     resetAllCircuits();
@@ -803,16 +835,22 @@ async function testBiddingAndSelection(timeline) {
 
     // Structural assertions
     assert(!result.timeout, `${scenario.id}: task completed (not timed out)`);
-    assert(result.agentId === scenario.expectedAgent, `${scenario.id}: ${scenario.expectedAgent} won (got: ${result.agentId})`);
+    assert(
+      result.agentId === scenario.expectedAgent,
+      `${scenario.id}: ${scenario.expectedAgent} won (got: ${result.agentId})`
+    );
     assert(result.success, `${scenario.id}: task succeeded`);
     assert(result.message && result.message.length > 0, `${scenario.id}: has response message`);
 
     // Event sequence
-    const types = timeline.getOrderedTypes().filter(t => t.startsWith('task:'));
+    const types = timeline.getOrderedTypes().filter((t) => t.startsWith('task:'));
     const hasQueued = types.includes('task:queued');
     const hasAssigned = types.includes('task:assigned');
     const hasSettled = types.includes('task:settled');
-    assert(hasQueued && hasAssigned && hasSettled, `${scenario.id}: complete event sequence (queued->assigned->settled)`);
+    assert(
+      hasQueued && hasAssigned && hasSettled,
+      `${scenario.id}: complete event sequence (queued->assigned->settled)`
+    );
 
     // Ack was emitted
     const acks = timeline.getByType('ack');
@@ -836,7 +874,9 @@ async function testBiddingAndSelection(timeline) {
     scenarioScores.push({ id: scenario.id, category: scenario.category, ...judgment });
 
     // Small delay between scenarios to avoid bid cache collisions
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => {
+      setTimeout(r, 500);
+    });
   }
 }
 
@@ -846,7 +886,7 @@ async function testFastPath(timeline) {
   const { clearCache } = require('./packages/agents/unified-bidder');
   clearCache(); // Ensure clean bids
 
-  for (const scenario of TEST_SCENARIOS.filter(s => s.category === 'fast-path')) {
+  for (const scenario of TEST_SCENARIOS.filter((s) => s.category === 'fast-path')) {
     console.log(`\n  Scenario: ${scenario.id} -- "${scenario.input}"`);
     timeline.reset();
     resetAllCircuits();
@@ -873,7 +913,10 @@ async function testFastPath(timeline) {
 
     // Agent selection
     if (scenario.expectedAgent) {
-      assert(result.agentId === scenario.expectedAgent, `${scenario.id}: ${scenario.expectedAgent} handled it (got: ${result.agentId})`);
+      assert(
+        result.agentId === scenario.expectedAgent,
+        `${scenario.id}: ${scenario.expectedAgent} handled it (got: ${result.agentId})`
+      );
     }
 
     // LLM Judge
@@ -887,14 +930,16 @@ async function testFastPath(timeline) {
     assert(judgment.composite >= 7.0, `${scenario.id}: judge score >= 7.0 (got: ${judgment.composite})`);
 
     scenarioScores.push({ id: scenario.id, category: scenario.category, ...judgment });
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => {
+      setTimeout(r, 500);
+    });
   }
 }
 
 async function testDecompositionScenario(timeline) {
   section('Task Decomposition');
 
-  const scenario = TEST_SCENARIOS.find(s => s.category === 'decomposition');
+  const scenario = TEST_SCENARIOS.find((s) => s.category === 'decomposition');
   console.log(`\n  Scenario: ${scenario.id} -- "${scenario.input}"`);
   timeline.reset();
 
@@ -910,8 +955,11 @@ async function testDecompositionScenario(timeline) {
   });
 
   assert(decomposition.isComposite === true, `${scenario.id}: identified as composite request`);
-  assert(decomposition.subtasks.length >= 2, `${scenario.id}: decomposed into ${decomposition.subtasks.length} subtasks (expected >= 2)`);
-  console.log(`  Subtasks: ${decomposition.subtasks.map(s => `"${s}"`).join(', ')}`);
+  assert(
+    decomposition.subtasks.length >= 2,
+    `${scenario.id}: decomposed into ${decomposition.subtasks.length} subtasks (expected >= 2)`
+  );
+  console.log(`  Subtasks: ${decomposition.subtasks.map((s) => `"${s}"`).join(', ')}`);
   console.log(`  Reasoning: ${decomposition.reasoning}`);
 
   // Now submit each subtask individually and verify it routes correctly
@@ -950,7 +998,7 @@ async function testDecompositionScenario(timeline) {
 async function testErrorHandling(timeline) {
   section('Error Communication');
 
-  const scenario = TEST_SCENARIOS.find(s => s.category === 'error-handling');
+  const scenario = TEST_SCENARIOS.find((s) => s.category === 'error-handling');
   console.log(`\n  Scenario: ${scenario.id} -- "${scenario.input}"`);
   timeline.reset();
 
@@ -1001,7 +1049,7 @@ async function testEventSequence(timeline) {
   section('Event Sequence Validation');
 
   // Check all completed scenarios for proper event ordering
-  for (const scenario of TEST_SCENARIOS.filter(s => s.category === 'bidding')) {
+  for (const scenario of TEST_SCENARIOS.filter((s) => s.category === 'bidding')) {
     console.log(`\n  Checking sequence for: ${scenario.id}`);
     timeline.reset();
     resetAllCircuits();
@@ -1034,15 +1082,17 @@ async function testEventSequence(timeline) {
     }
 
     // Bid events must exist (agents actually bid)
-    const bidEvents = timeline.events.filter(e => e.type.startsWith('bid:'));
+    const bidEvents = timeline.events.filter((e) => e.type.startsWith('bid:'));
     assert(bidEvents.length > 0, `${scenario.id}: at least one agent bid`);
 
     // No duplicate lifecycle events of same type for same task
-    const lifecycleTypes = timeline.getByChannel('lifecycle').map(e => e.type);
+    const lifecycleTypes = timeline.getByChannel('lifecycle').map((e) => e.type);
     const uniqueTypes = new Set(lifecycleTypes);
     assert(lifecycleTypes.length === uniqueTypes.size, `${scenario.id}: no duplicate lifecycle events`);
 
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => {
+      setTimeout(r, 500);
+    });
   }
 }
 
@@ -1080,10 +1130,12 @@ async function testAgentSpawnedSubtasks(timeline) {
   timeline.record('lifecycle', 'subtask:created', { subtaskId: openSubtaskId, routingMode: 'open' });
 
   // Wait for it to settle
-  await new Promise(r => setTimeout(r, 10000));
+  await new Promise((r) => {
+    setTimeout(r, 10000);
+  });
   exchangeInstance.off('task:settled', onSettled);
 
-  const openSettled = openSubtaskEvents.find(e => e.taskId === openSubtaskId);
+  const openSettled = openSubtaskEvents.find((e) => e.taskId === openSubtaskId);
   assert(!!openSettled, 'open subtask: settled through normal auction');
   if (openSettled) {
     assert(!!openSettled.agentId, `open subtask: handled by ${openSettled.agentId}`);
@@ -1121,24 +1173,42 @@ async function testAgentSpawnedSubtasks(timeline) {
   });
 
   assert(!!lockedSubtaskId, 'locked subtask: submitted successfully');
-  timeline.record('lifecycle', 'subtask:created', { subtaskId: lockedSubtaskId, routingMode: 'locked', lockedAgentId: 'time-agent' });
+  timeline.record('lifecycle', 'subtask:created', {
+    subtaskId: lockedSubtaskId,
+    routingMode: 'locked',
+    lockedAgentId: 'time-agent',
+  });
 
-  await new Promise(r => setTimeout(r, 10000));
+  await new Promise((r) => {
+    setTimeout(r, 10000);
+  });
   exchangeInstance.off('task:assigned', onAssigned2);
   exchangeInstance.off('task:settled', onSettled2);
 
-  const lockedAssign = lockedEvents.find(e => e.type === 'assigned');
+  const lockedAssign = lockedEvents.find((e) => e.type === 'assigned');
   assert(!!lockedAssign, 'locked subtask: was assigned');
   if (lockedAssign) {
-    assert(lockedAssign.agentId === 'time-agent', `locked subtask: assigned to time-agent (got: ${lockedAssign.agentId})`);
-    assert(lockedAssign.confidence === 1.0, `locked subtask: synthetic confidence = 1.0 (got: ${lockedAssign.confidence})`);
-    timeline.record('lifecycle', 'subtask:assigned', { agentId: lockedAssign.agentId, confidence: lockedAssign.confidence });
+    assert(
+      lockedAssign.agentId === 'time-agent',
+      `locked subtask: assigned to time-agent (got: ${lockedAssign.agentId})`
+    );
+    assert(
+      lockedAssign.confidence === 1.0,
+      `locked subtask: synthetic confidence = 1.0 (got: ${lockedAssign.confidence})`
+    );
+    timeline.record('lifecycle', 'subtask:assigned', {
+      agentId: lockedAssign.agentId,
+      confidence: lockedAssign.confidence,
+    });
   }
 
-  const lockedSettle = lockedEvents.find(e => e.type === 'settled');
+  const lockedSettle = lockedEvents.find((e) => e.type === 'settled');
   assert(!!lockedSettle, 'locked subtask: settled');
   if (lockedSettle) {
-    assert(lockedSettle.agentId === 'time-agent', `locked subtask: executed by time-agent (got: ${lockedSettle.agentId})`);
+    assert(
+      lockedSettle.agentId === 'time-agent',
+      `locked subtask: executed by time-agent (got: ${lockedSettle.agentId})`
+    );
     timeline.record('lifecycle', 'subtask:settled', { agentId: lockedSettle.agentId });
   }
 }
@@ -1175,13 +1245,18 @@ async function testCancelTask(timeline) {
   timeline.record('lifecycle', 'task:cancelled', { taskId });
 
   // Give a moment for event to propagate
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise((r) => {
+    setTimeout(r, 500);
+  });
   exchangeInstance.off('task:cancelled', onCancelled);
 
   assert(cancelledEvent !== null, 'cancel test: task:cancelled event fired');
   if (cancelledEvent) {
     assert(cancelledEvent.taskId === taskId, 'cancel test: correct taskId in event');
-    assert(cancelledEvent.reason === 'user_request', `cancel test: reason is user_request (got: ${cancelledEvent.reason})`);
+    assert(
+      cancelledEvent.reason === 'user_request',
+      `cancel test: reason is user_request (got: ${cancelledEvent.reason})`
+    );
   }
 
   // Verify the task is actually cancelled in the exchange
@@ -1227,7 +1302,9 @@ async function testMultiTurnNeedsInput(timeline) {
   timeline.record('lifecycle', 'task:queued', { taskId });
 
   // Wait for agent to respond
-  await new Promise(r => setTimeout(r, 12000));
+  await new Promise((r) => {
+    setTimeout(r, 12000);
+  });
   exchangeInstance.off('task:settled', onSettled);
 
   // Either the agent asks for clarification (needsInput) or provides a response
@@ -1274,9 +1351,8 @@ async function testToolScopedRouting(timeline) {
   hudApi.onResult('orb', (result) => orbResults.push(result));
 
   // Simulate a task submitted by recorder
-  const recorderTaskId = 'test-recorder-task-001';
+  const _recorderTaskId = 'test-recorder-task-001';
   // Manually wire up task-tool mapping (normally done by submitTask)
-  const taskToolMap = require('./lib/hud-api');
   // We need to use the internal mapping -- call emitLifecycle with a known taskId
   // First, add a HUD item for the recorder tool
   const item = hudApi.addHUDItem('recorder', { type: 'action-item', text: 'Test item for routing' });
@@ -1291,7 +1367,9 @@ async function testToolScopedRouting(timeline) {
   // Emit a lifecycle event for a task that isn't mapped to any tool
   // (should broadcast to ALL subscribers)
   hudApi.emitLifecycle({ type: 'task:queued', taskId: 'unmapped-task-123' });
-  await new Promise(r => setTimeout(r, 100));
+  await new Promise((r) => {
+    setTimeout(r, 100);
+  });
 
   assert(recorderEvents.length > 0, 'tool routing: recorder received global event');
   assert(orbEvents.length > 0, 'tool routing: orb received global event');
@@ -1303,14 +1381,18 @@ async function testToolScopedRouting(timeline) {
 
   // Emit another global event
   hudApi.emitLifecycle({ type: 'task:assigned', taskId: 'unmapped-task-456' });
-  await new Promise(r => setTimeout(r, 100));
+  await new Promise((r) => {
+    setTimeout(r, 100);
+  });
 
   assert(recorderEvents.length > preRecorderCount, 'tool routing: recorder got second global event');
   assert(orbEvents.length > preOrbCount, 'tool routing: orb got second global event');
 
   // Test result emission for recorder
   hudApi.emitResult({ taskId: 'unmapped-result-789', success: true, message: 'test result' });
-  await new Promise(r => setTimeout(r, 100));
+  await new Promise((r) => {
+    setTimeout(r, 100);
+  });
 
   // Clean up
   hudApi.offAll('recorder');
@@ -1320,7 +1402,9 @@ async function testToolScopedRouting(timeline) {
   // Verify unsubscribe works
   const postCleanRecorder = recorderEvents.length;
   hudApi.emitLifecycle({ type: 'task:queued', taskId: 'after-cleanup' });
-  await new Promise(r => setTimeout(r, 100));
+  await new Promise((r) => {
+    setTimeout(r, 100);
+  });
   assert(recorderEvents.length === postCleanRecorder, 'tool routing: offAll() stops events');
 
   timeline.record('hud', 'isolation-verified', { pass: true });
@@ -1367,7 +1451,9 @@ async function testRequeueAndCascade(timeline) {
   assert(!!taskId, 'cascade test: task submitted');
 
   // Wait for resolution
-  await new Promise(r => setTimeout(r, 15000));
+  await new Promise((r) => {
+    setTimeout(r, 15000);
+  });
 
   exchangeInstance.off('task:busted', onBusted);
   exchangeInstance.off('task:settled', onSettled);
@@ -1375,9 +1461,9 @@ async function testRequeueAndCascade(timeline) {
   exchangeInstance.off('exchange:halt', onHalt);
 
   // Check what happened
-  const bustedCount = cascadeEvents.filter(e => e.type === 'busted').length;
-  const settledCount = cascadeEvents.filter(e => e.type === 'settled').length;
-  const deadLetterCount = cascadeEvents.filter(e => e.type === 'dead_letter').length;
+  const bustedCount = cascadeEvents.filter((e) => e.type === 'busted').length;
+  const settledCount = cascadeEvents.filter((e) => e.type === 'settled').length;
+  const deadLetterCount = cascadeEvents.filter((e) => e.type === 'dead_letter').length;
 
   console.log(`  Cascade events: ${bustedCount} busted, ${settledCount} settled, ${deadLetterCount} dead-lettered`);
 
@@ -1416,19 +1502,15 @@ async function reportAggregateScoring() {
   const dimensions = Object.keys(RUBRIC_WEIGHTS);
   const dimAverages = {};
   for (const dim of dimensions) {
-    const scores = scenarioScores
-      .map(s => s.scores?.[dim]?.score)
-      .filter(s => s !== undefined && s !== null);
-    dimAverages[dim] = scores.length > 0
-      ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10
-      : 'N/A';
+    const scores = scenarioScores.map((s) => s.scores?.[dim]?.score).filter((s) => s !== undefined && s !== null);
+    dimAverages[dim] =
+      scores.length > 0 ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 'N/A';
   }
 
   // Overall composite
-  const composites = scenarioScores.map(s => s.composite).filter(c => c > 0);
-  const overallComposite = composites.length > 0
-    ? Math.round((composites.reduce((a, b) => a + b, 0) / composites.length) * 10) / 10
-    : 0;
+  const composites = scenarioScores.map((s) => s.composite).filter((c) => c > 0);
+  const overallComposite =
+    composites.length > 0 ? Math.round((composites.reduce((a, b) => a + b, 0) / composites.length) * 10) / 10 : 0;
 
   console.log('\n  Per-Scenario Scores:');
   for (const s of scenarioScores) {
@@ -1442,7 +1524,9 @@ async function reportAggregateScoring() {
   }
 
   console.log(`\n  Overall Composite: ${overallComposite}/10`);
-  console.log(`  Scenarios: ${scenarioScores.filter(s => s.composite >= 7.0).length} passed, ${scenarioScores.filter(s => s.composite < 7.0).length} failed`);
+  console.log(
+    `  Scenarios: ${scenarioScores.filter((s) => s.composite >= 7.0).length} passed, ${scenarioScores.filter((s) => s.composite < 7.0).length} failed`
+  );
 
   assert(overallComposite >= 7.0, `Overall composite score >= 7.0 (got: ${overallComposite})`);
 }
@@ -1488,7 +1572,7 @@ async function runAll() {
   // Load and connect agents
   const { loadBuiltInAgents, getAllAgents } = require('./packages/agents/agent-registry');
   loadBuiltInAgents();
-  const agents = getAllAgents().filter(a => !a.bidExcluded);
+  const agents = getAllAgents().filter((a) => !a.bidExcluded);
   console.log(`  Connecting ${agents.length} agents...`);
 
   let connectedCount = 0;
@@ -1503,7 +1587,9 @@ async function runAll() {
   assert(connectedCount >= 5, `Connected ${connectedCount} agents (need >= 5)`);
 
   // Wait for agents to register
-  await new Promise(r => setTimeout(r, 1000));
+  await new Promise((r) => {
+    setTimeout(r, 1000);
+  });
 
   // Clear bidder cache for clean test
   const { clearCache } = require('./packages/agents/unified-bidder');
@@ -1542,13 +1628,13 @@ async function runAll() {
 
   if (failed > 0) {
     console.log('\nFailed tests:');
-    results.filter(r => r.status === 'FAIL').forEach(r => console.log(`  - ${r.label}`));
+    results.filter((r) => r.status === 'FAIL').forEach((r) => console.log(`  - ${r.label}`));
   }
 
   process.exit(failed > 0 ? 1 : 0);
 }
 
-runAll().catch(err => {
+runAll().catch((err) => {
   console.error('Test runner error:', err);
   process.exit(1);
 });

@@ -1,6 +1,6 @@
 /**
  * BranchSwitcher - UI component for switching between edit branches
- * 
+ *
  * Features:
  * - Dropdown showing all branches
  * - Branch type icons (Main, Director's, Social, etc.)
@@ -15,7 +15,7 @@ export class BranchSwitcher {
     this.app = appContext;
     this.containerElement = null;
     this.isOpen = false;
-    
+
     // Branch types with icons and colors
     this.branchTypes = {
       main: { icon: '🎬', label: 'Main', color: '#3b82f6' },
@@ -23,9 +23,9 @@ export class BranchSwitcher {
       social: { icon: '📱', label: 'Social', color: '#ec4899' },
       broadcast: { icon: '📺', label: 'Broadcast', color: '#f59e0b' },
       archive: { icon: '📦', label: 'Archive', color: '#6b7280' },
-      custom: { icon: '✨', label: 'Custom', color: '#10b981' }
+      custom: { icon: '✨', label: 'Custom', color: '#10b981' },
     };
-    
+
     // State
     this.branches = [];
     this.currentBranch = null;
@@ -36,24 +36,23 @@ export class BranchSwitcher {
    */
   init(containerId = 'branchSwitcherContainer') {
     this.containerElement = document.getElementById(containerId);
-    
+
     if (!this.containerElement) {
       // Create container if it doesn't exist
       this.containerElement = document.createElement('div');
       this.containerElement.id = containerId;
       this.containerElement.className = 'branch-switcher-container';
-      
+
       // Insert into editor header if available
-      const editorHeader = document.querySelector('.video-editor-header') ||
-                          document.querySelector('.editor-toolbar') ||
-                          document.body;
+      const editorHeader =
+        document.querySelector('.video-editor-header') || document.querySelector('.editor-toolbar') || document.body;
       editorHeader.appendChild(this.containerElement);
     }
-    
+
     this._addStyles();
     this._loadBranches();
     this.render();
-    
+
     // Close on click outside
     document.addEventListener('click', (e) => {
       if (!this.containerElement?.contains(e.target)) {
@@ -67,7 +66,7 @@ export class BranchSwitcher {
    */
   _addStyles() {
     if (document.getElementById('branchSwitcherStyles')) return;
-    
+
     const styles = document.createElement('style');
     styles.id = 'branchSwitcherStyles';
     styles.textContent = `
@@ -310,14 +309,14 @@ export class BranchSwitcher {
   async _loadBranches() {
     // Try to load from version manager
     const versionManager = this.app.versionManager;
-    
+
     if (versionManager) {
       this.branches = versionManager.getBranches?.() || [];
       this.currentBranch = versionManager.getCurrentBranch?.() || null;
     } else {
       // Default branches if no version manager
       this.branches = [
-        { id: 'main', name: 'Main', type: 'main', isDefault: true, editCount: 0, createdAt: new Date().toISOString() }
+        { id: 'main', name: 'Main', type: 'main', isDefault: true, editCount: 0, createdAt: new Date().toISOString() },
       ];
       this.currentBranch = this.branches[0];
     }
@@ -328,10 +327,10 @@ export class BranchSwitcher {
    */
   render() {
     if (!this.containerElement) return;
-    
+
     const current = this.currentBranch || { name: 'No Branch', type: 'main' };
     const branchType = this.branchTypes[current.type] || this.branchTypes.custom;
-    
+
     this.containerElement.innerHTML = `
       <button class="branch-switcher-btn ${this.isOpen ? 'open' : ''}" id="branchSwitcherBtn">
         <span class="branch-icon">${branchType.icon}</span>
@@ -351,9 +350,13 @@ export class BranchSwitcher {
         </div>
         
         <div class="branch-list" id="branchList">
-          ${this.branches.length === 0 ? `
+          ${
+            this.branches.length === 0
+              ? `
             <div class="branch-empty">No branches yet</div>
-          ` : this.branches.map(branch => this._renderBranchItem(branch)).join('')}
+          `
+              : this.branches.map((branch) => this._renderBranchItem(branch)).join('')
+          }
         </div>
         
         <div class="branch-dropdown-footer">
@@ -366,7 +369,7 @@ export class BranchSwitcher {
         </div>
       </div>
     `;
-    
+
     this._setupEventListeners();
   }
 
@@ -378,7 +381,7 @@ export class BranchSwitcher {
     const isActive = this.currentBranch?.id === branch.id;
     const editCount = branch.editCount || 0;
     const date = branch.createdAt ? new Date(branch.createdAt).toLocaleDateString() : '';
-    
+
     return `
       <div class="branch-item ${isActive ? 'active' : ''}" data-branch-id="${branch.id}">
         <div class="branch-item-icon" style="background: ${branchType.color}20;">
@@ -393,10 +396,14 @@ export class BranchSwitcher {
           </div>
         </div>
         <div class="branch-item-actions">
-          ${!branch.isDefault ? `
+          ${
+            !branch.isDefault
+              ? `
             <button class="branch-action-btn" data-action="rename" data-branch-id="${branch.id}" title="Rename">✏️</button>
             <button class="branch-action-btn" data-action="delete" data-branch-id="${branch.id}" title="Delete">🗑️</button>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
       </div>
     `;
@@ -412,17 +419,17 @@ export class BranchSwitcher {
       e.stopPropagation();
       this.toggle();
     });
-    
+
     // New branch button
     const newBtn = this.containerElement.querySelector('#newBranchBtn');
     newBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
       this.createNewBranch();
     });
-    
+
     // Branch selection
     const branchItems = this.containerElement.querySelectorAll('.branch-item');
-    branchItems.forEach(item => {
+    branchItems.forEach((item) => {
       item.addEventListener('click', (e) => {
         const action = e.target.closest('[data-action]');
         if (action) {
@@ -430,16 +437,16 @@ export class BranchSwitcher {
           this._handleBranchAction(action.dataset.action, action.dataset.branchId);
           return;
         }
-        
+
         const branchId = item.dataset.branchId;
         this.switchToBranch(branchId);
       });
     });
-    
+
     // Compare button
     const compareBtn = this.containerElement.querySelector('#compareBranchesBtn');
     compareBtn?.addEventListener('click', () => this.showBranchComparison());
-    
+
     // History button
     const historyBtn = this.containerElement.querySelector('#branchHistoryBtn');
     historyBtn?.addEventListener('click', () => this.showBranchHistory());
@@ -475,25 +482,25 @@ export class BranchSwitcher {
    * Switch to a different branch
    */
   async switchToBranch(branchId) {
-    const branch = this.branches.find(b => b.id === branchId);
+    const branch = this.branches.find((b) => b.id === branchId);
     if (!branch) return;
-    
+
     // Confirm if there are unsaved changes
     if (this.app.hasUnsavedChanges?.()) {
       const confirmed = confirm('You have unsaved changes. Switch branches anyway?');
       if (!confirmed) return;
     }
-    
+
     log.info('video', '[BranchSwitcher] Switching to branch', { data: branchId });
-    
+
     // Switch via version manager if available
     if (this.app.versionManager?.switchBranch) {
       await this.app.versionManager.switchBranch(branchId);
     }
-    
+
     this.currentBranch = branch;
     this.close();
-    
+
     this.app.showToast?.('success', `Switched to "${branch.name}"`);
   }
 
@@ -503,15 +510,15 @@ export class BranchSwitcher {
   async createNewBranch() {
     const name = prompt('Enter branch name:');
     if (!name?.trim()) return;
-    
+
     // Select branch type
     const typeOptions = Object.entries(this.branchTypes)
       .map(([key, val]) => `${val.icon} ${key}`)
       .join('\n');
-    
+
     const typeInput = prompt(`Select branch type:\n${typeOptions}\n\nEnter type name:`, 'custom');
     const type = Object.keys(this.branchTypes).includes(typeInput) ? typeInput : 'custom';
-    
+
     const newBranch = {
       id: `branch_${Date.now()}`,
       name: name.trim(),
@@ -519,19 +526,19 @@ export class BranchSwitcher {
       isDefault: false,
       editCount: 0,
       createdAt: new Date().toISOString(),
-      parentBranch: this.currentBranch?.id
+      parentBranch: this.currentBranch?.id,
     };
-    
+
     // Add via version manager if available
     if (this.app.versionManager?.createBranch) {
       await this.app.versionManager.createBranch(newBranch);
     } else {
       this.branches.push(newBranch);
     }
-    
+
     // Auto-switch to new branch
     await this.switchToBranch(newBranch.id);
-    
+
     this.app.showToast?.('success', `Created branch "${newBranch.name}"`);
     this._loadBranches();
     this.render();
@@ -541,9 +548,9 @@ export class BranchSwitcher {
    * Handle branch action (rename, delete)
    */
   _handleBranchAction(action, branchId) {
-    const branch = this.branches.find(b => b.id === branchId);
+    const branch = this.branches.find((b) => b.id === branchId);
     if (!branch) return;
-    
+
     switch (action) {
       case 'rename':
         const newName = prompt('Enter new branch name:', branch.name);
@@ -554,18 +561,18 @@ export class BranchSwitcher {
           this.app.showToast?.('success', 'Branch renamed');
         }
         break;
-        
+
       case 'delete':
         if (confirm(`Delete branch "${branch.name}"? This cannot be undone.`)) {
-          this.branches = this.branches.filter(b => b.id !== branchId);
+          this.branches = this.branches.filter((b) => b.id !== branchId);
           this.app.versionManager?.deleteBranch?.(branchId);
-          
+
           // Switch to main if current branch was deleted
           if (this.currentBranch?.id === branchId) {
-            const mainBranch = this.branches.find(b => b.isDefault);
+            const mainBranch = this.branches.find((b) => b.isDefault);
             if (mainBranch) this.switchToBranch(mainBranch.id);
           }
-          
+
           this.render();
           this.app.showToast?.('success', 'Branch deleted');
         }
@@ -578,7 +585,7 @@ export class BranchSwitcher {
    */
   showBranchComparison() {
     this.close();
-    
+
     // Open version history panel in compare mode
     if (this.app.versionHistoryPanel) {
       this.app.versionHistoryPanel.show({ mode: 'compare' });
@@ -592,7 +599,7 @@ export class BranchSwitcher {
    */
   showBranchHistory() {
     this.close();
-    
+
     // Open version history panel
     if (this.app.versionHistoryPanel) {
       this.app.versionHistoryPanel.show();
@@ -626,14 +633,3 @@ export class BranchSwitcher {
 }
 
 export default BranchSwitcher;
-
-
-
-
-
-
-
-
-
-
-

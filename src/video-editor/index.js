@@ -1,20 +1,20 @@
 /**
  * Video Editor Modules
- * 
+ *
  * Modular architecture for the video editor application.
  * Each module is self-contained and receives the app context for state access.
- * 
+ *
  * Usage:
  * ```javascript
  * import { initVideoEditorModules } from './src/video-editor/index.js';
- * 
+ *
  * const app = {
  *   // ... existing app state and methods ...
  * };
- * 
+ *
  * // Initialize all modules
  * const modules = initVideoEditorModules(app);
- * 
+ *
  * // Modules are attached to app:
  * // app.teleprompter - TeleprompterUI
  * // app.transcriptSync - TranscriptSync
@@ -27,32 +27,17 @@
  */
 
 // Teleprompter module
-import { 
-  TeleprompterUI, 
-  TranscriptSync, 
-  TeleprompterMarkers,
-  initTeleprompterModules 
-} from './teleprompter/index.js';
+import { TeleprompterUI, TranscriptSync, TeleprompterMarkers, initTeleprompterModules } from './teleprompter/index.js';
 
 export { TeleprompterUI, TranscriptSync, TeleprompterMarkers, initTeleprompterModules };
 
 // Waveform module
-import { 
-  WaveformRenderer, 
-  WaveformCache, 
-  WaveformTypes,
-  initWaveformModule 
-} from './waveform/index.js';
+import { WaveformRenderer, WaveformCache, WaveformTypes, initWaveformModule } from './waveform/index.js';
 
 export { WaveformRenderer, WaveformCache, WaveformTypes, initWaveformModule };
 
 // Markers module
-import { 
-  MarkerManager, 
-  MarkerRenderer, 
-  MarkerModal,
-  initMarkerModules 
-} from './markers/index.js';
+import { MarkerManager, MarkerRenderer, MarkerModal, initMarkerModules } from './markers/index.js';
 
 export { MarkerManager, MarkerRenderer, MarkerModal, initMarkerModules };
 
@@ -70,7 +55,7 @@ import {
   hideContextMenu,
   buildContextMenuHTML,
   ContextMenu,
-  SpaceAssetPicker
+  SpaceAssetPicker,
 } from './utils/index.js';
 
 export {
@@ -86,7 +71,7 @@ export {
   hideContextMenu,
   buildContextMenuHTML,
   ContextMenu,
-  SpaceAssetPicker
+  SpaceAssetPicker,
 };
 
 /**
@@ -96,25 +81,17 @@ export {
  */
 export function initVideoEditorModules(appContext) {
   // Initialize teleprompter modules
-  const { 
-    teleprompter, 
-    transcriptSync, 
-    teleprompterMarkers 
-  } = initTeleprompterModules(appContext);
-  
+  const { teleprompter, transcriptSync, teleprompterMarkers } = initTeleprompterModules(appContext);
+
   // Initialize waveform module
   const waveform = initWaveformModule(appContext);
-  
+
   // Initialize marker modules
-  const { 
-    markerManager, 
-    markerRenderer, 
-    markerModal 
-  } = initMarkerModules(appContext);
-  
+  const { markerManager, markerRenderer, markerModal } = initMarkerModules(appContext);
+
   // Initialize Space Asset Picker
   const spaceAssetPicker = new SpaceAssetPicker(appContext);
-  
+
   // Attach to app context for easy access
   appContext.teleprompter = teleprompter;
   appContext.transcriptSync = transcriptSync;
@@ -124,20 +101,20 @@ export function initVideoEditorModules(appContext) {
   appContext.markerRenderer = markerRenderer;
   appContext.markerModal = markerModal;
   appContext.spaceAssetPicker = spaceAssetPicker;
-  
+
   // Add convenience methods for Space Asset Picker
   appContext.showSpaceAssetPicker = (options) => {
     spaceAssetPicker.show(options);
   };
-  
+
   // Add clip to track helper method
   appContext.addClipToTrack = (trackId, asset) => {
     addClipToTrack(appContext, trackId, asset);
   };
-  
+
   // Note: ADR module uses Global Class pattern (adr-track-manager.js)
   // and is initialized separately via <script> tag
-  
+
   return {
     teleprompter,
     transcriptSync,
@@ -146,7 +123,7 @@ export function initVideoEditorModules(appContext) {
     markerManager,
     markerRenderer,
     markerModal,
-    spaceAssetPicker
+    spaceAssetPicker,
   };
 }
 
@@ -161,24 +138,23 @@ function addClipToTrack(appContext, trackId, asset) {
     window.logging.error('video', 'VideoEditor addClipToTrack: Missing trackId or asset');
     return;
   }
-  
+
   window.logging.info('video', 'VideoEditor Adding clip to track', { data: trackId, asset });
-  
+
   // Get track from ADR manager or audioTracks
-  const track = appContext.adrManager?.findTrack(trackId) ||
-                appContext.audioTracks?.find(t => t.id === trackId);
-  
+  const track = appContext.adrManager?.findTrack(trackId) || appContext.audioTracks?.find((t) => t.id === trackId);
+
   if (!track) {
     window.logging.error('video', 'VideoEditor Track not found', { error: trackId });
     appContext.showToast?.('error', 'Track not found');
     return;
   }
-  
+
   // Initialize clips array if needed
   if (!track.clips) {
     track.clips = [];
   }
-  
+
   // Create clip object
   const clip = {
     id: `clip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -196,30 +172,30 @@ function addClipToTrack(appContext, trackId, asset) {
     // State
     muted: false,
     volume: 1.0,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
   };
-  
+
   // Add to track
   track.clips.push(clip);
-  
+
   // Sort clips by start time
   track.clips.sort((a, b) => a.startTime - b.startTime);
-  
+
   // Render track clips if render function exists
   if (appContext.renderTrackClips) {
     appContext.renderTrackClips(trackId);
   } else if (appContext.renderAudioTrack) {
     appContext.renderAudioTrack(track);
   }
-  
+
   // Emit event for other components
   if (appContext.emit) {
     appContext.emit('clipAdded', { trackId, clip });
   }
-  
+
   // Show success toast
   appContext.showToast?.('success', `Added "${clip.name}" to ${track.name}`);
-  
+
   return clip;
 }
 
@@ -227,21 +203,3 @@ function addClipToTrack(appContext, trackId, asset) {
  * Module version
  */
 export const VERSION = '1.0.0';
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

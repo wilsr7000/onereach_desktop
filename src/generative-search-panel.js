@@ -1,6 +1,6 @@
 /**
  * Generative Search Panel - Renderer Script
- * 
+ *
  * UI component for the generative search feature.
  * Provides slider-based filter controls and displays results.
  */
@@ -10,7 +10,7 @@ const log = window.logging || {
   info: (cat, msg, data) => console.log(`[${cat}] ${msg}`, data || ''),
   warn: (cat, msg, data) => console.warn(`[${cat}] ${msg}`, data || ''),
   error: (cat, msg, data) => console.error(`[${cat}] ${msg}`, data || ''),
-  debug: (cat, msg, data) => console.debug(`[${cat}] ${msg}`, data || '')
+  debug: (cat, msg, data) => console.debug(`[${cat}] ${msg}`, data || ''),
 };
 // Filter definitions (must match backend)
 const FILTER_DEFINITIONS = {
@@ -20,7 +20,7 @@ const FILTER_DEFINITIONS = {
     name: 'Related to Project',
     description: 'How relevant to the current space/project',
     category: 'context',
-    icon: '●'
+    icon: '●',
   },
   similar_to_item: {
     id: 'similar_to_item',
@@ -28,7 +28,7 @@ const FILTER_DEFINITIONS = {
     description: 'Semantic similarity to a reference item',
     category: 'context',
     icon: '◆',
-    requiresReference: true
+    requiresReference: true,
   },
   useful_for: {
     id: 'useful_for',
@@ -37,7 +37,7 @@ const FILTER_DEFINITIONS = {
     category: 'context',
     icon: '◈',
     requiresInput: true,
-    inputPlaceholder: 'Describe what you need...'
+    inputPlaceholder: 'Describe what you need...',
   },
 
   // Quality
@@ -46,21 +46,21 @@ const FILTER_DEFINITIONS = {
     name: 'Quality Score',
     description: 'Polish, completeness, craftsmanship',
     category: 'quality',
-    icon: '★'
+    icon: '★',
   },
   interesting_novel: {
     id: 'interesting_novel',
     name: 'Interesting/Novel',
     description: 'How unique or creative',
     category: 'quality',
-    icon: '◇'
+    icon: '◇',
   },
   recent_favorites: {
     id: 'recent_favorites',
     name: 'Recent Favorites',
     description: 'Quality + recency signals',
     category: 'quality',
-    icon: '♦'
+    icon: '♦',
   },
 
   // Purpose
@@ -71,14 +71,14 @@ const FILTER_DEFINITIONS = {
     category: 'purpose',
     icon: '▣',
     requiresInput: true,
-    inputPlaceholder: 'What do you need a visual for?'
+    inputPlaceholder: 'What do you need a visual for?',
   },
   reference_material: {
     id: 'reference_material',
     name: 'Reference Material',
     description: 'Items that teach or explain concepts',
     category: 'purpose',
-    icon: '▤'
+    icon: '▤',
   },
   working_example: {
     id: 'working_example',
@@ -87,7 +87,7 @@ const FILTER_DEFINITIONS = {
     category: 'purpose',
     icon: '▧',
     requiresInput: true,
-    inputPlaceholder: 'What pattern or technique?'
+    inputPlaceholder: 'What pattern or technique?',
   },
   inspiration_for: {
     id: 'inspiration_for',
@@ -96,7 +96,7 @@ const FILTER_DEFINITIONS = {
     category: 'purpose',
     icon: '◐',
     requiresInput: true,
-    inputPlaceholder: 'What are you creating?'
+    inputPlaceholder: 'What are you creating?',
   },
 
   // Content Analysis
@@ -105,7 +105,7 @@ const FILTER_DEFINITIONS = {
     name: 'Has Actionable Insights',
     description: 'Contains things you can act on',
     category: 'content',
-    icon: '✓'
+    icon: '✓',
   },
   contains_data_about: {
     id: 'contains_data_about',
@@ -114,7 +114,7 @@ const FILTER_DEFINITIONS = {
     category: 'content',
     icon: '▥',
     requiresInput: true,
-    inputPlaceholder: 'What topic?'
+    inputPlaceholder: 'What topic?',
   },
   explains_concept: {
     id: 'explains_concept',
@@ -123,7 +123,7 @@ const FILTER_DEFINITIONS = {
     category: 'content',
     icon: '▦',
     requiresInput: true,
-    inputPlaceholder: 'What concept?'
+    inputPlaceholder: 'What concept?',
   },
 
   // Organizational
@@ -132,15 +132,15 @@ const FILTER_DEFINITIONS = {
     name: 'Needs Attention',
     description: 'Incomplete, outdated, or needs metadata',
     category: 'organizational',
-    icon: '!'
+    icon: '!',
   },
   duplicates_variations: {
     id: 'duplicates_variations',
     name: 'Duplicates/Variations',
     description: 'Similar items to consolidate',
     category: 'organizational',
-    icon: '≡'
-  }
+    icon: '≡',
+  },
 };
 
 const CATEGORIES = {
@@ -148,53 +148,51 @@ const CATEGORIES = {
   quality: { name: 'Quality & Time', icon: '★' },
   purpose: { name: 'Purpose-Based', icon: '◐' },
   content: { name: 'Content Analysis', icon: '▥' },
-  organizational: { name: 'Organizational', icon: '≡' }
+  organizational: { name: 'Organizational', icon: '≡' },
 };
 
 class GenerativeSearchPanel {
   constructor(container, options = {}) {
-    this.container = typeof container === 'string' 
-      ? document.querySelector(container) 
-      : container;
-    
+    this.container = typeof container === 'string' ? document.querySelector(container) : container;
+
     this.options = options;
     this.activeFilters = [];
     this.isSearching = false;
     this.results = [];
     this.referenceItem = null;
     this.currentSpace = options.currentSpace || null;
-    
+
     // Callbacks
     this.onSearch = options.onSearch || null;
     this.onResults = options.onResults || null;
     this.onCancel = options.onCancel || null;
-    
+
     // Search history and saved searches
     this.searchHistory = this.loadSearchHistory();
     this.savedSearches = this.loadSavedSearches();
     this.lastSearchOptions = null;
-    
+
     this.init();
   }
-  
+
   // ============ Search History & Saved Searches ============
-  
+
   loadSearchHistory() {
     try {
       return JSON.parse(localStorage.getItem('gs_search_history') || '[]');
-    } catch (e) {
+    } catch (_e) {
       return [];
     }
   }
-  
+
   saveSearchHistory() {
     try {
       localStorage.setItem('gs_search_history', JSON.stringify(this.searchHistory.slice(0, 20)));
-    } catch (e) {
+    } catch (_e) {
       log.warn('app', 'Could not save search history');
     }
   }
-  
+
   addToHistory(searchOptions, resultCount) {
     const entry = {
       id: Date.now(),
@@ -202,74 +200,74 @@ class GenerativeSearchPanel {
       filters: searchOptions.filters || [],
       mode: searchOptions.mode || 'quick',
       resultCount,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
-    
+
     // Remove duplicate queries
-    this.searchHistory = this.searchHistory.filter(h => 
-      h.query !== entry.query || JSON.stringify(h.filters) !== JSON.stringify(entry.filters)
+    this.searchHistory = this.searchHistory.filter(
+      (h) => h.query !== entry.query || JSON.stringify(h.filters) !== JSON.stringify(entry.filters)
     );
-    
+
     // Add to front
     this.searchHistory.unshift(entry);
-    
+
     // Keep last 20
     this.searchHistory = this.searchHistory.slice(0, 20);
-    
+
     this.saveSearchHistory();
     this.lastSearchOptions = searchOptions;
   }
-  
+
   loadSavedSearches() {
     try {
       return JSON.parse(localStorage.getItem('gs_saved_searches') || '[]');
-    } catch (e) {
+    } catch (_e) {
       return [];
     }
   }
-  
+
   saveSavedSearches() {
     try {
       localStorage.setItem('gs_saved_searches', JSON.stringify(this.savedSearches));
-    } catch (e) {
+    } catch (_e) {
       log.warn('app', 'Could not save searches');
     }
   }
-  
+
   saveCurrentSearch(name) {
     if (!this.lastSearchOptions) return;
-    
+
     const saved = {
       id: Date.now(),
       name: name || `Search ${this.savedSearches.length + 1}`,
       query: this.lastSearchOptions.userQuery || '',
       filters: this.lastSearchOptions.filters || [],
       mode: this.lastSearchOptions.mode || 'quick',
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
-    
+
     this.savedSearches.push(saved);
     this.saveSavedSearches();
     this.renderHistorySection();
   }
-  
+
   deleteSavedSearch(id) {
-    this.savedSearches = this.savedSearches.filter(s => s.id !== id);
+    this.savedSearches = this.savedSearches.filter((s) => s.id !== id);
     this.saveSavedSearches();
     this.renderHistorySection();
   }
-  
+
   loadSearch(entry) {
     // Set query
     const queryInput = this.container.querySelector('.gs-query-input');
     if (queryInput) queryInput.value = entry.query || '';
-    
+
     // Set filters
     this.activeFilters = JSON.parse(JSON.stringify(entry.filters || []));
     this.renderActiveFilters();
     this.updateCostEstimate();
   }
-  
+
   formatTimeAgo(timestamp) {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
     if (seconds < 60) return 'just now';
@@ -353,16 +351,18 @@ class GenerativeSearchPanel {
 
   renderFilterPicker() {
     const pickerCategories = this.container.querySelector('.gs-filter-categories');
-    
+
     let html = '';
     for (const [catId, category] of Object.entries(CATEGORIES)) {
-      const filters = Object.values(FILTER_DEFINITIONS).filter(f => f.category === catId);
-      
+      const filters = Object.values(FILTER_DEFINITIONS).filter((f) => f.category === catId);
+
       html += `
         <div class="gs-filter-category">
           <div class="gs-category-header">${category.icon} ${category.name}</div>
           <div class="gs-category-filters">
-            ${filters.map(filter => `
+            ${filters
+              .map(
+                (filter) => `
               <div class="gs-filter-option" data-filter-id="${filter.id}">
                 <span class="gs-filter-icon">${filter.icon}</span>
                 <div class="gs-filter-info">
@@ -370,26 +370,30 @@ class GenerativeSearchPanel {
                   <span class="gs-filter-desc">${filter.description}</span>
                 </div>
               </div>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
         </div>
       `;
     }
-    
+
     pickerCategories.innerHTML = html;
   }
-  
+
   renderHistorySection() {
     const content = this.container.querySelector('.gs-history-content');
     if (!content) return;
-    
+
     let html = '';
-    
+
     // Saved searches first
     if (this.savedSearches.length > 0) {
       html += `<div class="gs-saved-searches">
         <div style="font-size: 11px; color: var(--text-secondary, #666); margin-bottom: 6px;">Saved Searches</div>
-        ${this.savedSearches.map(s => `
+        ${this.savedSearches
+          .map(
+            (s) => `
           <div class="gs-history-item gs-saved-item" data-type="saved" data-id="${s.id}">
             <div class="gs-history-item-main">
               <span class="gs-history-name">${this.escapeHtml(s.name)}</span>
@@ -397,32 +401,40 @@ class GenerativeSearchPanel {
             </div>
             <button class="gs-delete-saved" data-id="${s.id}" title="Delete">×</button>
           </div>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>`;
     }
-    
+
     // Recent searches
     if (this.searchHistory.length > 0) {
       html += `<div class="gs-recent-searches" style="margin-top: ${this.savedSearches.length > 0 ? '12px' : '0'};">
         <div style="font-size: 11px; color: var(--text-secondary, #666); margin-bottom: 6px;">Recent Searches</div>
-        ${this.searchHistory.slice(0, 10).map(h => `
+        ${this.searchHistory
+          .slice(0, 10)
+          .map(
+            (h) => `
           <div class="gs-history-item" data-type="history" data-id="${h.id}">
             <div class="gs-history-item-main">
               <span class="gs-history-query">${this.escapeHtml(h.query || 'Filter-based search')}</span>
               <span class="gs-history-meta">${h.resultCount} results • ${this.formatTimeAgo(h.timestamp)}</span>
             </div>
           </div>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>`;
     }
-    
+
     if (!html) {
-      html = '<div style="color: var(--text-secondary, #666); font-size: 12px; padding: 8px; text-align: center;">No search history yet</div>';
+      html =
+        '<div style="color: var(--text-secondary, #666); font-size: 12px; padding: 8px; text-align: center;">No search history yet</div>';
     }
-    
+
     content.innerHTML = html;
   }
-  
+
   escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -430,16 +442,17 @@ class GenerativeSearchPanel {
 
   renderActiveFilters() {
     const container = this.container.querySelector('.gs-active-filters');
-    
+
     if (this.activeFilters.length === 0) {
       container.innerHTML = '<div class="gs-no-filters">No filters active. Add a filter or type a query above.</div>';
       return;
     }
-    
-    container.innerHTML = this.activeFilters.map((filter, index) => {
-      const def = FILTER_DEFINITIONS[filter.id];
-      
-      return `
+
+    container.innerHTML = this.activeFilters
+      .map((filter, index) => {
+        const def = FILTER_DEFINITIONS[filter.id];
+
+        return `
         <div class="gs-active-filter" data-index="${index}">
           <div class="gs-filter-top-row">
             <span class="gs-filter-icon">${def.icon}</span>
@@ -447,12 +460,16 @@ class GenerativeSearchPanel {
             <button class="gs-remove-filter" data-index="${index}">&times;</button>
           </div>
           
-          ${def.requiresInput ? `
+          ${
+            def.requiresInput
+              ? `
             <input type="text" class="gs-filter-input" 
                    data-index="${index}" 
                    placeholder="${def.inputPlaceholder || 'Enter value...'}"
                    value="${filter.input || ''}">
-          ` : ''}
+          `
+              : ''
+          }
           
           <div class="gs-slider-row">
             <label>Threshold:</label>
@@ -471,7 +488,8 @@ class GenerativeSearchPanel {
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   bindEvents() {
@@ -479,17 +497,17 @@ class GenerativeSearchPanel {
     this.container.querySelector('.gs-close-btn')?.addEventListener('click', () => {
       this.hide();
     });
-    
+
     // Add filter button
     this.container.querySelector('.gs-add-filter-btn')?.addEventListener('click', () => {
       this.toggleFilterPicker();
     });
-    
+
     // Filter picker close
     this.container.querySelector('.gs-filter-picker-close')?.addEventListener('click', () => {
       this.hideFilterPicker();
     });
-    
+
     // Filter options
     this.container.querySelector('.gs-filter-categories')?.addEventListener('click', (e) => {
       const option = e.target.closest('.gs-filter-option');
@@ -499,7 +517,7 @@ class GenerativeSearchPanel {
         this.hideFilterPicker();
       }
     });
-    
+
     // Active filters events (delegated)
     this.container.querySelector('.gs-active-filters')?.addEventListener('click', (e) => {
       if (e.target.classList.contains('gs-remove-filter')) {
@@ -507,50 +525,50 @@ class GenerativeSearchPanel {
         this.removeFilter(index);
       }
     });
-    
+
     this.container.querySelector('.gs-active-filters')?.addEventListener('input', (e) => {
       const index = parseInt(e.target.dataset.index);
-      
+
       if (e.target.classList.contains('gs-threshold-slider')) {
         this.activeFilters[index].threshold = parseInt(e.target.value);
         e.target.nextElementSibling.textContent = `${e.target.value}%`;
         this.updateCostEstimate();
       }
-      
+
       if (e.target.classList.contains('gs-weight-slider')) {
         this.activeFilters[index].weight = parseFloat(e.target.value);
         e.target.nextElementSibling.textContent = `${e.target.value}x`;
       }
-      
+
       if (e.target.classList.contains('gs-filter-input')) {
         this.activeFilters[index].input = e.target.value;
       }
     });
-    
+
     // Search buttons
     this.container.querySelector('.gs-quick-scan-btn')?.addEventListener('click', () => {
       this.runSearch('quick');
     });
-    
+
     this.container.querySelector('.gs-deep-scan-btn')?.addEventListener('click', () => {
       this.runSearch('deep');
     });
-    
+
     // Cancel button
     this.container.querySelector('.gs-cancel-btn')?.addEventListener('click', () => {
       this.cancelSearch();
     });
-    
+
     // Clear results
     this.container.querySelector('.gs-clear-results')?.addEventListener('click', () => {
       this.clearResults();
     });
-    
+
     // Query input
     this.container.querySelector('.gs-query-input')?.addEventListener('input', () => {
       this.updateCostEstimate();
     });
-    
+
     // Toggle history section
     this.container.querySelector('.gs-toggle-history-btn')?.addEventListener('click', (e) => {
       const content = this.container.querySelector('.gs-history-content');
@@ -563,7 +581,7 @@ class GenerativeSearchPanel {
         btn.textContent = '▼ Show';
       }
     });
-    
+
     // History item clicks (delegated)
     this.container.querySelector('.gs-history-content')?.addEventListener('click', (e) => {
       // Delete saved search
@@ -573,26 +591,26 @@ class GenerativeSearchPanel {
         this.deleteSavedSearch(id);
         return;
       }
-      
+
       // Load a search
       const item = e.target.closest('.gs-history-item');
       if (item) {
         const type = item.dataset.type;
         const id = parseInt(item.dataset.id);
-        
+
         let entry;
         if (type === 'saved') {
-          entry = this.savedSearches.find(s => s.id === id);
+          entry = this.savedSearches.find((s) => s.id === id);
         } else {
-          entry = this.searchHistory.find(h => h.id === id);
+          entry = this.searchHistory.find((h) => h.id === id);
         }
-        
+
         if (entry) {
           this.loadSearch(entry);
         }
       }
     });
-    
+
     // Save search button
     this.container.querySelector('.gs-save-search-btn')?.addEventListener('click', () => {
       const name = prompt('Name this search pattern:', this.lastSearchOptions?.userQuery || 'My Search');
@@ -605,17 +623,17 @@ class GenerativeSearchPanel {
 
   addFilter(filterId) {
     // Don't add duplicates
-    if (this.activeFilters.some(f => f.id === filterId)) {
+    if (this.activeFilters.some((f) => f.id === filterId)) {
       return;
     }
-    
+
     this.activeFilters.push({
       id: filterId,
       threshold: 50,
       weight: 1.0,
-      input: ''
+      input: '',
     });
-    
+
     this.renderActiveFilters();
     this.updateCostEstimate();
   }
@@ -638,63 +656,63 @@ class GenerativeSearchPanel {
   async updateCostEstimate() {
     const query = this.container.querySelector('.gs-query-input')?.value || '';
     const costText = this.container.querySelector('.gs-cost-text');
-    
+
     if (this.activeFilters.length === 0 && !query.trim()) {
       costText.textContent = 'Add filters or type a query to search';
       return;
     }
-    
+
     // Get item count from API
     try {
       const estimate = await window.clipboard?.generativeSearch?.estimateCost({
         spaceId: this.currentSpace,
         filters: this.activeFilters,
-        mode: 'quick'
+        mode: 'quick',
       });
-      
+
       if (estimate) {
         costText.textContent = estimate.formatted;
       } else {
         costText.textContent = 'Ready to search';
       }
-    } catch (e) {
+    } catch (_e) {
       costText.textContent = 'Ready to search';
     }
   }
 
   async runSearch(mode) {
     const query = this.container.querySelector('.gs-query-input')?.value || '';
-    
+
     if (this.activeFilters.length === 0 && !query.trim()) {
       alert('Please add at least one filter or enter a search query.');
       return;
     }
-    
+
     this.isSearching = true;
     this.showProgress();
-    
+
     const searchOptions = {
       filters: this.activeFilters,
       spaceId: this.currentSpace,
       mode: mode,
       userQuery: query,
-      referenceItem: this.referenceItem
+      referenceItem: this.referenceItem,
     };
-    
+
     try {
       if (this.onSearch) {
         this.results = await this.onSearch(searchOptions);
       } else if (window.clipboard?.generativeSearch?.search) {
         this.results = await window.clipboard.generativeSearch.search(searchOptions);
       }
-      
+
       this.hideProgress();
       this.showResultsSummary();
-      
+
       // Save to history
       this.addToHistory(searchOptions, this.results.length);
       this.renderHistorySection();
-      
+
       if (this.onResults) {
         this.onResults(this.results);
       }
@@ -703,7 +721,7 @@ class GenerativeSearchPanel {
       log.error('app', '[GenerativeSearch] Search error', { error: error });
       alert('Search failed: ' + error.message);
     }
-    
+
     this.isSearching = false;
   }
 
@@ -728,7 +746,7 @@ class GenerativeSearchPanel {
   updateProgress(percent, text) {
     const fill = this.container.querySelector('.gs-progress-fill');
     const textEl = this.container.querySelector('.gs-progress-text');
-    
+
     if (fill) fill.style.width = `${percent}%`;
     if (textEl) textEl.textContent = text || `Processing... ${percent}%`;
   }
@@ -736,7 +754,7 @@ class GenerativeSearchPanel {
   showResultsSummary() {
     const summary = this.container.querySelector('.gs-results-summary');
     const count = this.container.querySelector('.gs-results-count');
-    
+
     summary.style.display = 'flex';
     count.textContent = `Found ${this.results.length} matching items`;
   }
@@ -744,7 +762,7 @@ class GenerativeSearchPanel {
   clearResults() {
     this.results = [];
     this.container.querySelector('.gs-results-summary').style.display = 'none';
-    
+
     if (this.onResults) {
       this.onResults([]);
     }
@@ -772,7 +790,7 @@ class GenerativeSearchPanel {
   applyStyles() {
     // Check if styles already exist
     if (document.getElementById('generative-search-styles')) return;
-    
+
     const styles = document.createElement('style');
     styles.id = 'generative-search-styles';
     styles.textContent = `
@@ -1231,7 +1249,7 @@ class GenerativeSearchPanel {
         color: #ff4444;
       }
     `;
-    
+
     document.head.appendChild(styles);
   }
 }

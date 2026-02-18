@@ -1,6 +1,6 @@
 /**
  * EditToolbar - Floating toolbar for text selection actions
- * 
+ *
  * Appears when text is selected in the StoryBeatsEditor and provides:
  * - Delete (mark for removal)
  * - Insert Gap (add placeholder for new content)
@@ -11,14 +11,14 @@
 export class EditToolbar {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // State
     this.visible = false;
     this.selection = null;
-    
+
     // DOM reference
     this.element = null;
-    
+
     // Create the toolbar element
     this.createToolbar();
   }
@@ -30,11 +30,11 @@ export class EditToolbar {
     // Check if already exists
     this.element = document.getElementById('storyBeatsEditToolbar');
     if (this.element) return;
-    
+
     this.element = document.createElement('div');
     this.element.id = 'storyBeatsEditToolbar';
     this.element.className = 'storybeats-edit-toolbar hidden';
-    
+
     this.element.innerHTML = `
       <div class="edit-toolbar-content">
         <button class="edit-toolbar-btn edit-toolbar-delete" data-action="delete" title="Delete Selection (Del)">
@@ -80,9 +80,9 @@ export class EditToolbar {
         <span class="edit-toolbar-selection-info" id="toolbarSelectionInfo"></span>
       </div>
     `;
-    
+
     document.body.appendChild(this.element);
-    
+
     // Attach event listeners
     this.attachListeners();
   }
@@ -91,7 +91,7 @@ export class EditToolbar {
    * Attach event listeners to toolbar buttons
    */
   attachListeners() {
-    this.element.querySelectorAll('.edit-toolbar-btn').forEach(btn => {
+    this.element.querySelectorAll('.edit-toolbar-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const action = btn.dataset.action;
@@ -106,29 +106,29 @@ export class EditToolbar {
   handleAction(action) {
     const editor = this.app.storyBeatsEditor;
     if (!editor) return;
-    
+
     switch (action) {
       case 'delete':
         editor.deleteSelection();
         break;
-        
+
       case 'insert-gap':
         this.showGapDurationPrompt();
         break;
-        
+
       case 'replace':
         this.showReplaceOptions();
         break;
-        
+
       case 'create-marker':
         editor.createMarkerFromSelection();
         break;
-        
+
       case 'split-marker':
         this.splitMarkerAtSelection();
         break;
     }
-    
+
     this.hide();
   }
 
@@ -138,13 +138,13 @@ export class EditToolbar {
   showGapDurationPrompt() {
     const duration = prompt('Gap duration (seconds):', '3.0');
     if (duration === null) return;
-    
+
     const durationNum = parseFloat(duration);
     if (isNaN(durationNum) || durationNum <= 0) {
       this.app.showToast?.('error', 'Please enter a valid duration');
       return;
     }
-    
+
     this.app.storyBeatsEditor?.insertGapAtSelection(durationNum);
   }
 
@@ -154,7 +154,7 @@ export class EditToolbar {
   showReplaceOptions() {
     const editor = this.app.storyBeatsEditor;
     if (!editor?.selection) return;
-    
+
     // For now, just mark for replacement
     // In future, could show a modal with AI voice options
     editor.replaceSelection();
@@ -166,39 +166,33 @@ export class EditToolbar {
   splitMarkerAtSelection() {
     const editor = this.app.storyBeatsEditor;
     if (!editor?.selection) return;
-    
+
     const splitTime = editor.selection.startTime;
-    
+
     // Find marker at this time
     const marker = editor.getMarkerAtTime(splitTime);
     if (!marker) {
       this.app.showToast?.('info', 'No marker at selection to split');
       return;
     }
-    
+
     // Create two markers from the one
     const markerManager = this.app.markerManager;
     if (!markerManager) return;
-    
+
     const originalInTime = marker.inTime;
     const originalOutTime = marker.outTime;
-    
+
     // Update original marker to end at split point
     marker.outTime = splitTime;
     marker.duration = splitTime - originalInTime;
-    
+
     // Create new marker from split point to original end
-    markerManager.addRangeMarker(
-      splitTime,
-      originalOutTime,
-      `${marker.name} (cont.)`,
-      marker.color,
-      {
-        description: marker.description,
-        tags: marker.tags ? [...marker.tags] : []
-      }
-    );
-    
+    markerManager.addRangeMarker(splitTime, originalOutTime, `${marker.name} (cont.)`, marker.color, {
+      description: marker.description,
+      tags: marker.tags ? [...marker.tags] : [],
+    });
+
     // Refresh
     editor.refresh();
     this.app.showToast?.('success', 'Marker split at selection');
@@ -210,7 +204,7 @@ export class EditToolbar {
   show(selection) {
     this.selection = selection;
     this.visible = true;
-    
+
     // Update selection info
     const info = this.element.querySelector('#toolbarSelectionInfo');
     if (info) {
@@ -218,10 +212,10 @@ export class EditToolbar {
       const wordCount = selection.endIndex - selection.startIndex + 1;
       info.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''} (${duration}s)`;
     }
-    
+
     // Position the toolbar
     this.position();
-    
+
     // Show
     this.element.classList.remove('hidden');
   }
@@ -240,15 +234,15 @@ export class EditToolbar {
    */
   position() {
     if (!this.selection) return;
-    
-    const editor = this.app.storyBeatsEditor;
+
+    const _editor = this.app.storyBeatsEditor;
     const editorContent = document.getElementById('storyBeatsEditorContent');
     if (!editorContent) return;
-    
+
     // Find the first selected word element
     const startWordEl = editorContent.querySelector(`[data-index="${this.selection.startIndex}"]`);
     const endWordEl = editorContent.querySelector(`[data-index="${this.selection.endIndex}"]`);
-    
+
     if (!startWordEl) {
       // Position at top center of editor
       const editorRect = editorContent.getBoundingClientRect();
@@ -257,31 +251,31 @@ export class EditToolbar {
       this.element.style.transform = 'translateX(-50%)';
       return;
     }
-    
+
     const startRect = startWordEl.getBoundingClientRect();
     const endRect = endWordEl ? endWordEl.getBoundingClientRect() : startRect;
-    
+
     // Position above the selection, centered
     const centerX = (startRect.left + endRect.right) / 2;
     const topY = startRect.top - 10;
-    
+
     this.element.style.top = `${topY}px`;
     this.element.style.left = `${centerX}px`;
     this.element.style.transform = 'translate(-50%, -100%)';
-    
+
     // Make sure it doesn't go off screen
     const toolbarRect = this.element.getBoundingClientRect();
-    
+
     if (toolbarRect.top < 0) {
       // Position below selection instead
       this.element.style.top = `${endRect.bottom + 10}px`;
       this.element.style.transform = 'translateX(-50%)';
     }
-    
+
     if (toolbarRect.left < 0) {
       this.element.style.left = `${toolbarRect.width / 2 + 10}px`;
     }
-    
+
     if (toolbarRect.right > window.innerWidth) {
       this.element.style.left = `${window.innerWidth - toolbarRect.width / 2 - 10}px`;
     }
@@ -295,5 +289,3 @@ export class EditToolbar {
     this.element = null;
   }
 }
-
-

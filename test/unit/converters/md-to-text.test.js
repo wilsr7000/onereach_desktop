@@ -13,7 +13,8 @@ const mockAI = createMockAIService();
 // Import the agent class (CJS)
 const { MdToTextAgent } = require('../../../lib/converters/md-to-text.js');
 
-const sampleMarkdown = '# Hello World\n\nThis is **bold** and *italic* text.\n\n- Item one\n- Item two\n\n[A link](http://example.com)';
+const sampleMarkdown =
+  '# Hello World\n\nThis is **bold** and *italic* text.\n\n- Item one\n- Item two\n\n[A link](http://example.com)';
 
 // Run the standard lifecycle test harness
 testConverterAgent(MdToTextAgent, {

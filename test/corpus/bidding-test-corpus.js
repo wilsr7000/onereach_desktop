@@ -1,14 +1,14 @@
 /**
  * Bidding Test Corpus
- * 
+ *
  * A collection of test phrases to validate that agents correctly
  * bid on tasks they can handle and ignore tasks they cannot.
- * 
+ *
  * Run with: npm run test:corpus
  */
 
 const { MockExchange } = require('../mocks/mock-exchange.js');
-const { createKeywordAgent, createMockAgent } = require('../mocks/mock-agent.js');
+const { createKeywordAgent } = require('../mocks/mock-agent.js');
 
 // ============================================================================
 // TEST CORPUS - Phrases organized by expected winning agent
@@ -18,31 +18,31 @@ const TEST_CORPUS = {
   // Time Agent should win these
   'time-agent': [
     'what time is it',
-    'what\'s the time',
+    "what's the time",
     'tell me the time',
     'what is the current time',
     'what day is it',
-    'what\'s today\'s date',
+    "what's today's date",
     'what is the date today',
     'what month is it',
     'what year is it',
-    'what\'s the date',
+    "what's the date",
   ],
-  
+
   // Weather Agent should win these
   'weather-agent': [
-    'what\'s the weather',
+    "what's the weather",
     'what is the weather like',
-    'how\'s the weather today',
-    'what\'s the temperature',
+    "how's the weather today",
+    "what's the temperature",
     'is it going to rain',
     'weather in New York',
-    'what\'s the weather in Denver',
+    "what's the weather in Denver",
     'temperature outside',
     'is it cold outside',
     'weather forecast',
   ],
-  
+
   // Media Agent should win these
   'media-agent': [
     'play music',
@@ -56,7 +56,7 @@ const TEST_CORPUS = {
     'volume down',
     'mute',
   ],
-  
+
   // Help Agent should win these
   'help-agent': [
     'help',
@@ -70,8 +70,8 @@ const TEST_CORPUS = {
     'assist me',
     'what commands are available',
   ],
-  
-  // Search Agent should win these  
+
+  // Search Agent should win these
   'search-agent': [
     'search for cats',
     'find information about AI',
@@ -84,7 +84,7 @@ const TEST_CORPUS = {
     'find cheap tickets',
     'search news about tech',
   ],
-  
+
   // Smalltalk Agent should win these
   'smalltalk-agent': [
     'hello',
@@ -96,18 +96,18 @@ const TEST_CORPUS = {
     'goodbye',
     'see you later',
     'nice to meet you',
-    'what\'s your name',
+    "what's your name",
   ],
-  
+
   // Ambiguous - multiple agents might bid
-  'ambiguous': [
-    'play the weather channel',  // media + weather
-    'search for the time in Tokyo',  // search + time
-    'help me find music',  // help + search + media
-    'what time does it start',  // time but context-dependent
-    'look up the temperature',  // search + weather
+  ambiguous: [
+    'play the weather channel', // media + weather
+    'search for the time in Tokyo', // search + time
+    'help me find music', // help + search + media
+    'what time does it start', // time but context-dependent
+    'look up the temperature', // search + weather
   ],
-  
+
   // No agent should bid high on these
   'low-confidence': [
     'asdfghjkl',
@@ -124,32 +124,34 @@ const TEST_CORPUS = {
 
 function createTestAgents() {
   return {
-    'time-agent': createKeywordAgent('time-agent', 
-      ['time', 'clock', 'hour', 'date', 'day', 'month', 'year', 'today'],
-      { successMessage: 'The time is 3:14 PM' }
-    ),
-    
-    'weather-agent': createKeywordAgent('weather-agent',
+    'time-agent': createKeywordAgent('time-agent', ['time', 'clock', 'hour', 'date', 'day', 'month', 'year', 'today'], {
+      successMessage: 'The time is 3:14 PM',
+    }),
+
+    'weather-agent': createKeywordAgent(
+      'weather-agent',
       ['weather', 'temperature', 'rain', 'cold', 'hot', 'forecast', 'outside'],
-      { successMessage: 'It\'s 72 degrees and sunny' }
+      { successMessage: "It's 72 degrees and sunny" }
     ),
-    
-    'media-agent': createKeywordAgent('media-agent',
+
+    'media-agent': createKeywordAgent(
+      'media-agent',
       ['play', 'pause', 'stop', 'music', 'song', 'track', 'volume', 'mute', 'skip', 'next', 'previous'],
       { successMessage: 'Playing music' }
     ),
-    
-    'help-agent': createKeywordAgent('help-agent',
+
+    'help-agent': createKeywordAgent(
+      'help-agent',
       ['help', 'assist', 'what can you do', 'capabilities', 'features', 'commands', 'how do'],
       { successMessage: 'I can help with time, weather, music, and more' }
     ),
-    
-    'search-agent': createKeywordAgent('search-agent',
-      ['search', 'find', 'look', 'google', 'look up', 'lookup'],
-      { successMessage: 'Found 10 results' }
-    ),
-    
-    'smalltalk-agent': createKeywordAgent('smalltalk-agent',
+
+    'search-agent': createKeywordAgent('search-agent', ['search', 'find', 'look', 'google', 'look up', 'lookup'], {
+      successMessage: 'Found 10 results',
+    }),
+
+    'smalltalk-agent': createKeywordAgent(
+      'smalltalk-agent',
       ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'goodbye', 'thanks', 'thank you', 'how are you', 'name'],
       { successMessage: 'Hello! How can I help you?' }
     ),
@@ -163,7 +165,7 @@ function createTestAgents() {
 async function runCorpusTests() {
   const exchange = new MockExchange({ auctionDelayMs: 1, executionDelayMs: 1 });
   await exchange.start();
-  
+
   // Register all test agents
   const agents = createTestAgents();
   for (const [id, agent] of Object.entries(agents)) {
@@ -172,12 +174,12 @@ async function runCorpusTests() {
       executeFn: (task) => agent.execute(task),
     });
   }
-  
+
   console.log('\n========================================');
   console.log('  DISTRIBUTED BIDDING TEST CORPUS');
   console.log('========================================\n');
   console.log(`Registered ${Object.keys(agents).length} agents\n`);
-  
+
   const results = {
     passed: 0,
     failed: 0,
@@ -185,15 +187,15 @@ async function runCorpusTests() {
     noBids: 0,
     details: [],
   };
-  
+
   // Run tests for each category
   for (const [expectedAgent, phrases] of Object.entries(TEST_CORPUS)) {
     console.log(`\n--- Testing: ${expectedAgent} ---\n`);
-    
+
     for (const phrase of phrases) {
       const result = await testPhrase(exchange, phrase, expectedAgent);
       results.details.push(result);
-      
+
       if (result.status === 'PASS') {
         results.passed++;
         console.log(`  ✓ "${phrase}"`);
@@ -207,7 +209,12 @@ async function runCorpusTests() {
         console.log(`  ? "${phrase}" [AMBIGUOUS - expected]`);
         console.log(`    → ${result.winner} (${(result.confidence * 100).toFixed(0)}%)`);
         if (result.allBids.length > 1) {
-          console.log(`    Other bids: ${result.allBids.slice(1).map(b => `${b.agentId}(${(b.confidence * 100).toFixed(0)}%)`).join(', ')}`);
+          console.log(
+            `    Other bids: ${result.allBids
+              .slice(1)
+              .map((b) => `${b.agentId}(${(b.confidence * 100).toFixed(0)}%)`)
+              .join(', ')}`
+          );
         }
       } else if (result.status === 'NO_BIDS') {
         if (expectedAgent === 'low-confidence') {
@@ -220,7 +227,7 @@ async function runCorpusTests() {
       }
     }
   }
-  
+
   // Print summary
   console.log('\n========================================');
   console.log('  SUMMARY');
@@ -232,9 +239,9 @@ async function runCorpusTests() {
   console.log(`  Total:     ${results.details.length}`);
   console.log(`\n  Success Rate: ${((results.passed / (results.passed + results.failed)) * 100).toFixed(1)}%`);
   console.log('');
-  
+
   await exchange.shutdown();
-  
+
   // Return exit code
   return results.failed === 0 ? 0 : 1;
 }
@@ -243,34 +250,36 @@ async function testPhrase(exchange, phrase, expectedAgent) {
   return new Promise(async (resolve) => {
     let winner = null;
     let allBids = [];
-    let settled = false;
-    
-    const onAssigned = ({ task, winner: w, backups }) => {
+    let _settled = false;
+
+    const onAssigned = ({ _task, winner: w, backups }) => {
       winner = w;
       allBids = [w, ...backups];
     };
-    
+
     const onHalt = () => {
       settled = true;
     };
-    
+
     const onSettled = () => {
       settled = true;
     };
-    
+
     exchange.on('task:assigned', onAssigned);
     exchange.on('exchange:halt', onHalt);
     exchange.on('task:settled', onSettled);
-    
+
     await exchange.submit({ content: phrase });
-    
+
     // Wait for auction to complete
-    await new Promise(r => setTimeout(r, 50));
-    
+    await new Promise((r) => {
+      setTimeout(r, 50);
+    });
+
     exchange.off('task:assigned', onAssigned);
     exchange.off('exchange:halt', onHalt);
     exchange.off('task:settled', onSettled);
-    
+
     // Determine result
     if (!winner) {
       resolve({
@@ -327,8 +336,8 @@ async function testPhrase(exchange, phrase, expectedAgent) {
 
 if (require.main === module) {
   runCorpusTests()
-    .then(exitCode => process.exit(exitCode))
-    .catch(err => {
+    .then((exitCode) => process.exit(exitCode))
+    .catch((err) => {
       console.error('Test corpus failed:', err);
       process.exit(1);
     });

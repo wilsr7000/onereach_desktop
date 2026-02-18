@@ -1,6 +1,6 @@
 /**
  * MockExchange - Simulates the Exchange for deterministic testing
- * 
+ *
  * This mock implements the Exchange interface without real WebSockets,
  * allowing tests to run fast and deterministically without LLM calls.
  */
@@ -10,9 +10,9 @@ class MockExchange {
     this.options = {
       auctionDelayMs: options.auctionDelayMs || 10,
       executionDelayMs: options.executionDelayMs || 10,
-      ...options
+      ...options,
     };
-    
+
     this.submittedTasks = [];
     this.registeredAgents = new Map();
     this.eventHandlers = {};
@@ -20,7 +20,7 @@ class MockExchange {
     this.taskIdCounter = 0;
     this.auctionResults = new Map(); // taskId -> { winner, bids }
   }
-  
+
   /**
    * Start the mock exchange
    */
@@ -29,7 +29,7 @@ class MockExchange {
     this.emit('exchange:started', { port: 0 });
     return Promise.resolve();
   }
-  
+
   /**
    * Stop the mock exchange
    */
@@ -38,7 +38,7 @@ class MockExchange {
     this.emit('exchange:shutdown_complete', {});
     return Promise.resolve();
   }
-  
+
   /**
    * Submit a task - triggers auction
    */
@@ -46,7 +46,7 @@ class MockExchange {
     if (!this.isRunning) {
       throw new Error('Exchange is not running');
     }
-    
+
     const taskId = `task-${++this.taskIdCounter}`;
     const task = {
       id: taskId,
@@ -56,23 +56,23 @@ class MockExchange {
       status: 'PENDING',
       createdAt: Date.now(),
     };
-    
+
     this.submittedTasks.push(task);
     this.emit('task:queued', { task });
-    
+
     // Run auction asynchronously
     setTimeout(() => this.runAuction(task), this.options.auctionDelayMs);
-    
+
     return { taskId, task };
   }
-  
+
   /**
    * Run auction - collect bids from all registered agents
    */
   async runAuction(task) {
     task.status = 'OPEN';
     this.emit('auction:started', { task, auctionId: `auction-${task.id}` });
-    
+
     // Collect bids from all agents
     const bids = [];
     for (const [agentId, agent] of this.registeredAgents) {
@@ -92,31 +92,31 @@ class MockExchange {
         }
       }
     }
-    
+
     this.emit('auction:closed', { task, bids });
-    
+
     // No bids - halt
     if (bids.length === 0) {
       task.status = 'HALTED';
       this.emit('exchange:halt', { task, reason: 'No bids received' });
       return;
     }
-    
+
     // Pick winner (highest confidence)
     bids.sort((a, b) => b.confidence - a.confidence);
     const winner = bids[0];
     const backups = bids.slice(1);
-    
+
     this.auctionResults.set(task.id, { winner, bids });
-    
+
     task.status = 'ASSIGNED';
     task.assignedAgent = winner.agentId;
     this.emit('task:assigned', { task, winner, backups });
-    
+
     // Execute
     await this.executeTask(task, winner);
   }
-  
+
   /**
    * Execute task with winning agent
    */
@@ -127,20 +127,22 @@ class MockExchange {
       this.emit('task:dead_letter', { task, reason: 'Winner agent not found' });
       return;
     }
-    
+
     this.emit('task:executing', { task, agentId: winner.agentId });
-    
+
     try {
       // Add small delay to simulate execution
-      await new Promise(r => setTimeout(r, this.options.executionDelayMs));
-      
+      await new Promise((r) => {
+        setTimeout(r, this.options.executionDelayMs);
+      });
+
       let execResult;
       if (agent.executeFn) {
         execResult = await agent.executeFn(task);
       } else {
         execResult = { success: true, message: `Mock execution by ${winner.agentId}` };
       }
-      
+
       // Normalize result format (agents return message, exchange expects output)
       const result = {
         success: execResult.success,
@@ -148,26 +150,26 @@ class MockExchange {
         data: execResult.data,
         error: execResult.error,
       };
-      
+
       task.status = 'SETTLED';
       task.result = result;
       this.emit('task:settled', { task, result, agentId: winner.agentId });
     } catch (error) {
       task.status = 'BUSTED';
       task.error = error.message;
-      this.emit('task:busted', { 
-        task, 
-        agentId: winner.agentId, 
+      this.emit('task:busted', {
+        task,
+        agentId: winner.agentId,
         error: error.message,
-        backupsRemaining: 0 
+        backupsRemaining: 0,
       });
-      
+
       // For simplicity, go straight to dead letter
       task.status = 'DEAD_LETTER';
       this.emit('task:dead_letter', { task, reason: error.message });
     }
   }
-  
+
   /**
    * Register an agent
    */
@@ -179,10 +181,10 @@ class MockExchange {
       keywords: config.keywords || [],
       capabilities: config.capabilities || [],
     });
-    
+
     this.emit('agent:connected', { agent: { id, name: config.name || id } });
   }
-  
+
   /**
    * Unregister an agent
    */
@@ -192,12 +194,12 @@ class MockExchange {
       this.emit('agent:disconnected', { agentId: id, reason: 'unregistered' });
     }
   }
-  
+
   /**
    * Cancel a task
    */
   cancelTask(taskId) {
-    const task = this.submittedTasks.find(t => t.id === taskId);
+    const task = this.submittedTasks.find((t) => t.id === taskId);
     if (task && task.status !== 'SETTLED' && task.status !== 'DEAD_LETTER') {
       task.status = 'CANCELLED';
       this.emit('task:cancelled', { task, reason: 'user_request' });
@@ -205,24 +207,24 @@ class MockExchange {
     }
     return false;
   }
-  
+
   /**
    * Get task by ID
    */
   getTask(taskId) {
-    return this.submittedTasks.find(t => t.id === taskId) || null;
+    return this.submittedTasks.find((t) => t.id === taskId) || null;
   }
-  
+
   /**
    * Get queue stats
    */
   getQueueStats() {
     return {
-      depth: { total: this.submittedTasks.filter(t => t.status === 'PENDING').length },
+      depth: { total: this.submittedTasks.filter((t) => t.status === 'PENDING').length },
       activeAuctions: 0,
     };
   }
-  
+
   /**
    * Event handling
    */
@@ -233,14 +235,14 @@ class MockExchange {
     this.eventHandlers[event].push(handler);
     return this;
   }
-  
+
   off(event, handler) {
     if (this.eventHandlers[event]) {
-      this.eventHandlers[event] = this.eventHandlers[event].filter(h => h !== handler);
+      this.eventHandlers[event] = this.eventHandlers[event].filter((h) => h !== handler);
     }
     return this;
   }
-  
+
   emit(event, data) {
     const handlers = this.eventHandlers[event] || [];
     for (const handler of handlers) {
@@ -251,7 +253,7 @@ class MockExchange {
       }
     }
   }
-  
+
   /**
    * Get registered agents (for assertions)
    */
@@ -261,7 +263,7 @@ class MockExchange {
       getCount: () => this.registeredAgents.size,
     };
   }
-  
+
   /**
    * Clear all state (for test isolation)
    */

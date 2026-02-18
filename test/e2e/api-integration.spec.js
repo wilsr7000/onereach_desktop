@@ -17,7 +17,7 @@ const path = require('path');
 const {
   closeApp,
   LOG_SERVER,
-  SPACES_API,
+  _SPACES_API,
   waitForHealth,
   getHealth,
   getStats,
@@ -37,7 +37,7 @@ test.beforeAll(async () => {
   electronApp = await electron.launch({
     args: [path.join(__dirname, '../../main.js')],
     env: { ...process.env, NODE_ENV: 'test', TEST_MODE: 'true' },
-    timeout: 30000
+    timeout: 30000,
   });
   await electronApp.firstWindow();
   await waitForHealth(40);
@@ -48,7 +48,6 @@ test.afterAll(async () => {
 });
 
 test.describe('Log Server API (port 47292)', () => {
-
   test('GET /health returns status ok', async () => {
     const health = await getHealth();
     expect(health.status).toBe('ok');
@@ -132,7 +131,7 @@ test.describe('Log Server API (port 47292)', () => {
     const res = await fetch(`${LOG_SERVER}/logging/level`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ level: 'invalid' })
+      body: JSON.stringify({ level: 'invalid' }),
     });
     const data = await res.json();
     expect(res.status).toBe(400);
@@ -148,15 +147,15 @@ test.describe('Log Server API (port 47292)', () => {
         level: 'info',
         category: 'test',
         message: marker,
-        source: 'e2e-test'
-      })
+        source: 'e2e-test',
+      }),
     });
     expect(res.ok).toBe(true);
 
     // Query it back
     await sleep(200); // Brief delay for ingestion
     const data = await queryLogs({ search: marker, limit: 5 });
-    const found = data.data.find(e => e.message === marker);
+    const found = data.data.find((e) => e.message === marker);
     expect(found).toBeTruthy();
     expect(found.source).toBe('external'); // Log server stamps external source
     expect(found.category).toBe('test');
@@ -164,7 +163,6 @@ test.describe('Log Server API (port 47292)', () => {
 });
 
 test.describe('Spaces API (port 47291)', () => {
-
   test('Spaces API is reachable', async () => {
     const alive = await checkSpacesApi();
     expect(alive).toBe(true);
@@ -186,7 +184,7 @@ test.describe('Spaces API (port 47291)', () => {
 
     // Verify it appears in the list
     const spaces = await listSpaces();
-    const found = spaces.find(s => (s.id || s.spaceId) === spaceId);
+    const found = spaces.find((s) => (s.id || s.spaceId) === spaceId);
     expect(found).toBeTruthy();
 
     // Delete
@@ -196,7 +194,7 @@ test.describe('Spaces API (port 47291)', () => {
     // Verify it's gone
     await sleep(300);
     const spacesAfter = await listSpaces();
-    const stillThere = spacesAfter.find(s => (s.id || s.spaceId) === spaceId);
+    const stillThere = spacesAfter.find((s) => (s.id || s.spaceId) === spaceId);
     expect(stillThere).toBeFalsy();
   });
 });

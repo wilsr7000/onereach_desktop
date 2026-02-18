@@ -25,12 +25,11 @@ let electronApp;
 let mainWindow;
 
 test.describe('Settings Flow', () => {
-
   test.beforeAll(async () => {
     electronApp = await electron.launch({
       args: [path.join(__dirname, '../../main.js')],
       env: { ...process.env, NODE_ENV: 'test', TEST_MODE: 'true' },
-      timeout: 30000
+      timeout: 30000,
     });
     mainWindow = await electronApp.firstWindow();
     await mainWindow.waitForLoadState('domcontentloaded');
@@ -39,7 +38,11 @@ test.describe('Settings Flow', () => {
 
   test.afterAll(async () => {
     // Restore logging level
-    try { await setLogLevel('info'); } catch (e) { /* ok */ }
+    try {
+      await setLogLevel('info');
+    } catch (_e) {
+      /* ok */
+    }
     await closeApp({ electronApp });
   });
 
@@ -56,8 +59,12 @@ test.describe('Settings Flow', () => {
 
     // Find settings window
     const allWindows = electronApp.windows();
-    const settingsWindow = allWindows.find(w => {
-      try { return w.url().includes('settings.html'); } catch { return false; }
+    const settingsWindow = allWindows.find((w) => {
+      try {
+        return w.url().includes('settings.html');
+      } catch {
+        return false;
+      }
     });
 
     expect(settingsWindow).toBeTruthy();
@@ -154,14 +161,11 @@ test.describe('Settings Flow', () => {
         showRecordingIndicator: false,
         enableUndoWindow: true,
         undoWindowMinutes: 10,
-        privateModeByDefault: true
-      }
+        privateModeByDefault: true,
+      },
     };
 
-    const saved = await mainWindow.evaluate(
-      (s) => window.api.saveSettings(s),
-      testSettings
-    );
+    const saved = await mainWindow.evaluate((s) => window.api.saveSettings(s), testSettings);
     expect(saved).toBeTruthy();
 
     // Read back via IPC
@@ -183,19 +187,22 @@ test.describe('Settings Flow', () => {
     expect(capture.undoWindowMinutes).toBe(10);
 
     // Restore original values
-    await mainWindow.evaluate(
-      (s) => window.api.saveSettings(s),
-      {
-        budgetEnabled: original.budgetEnabled !== false ? true : original.budgetEnabled,
-        budgetShowEstimates: original.budgetShowEstimates !== false ? true : original.budgetShowEstimates,
-        budgetConfirmThreshold: original.budgetConfirmThreshold || 0.05,
-        aiConversationCapture: original.aiConversationCapture || {
-          enabled: true, captureImages: true, captureFiles: true, captureCode: true,
-          autoCreateSpaces: true, conversationTimeoutMinutes: 30,
-          showRecordingIndicator: true, enableUndoWindow: true,
-          undoWindowMinutes: 5, privateModeByDefault: false
-        }
-      }
-    );
+    await mainWindow.evaluate((s) => window.api.saveSettings(s), {
+      budgetEnabled: original.budgetEnabled !== false ? true : original.budgetEnabled,
+      budgetShowEstimates: original.budgetShowEstimates !== false ? true : original.budgetShowEstimates,
+      budgetConfirmThreshold: original.budgetConfirmThreshold || 0.05,
+      aiConversationCapture: original.aiConversationCapture || {
+        enabled: true,
+        captureImages: true,
+        captureFiles: true,
+        captureCode: true,
+        autoCreateSpaces: true,
+        conversationTimeoutMinutes: 30,
+        showRecordingIndicator: true,
+        enableUndoWindow: true,
+        undoWindowMinutes: 5,
+        privateModeByDefault: false,
+      },
+    });
   });
 });

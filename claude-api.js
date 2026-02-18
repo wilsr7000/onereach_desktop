@@ -6,7 +6,7 @@
  */
 console.warn('[ClaudeAPI] DEPRECATED — use lib/ai-service.js instead');
 
-const { app, net } = require('electron');
+const { _app, net } = require('electron');
 const getLogger = require('./event-logger');
 const { getBudgetManager } = require('./budget-manager');
 const { getLLMUsageTracker } = require('./llm-usage-tracker');
@@ -31,42 +31,42 @@ class ClaudeAPI {
     const logger = getLogger();
     try {
       const budgetManager = getBudgetManager();
-      
+
       // Use unified pricing from pricing-config.js
       const costResult = calculateCost(this.defaultModel, estimatedInputTokens, estimatedOutputTokens);
-      
+
       const budgetCheck = budgetManager.preCheckBudget(
-        'anthropic', 
-        this.defaultModel, 
-        estimatedInputTokens, 
-        estimatedOutputTokens, 
+        'anthropic',
+        this.defaultModel,
+        estimatedInputTokens,
+        estimatedOutputTokens,
         projectId
       );
-      
+
       if (budgetCheck.blocked) {
         logger.warn('Claude API call blocked by hard budget limit', {
           event: 'budget:blocked',
           provider: 'anthropic',
           operation,
-          estimatedCost: costResult.totalCost
+          estimatedCost: costResult.totalCost,
         });
         return { exceeded: true, blocked: true, warning: budgetCheck.warnings };
       }
-      
+
       if (budgetCheck.warnings?.length > 0) {
         logger.warn('Claude API call proceeding with budget warning', {
           event: 'budget:warning',
           provider: 'anthropic',
           operation,
           estimatedCost: costResult.totalCost,
-          warnings: budgetCheck.warnings
+          warnings: budgetCheck.warnings,
         });
       }
-      
+
       return budgetCheck;
     } catch (budgetError) {
       logger.warn('Claude budget check failed, proceeding with call', {
-        error: budgetError.message
+        error: budgetError.message,
       });
       return { exceeded: false, blocked: false, warning: null };
     }
@@ -92,24 +92,24 @@ class ClaudeAPI {
         feature: this._getFeatureFromOperation(operation),
         purpose: operation,
         projectId,
-        success: true
+        success: true,
       });
-      
+
       logger.info('Claude API usage tracked', {
         event: 'api:usage',
         provider: 'anthropic',
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
-        operation
+        operation,
       });
     } catch (trackingError) {
       logger.warn('Claude API usage tracking failed', {
         error: trackingError.message,
-        operation
+        operation,
       });
     }
   }
-  
+
   /**
    * Map operation name to feature category for dashboard
    */
@@ -138,15 +138,14 @@ class ClaudeAPI {
     }
 
     // Truncate content if too long (keep under 10k chars for efficiency)
-    const truncatedContent = content.length > 10000 
-      ? content.substring(0, 10000) + '...\n[Content truncated for analysis]'
-      : content;
+    const truncatedContent =
+      content.length > 10000 ? content.substring(0, 10000) + '...\n[Content truncated for analysis]' : content;
 
     // Build the message content based on whether we have an image
     let messageContent;
-    
+
     const logger = getLogger();
-    
+
     if (imageData && contentType === 'image') {
       // For images, use Claude's vision capabilities
       logger.info('Claude API vision request', {
@@ -154,18 +153,18 @@ class ClaudeAPI {
         provider: 'anthropic',
         model: this.defaultModel,
         contentType: 'image',
-        hasCustomPrompt: !!customPrompt
+        hasCustomPrompt: !!customPrompt,
       });
-      
+
       // Validate image data
       if (!imageData || imageData.length < 100) {
         throw new Error('Invalid or empty image data provided');
       }
-      
+
       // Extract media type and validate
       let mediaType = 'image/png'; // default
       let base64Data = imageData;
-      
+
       if (imageData.startsWith('data:')) {
         const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
         if (matches) {
@@ -175,17 +174,17 @@ class ClaudeAPI {
           throw new Error('Invalid data URL format for image');
         }
       }
-      
+
       // Validate base64 data
       if (base64Data.length < 50) {
         throw new Error('Image data appears to be too small or corrupted');
       }
-      
+
       logger.debug('Claude API image data', {
         mediaType,
-        base64Length: base64Data.length
+        base64Length: base64Data.length,
       });
-      
+
       messageContent = [
         {
           type: 'text',
@@ -207,16 +206,16 @@ ${customPrompt ? `Additional analysis requested: ${customPrompt}` : ''}
 ${content && content !== 'Filename: Screenshot' ? `Context: ${content}` : ''}
 
 Remember: Describe what you ACTUALLY SEE in the image, not generic metadata about images.
-Respond with valid JSON only, no markdown formatting.`
+Respond with valid JSON only, no markdown formatting.`,
         },
         {
           type: 'image',
           source: {
             type: 'base64',
             media_type: mediaType,
-            data: base64Data
-          }
-        }
+            data: base64Data,
+          },
+        },
       ];
     } else {
       // For non-image content, use text-only prompt
@@ -225,9 +224,9 @@ Respond with valid JSON only, no markdown formatting.`
         provider: 'anthropic',
         model: this.defaultModel,
         contentType,
-        hasCustomPrompt: !!customPrompt
+        hasCustomPrompt: !!customPrompt,
       });
-      
+
       // Special handling for HTML content
       let analysisPrompt;
       if (contentType === 'html') {
@@ -266,7 +265,7 @@ Provide a JSON response with the following fields:
 - category: One of: script, library, component, configuration, test, snippet, other
 
 Additional instructions:
-${customPrompt || 'Focus on understanding the code\'s functionality and purpose.'}
+${customPrompt || "Focus on understanding the code's functionality and purpose."}
 
 Code to analyze:
 """
@@ -360,7 +359,7 @@ ${truncatedContent}
 
 Respond with valid JSON only, no markdown formatting.`;
       }
-      
+
       messageContent = analysisPrompt;
     }
 
@@ -368,72 +367,72 @@ Respond with valid JSON only, no markdown formatting.`;
       // Log the message type being sent
       if (imageData) {
         logger.debug('Claude API sending vision request', {
-          imageDataLength: imageData.length
+          imageDataLength: imageData.length,
         });
       }
-      
+
       // Estimate tokens and check budget before making the call
-      const messageContentStr = typeof messageContent === 'string' 
-        ? messageContent 
-        : JSON.stringify(messageContent);
+      const messageContentStr = typeof messageContent === 'string' ? messageContent : JSON.stringify(messageContent);
       const estimatedInputTokens = Math.ceil(messageContentStr.length / 4);
       const estimatedOutputTokens = this.maxTokens;
-      
-      this.checkBudgetBeforeCall(
-        `generateMetadata:${contentType}`, 
-        estimatedInputTokens, 
-        estimatedOutputTokens
-      );
-      
+
+      this.checkBudgetBeforeCall(`generateMetadata:${contentType}`, estimatedInputTokens, estimatedOutputTokens);
+
       // Use Electron's net module for the request
       const requestData = JSON.stringify({
         model: this.defaultModel,
         max_tokens: this.maxTokens,
         temperature: 0.3, // Lower temperature for more consistent metadata
-        messages: [{
-          role: 'user',
-          content: messageContent
-        }]
+        messages: [
+          {
+            role: 'user',
+            content: messageContent,
+          },
+        ],
       });
 
-      const data = await this.makeRequest(`${this.baseURL}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
-          'anthropic-version': '2023-06-01'
-        }
-      }, requestData);
-      
+      const data = await this.makeRequest(
+        `${this.baseURL}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+        },
+        requestData
+      );
+
       // Track usage from response
       if (data.usage) {
         this.trackUsage(`generateMetadata:${contentType}`, data.usage);
       }
-      
+
       // Extract JSON from Claude's response
       const content = data.content[0].text;
-      
+
       // Debug log the raw response
       logger.debug('Claude API response received', {
-        responseLength: content.length
+        responseLength: content.length,
       });
-      
+
       // Try to parse JSON from the response
       let metadata;
       try {
         // Remove any markdown code blocks if present
         const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) || content.match(/{[\s\S]*}/);
-        const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
+        const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : content;
         metadata = JSON.parse(jsonStr);
         logger.info('Claude API metadata parsed successfully', {
           event: 'api:success',
           provider: 'anthropic',
-          contentType
+          contentType,
         });
       } catch (parseError) {
         logger.warn('Claude API JSON parse failed, using fallback', {
           error: parseError.message,
-          contentType
+          contentType,
         });
         // Fallback to basic extraction
         metadata = this.extractBasicMetadata(content, contentType);
@@ -450,20 +449,20 @@ Respond with valid JSON only, no markdown formatting.`;
         ai_assisted: false,
         ai_model: 'claude-opus-4-5',
         ai_provider: 'Anthropic',
-        category: metadata.category || 'other'
+        category: metadata.category || 'other',
       };
-      
+
       // Add image-specific metadata if it's an image
       if (contentType === 'image' && metadata.category) {
         result.image_type = metadata.category;
       }
-      
+
       return result;
     } catch (error) {
       logger.logAPIError('/v1/messages', error, {
         provider: 'anthropic',
         contentType,
-        model: this.defaultModel
+        model: this.defaultModel,
       });
       throw error;
     }
@@ -481,16 +480,16 @@ Respond with valid JSON only, no markdown formatting.`;
       tags: [],
       source: 'unknown',
       ai_detected: false,
-      category: 'other'
+      category: 'other',
     };
 
     // Try to extract fields from the response text
-    lines.forEach(line => {
+    lines.forEach((line) => {
       if (line.includes('description:')) {
         metadata.description = line.split('description:')[1].trim();
       } else if (line.includes('tags:')) {
         const tagStr = line.split('tags:')[1].trim();
-        metadata.tags = tagStr.split(',').map(t => t.trim());
+        metadata.tags = tagStr.split(',').map((t) => t.trim());
       }
     });
 
@@ -510,7 +509,7 @@ Respond with valid JSON only, no markdown formatting.`;
       const request = net.request({
         url,
         method: options.method,
-        headers: options.headers
+        headers: options.headers,
       });
 
       let responseData = '';
@@ -525,7 +524,7 @@ Respond with valid JSON only, no markdown formatting.`;
             try {
               const data = JSON.parse(responseData);
               resolve(data);
-            } catch (error) {
+            } catch (_error) {
               reject(new Error('Failed to parse response as JSON'));
             }
           } else {
@@ -541,7 +540,7 @@ Respond with valid JSON only, no markdown formatting.`;
       if (body) {
         request.write(body);
       }
-      
+
       request.end();
     });
   }
@@ -556,7 +555,7 @@ Respond with valid JSON only, no markdown formatting.`;
    */
   async chat(messages, apiKey = null, options = {}) {
     const logger = getLogger();
-    
+
     // Helper to extract valid Anthropic key from a string (handles copy-paste errors like "Anthr: sk-ant-...")
     const extractAnthropicKey = (str) => {
       if (!str) return null;
@@ -564,7 +563,7 @@ Respond with valid JSON only, no markdown formatting.`;
       const match = str.match(/sk-ant-[A-Za-z0-9_-]+/);
       return match ? match[0] : null;
     };
-    
+
     // If apiKey was passed, clean it in case it has a prefix (e.g., "Anthr: sk-ant-...")
     if (apiKey) {
       const cleanedKey = extractAnthropicKey(apiKey);
@@ -573,23 +572,23 @@ Respond with valid JSON only, no markdown formatting.`;
       }
       // If cleanup found nothing but key exists, we'll let it proceed and validate later
     }
-    
+
     // Get API key from settings if not provided (or if provided key couldn't be cleaned)
     if (!apiKey) {
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
-      
+
       // Try to find an Anthropic key - prioritize dedicated anthropicApiKey
       const anthropicApiKey = settingsManager.get('anthropicApiKey');
       const nestedKey = settingsManager.get('llmConfig.anthropic.apiKey');
       const llmApiKey = settingsManager.get('llmApiKey');
       const provider = settingsManager.get('llmProvider');
-      
+
       // Priority: dedicated anthropic key > nested config > llmApiKey (only if it's an Anthropic key)
       const cleanAnthropicKey = extractAnthropicKey(anthropicApiKey);
       const cleanNestedKey = extractAnthropicKey(nestedKey);
       const cleanLlmKey = extractAnthropicKey(llmApiKey);
-      
+
       if (cleanAnthropicKey) {
         apiKey = cleanAnthropicKey;
       } else if (cleanNestedKey) {
@@ -601,39 +600,37 @@ Respond with valid JSON only, no markdown formatting.`;
         // Still try it in case they have a valid key with different format
         apiKey = llmApiKey;
       }
-      
+
       console.log('[ClaudeAPI] Key lookup:', {
         hasAnthropicApiKey: !!anthropicApiKey,
         cleanedAnthropicKey: !!cleanAnthropicKey,
         hasNestedKey: !!nestedKey,
         hasLlmApiKey: !!llmApiKey,
         provider,
-        selectedKeyPrefix: apiKey?.substring(0, 12)
+        selectedKeyPrefix: apiKey?.substring(0, 12),
       });
     }
-    
+
     if (!apiKey) {
-      throw new Error('Anthropic API key not found. Please add your Anthropic API key (starts with sk-ant-) in Settings > API Keys.');
-    }
-    
-    // Validate key format and give helpful error
-    if (!apiKey.startsWith('sk-ant-')) {
-      const keyType = apiKey.startsWith('sk-proj-') ? 'OpenAI' : 
-                      apiKey.startsWith('sk-') ? 'OpenAI' : 'unknown';
-      throw new Error(`Invalid API key format for Claude. You provided a ${keyType} key (${apiKey.substring(0, 10)}...), but Claude requires an Anthropic API key that starts with "sk-ant-". Please add your Anthropic key in Settings.`);
+      throw new Error(
+        'Anthropic API key not found. Please add your Anthropic API key (starts with sk-ant-) in Settings > API Keys.'
+      );
     }
 
-    const {
-      maxTokens = this.maxTokens,
-      temperature = 0.3,
-      model = this.defaultModel,
-      system = null
-    } = options;
+    // Validate key format and give helpful error
+    if (!apiKey.startsWith('sk-ant-')) {
+      const keyType = apiKey.startsWith('sk-proj-') ? 'OpenAI' : apiKey.startsWith('sk-') ? 'OpenAI' : 'unknown';
+      throw new Error(
+        `Invalid API key format for Claude. You provided a ${keyType} key (${apiKey.substring(0, 10)}...), but Claude requires an Anthropic API key that starts with "sk-ant-". Please add your Anthropic key in Settings.`
+      );
+    }
+
+    const { maxTokens = this.maxTokens, temperature = 0.3, model = this.defaultModel, system = null } = options;
 
     // Estimate tokens for budget check
     const totalContentLength = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
     const estimatedInputTokens = Math.ceil(totalContentLength / 4);
-    
+
     try {
       this.checkBudgetBeforeCall('chat', estimatedInputTokens, maxTokens);
     } catch (budgetError) {
@@ -646,9 +643,9 @@ Respond with valid JSON only, no markdown formatting.`;
         model: model,
         max_tokens: maxTokens,
         temperature: temperature,
-        messages: messages
+        messages: messages,
       };
-      
+
       // Add system prompt if provided
       if (system) {
         requestBody.system = system;
@@ -660,22 +657,26 @@ Respond with valid JSON only, no markdown formatting.`;
         model,
         maxTokens,
         messageCount: messages.length,
-        estimatedInputTokens
+        estimatedInputTokens,
       });
 
-      const data = await this.makeRequest(`${this.baseURL}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
-          'anthropic-version': '2023-06-01'
-        }
-      }, requestData);
+      const data = await this.makeRequest(
+        `${this.baseURL}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+        },
+        requestData
+      );
 
       // Track usage
       if (data.usage) {
         this.trackUsage('chat', data.usage);
-        
+
         // Track in LLM usage tracker
         try {
           const llmTracker = getLLMUsageTracker();
@@ -684,9 +685,9 @@ Respond with valid JSON only, no markdown formatting.`;
             inputTokens: data.usage.input_tokens || 0,
             outputTokens: data.usage.output_tokens || 0,
             feature: 'agent-diagnosis',
-            purpose: 'App Manager Agent chat'
+            purpose: 'App Manager Agent chat',
           });
-        } catch (trackerError) {
+        } catch (_trackerError) {
           // Tracker might not be available
         }
       }
@@ -696,7 +697,7 @@ Respond with valid JSON only, no markdown formatting.`;
           content: data.content[0].text,
           usage: data.usage,
           model: data.model,
-          stopReason: data.stop_reason
+          stopReason: data.stop_reason,
         };
       } else {
         throw new Error('No content in Claude response');
@@ -704,7 +705,7 @@ Respond with valid JSON only, no markdown formatting.`;
     } catch (error) {
       logger.logAPIError('/v1/messages (chat)', error, {
         provider: 'anthropic',
-        model
+        model,
       });
       throw error;
     }
@@ -717,21 +718,16 @@ Respond with valid JSON only, no markdown formatting.`;
    * @returns {Promise<string>} The completion text
    */
   async complete(prompt, options = {}) {
-    const {
-      systemPrompt = null,
-      maxTokens = this.maxTokens,
-      temperature = 0.3,
-      model = this.defaultModel
-    } = options;
+    const { systemPrompt = null, maxTokens = this.maxTokens, temperature = 0.3, model = this.defaultModel } = options;
 
     const messages = [{ role: 'user', content: prompt }];
-    
+
     const chatOptions = {
       maxTokens,
       temperature,
-      model
+      model,
     };
-    
+
     if (systemPrompt) {
       chatOptions.system = systemPrompt;
     }
@@ -749,31 +745,37 @@ Respond with valid JSON only, no markdown formatting.`;
       const requestData = JSON.stringify({
         model: this.defaultModel,
         max_tokens: 10,
-        messages: [{
-          role: 'user',
-          content: 'Hi'
-        }]
+        messages: [
+          {
+            role: 'user',
+            content: 'Hi',
+          },
+        ],
       });
 
-      await this.makeRequest(`${this.baseURL}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
-          'anthropic-version': '2023-06-01'
-        }
-      }, requestData);
+      await this.makeRequest(
+        `${this.baseURL}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+        },
+        requestData
+      );
 
       logger.info('Claude API connection test successful', {
         event: 'api:test',
         provider: 'anthropic',
-        success: true
+        success: true,
       });
       return true;
     } catch (error) {
       logger.logAPIError('/v1/messages', error, {
         provider: 'anthropic',
-        operation: 'testConnection'
+        operation: 'testConnection',
       });
       return false;
     }
@@ -789,16 +791,12 @@ Respond with valid JSON only, no markdown formatting.`;
     const { getSettingsManager } = require('./settings-manager');
     const settingsManager = getSettingsManager();
     const settings = settingsManager.get('llmConfig.anthropic');
-    
+
     if (!settings || !settings.apiKey) {
       throw new Error('Anthropic API key not configured. Please configure it in Settings > API Keys.');
     }
 
-    const {
-      maxTokens = 4000,
-      temperature = 0.3,
-      projectId = null
-    } = options;
+    const { maxTokens = 4000, temperature = 0.3, projectId = null } = options;
 
     // Check budget before making the call
     const estimatedInputTokens = Math.ceil(prompt.length / 4);
@@ -809,21 +807,28 @@ Respond with valid JSON only, no markdown formatting.`;
         model: settings.model || 'claude-sonnet-4-5-20250929',
         max_tokens: maxTokens,
         temperature: temperature,
-        system: "You are a technical log analyzer. Analyze the provided logs and return a structured JSON response with the following fields: summary (string), issues (array of objects with title, severity, component, impact, description, fix, and optional codeChanges fields), patterns (array of strings), recommendations (array of strings), and fixes (object with immediate and longTerm arrays). Ensure the response is valid JSON that can be parsed.",
-        messages: [{
-          role: 'user',
-          content: prompt
-        }]
+        system:
+          'You are a technical log analyzer. Analyze the provided logs and return a structured JSON response with the following fields: summary (string), issues (array of objects with title, severity, component, impact, description, fix, and optional codeChanges fields), patterns (array of strings), recommendations (array of strings), and fixes (object with immediate and longTerm arrays). Ensure the response is valid JSON that can be parsed.',
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
       });
 
-      const data = await this.makeRequest(`${this.baseURL}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': settings.apiKey,
-          'anthropic-version': '2023-06-01'
-        }
-      }, requestData);
+      const data = await this.makeRequest(
+        `${this.baseURL}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': settings.apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+        },
+        requestData
+      );
 
       // Track usage from response
       if (data.usage) {
@@ -832,29 +837,29 @@ Respond with valid JSON only, no markdown formatting.`;
 
       if (data.content && data.content.length > 0) {
         const responseText = data.content[0].text;
-        
+
         // Try to parse as JSON
         try {
           // Extract JSON from the response (in case it's wrapped in markdown)
-          const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || 
-                           responseText.match(/```\s*([\s\S]*?)\s*```/);
-          
+          const jsonMatch =
+            responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/```\s*([\s\S]*?)\s*```/);
+
           const jsonString = jsonMatch ? jsonMatch[1] : responseText;
           const analysis = JSON.parse(jsonString);
-          
+
           // Ensure required fields exist with defaults
           return {
             summary: analysis.summary || 'No summary available',
             issues: analysis.issues || [],
             patterns: analysis.patterns || [],
             recommendations: analysis.recommendations || [],
-            fixes: analysis.fixes || { immediate: [], longTerm: [] }
+            fixes: analysis.fixes || { immediate: [], longTerm: [] },
           };
         } catch (parseError) {
           const logger = getLogger();
           logger.warn('Claude API analyze parse failed', {
             error: parseError.message,
-            operation: 'analyze'
+            operation: 'analyze',
           });
           // Return a structured response even if parsing fails
           return {
@@ -862,7 +867,7 @@ Respond with valid JSON only, no markdown formatting.`;
             issues: [],
             patterns: [],
             recommendations: ['Failed to parse structured response. Raw analysis provided in summary.'],
-            fixes: { immediate: [], longTerm: [] }
+            fixes: { immediate: [], longTerm: [] },
           };
         }
       } else {
@@ -872,7 +877,7 @@ Respond with valid JSON only, no markdown formatting.`;
       const logger = getLogger();
       logger.logAPIError('/v1/messages', error, {
         provider: 'anthropic',
-        operation: 'analyze'
+        operation: 'analyze',
       });
       throw error;
     }
@@ -887,22 +892,25 @@ Respond with valid JSON only, no markdown formatting.`;
    * @returns {Promise<Object>} Planning result with recommended approach
    */
   async planAgent(description, availableTemplates = {}) {
-    const templateInfo = Object.entries(availableTemplates).map(([id, t]) => 
-      `- ${id}: ${t.name} - ${t.description} (capabilities: ${t.capabilities?.join(', ')})`
-    ).join('\n');
+    const templateInfo = Object.entries(availableTemplates)
+      .map(([id, t]) => `- ${id}: ${t.name} - ${t.description} (capabilities: ${t.capabilities?.join(', ')})`)
+      .join('\n');
 
     const prompt = `Analyze this user request and plan the best approach for building a voice-activated agent:
 
 USER REQUEST: "${description}"
 
 AVAILABLE EXECUTION TYPES:
-${templateInfo || `
+${
+  templateInfo ||
+  `
 - shell: Terminal commands, file operations, system tasks
 - applescript: macOS app control, UI automation, system features
 - nodejs: JavaScript code, API calls, data processing
 - llm: Conversational AI, Q&A, text generation (no system access)
 - browser: Web automation, scraping, form filling
-`}
+`
+}
 
 Analyze the request and identify ALL possible features this agent could have. For each feature, determine if it's feasible.
 
@@ -975,10 +983,10 @@ FEATURE GUIDELINES:
 
     try {
       const response = await this.complete(prompt, {
-        maxTokens: 8000,  // Large buffer for complex plans with many features and test cases
-        temperature: 0.2
+        maxTokens: 8000, // Large buffer for complex plans with many features and test cases
+        temperature: 0.2,
       });
-      
+
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         try {
@@ -986,31 +994,31 @@ FEATURE GUIDELINES:
           return {
             success: true,
             plan,
-            raw: response
+            raw: response,
           };
         } catch (parseError) {
           console.error('[ClaudeAPI] Plan JSON parse error:', parseError.message);
           console.error('[ClaudeAPI] Attempted to parse:', jsonMatch[0].substring(0, 500) + '...');
-          
+
           // Try to salvage a partial plan
           return {
             success: false,
             error: `JSON parse error: ${parseError.message}. The response may have been truncated.`,
             raw: response,
-            partialJson: jsonMatch[0].substring(0, 1000)
+            partialJson: jsonMatch[0].substring(0, 1000),
           };
         }
       }
-      
+
       return {
         success: false,
         error: 'Could not parse planning response',
-        raw: response
+        raw: response,
       };
     } catch (error) {
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -1052,20 +1060,20 @@ Analyze the failure and respond in this JSON format:
     try {
       const response = await this.complete(prompt, {
         maxTokens: 500,
-        temperature: 0.1
+        temperature: 0.1,
       });
-      
+
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         return JSON.parse(jsonMatch[0]);
       }
-      
+
       return {
         summary: 'Diagnosis parsing failed',
         rootCause: response,
         category: 'other',
         confidence: 0.3,
-        suggestedFix: 'Manual review required'
+        suggestedFix: 'Manual review required',
       };
     } catch (error) {
       return {
@@ -1073,7 +1081,7 @@ Analyze the failure and respond in this JSON format:
         rootCause: error.message,
         category: 'other',
         confidence: 0,
-        suggestedFix: 'Unable to diagnose - check logs manually'
+        suggestedFix: 'Unable to diagnose - check logs manually',
       };
     }
   }
@@ -1114,24 +1122,24 @@ Based on the diagnosis, generate a specific fix. Respond in JSON format:
     try {
       const response = await this.complete(prompt, {
         maxTokens: 800,
-        temperature: 0.1
+        temperature: 0.1,
       });
-      
+
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         return JSON.parse(jsonMatch[0]);
       }
-      
+
       return {
         canFix: false,
         reason: 'Could not generate structured fix',
-        description: response
+        description: response,
       };
     } catch (error) {
       return {
         canFix: false,
         reason: error.message,
-        description: 'Fix generation failed'
+        description: 'Fix generation failed',
       };
     }
   }
@@ -1145,15 +1153,17 @@ Based on the diagnosis, generate a specific fix. Respond in JSON format:
    * @returns {Promise<string>} The generated script
    */
   async generateOptimizedScript(agent, testPrompt, scriptType, previousAttempts = []) {
-    const failureContext = previousAttempts.length > 0
-      ? `\n\nPREVIOUS FAILURES (avoid these mistakes):\n${previousAttempts.map((a, i) => 
-          `${i + 1}. ${a.script || 'N/A'} -> Failed: ${a.details}`
-        ).join('\n')}`
-      : '';
+    const failureContext =
+      previousAttempts.length > 0
+        ? `\n\nPREVIOUS FAILURES (avoid these mistakes):\n${previousAttempts
+            .map((a, i) => `${i + 1}. ${a.script || 'N/A'} -> Failed: ${a.details}`)
+            .join('\n')}`
+        : '';
 
-    const typeInstructions = scriptType === 'applescript'
-      ? `Generate AppleScript code. Use proper "tell application" syntax. For Music app, remember to select a track before playing.`
-      : `Generate a shell command. Use safe commands, no sudo or rm -rf.`;
+    const typeInstructions =
+      scriptType === 'applescript'
+        ? `Generate AppleScript code. Use proper "tell application" syntax. For Music app, remember to select a track before playing.`
+        : `Generate a shell command. Use safe commands, no sudo or rm -rf.`;
 
     const prompt = `${typeInstructions}
 
@@ -1166,14 +1176,14 @@ Generate ONLY the ${scriptType} code, no explanations or markdown:`;
     try {
       const response = await this.complete(prompt, {
         maxTokens: 300,
-        temperature: 0.1
+        temperature: 0.1,
       });
-      
+
       // Clean up response
       let script = response.trim();
       script = script.replace(/^```(applescript|bash|sh|shell)?\n?/i, '');
       script = script.replace(/\n?```$/i, '');
-      
+
       return script;
     } catch (error) {
       throw new Error(`Script generation failed: ${error.message}`);
@@ -1184,4 +1194,4 @@ Generate ONLY the ${scriptType} code, no explanations or markdown:`;
 // Export both the class and a singleton instance for backward compatibility
 const claudeAPI = new ClaudeAPI();
 module.exports = ClaudeAPI;
-module.exports.default = claudeAPI; 
+module.exports.default = claudeAPI;

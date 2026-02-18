@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 /**
  * Daily Brief Live Integration Test
- * 
+ *
  * Part 1: Direct module tests (no Electron needed)
  * Part 2: Log-based checks against running app
- * 
+ *
  * The unit tests (Part 1) already verified:
  * - 7 briefing agents discovered and working
  * - Priority sorting correct
  * - Parallel collection < 8s
  * - Orchestrated brief generates valid output
  * - 19 agents total > 6 pre-screen threshold
- * 
+ *
  * Part 2 checks the app is healthy and the exchange is ready.
  * Full E2E (trigger via voice/HUD, observe result) requires the UI.
- * 
+ *
  * Run: node test-daily-brief-live.js
  */
 
@@ -25,7 +25,9 @@ const FAIL = 'FAIL';
 let passed = 0;
 let failed = 0;
 
-function test(name, fn) { return { name, fn }; }
+function test(name, fn) {
+  return { name, fn };
+}
 
 async function runTests(tests) {
   console.log(`Running ${tests.length} daily brief tests...\n`);
@@ -46,7 +48,9 @@ async function runTests(tests) {
   process.exit(failed > 0 ? 1 : 0);
 }
 
-function assert(c, m) { if (!c) throw new Error(m); }
+function assert(c, m) {
+  if (!c) throw new Error(m);
+}
 
 async function getLogs(params = {}) {
   const qs = new URLSearchParams(params);
@@ -58,16 +62,18 @@ async function getLogs(params = {}) {
 // ─── PART 1: Direct module tests ─────────────────────────────────
 
 const tests = [
-
   test('registry discovers 7 briefing agents', async () => {
     const registry = require('./packages/agents/agent-registry');
     registry.clearCache();
     registry.loadBuiltInAgents();
     const agents = registry.getBriefingAgents();
-    
-    console.log(`         Found: ${agents.map(a => a.id).join(', ')}`);
+
+    console.log(`         Found: ${agents.map((a) => a.id).join(', ')}`);
     assert(agents.length >= 7, `Expected >= 7, got ${agents.length}`);
-    assert(agents.every(a => typeof a.getBriefing === 'function'), 'All must have getBriefing()');
+    assert(
+      agents.every((a) => typeof a.getBriefing === 'function'),
+      'All must have getBriefing()'
+    );
   }),
 
   test('time agent returns greeting with time and date (priority 1)', async () => {
@@ -125,13 +131,17 @@ const tests = [
     const agents = require('./packages/agents/agent-registry').getBriefingAgents();
     const start = Date.now();
     const results = await Promise.allSettled(
-      agents.map(a => Promise.race([
-        a.getBriefing(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error(`${a.id} timeout`)), 6000)),
-      ]))
+      agents.map((a) =>
+        Promise.race([
+          a.getBriefing(),
+          new Promise((_, rej) => {
+            setTimeout(() => rej(new Error(`${a.id} timeout`)), 6000);
+          }),
+        ])
+      )
     );
     const elapsed = Date.now() - start;
-    const ok = results.filter(r => r.status === 'fulfilled').length;
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
     console.log(`         ${ok}/${agents.length} succeeded in ${elapsed}ms`);
     assert(ok >= 3, `Only ${ok} succeeded`);
     assert(elapsed < 8000, `Took ${elapsed}ms (> 8s)`);
@@ -142,15 +152,22 @@ const tests = [
     const contribs = [];
     for (const a of agents) {
       try {
-        const r = await Promise.race([a.getBriefing(), new Promise((_, rej) => setTimeout(() => rej(), 5000))]);
+        const r = await Promise.race([
+          a.getBriefing(),
+          new Promise((_, rej) => {
+            setTimeout(() => rej(), 5000);
+          }),
+        ]);
         if (r) contribs.push(r);
-      } catch (_) {}
+      } catch (_) {
+        /* no-op */
+      }
     }
     contribs.sort((a, b) => (a.priority || 99) - (b.priority || 99));
-    console.log(`         Order: ${contribs.map(c => `[${c.priority}]${c.section}`).join(' > ')}`);
+    console.log(`         Order: ${contribs.map((c) => `[${c.priority}]${c.section}`).join(' > ')}`);
     assert(contribs[0].section === 'Time & Date', 'Time should be first');
     for (let i = 1; i < contribs.length; i++) {
-      assert(contribs[i].priority >= contribs[i-1].priority, `Out of order at ${i}`);
+      assert(contribs[i].priority >= contribs[i - 1].priority, `Out of order at ${i}`);
     }
   }),
 
@@ -159,8 +176,10 @@ const tests = [
     const start = Date.now();
     const result = await cal._handleMorningBrief([]);
     const elapsed = Date.now() - start;
-    console.log(`         Success: ${result.success}, ${result.message?.length || 0} chars, ${result.data?.contributions?.length || 0} contributors`);
-    console.log(`         Sections: [${(result.data?.contributions?.map(c => c.section) || []).join(', ')}]`);
+    console.log(
+      `         Success: ${result.success}, ${result.message?.length || 0} chars, ${result.data?.contributions?.length || 0} contributors`
+    );
+    console.log(`         Sections: [${(result.data?.contributions?.map((c) => c.section) || []).join(', ')}]`);
     console.log(`         Elapsed: ${elapsed}ms`);
     console.log(`         Message: "${(result.message || '').substring(0, 200)}"`);
     assert(result.success, 'Brief should succeed');
@@ -178,27 +197,34 @@ const tests = [
   }),
 
   // ─── PART 2: Live app checks ─────────────────────────────────
-  
+
   test('app is healthy and exchange is connected', async () => {
     const resp = await fetch(`${LOG_SERVER}/health`);
     const health = await resp.json();
     console.log(`         App v${health.appVersion}, uptime ${health.uptime.toFixed(0)}s`);
-    
+
     // Check exchange is connected via logs
     const exchangeLogs = await getLogs({ search: 'Exchange running', limit: 1 });
     const agentLogs = await getLogs({ search: 'All agents connected', limit: 1 });
     console.log(`         Exchange: ${exchangeLogs.length > 0 ? 'running' : 'not found in logs'}`);
     console.log(`         Agents: ${agentLogs.length > 0 ? 'connected' : 'not found in logs'}`);
-    
+
     assert(health.status === 'ok', 'App not healthy');
   }),
 
   test('no fatal errors in last 5 minutes', async () => {
     const since = new Date(Date.now() - 300000).toISOString();
     const errors = await getLogs({ level: 'error', since, limit: 50 });
-    const benign = ['reconnect', 'WebSocket error', 'Chrome-like', 'Material Symbols', 'Database IO', 'console-message'];
-    const real = errors.filter(e => !benign.some(p => (e.message || '').includes(p)));
-    const fatal = real.filter(e => (e.message || '').match(/crash|FATAL|Uncaught/));
+    const benign = [
+      'reconnect',
+      'WebSocket error',
+      'Chrome-like',
+      'Material Symbols',
+      'Database IO',
+      'console-message',
+    ];
+    const real = errors.filter((e) => !benign.some((p) => (e.message || '').includes(p)));
+    const fatal = real.filter((e) => (e.message || '').match(/crash|FATAL|Uncaught/));
     console.log(`         Errors: ${errors.length} total, ${real.length} real, ${fatal.length} fatal`);
     assert(fatal.length === 0, `${fatal.length} fatal errors found`);
   }),

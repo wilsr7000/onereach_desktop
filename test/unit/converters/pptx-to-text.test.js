@@ -11,15 +11,19 @@ function MockAdmZip() {
   this.getEntries = vi.fn().mockReturnValue([
     {
       entryName: 'ppt/slides/slide1.xml',
-      getData: vi.fn().mockReturnValue(
-        Buffer.from('<p:sld><a:p><a:t>Slide Title</a:t></a:p><a:p><a:t>Bullet point one</a:t></a:p></p:sld>'),
-      ),
+      getData: vi
+        .fn()
+        .mockReturnValue(
+          Buffer.from('<p:sld><a:p><a:t>Slide Title</a:t></a:p><a:p><a:t>Bullet point one</a:t></a:p></p:sld>')
+        ),
     },
     {
       entryName: 'ppt/slides/slide2.xml',
-      getData: vi.fn().mockReturnValue(
-        Buffer.from('<p:sld><a:p><a:t>Second Slide</a:t></a:p><a:p><a:t>More content</a:t></a:p></p:sld>'),
-      ),
+      getData: vi
+        .fn()
+        .mockReturnValue(
+          Buffer.from('<p:sld><a:p><a:t>Second Slide</a:t></a:p><a:p><a:t>More content</a:t></a:p></p:sld>')
+        ),
     },
   ]);
 }
@@ -42,7 +46,7 @@ const { PptxToTextAgent } = require('../../../lib/converters/pptx-to-text.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(PptxToTextAgent, {
-  sampleInput: Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)]),
+  sampleInput: Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)]),
   expectedFromFormats: ['pptx'],
   expectedToFormats: ['text'],
   expectedStrategies: ['slide-text', 'with-notes', 'structured'],

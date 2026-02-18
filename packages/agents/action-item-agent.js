@@ -1,14 +1,14 @@
 /**
  * Action Item Agent
- * 
+ *
  * Captures action items from meeting context with:
  * - Owner/assignee extraction (person names as tags)
  * - Deadline detection
  * - Clean task text
- * 
+ *
  * Part of the meeting-agents space. Used by the Meeting HUD
  * in the recorder to track action items during meetings.
- * 
+ *
  * Returns structured data: { type, text, tags, deadline }
  * Tags are person names (or "Me"/"Everyone" as defaults).
  */
@@ -21,7 +21,8 @@ const log = getLogQueue();
 const actionItemAgent = {
   id: 'action-item-agent',
   name: 'Action Item Agent',
-  description: 'Captures action items from meeting context. Extracts assignees, deadlines, and clean task descriptions. Says things like "Action: John to send proposal by Friday" or "Todo: review the budget".',
+  description:
+    'Captures action items from meeting context. Extracts assignees, deadlines, and clean task descriptions. Says things like "Action: John to send proposal by Friday" or "Todo: review the budget".',
   voice: 'coral',
   acks: ['Got it.', 'Action item captured.'],
   categories: ['meeting', 'productivity'],
@@ -44,14 +45,14 @@ const actionItemAgent = {
       }
       // Filter to incomplete items from the last 7 days
       const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      const pending = items.filter(i => {
+      const pending = items.filter((i) => {
         const created = new Date(i.createdAt || 0).getTime();
         return created > weekAgo && !i.completed;
       });
       if (pending.length === 0) {
         return { section: 'Action Items', priority: 5, content: 'No pending action items.' };
       }
-      const summaryLines = pending.slice(0, 5).map(i => {
+      const summaryLines = pending.slice(0, 5).map((i) => {
         const desc = i.content?.substring(0, 80) || i.title || 'Untitled task';
         return `- ${desc}`;
       });
@@ -61,7 +62,7 @@ const actionItemAgent = {
         priority: 5,
         content: `You have ${pending.length} pending action items${more}:\n${summaryLines.join('\n')}`,
       };
-    } catch (e) {
+    } catch (_e) {
       // Action items unavailable
     }
     return { section: 'Action Items', priority: 5, content: null };
@@ -75,9 +76,9 @@ HIGH CONFIDENCE (0.80+) for:
 - Assignments: "assign this to Mike", "John is responsible for the report"
 
 LOW CONFIDENCE (0.00) -- do NOT bid on:
-- Calendar scheduling with specific times: "add a meeting at 2pm", "schedule a sync tomorrow at 11am", "book a call Thursday at 3pm" -> calendar-agent
-- Calendar queries: "what's on my calendar", "any meetings today" -> calendar-agent
-- Calendar delete/cancel: "cancel the meeting", "delete the standup" -> calendar-agent
+- Calendar scheduling with specific times: "add a meeting at 2pm", "schedule a sync tomorrow at 11am", "book a call Thursday at 3pm" -> calendar-create-agent
+- Calendar queries: "what's on my calendar", "any meetings today" -> calendar-query-agent
+- Calendar delete/cancel: "cancel the meeting", "delete the standup" -> calendar-delete-agent
 - General questions or knowledge: "what time is it", "tell me a joke" -> other agents
 
 CRITICAL: If the user mentions a SPECIFIC TIME (at 2pm, at 11am, tomorrow, Monday, etc.) and wants to ADD/SCHEDULE/CREATE something, this is a CALENDAR EVENT, not an action item. Bid 0.00.`,
@@ -123,12 +124,9 @@ CRITICAL: If the user mentions a SPECIFIC TIME (at 2pm, at 11am, tomorrow, Monda
           const timestamp = new Date().toLocaleTimeString();
           const tagStr = extraction.tags.join(', ');
           const deadlineStr = extraction.deadline ? ` (by ${extraction.deadline})` : '';
-          this.memory.appendToSection(
-            'Action Items',
-            `- [${timestamp}] [${tagStr}] ${extraction.text}${deadlineStr}`
-          );
+          this.memory.appendToSection('Action Items', `- [${timestamp}] [${tagStr}] ${extraction.text}${deadlineStr}`);
           this.memory.save();
-        } catch (e) {
+        } catch (_e) {
           // Non-fatal
         }
       }
@@ -157,9 +155,10 @@ async function _extractActionItem(text) {
   try {
     const data = await ai.chat({
       profile: 'fast',
-      messages: [{
-        role: 'user',
-        content: `Extract the action item from this meeting input. Return JSON only.
+      messages: [
+        {
+          role: 'user',
+          content: `Extract the action item from this meeting input. Return JSON only.
 
 Input: "${text}"
 
@@ -175,7 +174,8 @@ Examples:
 - "Sarah and Mike to coordinate on the launch" -> {"text":"Coordinate on the launch","tags":["Sarah","Mike"],"deadline":null}
 
 Return ONLY valid JSON, no other text.`,
-      }],
+        },
+      ],
       temperature: 0.1,
       maxTokens: 200,
       jsonMode: true,

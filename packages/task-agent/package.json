@@ -15,7 +15,12 @@
     "watch": "tsc --watch",
     "test": "jest"
   },
-  "keywords": ["task", "agent", "auction", "worker"],
+  "keywords": [
+    "task",
+    "agent",
+    "auction",
+    "worker"
+  ],
   "license": "MIT",
   "devDependencies": {
     "typescript": "^5.0.0",

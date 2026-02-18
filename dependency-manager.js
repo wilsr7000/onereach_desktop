@@ -36,7 +36,7 @@ class DependencyManager extends EventEmitter {
         encoding: 'utf-8',
         stdio: 'pipe',
         timeout: 30000,
-        ...options
+        ...options,
       });
       return { success: true, output: result.trim() };
     } catch (error) {
@@ -54,20 +54,18 @@ class DependencyManager extends EventEmitter {
       installed: false,
       version: null,
       path: null,
-      required: true
+      required: true,
     };
 
     // Try various Python commands
-    const pythonCommands = this.platform === 'win32' 
-      ? ['python', 'python3', 'py -3']
-      : ['python3', 'python'];
+    const pythonCommands = this.platform === 'win32' ? ['python', 'python3', 'py -3'] : ['python3', 'python'];
 
     for (const cmd of pythonCommands) {
       const check = this.execCommand(`${cmd} --version`);
       if (check.success && check.output.includes('Python 3')) {
         result.installed = true;
         result.version = check.output.replace('Python ', '').trim();
-        
+
         // Get the path
         const whichCmd = this.platform === 'win32' ? 'where' : 'which';
         const pathCheck = this.execCommand(`${whichCmd} ${cmd.split(' ')[0]}`);
@@ -95,14 +93,14 @@ class DependencyManager extends EventEmitter {
       installed: false,
       version: null,
       path: null,
-      required: false // Only required if we need to install Python
+      required: false, // Only required if we need to install Python
     };
 
     const check = this.execCommand('brew --version');
     if (check.success) {
       result.installed = true;
       result.version = check.output.split('\n')[0].replace('Homebrew ', '').trim();
-      
+
       const pathCheck = this.execCommand('which brew');
       if (pathCheck.success) {
         result.path = pathCheck.output.trim();
@@ -122,14 +120,14 @@ class DependencyManager extends EventEmitter {
       installed: false,
       version: null,
       path: null,
-      required: true
+      required: true,
     };
 
     const check = this.execCommand('pipx --version');
     if (check.success) {
       result.installed = true;
       result.version = check.output.trim();
-      
+
       const whichCmd = this.platform === 'win32' ? 'where' : 'which';
       const pathCheck = this.execCommand(`${whichCmd} pipx`);
       if (pathCheck.success) {
@@ -150,14 +148,14 @@ class DependencyManager extends EventEmitter {
       installed: false,
       version: null,
       path: null,
-      required: true
+      required: true,
     };
 
     // Check pipx list first
     const pipxCheck = this.execCommand('pipx list');
     if (pipxCheck.success && pipxCheck.output.includes('aider-chat')) {
       result.installed = true;
-      
+
       // Try to get version
       const versionMatch = pipxCheck.output.match(/aider-chat\s+([\d.]+)/);
       if (versionMatch) {
@@ -204,20 +202,20 @@ class DependencyManager extends EventEmitter {
     const aider = this.checkAider();
 
     const dependencies = [python, pipx, aider];
-    
+
     // Only include homebrew on macOS if Python is missing
     if (this.platform === 'darwin' && !python.installed) {
       dependencies.splice(1, 0, homebrew);
     }
 
-    const allInstalled = dependencies.filter(d => d.required).every(d => d.installed);
-    const missing = dependencies.filter(d => d.required && !d.installed);
+    const allInstalled = dependencies.filter((d) => d.required).every((d) => d.installed);
+    const missing = dependencies.filter((d) => d.required && !d.installed);
 
     return {
       allInstalled,
       missing,
       dependencies,
-      platform: this.platform
+      platform: this.platform,
     };
   }
 
@@ -229,23 +227,23 @@ class DependencyManager extends EventEmitter {
       python3: {
         darwin: 'brew install python3',
         win32: 'winget install Python.Python.3.12 --accept-source-agreements --accept-package-agreements',
-        linux: 'sudo apt-get update && sudo apt-get install -y python3 python3-pip'
+        linux: 'sudo apt-get update && sudo apt-get install -y python3 python3-pip',
       },
       homebrew: {
         darwin: '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
         win32: null,
-        linux: null
+        linux: null,
       },
       pipx: {
         darwin: 'python3 -m pip install --user pipx && python3 -m pipx ensurepath',
         win32: 'python -m pip install --user pipx && python -m pipx ensurepath',
-        linux: 'python3 -m pip install --user pipx && python3 -m pipx ensurepath'
+        linux: 'python3 -m pip install --user pipx && python3 -m pipx ensurepath',
       },
       'aider-chat': {
         darwin: 'pipx install aider-chat',
         win32: 'pipx install aider-chat',
-        linux: 'pipx install aider-chat'
-      }
+        linux: 'pipx install aider-chat',
+      },
     };
 
     const platformCommands = commands[depName];
@@ -263,26 +261,26 @@ class DependencyManager extends EventEmitter {
   installDependency(depName, outputCallback) {
     return new Promise((resolve, reject) => {
       const command = this.getInstallCommand(depName);
-      
+
       if (!command) {
         reject(new Error(`No install command for ${depName} on ${this.platform}`));
         return;
       }
 
       console.log(`[DependencyManager] Installing ${depName}: ${command}`);
-      
+
       if (outputCallback) {
         outputCallback({ type: 'start', message: `Installing ${depName}...`, command });
       }
 
       const { shell, shellArgs } = this.getShell();
-      
+
       // For pipx ensurepath, we need to handle it specially
       const fullCommand = command;
-      
+
       const proc = spawn(shell, [...shellArgs, fullCommand], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, PATH: this.getEnhancedPath() }
+        env: { ...process.env, PATH: this.getEnhancedPath() },
       });
 
       this.installProcesses.set(depName, proc);
@@ -310,7 +308,7 @@ class DependencyManager extends EventEmitter {
 
       proc.on('close', (code) => {
         this.installProcesses.delete(depName);
-        
+
         if (code === 0) {
           if (outputCallback) {
             outputCallback({ type: 'success', message: `${depName} installed successfully!` });
@@ -346,11 +344,7 @@ class DependencyManager extends EventEmitter {
     const additionalPaths = [];
 
     if (this.platform === 'darwin' || this.platform === 'linux') {
-      additionalPaths.push(
-        path.join(this.homeDir, '.local', 'bin'),
-        '/opt/homebrew/bin',
-        '/usr/local/bin'
-      );
+      additionalPaths.push(path.join(this.homeDir, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin');
     } else if (this.platform === 'win32') {
       additionalPaths.push(
         path.join(this.homeDir, 'AppData', 'Local', 'Programs', 'Python', 'Python312'),
@@ -374,22 +368,21 @@ class DependencyManager extends EventEmitter {
         if (outputCallback) {
           outputCallback({ type: 'info', message: `\n--- Installing ${dep.displayName} ---\n` });
         }
-        
+
         const result = await this.installDependency(dep.name, outputCallback);
         results.push({ name: dep.name, success: true, ...result });
-        
+
         // Re-check to update paths
         await this.refreshPath();
-        
       } catch (error) {
         results.push({ name: dep.name, success: false, error: error.message });
-        
+
         // If a required dependency fails, we might need to stop
         if (dep.required && dep.name !== 'homebrew') {
           if (outputCallback) {
-            outputCallback({ 
-              type: 'error', 
-              message: `Failed to install ${dep.displayName}. Cannot continue.` 
+            outputCallback({
+              type: 'error',
+              message: `Failed to install ${dep.displayName}. Cannot continue.`,
             });
           }
           break;
@@ -399,11 +392,11 @@ class DependencyManager extends EventEmitter {
 
     // Final status check
     const finalStatus = this.checkAllDependencies();
-    
+
     return {
       results,
       finalStatus,
-      allSuccessful: finalStatus.allInstalled
+      allSuccessful: finalStatus.allInstalled,
     };
   }
 
@@ -417,7 +410,7 @@ class DependencyManager extends EventEmitter {
       if (fs.existsSync(shellConfig)) {
         try {
           this.execCommand(`source ${shellConfig}`);
-        } catch (e) {
+        } catch (_e) {
           // Ignore errors from sourcing
         }
       }
@@ -442,7 +435,7 @@ class DependencyManager extends EventEmitter {
    */
   getAiderPythonPath() {
     const aider = this.checkAider();
-    
+
     if (aider.path) {
       return aider.path;
     }
@@ -454,9 +447,7 @@ class DependencyManager extends EventEmitter {
     ];
 
     if (this.platform === 'win32') {
-      possiblePaths.push(
-        path.join(this.homeDir, '.local', 'pipx', 'venvs', 'aider-chat', 'Scripts', 'python.exe')
-      );
+      possiblePaths.push(path.join(this.homeDir, '.local', 'pipx', 'venvs', 'aider-chat', 'Scripts', 'python.exe'));
     }
 
     for (const p of possiblePaths) {
@@ -482,7 +473,3 @@ function getDependencyManager() {
 }
 
 module.exports = { DependencyManager, getDependencyManager };
-
-
-
-

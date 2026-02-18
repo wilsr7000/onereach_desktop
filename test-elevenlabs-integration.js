@@ -4,15 +4,14 @@
  */
 
 const fs = require('fs');
-const path = require('path');
 
 console.log('=== ElevenLabs Integration Test ===\n');
 
 const files = {
   'video-editor.html': '/Users/richardwilson/Onereach_app/video-editor.html',
-  'video-editor.js': '/Users/richardwilson/Onereach_app/src/video/index.js',  // NEW: Modular architecture
-  'elevenlabs-service.js': '/Users/richardwilson/Onereach_app/src/video/audio/ElevenLabsService.js',  // NEW: Dedicated service
-  'preload-video-editor.js': '/Users/richardwilson/Onereach_app/preload-video-editor.js'
+  'video-editor.js': '/Users/richardwilson/Onereach_app/src/video/index.js', // NEW: Modular architecture
+  'elevenlabs-service.js': '/Users/richardwilson/Onereach_app/src/video/audio/ElevenLabsService.js', // NEW: Dedicated service
+  'preload-video-editor.js': '/Users/richardwilson/Onereach_app/preload-video-editor.js',
 };
 
 // Test 1: Check files exist
@@ -35,11 +34,7 @@ if (!hasButton) {
 
 // Test 3: Check JavaScript functions
 console.log('\nTest 3: JavaScript functions in HTML');
-const functions = [
-  'updateElevenLabsButton',
-  'replaceAudioWithElevenLabsFromModal',
-  'transcribeMarkerRange'
-];
+const functions = ['updateElevenLabsButton', 'replaceAudioWithElevenLabsFromModal', 'transcribeMarkerRange'];
 for (const func of functions) {
   const hasFn = html.includes(`${func}(`);
   console.log(`  ${hasFn ? '✓' : '✗'} ${func}()`);
@@ -65,7 +60,7 @@ const backendCode = mainVideoEditor + elevenLabsService; // Combined for checkin
 const backendFunctions = [
   { name: 'replaceAudioWithElevenLabs', file: 'index.js' },
   { name: 'generateAudio', file: 'ElevenLabsService.js' },
-  { name: 'replaceAudioSegment', file: 'index.js' }
+  { name: 'replaceAudioSegment', file: 'index.js' },
 ];
 for (const func of backendFunctions) {
   const hasFn = backendCode.includes(`${func.name}(`);
@@ -148,5 +143,3 @@ console.log('   - Click "Auto-Transcribe" (instant!)');
 console.log('   - Button appears: "🎙️ Replace Audio"');
 console.log('   - Click it and test!');
 console.log('\n✅ Integration is complete and ready!');
-
-

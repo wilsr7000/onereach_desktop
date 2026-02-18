@@ -1,24 +1,24 @@
 /**
  * Unified Spaces API
- * 
+ *
  * A clean, well-documented API for accessing and managing spaces and items.
  * This module wraps ClipboardStorageV2 and provides a consistent interface
  * for all apps (GSX Create, Black Hole, Clipboard Viewer, external windows, etc.)
- * 
+ *
  * IMPORTANT: All item additions should go through items.add() which routes
- * through the clipboard manager for proper validation, retry logic, 
+ * through the clipboard manager for proper validation, retry logic,
  * in-memory sync, and space metadata updates.
- * 
+ *
  * @module SpacesAPI
  */
 
-const ClipboardStorageV2 = require('./clipboard-storage-v2');
 const { getSharedStorage } = require('./clipboard-storage-v2');
-const { getContentIngestionService, VALID_TYPES } = require('./content-ingestion');
+const { VALID_TYPES } = require('./content-ingestion');
 const path = require('path');
 const fs = require('fs');
 const { getLogQueue } = require('./lib/log-event-queue');
 const log = getLogQueue();
+const { UNCLASSIFIED_SPACE, GSX_AGENT_SPACE, GSX_AGENT_SPACE_NAME } = require('./lib/spaces-constants');
 
 /**
  * Get the shared storage instance
@@ -32,23 +32,6 @@ function getStorage() {
 /**
  * SpacesAPI - Unified API for space and item management
  */
-/**
- * Safe characters for space/item/folder IDs (alphanumeric, hyphen, underscore).
- * Used to reject path traversal and injection.
- */
-const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
-/**
- * Check that a relative filePath does not escape (no '..' or absolute segments).
- * @param {string} filePath - Relative path segment(s)
- * @returns {boolean} true if safe
- */
-function isSafeRelativePath(filePath) {
-  if (!filePath || typeof filePath !== 'string') return true;
-  const normalized = path.normalize(filePath);
-  return normalized !== '..' && !normalized.startsWith('..' + path.sep) && !path.isAbsolute(normalized);
-}
-
 class SpacesAPI {
   constructor() {
     this.storage = getStorage();
@@ -83,13 +66,11 @@ class SpacesAPI {
   async list() {
     try {
       const spaces = this.storage.index.spaces || [];
-      
+
       // Enrich with item counts and paths
-      return spaces.map(space => {
-        const itemCount = this.storage.index.items.filter(
-          item => item.spaceId === space.id
-        ).length;
-        
+      return spaces.map((space) => {
+        const itemCount = this.storage.index.items.filter((item) => item.spaceId === space.id).length;
+
         return {
           id: space.id,
           name: space.name,
@@ -98,7 +79,7 @@ class SpacesAPI {
           itemCount,
           path: path.join(this.storage.spacesDir, space.id),
           createdAt: space.createdAt,
-          updatedAt: space.updatedAt
+          updatedAt: space.updatedAt,
         };
       });
     } catch (error) {
@@ -114,15 +95,13 @@ class SpacesAPI {
    */
   async get(spaceId) {
     try {
-      const space = this.storage.index.spaces.find(s => s.id === spaceId);
+      const space = this.storage.index.spaces.find((s) => s.id === spaceId);
       if (!space) {
         return null;
       }
 
       const metadata = this.storage.getSpaceMetadata(spaceId);
-      const itemCount = this.storage.index.items.filter(
-        item => item.spaceId === spaceId
-      ).length;
+      const itemCount = this.storage.index.items.filter((item) => item.spaceId === spaceId).length;
 
       return {
         id: space.id,
@@ -131,7 +110,7 @@ class SpacesAPI {
         color: space.color || '#64c8ff',
         itemCount,
         path: path.join(this.storage.spacesDir, spaceId),
-        metadata: metadata || {}
+        metadata: metadata || {},
       };
     } catch (error) {
       log.error('spaces', 'Error getting space', { error: error.message || error });
@@ -154,11 +133,11 @@ class SpacesAPI {
         name,
         icon: options.icon || '◯',
         color: options.color || '#64c8ff',
-        notebook: options.notebook
+        notebook: options.notebook,
       });
 
       log.info('spaces', 'Created space', { spaceId: space.id, name: space.name });
-      
+
       // Emit event
       this._emit('space:created', { space });
 
@@ -168,7 +147,7 @@ class SpacesAPI {
         icon: space.icon,
         color: space.color,
         itemCount: 0,
-        path: path.join(this.storage.spacesDir, space.id)
+        path: path.join(this.storage.spacesDir, space.id),
       };
     } catch (error) {
       log.error('spaces', 'Error creating space', { error: error.message || error });
@@ -183,43 +162,40 @@ class SpacesAPI {
    */
   async ensureGSXAgentSpace() {
     try {
-      const GSX_AGENT_SPACE_ID = 'gsx-agent';
-      const GSX_AGENT_SPACE_NAME = 'GSX Agent';
-      
       // Check if space already exists
       const spaces = await this.list();
-      const existingSpace = spaces.find(s => s.id === GSX_AGENT_SPACE_ID);
-      
+      const existingSpace = spaces.find((s) => s.id === GSX_AGENT_SPACE);
+
       if (existingSpace) {
         return existingSpace;
       }
-      
+
       // Space doesn't exist - create it
       log.info('spaces', 'Creating GSX Agent space');
-      
+
       const space = this.storage.createSpace({
-        id: GSX_AGENT_SPACE_ID,
+        id: GSX_AGENT_SPACE,
         name: GSX_AGENT_SPACE_NAME,
-        icon: '🤖',
-        color: '#8b5cf6', // Purple for agent-related content
-        isSystem: true
+        icon: '●',
+        color: '#8b5cf6',
+        isSystem: true,
       });
-      
+
       log.info('spaces', 'Created GSX Agent space', { spaceId: space.id });
       this._emit('space:created', { space });
-      
+
       // Trigger default files creation
       if (this.storage.ensureGSXAgentDefaultFiles) {
         this.storage.ensureGSXAgentDefaultFiles();
       }
-      
+
       return {
         id: space.id,
         name: space.name,
         icon: space.icon,
         color: space.color,
         itemCount: 0,
-        path: path.join(this.storage.spacesDir, space.id)
+        path: path.join(this.storage.spacesDir, space.id),
       };
     } catch (error) {
       log.error('spaces', 'Error ensuring GSX Agent space', { error: error.message || error });
@@ -239,12 +215,12 @@ class SpacesAPI {
   async update(spaceId, data) {
     try {
       const success = this.storage.updateSpace(spaceId, data);
-      
+
       if (success) {
         log.info('spaces', 'Updated space', { spaceId });
         this._emit('space:updated', { spaceId, data });
       }
-      
+
       return success;
     } catch (error) {
       log.error('spaces', 'Error updating space', { error: error.message || error });
@@ -259,21 +235,21 @@ class SpacesAPI {
    */
   async delete(spaceId) {
     try {
-      if (spaceId === 'unclassified') {
+      if (spaceId === UNCLASSIFIED_SPACE) {
         throw new Error('Cannot delete the Unclassified space');
       }
-      
-      if (spaceId === 'gsx-agent') {
+
+      if (spaceId === GSX_AGENT_SPACE) {
         throw new Error('Cannot delete the GSX Agent space');
       }
 
       const success = this.storage.deleteSpace(spaceId);
-      
+
       if (success) {
         log.info('spaces', 'Deleted space', { spaceId });
         this._emit('space:deleted', { spaceId });
       }
-      
+
       return success;
     } catch (error) {
       log.error('spaces', 'Error deleting space', { error: error.message || error });
@@ -306,64 +282,60 @@ class SpacesAPI {
       list: async (spaceId, options = {}) => {
         try {
           let items = this.storage.getSpaceItems(spaceId);
-          
+
           // Apply filters
           if (options.type) {
-            items = items.filter(item => item.type === options.type);
+            items = items.filter((item) => item.type === options.type);
           }
           if (options.pinned !== undefined) {
-            items = items.filter(item => item.pinned === options.pinned);
+            items = items.filter((item) => item.pinned === options.pinned);
           }
-          
+
           // Filter by tags (ALL tags must match)
           if (options.tags && options.tags.length > 0) {
-            items = items.filter(item => {
+            items = items.filter((item) => {
               const itemTags = this._getItemTags(item.id);
-              return options.tags.every(tag => 
-                itemTags.some(t => t.toLowerCase() === tag.toLowerCase())
-              );
+              return options.tags.every((tag) => itemTags.some((t) => t.toLowerCase() === tag.toLowerCase()));
             });
           }
-          
+
           // Filter by tags (ANY tag matches)
           if (options.anyTags && options.anyTags.length > 0) {
-            items = items.filter(item => {
+            items = items.filter((item) => {
               const itemTags = this._getItemTags(item.id);
-              return options.anyTags.some(tag => 
-                itemTags.some(t => t.toLowerCase() === tag.toLowerCase())
-              );
+              return options.anyTags.some((tag) => itemTags.some((t) => t.toLowerCase() === tag.toLowerCase()));
             });
           }
-          
+
           // Sort by timestamp (newest first), pinned items at top
           items.sort((a, b) => {
             if (a.pinned && !b.pinned) return -1;
             if (!a.pinned && b.pinned) return 1;
             return b.timestamp - a.timestamp;
           });
-          
+
           // Apply pagination
           const offset = options.offset || 0;
           const limit = options.limit || items.length;
           items = items.slice(offset, offset + limit);
-          
+
           // Optionally include full content (also includes tags)
           if (options.includeContent) {
-            items = items.map(item => {
+            items = items.map((item) => {
               try {
                 return this.storage.loadItem(item.id);
-              } catch (e) {
+              } catch (_e) {
                 return item;
               }
             });
           } else {
             // Add tags to items even without full content
-            items = items.map(item => ({
+            items = items.map((item) => ({
               ...item,
-              tags: this._getItemTags(item.id)
+              tags: this._getItemTags(item.id),
             }));
           }
-          
+
           return items;
         } catch (error) {
           log.error('spaces', 'Error listing items', { error: error.message || error });
@@ -389,10 +361,10 @@ class SpacesAPI {
             const tagsFromMetadata = (meta.attributes && meta.attributes.tags) || meta.tags;
             const tagsFromFile = this._getItemTags(itemId);
             const finalTags = tagsFromMetadata || tagsFromFile;
-            
+
             return {
               ...item,
-              tags: finalTags
+              tags: finalTags,
             };
           }
           return item;
@@ -409,14 +381,14 @@ class SpacesAPI {
 
       /**
        * Add a new item to a space
-       * 
+       *
        * This method routes through the clipboard manager for proper:
        * - Input validation
        * - Retry logic for transient disk errors
        * - In-memory history sync
        * - Space metadata updates
        * - Context capture
-       * 
+       *
        * @param {string} spaceId - The space ID
        * @param {Object} item - The item to add
        * @param {string} item.type - Type: text, image, file, html, code
@@ -433,47 +405,52 @@ class SpacesAPI {
           if (!VALID_TYPES.includes(type)) {
             throw new Error(`Invalid content type: ${type}. Must be one of: ${VALID_TYPES.join(', ')}`);
           }
-          
+
           // Validate spaceId exists (unless unclassified)
-          if (spaceId && spaceId !== 'unclassified') {
-            const spaceExists = this.storage.index.spaces.some(s => s.id === spaceId);
+          if (spaceId && spaceId !== UNCLASSIFIED_SPACE) {
+            const spaceExists = this.storage.index.spaces.some((s) => s.id === spaceId);
             if (!spaceExists) {
               throw new Error(`Space not found: ${spaceId}`);
             }
           }
-          
+
           // Route through clipboard manager if available for proper sync
           if (global.clipboardManager) {
             const itemData = {
               ...item,
               type,
-              spaceId: spaceId || 'unclassified',
+              spaceId: spaceId || UNCLASSIFIED_SPACE,
               timestamp: Date.now(),
-              source: item.source || 'spaces-api'
+              source: item.source || 'spaces-api',
             };
-            
+
             // Use addToHistory for proper in-memory sync and space metadata updates
             await global.clipboardManager.addToHistory(itemData);
-            
+
             // Get the newly added item from history
             const newItem = global.clipboardManager.history?.[0];
-            
+
             if (newItem) {
               log.info('spaces', 'Added item via clipboardManager', { spaceId, itemId: newItem.id });
               this._emit('item:added', { spaceId, item: newItem });
-              
+
               // Auto-generate metadata if incomplete and enabled
               if (!item.skipAutoMetadata && this._shouldAutoGenerateMetadata(item)) {
                 this._queueMetadataGeneration(newItem.id, spaceId, type);
               }
-              
+
               return newItem;
             }
           }
-          
+
           // Fallback to direct storage (less ideal but still works)
           log.warn('spaces', 'clipboardManager not available, using direct storage (may cause sync issues)');
-          
+
+          // Validate required content before storage write
+          if (!item.content && !item.filePath && !item.dataUrl && !item.url) {
+            throw new Error('Content is required: item must have content, filePath, dataUrl, or url');
+          }
+
           // Generate thumbnail for images if not provided
           const itemWithThumbnail = { ...item };
           if (type === 'image' && !item.thumbnail) {
@@ -484,27 +461,31 @@ class SpacesAPI {
               log.info('spaces', 'Using image content as thumbnail (fallback path)');
             }
           }
-          
+
           const newItem = this.storage.addItem({
             ...itemWithThumbnail,
             type,
-            spaceId: spaceId || 'unclassified',
-            timestamp: Date.now()
+            spaceId: spaceId || UNCLASSIFIED_SPACE,
+            timestamp: Date.now(),
           });
-          
+
           log.info('spaces', 'Added item to space', { spaceId, itemId: newItem.id });
           this._emit('item:added', { spaceId, item: newItem });
-          
+
           // Auto-generate metadata if incomplete and enabled
           if (!item.skipAutoMetadata && this._shouldAutoGenerateMetadata(item)) {
             this._queueMetadataGeneration(newItem.id, spaceId, type);
           }
-          
+
           return newItem;
         } catch (error) {
           // Validation errors (content type, missing fields) are client issues, not server errors
           const msg = error.message || '';
-          if (msg.includes('Invalid content type') || msg.includes('Missing content') || msg.includes('Content is required')) {
+          if (
+            msg.includes('Invalid content type') ||
+            msg.includes('Missing content') ||
+            msg.includes('Content is required')
+          ) {
             log.debug('spaces', 'Item validation rejected', { error: msg });
           } else if (msg.includes('not found') || msg.includes('Not found') || msg.includes('NOT_FOUND')) {
             log.debug('spaces', 'Add item to missing space', { error: msg });
@@ -525,12 +506,12 @@ class SpacesAPI {
       update: async (spaceId, itemId, data) => {
         try {
           const success = this.storage.updateItemIndex(itemId, data);
-          
+
           if (success) {
             log.info('spaces', 'Updated item', { itemId });
             this._emit('item:updated', { spaceId, itemId, data });
           }
-          
+
           return success;
         } catch (error) {
           log.error('spaces', 'Error updating item', { error: error.message || error });
@@ -547,12 +528,12 @@ class SpacesAPI {
       delete: async (spaceId, itemId) => {
         try {
           const success = this.storage.deleteItem(itemId);
-          
+
           if (success) {
             log.info('spaces', 'Deleted item', { itemId });
             this._emit('item:deleted', { spaceId, itemId });
           }
-          
+
           return success;
         } catch (error) {
           log.error('spaces', 'Error deleting item', { error: error.message || error });
@@ -571,14 +552,14 @@ class SpacesAPI {
           if (!Array.isArray(itemIds) || itemIds.length === 0) {
             return { success: false, deleted: 0, failed: 0, errors: ['No items provided'] };
           }
-          
+
           const results = {
             success: true,
             deleted: 0,
             failed: 0,
-            errors: []
+            errors: [],
           };
-          
+
           for (const itemId of itemIds) {
             try {
               const success = this.storage.deleteItem(itemId);
@@ -595,25 +576,25 @@ class SpacesAPI {
               log.error('spaces', 'Error deleting item in bulk', { itemId, error: error.message || error });
             }
           }
-          
+
           // Consider overall success if at least one item was deleted
           results.success = results.deleted > 0;
-          
+
           log.info('spaces', 'Bulk delete completed', { deleted: results.deleted, failed: results.failed });
-          this._emit('items:bulk-deleted', { 
-            spaceId, 
+          this._emit('items:bulk-deleted', {
+            spaceId,
             itemIds: itemIds.slice(0, results.deleted), // Only successfully deleted IDs
-            count: results.deleted 
+            count: results.deleted,
           });
-          
+
           return results;
         } catch (error) {
           log.error('spaces', 'Error in bulk delete', { error: error.message || error });
-          return { 
-            success: false, 
-            deleted: 0, 
-            failed: itemIds.length, 
-            errors: [error.message] 
+          return {
+            success: false,
+            deleted: 0,
+            failed: itemIds.length,
+            errors: [error.message],
           };
         }
       },
@@ -628,12 +609,12 @@ class SpacesAPI {
       move: async (itemId, fromSpaceId, toSpaceId) => {
         try {
           const success = this.storage.moveItem(itemId, toSpaceId);
-          
+
           if (success) {
             log.info('spaces', 'Moved item', { itemId, fromSpaceId, toSpaceId });
             this._emit('item:moved', { itemId, fromSpaceId, toSpaceId });
           }
-          
+
           return success;
         } catch (error) {
           log.error('spaces', 'Error moving item', { error: error.message || error });
@@ -653,26 +634,26 @@ class SpacesAPI {
           if (!Array.isArray(itemIds) || itemIds.length === 0) {
             return { success: false, moved: 0, failed: 0, errors: ['No items provided'] };
           }
-          
+
           if (!toSpaceId || toSpaceId === 'null') {
-            toSpaceId = 'unclassified';
+            toSpaceId = UNCLASSIFIED_SPACE;
           }
-          
+
           // Validate target space exists (unless unclassified)
-          if (toSpaceId !== 'unclassified') {
-            const spaceExists = this.storage.index.spaces.some(s => s.id === toSpaceId);
+          if (toSpaceId !== UNCLASSIFIED_SPACE) {
+            const spaceExists = this.storage.index.spaces.some((s) => s.id === toSpaceId);
             if (!spaceExists) {
               return { success: false, moved: 0, failed: itemIds.length, errors: ['Target space does not exist'] };
             }
           }
-          
+
           const results = {
             success: true,
             moved: 0,
             failed: 0,
-            errors: []
+            errors: [],
           };
-          
+
           for (const itemId of itemIds) {
             try {
               const success = this.storage.moveItem(itemId, toSpaceId);
@@ -689,26 +670,26 @@ class SpacesAPI {
               log.error('spaces', 'Error moving item in bulk', { itemId, error: error.message || error });
             }
           }
-          
+
           // Consider overall success if at least one item was moved
           results.success = results.moved > 0;
-          
+
           log.info('spaces', 'Bulk move completed', { moved: results.moved, failed: results.failed });
-          this._emit('items:bulk-moved', { 
+          this._emit('items:bulk-moved', {
             itemIds: itemIds.slice(0, results.moved), // Only successfully moved IDs
             fromSpaceId,
             toSpaceId,
-            count: results.moved 
+            count: results.moved,
           });
-          
+
           return results;
         } catch (error) {
           log.error('spaces', 'Error in bulk move', { error: error.message || error });
-          return { 
-            success: false, 
-            moved: 0, 
-            failed: itemIds.length, 
-            errors: [error.message] 
+          return {
+            success: false,
+            moved: 0,
+            failed: itemIds.length,
+            errors: [error.message],
           };
         }
       },
@@ -776,12 +757,12 @@ class SpacesAPI {
         try {
           const currentTags = this._getItemTags(itemId);
           const normalizedTag = tag.trim();
-          
+
           // Don't add duplicate tags (case-insensitive check)
-          if (currentTags.some(t => t.toLowerCase() === normalizedTag.toLowerCase())) {
+          if (currentTags.some((t) => t.toLowerCase() === normalizedTag.toLowerCase())) {
             return currentTags;
           }
-          
+
           const newTags = [...currentTags, normalizedTag];
           this._updateItemMetadata(itemId, { tags: newTags });
           this._emit('item:tags:updated', { spaceId, itemId, tags: newTags });
@@ -803,8 +784,8 @@ class SpacesAPI {
         try {
           const currentTags = this._getItemTags(itemId);
           const normalizedTag = tag.trim().toLowerCase();
-          
-          const newTags = currentTags.filter(t => t.toLowerCase() !== normalizedTag);
+
+          const newTags = currentTags.filter((t) => t.toLowerCase() !== normalizedTag);
           this._updateItemMetadata(itemId, { tags: newTags });
           this._emit('item:tags:updated', { spaceId, itemId, tags: newTags });
           return newTags;
@@ -830,7 +811,7 @@ class SpacesAPI {
           log.error('spaces', 'Error generating metadata', { error: error.message || error });
           return { success: false, error: error.message };
         }
-      }
+      },
     };
   }
 
@@ -852,7 +833,7 @@ class SpacesAPI {
         try {
           const items = this.storage.getSpaceItems(spaceId);
           const tagCounts = new Map();
-          
+
           for (const item of items) {
             const tags = this._getItemTags(item.id);
             for (const tag of tags) {
@@ -862,7 +843,7 @@ class SpacesAPI {
               tagCounts.set(lowerTag, existing);
             }
           }
-          
+
           // Sort by count (descending), then alphabetically
           return Array.from(tagCounts.values()).sort((a, b) => {
             if (b.count !== a.count) return b.count - a.count;
@@ -882,7 +863,7 @@ class SpacesAPI {
         try {
           const allItems = this.storage.getAllItems();
           const tagInfo = new Map();
-          
+
           for (const item of allItems) {
             const tags = this._getItemTags(item.id);
             for (const tag of tags) {
@@ -893,10 +874,10 @@ class SpacesAPI {
               tagInfo.set(lowerTag, existing);
             }
           }
-          
+
           // Convert Sets to Arrays and sort
           return Array.from(tagInfo.values())
-            .map(t => ({ ...t, spaces: Array.from(t.spaces) }))
+            .map((t) => ({ ...t, spaces: Array.from(t.spaces) }))
             .sort((a, b) => {
               if (b.count !== a.count) return b.count - a.count;
               return a.tag.localeCompare(b.tag);
@@ -918,34 +899,32 @@ class SpacesAPI {
        */
       findItems: async (tags, options = {}) => {
         try {
-          let items = options.spaceId 
-            ? this.storage.getSpaceItems(options.spaceId)
-            : this.storage.getAllItems();
-          
-          const searchTags = tags.map(t => t.toLowerCase());
-          
-          items = items.filter(item => {
-            const itemTags = this._getItemTags(item.id).map(t => t.toLowerCase());
-            
+          let items = options.spaceId ? this.storage.getSpaceItems(options.spaceId) : this.storage.getAllItems();
+
+          const searchTags = tags.map((t) => t.toLowerCase());
+
+          items = items.filter((item) => {
+            const itemTags = this._getItemTags(item.id).map((t) => t.toLowerCase());
+
             if (options.matchAll) {
               // All search tags must be present
-              return searchTags.every(t => itemTags.includes(t));
+              return searchTags.every((t) => itemTags.includes(t));
             } else {
               // Any search tag matches
-              return searchTags.some(t => itemTags.includes(t));
+              return searchTags.some((t) => itemTags.includes(t));
             }
           });
-          
+
           // Add tags to results
-          items = items.map(item => ({
+          items = items.map((item) => ({
             ...item,
-            tags: this._getItemTags(item.id)
+            tags: this._getItemTags(item.id),
           }));
-          
+
           if (options.limit) {
             items = items.slice(0, options.limit);
           }
-          
+
           return items;
         } catch (error) {
           log.error('spaces', 'Error finding items by tags', { error: error.message || error });
@@ -965,22 +944,22 @@ class SpacesAPI {
           const items = this.storage.getSpaceItems(spaceId);
           const oldTagLower = oldTag.toLowerCase();
           let updatedCount = 0;
-          
+
           for (const item of items) {
             const tags = this._getItemTags(item.id);
-            const tagIndex = tags.findIndex(t => t.toLowerCase() === oldTagLower);
-            
+            const tagIndex = tags.findIndex((t) => t.toLowerCase() === oldTagLower);
+
             if (tagIndex !== -1) {
               tags[tagIndex] = newTag.trim();
               this._updateItemMetadata(item.id, { tags });
               updatedCount++;
             }
           }
-          
+
           if (updatedCount > 0) {
             this._emit('tags:renamed', { spaceId, oldTag, newTag, count: updatedCount });
           }
-          
+
           return updatedCount;
         } catch (error) {
           log.error('spaces', 'Error renaming tag', { error: error.message || error });
@@ -999,27 +978,27 @@ class SpacesAPI {
           const items = this.storage.getSpaceItems(spaceId);
           const tagLower = tag.toLowerCase();
           let updatedCount = 0;
-          
+
           for (const item of items) {
             const tags = this._getItemTags(item.id);
-            const newTags = tags.filter(t => t.toLowerCase() !== tagLower);
-            
+            const newTags = tags.filter((t) => t.toLowerCase() !== tagLower);
+
             if (newTags.length !== tags.length) {
               this._updateItemMetadata(item.id, { tags: newTags });
               updatedCount++;
             }
           }
-          
+
           if (updatedCount > 0) {
             this._emit('tags:deleted', { spaceId, tag, count: updatedCount });
           }
-          
+
           return updatedCount;
         } catch (error) {
           log.error('spaces', 'Error deleting tag', { error: error.message || error });
           return 0;
         }
-      }
+      },
     };
   }
 
@@ -1056,7 +1035,7 @@ class SpacesAPI {
       get: async (folderId) => {
         try {
           const data = this._loadSmartFolders();
-          return (data.folders || []).find(f => f.id === folderId) || null;
+          return (data.folders || []).find((f) => f.id === folderId) || null;
         } catch (error) {
           log.error('spaces', 'Error getting smart folder', { error: error.message || error });
           return null;
@@ -1080,7 +1059,7 @@ class SpacesAPI {
         try {
           const data = this._loadSmartFolders();
           if (!data.folders) data.folders = [];
-          
+
           const folder = {
             id: 'sf-' + require('crypto').randomBytes(8).toString('hex'),
             name: name.trim(),
@@ -1090,18 +1069,18 @@ class SpacesAPI {
               tags: criteria.tags || [],
               anyTags: criteria.anyTags || [],
               types: criteria.types || [],
-              spaces: criteria.spaces || []
+              spaces: criteria.spaces || [],
             },
             createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            updatedAt: new Date().toISOString(),
           };
-          
+
           data.folders.push(folder);
           this._saveSmartFolders(data);
-          
+
           log.info('spaces', 'Created smart folder', { folderId: folder.id, name: folder.name });
           this._emit('smartFolder:created', { folder });
-          
+
           return folder;
         } catch (error) {
           log.error('spaces', 'Error creating smart folder', { error: error.message || error });
@@ -1118,14 +1097,14 @@ class SpacesAPI {
       update: async (folderId, updates) => {
         try {
           const data = this._loadSmartFolders();
-          const index = (data.folders || []).findIndex(f => f.id === folderId);
-          
+          const index = (data.folders || []).findIndex((f) => f.id === folderId);
+
           if (index === -1) {
             return null;
           }
-          
+
           const folder = data.folders[index];
-          
+
           // Apply updates
           if (updates.name !== undefined) folder.name = updates.name.trim();
           if (updates.icon !== undefined) folder.icon = updates.icon;
@@ -1133,17 +1112,17 @@ class SpacesAPI {
           if (updates.criteria !== undefined) {
             folder.criteria = {
               ...folder.criteria,
-              ...updates.criteria
+              ...updates.criteria,
             };
           }
           folder.updatedAt = new Date().toISOString();
-          
+
           data.folders[index] = folder;
           this._saveSmartFolders(data);
-          
+
           log.info('spaces', 'Updated smart folder', { folderId });
           this._emit('smartFolder:updated', { folderId, updates });
-          
+
           return folder;
         } catch (error) {
           log.error('spaces', 'Error updating smart folder', { error: error.message || error });
@@ -1159,18 +1138,18 @@ class SpacesAPI {
       delete: async (folderId) => {
         try {
           const data = this._loadSmartFolders();
-          const index = (data.folders || []).findIndex(f => f.id === folderId);
-          
+          const index = (data.folders || []).findIndex((f) => f.id === folderId);
+
           if (index === -1) {
             return false;
           }
-          
+
           data.folders.splice(index, 1);
           this._saveSmartFolders(data);
-          
+
           log.info('spaces', 'Deleted smart folder', { folderId });
           this._emit('smartFolder:deleted', { folderId });
-          
+
           return true;
         } catch (error) {
           log.error('spaces', 'Error deleting smart folder', { error: error.message || error });
@@ -1190,12 +1169,12 @@ class SpacesAPI {
       getItems: async (folderId, options = {}) => {
         try {
           const data = this._loadSmartFolders();
-          const folder = data.folders.find(f => f.id === folderId);
-          
+          const folder = data.folders.find((f) => f.id === folderId);
+
           if (!folder) {
             return [];
           }
-          
+
           return await this._executeSmartFolderQuery(folder.criteria, options);
         } catch (error) {
           log.error('spaces', 'Error getting smart folder items', { error: error.message || error });
@@ -1216,7 +1195,7 @@ class SpacesAPI {
           log.error('spaces', 'Error previewing smart folder', { error: error.message || error });
           return [];
         }
-      }
+      },
     };
   }
 
@@ -1226,7 +1205,7 @@ class SpacesAPI {
    */
   _loadSmartFolders() {
     const filePath = path.join(this.storage.storageRoot, 'smart-folders.json');
-    
+
     if (fs.existsSync(filePath)) {
       try {
         return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -1234,7 +1213,7 @@ class SpacesAPI {
         log.error('spaces', 'Error loading smart folders', { error: error.message || error });
       }
     }
-    
+
     // Return default structure
     return { version: '1.0', folders: [] };
   }
@@ -1255,61 +1234,57 @@ class SpacesAPI {
    */
   async _executeSmartFolderQuery(criteria, options = {}) {
     let items = this.storage.getAllItems();
-    
+
     // Filter by spaces if specified
     if (criteria.spaces && criteria.spaces.length > 0) {
-      items = items.filter(item => criteria.spaces.includes(item.spaceId));
+      items = items.filter((item) => criteria.spaces.includes(item.spaceId));
     }
-    
+
     // Filter by types if specified
     if (criteria.types && criteria.types.length > 0) {
-      items = items.filter(item => criteria.types.includes(item.type));
+      items = items.filter((item) => criteria.types.includes(item.type));
     }
-    
+
     // Filter by required tags (ALL must match)
     if (criteria.tags && criteria.tags.length > 0) {
-      items = items.filter(item => {
-        const itemTags = this._getItemTags(item.id).map(t => t.toLowerCase());
-        return criteria.tags.every(tag => 
-          itemTags.includes(tag.toLowerCase())
-        );
+      items = items.filter((item) => {
+        const itemTags = this._getItemTags(item.id).map((t) => t.toLowerCase());
+        return criteria.tags.every((tag) => itemTags.includes(tag.toLowerCase()));
       });
     }
-    
+
     // Filter by optional tags (ANY must match)
     if (criteria.anyTags && criteria.anyTags.length > 0) {
-      items = items.filter(item => {
-        const itemTags = this._getItemTags(item.id).map(t => t.toLowerCase());
-        return criteria.anyTags.some(tag => 
-          itemTags.includes(tag.toLowerCase())
-        );
+      items = items.filter((item) => {
+        const itemTags = this._getItemTags(item.id).map((t) => t.toLowerCase());
+        return criteria.anyTags.some((tag) => itemTags.includes(tag.toLowerCase()));
       });
     }
-    
+
     // Sort by timestamp (newest first)
     items.sort((a, b) => b.timestamp - a.timestamp);
-    
+
     // Apply pagination
     const offset = options.offset || 0;
     const limit = options.limit || items.length;
     items = items.slice(offset, offset + limit);
-    
+
     // Add tags and optionally full content
     if (options.includeContent) {
-      items = items.map(item => {
+      items = items.map((item) => {
         try {
           return this.storage.loadItem(item.id);
-        } catch (e) {
+        } catch (_e) {
           return { ...item, tags: this._getItemTags(item.id) };
         }
       });
     } else {
-      items = items.map(item => ({
+      items = items.map((item) => ({
         ...item,
-        tags: this._getItemTags(item.id)
+        tags: this._getItemTags(item.id),
       }));
     }
-    
+
     return items;
   }
 
@@ -1320,7 +1295,7 @@ class SpacesAPI {
   /**
    * Awesome search across all spaces with comprehensive metadata search,
    * relevance scoring, fuzzy matching, and search highlights.
-   * 
+   *
    * @param {string} query - Search query (supports multiple words)
    * @param {Object} options - Search options
    * @param {string} options.spaceId - Limit to specific space
@@ -1339,10 +1314,10 @@ class SpacesAPI {
       if (!query || typeof query !== 'string' || query.trim().length === 0) {
         return [];
       }
-      
+
       const queryLower = query.toLowerCase().trim();
-      const queryWords = queryLower.split(/\s+/).filter(w => w.length > 0);
-      
+      const queryWords = queryLower.split(/\s+/).filter((w) => w.length > 0);
+
       // Options with defaults
       const searchTags = options.searchTags !== false;
       const searchMetadata = options.searchMetadata !== false;
@@ -1350,22 +1325,22 @@ class SpacesAPI {
       const fuzzy = options.fuzzy !== false;
       const fuzzyThreshold = options.fuzzyThreshold || 0.7;
       const includeHighlights = options.includeHighlights !== false;
-      
+
       let items = this.storage.getAllItems();
-      
+
       // Filter by space if specified
       if (options.spaceId) {
-        items = items.filter(item => item.spaceId === options.spaceId);
+        items = items.filter((item) => item.spaceId === options.spaceId);
       }
-      
+
       // Filter by type if specified
       if (options.type) {
-        items = items.filter(item => item.type === options.type);
+        items = items.filter((item) => item.type === options.type);
       }
-      
+
       // Score and filter items
       const scoredItems = [];
-      
+
       for (const item of items) {
         const result = this._scoreItem(item, queryLower, queryWords, {
           searchTags,
@@ -1373,9 +1348,9 @@ class SpacesAPI {
           searchContent,
           fuzzy,
           fuzzyThreshold,
-          includeHighlights
+          includeHighlights,
         });
-        
+
         if (result.score > 0) {
           scoredItems.push({
             ...item,
@@ -1384,12 +1359,12 @@ class SpacesAPI {
             _search: {
               score: result.score,
               matches: result.matches,
-              highlights: includeHighlights ? result.highlights : undefined
-            }
+              highlights: includeHighlights ? result.highlights : undefined,
+            },
           });
         }
       }
-      
+
       // Sort by relevance score (highest first), then by timestamp (most recent)
       scoredItems.sort((a, b) => {
         if (b._search.score !== a._search.score) {
@@ -1397,12 +1372,12 @@ class SpacesAPI {
         }
         return new Date(b.timestamp) - new Date(a.timestamp);
       });
-      
+
       // Apply limit
       if (options.limit && options.limit > 0) {
         return scoredItems.slice(0, options.limit);
       }
-      
+
       return scoredItems;
     } catch (error) {
       log.error('spaces', 'Error searching', { error: error.message || error });
@@ -1418,51 +1393,51 @@ class SpacesAPI {
     let totalScore = 0;
     const matches = [];
     const highlights = {};
-    
+
     // Get tags and metadata
     const tags = this._getItemTags(item.id);
     const metadata = this._getItemMetadataForSearch(item.id);
-    
+
     // Field weights (higher = more important)
     const WEIGHTS = {
-      title: 10,        // Title is most important
-      fileName: 8,      // Filename is very important
-      tags: 7,          // Tags are explicit categorization
-      preview: 5,       // Preview/content preview
-      description: 4,   // Description
-      notes: 4,         // User notes
-      author: 3,        // Author name
-      source: 2,        // Source URL/info
-      content: 1        // Full content (lower weight, more text)
+      title: 10, // Title is most important
+      fileName: 8, // Filename is very important
+      tags: 7, // Tags are explicit categorization
+      preview: 5, // Preview/content preview
+      description: 4, // Description
+      notes: 4, // User notes
+      author: 3, // Author name
+      source: 2, // Source URL/info
+      content: 1, // Full content (lower weight, more text)
     };
-    
+
     // Bonus for exact phrase match
     const EXACT_PHRASE_BONUS = 5;
-    
+
     // Helper to check and score a field
     const scoreField = (fieldName, fieldValue, weight) => {
       if (!fieldValue || typeof fieldValue !== 'string') return 0;
-      
+
       const valueLower = fieldValue.toLowerCase();
       let fieldScore = 0;
       const fieldMatches = [];
-      
+
       // Check exact phrase match first (bonus points)
       if (valueLower.includes(queryLower)) {
         fieldScore += weight * EXACT_PHRASE_BONUS;
         fieldMatches.push({ type: 'exact', query: queryLower });
-        
+
         // Add highlight
         if (options.includeHighlights) {
           highlights[fieldName] = this._highlightMatches(fieldValue, [queryLower]);
         }
       }
-      
+
       // Check individual word matches
       for (const word of queryWords) {
         if (valueLower.includes(word)) {
           fieldScore += weight;
-          if (!fieldMatches.some(m => m.query === word)) {
+          if (!fieldMatches.some((m) => m.query === word)) {
             fieldMatches.push({ type: 'word', query: word });
           }
         } else if (options.fuzzy) {
@@ -1477,45 +1452,45 @@ class SpacesAPI {
           }
         }
       }
-      
+
       if (fieldMatches.length > 0) {
         matches.push({ field: fieldName, matches: fieldMatches });
       }
-      
+
       return fieldScore;
     };
-    
+
     // Score each field
-    
+
     // Title (from metadata)
     totalScore += scoreField('title', metadata.title, WEIGHTS.title);
-    
+
     // File name
     totalScore += scoreField('fileName', item.fileName, WEIGHTS.fileName);
-    
+
     // Tags
     if (options.searchTags && tags.length > 0) {
       const tagsString = tags.join(' ');
       totalScore += scoreField('tags', tagsString, WEIGHTS.tags);
     }
-    
+
     // Preview
     totalScore += scoreField('preview', item.preview, WEIGHTS.preview);
-    
+
     // Metadata fields (works with both v1.0 flat and v2.0 SPACE-normalized metadata)
     if (options.searchMetadata) {
       // A: Attributes
       totalScore += scoreField('description', metadata.description, WEIGHTS.description);
       totalScore += scoreField('notes', metadata.notes, WEIGHTS.notes);
       totalScore += scoreField('author', metadata.author, WEIGHTS.author);
-      
+
       // S: System Insights
       totalScore += scoreField('source', metadata.source, WEIGHTS.source);
-      
+
       // P: Physical Locations
       totalScore += scoreField('sourceUrl', metadata.sourceUrl, WEIGHTS.source);
       totalScore += scoreField('sourceApp', metadata.sourceApp, WEIGHTS.source);
-      
+
       // C: Communication Context
       if (metadata.participants) {
         totalScore += scoreField('participants', metadata.participants, WEIGHTS.author);
@@ -1523,12 +1498,12 @@ class SpacesAPI {
       if (metadata.channel) {
         totalScore += scoreField('channel', metadata.channel, WEIGHTS.source);
       }
-      
+
       // E: Event & Sequence Data
       if (metadata.workflowStage) {
         totalScore += scoreField('workflowStage', metadata.workflowStage, WEIGHTS.source);
       }
-      
+
       // Extensions: YouTube
       if (metadata.youtubeDescription) {
         totalScore += scoreField('youtubeDescription', metadata.youtubeDescription, WEIGHTS.description);
@@ -1537,7 +1512,7 @@ class SpacesAPI {
         totalScore += scoreField('uploader', metadata.uploader, WEIGHTS.author);
       }
     }
-    
+
     // Full content search (optional, slower)
     if (options.searchContent && (item.type === 'text' || item.type === 'html')) {
       try {
@@ -1546,17 +1521,17 @@ class SpacesAPI {
           const content = fs.readFileSync(contentPath, 'utf8');
           totalScore += scoreField('content', content, WEIGHTS.content);
         }
-      } catch (e) {
+      } catch (_e) {
         // Silently ignore content read errors
       }
     }
-    
+
     return {
       score: totalScore,
       matches,
       highlights,
       tags,
-      metadata
+      metadata,
     };
   }
 
@@ -1572,7 +1547,7 @@ class SpacesAPI {
         const raw = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
         return this._normalizeMetadataForSearch(raw);
       }
-    } catch (error) {
+    } catch (_error) {
       // Silently fail
     }
     return {};
@@ -1596,32 +1571,30 @@ class SpacesAPI {
 
     return {
       // A: Attributes
-      title:       attr.title       || raw.title       || null,
+      title: attr.title || raw.title || null,
       description: attr.description || raw.description || null,
-      notes:       attr.notes       || raw.notes       || null,
-      author:      attr.author      || raw.author      || null,
-      tags:        attr.tags        || raw.tags        || [],
-      language:    attr.language    || raw.language    || null,
+      notes: attr.notes || raw.notes || null,
+      author: attr.author || raw.author || null,
+      tags: attr.tags || raw.tags || [],
+      language: attr.language || raw.language || null,
 
       // S: System Insights
-      source:      sys.source       || raw.source      || null,
+      source: sys.source || raw.source || null,
 
       // P: Physical Locations
-      sourceUrl:   phys.sourceUrl   || raw.sourceUrl   || null,
-      sourceApp:   phys.sourceApp   || raw.sourceApp   || null,
+      sourceUrl: phys.sourceUrl || raw.sourceUrl || null,
+      sourceApp: phys.sourceApp || raw.sourceApp || null,
 
       // C: Communication Context
-      channel:     comm.channel     || raw.channel     || null,
-      participants: (comm.participants && comm.participants.length > 0)
-                     ? comm.participants.join(' ')
-                     : null,
+      channel: comm.channel || raw.channel || null,
+      participants: comm.participants && comm.participants.length > 0 ? comm.participants.join(' ') : null,
 
       // E: Event & Sequence Data
       workflowStage: evt.workflowStage || null,
 
       // Extensions: YouTube
       youtubeDescription: (ext.youtube && ext.youtube.description) || raw.youtubeDescription || null,
-      uploader:           (ext.youtube && ext.youtube.uploader)    || raw.uploader           || null,
+      uploader: (ext.youtube && ext.youtube.uploader) || raw.uploader || null,
 
       // GSX Push metadata (needed by gsx.* methods that read via _getItemMetadataForSearch)
       gsxPush: raw.gsxPush || null,
@@ -1630,7 +1603,7 @@ class SpacesAPI {
       dataSource: raw.dataSource || null,
 
       // Pass-through for anything else the scorer might need
-      _raw: raw
+      _raw: raw,
     };
   }
 
@@ -1642,40 +1615,40 @@ class SpacesAPI {
   _stringSimilarity(str1, str2) {
     if (str1 === str2) return 1;
     if (str1.length === 0 || str2.length === 0) return 0;
-    
+
     // Quick check for containment
     if (str1.includes(str2) || str2.includes(str1)) {
       return Math.min(str1.length, str2.length) / Math.max(str1.length, str2.length);
     }
-    
+
     // Levenshtein distance for fuzzy matching
     const matrix = [];
     const len1 = str1.length;
     const len2 = str2.length;
-    
+
     // Quick reject if strings are too different in length
     if (Math.abs(len1 - len2) / Math.max(len1, len2) > 0.5) {
       return 0;
     }
-    
+
     for (let i = 0; i <= len1; i++) {
       matrix[i] = [i];
     }
     for (let j = 0; j <= len2; j++) {
       matrix[0][j] = j;
     }
-    
+
     for (let i = 1; i <= len1; i++) {
       for (let j = 1; j <= len2; j++) {
         const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
         matrix[i][j] = Math.min(
-          matrix[i - 1][j] + 1,     // deletion
-          matrix[i][j - 1] + 1,     // insertion
-          matrix[i - 1][j - 1] + cost  // substitution
+          matrix[i - 1][j] + 1, // deletion
+          matrix[i][j - 1] + 1, // insertion
+          matrix[i - 1][j - 1] + cost // substitution
         );
       }
     }
-    
+
     const distance = matrix[len1][len2];
     const maxLen = Math.max(len1, len2);
     return 1 - distance / maxLen;
@@ -1687,10 +1660,10 @@ class SpacesAPI {
    */
   _highlightMatches(text, queries) {
     if (!text) return '';
-    
+
     let highlighted = text;
     const lowerText = text.toLowerCase();
-    
+
     // Find all match positions
     const positions = [];
     for (const query of queries) {
@@ -1700,9 +1673,9 @@ class SpacesAPI {
         pos += 1;
       }
     }
-    
+
     if (positions.length === 0) return text;
-    
+
     // Sort and merge overlapping positions
     positions.sort((a, b) => a.start - b.start);
     const merged = [positions[0]];
@@ -1714,16 +1687,13 @@ class SpacesAPI {
         merged.push(positions[i]);
       }
     }
-    
+
     // Build highlighted string (from end to preserve positions)
     for (let i = merged.length - 1; i >= 0; i--) {
       const { start, end } = merged[i];
-      highlighted = 
-        highlighted.slice(0, start) + 
-        '**' + highlighted.slice(start, end) + '**' + 
-        highlighted.slice(end);
+      highlighted = highlighted.slice(0, start) + '**' + highlighted.slice(start, end) + '**' + highlighted.slice(end);
     }
-    
+
     // Truncate long text around matches for readability
     if (highlighted.length > 200) {
       const firstMatch = highlighted.indexOf('**');
@@ -1734,7 +1704,7 @@ class SpacesAPI {
         highlighted = highlighted.slice(0, 197) + '...';
       }
     }
-    
+
     return highlighted;
   }
 
@@ -1752,7 +1722,7 @@ class SpacesAPI {
       searchContent: false,
       fuzzy: false,
       includeHighlights: false,
-      limit: options.limit || 10
+      limit: options.limit || 10,
     });
   }
 
@@ -1769,7 +1739,7 @@ class SpacesAPI {
       searchMetadata: true,
       searchContent: true,
       fuzzy: true,
-      includeHighlights: true
+      includeHighlights: true,
     });
   }
 
@@ -1783,10 +1753,10 @@ class SpacesAPI {
     try {
       const prefixLower = prefix.toLowerCase().trim();
       if (prefixLower.length === 0) return [];
-      
+
       const suggestions = new Map();
       const items = this.storage.getAllItems();
-      
+
       for (const item of items) {
         // Get tags
         const tags = this._getItemTags(item.id);
@@ -1799,7 +1769,7 @@ class SpacesAPI {
             suggestions.get(key).count++;
           }
         }
-        
+
         // Get title from metadata
         const metadata = this._getItemMetadataForSearch(item.id);
         if (metadata.title && metadata.title.toLowerCase().includes(prefixLower)) {
@@ -1809,7 +1779,7 @@ class SpacesAPI {
           }
           suggestions.get(key).count++;
         }
-        
+
         // Check fileName
         if (item.fileName && item.fileName.toLowerCase().includes(prefixLower)) {
           const key = `file:${item.fileName.toLowerCase()}`;
@@ -1819,7 +1789,7 @@ class SpacesAPI {
           suggestions.get(key).count++;
         }
       }
-      
+
       // Sort by count and return top suggestions
       return Array.from(suggestions.values())
         .sort((a, b) => b.count - a.count)
@@ -1964,7 +1934,7 @@ class SpacesAPI {
           log.error('spaces', 'Error updating project config', { error: error.message || error });
           return null;
         }
-      }
+      },
     };
   }
 
@@ -1995,18 +1965,18 @@ class SpacesAPI {
       list: async (spaceId, subPath = '') => {
         try {
           const spacePath = this._resolveSpaceFilePath(spaceId, subPath);
-          
+
           if (!fs.existsSync(spacePath)) {
             return [];
           }
-          
+
           const entries = fs.readdirSync(spacePath, { withFileTypes: true });
-          
-          return entries.map(entry => ({
+
+          return entries.map((entry) => ({
             name: entry.name,
             isDirectory: entry.isDirectory(),
             path: path.join(spacePath, entry.name),
-            relativePath: path.join(subPath, entry.name)
+            relativePath: path.join(subPath, entry.name),
           }));
         } catch (error) {
           if (error.message === 'Path escapes space directory') throw error;
@@ -2024,11 +1994,11 @@ class SpacesAPI {
       read: async (spaceId, filePath) => {
         try {
           const fullPath = this._resolveSpaceFilePath(spaceId, filePath);
-          
+
           if (!fs.existsSync(fullPath)) {
             return null;
           }
-          
+
           return fs.readFileSync(fullPath, 'utf8');
         } catch (error) {
           if (error.message === 'Path escapes space directory') throw error;
@@ -2047,18 +2017,18 @@ class SpacesAPI {
       write: async (spaceId, filePath, content) => {
         try {
           // If writing a .md file to gsx-agent space, ensure the space exists first
-          if (spaceId === 'gsx-agent' && filePath.endsWith('.md')) {
+          if (spaceId === GSX_AGENT_SPACE && filePath.endsWith('.md')) {
             await this.ensureGSXAgentSpace();
           }
-          
+
           const fullPath = this._resolveSpaceFilePath(spaceId, filePath);
           const dir = path.dirname(fullPath);
-          
+
           // Ensure directory exists
           fs.mkdirSync(dir, { recursive: true });
-          
+
           fs.writeFileSync(fullPath, content);
-          
+
           this._emit('file:written', { spaceId, filePath });
           return true;
         } catch (error) {
@@ -2077,7 +2047,7 @@ class SpacesAPI {
       delete: async (spaceId, filePath) => {
         try {
           // Protect default context files in GSX Agent space
-          if (spaceId === 'gsx-agent') {
+          if (spaceId === GSX_AGENT_SPACE) {
             const protectedFiles = ['main.md', 'agent-profile.md'];
             const fileName = filePath.split('/').pop();
             if (protectedFiles.includes(fileName)) {
@@ -2085,22 +2055,22 @@ class SpacesAPI {
               throw new Error(`Cannot delete ${fileName} - this is a required system file`);
             }
           }
-          
+
           const fullPath = this._resolveSpaceFilePath(spaceId, filePath);
-          
+
           if (fs.existsSync(fullPath)) {
             fs.unlinkSync(fullPath);
             this._emit('file:deleted', { spaceId, filePath });
             return true;
           }
-          
+
           return false;
         } catch (error) {
           if (error.message === 'Path escapes space directory') throw error;
           log.error('spaces', 'Error deleting file', { error: error.message || error });
           return false;
         }
-      }
+      },
     };
   }
 
@@ -2119,7 +2089,7 @@ class SpacesAPI {
       this._eventListeners.set(event, new Set());
     }
     this._eventListeners.get(event).add(callback);
-    
+
     // Return unsubscribe function
     return () => {
       const listeners = this._eventListeners.get(event);
@@ -2136,7 +2106,7 @@ class SpacesAPI {
   _emit(event, data) {
     const listeners = this._eventListeners.get(event);
     if (listeners) {
-      listeners.forEach(callback => {
+      listeners.forEach((callback) => {
         try {
           callback(data);
         } catch (error) {
@@ -2144,7 +2114,7 @@ class SpacesAPI {
         }
       });
     }
-    
+
     // Also emit to global broadcast handler if set
     if (this._broadcastHandler) {
       this._broadcastHandler(event, data);
@@ -2173,17 +2143,17 @@ class SpacesAPI {
     try {
       const metaPath = path.join(this.storage.itemsDir, itemId, 'metadata.json');
       const fileExists = fs.existsSync(metaPath);
-      
+
       if (fileExists) {
         const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-        
+
         // SPACE schema (v2.0+): tags in attributes.tags; v1.0: tags at root
         // Prefer non-empty attributes.tags, then root tags, then empty
         const attrTags = metadata.attributes && Array.isArray(metadata.attributes.tags) ? metadata.attributes.tags : [];
         const rootTags = Array.isArray(metadata.tags) ? metadata.tags : [];
-        return attrTags.length > 0 ? attrTags : (rootTags.length > 0 ? rootTags : []);
+        return attrTags.length > 0 ? attrTags : rootTags.length > 0 ? rootTags : [];
       }
-    } catch (error) {
+    } catch (_error) {
       // Silently fail - item may not have metadata
     }
     return [];
@@ -2202,14 +2172,14 @@ class SpacesAPI {
     try {
       const metaPath = path.join(this.storage.itemsDir, itemId, 'metadata.json');
       let metadata = {};
-      
+
       if (fs.existsSync(metaPath)) {
         metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
       }
-      
+
       // Accept any SPACE schema version (2.0, 3.0, etc.) -- not just 2.0
       const isV2 = metadata._schema && parseFloat(metadata._schema.version) >= 2.0;
-      
+
       if (isV2) {
         // Route known flat fields into their SPACE namespaces
         if (updates.tags !== undefined) {
@@ -2248,8 +2218,19 @@ class SpacesAPI {
         }
         // Pass through non-SPACE fields (scenes, etc.)
         const handledKeys = new Set([
-          'tags', 'title', 'description', 'notes', 'pinned', 'author', 'source',
-          'system', 'physical', 'attributes', 'communication', 'events', 'extensions'
+          'tags',
+          'title',
+          'description',
+          'notes',
+          'pinned',
+          'author',
+          'source',
+          'system',
+          'physical',
+          'attributes',
+          'communication',
+          'events',
+          'extensions',
         ]);
         for (const key of Object.keys(updates)) {
           if (!handledKeys.has(key)) {
@@ -2262,7 +2243,7 @@ class SpacesAPI {
         Object.assign(metadata, updates);
         metadata.updatedAt = new Date().toISOString();
       }
-      
+
       fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
       return true;
     } catch (error) {
@@ -2310,7 +2291,7 @@ class SpacesAPI {
 
       // Generate if missing title, description, or tags
       const needsMetadata = !hasTitle || !hasDescription || !hasTags;
-      
+
       return needsMetadata;
     } catch (error) {
       log.error('spaces', 'Error checking auto-metadata settings', { error: error.message || error });
@@ -2325,12 +2306,12 @@ class SpacesAPI {
    * @param {string} spaceId - The space ID
    * @param {string} itemType - The item type
    */
-  _queueMetadataGeneration(itemId, spaceId, itemType) {
+  _queueMetadataGeneration(itemId, spaceId, _itemType) {
     // Run asynchronously to not block the add operation
     setImmediate(async () => {
       try {
         log.info('spaces', 'Starting background metadata generation', { itemId });
-        
+
         const apiKey = global.settingsManager?.get('openaiApiKey');
         if (!apiKey) {
           log.debug('spaces', 'No API key, skipping metadata generation');
@@ -2340,7 +2321,7 @@ class SpacesAPI {
         // Get the metadata generator
         const MetadataGenerator = require('./metadata-generator');
         const storageRef = this.storage;
-        
+
         // Create a clipboard manager interface with updateItemMetadata method
         const clipboardInterface = {
           storage: this.storage,
@@ -2354,11 +2335,11 @@ class SpacesAPI {
                 log.debug('spaces', 'Skipping metadata update for deleted item', { itemId });
                 return { success: false, error: 'Item not found' };
               }
-              
+
               const fs = require('fs');
               const path = require('path');
               const metadataPath = path.join(storageRef.storageRoot, 'items', itemId, 'metadata.json');
-              
+
               // Read existing metadata and deep-merge (preserves tags, etc. in namespace objects)
               let existingMetadata = {};
               if (fs.existsSync(metadataPath)) {
@@ -2368,20 +2349,26 @@ class SpacesAPI {
                   log.warn('spaces', 'Could not parse existing metadata', { error: parseErr.message });
                 }
               }
-              
+
               // Deep merge for SPACE namespace objects (attributes, system, etc.)
               // so auto-metadata doesn't overwrite user-set tags
               const mergedMetadata = { ...existingMetadata };
               for (const key of Object.keys(metadata)) {
-                if (metadata[key] && typeof metadata[key] === 'object' && !Array.isArray(metadata[key])
-                    && existingMetadata[key] && typeof existingMetadata[key] === 'object' && !Array.isArray(existingMetadata[key])) {
+                if (
+                  metadata[key] &&
+                  typeof metadata[key] === 'object' &&
+                  !Array.isArray(metadata[key]) &&
+                  existingMetadata[key] &&
+                  typeof existingMetadata[key] === 'object' &&
+                  !Array.isArray(existingMetadata[key])
+                ) {
                   mergedMetadata[key] = { ...existingMetadata[key], ...metadata[key] };
                 } else {
                   mergedMetadata[key] = metadata[key];
                 }
               }
               fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
-              
+
               return { success: true };
             } catch (err) {
               // Downgrade "not found" errors to debug (item deleted before metadata generation)
@@ -2393,20 +2380,20 @@ class SpacesAPI {
               }
               return { success: false, error: msg };
             }
-          }
+          },
         };
-        
+
         const generator = new MetadataGenerator(clipboardInterface);
         const result = await generator.generateMetadataForItem(itemId, apiKey);
-        
+
         if (result.success) {
           log.info('spaces', 'Auto-generated metadata', { itemId });
-          
+
           // Emit event for listeners
           this._emit('item:metadata:generated', {
             spaceId,
             itemId,
-            metadata: result.metadata || result
+            metadata: result.metadata || result,
           });
         } else {
           log.warn('spaces', 'Auto-metadata generation failed (non-critical)', { error: result.error });
@@ -2442,7 +2429,7 @@ class SpacesAPI {
       // Get the metadata generator
       const MetadataGenerator = require('./metadata-generator');
       const storageRef = this.storage;
-      
+
       // Create a clipboard manager interface with updateItemMetadata method
       const clipboardInterface = {
         storage: this.storage,
@@ -2452,44 +2439,44 @@ class SpacesAPI {
           try {
             const item = storageRef.loadItem(itemId);
             if (!item) return { success: false, error: 'Item not found' };
-            
+
             const fs = require('fs');
             const path = require('path');
             const metadataPath = path.join(storageRef.storageRoot, 'items', itemId, 'metadata.json');
-            
+
             // Read existing metadata and merge
             let existingMetadata = {};
             if (fs.existsSync(metadataPath)) {
               try {
                 existingMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
               } catch (parseErr) {
-                  log.warn('spaces', 'Could not parse existing metadata', { error: parseErr.message });
-                }
+                log.warn('spaces', 'Could not parse existing metadata', { error: parseErr.message });
               }
-              
-              const mergedMetadata = { ...existingMetadata, ...metadata };
-              fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
-              
-              return { success: true };
-            } catch (err) {
-              log.error('spaces', 'updateItemMetadata error', { error: err.message || err });
-              return { success: false, error: err.message };
             }
+
+            const mergedMetadata = { ...existingMetadata, ...metadata };
+            fs.writeFileSync(metadataPath, JSON.stringify(mergedMetadata, null, 2));
+
+            return { success: true };
+          } catch (err) {
+            log.error('spaces', 'updateItemMetadata error', { error: err.message || err });
+            return { success: false, error: err.message };
           }
-        };
-      
+        },
+      };
+
       const generator = new MetadataGenerator(clipboardInterface);
       const result = await generator.generateMetadataForItem(itemId, apiKey, options.customPrompt || '');
-      
+
       if (result.success) {
         // Emit event for listeners
         this._emit('item:metadata:generated', {
           spaceId: item.spaceId,
           itemId,
-          metadata: result.metadata || result
+          metadata: result.metadata || result,
         });
       }
-      
+
       return result;
     } catch (error) {
       log.error('spaces', 'Error generating metadata', { error: error.message || error });
@@ -2508,8 +2495,7 @@ class SpacesAPI {
   get gsx() {
     // Lazy load dependencies
     const { getOmniGraphClient, computeContentHash, computeVersionNumber } = require('./omnigraph-client');
-    const crypto = require('crypto');
-    
+
     /**
      * Verify a file URL is accessible
      * @param {string} fileUrl - URL to verify
@@ -2520,22 +2506,22 @@ class SpacesAPI {
       if (!fileUrl) {
         return { verified: false, reason: 'No file URL provided' };
       }
-      
+
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeout);
-        
-        const response = await fetch(fileUrl, { 
+
+        const response = await fetch(fileUrl, {
           method: 'HEAD',
-          signal: controller.signal
+          signal: controller.signal,
         });
-        
+
         clearTimeout(timeoutId);
-        
-        return { 
+
+        return {
           verified: response.ok,
           statusCode: response.status,
-          reason: response.ok ? null : `HTTP ${response.status}`
+          reason: response.ok ? null : `HTTP ${response.status}`,
         };
       } catch (error) {
         if (error.name === 'AbortError') {
@@ -2544,7 +2530,7 @@ class SpacesAPI {
         return { verified: false, reason: error.message };
       }
     };
-    
+
     return {
       /**
        * Get the OmniGraph client instance
@@ -2563,7 +2549,7 @@ class SpacesAPI {
       initialize: (endpoint, getAuthToken, currentUser) => {
         const client = getOmniGraphClient();
         client.setEndpoint(endpoint);
-        
+
         // Set up auth token getter - use provided function or default to settings
         if (getAuthToken) {
           client.setAuthTokenGetter(getAuthToken);
@@ -2575,13 +2561,13 @@ class SpacesAPI {
             return settings.get('gsxToken') || null;
           });
         }
-        
+
         if (currentUser) {
           client.setCurrentUser(currentUser);
         }
         log.info('spaces', 'GSX Push initialized', { endpoint, user: currentUser || 'system' });
       },
-      
+
       /**
        * Set the current user for provenance tracking
        * @param {string} user - User email
@@ -2657,21 +2643,21 @@ class SpacesAPI {
             const client = getOmniGraphClient();
             if (client.isReady()) {
               const assetType = item.fileCategory || item.type || 'file';
-              
+
               // Get file stats for size
               let fileSize = 0;
               try {
                 const contentPath = path.join(this.storage.storageRoot, item.contentPath);
                 const stats = fs.statSync(contentPath);
                 fileSize = stats.size;
-              } catch (e) {
+              } catch (_e) {
                 fileSize = item.size || 0;
               }
 
               // Load full space metadata so the space is created properly in the graph
               let spaceData = null;
               try {
-                const space = this.storage.index.spaces.find(s => s.id === item.spaceId);
+                const space = this.storage.index.spaces.find((s) => s.id === item.spaceId);
                 if (space) {
                   const spaceMetadata = this.storage.getSpaceMetadata(item.spaceId);
                   spaceData = {
@@ -2680,7 +2666,7 @@ class SpacesAPI {
                     description: spaceMetadata?.description || '',
                     icon: space.icon || '',
                     color: space.color || '#64c8ff',
-                    visibility: options.isPublic ? 'public' : 'private'
+                    visibility: options.isPublic ? 'public' : 'private',
                   };
                 }
               } catch (spaceError) {
@@ -2702,9 +2688,9 @@ class SpacesAPI {
                 tags: metadata.tags || [],
                 source: metadata.source || item.source || '',
                 author: metadata.author || '',
-                notes: metadata.notes || ''
+                notes: metadata.notes || '',
               };
-              
+
               // Add data-source-specific fields to graph node (no secrets)
               if (item.type === 'data-source') {
                 const ds = item.dataSource || {};
@@ -2712,8 +2698,8 @@ class SpacesAPI {
                 assetData.protocol = (ds.connection || {}).protocol || '';
                 assetData.dataSourceUrl = (ds.connection || {}).url || '';
                 assetData.authType = (ds.auth || {}).type || 'none';
-                assetData.operationsEnabled = ['create','read','update','delete','list']
-                  .filter(op => ds.operations && ds.operations[op] && ds.operations[op].enabled)
+                assetData.operationsEnabled = ['create', 'read', 'update', 'delete', 'list']
+                  .filter((op) => ds.operations && ds.operations[op] && ds.operations[op].enabled)
                   .join(',');
                 assetData.dataSourceStatus = ds.status || 'inactive';
                 assetData.documentVisibility = (ds.document || {}).visibility || 'private';
@@ -2727,23 +2713,23 @@ class SpacesAPI {
               await client.upsertAsset(assetData, item.spaceId, assetType, spaceData);
               graphNodeId = `asset_${itemId}`;
               graphPushSucceeded = true;
-              
+
               // 8. VERIFY graph write succeeded with checksum match
               log.info('spaces', 'Verifying graph write');
               const graphVerification = await client.verifyAsset(itemId, localHash);
-              
+
               if (!graphVerification.verified) {
                 log.error('spaces', 'Graph verification failed', { reason: graphVerification.reason });
                 return {
                   success: false,
                   error: 'GRAPH_VERIFICATION_FAILED',
                   message: graphVerification.reason,
-                  details: graphVerification
+                  details: graphVerification,
                 };
               }
-              
+
               log.info('spaces', 'Graph verification passed', { title: graphVerification.title });
-              
+
               // Use verified fileUrl from graph if available
               if (graphVerification.fileUrl) {
                 fileUrl = graphVerification.fileUrl;
@@ -2762,14 +2748,14 @@ class SpacesAPI {
                 graphNodeId: null,
                 version,
                 message: 'Graph update timed out. Please retry.',
-                retryable: true
+                retryable: true,
               };
             }
             return {
               success: false,
               error: 'GRAPH_ERROR',
               message: graphError.message,
-              retryable: true
+              retryable: true,
             };
           }
 
@@ -2791,12 +2777,12 @@ class SpacesAPI {
 
           // 10. Update local metadata (only after graph verification passed)
           const newHistory = [...history];
-          if (!history.some(h => h.contentHash === localHash)) {
+          if (!history.some((h) => h.contentHash === localHash)) {
             newHistory.push({
               version,
               contentHash: localHash,
               pushedAt: new Date().toISOString(),
-              visibility: options.isPublic ? 'public' : 'private'
+              visibility: options.isPublic ? 'public' : 'private',
             });
           }
 
@@ -2815,8 +2801,8 @@ class SpacesAPI {
             verification: {
               graph: graphPushSucceeded,
               file: fileVerification.verified,
-              verifiedAt: new Date().toISOString()
-            }
+              verifiedAt: new Date().toISOString(),
+            },
           };
 
           this._updateItemMetadata(itemId, { gsxPush: newGsxPush });
@@ -2834,22 +2820,24 @@ class SpacesAPI {
             contentHash: localHash,
             verification: {
               graph: graphPushSucceeded,
-              graphDetails: graphPushSucceeded ? {
-                spaceId: item.spaceId,
-                assetType: item.fileCategory || item.type || 'file'
-              } : null,
+              graphDetails: graphPushSucceeded
+                ? {
+                    spaceId: item.spaceId,
+                    assetType: item.fileCategory || item.type || 'file',
+                  }
+                : null,
               file: fileVerification.verified,
               fileDetails: fileVerification,
-              timestamp: new Date().toISOString()
-            }
+              timestamp: new Date().toISOString(),
+            },
           };
         } catch (error) {
           log.error('spaces', 'Push asset error', { error: error.message || error });
-          
+
           if (error.message?.includes('ENOTFOUND') || error.message?.includes('network')) {
             return { success: false, error: 'NETWORK_ERROR', message: 'No internet connection', retryable: true };
           }
-          
+
           return { success: false, error: 'UNKNOWN', message: error.message, retryable: false };
         }
       },
@@ -2867,19 +2855,19 @@ class SpacesAPI {
           success: true,
           pushed: [],
           skipped: [],
-          failed: []
+          failed: [],
         };
 
         for (let i = 0; i < itemIds.length; i++) {
           const itemId = itemIds[i];
-          
+
           if (options.onProgress) {
             options.onProgress(i + 1, itemIds.length, itemId);
           }
 
           try {
             const result = await this.gsx.pushAsset(itemId, { isPublic: options.isPublic });
-            
+
             if (result.success) {
               if (result.skipped) {
                 results.skipped.push({ itemId, ...result });
@@ -2895,11 +2883,11 @@ class SpacesAPI {
         }
 
         results.success = results.pushed.length > 0 || results.skipped.length > 0;
-        
+
         log.info('spaces', 'Bulk push completed', {
           pushed: results.pushed.length,
           skipped: results.skipped.length,
-          failed: results.failed.length
+          failed: results.failed.length,
         });
 
         return results;
@@ -2931,7 +2919,7 @@ class SpacesAPI {
                 id: spaceId,
                 name: space.name,
                 color: space.color,
-                visibility: options.isPublic ? 'public' : 'private'
+                visibility: options.isPublic ? 'public' : 'private',
               });
               graphNodeId = `space_${spaceId}`;
             }
@@ -2943,11 +2931,11 @@ class SpacesAPI {
           let assetResults = { pushed: [], skipped: [], failed: [] };
           if (options.includeAssets) {
             const items = await this.items.list(spaceId);
-            const itemIds = items.map(i => i.id);
-            
+            const itemIds = items.map((i) => i.id);
+
             assetResults = await this.gsx.pushAssets(itemIds, {
               isPublic: options.isPublic,
-              onProgress: options.onProgress
+              onProgress: options.onProgress,
             });
           }
 
@@ -2958,8 +2946,9 @@ class SpacesAPI {
             visibility: options.isPublic ? 'public' : 'private',
             pushedAt: new Date().toISOString(),
             assetsPushed: assetResults.pushed.length,
-            assetsTotal: options.includeAssets ? 
-              (assetResults.pushed.length + assetResults.skipped.length + assetResults.failed.length) : 0
+            assetsTotal: options.includeAssets
+              ? assetResults.pushed.length + assetResults.skipped.length + assetResults.failed.length
+              : 0,
           };
 
           await this.metadata.updateSpace(spaceId, { gsxPush: spaceGsxPush });
@@ -2972,7 +2961,7 @@ class SpacesAPI {
             graphNodeId,
             assetsPushed: assetResults.pushed.length,
             assetsSkipped: assetResults.skipped.length,
-            assetsFailed: assetResults.failed.length
+            assetsFailed: assetResults.failed.length,
           };
         } catch (error) {
           log.error('spaces', 'Push space error', { error: error.message || error });
@@ -2994,7 +2983,7 @@ class SpacesAPI {
 
           const metadata = this._getItemMetadataForSearch(itemId);
           const gsxPush = metadata.gsxPush;
-          
+
           if (!gsxPush || gsxPush.status === 'not_pushed') {
             return { success: false, error: 'NOT_PUSHED', message: 'Item is not pushed to GSX' };
           }
@@ -3013,7 +3002,7 @@ class SpacesAPI {
           const newGsxPush = {
             ...gsxPush,
             status: 'unpushed',
-            unpushedAt: new Date().toISOString()
+            unpushedAt: new Date().toISOString(),
           };
 
           this._updateItemMetadata(itemId, { gsxPush: newGsxPush });
@@ -3081,8 +3070,8 @@ class SpacesAPI {
             gsxPush: {
               ...(spaceMetadata?.gsxPush || {}),
               status: 'unpushed',
-              unpushedAt: new Date().toISOString()
-            }
+              unpushedAt: new Date().toISOString(),
+            },
           });
 
           log.info('spaces', 'Unpushed space', { spaceId });
@@ -3128,7 +3117,7 @@ class SpacesAPI {
           // Update local metadata
           const newGsxPush = {
             ...gsxPush,
-            visibility: isPublic ? 'public' : 'private'
+            visibility: isPublic ? 'public' : 'private',
           };
 
           this._updateItemMetadata(itemId, { gsxPush: newGsxPush });
@@ -3138,7 +3127,7 @@ class SpacesAPI {
           return {
             success: true,
             newVisibility: newGsxPush.visibility,
-            fileUrl: gsxPush.fileUrl
+            fileUrl: gsxPush.fileUrl,
           };
         } catch (error) {
           log.error('spaces', 'Change visibility error', { error: error.message || error });
@@ -3187,7 +3176,7 @@ class SpacesAPI {
           try {
             const contentPath = path.join(this.storage.storageRoot, item.contentPath);
             localHash = computeContentHash(contentPath);
-          } catch (e) {
+          } catch (_e) {
             localHash = gsxPush.localHash;
           }
 
@@ -3217,7 +3206,7 @@ class SpacesAPI {
             pushedHash: gsxPush.pushedHash,
             localHash,
             hasLocalChanges,
-            history: gsxPush.history || []
+            history: gsxPush.history || [],
           };
         } catch (error) {
           log.error('spaces', 'Get push status error', { error: error.message || error });
@@ -3250,7 +3239,7 @@ class SpacesAPI {
         const newGsxPush = {
           ...existingGsxPush,
           ...pushData,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
         };
 
         this._updateItemMetadata(itemId, { gsxPush: newGsxPush });
@@ -3269,7 +3258,7 @@ class SpacesAPI {
 
         for (const itemId of itemIds) {
           const status = await this.gsx.getPushStatus(itemId);
-          
+
           if (status.status === 'not_pushed') {
             result.notPushed.push(itemId);
           } else if (status.hasLocalChanges) {
@@ -3289,7 +3278,7 @@ class SpacesAPI {
        */
       getLinks: async (itemId) => {
         const status = await this.gsx.getPushStatus(itemId);
-        
+
         if (status.status === 'not_pushed' || status.status === 'not_found') {
           return { error: 'Item not pushed to GSX' };
         }
@@ -3297,7 +3286,7 @@ class SpacesAPI {
         return {
           fileUrl: status.fileUrl,
           graphNodeId: status.graphNodeId,
-          shareLink: status.shareLink || status.fileUrl
+          shareLink: status.shareLink || status.fileUrl,
         };
       },
 
@@ -3308,7 +3297,7 @@ class SpacesAPI {
        */
       getShareLink: async (itemId) => {
         const status = await this.gsx.getPushStatus(itemId);
-        
+
         if (!status.fileUrl) {
           return { error: 'Item not pushed to GSX' };
         }
@@ -3320,7 +3309,7 @@ class SpacesAPI {
         return {
           url: status.fileUrl,
           requiresAuth: true,
-          message: 'This file is private. Recipient needs GSX access.'
+          message: 'This file is private. Recipient needs GSX access.',
         };
       },
 
@@ -3332,7 +3321,7 @@ class SpacesAPI {
        */
       getLink: async (itemId, linkType = 'file') => {
         const links = await this.gsx.getLinks(itemId);
-        
+
         if (links.error) {
           return { error: links.error };
         }
@@ -3351,7 +3340,7 @@ class SpacesAPI {
         }
 
         return { link, type: linkType };
-      }
+      },
     };
   }
 
@@ -3380,7 +3369,7 @@ class SpacesAPI {
       shareSpace: async (spaceId, email, permission, options = {}) => {
         try {
           // Validate space exists
-          const space = this.storage.index.spaces.find(s => s.id === spaceId);
+          const space = this.storage.index.spaces.find((s) => s.id === spaceId);
           if (!space) {
             return { success: false, error: 'SPACE_NOT_FOUND', message: 'Space not found' };
           }
@@ -3394,7 +3383,7 @@ class SpacesAPI {
           }
 
           // Calculate TTL
-          const expiresAt = options.expiresIn ? Date.now() + (options.expiresIn * 1000) : null;
+          const expiresAt = options.expiresIn ? Date.now() + options.expiresIn * 1000 : null;
 
           // Write to graph
           let graphResult = null;
@@ -3409,13 +3398,13 @@ class SpacesAPI {
                 description: spaceMetadata?.attributes?.description || '',
                 icon: space.icon || '',
                 color: space.color || '#64c8ff',
-                visibility: spaceMetadata?.attributes?.visibility || 'private'
+                visibility: spaceMetadata?.attributes?.visibility || 'private',
               });
 
               graphResult = await client.shareWith('Space', spaceId, email, permission, {
                 expiresAt,
                 note: options.note || '',
-                grantedBy: client.currentUser
+                grantedBy: client.currentUser,
               });
             }
           } catch (graphError) {
@@ -3431,31 +3420,23 @@ class SpacesAPI {
             permission,
             grantedAt: new Date().toISOString(),
             expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
-            grantedBy: graphResult?.grantedBy || 'system'
+            grantedBy: graphResult?.grantedBy || 'system',
           };
 
           const spaceMetadata = this.storage.getSpaceMetadata(spaceId);
-          const sharedWith = (spaceMetadata?.communication?.sharedWith || [])
-            .filter(s => s.email !== email); // Remove existing entry for this email
+          const sharedWith = (spaceMetadata?.communication?.sharedWith || []).filter((s) => s.email !== email); // Remove existing entry for this email
           sharedWith.push(shareEntry);
 
           this.storage.updateSpaceMetadata(spaceId, {
-            communication: { ...spaceMetadata?.communication, sharedWith }
+            communication: { ...spaceMetadata?.communication, sharedWith },
           });
 
           this._emit('sharing:space:shared', { spaceId, email, permission });
 
-          // Include graph diagnostics
-          const client = getOmniGraphClient();
           return {
             success: true,
             share: shareEntry,
             graphSynced: graphResult !== null,
-            _debug: {
-              clientReady: client.isReady(),
-              schemaError: client._permissionSchemaError || null,
-              schemaEnsured: !!client._permissionSchemaEnsured
-            }
           };
         } catch (error) {
           log.error('spaces', 'Share space error', { error: error.message || error });
@@ -3485,10 +3466,9 @@ class SpacesAPI {
           // Update local metadata
           const spaceMetadata = this.storage.getSpaceMetadata(spaceId);
           if (spaceMetadata) {
-            const sharedWith = (spaceMetadata?.communication?.sharedWith || [])
-              .filter(s => s.email !== email);
+            const sharedWith = (spaceMetadata?.communication?.sharedWith || []).filter((s) => s.email !== email);
             this.storage.updateSpaceMetadata(spaceId, {
-              communication: { ...spaceMetadata?.communication, sharedWith }
+              communication: { ...spaceMetadata?.communication, sharedWith },
             });
           }
 
@@ -3523,19 +3503,21 @@ class SpacesAPI {
           if (!shares) {
             const spaceMetadata = this.storage.getSpaceMetadata(spaceId);
             const now = Date.now();
-            shares = (spaceMetadata?.communication?.sharedWith || [])
-              .filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
+            shares = (spaceMetadata?.communication?.sharedWith || []).filter(
+              (s) => !s.expiresAt || new Date(s.expiresAt).getTime() > now
+            );
           }
 
           // Prune expired entries from local metadata
           const spaceMetadata = this.storage.getSpaceMetadata(spaceId);
           if (spaceMetadata?.communication?.sharedWith?.length) {
             const now = Date.now();
-            const active = spaceMetadata.communication.sharedWith
-              .filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
+            const active = spaceMetadata.communication.sharedWith.filter(
+              (s) => !s.expiresAt || new Date(s.expiresAt).getTime() > now
+            );
             if (active.length !== spaceMetadata.communication.sharedWith.length) {
               this.storage.updateSpaceMetadata(spaceId, {
-                communication: { ...spaceMetadata.communication, sharedWith: active }
+                communication: { ...spaceMetadata.communication, sharedWith: active },
               });
             }
           }
@@ -3570,7 +3552,7 @@ class SpacesAPI {
             return { success: false, error: 'INVALID_EMAIL', message: 'Valid email address required' };
           }
 
-          const expiresAt = options.expiresIn ? Date.now() + (options.expiresIn * 1000) : null;
+          const expiresAt = options.expiresIn ? Date.now() + options.expiresIn * 1000 : null;
 
           // Write to graph
           let graphResult = null;
@@ -3580,7 +3562,7 @@ class SpacesAPI {
               graphResult = await client.shareWith('Asset', itemId, email, permission, {
                 expiresAt,
                 note: options.note || '',
-                grantedBy: client.currentUser
+                grantedBy: client.currentUser,
               });
             }
           } catch (graphError) {
@@ -3593,12 +3575,12 @@ class SpacesAPI {
             permission,
             grantedAt: new Date().toISOString(),
             expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
-            grantedBy: graphResult?.grantedBy || 'system'
+            grantedBy: graphResult?.grantedBy || 'system',
           };
 
           // Update item metadata with share info
           const metadata = this._getItemMetadataForSearch(itemId);
-          const shares = (metadata?.shares || []).filter(s => s.email !== email);
+          const shares = (metadata?.shares || []).filter((s) => s.email !== email);
           shares.push(shareEntry);
           this._updateItemMetadata(itemId, { shares });
 
@@ -3607,7 +3589,7 @@ class SpacesAPI {
           return {
             success: true,
             share: shareEntry,
-            graphSynced: graphResult !== null
+            graphSynced: graphResult !== null,
           };
         } catch (error) {
           log.error('spaces', 'Share asset error', { error: error.message || error });
@@ -3636,7 +3618,7 @@ class SpacesAPI {
           // Update item metadata
           const metadata = this._getItemMetadataForSearch(itemId);
           if (metadata) {
-            const shares = (metadata?.shares || []).filter(s => s.email !== email);
+            const shares = (metadata?.shares || []).filter((s) => s.email !== email);
             this._updateItemMetadata(itemId, { shares });
           }
 
@@ -3669,8 +3651,7 @@ class SpacesAPI {
           if (!shares) {
             const metadata = this._getItemMetadataForSearch(itemId);
             const now = Date.now();
-            shares = (metadata?.shares || [])
-              .filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
+            shares = (metadata?.shares || []).filter((s) => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
           }
 
           return { shares: shares || [] };
@@ -3702,7 +3683,143 @@ class SpacesAPI {
           log.error('spaces', 'Get shared with me error', { error: error.message || error });
           return { shares: [], error: error.message };
         }
+      },
+    };
+  }
+
+  // ============================================
+  // DISCOVERY (remote graph -> local import)
+  // ============================================
+
+  /**
+   * Discovery API namespace for finding remote spaces in the graph
+   * and importing them locally. Uses the user's email to query
+   * owned spaces and spaces shared with them.
+   */
+  get discovery() {
+    const { getOmniGraphClient } = require('./omnigraph-client');
+
+    const discoverRemoteSpaces = async () => {
+      try {
+        const client = getOmniGraphClient();
+        if (!client.isReady()) {
+          return { spaces: [], email: null, lastChecked: new Date().toISOString(), error: 'Graph not connected' };
+        }
+
+        const email = client.currentUser;
+        if (!email || !email.includes('@')) {
+          return {
+            spaces: [],
+            email: null,
+            lastChecked: new Date().toISOString(),
+            error: 'No valid user email configured',
+          };
+        }
+
+        const remoteSpaces = await client.discoverSpaces(email);
+
+        const localSpaces = await this.list();
+        const localIds = new Set(localSpaces.map((s) => s.id));
+
+        const newSpaces = remoteSpaces.filter((s) => !localIds.has(s.id));
+
+        return {
+          spaces: newSpaces,
+          email,
+          lastChecked: new Date().toISOString(),
+        };
+      } catch (error) {
+        log.error('spaces', 'Discovery error', { error: error.message || error });
+        return { spaces: [], email: null, lastChecked: new Date().toISOString(), error: error.message };
       }
+    };
+
+    const importRemoteSpace = async (remoteSpace) => {
+      try {
+        if (!remoteSpace || !remoteSpace.id) {
+          return { success: false, error: 'Missing space ID' };
+        }
+
+        const existing = await this.get(remoteSpace.id);
+        if (existing) {
+          return { success: false, error: 'Space already exists locally', spaceId: remoteSpace.id };
+        }
+
+        const space = this.storage.createSpace({
+          id: remoteSpace.id,
+          name: remoteSpace.name || remoteSpace.id,
+          icon: remoteSpace.icon || '◯',
+          color: remoteSpace.color || '#64c8ff',
+        });
+
+        this.storage.updateSpaceMetadata(space.id, {
+          system: {
+            syncStatus: 'remote',
+            lastSyncAt: new Date().toISOString(),
+          },
+          attributes: {
+            description: remoteSpace.description || '',
+            visibility: remoteSpace.visibility || 'private',
+          },
+          _discovery: {
+            source: remoteSpace.source || 'unknown',
+            importedAt: new Date().toISOString(),
+            permission: remoteSpace.permission || null,
+            grantedBy: remoteSpace.grantedBy || null,
+          },
+        });
+
+        log.info('spaces', 'Imported remote space', { spaceId: space.id, source: remoteSpace.source });
+        this._emit('space:created', { space });
+        this._emit('space:imported', { spaceId: space.id, source: remoteSpace.source });
+
+        return {
+          success: true,
+          space: {
+            id: space.id,
+            name: space.name,
+            icon: space.icon,
+            color: space.color,
+            source: remoteSpace.source,
+          },
+        };
+      } catch (error) {
+        log.error('spaces', 'Import remote space error', { error: error.message || error, spaceId: remoteSpace?.id });
+        return { success: false, error: error.message };
+      }
+    };
+
+    const importAll = async (remoteSpaces) => {
+      const results = { imported: [], skipped: [], failed: [] };
+
+      if (!Array.isArray(remoteSpaces) || remoteSpaces.length === 0) {
+        return results;
+      }
+
+      for (const remote of remoteSpaces) {
+        const result = await importRemoteSpace(remote);
+        if (result.success) {
+          results.imported.push(result.space);
+        } else if (result.error === 'Space already exists locally') {
+          results.skipped.push({ id: remote.id, reason: result.error });
+        } else {
+          results.failed.push({ id: remote.id, error: result.error });
+        }
+      }
+
+      log.info('spaces', 'Batch import complete', {
+        imported: results.imported.length,
+        skipped: results.skipped.length,
+        failed: results.failed.length,
+      });
+
+      return results;
+    };
+
+    return {
+      discoverRemoteSpaces,
+      importRemoteSpace,
+      importAll,
     };
   }
 
@@ -3729,7 +3846,7 @@ class SpacesAPI {
    * Force reload the index from disk
    * Use this when running external scripts or when you need to sync
    * with changes made by another process (e.g., the main app).
-   * 
+   *
    * @returns {void}
    * @example
    * // Reload before reading to ensure fresh data
@@ -3740,11 +3857,11 @@ class SpacesAPI {
     this.storage.reloadIndex();
     log.info('spaces', 'Index reloaded from disk');
   }
-  
+
   // ============================================
   // DUCKDB-POWERED ASYNC METHODS
   // ============================================
-  
+
   /**
    * Check if DuckDB is ready for queries
    * @returns {boolean} Whether DuckDB is initialized
@@ -3752,7 +3869,7 @@ class SpacesAPI {
   isDatabaseReady() {
     return this.storage.dbReady || false;
   }
-  
+
   /**
    * Wait for DuckDB to be ready
    * @returns {Promise<boolean>} True if ready, false if unavailable
@@ -3763,7 +3880,7 @@ class SpacesAPI {
     }
     return false;
   }
-  
+
   /**
    * Rebuild the database index from metadata.json files
    * Use this for recovery when the database is corrupted
@@ -3775,7 +3892,7 @@ class SpacesAPI {
     }
     throw new Error('rebuildIndexFromFiles not available');
   }
-  
+
   /**
    * Search using DuckDB (faster than JSON-based search for large datasets)
    * Falls back to regular search if DuckDB is not ready
@@ -3790,7 +3907,7 @@ class SpacesAPI {
     // Fallback to sync search
     return this.search(query, options);
   }
-  
+
   /**
    * Get all items with optional filtering using DuckDB
    * @param {Object} options - Filter options
@@ -3808,13 +3925,13 @@ class SpacesAPI {
     }
     // Fallback to sync method
     let items = this.storage.getAllItems();
-    if (options.type) items = items.filter(i => i.type === options.type);
-    if (options.spaceId) items = items.filter(i => i.spaceId === options.spaceId);
-    if (options.pinned !== undefined) items = items.filter(i => i.pinned === options.pinned);
+    if (options.type) items = items.filter((i) => i.type === options.type);
+    if (options.spaceId) items = items.filter((i) => i.spaceId === options.spaceId);
+    if (options.pinned !== undefined) items = items.filter((i) => i.pinned === options.pinned);
     if (options.limit) items = items.slice(options.offset || 0, (options.offset || 0) + options.limit);
     return items;
   }
-  
+
   /**
    * Search items by tags using DuckDB
    * @param {Array<string>} tags - Tags to search for
@@ -3828,7 +3945,7 @@ class SpacesAPI {
     // Fallback to sync search
     return this.tags.findItems(tags, { matchAll });
   }
-  
+
   /**
    * Get database status information
    * @returns {Object} Database status
@@ -3837,7 +3954,7 @@ class SpacesAPI {
     return {
       ready: this.storage.dbReady || false,
       path: this.storage.dbPath || null,
-      hasConnection: !!this.storage.dbConnection
+      hasConnection: !!this.storage.dbConnection,
     };
   }
 }
@@ -3858,6 +3975,5 @@ function getSpacesAPI() {
 
 module.exports = {
   SpacesAPI,
-  getSpacesAPI
+  getSpacesAPI,
 };
-

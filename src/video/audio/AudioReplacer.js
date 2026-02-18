@@ -40,7 +40,7 @@ export class AudioReplacer {
     // Get video info for progress calculations
     const videoInfo = await this.videoProcessor.getVideoInfo(videoPath);
     const totalDuration = videoInfo.duration;
-    
+
     log.info('video', 'AudioReplacer video duration', { totalDuration, minutes: (totalDuration / 60).toFixed(1) });
 
     // Get audio duration to check if it matches the video segment
@@ -52,7 +52,10 @@ export class AudioReplacer {
     });
 
     const audioDuration = audioInfo.format.duration;
-    log.info('video', 'AudioReplacer segment info', { segmentDuration: duration, generatedAudioDuration: audioDuration });
+    log.info('video', 'AudioReplacer segment info', {
+      segmentDuration: duration,
+      generatedAudioDuration: audioDuration,
+    });
 
     const tempDir = path.join(this.outputDir, `temp_${Date.now()}`);
     if (!fs.existsSync(tempDir)) {
@@ -72,14 +75,14 @@ export class AudioReplacer {
         progressCallback({
           jobId,
           status: 'Extracting video track (this may take a while for long videos)...',
-          percent: 5
+          percent: 5,
         });
       }
-      
+
       await new Promise((resolve, reject) => {
         ffmpeg(videoPath)
           .noAudio()
-          .videoCodec('copy')  // Just copy, don't re-encode!
+          .videoCodec('copy') // Just copy, don't re-encode!
           .output(videoOnly)
           .on('start', (cmd) => {
             log.info('video', 'AudioReplacer FFmpeg command', { cmd });
@@ -89,8 +92,8 @@ export class AudioReplacer {
               progressCallback({
                 jobId,
                 status: `Extracting video track... ${Math.round(progress.percent)}%`,
-                percent: 5 + (progress.percent * 0.15),
-                timemark: progress.timemark
+                percent: 5 + progress.percent * 0.15,
+                timemark: progress.timemark,
               });
             }
           })
@@ -108,13 +111,21 @@ export class AudioReplacer {
         progressCallback({
           jobId,
           status: 'Building audio track...',
-          percent: 25
+          percent: 25,
         });
       }
-      
+
       await this.buildReplacedAudioTrack(
-        videoPath, audioPath, startTime, endTime,
-        audioBefore, audioAfter, audioNew, audioFinal, progressCallback, totalDuration
+        videoPath,
+        audioPath,
+        startTime,
+        endTime,
+        audioBefore,
+        audioAfter,
+        audioNew,
+        audioFinal,
+        progressCallback,
+        totalDuration
       );
 
       // Step 3: Merge video and new audio
@@ -123,15 +134,15 @@ export class AudioReplacer {
         progressCallback({
           jobId,
           status: 'Merging video and audio (final step)...',
-          percent: 60
+          percent: 60,
         });
       }
-      
+
       await new Promise((resolve, reject) => {
         ffmpeg(videoOnly)
           .input(audioFinal)
           .audioCodec('aac')
-          .videoCodec('copy')  // Just copy video, don't re-encode!
+          .videoCodec('copy') // Just copy video, don't re-encode!
           .output(outputPath)
           .on('start', (cmd) => {
             log.info('video', 'AudioReplacer merging video and audio', { cmd });
@@ -143,8 +154,8 @@ export class AudioReplacer {
               progressCallback({
                 jobId,
                 status: `Merging audio and video... ${Math.round(percent)}%`,
-                percent: 60 + (percent * 0.4),
-                timemark: progress.timemark
+                percent: 60 + percent * 0.4,
+                timemark: progress.timemark,
               });
             }
           })
@@ -162,7 +173,6 @@ export class AudioReplacer {
 
       log.info('video', 'AudioReplacer audio replacement complete', { outputPath });
       return { success: true, outputPath, jobId };
-
     } catch (error) {
       log.error('video', 'AudioReplacer error', { error: error.message });
       this.cleanupTempDir(tempDir);
@@ -175,13 +185,27 @@ export class AudioReplacer {
    * Build audio track with replaced segment
    * @private
    */
-  async buildReplacedAudioTrack(videoPath, newAudioPath, startTime, endTime, audioBeforePath, audioAfterPath, audioNewPath, outputPath, progressCallback = null, totalDuration = null) {
+  async buildReplacedAudioTrack(
+    videoPath,
+    newAudioPath,
+    startTime,
+    endTime,
+    audioBeforePath,
+    audioAfterPath,
+    audioNewPath,
+    outputPath,
+    progressCallback = null,
+    totalDuration = null
+  ) {
     if (!totalDuration) {
       const videoInfo = await this.videoProcessor.getVideoInfo(videoPath);
       totalDuration = videoInfo.duration;
     }
-    
-    log.info('video', 'AudioReplacer building audio track', { hasBefore: startTime > 0.1, hasAfter: endTime < totalDuration - 0.1 });
+
+    log.info('video', 'AudioReplacer building audio track', {
+      hasBefore: startTime > 0.1,
+      hasAfter: endTime < totalDuration - 0.1,
+    });
 
     const promises = [];
 
@@ -191,7 +215,7 @@ export class AudioReplacer {
       if (progressCallback) {
         progressCallback({
           status: 'Extracting audio before segment...',
-          percent: 30
+          percent: 30,
         });
       }
       promises.push(
@@ -214,21 +238,21 @@ export class AudioReplacer {
 
     // Adjust new audio duration to match segment
     const segmentDuration = endTime - startTime;
-    
+
     const newAudioInfo = await new Promise((resolve, reject) => {
       ffmpeg.ffprobe(newAudioPath, (err, metadata) => {
         if (err) reject(err);
         else resolve(metadata);
       });
     });
-    
+
     const generatedDuration = newAudioInfo.format.duration;
     const tempoRatio = generatedDuration / segmentDuration;
-    
+
     // Only adjust tempo if there's a significant difference (>5%)
     if (Math.abs(tempoRatio - 1.0) > 0.05) {
       const audioFilter = this.buildTempoFilter(tempoRatio);
-      
+
       promises.push(
         new Promise((resolve, reject) => {
           ffmpeg(newAudioPath)
@@ -260,7 +284,7 @@ export class AudioReplacer {
       if (progressCallback) {
         progressCallback({
           status: 'Extracting audio after segment...',
-          percent: 40
+          percent: 40,
         });
       }
       promises.push(
@@ -286,7 +310,7 @@ export class AudioReplacer {
     if (progressCallback) {
       progressCallback({
         status: 'Concatenating audio segments...',
-        percent: 50
+        percent: 50,
       });
     }
 
@@ -307,7 +331,7 @@ export class AudioReplacer {
     // atempo must be between 0.5 and 2.0, so we might need multiple filters
     const tempoFilters = [];
     let currentRatio = tempoRatio;
-    
+
     while (currentRatio > 2.0) {
       tempoFilters.push('atempo=2.0');
       currentRatio /= 2.0;
@@ -319,7 +343,7 @@ export class AudioReplacer {
     if (currentRatio !== 1.0) {
       tempoFilters.push(`atempo=${currentRatio.toFixed(3)}`);
     }
-    
+
     return tempoFilters.join(',');
   }
 
@@ -329,7 +353,7 @@ export class AudioReplacer {
    */
   async concatenateAudioSegments(paths, outputPath, hasBefore, hasAfter) {
     const [audioBeforePath, audioNewPath, audioAfterPath] = paths;
-    
+
     return new Promise((resolve, reject) => {
       const inputs = [];
       if (hasBefore && fs.existsSync(audioBeforePath)) inputs.push(audioBeforePath);
@@ -349,7 +373,7 @@ export class AudioReplacer {
 
       // Create concat file list
       const concatFile = path.join(path.dirname(outputPath), 'concat.txt');
-      const concatContent = inputs.map(f => `file '${f}'`).join('\n');
+      const concatContent = inputs.map((f) => `file '${f}'`).join('\n');
       fs.writeFileSync(concatFile, concatContent);
 
       ffmpeg()
@@ -383,19 +407,3 @@ export class AudioReplacer {
     }
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -33,7 +33,7 @@ export class SceneDetector {
     const {
       minSceneDuration = 5, // Minimum scene duration in seconds
       silenceThreshold = -30, // dB threshold for silence detection
-      silenceDuration = 0.5 // Minimum silence duration to mark as scene break
+      silenceDuration = 0.5, // Minimum silence duration to mark as scene break
     } = options;
 
     log.info('video', '[SceneDetector] Detecting scenes in:', { v0: inputPath });
@@ -56,26 +56,26 @@ export class SceneDetector {
         .on('end', () => {
           try {
             let silencePoints = [];
-            
+
             if (fs.existsSync(tempFile)) {
               const content = fs.readFileSync(tempFile, 'utf8');
-              
+
               // Parse silence_start and silence_end from FFmpeg output
               const startMatches = content.matchAll(/silence_start:\s*([\d.]+)/g);
               const endMatches = content.matchAll(/silence_end:\s*([\d.]+)/g);
-              
-              const starts = [...startMatches].map(m => parseFloat(m[1]));
-              const ends = [...endMatches].map(m => parseFloat(m[1]));
-              
+
+              const starts = [...startMatches].map((m) => parseFloat(m[1]));
+              const ends = [...endMatches].map((m) => parseFloat(m[1]));
+
               // Combine into silence periods
               for (let i = 0; i < Math.min(starts.length, ends.length); i++) {
                 silencePoints.push({
                   start: starts[i],
                   end: ends[i],
-                  midpoint: (starts[i] + ends[i]) / 2
+                  midpoint: (starts[i] + ends[i]) / 2,
                 });
               }
-              
+
               fs.unlinkSync(tempFile);
             }
 
@@ -88,9 +88,8 @@ export class SceneDetector {
               success: true,
               scenes,
               totalDuration: duration,
-              silencePoints: silencePoints.length
+              silencePoints: silencePoints.length,
             });
-
           } catch (error) {
             reject(error);
           }
@@ -115,7 +114,7 @@ export class SceneDetector {
     for (const silence of silencePoints) {
       const sceneEnd = silence.midpoint;
       const sceneDuration = sceneEnd - sceneStart;
-      
+
       // Only create scene if it meets minimum duration
       if (sceneDuration >= minSceneDuration) {
         scenes.push({
@@ -126,7 +125,7 @@ export class SceneDetector {
           duration: sceneDuration,
           description: '',
           tags: [],
-          autoDetected: true
+          autoDetected: true,
         });
         sceneStart = sceneEnd;
       }
@@ -142,7 +141,7 @@ export class SceneDetector {
         duration: duration - sceneStart,
         description: '',
         tags: [],
-        autoDetected: true
+        autoDetected: true,
       });
     }
 
@@ -156,7 +155,7 @@ export class SceneDetector {
         duration: duration,
         description: '',
         tags: [],
-        autoDetected: true
+        autoDetected: true,
       });
     }
 
@@ -172,7 +171,7 @@ export class SceneDetector {
   async detectVisualScenes(inputPath, options = {}) {
     const {
       threshold = 0.4, // Scene change threshold (0-1)
-      minSceneDuration = 3
+      minSceneDuration = 3,
     } = options;
 
     const info = await this.videoProcessor.getVideoInfo(inputPath);
@@ -180,7 +179,7 @@ export class SceneDetector {
 
     return new Promise((resolve, reject) => {
       const sceneChanges = [];
-      
+
       ffmpeg(inputPath)
         .videoFilters(`select='gt(scene,${threshold})',showinfo`)
         .outputOptions(['-f', 'null'])
@@ -194,12 +193,12 @@ export class SceneDetector {
         })
         .on('end', () => {
           const scenes = this.buildScenesFromChanges(sceneChanges, duration, minSceneDuration);
-          
+
           resolve({
             success: true,
             scenes,
             totalDuration: duration,
-            changePoints: sceneChanges.length
+            changePoints: sceneChanges.length,
           });
         })
         .on('error', reject)
@@ -217,7 +216,7 @@ export class SceneDetector {
 
     for (const changePoint of changePoints) {
       const sceneDuration = changePoint - sceneStart;
-      
+
       if (sceneDuration >= minSceneDuration) {
         scenes.push({
           id: scenes.length + 1,
@@ -228,7 +227,7 @@ export class SceneDetector {
           description: '',
           tags: [],
           autoDetected: true,
-          method: 'visual'
+          method: 'visual',
         });
         sceneStart = changePoint;
       }
@@ -245,26 +244,10 @@ export class SceneDetector {
         description: '',
         tags: [],
         autoDetected: true,
-        method: 'visual'
+        method: 'visual',
       });
     }
 
     return scenes;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

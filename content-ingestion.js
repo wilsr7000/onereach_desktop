@@ -1,12 +1,12 @@
 /**
  * Content Ingestion Service
- * 
+ *
  * Unified layer for adding items to spaces from any entry point:
  * - Black Hole widget (drag-drop, paste)
  * - Clipboard Viewer (right-click paste)
  * - Smart Export
  * - GSX Create
- * 
+ *
  * Provides consistent validation, error handling, and retry logic.
  */
 
@@ -34,7 +34,7 @@ class ValidationError extends Error {
 
 /**
  * Content Ingestion Service
- * 
+ *
  * Singleton service that handles all content additions to spaces.
  */
 class ContentIngestionService {
@@ -56,7 +56,7 @@ class ContentIngestionService {
   _log(opId, level, message, data = {}) {
     const prefix = `[ContentIngestion:${opId}]`;
     const logData = { ...data, timestamp: new Date().toISOString() };
-    
+
     switch (level) {
       case 'error':
         console.error(prefix, message, logData);
@@ -78,7 +78,7 @@ class ContentIngestionService {
     if (!spaceId) {
       return true; // Will default to 'unclassified'
     }
-    
+
     if (spaceId === 'unclassified') {
       return true;
     }
@@ -86,9 +86,9 @@ class ContentIngestionService {
     // Check if space exists in the storage
     if (this.clipboardManager && this.clipboardManager.storage) {
       const spaces = this.clipboardManager.storage.index?.spaces || [];
-      return spaces.some(s => s.id === spaceId);
+      return spaces.some((s) => s.id === spaceId);
     }
-    
+
     // If we can't verify, allow it (fail open)
     return true;
   }
@@ -176,7 +176,7 @@ class ContentIngestionService {
 
     return {
       valid: errors.length === 0,
-      errors
+      errors,
     };
   }
 
@@ -247,7 +247,7 @@ class ContentIngestionService {
           try {
             const stats = fs.statSync(normalized.filePath);
             normalized.fileSize = stats.size;
-          } catch (e) {
+          } catch (_e) {
             // Ignore - fileSize is optional
           }
         }
@@ -266,11 +266,11 @@ class ContentIngestionService {
    */
   async addItem(type, data, options = {}) {
     const opId = this._getOperationId();
-    this._log(opId, 'info', `Adding ${type} item`, { 
+    this._log(opId, 'info', `Adding ${type} item`, {
       spaceId: data?.spaceId,
       hasContent: !!data?.content,
       hasFileData: !!data?.fileData,
-      fileName: data?.fileName
+      fileName: data?.fileName,
     });
 
     try {
@@ -281,20 +281,20 @@ class ContentIngestionService {
         return {
           success: false,
           error: validation.errors.join('; '),
-          code: 'VALIDATION_ERROR'
+          code: 'VALIDATION_ERROR',
         };
       }
 
       // Step 2: Normalize
       const normalizedData = this.normalizeInput(type, data);
-      this._log(opId, 'info', 'Data normalized', { 
+      this._log(opId, 'info', 'Data normalized', {
         spaceId: normalizedData.spaceId,
-        type 
+        type,
       });
 
       // Step 3: Add with retry
       const result = await this._addWithRetry(opId, type, normalizedData, options);
-      
+
       if (result.success) {
         this._log(opId, 'info', 'Item added successfully', { itemId: result.itemId });
       } else {
@@ -302,11 +302,10 @@ class ContentIngestionService {
       }
 
       return result;
-
     } catch (error) {
-      this._log(opId, 'error', 'Unexpected error', { 
+      this._log(opId, 'error', 'Unexpected error', {
         error: error.message,
-        stack: error.stack 
+        stack: error.stack,
       });
       return this.handleError(error, { opId, type, spaceId: data?.spaceId });
     }
@@ -325,20 +324,20 @@ class ContentIngestionService {
         return result;
       } catch (error) {
         lastError = error;
-        
+
         // Check if error is retryable
         if (!this._isRetryableError(error)) {
-          this._log(opId, 'warn', 'Non-retryable error, giving up', { 
+          this._log(opId, 'warn', 'Non-retryable error, giving up', {
             error: error.message,
-            attempt 
+            attempt,
           });
           break;
         }
 
         if (attempt < maxRetries) {
           const delay = RETRY_DELAY_BASE * attempt;
-          this._log(opId, 'warn', `Attempt ${attempt} failed, retrying in ${delay}ms`, { 
-            error: error.message 
+          this._log(opId, 'warn', `Attempt ${attempt} failed, retrying in ${delay}ms`, {
+            error: error.message,
           });
           await this._sleep(delay);
         }
@@ -353,16 +352,16 @@ class ContentIngestionService {
    */
   _isRetryableError(error) {
     if (!error) return false;
-    
+
     const message = error.message?.toLowerCase() || '';
-    
+
     // Retryable conditions
     return (
-      message.includes('ebusy') ||      // File busy
-      message.includes('enoent') ||     // File not found (might be timing)
-      message.includes('eagain') ||     // Resource temporarily unavailable
-      message.includes('timeout') ||    // Timeout
-      message.includes('lock') ||       // Lock contention
+      message.includes('ebusy') || // File busy
+      message.includes('enoent') || // File not found (might be timing)
+      message.includes('eagain') || // Resource temporarily unavailable
+      message.includes('timeout') || // Timeout
+      message.includes('lock') || // Lock contention
       error.code === 'EBUSY' ||
       error.code === 'EAGAIN'
     );
@@ -372,7 +371,9 @@ class ContentIngestionService {
    * Sleep helper
    */
   _sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   /**
@@ -389,7 +390,7 @@ class ContentIngestionService {
       try {
         const { getAssetPipeline } = require('./asset-pipeline');
         const pipeline = getAssetPipeline();
-        
+
         if (pipeline && pipeline.clipboardManager) {
           const pipelineInput = {
             type,
@@ -402,17 +403,17 @@ class ContentIngestionService {
             fileSize: data.fileSize,
             mimeType: data.mimeType,
             spaceId: data.spaceId,
-            source: data.source || 'content-ingestion'
+            source: data.source || 'content-ingestion',
           };
-          
+
           const result = await pipeline.process(pipelineInput, options);
-          
+
           if (result.success) {
             return {
               success: true,
               itemId: result.itemId,
               checksum: result.checksum,
-              pipeline: true
+              pipeline: true,
             };
           }
           // If pipeline fails, fall through to direct add
@@ -430,7 +431,7 @@ class ContentIngestionService {
       spaceId: data.spaceId,
       timestamp: data.timestamp || Date.now(),
       source: data.source || 'content-ingestion',
-      ...this._buildTypeSpecificFields(type, data)
+      ...this._buildTypeSpecificFields(type, data),
     };
 
     // Add metadata if provided
@@ -442,7 +443,7 @@ class ContentIngestionService {
     if (options.context) {
       item.metadata = {
         ...item.metadata,
-        context: options.context
+        context: options.context,
       };
     }
 
@@ -455,7 +456,7 @@ class ContentIngestionService {
 
     return {
       success: true,
-      itemId: addedItem?.id || 'unknown'
+      itemId: addedItem?.id || 'unknown',
     };
   }
 
@@ -469,7 +470,7 @@ class ContentIngestionService {
           content: data.content,
           text: data.content,
           plainText: data.content,
-          preview: data.content.substring(0, 200)
+          preview: data.content.substring(0, 200),
         };
 
       case 'html':
@@ -477,7 +478,7 @@ class ContentIngestionService {
           content: data.content || data.html,
           html: data.html || data.content,
           plainText: data.plainText || '',
-          preview: data.plainText?.substring(0, 200) || 'HTML Content'
+          preview: data.plainText?.substring(0, 200) || 'HTML Content',
         };
 
       case 'image':
@@ -485,7 +486,7 @@ class ContentIngestionService {
           content: data.content || data.dataUrl,
           dataUrl: data.dataUrl || data.content,
           preview: 'Image',
-          thumbnail: data.thumbnail
+          thumbnail: data.thumbnail,
         };
 
       case 'file':
@@ -497,20 +498,20 @@ class ContentIngestionService {
           fileType: data.fileType || data.mimeType,
           mimeType: data.mimeType || data.fileType,
           preview: data.fileName || 'File',
-          fileData: data.fileData
+          fileData: data.fileData,
         };
 
       case 'code':
         return {
           content: data.content,
           language: data.language || 'text',
-          preview: data.content.substring(0, 200)
+          preview: data.content.substring(0, 200),
         };
 
       default:
         return {
           content: data.content,
-          preview: String(data.content || '').substring(0, 200)
+          preview: String(data.content || '').substring(0, 200),
         };
     }
   }
@@ -530,7 +531,7 @@ class ContentIngestionService {
       code: error?.code,
       type,
       spaceId,
-      stack: error?.stack
+      stack: error?.stack,
     });
 
     // Return user-friendly error
@@ -543,7 +544,7 @@ class ContentIngestionService {
     } else if (error?.message) {
       // Map common errors to user-friendly messages
       const msg = error.message.toLowerCase();
-      
+
       if (msg.includes('disk') || msg.includes('enospc')) {
         userMessage = 'Disk is full. Please free up space and try again.';
         errorCode = 'DISK_FULL';
@@ -566,7 +567,7 @@ class ContentIngestionService {
       success: false,
       error: userMessage,
       code: errorCode,
-      details: error?.message
+      details: error?.message,
     };
   }
 
@@ -618,7 +619,7 @@ function resetContentIngestionService() {
 /**
  * Utility: Retry an async operation with exponential backoff
  * Use this for file operations that may have transient failures
- * 
+ *
  * @param {Function} operation - Async function to retry
  * @param {Object} options - Options
  * @param {number} options.maxRetries - Max attempts (default: 3)
@@ -629,19 +630,21 @@ function resetContentIngestionService() {
 async function retryOperation(operation, options = {}) {
   const maxRetries = options.maxRetries || MAX_RETRIES;
   const baseDelay = options.baseDelay || RETRY_DELAY_BASE;
-  const shouldRetry = options.shouldRetry || ((error) => {
-    if (!error) return false;
-    const msg = error.message?.toLowerCase() || '';
-    return (
-      msg.includes('ebusy') ||
-      msg.includes('enoent') ||
-      msg.includes('eagain') ||
-      msg.includes('timeout') ||
-      msg.includes('lock') ||
-      error.code === 'EBUSY' ||
-      error.code === 'EAGAIN'
-    );
-  });
+  const shouldRetry =
+    options.shouldRetry ||
+    ((error) => {
+      if (!error) return false;
+      const msg = error.message?.toLowerCase() || '';
+      return (
+        msg.includes('ebusy') ||
+        msg.includes('enoent') ||
+        msg.includes('eagain') ||
+        msg.includes('timeout') ||
+        msg.includes('lock') ||
+        error.code === 'EBUSY' ||
+        error.code === 'EAGAIN'
+      );
+    });
 
   let lastError = null;
 
@@ -650,14 +653,16 @@ async function retryOperation(operation, options = {}) {
       return await operation();
     } catch (error) {
       lastError = error;
-      
+
       if (!shouldRetry(error) || attempt >= maxRetries) {
         throw error;
       }
 
       const delay = baseDelay * attempt;
       console.log(`[ContentIngestion] Attempt ${attempt} failed, retrying in ${delay}ms:`, error.message);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise((resolve) => {
+        setTimeout(resolve, delay);
+      });
     }
   }
 
@@ -670,6 +675,5 @@ module.exports = {
   resetContentIngestionService,
   retryOperation,
   ValidationError,
-  VALID_TYPES
+  VALID_TYPES,
 };
-

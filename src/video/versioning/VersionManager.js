@@ -21,7 +21,7 @@ export const BRANCH_TYPES = {
   SOCIAL: 'social',
   EXTENDED: 'extended',
   TRAILER: 'trailer',
-  CUSTOM: 'custom'
+  CUSTOM: 'custom',
 };
 
 /**
@@ -33,7 +33,7 @@ export const BRANCH_TYPE_INFO = {
   social: { name: 'Social Media Cut', description: 'Short-form for platforms', icon: '📱' },
   extended: { name: 'Extended Cut', description: 'Behind-the-scenes, bonus content', icon: '➕' },
   trailer: { name: 'Trailer', description: 'Promotional cut', icon: '🎞️' },
-  custom: { name: 'Custom', description: 'User-defined purpose', icon: '✨' }
+  custom: { name: 'Custom', description: 'User-defined purpose', icon: '✨' },
 };
 
 /**
@@ -63,18 +63,18 @@ export class VersionManager {
   async createProject(sourceVideoPath, projectName) {
     const projectId = this.generateProjectId(projectName);
     const projectPath = path.join(this.projectsDir, projectId);
-    
+
     // Create project directory structure
     fs.mkdirSync(projectPath, { recursive: true });
     fs.mkdirSync(path.join(projectPath, 'source'), { recursive: true });
     fs.mkdirSync(path.join(projectPath, 'branches'), { recursive: true });
     fs.mkdirSync(path.join(projectPath, 'thumbnails'), { recursive: true });
-    
+
     // Copy source video
     const sourceFileName = path.basename(sourceVideoPath);
     const destSourcePath = path.join(projectPath, 'source', sourceFileName);
     fs.copyFileSync(sourceVideoPath, destSourcePath);
-    
+
     // Create project.json
     const project = {
       id: projectId,
@@ -83,22 +83,22 @@ export class VersionManager {
       originalSourcePath: sourceVideoPath,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      branches: []
+      branches: [],
     };
-    
+
     // Create default main branch
     const mainBranch = await this._createBranchInternal(projectPath, project, {
       name: 'Main Cut',
       type: BRANCH_TYPES.MAIN,
-      isDefault: true
+      isDefault: true,
     });
-    
+
     project.branches.push(mainBranch);
     project.currentBranch = mainBranch.id;
-    
+
     // Save project file
     this.saveProject(projectPath, project);
-    
+
     log.info('video', '[VersionManager] Created project:', { v0: projectId });
     return { projectPath, project };
   }
@@ -133,16 +133,16 @@ export class VersionManager {
    */
   getAllProjects() {
     const projects = [];
-    
+
     if (!fs.existsSync(this.projectsDir)) {
       return projects;
     }
-    
+
     const dirs = fs.readdirSync(this.projectsDir);
     for (const dir of dirs) {
       const projectPath = path.join(this.projectsDir, dir);
       const projectFile = path.join(projectPath, 'project.json');
-      
+
       if (fs.existsSync(projectFile)) {
         try {
           const project = JSON.parse(fs.readFileSync(projectFile, 'utf8'));
@@ -152,10 +152,8 @@ export class VersionManager {
         }
       }
     }
-    
-    return projects.sort((a, b) => 
-      new Date(b.project.updatedAt) - new Date(a.project.updatedAt)
-    );
+
+    return projects.sort((a, b) => new Date(b.project.updatedAt) - new Date(a.project.updatedAt));
   }
 
   /**
@@ -167,10 +165,10 @@ export class VersionManager {
   async createBranch(projectPath, options) {
     const project = this.loadProject(projectPath);
     const branch = await this._createBranchInternal(projectPath, project, options);
-    
+
     project.branches.push(branch);
     this.saveProject(projectPath, project);
-    
+
     log.info('video', '[VersionManager] Created branch:', { v0: branch.id });
     return branch;
   }
@@ -185,36 +183,36 @@ export class VersionManager {
       type = BRANCH_TYPES.CUSTOM,
       forkFromBranch = null,
       forkFromVersion = null,
-      isDefault = false
+      isDefault = false,
     } = options;
-    
+
     const branchId = this.generateBranchId(name);
     const branchPath = path.join(projectPath, 'branches', branchId);
-    
+
     // Create branch directories
     fs.mkdirSync(branchPath, { recursive: true });
     fs.mkdirSync(path.join(branchPath, 'edits'), { recursive: true });
     fs.mkdirSync(path.join(branchPath, 'releases'), { recursive: true });
-    
+
     // Determine source EDL if forking
     let sourceEdlPath = null;
     let sourceVersion = null;
-    
+
     if (forkFromBranch) {
-      const sourceBranch = project.branches.find(b => b.id === forkFromBranch);
+      const sourceBranch = project.branches.find((b) => b.id === forkFromBranch);
       if (sourceBranch) {
         sourceVersion = forkFromVersion || sourceBranch.currentVersion;
-        const sourceVersionData = sourceBranch.versions.find(v => v.version === sourceVersion);
+        const sourceVersionData = sourceBranch.versions.find((v) => v.version === sourceVersion);
         if (sourceVersionData) {
           sourceEdlPath = path.join(projectPath, sourceVersionData.edlPath);
         }
       }
     }
-    
+
     // Create initial version
     const initialEdlPath = `branches/${branchId}/edits/v1.0.edl`;
     const fullEdlPath = path.join(projectPath, initialEdlPath);
-    
+
     // Create EDL content (copy from source or create new)
     let edlContent;
     if (sourceEdlPath && fs.existsSync(sourceEdlPath)) {
@@ -224,11 +222,11 @@ export class VersionManager {
       // Create default EDL that includes entire source video
       edlContent = this._createDefaultEDL(project);
     }
-    
+
     edlContent.createdAt = new Date().toISOString();
     edlContent.version = '1.0';
     fs.writeFileSync(fullEdlPath, JSON.stringify(edlContent, null, 2));
-    
+
     const branch = {
       id: branchId,
       name: name,
@@ -239,22 +237,22 @@ export class VersionManager {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       currentVersion: '1.0',
-      versions: [{
-        version: '1.0',
-        createdAt: new Date().toISOString(),
-        edlPath: initialEdlPath,
-        message: forkFromBranch 
-          ? `Forked from ${forkFromBranch} v${sourceVersion}`
-          : 'Initial version',
-        releasePath: null,
-        released: false
-      }]
+      versions: [
+        {
+          version: '1.0',
+          createdAt: new Date().toISOString(),
+          edlPath: initialEdlPath,
+          message: forkFromBranch ? `Forked from ${forkFromBranch} v${sourceVersion}` : 'Initial version',
+          releasePath: null,
+          released: false,
+        },
+      ],
     };
-    
+
     // Save branch metadata
     const branchMetaPath = path.join(branchPath, 'branch.json');
     fs.writeFileSync(branchMetaPath, JSON.stringify(branch, null, 2));
-    
+
     return branch;
   }
 
@@ -272,12 +270,12 @@ export class VersionManager {
           id: 'seg_001',
           startTime: 0,
           endTime: null, // null means end of video
-          type: 'include'
-        }
+          type: 'include',
+        },
       ],
       markers: [],
       audioTracks: [],
-      effects: []
+      effects: [],
     };
   }
 
@@ -291,22 +289,22 @@ export class VersionManager {
    */
   async saveVersion(projectPath, branchId, edlData, message = '') {
     const project = this.loadProject(projectPath);
-    const branch = project.branches.find(b => b.id === branchId);
-    
+    const branch = project.branches.find((b) => b.id === branchId);
+
     if (!branch) {
       throw new Error(`Branch not found: ${branchId}`);
     }
-    
+
     // Increment version
     const newVersion = this.incrementVersion(branch.currentVersion);
     const edlPath = `branches/${branchId}/edits/v${newVersion}.edl`;
     const fullEdlPath = path.join(projectPath, edlPath);
-    
+
     // Save EDL
     edlData.version = newVersion;
     edlData.createdAt = new Date().toISOString();
     fs.writeFileSync(fullEdlPath, JSON.stringify(edlData, null, 2));
-    
+
     // Create version entry
     const versionEntry = {
       version: newVersion,
@@ -314,15 +312,15 @@ export class VersionManager {
       edlPath: edlPath,
       message: message || `Version ${newVersion}`,
       releasePath: null,
-      released: false
+      released: false,
     };
-    
+
     branch.versions.push(versionEntry);
     branch.currentVersion = newVersion;
     branch.updatedAt = new Date().toISOString();
-    
+
     this.saveProject(projectPath, project);
-    
+
     log.info('video', '[VersionManager] Saved version for branch', { v0: newVersion, v1: branchId });
     return versionEntry;
   }
@@ -336,26 +334,26 @@ export class VersionManager {
    */
   markVersionReleased(projectPath, branchId, version, releasePath) {
     const project = this.loadProject(projectPath);
-    const branch = project.branches.find(b => b.id === branchId);
-    
+    const branch = project.branches.find((b) => b.id === branchId);
+
     if (!branch) {
       throw new Error(`Branch not found: ${branchId}`);
     }
-    
-    const versionData = branch.versions.find(v => v.version === version);
+
+    const versionData = branch.versions.find((v) => v.version === version);
     if (!versionData) {
       throw new Error(`Version not found: ${version}`);
     }
-    
+
     // Store relative path
     const relativePath = path.relative(projectPath, releasePath);
     versionData.releasePath = relativePath;
     versionData.released = true;
     versionData.releasedAt = new Date().toISOString();
-    
+
     branch.updatedAt = new Date().toISOString();
     this.saveProject(projectPath, project);
-    
+
     log.info('video', '[VersionManager] Marked v as released', { v0: branchId, v1: version });
   }
 
@@ -367,22 +365,20 @@ export class VersionManager {
    */
   getLatestVersion(projectPath, branchId) {
     const project = this.loadProject(projectPath);
-    const branch = project.branches.find(b => b.id === branchId);
-    
+    const branch = project.branches.find((b) => b.id === branchId);
+
     if (!branch) {
       throw new Error(`Branch not found: ${branchId}`);
     }
-    
+
     const latestVersion = branch.versions[branch.versions.length - 1];
-    const releasePath = latestVersion.releasePath 
-      ? path.join(projectPath, latestVersion.releasePath)
-      : null;
-    
+    const releasePath = latestVersion.releasePath ? path.join(projectPath, latestVersion.releasePath) : null;
+
     return {
       branch: branch,
       version: latestVersion,
       hasRenderedFile: releasePath && fs.existsSync(releasePath),
-      fullReleasePath: releasePath
+      fullReleasePath: releasePath,
     };
   }
 
@@ -393,9 +389,9 @@ export class VersionManager {
    */
   getBranches(projectPath) {
     const project = this.loadProject(projectPath);
-    return project.branches.map(branch => ({
+    return project.branches.map((branch) => ({
       ...branch,
-      typeInfo: BRANCH_TYPE_INFO[branch.type] || BRANCH_TYPE_INFO.custom
+      typeInfo: BRANCH_TYPE_INFO[branch.type] || BRANCH_TYPE_INFO.custom,
     }));
   }
 
@@ -407,15 +403,15 @@ export class VersionManager {
    */
   getBranch(projectPath, branchId) {
     const project = this.loadProject(projectPath);
-    const branch = project.branches.find(b => b.id === branchId);
-    
+    const branch = project.branches.find((b) => b.id === branchId);
+
     if (!branch) {
       throw new Error(`Branch not found: ${branchId}`);
     }
-    
+
     return {
       ...branch,
-      typeInfo: BRANCH_TYPE_INFO[branch.type] || BRANCH_TYPE_INFO.custom
+      typeInfo: BRANCH_TYPE_INFO[branch.type] || BRANCH_TYPE_INFO.custom,
     };
   }
 
@@ -426,42 +422,42 @@ export class VersionManager {
    */
   deleteBranch(projectPath, branchId) {
     const project = this.loadProject(projectPath);
-    const branchIndex = project.branches.findIndex(b => b.id === branchId);
-    
+    const branchIndex = project.branches.findIndex((b) => b.id === branchId);
+
     if (branchIndex === -1) {
       throw new Error(`Branch not found: ${branchId}`);
     }
-    
+
     const branch = project.branches[branchIndex];
-    
+
     // Prevent deleting default branch
     if (branch.isDefault) {
       throw new Error('Cannot delete the default branch');
     }
-    
+
     // Prevent deleting if other branches depend on it
-    const dependentBranches = project.branches.filter(b => b.parentBranch === branchId);
+    const dependentBranches = project.branches.filter((b) => b.parentBranch === branchId);
     if (dependentBranches.length > 0) {
       throw new Error(`Cannot delete branch: ${dependentBranches.length} other branches depend on it`);
     }
-    
+
     // Delete branch directory
     const branchPath = path.join(projectPath, 'branches', branchId);
     if (fs.existsSync(branchPath)) {
       fs.rmSync(branchPath, { recursive: true, force: true });
     }
-    
+
     // Remove from project
     project.branches.splice(branchIndex, 1);
-    
+
     // Update current branch if needed
     if (project.currentBranch === branchId) {
-      const defaultBranch = project.branches.find(b => b.isDefault);
+      const defaultBranch = project.branches.find((b) => b.isDefault);
       project.currentBranch = defaultBranch?.id || project.branches[0]?.id;
     }
-    
+
     this.saveProject(projectPath, project);
-    
+
     log.info('video', '[VersionManager] Deleted branch:', { v0: branchId });
   }
 
@@ -474,24 +470,24 @@ export class VersionManager {
    */
   loadEDL(projectPath, branchId, version = null) {
     const project = this.loadProject(projectPath);
-    const branch = project.branches.find(b => b.id === branchId);
-    
+    const branch = project.branches.find((b) => b.id === branchId);
+
     if (!branch) {
       throw new Error(`Branch not found: ${branchId}`);
     }
-    
+
     const targetVersion = version || branch.currentVersion;
-    const versionData = branch.versions.find(v => v.version === targetVersion);
-    
+    const versionData = branch.versions.find((v) => v.version === targetVersion);
+
     if (!versionData) {
       throw new Error(`Version not found: ${targetVersion}`);
     }
-    
+
     const edlPath = path.join(projectPath, versionData.edlPath);
     if (!fs.existsSync(edlPath)) {
       throw new Error(`EDL file not found: ${edlPath}`);
     }
-    
+
     return JSON.parse(fs.readFileSync(edlPath, 'utf8'));
   }
 
@@ -500,7 +496,8 @@ export class VersionManager {
    * @private
    */
   generateProjectId(name) {
-    const slug = name.toLowerCase()
+    const slug = name
+      .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '')
       .substring(0, 30);
@@ -512,7 +509,8 @@ export class VersionManager {
    * @private
    */
   generateBranchId(name) {
-    const slug = name.toLowerCase()
+    const slug = name
+      .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '')
       .substring(0, 20);
@@ -526,24 +524,13 @@ export class VersionManager {
   incrementVersion(version) {
     const parts = version.split('.').map(Number);
     parts[parts.length - 1]++;
-    
+
     // Roll over if minor version reaches 10
     if (parts.length > 1 && parts[parts.length - 1] >= 10) {
       parts[parts.length - 1] = 0;
       parts[parts.length - 2]++;
     }
-    
+
     return parts.join('.');
   }
 }
-
-
-
-
-
-
-
-
-
-
-

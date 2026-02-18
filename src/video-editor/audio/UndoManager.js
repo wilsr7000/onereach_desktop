@@ -1,6 +1,6 @@
 /**
  * UndoManager - Manages undo/redo history for audio editing operations
- * 
+ *
  * Features:
  * - Full history stack with configurable depth
  * - State snapshots with descriptions
@@ -15,13 +15,13 @@ export class UndoManager {
     this.maxHistory = options.maxHistory || 50;
     this.undoStack = [];
     this.redoStack = [];
-    
+
     // Optional callback when state changes
     this.onStateChange = options.onStateChange || null;
-    
+
     log.info('video', '[UndoManager] Initialized with maxHistory', { data: this.maxHistory });
   }
-  
+
   /**
    * Push a new state to the undo stack
    * @param {object} state - The state to save (will be deep-cloned)
@@ -32,24 +32,24 @@ export class UndoManager {
     const snapshot = {
       state: JSON.parse(JSON.stringify(state)),
       description,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
-    
+
     this.undoStack.push(snapshot);
-    
+
     // Clear redo stack when new action is performed
     this.redoStack = [];
-    
+
     // Limit history size
     if (this.undoStack.length > this.maxHistory) {
       this.undoStack.shift(); // Remove oldest
     }
-    
+
     log.info('video', '[UndoManager] Pushed state: "" (stack: )', { v0: description, v1: this.undoStack.length });
-    
+
     this._notifyStateChange();
   }
-  
+
   /**
    * Undo the last action
    * @returns {object|null} The previous state, or null if nothing to undo
@@ -59,21 +59,25 @@ export class UndoManager {
       log.info('video', '[UndoManager] Nothing to undo');
       return null;
     }
-    
+
     // Pop current state and move to redo stack
     const current = this.undoStack.pop();
     this.redoStack.push(current);
-    
+
     // Get the previous state (or null if we've undone everything)
     const previousState = this.undoStack[this.undoStack.length - 1]?.state || null;
-    
-    log.info('video', '[UndoManager] Undo: "" (undo: , redo: )', { v0: current.description, v1: this.undoStack.length, v2: this.redoStack.length });
-    
+
+    log.info('video', '[UndoManager] Undo: "" (undo: , redo: )', {
+      v0: current.description,
+      v1: this.undoStack.length,
+      v2: this.redoStack.length,
+    });
+
     this._notifyStateChange();
-    
+
     return previousState;
   }
-  
+
   /**
    * Redo the last undone action
    * @returns {object|null} The redone state, or null if nothing to redo
@@ -83,31 +87,35 @@ export class UndoManager {
       log.info('video', '[UndoManager] Nothing to redo');
       return null;
     }
-    
+
     const state = this.redoStack.pop();
     this.undoStack.push(state);
-    
-    log.info('video', '[UndoManager] Redo: "" (undo: , redo: )', { v0: state.description, v1: this.undoStack.length, v2: this.redoStack.length });
-    
+
+    log.info('video', '[UndoManager] Redo: "" (undo: , redo: )', {
+      v0: state.description,
+      v1: this.undoStack.length,
+      v2: this.redoStack.length,
+    });
+
     this._notifyStateChange();
-    
+
     return state.state;
   }
-  
+
   /**
    * Check if undo is available
    */
   canUndo() {
     return this.undoStack.length > 0;
   }
-  
+
   /**
    * Check if redo is available
    */
   canRedo() {
     return this.redoStack.length > 0;
   }
-  
+
   /**
    * Get the description of the next undo action
    */
@@ -115,7 +123,7 @@ export class UndoManager {
     if (this.undoStack.length === 0) return null;
     return this.undoStack[this.undoStack.length - 1].description;
   }
-  
+
   /**
    * Get the description of the next redo action
    */
@@ -123,7 +131,7 @@ export class UndoManager {
     if (this.redoStack.length === 0) return null;
     return this.redoStack[this.redoStack.length - 1].description;
   }
-  
+
   /**
    * Get the current stack sizes
    */
@@ -134,10 +142,10 @@ export class UndoManager {
       canUndo: this.canUndo(),
       canRedo: this.canRedo(),
       nextUndo: this.getUndoDescription(),
-      nextRedo: this.getRedoDescription()
+      nextRedo: this.getRedoDescription(),
     };
   }
-  
+
   /**
    * Clear all history
    */
@@ -147,7 +155,7 @@ export class UndoManager {
     log.info('video', '[UndoManager] History cleared');
     this._notifyStateChange();
   }
-  
+
   /**
    * Get the full undo history (for debugging/display)
    */
@@ -155,10 +163,10 @@ export class UndoManager {
     return this.undoStack.map((s, i) => ({
       index: i,
       description: s.description,
-      timestamp: s.timestamp
+      timestamp: s.timestamp,
     }));
   }
-  
+
   /**
    * Notify listeners of state change
    */
@@ -167,7 +175,7 @@ export class UndoManager {
       this.onStateChange(this.getStackInfo());
     }
   }
-  
+
   /**
    * Dispose of resources
    */
@@ -178,13 +186,3 @@ export class UndoManager {
     log.info('video', '[UndoManager] Disposed');
   }
 }
-
-
-
-
-
-
-
-
-
-

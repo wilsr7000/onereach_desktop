@@ -1,6 +1,6 @@
 /**
  * LineScriptPanel.js - Main UI for Enhanced Line Script System
- * 
+ *
  * Features:
  * - Adaptive view modes (Spotting, Edit, Review, Export)
  * - Template-based rendering (Podcast, Product, Promo, Learning)
@@ -9,7 +9,7 @@
  * - Marker integration with visual feedback
  */
 
-import { ContentTemplates, getTemplate, getAllTemplates } from './ContentTemplates.js';
+import { ContentTemplates, getAllTemplates } from './ContentTemplates.js';
 import { ProductionScriptManager } from './ProductionScript.js';
 import { ProductionScriptUI, renderProductionScriptFormat } from './ProductionScriptUI.js';
 
@@ -17,11 +17,11 @@ import { ProductionScriptUI, renderProductionScriptFormat } from './ProductionSc
  * View modes for the Line Script panel
  */
 export const VIEW_MODES = {
-  SPOTTING: 'spotting',   // Minimal UI, large timecode, voice status - for marking while watching
-  EDIT: 'edit',           // Full controls, metadata fields - for editing markers
-  REVIEW: 'review',       // Thumbnails, quick preview - for reviewing marked content
+  SPOTTING: 'spotting', // Minimal UI, large timecode, voice status - for marking while watching
+  EDIT: 'edit', // Full controls, metadata fields - for editing markers
+  REVIEW: 'review', // Thumbnails, quick preview - for reviewing marked content
   PRODUCTION: 'production', // Camera angles, shots, technical directions - for production scripts
-  EXPORT: 'export'        // EDL format, technical notes - for export preparation
+  EXPORT: 'export', // EDL format, technical notes - for export preparation
 };
 
 /**
@@ -30,26 +30,26 @@ export const VIEW_MODES = {
 export class LineScriptPanel {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Template management
     this.contentTemplates = new ContentTemplates();
     this.currentTemplateId = 'podcast';
-    
+
     // View mode
     this.viewMode = VIEW_MODES.SPOTTING;
     this.modeLocked = false;
-    
+
     // Content state
     this.words = [];
     this.markers = [];
     this.dialogueBlocks = [];
     this.speakers = [];
     this.transcriptSegments = [];
-    
+
     // Production script management
     this.productionScriptManager = new ProductionScriptManager();
     this.productionScriptUI = new ProductionScriptUI(appContext, this.productionScriptManager);
-    
+
     // UI state
     this.visible = false;
     this.autoScroll = true;
@@ -58,24 +58,24 @@ export class LineScriptPanel {
     this.highlightedWordIndex = -1;
     this.renderedRangeStart = -1;
     this.renderedRangeEnd = -1;
-    
+
     // Pending range marker
     this.pendingInPoint = null;
-    
+
     // AI metadata generation state
     this.aiGenerating = false;
     this.aiProgress = { current: 0, total: 0 };
-    
+
     // DOM elements
     this.container = null;
     this.contentArea = null;
     this.headerArea = null;
     this.footerArea = null;
     this.modeIndicator = null;
-    
+
     // Event emitter for cross-view sync
     this.eventListeners = {};
-    
+
     // Bind methods
     this.handleTimeUpdate = this.handleTimeUpdate.bind(this);
     this.handlePlayStateChange = this.handlePlayStateChange.bind(this);
@@ -109,25 +109,23 @@ export class LineScriptPanel {
    * Initialize the panel
    */
   init() {
-    this.container = document.getElementById('lineScriptPanel') || 
-                     document.getElementById('storyBeatsEditorContainer');
-    
-    
+    this.container = document.getElementById('lineScriptPanel') || document.getElementById('storyBeatsEditorContainer');
+
     if (!this.container) {
       window.logging.warn('video', 'LineScriptPanel Container not found');
       return;
     }
-    
+
     // Load initial data
     this.loadTranscriptData();
     this.loadMarkers();
-    
+
     // Setup event listeners
     this.setupEventListeners();
-    
+
     // Initial render
     this.render();
-    
+
     window.logging.info('video', 'LineScriptPanel Initialized with template', { data: this.currentTemplateId });
   }
 
@@ -138,7 +136,7 @@ export class LineScriptPanel {
     // Store bound handlers so they can be removed later
     this._boundHandlePlay = () => this.handlePlayStateChange(true);
     this._boundHandlePause = () => this.handlePlayStateChange(false);
-    
+
     // Video time updates
     const video = this.getVideo();
     if (video) {
@@ -146,10 +144,10 @@ export class LineScriptPanel {
       video.addEventListener('play', this._boundHandlePlay);
       video.addEventListener('pause', this._boundHandlePause);
     }
-    
+
     // Keyboard shortcuts
     document.addEventListener('keydown', this.handleKeyDown);
-    
+
     // Marker events from MarkerManager
     if (this.app.markerManager) {
       // Subscribe to marker changes
@@ -185,8 +183,8 @@ export class LineScriptPanel {
    */
   showMarkerFeedback(marker) {
     const template = this.contentTemplates.getCurrent();
-    const markerType = template.markerTypes.find(m => m.id === marker.markerType);
-    
+    const markerType = template.markerTypes.find((m) => m.id === marker.markerType);
+
     if (markerType) {
       this.showToast(`${markerType.icon} ${markerType.name} added`, 'success');
     } else {
@@ -198,40 +196,49 @@ export class LineScriptPanel {
    * Load transcript data
    */
   loadTranscriptData() {
-    
     // Get transcript from app context - check both the appContext and the main app object
     // The main app (this.app.app) has the live data, appContext may have stale snapshot
     const mainApp = this.app.app || this.app;
-    
-    
+
     // Priority 1: Live teleprompter words from main app
     if (mainApp.teleprompterWords?.length > 0) {
       this.words = [...mainApp.teleprompterWords];
-      window.logging.info('video', 'LineScriptPanel Loaded', { data: this.words.length, 'words from main app teleprompterWords' });
-    } 
+      window.logging.info('video', 'LineScriptPanel Loaded', {
+        wordCount: this.words.length,
+        source: 'teleprompterWords',
+      });
+    }
     // Priority 2: Live transcript segments from main app
     else if (mainApp.transcriptSegments?.length > 0) {
       this.transcriptSegments = mainApp.transcriptSegments;
       this.words = this.expandTranscriptToWords(this.transcriptSegments);
-      window.logging.info('video', 'LineScriptPanel Loaded', { data: this.words.length, 'words from main app transcriptSegments' });
+      window.logging.info('video', 'LineScriptPanel Loaded', {
+        wordCount: this.words.length,
+        source: 'transcriptSegments',
+      });
     }
     // Priority 3: Check appContext snapshot (fallback)
     else if (this.app.teleprompterWords?.length > 0) {
       this.words = [...this.app.teleprompterWords];
-      window.logging.info('video', 'LineScriptPanel Loaded', { data: this.words.length, 'words from appContext teleprompterWords' });
+      window.logging.info('video', 'LineScriptPanel Loaded', {
+        wordCount: this.words.length,
+        source: 'appContext.teleprompterWords',
+      });
     } else if (this.app.transcriptSegments?.length > 0) {
       this.transcriptSegments = this.app.transcriptSegments;
       this.words = this.expandTranscriptToWords(this.transcriptSegments);
-      window.logging.info('video', 'LineScriptPanel Loaded', { data: this.words.length, 'words from appContext transcriptSegments' });
+      window.logging.info('video', 'LineScriptPanel Loaded', {
+        wordCount: this.words.length,
+        source: 'appContext.transcriptSegments',
+      });
     } else {
       this.words = [];
       window.logging.info('video', 'LineScriptPanel No transcript data available');
     }
-    
-    
+
     // Get speakers from main app or appContext
     this.speakers = mainApp.speakers || this.app.speakers || [];
-    
+
     // Parse dialogue blocks
     this.parseDialogueBlocks();
   }
@@ -243,34 +250,34 @@ export class LineScriptPanel {
    */
   expandTranscriptToWords(segments) {
     const words = [];
-    
-    segments.forEach(segment => {
+
+    segments.forEach((segment) => {
       const text = (segment.text || segment.word || '').trim();
       const startTime = segment.start || 0;
-      const endTime = segment.end || (startTime + 1);
+      const endTime = segment.end || startTime + 1;
       const speaker = segment.speaker || null;
-      
+
       if (!text.includes(' ')) {
         if (text.length > 0) {
           words.push({ text, start: startTime, end: endTime, speaker });
         }
         return;
       }
-      
-      const segmentWords = text.split(/\s+/).filter(w => w.length > 0);
+
+      const segmentWords = text.split(/\s+/).filter((w) => w.length > 0);
       const segmentDuration = endTime - startTime;
       const wordDuration = segmentDuration / segmentWords.length;
-      
+
       segmentWords.forEach((word, i) => {
         words.push({
           text: word,
-          start: startTime + (i * wordDuration),
-          end: startTime + ((i + 1) * wordDuration),
-          speaker
+          start: startTime + i * wordDuration,
+          end: startTime + (i + 1) * wordDuration,
+          speaker,
         });
       });
     });
-    
+
     return words;
   }
 
@@ -279,18 +286,18 @@ export class LineScriptPanel {
    */
   parseDialogueBlocks() {
     this.dialogueBlocks = [];
-    
+
     if (this.words.length === 0) return;
-    
+
     const WORDS_PER_BLOCK = 25;
     let blockWords = [];
     let blockStartIdx = 0;
     let currentSpeaker = null;
-    
+
     this.words.forEach((word, idx) => {
       // Check for speaker change
       const speakerChanged = word.speaker !== currentSpeaker && word.speaker;
-      
+
       if (speakerChanged && blockWords.length > 0) {
         // Save current block
         this.dialogueBlocks.push({
@@ -299,27 +306,27 @@ export class LineScriptPanel {
           wordStartIdx: blockStartIdx,
           wordEndIdx: idx - 1,
           startTime: this.words[blockStartIdx].start,
-          endTime: this.words[idx - 1].end
+          endTime: this.words[idx - 1].end,
         });
-        
+
         blockWords = [];
         blockStartIdx = idx;
       }
-      
+
       if (word.speaker) {
         currentSpeaker = word.speaker;
         if (!this.speakers.includes(word.speaker)) {
           this.speakers.push(word.speaker);
         }
       }
-      
+
       blockWords.push(word.text);
-      
+
       // Create block at sentence end or word limit
       const isEndOfSentence = /[.!?]$/.test(word.text);
       const isLastWord = idx === this.words.length - 1;
       const isBlockFull = blockWords.length >= WORDS_PER_BLOCK;
-      
+
       if ((isEndOfSentence && blockWords.length >= 8) || isBlockFull || isLastWord) {
         this.dialogueBlocks.push({
           speaker: currentSpeaker,
@@ -327,7 +334,7 @@ export class LineScriptPanel {
           wordStartIdx: blockStartIdx,
           wordEndIdx: idx,
           startTime: this.words[blockStartIdx].start,
-          endTime: word.end
+          endTime: word.end,
         });
         blockWords = [];
         blockStartIdx = idx + 1;
@@ -345,14 +352,14 @@ export class LineScriptPanel {
     } else {
       this.markers = this.app.markers || [];
     }
-    
+
     // Sort by time
     this.markers.sort((a, b) => {
-      const aTime = a.type === 'range' ? a.inTime : (a.time || 0);
-      const bTime = b.type === 'range' ? b.inTime : (b.time || 0);
+      const aTime = a.type === 'range' ? a.inTime : a.time || 0;
+      const bTime = b.type === 'range' ? b.inTime : b.time || 0;
       return aTime - bTime;
     });
-    
+
     // Re-render if visible
     if (this.visible) {
       this.render();
@@ -365,18 +372,18 @@ export class LineScriptPanel {
    */
   handleTimeUpdate(e) {
     this.currentTime = e.target.currentTime;
-    
+
     // Update word highlighting
     this.updateWordHighlight();
-    
+
     // Auto-scroll if enabled
     if (this.autoScroll && this.isPlaying) {
       this.scrollToCurrentTime();
     }
-    
+
     // Update timecode display
     this.updateTimecodeDisplay();
-    
+
     // Update production script UI current time
     if (this.productionScriptUI) {
       this.productionScriptUI.setCurrentTime(this.currentTime);
@@ -389,7 +396,7 @@ export class LineScriptPanel {
    */
   handlePlayStateChange(playing) {
     this.isPlaying = playing;
-    
+
     // Auto-switch to spotting mode when playing
     if (playing && !this.modeLocked) {
       this.setViewMode(VIEW_MODES.SPOTTING);
@@ -402,19 +409,19 @@ export class LineScriptPanel {
    */
   handleKeyDown(e) {
     if (!this.visible) return;
-    
+
     // Don't capture if typing in an input
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    
+
     const template = this.contentTemplates.getCurrent();
     const shortcut = template.keyboardShortcuts[e.key.toLowerCase()];
-    
+
     if (shortcut) {
       e.preventDefault();
       this.executeAction(shortcut.action);
       return;
     }
-    
+
     // Global shortcuts
     switch (e.key.toLowerCase()) {
       case ' ':
@@ -433,7 +440,7 @@ export class LineScriptPanel {
    */
   executeAction(action) {
     const time = this.currentTime;
-    
+
     switch (action) {
       case 'addPointMarker':
         this.addMarker('spot', time);
@@ -468,23 +475,23 @@ export class LineScriptPanel {
       window.logging.warn('video', 'LineScriptPanel MarkerManager not available');
       return;
     }
-    
+
     const template = this.contentTemplates.getCurrent();
-    const markerTypeDef = template.markerTypes.find(m => m.id === metadata.markerType);
-    
+    const markerTypeDef = template.markerTypes.find((m) => m.id === metadata.markerType);
+
     const name = metadata.name || (markerTypeDef ? markerTypeDef.name : 'Marker');
     const color = metadata.color || (markerTypeDef ? markerTypeDef.color : '#4a9eff');
-    
+
     if (type === 'spot') {
       const marker = markerManager.addSpotMarker(time, name, color, {
         ...metadata,
         source: 'linescript',
-        templateId: this.currentTemplateId
+        templateId: this.currentTemplateId,
       });
-      
+
       this.showMarkerFeedback(marker);
     }
-    
+
     this.loadMarkers();
     this.emit('markerAdded', { type, time, metadata });
   }
@@ -508,26 +515,26 @@ export class LineScriptPanel {
       this.showToast('Set IN point first', 'warning');
       return;
     }
-    
+
     const inTime = this.pendingInPoint;
     const outTime = time;
-    
+
     if (outTime <= inTime) {
       this.showToast('OUT must be after IN', 'error');
       return;
     }
-    
+
     const markerManager = this.app.markerManager;
     if (markerManager) {
       const template = this.contentTemplates.getCurrent();
       const marker = markerManager.addRangeMarker(inTime, outTime, 'Scene', template.primaryColor, {
         source: 'linescript',
-        templateId: this.currentTemplateId
+        templateId: this.currentTemplateId,
       });
-      
+
       this.showMarkerFeedback(marker);
     }
-    
+
     this.pendingInPoint = null;
     this.loadMarkers();
     this.updatePendingRangeUI();
@@ -550,7 +557,7 @@ export class LineScriptPanel {
   undoLastMarker() {
     const markerManager = this.app.markerManager;
     if (!markerManager || this.markers.length === 0) return;
-    
+
     const lastMarker = this.markers[this.markers.length - 1];
     markerManager.deleteMarker(lastMarker.id);
     this.loadMarkers();
@@ -590,7 +597,7 @@ export class LineScriptPanel {
    */
   setViewMode(mode) {
     if (this.modeLocked) return;
-    
+
     if (Object.values(VIEW_MODES).includes(mode)) {
       this.viewMode = mode;
       this.updateModeUI();
@@ -611,7 +618,6 @@ export class LineScriptPanel {
    * Show the panel
    */
   show() {
-    
     this.visible = true;
     if (this.container) {
       this.container.classList.remove('hidden');
@@ -646,19 +652,18 @@ export class LineScriptPanel {
    * Render the panel
    */
   render() {
-    
     if (!this.container) return;
-    
+
     const template = this.contentTemplates.getCurrent();
-    
+
     let html = '';
-    
+
     // Header with template selector and mode indicator
     html += this.renderHeader(template);
-    
+
     // Main content area
     html += '<div class="linescript-content">';
-    
+
     if (this.words.length === 0 && this.dialogueBlocks.length === 0) {
       html += this.renderEmptyState();
     } else {
@@ -683,17 +688,17 @@ export class LineScriptPanel {
           html += this.renderSpottingMode(template);
       }
     }
-    
+
     html += '</div>';
-    
+
     // Footer with stats and controls
     html += this.renderFooter(template);
-    
+
     this.container.innerHTML = html;
-    
+
     // Attach event listeners
     this.attachEventListeners();
-    
+
     // Cache DOM references
     this.contentArea = this.container.querySelector('.linescript-content');
     this.headerArea = this.container.querySelector('.linescript-header');
@@ -709,14 +714,16 @@ export class LineScriptPanel {
   renderHeader(template) {
     const allTemplates = getAllTemplates();
     const runningTime = this.words.length > 0 ? this.words[this.words.length - 1].end : 0;
-    
+
     return `
       <div class="linescript-header" style="--template-color: ${template.primaryColor}">
         <div class="header-top">
           <div class="template-selector">
             <span class="template-label">Template:</span>
             <div class="template-buttons">
-              ${allTemplates.map(t => `
+              ${allTemplates
+                .map(
+                  (t) => `
                 <button class="template-btn ${t.id === this.currentTemplateId ? 'active' : ''}"
                         data-template="${t.id}"
                         title="${t.description}"
@@ -724,7 +731,9 @@ export class LineScriptPanel {
                   <span class="template-icon">${t.icon}</span>
                   <span class="template-name">${t.name}</span>
                 </button>
-              `).join('')}
+              `
+                )
+                .join('')}
             </div>
           </div>
           
@@ -734,13 +743,17 @@ export class LineScriptPanel {
               ${this.modeLocked ? '🔒' : ''}
             </div>
             <div class="mode-buttons">
-              ${Object.values(VIEW_MODES).map(mode => `
+              ${Object.values(VIEW_MODES)
+                .map(
+                  (mode) => `
                 <button class="mode-btn ${mode === this.viewMode ? 'active' : ''}"
                         data-mode="${mode}"
                         title="${this.getModeDescription(mode)}">
                   ${this.getModeIcon(mode)}
                 </button>
-              `).join('')}
+              `
+                )
+                .join('')}
               <button class="mode-lock-btn ${this.modeLocked ? 'locked' : ''}"
                       title="Lock mode">
                 ${this.modeLocked ? '🔒' : '🔓'}
@@ -775,11 +788,15 @@ export class LineScriptPanel {
           </div>
         </div>
         
-        ${this.pendingInPoint !== null ? `
+        ${
+          this.pendingInPoint !== null
+            ? `
           <div class="pending-range-indicator">
             ◀ IN: ${this.formatTimecode(this.pendingInPoint)} - Waiting for OUT point...
           </div>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
     `;
   }
@@ -808,11 +825,16 @@ export class LineScriptPanel {
         <div class="spotting-shortcuts">
           <div class="shortcut-group">
             <span class="shortcut-label">Quick Marks:</span>
-            ${Object.entries(template.keyboardShortcuts).slice(0, 4).map(([key, config]) => `
+            ${Object.entries(template.keyboardShortcuts)
+              .slice(0, 4)
+              .map(
+                ([key, config]) => `
               <span class="shortcut-key" title="${config.label}">
                 <kbd>${key.toUpperCase()}</kbd>
               </span>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
           <div class="shortcut-group">
             <span class="shortcut-label">Range:</span>
@@ -832,28 +854,29 @@ export class LineScriptPanel {
    * @param {Object} template - Current template
    * @returns {string} HTML
    */
-  renderScrollingTranscript(template) {
+  renderScrollingTranscript(_template) {
     const currentWordIdx = this.findWordIndexAtTime(this.currentTime);
     const contextWords = 15;
     const startIdx = Math.max(0, currentWordIdx - contextWords);
     const endIdx = Math.min(this.words.length, currentWordIdx + contextWords);
-    
+
     // Track the rendered range to avoid unnecessary re-renders
     this.renderedRangeStart = startIdx;
     this.renderedRangeEnd = endIdx;
     this.highlightedWordIndex = currentWordIdx;
-    
+
     const visibleWords = this.words.slice(startIdx, endIdx);
-    
+
     return `
       <div class="scrolling-transcript">
-        ${visibleWords.map((word, idx) => {
-          const absoluteIdx = startIdx + idx;
-          const isCurrent = absoluteIdx === currentWordIdx;
-          const isPast = absoluteIdx < currentWordIdx;
-          const marker = this.getMarkerAtTime(word.start);
-          
-          return `
+        ${visibleWords
+          .map((word, idx) => {
+            const absoluteIdx = startIdx + idx;
+            const isCurrent = absoluteIdx === currentWordIdx;
+            const isPast = absoluteIdx < currentWordIdx;
+            const marker = this.getMarkerAtTime(word.start);
+
+            return `
             <span class="transcript-word ${isCurrent ? 'current' : ''} ${isPast ? 'past' : ''}"
                   data-word-idx="${absoluteIdx}"
                   data-time="${word.start}"
@@ -861,7 +884,8 @@ export class LineScriptPanel {
               ${this.escapeHtml(word.text)}
             </span>
           `;
-        }).join(' ')}
+          })
+          .join(' ')}
       </div>
     `;
   }
@@ -873,21 +897,23 @@ export class LineScriptPanel {
    */
   renderMiniMarkerTimeline(template) {
     const totalDuration = this.words.length > 0 ? this.words[this.words.length - 1].end : 1;
-    
+
     return `
       <div class="mini-timeline">
         <div class="timeline-track">
-          ${this.markers.map(marker => {
-            const position = ((marker.type === 'range' ? marker.inTime : marker.time) / totalDuration) * 100;
-            const width = marker.type === 'range' ? ((marker.outTime - marker.inTime) / totalDuration) * 100 : 0.5;
-            
-            return `
+          ${this.markers
+            .map((marker) => {
+              const position = ((marker.type === 'range' ? marker.inTime : marker.time) / totalDuration) * 100;
+              const width = marker.type === 'range' ? ((marker.outTime - marker.inTime) / totalDuration) * 100 : 0.5;
+
+              return `
               <div class="timeline-marker ${marker.type}"
                    style="left: ${position}%; width: ${width}%; background: ${marker.color || template.primaryColor}"
                    title="${marker.name}">
               </div>
             `;
-          }).join('')}
+            })
+            .join('')}
           <div class="timeline-playhead" style="left: ${(this.currentTime / totalDuration) * 100}%"></div>
         </div>
       </div>
@@ -906,21 +932,25 @@ export class LineScriptPanel {
           <div class="marker-types-panel">
             <h3>Marker Types</h3>
             <div class="marker-type-buttons">
-              ${template.markerTypes.map(mt => `
+              ${template.markerTypes
+                .map(
+                  (mt) => `
                 <button class="marker-type-btn" 
                         data-marker-type="${mt.id}"
                         style="--marker-color: ${mt.color}">
                   <span class="marker-icon">${mt.icon}</span>
                   <span class="marker-name">${mt.name}</span>
                 </button>
-              `).join('')}
+              `
+                )
+                .join('')}
             </div>
           </div>
           
           <div class="markers-list-panel">
             <h3>Markers (${this.markers.length})</h3>
             <div class="markers-list">
-              ${this.markers.map(marker => this.renderMarkerListItem(marker, template)).join('')}
+              ${this.markers.map((marker) => this.renderMarkerListItem(marker, template)).join('')}
             </div>
           </div>
         </div>
@@ -942,10 +972,10 @@ export class LineScriptPanel {
     let lineNumber = 1;
     let sceneNumber = 0;
     let lastMarkerId = null;
-    
-    this.dialogueBlocks.forEach((block, blockIdx) => {
+
+    this.dialogueBlocks.forEach((block, _blockIdx) => {
       const blockTime = block.startTime;
-      
+
       // Check for scene marker
       const sceneMarker = this.getMarkerAtTime(blockTime);
       if (sceneMarker && sceneMarker.type === 'range' && sceneMarker.id !== lastMarkerId) {
@@ -953,13 +983,13 @@ export class LineScriptPanel {
         html += this.renderSceneHeader(sceneMarker, sceneNumber, template);
         lastMarkerId = sceneMarker.id;
       }
-      
+
       // Render speaker cue
       if (block.speaker) {
         html += this.renderSpeakerCue(block.speaker, lineNumber, template);
         lineNumber++;
       }
-      
+
       // Render dialogue lines
       const lines = this.splitTextIntoLines(block.text, template.ui.dialogueWidth === 'wide' ? 70 : 50);
       lines.forEach((lineText, lineIdx) => {
@@ -967,10 +997,10 @@ export class LineScriptPanel {
         html += this.renderDialogueLine(lineNumber, lineTime, lineText, block.speaker, template);
         lineNumber++;
       });
-      
+
       html += '<div class="block-spacer"></div>';
     });
-    
+
     html += '</div>';
     return html;
   }
@@ -982,9 +1012,9 @@ export class LineScriptPanel {
    * @param {Object} template - Current template
    * @returns {string} HTML
    */
-  renderSceneHeader(marker, sceneNumber, template) {
+  renderSceneHeader(marker, sceneNumber, _template) {
     const duration = (marker.outTime - marker.inTime).toFixed(1);
-    
+
     return `
       <div class="scene-header" data-marker-id="${marker.id}" style="--scene-color: ${marker.color}">
         <div class="scene-slugline">
@@ -1007,10 +1037,10 @@ export class LineScriptPanel {
    * @param {Object} template - Current template
    * @returns {string} HTML
    */
-  renderSpeakerCue(speaker, lineNumber, template) {
+  renderSpeakerCue(speaker, lineNumber, _template) {
     const speakerIdx = this.speakers.indexOf(speaker);
     const speakerClass = speakerIdx >= 0 ? `speaker-${speakerIdx % 6}` : '';
-    
+
     return `
       <div class="speaker-cue ${speakerClass}" data-line="${lineNumber}">
         <span class="speaker-avatar">${speaker.charAt(0).toUpperCase()}</span>
@@ -1028,12 +1058,12 @@ export class LineScriptPanel {
    * @param {Object} template - Current template
    * @returns {string} HTML
    */
-  renderDialogueLine(lineNumber, time, text, speaker, template) {
+  renderDialogueLine(lineNumber, time, text, speaker, _template) {
     const speakerIdx = speaker ? this.speakers.indexOf(speaker) : -1;
     const speakerClass = speakerIdx >= 0 ? `speaker-${speakerIdx % 6}` : '';
     const marker = this.getMarkerAtTime(time);
     const markerStyle = marker ? `border-left: 3px solid ${marker.color}` : '';
-    
+
     return `
       <div class="dialogue-line ${speakerClass}" data-line="${lineNumber}" data-time="${time}" style="${markerStyle}">
         <span class="line-number">${lineNumber}</span>
@@ -1051,9 +1081,9 @@ export class LineScriptPanel {
    */
   renderMarkerListItem(marker, template) {
     const time = marker.type === 'range' ? marker.inTime : marker.time;
-    const markerTypeDef = template.markerTypes.find(m => m.id === marker.markerType);
+    const markerTypeDef = template.markerTypes.find((m) => m.id === marker.markerType);
     const icon = markerTypeDef?.icon || '📍';
-    
+
     return `
       <div class="marker-list-item" data-marker-id="${marker.id}" style="--marker-color: ${marker.color}">
         <span class="marker-icon">${icon}</span>
@@ -1114,7 +1144,7 @@ export class LineScriptPanel {
         </div>
       `;
     }
-    
+
     return renderProductionScriptFormat(
       this.words,
       this.dialogueBlocks,
@@ -1135,7 +1165,7 @@ export class LineScriptPanel {
       <div class="linescript-review-mode">
         <h3>Review Markers</h3>
         <div class="review-grid">
-          ${this.markers.map(marker => this.renderReviewCard(marker, template)).join('')}
+          ${this.markers.map((marker) => this.renderReviewCard(marker, template)).join('')}
         </div>
         ${this.markers.length === 0 ? '<p class="empty-message">No markers to review. Add markers in Spotting or Edit mode.</p>' : ''}
       </div>
@@ -1148,11 +1178,11 @@ export class LineScriptPanel {
    * @param {Object} template - Current template
    * @returns {string} HTML
    */
-  renderReviewCard(marker, template) {
+  renderReviewCard(marker, _template) {
     const time = marker.type === 'range' ? marker.inTime : marker.time;
     const duration = marker.type === 'range' ? (marker.outTime - marker.inTime).toFixed(1) + 's' : '';
     const transcript = this.getTranscriptForTime(time, marker.type === 'range' ? marker.outTime : time + 5);
-    
+
     return `
       <div class="review-card" data-marker-id="${marker.id}" style="--card-color: ${marker.color}">
         <div class="card-header">
@@ -1180,21 +1210,23 @@ export class LineScriptPanel {
   renderExportMode(template) {
     // Get export formats from the ExportPresets module if available
     const formats = this.app?.app?.EXPORT_FORMATS?.[this.currentTemplate] || {};
-    const formatList = Object.values(formats).length > 0 
-      ? Object.values(formats)
-      : template.exports || [];
-    
+    const formatList = Object.values(formats).length > 0 ? Object.values(formats) : template.exports || [];
+
     return `
       <div class="linescript-export-mode" id="lineScriptExportView">
         <h3>Export Options</h3>
         <div class="export-formats" id="lineScriptExportFormats">
-          ${formatList.map(exp => `
+          ${formatList
+            .map(
+              (exp) => `
             <button class="export-btn" data-format="${exp.id}">
               <span class="export-icon">${exp.icon}</span>
               <span class="export-name">${exp.name}</span>
               <span class="export-format">.${exp.extension || exp.format || 'txt'}</span>
             </button>
-          `).join('')}
+          `
+            )
+            .join('')}
         </div>
         
         <div class="export-preview">
@@ -1224,17 +1256,17 @@ export class LineScriptPanel {
    */
   generateExportPreview(exportFormat) {
     if (!exportFormat) return 'Select an export format...';
-    
+
     switch (exportFormat.id) {
       case 'youtube-chapters':
         return this.markers
-          .filter(m => m.type === 'range' || m.type === 'spot')
-          .map(m => `${this.formatTimecode(m.type === 'range' ? m.inTime : m.time).replace(/\.\d$/, '')} ${m.name}`)
+          .filter((m) => m.type === 'range' || m.type === 'spot')
+          .map((m) => `${this.formatTimecode(m.type === 'range' ? m.inTime : m.time).replace(/\.\d$/, '')} ${m.name}`)
           .join('\n');
-      
+
       case 'show-notes':
         return this.generateShowNotes();
-      
+
       default:
         return JSON.stringify(this.markers.slice(0, 3), null, 2) + '\n...';
     }
@@ -1247,12 +1279,12 @@ export class LineScriptPanel {
   generateShowNotes() {
     let notes = `# Episode Notes\n\n`;
     notes += `## Timestamps\n\n`;
-    
-    this.markers.forEach(m => {
+
+    this.markers.forEach((m) => {
       const time = m.type === 'range' ? m.inTime : m.time;
       notes += `- ${this.formatTimecode(time).replace(/\.\d$/, '')} - ${m.name}\n`;
     });
-    
+
     return notes;
   }
 
@@ -1308,67 +1340,67 @@ export class LineScriptPanel {
    */
   attachEventListeners() {
     // Template selector buttons
-    this.container.querySelectorAll('.template-btn').forEach(btn => {
+    this.container.querySelectorAll('.template-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.setTemplate(btn.dataset.template);
       });
     });
-    
+
     // Mode buttons
-    this.container.querySelectorAll('.mode-btn').forEach(btn => {
+    this.container.querySelectorAll('.mode-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.setViewMode(btn.dataset.mode);
       });
     });
-    
+
     // Mode lock button
     this.container.querySelector('.mode-lock-btn')?.addEventListener('click', () => {
       this.lockMode(!this.modeLocked);
     });
-    
+
     // Auto-scroll toggle
     this.container.querySelector('#autoScrollToggle')?.addEventListener('change', (e) => {
       this.autoScroll = e.target.checked;
     });
-    
+
     // Marker type buttons (edit mode)
-    this.container.querySelectorAll('.marker-type-btn').forEach(btn => {
+    this.container.querySelectorAll('.marker-type-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const markerType = btn.dataset.markerType;
         this.addMarker('spot', this.currentTime, { markerType });
       });
     });
-    
+
     // Marker goto buttons
-    this.container.querySelectorAll('.marker-goto-btn').forEach(btn => {
+    this.container.querySelectorAll('.marker-goto-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const time = parseFloat(btn.dataset.time);
         this.seekToTime(time);
       });
     });
-    
+
     // Marker delete buttons
-    this.container.querySelectorAll('.marker-delete-btn').forEach(btn => {
+    this.container.querySelectorAll('.marker-delete-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const markerId = parseInt(btn.dataset.markerId);
         this.deleteMarker(markerId);
       });
     });
-    
+
     // AI generate button
     this.container.querySelector('.ai-generate-btn')?.addEventListener('click', () => {
       this.emit('generateAIMetadata');
     });
-    
+
     // Export buttons
-    this.container.querySelectorAll('.export-btn').forEach(btn => {
+    this.container.querySelectorAll('.export-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.handleExport(btn.dataset.format);
       });
     });
-    
+
     // Word click for seeking
-    this.container.querySelectorAll('.transcript-word, .dialogue-line').forEach(el => {
+    this.container.querySelectorAll('.transcript-word, .dialogue-line').forEach((el) => {
       el.addEventListener('click', () => {
         const time = parseFloat(el.dataset.time);
         if (!isNaN(time)) {
@@ -1376,23 +1408,23 @@ export class LineScriptPanel {
         }
       });
     });
-    
+
     // Production mode specific listeners
     if (this.viewMode === VIEW_MODES.PRODUCTION) {
       const sidebar = this.container.querySelector('.production-sidebar-container');
       if (sidebar && this.productionScriptUI) {
         this.productionScriptUI.attachEventListeners(sidebar);
       }
-      
+
       // Production toolbar buttons
       this.container.querySelector('#exportProductionScript')?.addEventListener('click', () => {
         this.exportProductionScript();
       });
-      
+
       this.container.querySelector('#exportShotList')?.addEventListener('click', () => {
         this.exportShotList();
       });
-      
+
       this.container.querySelector('#clearAllDirections')?.addEventListener('click', () => {
         if (confirm('Clear all camera directions? This cannot be undone.')) {
           this.productionScriptManager.clear();
@@ -1400,15 +1432,15 @@ export class LineScriptPanel {
           this.showToast('All directions cleared', 'info');
         }
       });
-      
+
       this.container.querySelector('#importProductionScript')?.addEventListener('click', () => {
         this.importProductionScript();
       });
-      
+
       // Click on camera direction to edit
-      this.container.querySelectorAll('.camera-direction').forEach(el => {
+      this.container.querySelectorAll('.camera-direction').forEach((el) => {
         el.addEventListener('click', () => {
-          const directionId = parseFloat(el.dataset.directionId);
+          const _directionId = parseFloat(el.dataset.directionId);
           const time = parseFloat(el.dataset.time);
           this.seekToTime(time);
           // Could open edit modal here
@@ -1490,14 +1522,14 @@ export class LineScriptPanel {
   }
 
   // Utility methods
-  
+
   /**
    * Find word index at a given time
    * @param {number} time - Time in seconds
    * @returns {number} Word index
    */
   findWordIndexAtTime(time) {
-    return this.words.findIndex(w => w.start <= time && w.end >= time);
+    return this.words.findIndex((w) => w.start <= time && w.end >= time);
   }
 
   /**
@@ -1506,7 +1538,7 @@ export class LineScriptPanel {
    * @returns {Object|null} Marker or null
    */
   getMarkerAtTime(time) {
-    return this.markers.find(m => {
+    return this.markers.find((m) => {
       if (m.type === 'range') {
         return time >= m.inTime && time <= m.outTime;
       }
@@ -1522,8 +1554,8 @@ export class LineScriptPanel {
    */
   getTranscriptForTime(startTime, endTime) {
     return this.words
-      .filter(w => w.start >= startTime && w.end <= endTime)
-      .map(w => w.text)
+      .filter((w) => w.start >= startTime && w.end <= endTime)
+      .map((w) => w.text)
       .join(' ');
   }
 
@@ -1535,10 +1567,10 @@ export class LineScriptPanel {
     if (currentIdx === this.highlightedWordIndex) {
       return; // No change needed
     }
-    
+
     // Check if current word is within the rendered range
     const isInRange = currentIdx >= this.renderedRangeStart && currentIdx < this.renderedRangeEnd;
-    
+
     if (!isInRange && this.viewMode === VIEW_MODES.SPOTTING && this.words.length > 0) {
       // Current word is outside visible range - re-render the transcript
       const transcriptContainer = this.container?.querySelector('.spotting-transcript');
@@ -1546,7 +1578,7 @@ export class LineScriptPanel {
         const template = this.contentTemplates.getCurrent();
         transcriptContainer.innerHTML = this.renderScrollingTranscript(template);
         // Re-attach click listeners for the new words
-        transcriptContainer.querySelectorAll('.transcript-word').forEach(el => {
+        transcriptContainer.querySelectorAll('.transcript-word').forEach((el) => {
           el.addEventListener('click', () => {
             const time = parseFloat(el.dataset.time);
             if (!isNaN(time)) {
@@ -1557,14 +1589,14 @@ export class LineScriptPanel {
       }
       return; // Already highlighted by re-render
     }
-    
+
     // Update highlight in DOM
-    this.container?.querySelectorAll('.transcript-word.current')?.forEach(el => {
+    this.container?.querySelectorAll('.transcript-word.current')?.forEach((el) => {
       el.classList.remove('current');
     });
-    
+
     // Also update past words
-    this.container?.querySelectorAll('.transcript-word')?.forEach(el => {
+    this.container?.querySelectorAll('.transcript-word')?.forEach((el) => {
       const wordIdx = parseInt(el.dataset.wordIdx);
       if (wordIdx < currentIdx) {
         el.classList.add('past');
@@ -1572,12 +1604,12 @@ export class LineScriptPanel {
         el.classList.remove('past');
       }
     });
-    
+
     const currentWord = this.container?.querySelector(`[data-word-idx="${currentIdx}"]`);
     if (currentWord) {
       currentWord.classList.add('current');
     }
-    
+
     this.highlightedWordIndex = currentIdx;
   }
 
@@ -1588,31 +1620,33 @@ export class LineScriptPanel {
   scrollToCurrentTime() {
     const currentWord = this.container?.querySelector('.transcript-word.current');
     if (!currentWord) return;
-    
+
     // Find the scrolling container - use the spotting transcript or content area
-    const scrollContainer = this.container?.querySelector('.spotting-transcript') || 
-                           this.container?.querySelector('.scrolling-transcript')?.parentElement ||
-                           this.contentArea;
-    
+    const scrollContainer =
+      this.container?.querySelector('.spotting-transcript') ||
+      this.container?.querySelector('.scrolling-transcript')?.parentElement ||
+      this.contentArea;
+
     if (!scrollContainer) return;
-    
+
     // Get the container's visible bounds
     const containerRect = scrollContainer.getBoundingClientRect();
     const wordRect = currentWord.getBoundingClientRect();
-    
+
     // Check if the word is already visible within the container
-    const isVisible = wordRect.top >= containerRect.top &&
-                     wordRect.bottom <= containerRect.bottom &&
-                     wordRect.left >= containerRect.left &&
-                     wordRect.right <= containerRect.right;
-    
+    const isVisible =
+      wordRect.top >= containerRect.top &&
+      wordRect.bottom <= containerRect.bottom &&
+      wordRect.left >= containerRect.left &&
+      wordRect.right <= containerRect.right;
+
     // Only scroll if the word is not visible
     if (!isVisible) {
       // Use scrollIntoView with 'nearest' to minimize scrolling
-      currentWord.scrollIntoView({ 
-        behavior: 'smooth', 
+      currentWord.scrollIntoView({
+        behavior: 'smooth',
         block: 'nearest',
-        inline: 'nearest'
+        inline: 'nearest',
       });
     }
   }
@@ -1661,8 +1695,8 @@ export class LineScriptPanel {
     const lines = [];
     let currentLine = [];
     let currentLength = 0;
-    
-    words.forEach(word => {
+
+    words.forEach((word) => {
       if (currentLength + word.length + 1 > maxChars && currentLine.length > 0) {
         lines.push(currentLine.join(' '));
         currentLine = [word];
@@ -1672,11 +1706,11 @@ export class LineScriptPanel {
         currentLength += word.length + 1;
       }
     });
-    
+
     if (currentLine.length > 0) {
       lines.push(currentLine.join(' '));
     }
-    
+
     return lines;
   }
 
@@ -1689,7 +1723,7 @@ export class LineScriptPanel {
    */
   interpolateTime(block, lineIdx, totalLines) {
     const duration = block.endTime - block.startTime;
-    return block.startTime + (duration * lineIdx / totalLines);
+    return block.startTime + (duration * lineIdx) / totalLines;
   }
 
   /**
@@ -1740,7 +1774,7 @@ export class LineScriptPanel {
       [VIEW_MODES.EDIT]: '✏️',
       [VIEW_MODES.REVIEW]: '👁️',
       [VIEW_MODES.PRODUCTION]: '🎬',
-      [VIEW_MODES.EXPORT]: '📤'
+      [VIEW_MODES.EXPORT]: '📤',
     };
     return icons[mode] || '📝';
   }
@@ -1756,7 +1790,7 @@ export class LineScriptPanel {
       [VIEW_MODES.EDIT]: 'Edit marker details and metadata',
       [VIEW_MODES.REVIEW]: 'Review and preview markers',
       [VIEW_MODES.PRODUCTION]: 'Add camera angles and technical directions',
-      [VIEW_MODES.EXPORT]: 'Export markers and content'
+      [VIEW_MODES.EXPORT]: 'Export markers and content',
     };
     return descriptions[mode] || '';
   }
@@ -1775,7 +1809,7 @@ export class LineScriptPanel {
   }
 
   // Event emitter methods
-  
+
   /**
    * Subscribe to an event
    * @param {string} event - Event name
@@ -1795,7 +1829,7 @@ export class LineScriptPanel {
    */
   emit(event, data = {}) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event].forEach(callback => callback(data));
+      this.eventListeners[event].forEach((callback) => callback(data));
     }
   }
 
@@ -1806,7 +1840,7 @@ export class LineScriptPanel {
    */
   off(event, callback) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+      this.eventListeners[event] = this.eventListeners[event].filter((cb) => cb !== callback);
     }
   }
 
@@ -1860,7 +1894,7 @@ export class LineScriptPanel {
    * Called when a marker is updated
    * @param {Object} marker - The updated marker
    */
-  onMarkerUpdated(marker) {
+  onMarkerUpdated(_marker) {
     this.loadMarkers();
   }
 
@@ -1868,7 +1902,7 @@ export class LineScriptPanel {
    * Called when a marker is deleted
    * @param {string|number} markerId - The deleted marker's ID
    */
-  onMarkerDeleted(markerId) {
+  onMarkerDeleted(_markerId) {
     this.loadMarkers();
   }
 
@@ -1876,7 +1910,7 @@ export class LineScriptPanel {
    * Load transcript - alias for loadTranscriptData for compatibility
    * @param {Object} data - Optional transcript data (ignored, always loads from app)
    */
-  loadTranscript(data) {
+  loadTranscript(_data) {
     // Always reload from the main app to get live data
     this.loadTranscriptData();
     if (this.visible) {
@@ -1888,7 +1922,7 @@ export class LineScriptPanel {
    * Sync words - alias for loadTranscriptData for compatibility
    * @param {Array} words - Words array (ignored, always loads from app)
    */
-  syncWords(words) {
+  syncWords(_words) {
     // Always reload from the main app to get live data
     this.loadTranscriptData();
     if (this.visible) {
@@ -1921,60 +1955,58 @@ export class LineScriptPanel {
       }
     }
     document.removeEventListener('keydown', this.handleKeyDown);
-    
+
     // Clear bound handlers
     this._boundHandlePlay = null;
     this._boundHandlePause = null;
-    
+
     // Clear state
     this.eventListeners = {};
     this.visible = false;
   }
-  
+
   /**
    * Export production script
    */
   exportProductionScript() {
     const directions = this.productionScriptManager.getAll();
-    
+
     if (directions.length === 0) {
       this.showToast('No camera directions to export', 'warning');
       return;
     }
-    
+
     // Generate production script text
     let scriptText = '# PRODUCTION SCRIPT\n\n';
     scriptText += `Generated: ${new Date().toLocaleString()}\n\n`;
     scriptText += '---\n\n';
-    
+
     // Group by scenes
-    const scenes = this.markers.filter(m => m.type === 'range');
-    
+    const scenes = this.markers.filter((m) => m.type === 'range');
+
     if (scenes.length > 0) {
       scenes.forEach((scene, sceneIdx) => {
-        const sceneDirections = directions.filter(
-          d => d.time >= scene.inTime && d.time <= scene.outTime
-        );
-        
+        const sceneDirections = directions.filter((d) => d.time >= scene.inTime && d.time <= scene.outTime);
+
         scriptText += `## SCENE ${sceneIdx + 1} - ${scene.name}\n`;
         scriptText += `[${this.formatTimecode(scene.inTime)} → ${this.formatTimecode(scene.outTime)}]\n\n`;
-        
+
         if (scene.description) {
           scriptText += `${scene.description}\n\n`;
         }
-        
-        sceneDirections.forEach(direction => {
+
+        sceneDirections.forEach((direction) => {
           scriptText += `[${this.formatTimecode(direction.time)}] ${direction.getIcon()} ${direction.getDisplayText()}\n`;
           if (direction.notes) {
             scriptText += `  Notes: ${direction.notes}\n`;
           }
         });
-        
+
         scriptText += '\n';
       });
     } else {
       // No scenes, just list all directions
-      directions.forEach(direction => {
+      directions.forEach((direction) => {
         scriptText += `[${this.formatTimecode(direction.time)}] ${direction.getIcon()} ${direction.getDisplayText()}\n`;
         if (direction.notes) {
           scriptText += `  Notes: ${direction.notes}\n`;
@@ -1982,7 +2014,7 @@ export class LineScriptPanel {
         scriptText += '\n';
       });
     }
-    
+
     // Download
     const blob = new Blob([scriptText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -1991,31 +2023,29 @@ export class LineScriptPanel {
     a.download = 'production-script.txt';
     a.click();
     URL.revokeObjectURL(url);
-    
+
     this.showToast('Production script exported', 'success');
   }
-  
+
   /**
    * Export shot list
    */
   exportShotList() {
     const directions = this.productionScriptManager.getAll();
-    
+
     if (directions.length === 0) {
       this.showToast('No camera directions to export', 'warning');
       return;
     }
-    
+
     // Generate shot list CSV
     let csv = 'Shot #,Timecode,Type,Description,Scene,Notes\n';
-    
+
     directions.forEach((direction, idx) => {
-      const scene = this.markers.find(m => 
-        m.type === 'range' && 
-        direction.time >= m.inTime && 
-        direction.time <= m.outTime
+      const scene = this.markers.find(
+        (m) => m.type === 'range' && direction.time >= m.inTime && direction.time <= m.outTime
       );
-      
+
       csv += `${idx + 1},`;
       csv += `${this.formatTimecode(direction.time)},`;
       csv += `"${direction.getFullName()}",`;
@@ -2023,7 +2053,7 @@ export class LineScriptPanel {
       csv += `"${scene ? scene.name : ''}",`;
       csv += `"${direction.notes || ''}"\n`;
     });
-    
+
     // Download
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -2032,10 +2062,10 @@ export class LineScriptPanel {
     a.download = 'shot-list.csv';
     a.click();
     URL.revokeObjectURL(url);
-    
+
     this.showToast('Shot list exported', 'success');
   }
-  
+
   /**
    * Import production script
    */
@@ -2043,11 +2073,11 @@ export class LineScriptPanel {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
-    
+
     input.onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      
+
       const reader = new FileReader();
       reader.onload = (event) => {
         try {
@@ -2062,26 +2092,26 @@ export class LineScriptPanel {
       };
       reader.readAsText(file);
     };
-    
+
     input.click();
   }
-  
+
   /**
    * Save production directions to project
    */
   saveProductionDirections() {
     if (!this.app.projectManager) return;
-    
+
     const json = this.productionScriptManager.toJSON();
     this.app.projectManager.saveMetadata('productionDirections', json);
   }
-  
+
   /**
    * Load production directions from project
    */
   loadProductionDirections() {
     if (!this.app.projectManager) return;
-    
+
     const json = this.app.projectManager.loadMetadata('productionDirections');
     if (json) {
       this.productionScriptManager.fromJSON(json);
@@ -2090,14 +2120,3 @@ export class LineScriptPanel {
 }
 
 export default LineScriptPanel;
-
-
-
-
-
-
-
-
-
-
-

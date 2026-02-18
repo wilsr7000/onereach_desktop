@@ -1,6 +1,6 @@
 /**
  * Intent Classifier
- * 
+ *
  * Uses OpenAI GPT-4o-mini for fast, accurate intent classification.
  * Replaces brittle regex matching with natural language understanding.
  */
@@ -13,31 +13,31 @@ const log = getLogQueue();
 const AGENT_DEFINITIONS = {
   'time-agent': {
     description: 'Answers time and date questions',
-    examples: ['what time is it', 'what day is today', 'what is the date', 'current time', 'what month is it']
+    examples: ['what time is it', 'what day is today', 'what is the date', 'current time', 'what month is it'],
   },
   'weather-agent': {
     description: 'Provides weather information for locations',
-    examples: ['weather in Denver', 'is it raining', 'temperature outside', 'forecast for tomorrow', 'will it snow']
+    examples: ['weather in Denver', 'is it raining', 'temperature outside', 'forecast for tomorrow', 'will it snow'],
   },
   'media-agent': {
     description: 'Controls music playback - play, pause, skip, volume',
-    examples: ['play music', 'pause', 'stop', 'next song', 'volume up', 'play jazz', 'skip this track']
+    examples: ['play music', 'pause', 'stop', 'next song', 'volume up', 'play jazz', 'skip this track'],
   },
   'help-agent': {
     description: 'Explains what the assistant can do',
-    examples: ['what can you do', 'help', 'list commands', 'capabilities', 'how do I use this']
+    examples: ['what can you do', 'help', 'list commands', 'capabilities', 'how do I use this'],
   },
   'smalltalk-agent': {
     description: 'Handles greetings, goodbyes, thanks, and casual conversation',
-    examples: ['hi', 'hello', 'hey', 'goodbye', 'bye', 'thanks', 'thank you', 'how are you', 'good morning']
-  }
+    examples: ['hi', 'hello', 'hey', 'goodbye', 'bye', 'thanks', 'thank you', 'how are you', 'good morning'],
+  },
 };
 
 // System commands handled by router (not agents)
 const SYSTEM_COMMANDS = {
-  'cancel': ['cancel', 'stop', 'nevermind', 'forget it', 'abort'],
-  'repeat': ['repeat', 'say that again', 'what did you say', 'pardon'],
-  'undo': ['undo', 'undo that', 'take that back', 'revert']
+  cancel: ['cancel', 'stop', 'nevermind', 'forget it', 'abort'],
+  repeat: ['repeat', 'say that again', 'what did you say', 'pardon'],
+  undo: ['undo', 'undo that', 'take that back', 'revert'],
 };
 
 /**
@@ -51,10 +51,10 @@ async function classifyIntent(transcript) {
   }
 
   const text = transcript.trim().toLowerCase();
-  
+
   // Quick check for system commands (still use simple matching for these)
   for (const [command, patterns] of Object.entries(SYSTEM_COMMANDS)) {
-    if (patterns.some(p => text === p || text.startsWith(p + ' '))) {
+    if (patterns.some((p) => text === p || text.startsWith(p + ' '))) {
       return { agentId: null, intent: command, confidence: 1.0, entities: {}, isSystemCommand: true };
     }
   }
@@ -66,24 +66,23 @@ async function classifyIntent(transcript) {
       messages: [
         {
           role: 'user',
-          content: transcript
-        }
+          content: transcript,
+        },
       ],
       temperature: 0,
       maxTokens: 150,
       jsonMode: true,
-      feature: 'intent-classifier'
+      feature: 'intent-classifier',
     });
-    
+
     const parsed = typeof result.content === 'string' ? JSON.parse(result.content) : result.content;
-    
+
     return {
       agentId: parsed.agent_id || null,
       intent: parsed.intent || 'unknown',
       confidence: parsed.confidence || 0,
-      entities: parsed.entities || {}
+      entities: parsed.entities || {},
     };
-
   } catch (error) {
     log.error('agent', 'Error', { error: error.message });
     return { agentId: null, intent: 'error', confidence: 0, entities: {}, error: error.message };
@@ -119,7 +118,6 @@ Rules:
 - Be concise in intent description`;
 }
 
-
 /**
  * Get agent by ID
  */
@@ -131,5 +129,5 @@ module.exports = {
   classifyIntent,
   getAgentDefinition,
   AGENT_DEFINITIONS,
-  SYSTEM_COMMANDS
+  SYSTEM_COMMANDS,
 };

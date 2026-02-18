@@ -1,304 +1,307 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
-  <title>Claude Code Login</title>
-  <link rel="stylesheet" href="node_modules/xterm/css/xterm.css">
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1a1a2e;
-      color: #eee;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    
-    .header {
-      padding: 12px 16px;
-      background: #16213e;
-      border-bottom: 1px solid #0f3460;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    
-    .header h1 {
-      font-size: 16px;
-      font-weight: 500;
-      color: #e94560;
-    }
-    
-    .header-actions {
-      display: flex;
-      gap: 8px;
-    }
-    
-    .btn {
-      padding: 6px 12px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-    }
-    
-    .btn-primary {
-      background: #e94560;
-      color: white;
-    }
-    
-    .btn-primary:hover {
-      background: #ff6b6b;
-    }
-    
-    .btn-secondary {
-      background: #0f3460;
-      color: #eee;
-    }
-    
-    .btn-secondary:hover {
-      background: #1a4a7a;
-    }
-    
-    .instructions {
-      padding: 12px 16px;
-      background: #16213e;
-      border-bottom: 1px solid #0f3460;
-      font-size: 13px;
-      color: #aaa;
-    }
-    
-    .instructions code {
-      background: #0f3460;
-      padding: 2px 6px;
-      border-radius: 3px;
-      color: #e94560;
-    }
-    
-    .status {
-      padding: 8px 16px;
-      font-size: 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #666;
-    }
-    
-    .status-dot.connected {
-      background: #4ade80;
-    }
-    
-    .status-dot.disconnected {
-      background: #ef4444;
-    }
-    
-    .terminal-container {
-      flex: 1;
-      padding: 8px;
-      background: #0d1117;
-      overflow: hidden;
-    }
-    
-    #terminal {
-      height: 100%;
-    }
-    
-    .footer {
-      padding: 8px 16px;
-      background: #16213e;
-      border-top: 1px solid #0f3460;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 12px;
-      color: #888;
-    }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>Claude Code Login</h1>
-    <div class="header-actions">
-      <button class="btn btn-secondary" id="sendLogin">Send /login</button>
-      <button class="btn btn-primary" id="checkAuth">Check Auth Status</button>
-    </div>
-  </div>
-  
-  <div class="instructions">
-    <strong>Quick Start:</strong> Type <code>/login</code> and press Enter. A browser will open for authentication.
-    After logging in, return here and type <code>/exit</code> to close Claude Code.
-  </div>
-  
-  <div class="status">
-    <span class="status-dot" id="statusDot"></span>
-    <span id="statusText">Initializing...</span>
-  </div>
-  
-  <div class="terminal-container">
-    <div id="terminal"></div>
-  </div>
-  
-  <div class="footer">
-    <span>Claude Code CLI</span>
-    <span id="authStatus">Checking authentication...</span>
-  </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+    />
+    <title>Claude Code Login</title>
+    <link rel="stylesheet" href="node_modules/xterm/css/xterm.css" />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-  <script src="node_modules/xterm/lib/xterm.js"></script>
-  <script src="node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
-  <script>
-    const { Terminal } = window;
-    const { FitAddon } = window.FitAddon;
-    
-    // Create terminal
-    const term = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: '#0d1117',
-        foreground: '#c9d1d9',
-        cursor: '#e94560',
-        selection: 'rgba(233, 69, 96, 0.3)',
-        black: '#0d1117',
-        red: '#ff7b72',
-        green: '#7ee787',
-        yellow: '#d29922',
-        blue: '#79c0ff',
-        magenta: '#d2a8ff',
-        cyan: '#a5d6ff',
-        white: '#c9d1d9',
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #1a1a2e;
+        color: #eee;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
       }
-    });
-    
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    
-    // Mount terminal
-    const termContainer = document.getElementById('terminal');
-    term.open(termContainer);
-    fitAddon.fit();
-    
-    // Handle resize
-    window.addEventListener('resize', () => {
+
+      .header {
+        padding: 12px 16px;
+        background: #16213e;
+        border-bottom: 1px solid #0f3460;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .header h1 {
+        font-size: 16px;
+        font-weight: 500;
+        color: #e94560;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .btn {
+        padding: 6px 12px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: all 0.2s;
+      }
+
+      .btn-primary {
+        background: #e94560;
+        color: white;
+      }
+
+      .btn-primary:hover {
+        background: #ff6b6b;
+      }
+
+      .btn-secondary {
+        background: #0f3460;
+        color: #eee;
+      }
+
+      .btn-secondary:hover {
+        background: #1a4a7a;
+      }
+
+      .instructions {
+        padding: 12px 16px;
+        background: #16213e;
+        border-bottom: 1px solid #0f3460;
+        font-size: 13px;
+        color: #aaa;
+      }
+
+      .instructions code {
+        background: #0f3460;
+        padding: 2px 6px;
+        border-radius: 3px;
+        color: #e94560;
+      }
+
+      .status {
+        padding: 8px 16px;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #666;
+      }
+
+      .status-dot.connected {
+        background: #4ade80;
+      }
+
+      .status-dot.disconnected {
+        background: #ef4444;
+      }
+
+      .terminal-container {
+        flex: 1;
+        padding: 8px;
+        background: #0d1117;
+        overflow: hidden;
+      }
+
+      #terminal {
+        height: 100%;
+      }
+
+      .footer {
+        padding: 8px 16px;
+        background: #16213e;
+        border-top: 1px solid #0f3460;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 12px;
+        color: #888;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>Claude Code Login</h1>
+      <div class="header-actions">
+        <button class="btn btn-secondary" id="sendLogin">Send /login</button>
+        <button class="btn btn-primary" id="checkAuth">Check Auth Status</button>
+      </div>
+    </div>
+
+    <div class="instructions">
+      <strong>Quick Start:</strong> Type <code>/login</code> and press Enter. A browser will open for authentication.
+      After logging in, return here and type <code>/exit</code> to close Claude Code.
+    </div>
+
+    <div class="status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Initializing...</span>
+    </div>
+
+    <div class="terminal-container">
+      <div id="terminal"></div>
+    </div>
+
+    <div class="footer">
+      <span>Claude Code CLI</span>
+      <span id="authStatus">Checking authentication...</span>
+    </div>
+
+    <script src="node_modules/xterm/lib/xterm.js"></script>
+    <script src="node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+    <script>
+      const { Terminal } = window;
+      const { FitAddon } = window.FitAddon;
+
+      // Create terminal
+      const term = new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        theme: {
+          background: '#0d1117',
+          foreground: '#c9d1d9',
+          cursor: '#e94560',
+          selection: 'rgba(233, 69, 96, 0.3)',
+          black: '#0d1117',
+          red: '#ff7b72',
+          green: '#7ee787',
+          yellow: '#d29922',
+          blue: '#79c0ff',
+          magenta: '#d2a8ff',
+          cyan: '#a5d6ff',
+          white: '#c9d1d9',
+        },
+      });
+
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+
+      // Mount terminal
+      const termContainer = document.getElementById('terminal');
+      term.open(termContainer);
       fitAddon.fit();
-      if (window.claudeTerminal) {
-        window.claudeTerminal.resize(term.cols, term.rows);
-      }
-    });
-    
-    // Status elements
-    const statusDot = document.getElementById('statusDot');
-    const statusText = document.getElementById('statusText');
-    const authStatus = document.getElementById('authStatus');
-    
-    function updateStatus(connected, text) {
-      statusDot.className = 'status-dot ' + (connected ? 'connected' : 'disconnected');
-      statusText.textContent = text;
-    }
-    
-    // Initialize terminal with Claude Code
-    async function initTerminal() {
-      updateStatus(false, 'Starting Claude Code...');
-      
-      try {
-        // Check if API is available
-        if (!window.claudeTerminal) {
-          updateStatus(false, 'Terminal API not available');
-          term.writeln('\x1b[31mError: Terminal API not available. Please restart the app.\x1b[0m');
-          return;
+
+      // Handle resize
+      window.addEventListener('resize', () => {
+        fitAddon.fit();
+        if (window.claudeTerminal) {
+          window.claudeTerminal.resize(term.cols, term.rows);
         }
-        
-        // Start Claude Code
-        const result = await window.claudeTerminal.start(term.cols, term.rows);
-        
-        if (result.success) {
-          updateStatus(true, 'Claude Code running');
-          term.writeln('\x1b[32m=== Claude Code Started ===\x1b[0m');
-          term.writeln('\x1b[33mType /login and press Enter to authenticate\x1b[0m');
+      });
+
+      // Status elements
+      const statusDot = document.getElementById('statusDot');
+      const statusText = document.getElementById('statusText');
+      const authStatus = document.getElementById('authStatus');
+
+      function updateStatus(connected, text) {
+        statusDot.className = 'status-dot ' + (connected ? 'connected' : 'disconnected');
+        statusText.textContent = text;
+      }
+
+      // Initialize terminal with Claude Code
+      async function initTerminal() {
+        updateStatus(false, 'Starting Claude Code...');
+
+        try {
+          // Check if API is available
+          if (!window.claudeTerminal) {
+            updateStatus(false, 'Terminal API not available');
+            term.writeln('\x1b[31mError: Terminal API not available. Please restart the app.\x1b[0m');
+            return;
+          }
+
+          // Start Claude Code
+          const result = await window.claudeTerminal.start(term.cols, term.rows);
+
+          if (result.success) {
+            updateStatus(true, 'Claude Code running');
+            term.writeln('\x1b[32m=== Claude Code Started ===\x1b[0m');
+            term.writeln('\x1b[33mType /login and press Enter to authenticate\x1b[0m');
+            term.writeln('');
+          } else {
+            updateStatus(false, 'Failed to start');
+            term.writeln('\x1b[31mFailed to start Claude Code: ' + result.error + '\x1b[0m');
+          }
+        } catch (error) {
+          updateStatus(false, 'Error: ' + error.message);
+          term.writeln('\x1b[31mError: ' + error.message + '\x1b[0m');
+        }
+      }
+
+      // Handle terminal input
+      term.onData((data) => {
+        if (window.claudeTerminal) {
+          window.claudeTerminal.write(data);
+        }
+      });
+
+      // Handle output from Claude Code
+      if (window.claudeTerminal) {
+        window.claudeTerminal.onData((data) => {
+          term.write(data);
+        });
+
+        window.claudeTerminal.onExit((code) => {
+          updateStatus(false, 'Claude Code exited (code: ' + code + ')');
           term.writeln('');
-        } else {
-          updateStatus(false, 'Failed to start');
-          term.writeln('\x1b[31mFailed to start Claude Code: ' + result.error + '\x1b[0m');
+          term.writeln('\x1b[33mClaude Code has exited. You can close this window.\x1b[0m');
+
+          // Check auth after exit
+          checkAuthStatus();
+        });
+      }
+
+      // Send /login button
+      document.getElementById('sendLogin').addEventListener('click', () => {
+        if (window.claudeTerminal) {
+          window.claudeTerminal.write('/login\r');
+          term.focus();
         }
-      } catch (error) {
-        updateStatus(false, 'Error: ' + error.message);
-        term.writeln('\x1b[31mError: ' + error.message + '\x1b[0m');
-      }
-    }
-    
-    // Handle terminal input
-    term.onData(data => {
-      if (window.claudeTerminal) {
-        window.claudeTerminal.write(data);
-      }
-    });
-    
-    // Handle output from Claude Code
-    if (window.claudeTerminal) {
-      window.claudeTerminal.onData((data) => {
-        term.write(data);
       });
-      
-      window.claudeTerminal.onExit((code) => {
-        updateStatus(false, 'Claude Code exited (code: ' + code + ')');
-        term.writeln('');
-        term.writeln('\x1b[33mClaude Code has exited. You can close this window.\x1b[0m');
-        
-        // Check auth after exit
-        checkAuthStatus();
-      });
-    }
-    
-    // Send /login button
-    document.getElementById('sendLogin').addEventListener('click', () => {
-      if (window.claudeTerminal) {
-        window.claudeTerminal.write('/login\r');
-        term.focus();
-      }
-    });
-    
-    // Check auth status
-    async function checkAuthStatus() {
-      authStatus.textContent = 'Checking...';
-      try {
-        const result = await window.claudeTerminal.checkAuth();
-        if (result.authenticated) {
-          authStatus.textContent = 'Authenticated';
-          authStatus.style.color = '#4ade80';
-        } else {
-          authStatus.textContent = 'Not logged in';
+
+      // Check auth status
+      async function checkAuthStatus() {
+        authStatus.textContent = 'Checking...';
+        try {
+          const result = await window.claudeTerminal.checkAuth();
+          if (result.authenticated) {
+            authStatus.textContent = 'Authenticated';
+            authStatus.style.color = '#4ade80';
+          } else {
+            authStatus.textContent = 'Not logged in';
+            authStatus.style.color = '#ef4444';
+          }
+        } catch (e) {
+          authStatus.textContent = 'Check failed';
           authStatus.style.color = '#ef4444';
         }
-      } catch (e) {
-        authStatus.textContent = 'Check failed';
-        authStatus.style.color = '#ef4444';
       }
-    }
-    
-    document.getElementById('checkAuth').addEventListener('click', checkAuthStatus);
-    
-    // Initialize
-    initTerminal();
-    checkAuthStatus();
-    
-    // Focus terminal
-    term.focus();
-  </script>
-</body>
+
+      document.getElementById('checkAuth').addEventListener('click', checkAuthStatus);
+
+      // Initialize
+      initTerminal();
+      checkAuthStatus();
+
+      // Focus terminal
+      term.focus();
+    </script>
+  </body>
 </html>

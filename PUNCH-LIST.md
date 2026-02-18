@@ -1,7 +1,7 @@
 # Onereach.ai Punch List
 
 > Master list of bugs, fixes, and small features to address.
-> Updated: January 2026 | Current Version: 3.10.0
+> Updated: February 2026 | Current Version: 4.2.0
 
 ---
 
@@ -24,6 +24,16 @@
 
 ## 🟠 High Priority
 
+### Web Monitors
+- [x] **Web monitors completely broken** - All monitor items had empty URLs, never checked (v4.1.x)
+  - Root cause: `clipboard:check-website` handler created `type: 'text'` change-notification items in web-monitors space; migration then corrupted them to `type: 'web-monitor'` with empty URLs
+  - Fix 1: Migration now extracts URLs from content text ("URL: https://..."), deduplicates items by URL, keeps one canonical monitor per URL
+  - Fix 2: `check-website` handler now calls `handleWebsiteChange()` (updates timeline) instead of creating new items
+  - Fix 3: Startup sync re-registers clipboard monitors into WebsiteMonitor in-memory state
+  - Fix 4: `check-monitor-now` recovers URL from content if index field is empty
+  - Fix 5: Removed stray label syntax (`info:`) in `createWebsiteMonitorFromURL`
+  - Files: `clipboard-manager-v2-adapter.js`
+
 ### GSX Create
 - [ ] **Task queue persistence** - Verify working across all edge cases
 - [x] **Graceful shutdown** - Fixed in v3.8.12 with app quit handlers and forced window close
@@ -40,7 +50,68 @@
 - [ ] **ADR track audio loading** - Not implemented
   - Location: `video-editor-app.js:8554`
 
+### Playbook Executor Service
+- [x] **Claude Code Runner Modernization** - Replace execSync with async spawn (v3.20.x)
+  - Non-blocking execution, concurrent sessions via Map, --output-format json/stream-json
+  - Session management (--resume, --session-id), safety controls (--max-turns, --max-budget-usd)
+  - MCP config injection, real token tracking from JSON response
+  - Files: `lib/claude-code-runner.js`
+
+### First-Class Custom Agents
+- [x] **Phase 1: ai-service migration** - Replace Claude Code CLI spawns with ai.chat() in executeLocalAgent()
+  - Custom agents now use centralized AI service instead of heavy CLI binary spawns
+  - Conversation history included for multi-turn context
+  - Files: `src/voice-task-sdk/exchange-bridge.js`
+- [x] **Phase 2: Agent schema v2** - Upgraded agent config with voice, acks, memory, briefing, multiTurn
+  - Schema migration for existing agents, new AGENT_SCHEMA_VERSION constant
+  - Files: `src/voice-task-sdk/agent-store.js`
+- [x] **Phase 3: Thinking pattern for custom agents** - Memory, learning, subtask support
+  - Custom agents now initialize memory, load preferences, learn from interactions
+  - Custom agents with briefing.enabled contribute to daily brief
+  - Files: `src/voice-task-sdk/exchange-bridge.js`, `packages/agents/daily-brief-agent.js`
+- [x] **Phase 4: v2 agent generator** - Enriched config output with bidding guidance
+  - Generator uses ai.chat() (not CLI), produces voice, acks, memory, briefing config
+  - Structured HIGH/LOW CONFIDENCE bidding guidance in prompts
+  - Files: `lib/ai-agent-generator.js`
+- [x] **Phase 5: Composer UX upgrade** - Voice picker, memory/briefing toggles, test status
+  - Agent preview card shows v2 config controls (voice, memory, briefing, multi-turn)
+  - Controls sync changes back to draft in real-time
+  - Files: `claude-code-ui.html`, `preload-claude-code.js`, `main.js`
+- [x] **Phase 6: Testing pipeline** - Scenario generation, validation, persistence
+  - Auto-generate positive/negative test scenarios from agent description
+  - Full test suite runner with result persistence to agent-store
+  - Test status badge (passed/failed) in composer UI
+  - Files: `lib/agent-auto-tester.js`, `preload-claude-code.js`, `main.js`
+- [x] **Playbook Executor** - Job-based async execution of playbooks in Spaces (v3.20.x)
+  - REST API on port 47291: POST /api/playbook/execute, GET jobs/:id, POST respond, cancel
+  - Human-in-the-loop pause/resume via _pause.json convention
+  - Loads space context (playbook, data sources, assets), builds system prompt, executes via Claude Code
+  - Stores typed outputs (UI, documents, data, code) back into space
+  - Files: `lib/playbook-executor.js`, `spaces-api-server.js`
+- [x] **Spaces Sync Layer** - Git commit + GSX Files + OmniGraph sync (v3.20.x)
+  - Push: local git commit, upload files to GSX, upsert metadata + ticket status to OmniGraph
+  - Pull: fetch remote state from graph
+  - Files: `lib/spaces-sync.js`
+- [x] **Playbook Agent** - Voice/HUD agent for playbook execution (v3.20.x)
+  - Handles "Run the playbook in my space", status checks, question relay, cancel
+  - Files: `packages/agents/playbook-agent.js`
+- [x] **Playbook IPC + Preload Bridges** - window.playbook and window.sync APIs (v3.20.x)
+  - Files: `main.js`, `preload.js`, `preload-spaces.js`, `preload-minimal.js`
+- [x] **Playbook API Tests** - Unit + E2E with UXmag email use case (v3.20.x)
+  - Files: `test/unit/playbook-executor.test.js`, `test/e2e/playbook-api.spec.js`
+
 ### Voice / Agent Exchange
+- [x] **Calendar Agent: replaced regex pre-routing with LLM-driven classification** - "Cancel the Weekly Sync" was misrouted to recurring creation because regex matched "Weekly Sync"
+  - Root cause: 6 regex-based pre-route detectors (`_isBriefRequest`, `_isRecurringRequest`, etc.) matched keywords in event names, ignoring user intent -- violated project's "no regex classification" rule
+  - Fix: Removed all regex pre-routing. All requests now flow through `_askLLMAboutCalendar` which understands intent semantically. Updated the LLM system prompt to cover all action types (morning_brief, week_summary, find_free_slots, add_recurring, resolve_conflicts, delete_event, add_event, event_details). Added `recurring_create` handler to `_handleLocalAction`.
+  - File: `packages/agents/calendar-agent.js`
+- [x] **Calendar Agent empty-response crash** - Opus 4.6 with adaptive thinking returns empty text content (~247 occurrences)
+  - Root cause: `thinking: true` consumed all output tokens for thinking, returned empty text block
+  - Systemic fix: Downgraded from `powerful` (Opus $0.11/call) to `standard` (Sonnet ~$0.005/call) -- calendar queries are data lookup, not deep reasoning
+  - Removed `thinking: true` from all 3 ai.chat() calls (main query, intent understanding, recurring parsing)
+  - Trimmed system prompt from ~1100 words to ~250 words (removed pre-routed action handlers that never reach the LLM)
+  - Protected UI rendering in try/catch; fixed error logging (Error objects serialized as `{}`)
+  - Files: `packages/agents/calendar-agent.js`, `.cursorrules`
 - [x] **Documentation Agent (RAG-grounded)** - New docs-agent answers app questions from official docs without hallucination
   - Self-contained RAG: chunks markdown by section headers, embeds via ai-service, cosine similarity search
   - Anti-hallucination system prompt refuses when docs don't cover the topic
@@ -70,6 +141,20 @@
   - Files: `orb.html`, `preload-hud-api.js`, `lib/hud-api.js`
 - [ ] **MasterOrchestrator missing module** - `Cannot find module '../../packages/task-exchange/src/reputation/store'`
   - Location: `packages/agents/master-orchestrator.js`
+- [x] **Orb Control API for external apps** - Web apps in webviews can programmatically control the Voice Orb
+  - API: `window.orbControl` with hide, show, toggle, isVisible, getStatus
+  - HUD items: addHUDItem, removeHUDItem, getHUDItems, clearHUDItems (scoped to toolId 'external-app')
+  - Events: onVisibilityChange, onStatusChange (with cleanup functions)
+  - Security: Only available to OneReach sites (via preload-minimal.js gating)
+  - Follows shared-preload-module pattern (like preload-hud-api.js)
+  - Files: `preload-orb-control.js`, `preload-minimal.js`, `main.js`
+- [x] **Search Agent: GSX Search Serper API** - Search agent now uses OneReach GSX Search Serper API as primary search method
+  - Primary: GSX Search API (`GET /gsx-search?query=`) returns structured Google results via Serper
+  - Fallback 1: Webview search (hidden BrowserWindow)
+  - Fallback 2: DuckDuckGo Instant Answer + Lite APIs
+  - Parses organic results, People Also Ask, and Knowledge Graph
+  - Endpoint: `https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/gsx-search`
+  - Files: `packages/agents/search-agent.js`
 
 ### Spaces
 - [x] **SPACE Framework metadata schema v2.0** - Extensible core schema for Spaces and Items
@@ -94,11 +179,40 @@
   - GSX Push: data-source items push to graph with sourceType, protocol, auth type, operations, visibility
   - AI metadata generation for data sources
   - Files: `lib/metadata-schema.js`, `content-ingestion.js`, `clipboard-storage-v2.js`, `clipboard-viewer.js`, `clipboard-viewer.html`, `lib/icon-library.js`, `preload.js`, `clipboard-manager-v2-adapter.js`, `spaces-api-server.js`, `spaces-api.js`, `metadata-generator.js`, `TOOL-APP-SPACES-API-GUIDE.md`
+- [x] **Remote Space Discovery** - Discover and import spaces from OmniGraph by email
+  - OmniGraph queries: `getSpacesByUser(email)` for owned spaces, `getSharedWithMe(email)` for shared
+  - Combined `discoverSpaces(email)` deduplicates and returns unified list with source (owned/shared)
+  - Spaces API `discovery` namespace: `discoverRemoteSpaces()`, `importRemoteSpace()`, `importAll()`
+  - REST API: `GET /api/spaces/discover`, `POST /api/spaces/discover` (import)
+  - IPC: `spaces:discover`, `spaces:discover:import` with preload bridge
+  - Auto-polling (60s interval with exponential backoff on failure) + manual "Discover Spaces" button
+  - Discovery banner UI in Spaces Manager with per-space checkboxes and import controls
+  - Files: `omnigraph-client.js`, `spaces-api.js`, `spaces-api-server.js`, `main.js`, `preload-spaces.js`, `lib/spaces-sync.js`, `clipboard-viewer.js`, `clipboard-viewer.html`
 - [ ] **Large space performance** - Slow with 500+ items
 - [ ] **Search indexing** - Full-text search could be faster
 - [ ] **Sync conflicts** - Better handling when GSX sync conflicts
 
-### GSX Capture
+### WISER Meeting
+- [x] **Space selector in session setup** - Added space dropdown to "Start a WISER Meeting" page so users can select a space directly from the setup panel instead of scrolling to the bottom panel
+  - Session space selector syncs bidirectionally with main targetSpace and save dialog
+  - Highlights with red border when no space selected and user tries to host
+  - Files: recorder.html
+- [x] **Mobile PiP self-view on guest page** - Guest page now shows a FaceTime-style floating self-view overlay on mobile instead of 50/50 split
+  - Remote participant takes full screen, local video is a small rounded overlay (bottom-right)
+  - Draggable via touch with viewport clamping
+  - Mirrored (selfie-style) for natural appearance
+  - Auto-switches between PiP (mobile) and grid (desktop) on resize/rotation
+  - Files: lib/capture-guest-page.js
+- [x] **Guest page remote audio fix** - Added explicit play() for remote audio tracks on guest page
+  - Browsers block autoplay; now retries on next user gesture with "Tap anywhere to enable audio" prompt
+  - Fixed Electron autoplay-policy switch (was set too late, after app.whenReady)
+  - Files: lib/capture-guest-page.js, main.js
+- [x] **Guest page meeting controls** - Added essential meeting controls to guest page
+  - Mute/unmute microphone toggle (circular button with icon swap, mutes LiveKit track)
+  - Camera on/off toggle (circular button with icon swap, mutes LiveKit camera track)
+  - Device settings panel (gear icon opens slide-up with mic and camera dropdowns)
+  - Device switching republishes tracks to LiveKit, respects current mute/camera-off state
+  - Files: lib/capture-guest-page.js
 - [ ] **P2P Dual Recording (Phase 1)** - Riverside-style session mode
   - [x] Session mode tab with Host/Join UI
   - [x] OmniGraph signaling module (lib/capture-signaling.js)
@@ -107,7 +221,7 @@
   - [x] Split-view layout with participant labels
   - [x] IPC bridges for session lifecycle
   - [x] Synchronized recording start/stop via data channel
-  - [ ] End-to-end testing with two app instances
+  - [ ] End-to-end testing with two app instances (requires two machines on same LAN)
   - Files: recorder.html, recorder.js, preload-recorder.js, lib/capture-signaling.js
 - [x] **Live Captions + Post-Recording Diarized Transcript** (v3.13.x)
   - Live captions during recording via OpenAI Realtime API (WebSocket streaming)
@@ -132,11 +246,20 @@
     - Reuses existing ResourceManager for CPU/memory/battery (no duplicate monitoring)
     - Agent detects: high CPU (>80%), high memory (>85%), battery power, throttled windows
   - Files: recorder.html, recorder.js, preload-recorder.js, packages/agents/meeting-monitor-agent.js, packages/agents/agent-registry.js
-- [ ] **P2P Dual Recording (Phase 2)** - Guest track transfer
-  - [ ] Transfer guest recording to host via WebRTC data channel
-  - [ ] Save both tracks to Space
-- [ ] **P2P Dual Recording (Phase 3)** - Post-processing
-  - [ ] FFmpeg merge with layout options (side-by-side, PiP, speaker view)
+- [x] **P2P Dual Recording (Phase 2)** - Guest track transfer (v3.20.x)
+  - [x] Transfer guest recording to host via WebRTC data channel
+  - [x] Chunked binary transfer (16KB chunks) with backpressure handling
+  - [x] Progress overlay with real-time byte counter
+  - [x] Save both tracks to Space (host track via save-to-space, guest track via save-guest-track IPC)
+  - Files: `recorder.html`, `recorder.js`, `preload-recorder.js`
+- [x] **P2P Dual Recording (Phase 3)** - Post-processing (v3.20.x)
+  - [x] FFmpeg merge with layout options: side-by-side, PiP (host main), PiP (guest main)
+  - [x] Layout picker dialog with visual previews
+  - [x] Real-time merge progress via IPC events
+  - [x] Merged video saved to Space as MP4 (libx264 + AAC)
+  - [x] Auto-probes both tracks for dimensions, scales to matching height
+  - [x] Audio mixed from both tracks (amix)
+  - Files: `recorder.html`, `recorder.js`, `preload-recorder.js`
 
 ---
 
@@ -164,7 +287,7 @@
   - Tracks which features user has explored
   - Files: `packages/agents/app-agent.js`, `packages/agents/agent-registry.js`
 - [x] **Recorder Agent** - Voice agent that launches video capture (v3.10.x)
-  - "Record a video" / "Start recording" opens GSX Capture
+  - "Record a video" / "Start recording" opens WISER Meeting
   - "Capture my screen" hints at screen recording mode
   - "Record for [space name]" pre-selects space for saving
   - Files: `packages/agents/recorder-agent.js`, `packages/agents/agent-registry.js`
@@ -172,6 +295,11 @@
 - [ ] **Agent chaining** - Connect agents to work together
 
 ### IDW Management
+- [x] **IDW Store uses OmniGraph** - Store directory now queries graph DB IDW nodes instead of hardcoded staging API
+  - Replaced direct HTTPS POST to `em.staging.api.onereach.ai` with OmniGraph Cypher query
+  - Added `getIDWDirectory()` and `getIDW()` methods to `omnigraph-client.js`
+  - Auto-initializes OmniGraph from settings if not already configured
+  - Files: `omnigraph-client.js`, `main.js`
 - [ ] **Bulk import/export** - No way to backup all IDW configs
 - [ ] **Environment detection** - Sometimes misidentifies environment
 - [ ] **GSX link validation** - No validation on URL entry
@@ -195,7 +323,7 @@
   - ✅ Created reusable icon library (lib/icon-library.js) with 40+ icons
   - ✅ Comprehensive documentation (SPACES-DESIGN-SYSTEM.md, SPACES-TUFTE-POLISH-COMPLETE.md)
   - Files: clipboard-viewer.html (~150+ style changes), clipboard-viewer.js, lib/icon-library.js
-- [x] **GSX Capture UI redesign** - Complete UX overhaul (v3.10.x)
+- [x] **WISER Meeting UI redesign** - Complete UX overhaul (v3.10.x)
   - Replaced all emojis with SVG icons throughout
   - New deep-space dark theme with purple/blue undertones
   - Glassmorphism panels with backdrop-filter blur effects
@@ -300,6 +428,57 @@
 
 ## Recently Completed
 
+- [x] **Calendar Agent v3 Refactor** (v4.3.0)
+  - **Deleted**: Monolithic `calendar-agent.js` (4800 lines) -- inconsistent routing, keyword fallbacks, unvalidated LLM dates
+  - **New: `lib/calendar-data.js`** -- Pure synchronous analysis functions: analyzeDay/Week/Month, findConflicts, findFreeSlots, getNextEvent, enrichEvent, deduplicateEvents. All take `now` parameter for testability. 65 unit tests.
+  - **New: `lib/calendar-fetch.js`** -- Async API layer: fetchEventsForRange, resolveTimeframe (pure JS date resolution), resolveEventDate, verified mutations (createEventVerified, deleteEventVerified, editEventVerified). All mutations re-fetch and confirm. 27 unit tests.
+  - **New: `lib/calendar-format.js`** -- Pure rendering: buildDayUISpec, buildEventsUISpec, buildBriefUISpec, spokenDaySummary, extractMeetingLink, confirmCreate/Delete/Edit. 39 unit tests.
+  - **New: `packages/agents/calendar-query-agent.js`** -- Read schedule, next meeting, availability, conflicts, free slots, join meeting, morning brief. LLM intent parsing with structured routing.
+  - **New: `packages/agents/calendar-create-agent.js`** -- Create events with LLM detail extraction, guest resolution via contact-store, multi-turn for missing fields, verified creation.
+  - **New: `packages/agents/calendar-edit-agent.js`** -- Move/rename/change attendees via delete+recreate pattern, disambiguation for multiple matches, verified edit.
+  - **New: `packages/agents/calendar-delete-agent.js`** -- Cancel events with name search, ordinal disambiguation, verified deletion.
+  - **Updated**: agent-registry.js, daily-brief-agent.js, agent-space-registry.js, voice-coordinator.js, action-item-agent.js, agent-manager.html, meeting-link-extraction.test.js
+  - All 1910 unit tests pass (131 new calendar tests)
+  - Files: `lib/calendar-data.js`, `lib/calendar-fetch.js`, `lib/calendar-format.js`, `packages/agents/calendar-{query,create,edit,delete}-agent.js`
+
+- [x] **Browser Automation Agent** (v4.2.0)
+  - **New: `lib/browser-automation.js`** -- Playwright-based singleton service managing an isolated Chromium browser with ref-based accessibility snapshot interaction (navigate, snapshot, act, screenshot, evaluate, tab/cookie management, idle auto-shutdown)
+  - **New: `packages/agents/browser-agent.js`** -- Task exchange agent that uses LLM reasoning to autonomously plan and execute browser actions step-by-step. Safety guardrails: max 20 actions/task, 60s timeout, domain blocklist, no password entry without confirmation, screenshot audit trail.
+  - **Registered** in `agent-registry.js` -- auto-connects via exchange-bridge, LLM-based bidding
+  - **IPC bridge** -- `window.browserAutomation` API exposed in `preload.js` with full IPC handlers in `main.js`
+  - **Web scraper consolidation** -- `web-scraper.js` refactored from Puppeteer to use `browser-automation.js` (shared Playwright instance)
+  - **Settings UI** -- New "Browser Automation" tab in settings.html with enable/disable, headless toggle, max actions, idle timeout, max tabs, blocked domains
+  - Files: `lib/browser-automation.js`, `packages/agents/browser-agent.js`, `packages/agents/agent-registry.js`, `main.js`, `preload.js`, `web-scraper.js`, `settings.html`, `ROADMAP.md`
+
+- [x] **Orb & Task Exchange Architecture Refactoring** (v3.14.x)
+  - **Consolidated task submission paths**: Removed 3 legacy `orbAPI.submit()` fallbacks in orb.html and deprecated `voice-task-sdk:submit` IPC. All submissions now go through `agentHUD.submitTask()` -> `hud-api` -> `processSubmit()`.
+  - **Extracted exchange-bridge modules**: Created `lib/exchange/voice-coordinator.js` (voice personalities, config), `lib/exchange/conversation-history.js` (conversation tracking, session summaries, active learning), and `lib/exchange/subtask-registry.js` (subtask API, input schema processor). Reduced `exchange-bridge.js` from 4,797 to 3,943 lines.
+  - **Decoupled exchange-bridge / hud-api circular dependency**: Created `lib/exchange/event-bus.js` shared EventEmitter singleton. `hud-api.js` no longer holds a direct `_exchangeBridge` reference -- uses the event bus for pull-based operations (`getExchange`, `processSubmit`, `cancelTask`).
+  - **Extracted orb audio module**: Created `lib/orb/orb-audio.js` (AudioContext management, WAV/PCM playback, ready chime). Loaded as `<script>` in orb.html.
+  - **Introduced orb state machine**: Created `lib/orb/orb-state.js` with formal phase transitions (`idle` -> `listening` -> `processing` -> `speaking`), event system, and transition guards. Integrated at key orb lifecycle points.
+  - **Renamed HUD API**: `window.hudAPI` -> `window.commandHUD` in `preload-command-hud.js`, `command-hud.html`, and all test files. `window.agentHUD` remains the canonical task API.
+  - **Eliminated preload duplication**: Removed ~100 lines of inline orb-control code from `preload-minimal.js` and `preload-spaces.js`. Both now use `require('./preload-orb-control')` shared module.
+  - Files: `exchange-bridge.js`, `hud-api.js`, `orb.html`, `preload-orb.js`, `preload-command-hud.js`, `preload-minimal.js`, `preload-spaces.js`, `command-hud.html`, + 5 new modules in `lib/exchange/` and `lib/orb/`
+
+- [x] **Daily Brief Pipeline Overhaul: 5 Fixes** (v3.14.x)
+  - **Double greeting fix**: Time-agent `getBriefing()` no longer includes "Good morning" -- only provides time/date facts. LLM composer handles the single greeting. Previously: "Good morning. Good morning. It's 11:51 AM..."
+  - **Decomposition fix**: Daily brief requests ("give me my brief", "catch me up", etc.) are now excluded from task decomposition. The daily-brief-agent already orchestrates weather/calendar/email internally -- decomposing caused duplicate work, dead-lettered subtasks, and chaos.
+  - **Memory header duplication fix**: `parseMarkdownSections()` now strips `# Title` lines from the `_header` section so `rebuildMarkdown()` doesn't duplicate them. Fixed all 18+ agent memory files that had accumulated 2-10 duplicate title lines.
+  - **Weather fallback**: Added Open-Meteo (free, no API key) as fallback when wttr.in times out. Both `_fetchWeather()` and `_fetchWeatherData()` now try wttr.in first, then Open-Meteo. Includes geocoding (city name to lat/lon) and WMO weather code translation.
+  - **Composition cost reduction**: Brief composition switched from `powerful` profile with extended thinking (Claude 4.6 Opus) to `standard` profile (Claude Sonnet). Formatting a brief into speech doesn't need deep reasoning.
+  - **Calendar data source fix**: `getBriefing()` was only reading from the local calendar store (empty) instead of fetching from the omnical API (Apple Calendar). Now calls `_fetchEvents(false)` to get real events. Also bumped per-agent timeout from 5s to 8s and total timeout from 12s to 15s to accommodate the API call.
+  - Files: `packages/agents/time-agent.js`, `packages/agents/daily-brief-agent.js`, `packages/agents/calendar-agent.js`, `packages/agents/weather-agent.js`, `lib/agent-memory-store.js`, `src/voice-task-sdk/exchange-bridge.js`
+
+- [x] **Full Spatial Awareness: Multi-Monitor, Edge Snap, Per-Display Memory** (v3.14.x)
+  - New centralized screen service (`lib/screen-service.js`) replaces all `screen.getPrimaryDisplay()` with display-aware logic
+  - Fixed HUD positioning bug: HUD now centers on the actual visible 80x80 orb, not the 400x550 window origin (~300px offset fix)
+  - Multi-monitor support: orb, HUD, Black Hole, GSX Create, and QR scanner all use the correct display
+  - Per-display position memory: orb remembers its position on each monitor; "welcome home" when a display is reconnected
+  - Edge magnetism: 20px snap zone on screen edges and corners (applied on drag release, zero jank)
+  - Display change listener: handles monitor plug/unplug/resolution change at runtime
+  - Agent screen context: display geometry, orb position, and frontmost app injected into task metadata
+  - 43 unit tests covering all geometry, snap, per-display memory, and multi-monitor scenarios
+
 - [x] **Daily Brief Time-Awareness: Past vs Upcoming Events** (v3.14.x)
   - Bug: Daily brief described past events in future tense ("Your first meeting is at 9 AM" when it's 3 PM)
   - Fix: `generateMorningBrief()` now splits events into completed/in-progress/upcoming with status per event
@@ -309,6 +488,14 @@
   - Conflicts filtered to only show upcoming ones
   - LLM composition prompt updated with explicit time-awareness rules
   - Files: `lib/calendar-store.js`, `packages/agents/daily-brief-agent.js`
+
+- [x] **Calendar Agent: Time-Aware LLM Event Formatting** (v3.14.x)
+  - Bug: `_askLLMAboutCalendar()` sent a flat chronological list under "UPCOMING EVENTS" -- events already over today still appeared as upcoming, no indication of current or next meeting
+  - Fix: Events now grouped by temporal status: ALREADY OVER, HAPPENING NOW, NEXT UP, LATER TODAY, and future days grouped by day
+  - Relative time annotations added: "ended 2 hr ago", "25 min remaining", "starts in 15 minutes"
+  - LLM system prompt updated with time-awareness rules (past/present/future tense per section)
+  - Future-day events now grouped under day headers (with "TOMORROW" label for next day)
+  - File: `packages/agents/calendar-agent.js`
 
 - [x] **Memory Management Agent: Cross-Agent Memory Orchestrator** (v3.14.x)
   - Overhauled `packages/agents/memory-agent.js` from single-profile manager to full cross-agent memory orchestrator
@@ -551,7 +738,7 @@
   - Default subtask routing changed from 'locked' to 'open' for fair auctions
   - HUD: lock indicator, decomposition banner, error-routed banner
 
-- [x] **GSX Capture screen/camera recording fix + full audio mixing + Spaces save** (v3.12.x)
+- [x] **WISER Meeting screen/camera recording fix + full audio mixing + Spaces save** (v3.12.x)
   - Fixed: `desktopCapturer` removed from preload context in Electron 39 (main-process only now)
   - Moved screen source enumeration to main process IPC handler (`recorder:get-screen-sources`)
   - Updated `preload-recorder.js` to use IPC instead of direct `desktopCapturer` call

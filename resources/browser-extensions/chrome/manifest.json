@@ -3,18 +3,8 @@
   "name": "OneReach.ai Tab Share",
   "version": "1.0.0",
   "description": "Share browser tabs, text, and images with OneReach.ai Spaces",
-  "permissions": [
-    "tabs",
-    "activeTab",
-    "scripting",
-    "storage",
-    "contextMenus"
-  ],
-  "host_permissions": [
-    "http://127.0.0.1:47291/*",
-    "http://localhost:47291/*",
-    "<all_urls>"
-  ],
+  "permissions": ["tabs", "activeTab", "scripting", "storage", "contextMenus"],
+  "host_permissions": ["http://127.0.0.1:47291/*", "http://localhost:47291/*", "<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },
@@ -42,7 +32,3 @@
     }
   }
 }
-
-
-
-

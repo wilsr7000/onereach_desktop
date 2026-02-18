@@ -3,7 +3,6 @@
  * @module src/video/translation/TranslationEvaluator
  */
 
-import https from 'https';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const ai = require('../../../lib/ai-service');
@@ -67,10 +66,10 @@ ${sourceDuration ? `Source duration: ${sourceDuration}s` : ''}
 
 Evaluate and return JSON:`;
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve, _reject) => {
       // Determine if using Claude or GPT
       const isAnthropic = apiKey && apiKey.startsWith('sk-ant-');
-      
+
       if (isAnthropic) {
         this.evaluateWithAnthropic(systemPrompt, userPrompt, apiKey)
           .then(resolve)
@@ -87,24 +86,21 @@ Evaluate and return JSON:`;
    * Evaluate using Anthropic API
    * @private
    */
-  async evaluateWithAnthropic(systemPrompt, userPrompt, apiKey) {
+  async evaluateWithAnthropic(systemPrompt, userPrompt, _apiKey) {
     try {
-      const result = await ai.json(
-        `${systemPrompt}\n\n${userPrompt}`,
-        {
-          profile: 'standard',
-          maxTokens: 1500,
-          feature: 'translation-evaluator'
-        }
-      );
-      
+      const result = await ai.json(`${systemPrompt}\n\n${userPrompt}`, {
+        profile: 'standard',
+        maxTokens: 1500,
+        feature: 'translation-evaluator',
+      });
+
       const evaluation = result || {};
-      
+
       // Calculate composite if not provided
       if (!evaluation.composite) {
         evaluation.composite = this.calculateComposite(evaluation.scores);
       }
-      
+
       evaluation.pass = evaluation.composite >= 9.0;
       return evaluation;
     } catch (e) {
@@ -117,25 +113,22 @@ Evaluate and return JSON:`;
    * Evaluate using OpenAI API
    * @private
    */
-  async evaluateWithOpenAI(systemPrompt, userPrompt, apiKey) {
+  async evaluateWithOpenAI(systemPrompt, userPrompt, _apiKey) {
     try {
-      const result = await ai.json(
-        userPrompt,
-        {
-          profile: 'fast',
-          system: systemPrompt,
-          temperature: 0.3,
-          feature: 'translation-evaluator'
-        }
-      );
-      
+      const result = await ai.json(userPrompt, {
+        profile: 'fast',
+        system: systemPrompt,
+        temperature: 0.3,
+        feature: 'translation-evaluator',
+      });
+
       const evaluation = result || {};
-      
+
       // Calculate composite if not provided
       if (!evaluation.composite) {
         evaluation.composite = this.calculateComposite(evaluation.scores);
       }
-      
+
       evaluation.pass = evaluation.composite >= 9.0;
       return evaluation;
     } catch (e) {
@@ -149,14 +142,14 @@ Evaluate and return JSON:`;
    * @private
    */
   calculateComposite(scores) {
-    const weights = { 
-      accuracy: 0.25, 
-      fluency: 0.25, 
-      adequacy: 0.20, 
-      cultural_fit: 0.15, 
-      timing_fit: 0.15 
+    const weights = {
+      accuracy: 0.25,
+      fluency: 0.25,
+      adequacy: 0.2,
+      cultural_fit: 0.15,
+      timing_fit: 0.15,
     };
-    
+
     let composite = 0;
     for (const [key, weight] of Object.entries(weights)) {
       composite += (scores[key]?.score || 7) * weight;
@@ -175,27 +168,11 @@ Evaluate and return JSON:`;
         fluency: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
         adequacy: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
         cultural_fit: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
-        timing_fit: { score: 7.5, feedback: 'Unable to evaluate - please review manually' }
+        timing_fit: { score: 7.5, feedback: 'Unable to evaluate - please review manually' },
       },
       composite: 7.5,
       improvements: ['Manual review recommended'],
-      pass: false
+      pass: false,
     };
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -21,7 +21,7 @@ const FORMAT_METADATA = {
     category: 'documents',
     description: 'Professional PDF document with formatting preserved',
     supportsImages: true,
-    supportsStyles: true
+    supportsStyles: true,
   },
   docx: {
     name: 'Word Document',
@@ -31,7 +31,7 @@ const FORMAT_METADATA = {
     category: 'documents',
     description: 'Editable Word document for Microsoft Office or Google Docs',
     supportsImages: true,
-    supportsStyles: true
+    supportsStyles: true,
   },
   txt: {
     name: 'Plain Text',
@@ -41,7 +41,7 @@ const FORMAT_METADATA = {
     category: 'documents',
     description: 'Simple plain text file, universally compatible',
     supportsImages: false,
-    supportsStyles: false
+    supportsStyles: false,
   },
   pptx: {
     name: 'PowerPoint',
@@ -51,7 +51,7 @@ const FORMAT_METADATA = {
     category: 'presentations',
     description: 'PowerPoint presentation with slides and bullet points',
     supportsImages: true,
-    supportsStyles: true
+    supportsStyles: true,
   },
   slides: {
     name: 'Web Slides',
@@ -61,7 +61,7 @@ const FORMAT_METADATA = {
     category: 'presentations',
     description: 'Interactive web-based presentation',
     supportsImages: true,
-    supportsStyles: true
+    supportsStyles: true,
   },
   xlsx: {
     name: 'Excel Spreadsheet',
@@ -71,7 +71,7 @@ const FORMAT_METADATA = {
     category: 'data',
     description: 'Excel spreadsheet with structured data tables',
     supportsImages: false,
-    supportsStyles: true
+    supportsStyles: true,
   },
   csv: {
     name: 'CSV Data',
@@ -81,7 +81,7 @@ const FORMAT_METADATA = {
     category: 'data',
     description: 'Comma-separated values for data import/export',
     supportsImages: false,
-    supportsStyles: false
+    supportsStyles: false,
   },
   html: {
     name: 'Web Page',
@@ -91,7 +91,7 @@ const FORMAT_METADATA = {
     category: 'web',
     description: 'Standalone web page with embedded styles',
     supportsImages: true,
-    supportsStyles: true
+    supportsStyles: true,
   },
   markdown: {
     name: 'Markdown',
@@ -101,8 +101,8 @@ const FORMAT_METADATA = {
     category: 'web',
     description: 'Portable markdown for documentation and wikis',
     supportsImages: true,
-    supportsStyles: false
-  }
+    supportsStyles: false,
+  },
 };
 
 // Generator instances (lazy loaded)
@@ -158,11 +158,11 @@ function getGenerator(format) {
  */
 async function generateDocument(format, space, items, options = {}) {
   const generator = getGenerator(format);
-  
+
   if (!generator) {
     throw new Error(`No generator available for format: ${format}`);
   }
-  
+
   return generator.generate(space, items, options);
 }
 
@@ -182,7 +182,7 @@ function getFormatMetadata(format) {
 function getAllFormats() {
   return Object.entries(FORMAT_METADATA).map(([key, value]) => ({
     id: key,
-    ...value
+    ...value,
   }));
 }
 
@@ -192,7 +192,7 @@ function getAllFormats() {
  * @returns {Array} Array of format metadata objects
  */
 function getFormatsByCategory(category) {
-  return getAllFormats().filter(f => f.category === category);
+  return getAllFormats().filter((f) => f.category === category);
 }
 
 module.exports = {
@@ -209,9 +209,5 @@ module.exports = {
   MarkdownGenerator,
   CsvGenerator,
   TxtGenerator,
-  SlidesGenerator
+  SlidesGenerator,
 };
-
-
-
-

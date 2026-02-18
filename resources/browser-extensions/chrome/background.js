@@ -1,6 +1,6 @@
 /**
  * OneReach.ai Tab Share - Background Service Worker
- * 
+ *
  * Handles WebSocket connection to Electron app, tab queries, and captures.
  */
 
@@ -40,21 +40,21 @@ function setupContextMenus() {
     chrome.contextMenus.create({
       id: 'send-selection-to-space',
       title: 'Send to OneReach Space',
-      contexts: ['selection']
+      contexts: ['selection'],
     });
 
     // Context menu for images
     chrome.contextMenus.create({
       id: 'send-image-to-space',
       title: 'Send Image to OneReach Space',
-      contexts: ['image']
+      contexts: ['image'],
     });
 
     // Context menu for page
     chrome.contextMenus.create({
       id: 'share-page',
       title: 'Share Page with OneReach.ai',
-      contexts: ['page']
+      contexts: ['page'],
     });
 
     console.log('[OneReach] Context menus created');
@@ -99,7 +99,7 @@ async function loadTokenAndConnect() {
   try {
     // Try to get token from storage
     const result = await chrome.storage.local.get(['authToken']);
-    
+
     if (result.authToken) {
       authToken = result.authToken;
       console.log('[OneReach] Token loaded from storage');
@@ -127,7 +127,7 @@ async function tryFetchToken() {
       console.log('[OneReach] Token fetched from app');
       connectWebSocket();
     }
-  } catch (error) {
+  } catch (_error) {
     console.log('[OneReach] App not running or token fetch failed');
   }
 }
@@ -154,12 +154,14 @@ function connectWebSocket() {
     ws.onopen = () => {
       console.log('[OneReach] WebSocket connected');
       reconnectAttempts = 0;
-      
+
       // Send auth message
-      ws.send(JSON.stringify({
-        type: 'auth',
-        token: authToken
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'auth',
+          token: authToken,
+        })
+      );
     };
 
     ws.onmessage = (event) => {
@@ -231,27 +233,27 @@ function handleWebSocketMessage(data) {
 async function handleGetTabsRequest(requestId) {
   try {
     const tabs = await chrome.tabs.query({});
-    
-    const tabList = tabs.map(tab => ({
+
+    const tabList = tabs.map((tab) => ({
       id: tab.id,
       title: tab.title,
       url: tab.url,
       favIconUrl: tab.favIconUrl,
       active: tab.active,
-      windowId: tab.windowId
+      windowId: tab.windowId,
     }));
 
     sendToApp({
       type: 'tabs',
       requestId,
-      data: tabList
+      data: tabList,
     });
   } catch (error) {
     console.error('[OneReach] Error getting tabs:', error);
     sendToApp({
       type: 'tabs',
       requestId,
-      error: error.message
+      error: error.message,
     });
   }
 }
@@ -263,27 +265,29 @@ async function handleCaptureTabRequest(requestId, tabId) {
   try {
     // Get the tab info
     const tab = await chrome.tabs.get(tabId);
-    
+
     // Activate the tab to capture it
     await chrome.tabs.update(tabId, { active: true });
     await chrome.windows.update(tab.windowId, { focused: true });
-    
+
     // Wait a moment for the tab to be visible
-    await new Promise(resolve => setTimeout(resolve, 200));
-    
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+
     // Capture screenshot
     const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
-      format: 'png'
+      format: 'png',
     });
-    
+
     // Extract text content
     let textContent = '';
     try {
       const results = await chrome.scripting.executeScript({
         target: { tabId },
-        func: extractPageText
+        func: extractPageText,
       });
-      
+
       if (results && results[0] && results[0].result) {
         textContent = results[0].result;
       }
@@ -300,15 +304,15 @@ async function handleCaptureTabRequest(requestId, tabId) {
         title: tab.title,
         screenshot,
         textContent,
-        capturedAt: Date.now()
-      }
+        capturedAt: Date.now(),
+      },
     });
   } catch (error) {
     console.error('[OneReach] Error capturing tab:', error);
     sendToApp({
       type: 'capture-result',
       requestId,
-      error: error.message
+      error: error.message,
     });
   }
 }
@@ -321,29 +325,41 @@ function extractPageText() {
   const article = document.querySelector('article');
   const main = document.querySelector('main');
   const body = document.body;
-  
+
   const container = article || main || body;
-  
+
   // Clone and clean
   const clone = container.cloneNode(true);
-  
+
   // Remove script, style, nav, footer, aside elements
-  const removeSelectors = ['script', 'style', 'nav', 'footer', 'aside', 'header', '.ad', '.ads', '.advertisement', '[role="navigation"]', '[role="banner"]'];
-  removeSelectors.forEach(selector => {
-    clone.querySelectorAll(selector).forEach(el => el.remove());
+  const removeSelectors = [
+    'script',
+    'style',
+    'nav',
+    'footer',
+    'aside',
+    'header',
+    '.ad',
+    '.ads',
+    '.advertisement',
+    '[role="navigation"]',
+    '[role="banner"]',
+  ];
+  removeSelectors.forEach((selector) => {
+    clone.querySelectorAll(selector).forEach((el) => el.remove());
   });
-  
+
   // Get text content
   let text = clone.textContent || clone.innerText || '';
-  
+
   // Clean up whitespace
   text = text.replace(/\s+/g, ' ').trim();
-  
+
   // Limit length
   if (text.length > 50000) {
     text = text.substring(0, 50000) + '...';
   }
-  
+
   return text;
 }
 
@@ -369,9 +385,9 @@ function scheduleReconnect() {
 
   reconnectAttempts++;
   const delay = RECONNECT_DELAY * Math.min(reconnectAttempts, 5);
-  
+
   console.log(`[OneReach] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
-  
+
   setTimeout(() => {
     if (!isConnected) {
       connectWebSocket();
@@ -411,8 +427,8 @@ async function sendSelectionToSpace(text, tab) {
         content: text,
         title: text.substring(0, 50),
         sourceUrl: tab.url,
-        spaceId: 'default' // Will be handled by app
-      })
+        spaceId: 'default', // Will be handled by app
+      }),
     });
 
     if (response.ok) {
@@ -441,8 +457,8 @@ async function sendImageToSpace(srcUrl, tab) {
         content: srcUrl,
         title: 'Image from ' + new URL(tab.url).hostname,
         sourceUrl: tab.url,
-        spaceId: 'default'
-      })
+        spaceId: 'default',
+      }),
     });
 
     if (response.ok) {
@@ -463,7 +479,7 @@ async function shareCurrentTab(tab) {
   try {
     // Capture screenshot
     const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
-      format: 'png'
+      format: 'png',
     });
 
     // Extract text
@@ -471,9 +487,9 @@ async function shareCurrentTab(tab) {
     try {
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: extractPageText
+        func: extractPageText,
       });
-      
+
       if (results && results[0] && results[0].result) {
         textContent = results[0].result;
       }
@@ -490,12 +506,12 @@ async function shareCurrentTab(tab) {
           screenshot,
           textContent,
           url: tab.url,
-          title: tab.title
+          title: tab.title,
         }),
         title: tab.title,
         sourceUrl: tab.url,
-        spaceId: 'default'
-      })
+        spaceId: 'default',
+      }),
     });
 
     if (response.ok) {
@@ -527,7 +543,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'get-status':
       sendResponse({
         isConnected,
-        hasToken: !!authToken
+        hasToken: !!authToken,
       });
       break;
 
@@ -564,7 +580,3 @@ setInterval(() => {
 
 // Initial badge update
 updateBadge();
-
-
-
-

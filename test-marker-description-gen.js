@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Test: Marker Description Generation from Transcript
- * 
+ *
  * This test verifies the end-to-end functionality of generating
  * scene descriptions from transcript info within a range marker.
  */
@@ -17,7 +17,7 @@ const files = {
   'video-editor.html': path.join(__dirname, 'video-editor.html'),
   'video-editor-beats.js': path.join(__dirname, 'video-editor-beats.js'),
   'preload-video-editor.js': path.join(__dirname, 'preload-video-editor.js'),
-  'VideoEditorIPC.js': path.join(__dirname, 'src/video/ipc/VideoEditorIPC.js')
+  'VideoEditorIPC.js': path.join(__dirname, 'src/video/ipc/VideoEditorIPC.js'),
 };
 
 let passed = 0;
@@ -49,7 +49,10 @@ test('Function is defined', beatsJs.includes('async generateMarkerDescriptionFro
 test('Gets transcript from field', beatsJs.includes("getElementById('markerTranscription')"));
 test('Gets description field', beatsJs.includes("getElementById('markerDescription')"));
 test('Checks for empty transcript', beatsJs.includes('No transcription available'));
-test('Calls window.videoEditor.generateSceneDescription', beatsJs.includes('window.videoEditor.generateSceneDescription'));
+test(
+  'Calls window.videoEditor.generateSceneDescription',
+  beatsJs.includes('window.videoEditor.generateSceneDescription')
+);
 test('Handles time context for range markers', beatsJs.includes('this.rangeInTime'));
 test('Handles time context for spot markers', beatsJs.includes('spotTime'));
 test('Updates description field with result', beatsJs.includes('descriptionField.value = result.description'));
@@ -60,7 +63,7 @@ console.log('\n📋 Test 3: Preload Exposure');
 const preload = fs.readFileSync(files['preload-video-editor.js'], 'utf8');
 
 test('generateSceneDescription exposed to renderer', preload.includes('generateSceneDescription'));
-test('IPC channel matches', preload.includes("video-editor:generate-scene-description"));
+test('IPC channel matches', preload.includes('video-editor:generate-scene-description'));
 
 console.log('\n📋 Test 4: Backend IPC Handler');
 const ipc = fs.readFileSync(files['VideoEditorIPC.js'], 'utf8');
@@ -72,15 +75,18 @@ test('Gets provider from settings', ipc.includes("settingsManager.get('llmProvid
 test('Supports Anthropic/Claude', ipc.includes('api.anthropic.com'));
 test('Supports OpenAI', ipc.includes('api.openai.com'));
 test('Has proper prompt for scene description', ipc.includes('professional video editor'));
-test('Returns success with description', ipc.includes("{ success: true, description }"));
-test('Handles errors gracefully', ipc.includes("{ success: false, error: error.message }"));
+test('Returns success with description', ipc.includes('{ success: true, description }'));
+test('Handles errors gracefully', ipc.includes('{ success: false, error: error.message }'));
 
 console.log('\n📋 Test 5: Integration with Existing Features');
 
 test('Existing transcribeMarkerRange still works', html.includes('app.transcribeMarkerRange()'));
-test('Existing getWordsInRange in TeleprompterUI', 
-  fs.readFileSync(path.join(__dirname, 'src/video-editor/teleprompter/TeleprompterUI.js'), 'utf8')
-    .includes('getWordsInRange'));
+test(
+  'Existing getWordsInRange in TeleprompterUI',
+  fs
+    .readFileSync(path.join(__dirname, 'src/video-editor/teleprompter/TeleprompterUI.js'), 'utf8')
+    .includes('getWordsInRange')
+);
 test('Beats export includes transcript', beatsJs.includes('transcript: transcript'));
 
 console.log('\n═══════════════════════════════════════════════════════════════');
@@ -106,6 +112,3 @@ if (failed > 0) {
   console.log('');
   process.exit(0);
 }
-
-
-

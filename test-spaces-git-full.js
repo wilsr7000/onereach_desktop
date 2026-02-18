@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
  * Full end-to-end test for Spaces Git integration.
- * 
+ *
  * Tests:
  * 1. SpacesGit wrapper (lib/spaces-git.js)
  * 2. Migration (lib/spaces-migration.js)
  * 3. Metadata schema v3 (lib/metadata-schema.js)
  * 4. API endpoint handlers via direct calls
- * 
+ *
  * Uses a COPY of real OR-Spaces data. Never touches production.
  */
 
@@ -105,8 +105,9 @@ async function runTests() {
 
   // 1.7 Modify a file and commit specific paths
   const spacesDir = path.join(TEST_DIR, 'spaces');
-  const firstSpace = fs.readdirSync(spacesDir, { withFileTypes: true })
-    .find(d => d.isDirectory() && !d.name.startsWith('.'));
+  const firstSpace = fs
+    .readdirSync(spacesDir, { withFileTypes: true })
+    .find((d) => d.isDirectory() && !d.name.startsWith('.'));
   const testMetaPath = path.join(spacesDir, firstSpace.name, 'space-metadata.json');
   const testRelPath = `spaces/${firstSpace.name}/space-metadata.json`;
 
@@ -251,7 +252,7 @@ async function runTests() {
 
   // 4.4 History preserved
   const logAfterRevert = await spacesGit.log({ depth: 20 });
-  const revertEntry = logAfterRevert.find(e => e.message.startsWith('Revert'));
+  const revertEntry = logAfterRevert.find((e) => e.message.startsWith('Revert'));
   assert(!!revertEntry, 'revert commit appears in log');
   assert(revertEntry.message.includes('Bad change to revert'), 'revert commit references original message');
 
@@ -307,11 +308,12 @@ async function runTests() {
 
   // Check schema on a space
   const migSpacesDir = path.join(MIGRATE_DIR, 'spaces');
-  const migFirstSpace = fs.readdirSync(migSpacesDir, { withFileTypes: true })
-    .find(d => d.isDirectory() && !d.name.startsWith('.'));
-  const migMeta = JSON.parse(fs.readFileSync(
-    path.join(migSpacesDir, migFirstSpace.name, 'space-metadata.json'), 'utf8'
-  ));
+  const migFirstSpace = fs
+    .readdirSync(migSpacesDir, { withFileTypes: true })
+    .find((d) => d.isDirectory() && !d.name.startsWith('.'));
+  const migMeta = JSON.parse(
+    fs.readFileSync(path.join(migSpacesDir, migFirstSpace.name, 'space-metadata.json'), 'utf8')
+  );
   assert(migMeta._schema.version === '3.0', 'space metadata schema is 3.0');
   assert(migMeta._schema.storageEngine === 'git', 'space metadata has storageEngine: git');
   assert(!migMeta._schema.migratedFrom, 'migratedFrom field removed');
@@ -321,8 +323,9 @@ async function runTests() {
 
   // Check item schema
   const migItemsDir = path.join(MIGRATE_DIR, 'items');
-  const migFirstItem = fs.readdirSync(migItemsDir, { withFileTypes: true })
-    .find(d => d.isDirectory() && !d.name.startsWith('.'));
+  const migFirstItem = fs
+    .readdirSync(migItemsDir, { withFileTypes: true })
+    .find((d) => d.isDirectory() && !d.name.startsWith('.'));
   if (migFirstItem) {
     const itemMetaPath = path.join(migItemsDir, migFirstItem.name, 'metadata.json');
     if (fs.existsSync(itemMetaPath)) {
@@ -417,8 +420,9 @@ async function runTests() {
   await spacesGit.checkout('agent/calendar');
   // Modify a DIFFERENT file to avoid merge conflicts
   const itemsDir = path.join(TEST_DIR, 'items');
-  const firstItem = fs.readdirSync(itemsDir, { withFileTypes: true })
-    .find(d => d.isDirectory() && !d.name.startsWith('.'));
+  const firstItem = fs
+    .readdirSync(itemsDir, { withFileTypes: true })
+    .find((d) => d.isDirectory() && !d.name.startsWith('.'));
   if (firstItem) {
     const itemMetaPath = path.join(itemsDir, firstItem.name, 'metadata.json');
     if (fs.existsSync(itemMetaPath)) {
@@ -484,7 +488,7 @@ async function runTests() {
   process.exit(failed > 0 ? 1 : 0);
 }
 
-runTests().catch(err => {
+runTests().catch((err) => {
   console.error('\n=== TEST RUNNER CRASHED ===');
   console.error(err);
   process.exit(2);

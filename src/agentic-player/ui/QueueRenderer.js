@@ -31,7 +31,7 @@ export class QueueRenderer {
 
     // History (played clips)
     history.forEach((clip, i) => {
-      const isCurrent = (i === history.length - 1) && currentClip;
+      const isCurrent = i === history.length - 1 && currentClip;
       html += this.renderItem(clip, i + 1, isCurrent ? 'current' : 'played');
     });
 
@@ -76,19 +76,3 @@ export class QueueRenderer {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

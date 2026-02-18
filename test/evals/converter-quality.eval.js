@@ -3,12 +3,12 @@ import { createMockAIService } from '../mocks/conversion-mocks.js';
 
 /**
  * Converter Quality Evaluations
- * 
+ *
  * These tests use LLM-as-judge to evaluate the quality of conversion outputs.
  * Run with: npx vitest run test/evals/converter-quality.eval.js
- * 
+ *
  * In CI, these use mock AI. For real evaluation, set EVAL_LIVE=true.
- * 
+ *
  * Two-tier strategy:
  *   Tier 1 (deterministic): Assert exact output or structural properties
  *   Tier 2 (AI/creative): Assert report.finalScore >= 70 (built-in LLM judge)
@@ -47,16 +47,12 @@ async function judgeWithRubric(input, output, { criteria, ai, context }) {
     // Mock mode: all criteria pass
     return {
       score: 85,
-      criteriaResults: criteria.map(c => ({ criterion: c, pass: true, reasoning: 'Mock: auto-pass' })),
+      criteriaResults: criteria.map((c) => ({ criterion: c, pass: true, reasoning: 'Mock: auto-pass' })),
     };
   }
 
-  const inputDesc = typeof input === 'string'
-    ? input.slice(0, 500)
-    : `[Buffer ${input.length} bytes]`;
-  const outputDesc = typeof output === 'string'
-    ? output.slice(0, 2000)
-    : `[Buffer ${output.length} bytes]`;
+  const inputDesc = typeof input === 'string' ? input.slice(0, 500) : `[Buffer ${input.length} bytes]`;
+  const outputDesc = typeof output === 'string' ? output.slice(0, 2000) : `[Buffer ${output.length} bytes]`;
 
   // Build optional context block for the prompt
   let contextBlock = '';
@@ -97,7 +93,7 @@ Return JSON:
   } catch {
     return {
       score: 70,
-      criteriaResults: criteria.map(c => ({ criterion: c, pass: true, reasoning: 'Eval error fallback' })),
+      criteriaResults: criteria.map((c) => ({ criterion: c, pass: true, reasoning: 'Eval error fallback' })),
     };
   }
 }
@@ -129,7 +125,8 @@ describe('Converter Quality Evals', () => {
         const { MdToHtmlAgent } = require('../../lib/converters/md-to-html');
         const agent = new MdToHtmlAgent({ ai: mockAI, silent: true });
 
-        const input = '# Title\n\n## Section\n\nParagraph with **bold** and *italic*.\n\n- Item 1\n- Item 2\n\n```js\nconst x = 1;\n```';
+        const input =
+          '# Title\n\n## Section\n\nParagraph with **bold** and *italic*.\n\n- Item 1\n- Item 2\n\n```js\nconst x = 1;\n```';
         const result = await agent.convert(input);
 
         expect(result.report).toBeDefined();
@@ -208,7 +205,10 @@ describe('Converter Quality Evals', () => {
         const { JsonToCsvAgent } = require('../../lib/converters/json-to-csv');
         const agent = new JsonToCsvAgent({ ai: mockAI, silent: true });
 
-        const input = JSON.stringify([{ name: 'Alice', age: 30 }, { name: 'Bob', age: 25 }]);
+        const input = JSON.stringify([
+          { name: 'Alice', age: 30 },
+          { name: 'Bob', age: 25 },
+        ]);
         const result = await agent.convert(input);
 
         expect(result.report).toBeDefined();
@@ -331,7 +331,8 @@ describe('Converter Quality Evals', () => {
         const { TextToMdAgent } = require('../../lib/converters/text-to-md');
         const agent = new TextToMdAgent({ ai, silent: true });
 
-        const input = 'Meeting notes from today. We discussed the Q4 roadmap. Action items include updating the docs, scheduling reviews, and preparing for launch. Next meeting is Friday.';
+        const input =
+          'Meeting notes from today. We discussed the Q4 roadmap. Action items include updating the docs, scheduling reviews, and preparing for launch. Next meeting is Friday.';
         const result = await agent.convert(input);
 
         expect(result.report).toBeDefined();
@@ -398,7 +399,8 @@ describe('Converter Quality Evals', () => {
         const { CodeToMdAgent } = require('../../lib/converters/code-to-md');
         const agent = new CodeToMdAgent({ ai, silent: true });
 
-        const input = 'class Stack {\n  constructor() { this.items = []; }\n  push(val) { this.items.push(val); }\n  pop() { return this.items.pop(); }\n}';
+        const input =
+          'class Stack {\n  constructor() { this.items = []; }\n  push(val) { this.items.push(val); }\n  pop() { return this.items.pop(); }\n}';
         const result = await agent.convert(input);
 
         expect(result.report).toBeDefined();
@@ -429,7 +431,8 @@ describe('Converter Quality Evals', () => {
         const { ContentToPlaybookAgent } = require('../../lib/converters/content-to-playbook');
         const agent = new ContentToPlaybookAgent({ ai, silent: true });
 
-        const input = 'How to onboard a new employee:\n1. Send welcome email\n2. Set up accounts (email, Slack, GitHub)\n3. Schedule orientation meeting\n4. Assign buddy for first week\n5. Review company handbook';
+        const input =
+          'How to onboard a new employee:\n1. Send welcome email\n2. Set up accounts (email, Slack, GitHub)\n3. Schedule orientation meeting\n4. Assign buddy for first week\n5. Review company handbook';
         const result = await agent.convert(input);
 
         expect(result.report).toBeDefined();
@@ -438,8 +441,12 @@ describe('Converter Quality Evals', () => {
         if (isLive) {
           expect(result.report.finalScore).toBeGreaterThanOrEqual(70);
           if (result.success && result.output) {
-            const output = typeof result.output === 'object' ? result.output
-              : typeof result.output === 'string' ? JSON.parse(result.output) : result.output;
+            const output =
+              typeof result.output === 'object'
+                ? result.output
+                : typeof result.output === 'string'
+                  ? JSON.parse(result.output)
+                  : result.output;
             expect(output.title || output.name).toBeTruthy();
           }
           if (result.success) {
@@ -465,7 +472,7 @@ describe('Converter Quality Evals', () => {
         const agent = new ImageToTextAgent({ ai, silent: true });
 
         // Use a small mock PNG buffer (the mock AI will describe it)
-        const input = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00]);
+        const input = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
         const result = await agent.convert(input);
 
         expect(result.report).toBeDefined();
@@ -759,7 +766,10 @@ describe('Converter Quality Evals', () => {
         const { JsonToHtmlAgent } = require('../../lib/converters/json-to-html');
         const agent = new JsonToHtmlAgent({ ai: mockAI, silent: true });
 
-        const input = JSON.stringify([{ name: 'Alice', age: 30 }, { name: 'Bob', age: 25 }]);
+        const input = JSON.stringify([
+          { name: 'Alice', age: 30 },
+          { name: 'Bob', age: 25 },
+        ]);
         const result = await agent.convert(input);
 
         expect(result.report).toBeDefined();
@@ -778,7 +788,10 @@ describe('Converter Quality Evals', () => {
         const { JsonToMdAgent } = require('../../lib/converters/json-to-md');
         const agent = new JsonToMdAgent({ ai: mockAI, silent: true });
 
-        const input = JSON.stringify([{ name: 'Alice', age: 30 }, { name: 'Bob', age: 25 }]);
+        const input = JSON.stringify([
+          { name: 'Alice', age: 30 },
+          { name: 'Bob', age: 25 },
+        ]);
         const result = await agent.convert(input);
 
         expect(result.report).toBeDefined();
@@ -888,7 +901,7 @@ describe('Converter Quality Evals', () => {
 
       for (const { path, input } of agents) {
         const mod = require(path);
-        const AgentClass = Object.values(mod).find(v => typeof v === 'function');
+        const AgentClass = Object.values(mod).find((v) => typeof v === 'function');
         if (!AgentClass) continue;
 
         const agent = new AgentClass({ ai: mockAI, silent: true });
@@ -912,7 +925,7 @@ describe('Converter Quality Evals', () => {
         expect(result.report.events.length).toBeGreaterThan(0);
 
         // Events should have converter:start
-        expect(result.report.events.some(e => e.event === 'converter:start')).toBe(true);
+        expect(result.report.events.some((e) => e.event === 'converter:start')).toBe(true);
       }
     });
   });

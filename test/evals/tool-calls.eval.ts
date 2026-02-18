@@ -32,7 +32,7 @@ async function getToolCalls(prompt: string): Promise<ToolCall[]> {
   if (prompt.toLowerCase().includes('run') && prompt.toLowerCase().includes('lint')) {
     return [{ name: 'terminal:run', arguments: { command: 'npm run lint' } }];
   }
-  if (prompt.toLowerCase().includes('read') && prompt.toLowerCase().includes('file')) {
+  if (prompt.toLowerCase().includes('read') && (prompt.toLowerCase().includes('file') || prompt.toLowerCase().includes('contents'))) {
     return [{ name: 'file:read', arguments: { path: 'src/index.js' } }];
   }
   if (prompt.toLowerCase().includes('search')) {

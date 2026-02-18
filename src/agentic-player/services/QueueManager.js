@@ -21,7 +21,7 @@ export class QueueManager {
    */
   addClips(clips) {
     if (!clips || clips.length === 0) return;
-    
+
     this.queue.push(...clips);
     log.info('agent', '[QueueManager] Added clips (total: )', { v0: clips.length, v1: this.queue.length });
   }
@@ -32,7 +32,7 @@ export class QueueManager {
    */
   getNext() {
     if (this.queue.length === 0) return null;
-    
+
     const clip = this.queue.shift();
     this.history.push(clip);
     return clip;
@@ -101,19 +101,3 @@ export class QueueManager {
     return this.history.length > 0 ? this.history[this.history.length - 1] : null;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

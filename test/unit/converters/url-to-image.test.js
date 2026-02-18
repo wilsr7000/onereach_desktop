@@ -4,14 +4,16 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 
 // Mock Electron BrowserWindow for image capture
 const mockNativeImage = {
-  toPNG: vi.fn().mockReturnValue(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])),
-  toJPEG: vi.fn().mockReturnValue(Buffer.from([0xFF, 0xD8, 0xFF, 0xE0])),
+  toPNG: vi.fn().mockReturnValue(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  toJPEG: vi.fn().mockReturnValue(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
   getSize: vi.fn().mockReturnValue({ width: 1280, height: 900 }),
 };
 const mockWebContents = {
   loadURL: vi.fn().mockResolvedValue(undefined),
   on: vi.fn(),
-  once: vi.fn((event, handler) => { if (event === 'did-finish-load') handler(); }),
+  once: vi.fn((event, handler) => {
+    if (event === 'did-finish-load') handler();
+  }),
   executeJavaScript: vi.fn().mockResolvedValue(900),
   capturePage: vi.fn().mockResolvedValue(mockNativeImage),
   setUserAgent: vi.fn(),
@@ -63,7 +65,7 @@ describe('UrlToImageAgent (specific)', () => {
 
   it('defines 3 strategies for different viewport modes', () => {
     expect(agent.strategies.length).toBe(3);
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toContain('viewport');
     expect(ids).toContain('full-page');
     expect(ids).toContain('mobile');

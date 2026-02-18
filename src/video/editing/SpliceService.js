@@ -34,8 +34,8 @@ export class SpliceService {
   async spliceVideo(inputPath, options = {}, progressCallback = null) {
     const {
       cutStart, // Start time of section to remove
-      cutEnd,   // End time of section to remove
-      outputPath = null
+      cutEnd, // End time of section to remove
+      outputPath = null,
     } = options;
 
     if (cutStart === undefined || cutEnd === undefined) {
@@ -118,7 +118,7 @@ export class SpliceService {
               progressCallback({
                 jobId,
                 percent: progress.percent,
-                timemark: progress.timemark
+                timemark: progress.timemark,
               });
             }
           })
@@ -137,9 +137,8 @@ export class SpliceService {
         outputPath: output,
         jobId,
         removedDuration,
-        newDuration: duration - removedDuration
+        newDuration: duration - removedDuration,
       };
-
     } catch (error) {
       this.activeJobs.delete(jobId);
       this.cleanupTempFiles([tempPart1, tempPart2, tempList]);
@@ -163,30 +162,14 @@ export class SpliceService {
    * @param {Array} files - Array of file paths to delete
    */
   cleanupTempFiles(files) {
-    files.forEach(f => {
+    files.forEach((f) => {
       if (f && fs.existsSync(f)) {
         try {
           fs.unlinkSync(f);
-        } catch (e) {
+        } catch (_e) {
           log.warn('video', '[SpliceService] Failed to delete temp file', { data: f });
         }
       }
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

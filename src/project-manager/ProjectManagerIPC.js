@@ -26,7 +26,7 @@ function getProjectManager() {
  */
 function setupProjectManagerIPC() {
   const pm = getProjectManager();
-  
+
   log.info('app', '[ProjectManagerIPC] Registering IPC handlers...');
 
   // ==================== PROJECT OPERATIONS ====================
@@ -50,7 +50,7 @@ function setupProjectManagerIPC() {
     }
   });
 
-  ipcMain.handle('project:getAll', async (event) => {
+  ipcMain.handle('project:getAll', async (_event) => {
     try {
       return pm.getAllProjects();
     } catch (error) {
@@ -237,7 +237,7 @@ function setupProjectManagerIPC() {
     }
   });
 
-  ipcMain.handle('project:getCurrentSession', async (event) => {
+  ipcMain.handle('project:getCurrentSession', async (_event) => {
     try {
       return pm.getCurrentSession();
     } catch (error) {
@@ -266,7 +266,7 @@ function setupProjectManagerIPC() {
     }
   });
 
-  ipcMain.handle('project:getStats', async (event) => {
+  ipcMain.handle('project:getStats', async (_event) => {
     try {
       return pm.getStats();
     } catch (error) {
@@ -280,16 +280,5 @@ function setupProjectManagerIPC() {
 
 module.exports = {
   setupProjectManagerIPC,
-  getProjectManager
+  getProjectManager,
 };
-
-
-
-
-
-
-
-
-
-
-

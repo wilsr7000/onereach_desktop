@@ -56,7 +56,7 @@ describe('MdToJupyterAgent (specific)', () => {
   it('creates code cells from fenced code blocks', async () => {
     const result = await agent.execute(sampleMarkdown, 'strict-fence');
     const notebook = JSON.parse(result.output);
-    const codeCells = notebook.cells.filter(c => c.cell_type === 'code');
+    const codeCells = notebook.cells.filter((c) => c.cell_type === 'code');
     expect(codeCells.length).toBeGreaterThan(0);
     expect(codeCells[0].source.join('')).toContain('import pandas');
   });
@@ -64,7 +64,7 @@ describe('MdToJupyterAgent (specific)', () => {
   it('annotated strategy adds metadata tags to cells', async () => {
     const result = await agent.execute(sampleMarkdown, 'annotated');
     const notebook = JSON.parse(result.output);
-    const taggedCells = notebook.cells.filter(c => c.metadata.tags && c.metadata.tags.length > 0);
+    const taggedCells = notebook.cells.filter((c) => c.metadata.tags && c.metadata.tags.length > 0);
     expect(taggedCells.length).toBeGreaterThan(0);
   });
 });

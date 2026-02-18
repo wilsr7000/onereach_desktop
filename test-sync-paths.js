@@ -43,7 +43,7 @@ console.log('');
 // Count files
 async function countFiles(dir) {
   let count = 0;
-  
+
   async function scan(currentDir) {
     try {
       const entries = fs.readdirSync(currentDir, { withFileTypes: true });
@@ -59,7 +59,7 @@ async function countFiles(dir) {
       console.error(`Error scanning ${currentDir}:`, error.message);
     }
   }
-  
+
   await scan(dir);
   return count;
 }
@@ -69,17 +69,17 @@ async function countFiles(dir) {
   console.log('=== File Counts ===');
   const orSpacesCount = await countFiles(orSpacesPath);
   console.log('OR-Spaces files:', orSpacesCount);
-  
+
   // Don't count all desktop files, just check a quick sample
   const desktopFiles = fs.readdirSync(desktopPath);
   console.log('Desktop items (sample):', desktopFiles.length);
   console.log('');
-  
+
   // Check if there's any symlink weirdness
   console.log('=== Symlink Check ===');
   const orSpacesStat = fs.lstatSync(orSpacesPath);
   console.log('OR-Spaces is symlink:', orSpacesStat.isSymbolicLink());
-  
+
   if (orSpacesStat.isSymbolicLink()) {
     console.log('Symlink target:', fs.readlinkSync(orSpacesPath));
   }

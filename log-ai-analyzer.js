@@ -1,6 +1,6 @@
 /**
  * AI-Powered Log Analyzer
- * 
+ *
  * This module analyzes filtered logs using Claude AI to identify issues
  * and generate fix prompts for Cursor.
  */
@@ -10,121 +10,116 @@ const getLogger = require('./event-logger');
 const ai = require('./lib/ai-service');
 
 class LogAIAnalyzer {
-    constructor() {
-        this.logger = getLogger();
-        this.setupIpcHandlers();
-    }
+  constructor() {
+    this.logger = getLogger();
+    this.setupIpcHandlers();
+  }
 
-    setupIpcHandlers() {
-        // Analyze logs with AI
-        ipcMain.handle('ai:analyze-logs', async (event, options) => {
-            try {
-                return await this.analyzeLogs(options);
-            } catch (error) {
-                this.logger.error('Error analyzing logs with AI', {
-                    error: error.message,
-                    stack: error.stack
-                });
-                throw error;
-            }
+  setupIpcHandlers() {
+    // Analyze logs with AI
+    ipcMain.handle('ai:analyze-logs', async (event, options) => {
+      try {
+        return await this.analyzeLogs(options);
+      } catch (error) {
+        this.logger.error('Error analyzing logs with AI', {
+          error: error.message,
+          stack: error.stack,
         });
+        throw error;
+      }
+    });
 
-        // Generate Cursor prompt from analysis
-        ipcMain.handle('ai:generate-cursor-prompt', async (event, analysis) => {
-            try {
-                return await this.generateCursorPrompt(analysis);
-            } catch (error) {
-                this.logger.error('Error generating Cursor prompt', {
-                    error: error.message,
-                    stack: error.stack
-                });
-                throw error;
-            }
+    // Generate Cursor prompt from analysis
+    ipcMain.handle('ai:generate-cursor-prompt', async (event, analysis) => {
+      try {
+        return await this.generateCursorPrompt(analysis);
+      } catch (error) {
+        this.logger.error('Error generating Cursor prompt', {
+          error: error.message,
+          stack: error.stack,
         });
-    }
+        throw error;
+      }
+    });
+  }
 
-    /**
-     * Analyze logs using Claude AI
-     */
-    async analyzeLogs(options) {
-        const {
-            logs,
-            context,
-            focusArea,
-            includeContext = true
-        } = options;
+  /**
+   * Analyze logs using Claude AI
+   */
+  async analyzeLogs(options) {
+    const { logs, context, focusArea, includeContext = true } = options;
 
-        // Prepare logs for analysis
-        const preparedLogs = this.prepareLogs(logs, includeContext);
-        
-        // Build the analysis prompt
-        const prompt = this.buildAnalysisPrompt(preparedLogs, context, focusArea);
-        
-        // Call AI service
-        const analysis = await ai.json(prompt, {
-            profile: 'standard',
-            maxTokens: 4000,
-            feature: 'log-analyzer'
-        });
-        
-        return {
-            summary: analysis.summary,
-            issues: analysis.issues,
-            patterns: analysis.patterns,
-            recommendations: analysis.recommendations,
-            fixes: analysis.fixes,
-            timestamp: new Date().toISOString()
-        };
-    }
+    // Prepare logs for analysis
+    const preparedLogs = this.prepareLogs(logs, includeContext);
 
-    /**
-     * Prepare logs for AI analysis
-     */
-    prepareLogs(logs, includeContext) {
-        return logs.map(log => {
-            const prepared = {
-                timestamp: log.timestamp,
-                level: log.level,
-                message: log.message
-            };
+    // Build the analysis prompt
+    const prompt = this.buildAnalysisPrompt(preparedLogs, context, focusArea);
 
-            if (includeContext) {
-                // Include relevant context
-                if (log.testContext) {
-                    prepared.testContext = {
-                        testId: log.testContext.testId,
-                        testName: log.testContext.testName,
-                        testArea: log.testContext.testArea
-                    };
-                }
+    // Call AI service
+    const analysis = await ai.json(prompt, {
+      profile: 'standard',
+      maxTokens: 4000,
+      feature: 'log-analyzer',
+    });
 
-                if (log.error) {
-                    prepared.error = log.error;
-                }
+    return {
+      summary: analysis.summary,
+      issues: analysis.issues,
+      patterns: analysis.patterns,
+      recommendations: analysis.recommendations,
+      fixes: analysis.fixes,
+      timestamp: new Date().toISOString(),
+    };
+  }
 
-                if (log.stack) {
-                    prepared.stack = log.stack;
-                }
+  /**
+   * Prepare logs for AI analysis
+   */
+  prepareLogs(logs, includeContext) {
+    return logs.map((log) => {
+      const prepared = {
+        timestamp: log.timestamp,
+        level: log.level,
+        message: log.message,
+      };
 
-                if (log.window) {
-                    prepared.window = log.window;
-                }
+      if (includeContext) {
+        // Include relevant context
+        if (log.testContext) {
+          prepared.testContext = {
+            testId: log.testContext.testId,
+            testName: log.testContext.testName,
+            testArea: log.testContext.testArea,
+          };
+        }
 
-                // Include performance metrics
-                if (log.duration) {
-                    prepared.duration = log.duration;
-                }
-            }
+        if (log.error) {
+          prepared.error = log.error;
+        }
 
-            return prepared;
-        });
-    }
+        if (log.stack) {
+          prepared.stack = log.stack;
+        }
 
-    /**
-     * Build analysis prompt for Claude
-     */
-    buildAnalysisPrompt(logs, context, focusArea) {
-        let prompt = `Analyze the following application logs and identify issues, patterns, and potential fixes.
+        if (log.window) {
+          prepared.window = log.window;
+        }
+
+        // Include performance metrics
+        if (log.duration) {
+          prepared.duration = log.duration;
+        }
+      }
+
+      return prepared;
+    });
+  }
+
+  /**
+   * Build analysis prompt for Claude
+   */
+  buildAnalysisPrompt(logs, context, focusArea) {
+    let prompt = `Analyze the following application logs and identify issues, patterns, and potential fixes.
 
 Context: ${context || 'General application logs'}
 Focus Area: ${focusArea || 'All areas'}
@@ -152,21 +147,23 @@ For each issue, please provide:
 
 Format your response as a structured JSON object.`;
 
-        return prompt;
-    }
+    return prompt;
+  }
 
-    /**
-     * Generate a Cursor prompt from AI analysis
-     */
-    async generateCursorPrompt(analysis) {
-        const prompt = `# Fix Request for Cursor
+  /**
+   * Generate a Cursor prompt from AI analysis
+   */
+  async generateCursorPrompt(analysis) {
+    const prompt = `# Fix Request for Cursor
 
 ## Summary
 ${analysis.summary}
 
 ## Issues to Fix
 
-${analysis.issues.map((issue, index) => `
+${analysis.issues
+  .map(
+    (issue, index) => `
 ### ${index + 1}. ${issue.title} (${issue.severity})
 
 **Component**: ${issue.component}
@@ -181,75 +178,73 @@ ${issue.fix}
 \`\`\`${issue.language || 'javascript'}
 ${issue.codeChanges || '// Implement fix here'}
 \`\`\`
-`).join('\n')}
+`
+  )
+  .join('\n')}
 
 ## Implementation Steps
 
-${analysis.recommendations.map((rec, index) => 
-    `${index + 1}. ${rec}`
-).join('\n')}
+${analysis.recommendations.map((rec, index) => `${index + 1}. ${rec}`).join('\n')}
 
 ## Testing Instructions
 
 After implementing the fixes, please:
 1. Run the test suite to ensure no regressions
-2. Specifically test the affected areas: ${analysis.issues.map(i => i.component).join(', ')}
+2. Specifically test the affected areas: ${analysis.issues.map((i) => i.component).join(', ')}
 3. Verify the error logs no longer appear
 4. Check performance metrics if applicable
 
 ## Additional Context
 
-${analysis.patterns.length > 0 ? `
+${
+  analysis.patterns.length > 0
+    ? `
 ### Patterns Observed
-${analysis.patterns.map(p => `- ${p}`).join('\n')}
-` : ''}
+${analysis.patterns.map((p) => `- ${p}`).join('\n')}
+`
+    : ''
+}
 
 Please implement these fixes following the project's coding standards and best practices.`;
 
-        return {
-            prompt,
-            metadata: {
-                generatedAt: new Date().toISOString(),
-                issueCount: analysis.issues.length,
-                severity: this.getOverallSeverity(analysis.issues),
-                affectedAreas: [...new Set(analysis.issues.map(i => i.component))]
-            }
-        };
-    }
+    return {
+      prompt,
+      metadata: {
+        generatedAt: new Date().toISOString(),
+        issueCount: analysis.issues.length,
+        severity: this.getOverallSeverity(analysis.issues),
+        affectedAreas: [...new Set(analysis.issues.map((i) => i.component))],
+      },
+    };
+  }
 
-    /**
-     * Calculate overall severity
-     */
-    getOverallSeverity(issues) {
-        const severityScores = {
-            critical: 4,
-            high: 3,
-            medium: 2,
-            low: 1
-        };
+  /**
+   * Calculate overall severity
+   */
+  getOverallSeverity(issues) {
+    const severityScores = {
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1,
+    };
 
-        if (issues.length === 0) return 'none';
+    if (issues.length === 0) return 'none';
 
-        const maxSeverity = Math.max(...issues.map(i => 
-            severityScores[i.severity] || 0
-        ));
+    const maxSeverity = Math.max(...issues.map((i) => severityScores[i.severity] || 0));
 
-        return Object.entries(severityScores).find(
-            ([severity, score]) => score === maxSeverity
-        )?.[0] || 'unknown';
-    }
+    return Object.entries(severityScores).find(([_severity, score]) => score === maxSeverity)?.[0] || 'unknown';
+  }
 
-    /**
-     * Analyze test failures specifically
-     */
-    async analyzeTestFailures(logs) {
-        const failureLogs = logs.filter(log => 
-            log.level === 'ERROR' || 
-            (log.message && log.message.includes('fail')) ||
-            (log.action === 'test-fail')
-        );
+  /**
+   * Analyze test failures specifically
+   */
+  async analyzeTestFailures(logs) {
+    const failureLogs = logs.filter(
+      (log) => log.level === 'ERROR' || (log.message && log.message.includes('fail')) || log.action === 'test-fail'
+    );
 
-        const prompt = `Analyze these test failure logs and provide specific fixes:
+    const prompt = `Analyze these test failure logs and provide specific fixes:
 
 \`\`\`json
 ${JSON.stringify(failureLogs, null, 2)}
@@ -263,24 +258,25 @@ Focus on:
 
 Provide actionable fixes that can be implemented immediately.`;
 
-        return await ai.json(prompt, {
-            profile: 'standard',
-            maxTokens: 4000,
-            feature: 'log-analyzer'
-        });
-    }
+    return await ai.json(prompt, {
+      profile: 'standard',
+      maxTokens: 4000,
+      feature: 'log-analyzer',
+    });
+  }
 
-    /**
-     * Analyze performance issues
-     */
-    async analyzePerformance(logs) {
-        const perfLogs = logs.filter(log => 
-            log.duration || 
-            log.testArea?.includes('performance') ||
-            (log.message && log.message.toLowerCase().includes('slow'))
-        );
+  /**
+   * Analyze performance issues
+   */
+  async analyzePerformance(logs) {
+    const perfLogs = logs.filter(
+      (log) =>
+        log.duration ||
+        log.testArea?.includes('performance') ||
+        (log.message && log.message.toLowerCase().includes('slow'))
+    );
 
-        const prompt = `Analyze these performance-related logs:
+    const prompt = `Analyze these performance-related logs:
 
 \`\`\`json
 ${JSON.stringify(perfLogs, null, 2)}
@@ -294,18 +290,18 @@ Identify:
 
 Provide specific code optimizations and performance improvements.`;
 
-        return await ai.json(prompt, {
-            profile: 'standard',
-            maxTokens: 4000,
-            feature: 'log-analyzer'
-        });
-    }
+    return await ai.json(prompt, {
+      profile: 'standard',
+      maxTokens: 4000,
+      feature: 'log-analyzer',
+    });
+  }
 
-    /**
-     * Generate a comprehensive test report with AI insights
-     */
-    async generateTestReport(testRun, logs) {
-        const prompt = `Generate a comprehensive test report based on this test run data and logs:
+  /**
+   * Generate a comprehensive test report with AI insights
+   */
+  async generateTestReport(testRun, logs) {
+    const prompt = `Generate a comprehensive test report based on this test run data and logs:
 
 Test Run Summary:
 \`\`\`json
@@ -326,22 +322,22 @@ Please provide:
 
 Format as a professional test report.`;
 
-        return await ai.json(prompt, {
-            profile: 'standard',
-            maxTokens: 4000,
-            feature: 'log-analyzer'
-        });
-    }
+    return await ai.json(prompt, {
+      profile: 'standard',
+      maxTokens: 4000,
+      feature: 'log-analyzer',
+    });
+  }
 }
 
 // Create singleton instance
 let analyzer = null;
 
 function getLogAIAnalyzer() {
-    if (!analyzer) {
-        analyzer = new LogAIAnalyzer();
-    }
-    return analyzer;
+  if (!analyzer) {
+    analyzer = new LogAIAnalyzer();
+  }
+  return analyzer;
 }
 
-module.exports = getLogAIAnalyzer; 
+module.exports = getLogAIAnalyzer;

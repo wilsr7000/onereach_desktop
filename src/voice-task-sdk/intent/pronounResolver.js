@@ -1,6 +1,6 @@
 /**
  * Pronoun Resolver
- * 
+ *
  * Resolves pronouns like "it", "that", "this" using recent conversation context.
  * Enables natural followup interactions like "play it" or "what about that one".
  */
@@ -18,7 +18,7 @@ const FOLLOWUP_PATTERNS = [
   /\b(what|where|when|who|how)\s+(is|are|was|were)\s+(it|that|this)\b/i,
   /\bmore about\s+(it|that|this)\b/i,
   /\b(and|but|also)\s+(that|this|it)\b/i,
-  /^(it|that|this|that one)$/i,  // Just the pronoun alone
+  /^(it|that|this|that one)$/i, // Just the pronoun alone
 ];
 
 const pronounResolver = {
@@ -30,9 +30,9 @@ const pronounResolver = {
   needsResolution(transcript) {
     if (!transcript || typeof transcript !== 'string') return false;
     const lower = transcript.toLowerCase().trim();
-    return FOLLOWUP_PATTERNS.some(pattern => pattern.test(lower));
+    return FOLLOWUP_PATTERNS.some((pattern) => pattern.test(lower));
   },
-  
+
   /**
    * Resolve pronouns using recent context
    * @param {string} transcript - User's input
@@ -41,26 +41,26 @@ const pronounResolver = {
    */
   resolve(transcript, recentContext = []) {
     if (!this.needsResolution(transcript)) {
-      return { 
-        resolved: transcript, 
-        wasResolved: false, 
-        referencedSubject: null 
+      return {
+        resolved: transcript,
+        wasResolved: false,
+        referencedSubject: null,
       };
     }
-    
+
     // Find the most recent subject to reference
     const recent = recentContext[0];
     if (!recent?.subject) {
-      return { 
-        resolved: transcript, 
-        wasResolved: false, 
-        referencedSubject: null 
+      return {
+        resolved: transcript,
+        wasResolved: false,
+        referencedSubject: null,
       };
     }
-    
+
     const subject = recent.subject;
     let resolved = transcript;
-    
+
     // Replace pronouns with the subject
     // Be careful to only replace in appropriate contexts
     for (const pattern of FOLLOWUP_PATTERNS) {
@@ -77,20 +77,20 @@ const pronounResolver = {
         break; // Only match one pattern
       }
     }
-    
+
     const wasResolved = resolved !== transcript;
-    
+
     if (wasResolved) {
       log.info('voice', '[PronounResolver] Resolved: "" → ""', { v0: transcript, v1: resolved });
     }
-    
+
     return {
       resolved,
       wasResolved,
-      referencedSubject: wasResolved ? subject : null
+      referencedSubject: wasResolved ? subject : null,
     };
   },
-  
+
   /**
    * Extract the subject from a task for future reference
    * This is what will be stored in recentContext for later pronoun resolution
@@ -99,9 +99,9 @@ const pronounResolver = {
    */
   extractSubject(transcript) {
     if (!transcript || typeof transcript !== 'string') return null;
-    
-    const lower = transcript.toLowerCase();
-    
+
+    const _lower = transcript.toLowerCase();
+
     // Extract subject from common patterns
     const patterns = [
       // "play [song/artist]"
@@ -112,7 +112,7 @@ const pronounResolver = {
       /tell me about\s+(.+?)(?:\?|$)/i,
       // "what is [thing]" / "what's [thing]"
       /what(?:'s| is| are)\s+(?:the\s+)?(.+?)(?:\?|$)/i,
-      // "search for [query]"  
+      // "search for [query]"
       /search\s+(?:for\s+)?(.+?)(?:\?|$)/i,
       // "find [thing]"
       /find\s+(.+?)(?:\?|$)/i,
@@ -121,7 +121,7 @@ const pronounResolver = {
       // "set volume to [level]"
       /set\s+(?:the\s+)?volume\s+(?:to\s+)?(\d+)/i,
     ];
-    
+
     for (const pattern of patterns) {
       const match = transcript.match(pattern);
       if (match && match[1]) {
@@ -132,15 +132,15 @@ const pronounResolver = {
         }
       }
     }
-    
+
     // Fallback: use the whole transcript for short simple commands
     if (transcript.length < 40 && !this.needsResolution(transcript)) {
       return transcript;
     }
-    
+
     return null;
   },
-  
+
   /**
    * Check if a transcript is just a simple followup (pronoun only or very short)
    * @param {string} transcript
@@ -150,9 +150,11 @@ const pronounResolver = {
     if (!transcript) return false;
     const lower = transcript.toLowerCase().trim();
     // Just a pronoun or very short pronoun phrase
-    return /^(it|that|this|that one|this one|the same|the same one|same)$/i.test(lower) ||
-           /^(and|or|but|also)\s+(that|this|it)$/i.test(lower);
-  }
+    return (
+      /^(it|that|this|that one|this one|the same|the same one|same)$/i.test(lower) ||
+      /^(and|or|but|also)\s+(that|this|it)$/i.test(lower)
+    );
+  },
 };
 
 module.exports = pronounResolver;

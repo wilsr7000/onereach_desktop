@@ -1,5 +1,4 @@
 const { BrowserWindow } = require('electron');
-const https = require('https');
 const ai = require('./lib/ai-service');
 
 class WebStyleAnalyzer {
@@ -9,12 +8,12 @@ class WebStyleAnalyzer {
 
   async analyzeStyles(urls, options = {}) {
     console.log('[WebStyleAnalyzer] Starting analysis for URLs:', urls);
-    
+
     const results = {
       colors: new Map(),
       fonts: new Map(),
       spacing: new Map(),
-      components: {}
+      components: {},
     };
 
     try {
@@ -26,8 +25,8 @@ class WebStyleAnalyzer {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          webSecurity: false // Allow cross-origin requests
-        }
+          webSecurity: false, // Allow cross-origin requests
+        },
       });
 
       for (const url of urls) {
@@ -40,7 +39,7 @@ class WebStyleAnalyzer {
 
       // Process the results
       const processedStyles = this.processResults(results);
-      
+
       // Always enhance with LLM by default, unless explicitly disabled
       if (options.useLLMEnhancement !== false) {
         console.log('[WebStyleAnalyzer] Running LLM enhancement...');
@@ -48,20 +47,20 @@ class WebStyleAnalyzer {
         return {
           success: true,
           styles: enhancedStyles,
-          llmEnhanced: true
+          llmEnhanced: true,
         };
       }
-      
+
       return {
         success: true,
         styles: processedStyles,
-        llmEnhanced: false
+        llmEnhanced: false,
       };
     } catch (error) {
       console.error('[WebStyleAnalyzer] Error:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     } finally {
       if (this.window) {
@@ -193,25 +192,24 @@ IMPORTANT: Your response must be a valid JSON object with this exact structure:
       const enhancedStyles = await ai.json(prompt, {
         profile: 'standard',
         maxTokens: 4000,
-        feature: 'web-style-analyzer'
+        feature: 'web-style-analyzer',
       });
-      
+
       try {
-        
         // Ensure the enhanced styles have the required structure
         if (!enhancedStyles.colors || !Array.isArray(enhancedStyles.colors)) {
           console.error('[WebStyleAnalyzer] Invalid enhanced styles structure');
           return styles;
         }
-        
+
         // Add metadata about enhancement
         enhancedStyles.metadata = {
           enhanced: true,
           enhancedAt: new Date().toISOString(),
           originalUrls: urls,
-          enhancementModel: 'claude-3'
+          enhancementModel: 'claude-3',
         };
-        
+
         console.log('[WebStyleAnalyzer] Successfully enhanced styles with LLM');
         return enhancedStyles;
       } catch (error) {
@@ -227,11 +225,13 @@ IMPORTANT: Your response must be a valid JSON object with this exact structure:
 
   async analyzeURL(url, results, options) {
     console.log(`[WebStyleAnalyzer] Analyzing ${url}`);
-    
+
     await this.window.loadURL(url);
-    
+
     // Wait for page to load
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 3000);
+    });
 
     // Extract styles using JavaScript injection
     const extractedStyles = await this.window.webContents.executeJavaScript(`
@@ -481,34 +481,31 @@ IMPORTANT: Your response must be a valid JSON object with this exact structure:
         results.categorizedColors = {
           backgrounds: new Map(),
           textColors: new Map(),
-          accentColors: new Map()
+          accentColors: new Map(),
         };
       }
-      
-      extractedStyles.colors.backgrounds.forEach(color => {
-        results.categorizedColors.backgrounds.set(color, 
-          (results.categorizedColors.backgrounds.get(color) || 0) + 1);
+
+      extractedStyles.colors.backgrounds.forEach((color) => {
+        results.categorizedColors.backgrounds.set(color, (results.categorizedColors.backgrounds.get(color) || 0) + 1);
       });
-      
-      extractedStyles.colors.textColors.forEach(color => {
-        results.categorizedColors.textColors.set(color, 
-          (results.categorizedColors.textColors.get(color) || 0) + 1);
+
+      extractedStyles.colors.textColors.forEach((color) => {
+        results.categorizedColors.textColors.set(color, (results.categorizedColors.textColors.get(color) || 0) + 1);
       });
-      
-      extractedStyles.colors.accentColors.forEach(color => {
-        results.categorizedColors.accentColors.set(color, 
-          (results.categorizedColors.accentColors.get(color) || 0) + 1);
+
+      extractedStyles.colors.accentColors.forEach((color) => {
+        results.categorizedColors.accentColors.set(color, (results.categorizedColors.accentColors.get(color) || 0) + 1);
       });
     }
-    
+
     if (extractedStyles.fonts) {
-      extractedStyles.fonts.families.forEach(font => results.fonts.set(font, (results.fonts.get(font) || 0) + 1));
+      extractedStyles.fonts.families.forEach((font) => results.fonts.set(font, (results.fonts.get(font) || 0) + 1));
     }
-    
+
     if (extractedStyles.spacing) {
-      extractedStyles.spacing.forEach(space => results.spacing.set(space, (results.spacing.get(space) || 0) + 1));
+      extractedStyles.spacing.forEach((space) => results.spacing.set(space, (results.spacing.get(space) || 0) + 1));
     }
-    
+
     // Merge components (prefer non-null values)
     Object.entries(extractedStyles.components).forEach(([key, value]) => {
       if (!results.components[key] || Object.keys(value).length > Object.keys(results.components[key]).length) {
@@ -520,32 +517,29 @@ IMPORTANT: Your response must be a valid JSON object with this exact structure:
   processResults(results) {
     // Process categorized colors intelligently
     let topColors = [];
-    
+
     if (results.categorizedColors) {
       // Get the most common background color (usually white or a light color)
-      const topBackground = Array.from(results.categorizedColors.backgrounds.entries())
-        .sort((a, b) => b[1] - a[1])[0];
-      
+      const topBackground = Array.from(results.categorizedColors.backgrounds.entries()).sort((a, b) => b[1] - a[1])[0];
+
       // Get the most common text color (usually black or dark gray)
-      const topTextColor = Array.from(results.categorizedColors.textColors.entries())
-        .sort((a, b) => b[1] - a[1])[0];
-      
+      const topTextColor = Array.from(results.categorizedColors.textColors.entries()).sort((a, b) => b[1] - a[1])[0];
+
       // Get top accent colors (exclude background and text colors)
       const topAccents = Array.from(results.categorizedColors.accentColors.entries())
-        .filter(([color]) => 
-          (!topBackground || color !== topBackground[0]) && 
-          (!topTextColor || color !== topTextColor[0])
+        .filter(
+          ([color]) => (!topBackground || color !== topBackground[0]) && (!topTextColor || color !== topTextColor[0])
         )
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3);
-      
+
       // Build color array with proper categorization
       topColors = [
         { hex: topAccents[0] ? topAccents[0][0] : '#3B82F6', category: 'primary' },
         { hex: topAccents[1] ? topAccents[1][0] : '#10B981', category: 'secondary' },
         { hex: topTextColor ? topTextColor[0] : '#2C2C2C', category: 'text' },
         { hex: topBackground ? topBackground[0] : '#FFFFFF', category: 'background' },
-        { hex: topAccents[2] ? topAccents[2][0] : '#F59E0B', category: 'accent' }
+        { hex: topAccents[2] ? topAccents[2][0] : '#F59E0B', category: 'accent' },
       ];
     } else if (results.colors) {
       // Fallback to old logic if categorized colors not available
@@ -560,7 +554,7 @@ IMPORTANT: Your response must be a valid JSON object with this exact structure:
         { hex: '#10B981', category: 'secondary' },
         { hex: '#2C2C2C', category: 'text' },
         { hex: '#FFFFFF', category: 'background' },
-        { hex: '#F59E0B', category: 'accent' }
+        { hex: '#F59E0B', category: 'accent' },
       ];
     }
 
@@ -574,24 +568,24 @@ IMPORTANT: Your response must be a valid JSON object with this exact structure:
           .replace(/['"]/g, '') // Remove quotes
           .split(',')[0] // Take first font
           .trim();
-        
+
         return {
           family: cleanFamily,
           sizes: ['14px', '16px', '18px', '24px', '32px'], // Default sizes
-          weights: ['400', '500', '600', '700'] // Default weights
+          weights: ['400', '500', '600', '700'], // Default weights
         };
       });
 
     // Process spacing - sort numerically
     const spacingValues = Array.from(results.spacing.keys())
-      .filter(v => v && v !== '0px')
+      .filter((v) => v && v !== '0px')
       .sort((a, b) => {
         const aNum = parseFloat(a);
         const bNum = parseFloat(b);
         return aNum - bNum;
       })
       .slice(0, 6);
-    
+
     const spacing = {};
     const sizes = ['xs', 'sm', 'md', 'lg', 'xl', 'xxl'];
     spacingValues.forEach((value, index) => {
@@ -604,9 +598,9 @@ IMPORTANT: Your response must be a valid JSON object with this exact structure:
       colors: topColors,
       fonts: topFonts,
       spacing: spacing,
-      components: results.components
+      components: results.components,
     };
   }
 }
 
-module.exports = WebStyleAnalyzer; 
+module.exports = WebStyleAnalyzer;

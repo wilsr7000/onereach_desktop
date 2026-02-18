@@ -18,7 +18,8 @@ console.log('1. Checking for duplicate method definitions...');
 const clipboardManagerPath = path.join(__dirname, 'clipboard-manager-v2-adapter.js');
 const clipboardManagerContent = fs.readFileSync(clipboardManagerPath, 'utf8');
 // Look for method definitions (not calls)
-const blackHoleMethodCount = (clipboardManagerContent.match(/^\s*createBlackHoleWindow\s*\([^)]*\)\s*{/gm) || []).length;
+const blackHoleMethodCount = (clipboardManagerContent.match(/^\s*createBlackHoleWindow\s*\([^)]*\)\s*{/gm) || [])
+  .length;
 
 if (blackHoleMethodCount > 1) {
   console.error('   ❌ ERROR: Found', blackHoleMethodCount, 'createBlackHoleWindow method definitions (should be 1)');
@@ -36,10 +37,10 @@ console.log('\n2. Checking preload path configuration...');
 const blackHoleMethod = clipboardManagerContent.match(/createBlackHoleWindow[\s\S]*?^\s*\}/m);
 if (blackHoleMethod) {
   const methodContent = blackHoleMethod[0];
-  const hasCorrectPreloadPath = methodContent.includes('app.getAppPath()') && 
-                                 methodContent.includes("preload: preloadPath");
+  const hasCorrectPreloadPath =
+    methodContent.includes('app.getAppPath()') && methodContent.includes('preload: preloadPath');
   const hasWrongPreloadPath = /preload:\s*path\.join\s*\(\s*__dirname/.test(methodContent);
-  
+
   if (hasWrongPreloadPath) {
     console.error('   ❌ ERROR: Black hole window using __dirname for preload path (should use app.getAppPath())');
     errors++;
@@ -69,8 +70,9 @@ if (blackHoleWindowSection) {
 
 // Test 4: Check window dimensions
 console.log('\n4. Checking window dimensions...');
-const hasCorrectDimensions = clipboardManagerContent.includes('width = startExpanded ? 600 : 150') &&
-                             clipboardManagerContent.includes('height = startExpanded ? 800 : 150');
+const hasCorrectDimensions =
+  clipboardManagerContent.includes('width = startExpanded ? 600 : 150') &&
+  clipboardManagerContent.includes('height = startExpanded ? 800 : 150');
 
 if (!hasCorrectDimensions) {
   console.warn('   ⚠️  WARNING: Window dimensions may be incorrect');
@@ -95,8 +97,7 @@ console.log('\n6. Checking main.js handlers...');
 const mainPath = path.join(__dirname, 'main.js');
 const mainContent = fs.readFileSync(mainPath, 'utf8');
 const hasTriggerPaste = mainContent.includes("ipcMain.on('black-hole:trigger-paste'");
-const hasClipboardRead = mainContent.includes('clipboard.readText()') && 
-                        mainContent.includes('clipboard.readImage()');
+const hasClipboardRead = mainContent.includes('clipboard.readText()') && mainContent.includes('clipboard.readImage()');
 
 if (!hasTriggerPaste) {
   console.error('   ❌ ERROR: black-hole:trigger-paste handler not found in main.js');
@@ -112,8 +113,7 @@ if (!hasTriggerPaste) {
 console.log('\n7. Checking browser renderer configuration...');
 const browserRendererPath = path.join(__dirname, 'browser-renderer.js');
 const browserRendererContent = fs.readFileSync(browserRendererPath, 'utf8');
-const hasHoverTimeout = browserRendererContent.includes('3000') && 
-                       browserRendererContent.includes('hoverTimeout');
+const hasHoverTimeout = browserRendererContent.includes('3000') && browserRendererContent.includes('hoverTimeout');
 
 if (!hasHoverTimeout) {
   console.warn('   ⚠️  WARNING: 3-second hover timeout may be missing');

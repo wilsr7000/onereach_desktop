@@ -42,7 +42,7 @@ export class PlayerUI {
       reasoningLog: document.getElementById('reasoningLog'),
       npName: document.getElementById('npSceneName'),
       npTime: document.getElementById('npSceneTime'),
-      npDesc: document.getElementById('npDescription')
+      npDesc: document.getElementById('npDescription'),
     };
   }
 
@@ -56,7 +56,7 @@ export class PlayerUI {
     this.elements.nowPlaying.classList.remove('hidden');
     this.elements.controls.classList.remove('hidden');
     this.elements.overlay.classList.add('hidden');
-    
+
     if (this.elements.showReasoning?.checked) {
       this.elements.reasoningSection.classList.remove('hidden');
       this.elements.reasoningLog.innerHTML = '';
@@ -69,7 +69,7 @@ export class PlayerUI {
   showSessionEnded() {
     this.elements.status.textContent = 'Ended';
     this.elements.status.classList.remove('active');
-    
+
     setTimeout(() => {
       this.elements.setupSection.classList.remove('hidden');
       this.elements.controls.classList.add('hidden');
@@ -87,15 +87,14 @@ export class PlayerUI {
     this.elements.sceneNumber.textContent = index;
     this.elements.sceneName.textContent = clip.name || 'Untitled';
     this.elements.sceneInfo.classList.remove('hidden');
-    
+
     this.elements.npName.textContent = clip.name || 'Untitled';
     this.elements.npTime.textContent = `${this.formatTime(clip.inTime || 0)} - ${this.formatTime(clip.outTime || 0)}`;
     this.elements.npDesc.textContent = clip.description || '';
-    
+
     this.elements.sceneIndex.textContent = index;
-    this.elements.totalScenes.textContent = queueLength > 0 
-      ? `${index}+${queueLength}` 
-      : (endSignaled ? index : `${index}+`);
+    this.elements.totalScenes.textContent =
+      queueLength > 0 ? `${index}+${queueLength}` : endSignaled ? index : `${index}+`;
   }
 
   /**
@@ -161,19 +160,3 @@ export class PlayerUI {
     return parseInt(this.elements.timeLimit?.value) || 0;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

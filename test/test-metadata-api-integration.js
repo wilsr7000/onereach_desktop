@@ -1,18 +1,17 @@
 /**
  * Metadata Generation API Integration Tests
- * 
+ *
  * Actually calls Claude and GPT-5.2 APIs to generate metadata for sample files.
  * Tests model routing, schema validation, and response quality.
- * 
+ *
  * Run with: npm run test:metadata-api
- * 
+ *
  * Requirements:
  * - CLAUDE_API_KEY environment variable (for vision tasks)
  * - OPENAI_API_KEY environment variable (for text tasks with GPT-5.2)
  */
 
 const fs = require('fs');
-const path = require('path');
 const https = require('https');
 
 // ============================================
@@ -25,7 +24,7 @@ const CONFIG = {
   claudeModel: 'claude-sonnet-4-20250514',
   openaiModel: 'gpt-5.2',
   timeout: 60000, // 60 seconds per API call
-  verbose: true
+  verbose: true,
 };
 
 // Colors for terminal output
@@ -37,7 +36,7 @@ const colors = {
   blue: '\x1b[34m',
   cyan: '\x1b[36m',
   dim: '\x1b[2m',
-  bold: '\x1b[1m'
+  bold: '\x1b[1m',
 };
 
 // Test results
@@ -48,9 +47,9 @@ const results = {
   tests: [],
   apiCalls: {
     claude: 0,
-    openai: 0
+    openai: 0,
   },
-  totalTokens: 0
+  totalTokens: 0,
 };
 
 // ============================================
@@ -72,7 +71,7 @@ function logTest(name, passed, details = '', model = '') {
   const color = passed ? 'green' : 'red';
   const modelInfo = model ? ` [${model}]` : '';
   log(`  ${status} ${name}${modelInfo}${details ? ` - ${details}` : ''}`, color);
-  
+
   results.tests.push({ name, passed, details, model });
   if (passed) results.passed++;
   else results.failed++;
@@ -91,7 +90,7 @@ const testSamples = {
   // ============================================
   // VISION TESTS (Claude Sonnet 4)
   // ============================================
-  
+
   // Screenshot/Image test - FULL SCHEMA
   screenshot: {
     type: 'image',
@@ -102,17 +101,17 @@ const testSamples = {
     imagePath: '/Users/richardwilson/Documents/OR-Spaces/items/9c5d01ff77d510a4f8b3829456756de1/thumbnail.png',
     // Full image schema validation
     expectedFields: [
-      'title',           // Clear, descriptive title
-      'description',     // What's in the image
-      'tags',            // Searchable tags
-      'category',        // screenshot|photo|diagram|design|chart|document|ui-mockup|other
-      'extracted_text',  // Any readable text in the image
-      'app_detected',    // Specific app name if identifiable
-      'source'           // Application or platform shown
+      'title', // Clear, descriptive title
+      'description', // What's in the image
+      'tags', // Searchable tags
+      'category', // screenshot|photo|diagram|design|chart|document|ui-mockup|other
+      'extracted_text', // Any readable text in the image
+      'app_detected', // Specific app name if identifiable
+      'source', // Application or platform shown
     ],
-    optionalFields: ['notes', 'instructions', 'ai_detected', 'visible_urls']
+    optionalFields: ['notes', 'instructions', 'ai_detected', 'visible_urls'],
   },
-  
+
   // YouTube video with transcript - FULL SCHEMA
   youtubeVideo: {
     type: 'video',
@@ -138,22 +137,22 @@ const testSamples = {
 [CTO]: My pleasure. Exciting times ahead.`,
     // Full video schema validation
     expectedFields: [
-      'title',           // Clear video title
-      'description',     // What the video is about
-      'category',        // tutorial|interview|presentation|screen-recording|entertainment|educational|documentary|demo|other
-      'topics',          // Main topics covered
-      'speakers',        // Speaker names
-      'keyPoints',       // Bullet point summaries
-      'tags',            // Searchable tags
-      'targetAudience'   // Who this is for
+      'title', // Clear video title
+      'description', // What the video is about
+      'category', // tutorial|interview|presentation|screen-recording|entertainment|educational|documentary|demo|other
+      'topics', // Main topics covered
+      'speakers', // Speaker names
+      'keyPoints', // Bullet point summaries
+      'tags', // Searchable tags
+      'targetAudience', // Who this is for
     ],
-    optionalFields: ['shortDescription', 'longDescription', 'notes']
+    optionalFields: ['shortDescription', 'longDescription', 'notes'],
   },
-  
+
   // ============================================
   // TEXT TESTS (GPT-5.2)
   // ============================================
-  
+
   // Small text for code analysis (GPT-5.2) - FULL SCHEMA
   codeSmall: {
     type: 'code',
@@ -181,18 +180,18 @@ export function useAuth() {
 }`,
     // Full code schema validation
     expectedFields: [
-      'title',           // What this code does
-      'description',     // Purpose description
-      'language',        // Programming language
-      'purpose',         // Main purpose or use case
-      'functions',       // Main functions or classes
-      'dependencies',    // Libraries/frameworks used
-      'tags',            // Technical tags
-      'complexity'       // simple|moderate|complex
+      'title', // What this code does
+      'description', // Purpose description
+      'language', // Programming language
+      'purpose', // Main purpose or use case
+      'functions', // Main functions or classes
+      'dependencies', // Libraries/frameworks used
+      'tags', // Technical tags
+      'complexity', // simple|moderate|complex
     ],
-    optionalFields: ['notes']
+    optionalFields: ['notes'],
   },
-  
+
   // Large code file (GPT-5.2 - benefits from 256K context) - FULL SCHEMA
   codeLarge: {
     type: 'code',
@@ -200,47 +199,42 @@ export function useAuth() {
     fileName: 'api-service.ts',
     fileExt: '.ts',
     content: generateLargeCodeSample(),
-    expectedFields: [
-      'title',
-      'description',
-      'language',
-      'purpose',
-      'functions',
-      'dependencies',
-      'tags',
-      'complexity'
-    ],
-    optionalFields: ['notes']
+    expectedFields: ['title', 'description', 'language', 'purpose', 'functions', 'dependencies', 'tags', 'complexity'],
+    optionalFields: ['notes'],
   },
-  
+
   // JSON data file (GPT-5.2) - FULL SCHEMA
   jsonData: {
     type: 'data',
     expectedModel: 'gpt-5.2',
     fileName: 'users.json',
     fileExt: '.json',
-    content: JSON.stringify({
-      users: [
-        { id: 1, name: 'John Doe', email: 'john@example.com', role: 'admin', createdAt: '2024-01-01' },
-        { id: 2, name: 'Jane Smith', email: 'jane@example.com', role: 'user', createdAt: '2024-01-15' },
-        { id: 3, name: 'Bob Wilson', email: 'bob@example.com', role: 'moderator', createdAt: '2024-02-01' }
-      ],
-      pagination: { page: 1, perPage: 10, total: 100 },
-      metadata: { exportedAt: '2024-12-01', version: '2.0' }
-    }, null, 2),
+    content: JSON.stringify(
+      {
+        users: [
+          { id: 1, name: 'John Doe', email: 'john@example.com', role: 'admin', createdAt: '2024-01-01' },
+          { id: 2, name: 'Jane Smith', email: 'jane@example.com', role: 'user', createdAt: '2024-01-15' },
+          { id: 3, name: 'Bob Wilson', email: 'bob@example.com', role: 'moderator', createdAt: '2024-02-01' },
+        ],
+        pagination: { page: 1, perPage: 10, total: 100 },
+        metadata: { exportedAt: '2024-12-01', version: '2.0' },
+      },
+      null,
+      2
+    ),
     // Full data schema validation
     expectedFields: [
-      'title',           // What this data represents
-      'description',     // Description of contents
-      'dataType',        // config|dataset|api-response|export|schema|log|other
-      'format',          // JSON|CSV|YAML|XML|other
-      'entities',        // Main entities in the data
-      'keyFields',       // Important fields
-      'tags'             // Searchable tags
+      'title', // What this data represents
+      'description', // Description of contents
+      'dataType', // config|dataset|api-response|export|schema|log|other
+      'format', // JSON|CSV|YAML|XML|other
+      'entities', // Main entities in the data
+      'keyFields', // Important fields
+      'tags', // Searchable tags
     ],
-    optionalFields: ['purpose', 'notes']
+    optionalFields: ['purpose', 'notes'],
   },
-  
+
   // Meeting notes (GPT-5.2) - FULL SCHEMA
   textNotes: {
     type: 'text',
@@ -272,17 +266,17 @@ RISKS IDENTIFIED:
 NEXT MEETING: December 17, 2024 at 2pm`,
     // Full text schema validation
     expectedFields: [
-      'title',           // Descriptive title
-      'description',     // What the text is about
-      'contentType',     // notes|article|documentation|message|list|meeting-notes|transcript|interview|other
-      'topics',          // Main topics
-      'keyPoints',       // Important points
-      'actionItems',     // Any todos
-      'tags'             // Searchable tags
+      'title', // Descriptive title
+      'description', // What the text is about
+      'contentType', // notes|article|documentation|message|list|meeting-notes|transcript|interview|other
+      'topics', // Main topics
+      'keyPoints', // Important points
+      'actionItems', // Any todos
+      'tags', // Searchable tags
     ],
-    optionalFields: ['notes']
+    optionalFields: ['notes'],
   },
-  
+
   // URL (GPT-5.2) - FULL SCHEMA
   url: {
     type: 'url',
@@ -292,17 +286,17 @@ NEXT MEETING: December 17, 2024 at 2pm`,
     pageDescription: 'React hooks let you use state and other React features in your components.',
     // Full URL schema validation
     expectedFields: [
-      'title',           // Clear title for this link
-      'description',     // What this link is about
-      'urlType',         // article|documentation|tool|repository|video|social-media|resource|other
-      'platform',        // Website or platform name
-      'topics',          // Relevant topics
-      'category',        // Domain category
-      'tags'             // Searchable tags
+      'title', // Clear title for this link
+      'description', // What this link is about
+      'urlType', // article|documentation|tool|repository|video|social-media|resource|other
+      'platform', // Website or platform name
+      'topics', // Relevant topics
+      'category', // Domain category
+      'tags', // Searchable tags
     ],
-    optionalFields: ['purpose', 'notes']
+    optionalFields: ['purpose', 'notes'],
   },
-  
+
   // HTML document (GPT-5.2) - FULL SCHEMA
   html: {
     type: 'html',
@@ -326,16 +320,16 @@ NEXT MEETING: December 17, 2024 at 2pm`,
 <p>All tokens must be stored securely using the system keychain. Session tokens expire after 24 hours of inactivity.</p>`,
     // Full HTML schema validation
     expectedFields: [
-      'title',           // Document title
-      'description',     // What document covers
-      'documentType',    // article|report|webpage|documentation|presentation|email|other
-      'topics',          // Main topics
-      'keyPoints',       // Important points
-      'tags'             // Searchable tags
+      'title', // Document title
+      'description', // What document covers
+      'documentType', // article|report|webpage|documentation|presentation|email|other
+      'topics', // Main topics
+      'keyPoints', // Important points
+      'tags', // Searchable tags
     ],
-    optionalFields: ['author', 'source', 'notes']
+    optionalFields: ['author', 'source', 'notes'],
   },
-  
+
   // Audio with transcript (GPT-5.2 for long transcripts) - FULL SCHEMA
   audio: {
     type: 'audio',
@@ -355,16 +349,16 @@ Our guest today is Dr. Sarah Chen, who leads the AI research team at TechCorp. S
 [The discussion continues about AI safety, enterprise adoption, and future trends...]`,
     // Full audio schema validation
     expectedFields: [
-      'title',           // Audio title
-      'description',     // What the audio is about
-      'audioType',       // podcast|music|voice-memo|audiobook|interview|lecture|recording|other
-      'topics',          // Main topics
-      'speakers',        // Speaker names
-      'keyPoints',       // Important points discussed
-      'tags'             // Searchable tags
+      'title', // Audio title
+      'description', // What the audio is about
+      'audioType', // podcast|music|voice-memo|audiobook|interview|lecture|recording|other
+      'topics', // Main topics
+      'speakers', // Speaker names
+      'keyPoints', // Important points discussed
+      'tags', // Searchable tags
     ],
-    optionalFields: ['genre', 'notes']
-  }
+    optionalFields: ['genre', 'notes'],
+  },
 };
 
 // Generate a large code sample for testing context handling
@@ -396,7 +390,7 @@ async function processBatch${i}(data: DataItem[]): Promise<ProcessedResult[]> {
 }
 `);
   }
-  
+
   return `// API Service - Data Processing Module
 // Generated for testing large context handling
 
@@ -458,27 +452,27 @@ export class DataProcessor {
 async function callClaude(content, apiKey, isVision = false, imageData = null) {
   return new Promise((resolve, reject) => {
     let messageContent;
-    
+
     if (isVision && imageData) {
       messageContent = [
         { type: 'text', text: content },
-        { 
-          type: 'image', 
-          source: { 
-            type: 'base64', 
-            media_type: 'image/png', 
-            data: imageData 
-          } 
-        }
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/png',
+            data: imageData,
+          },
+        },
       ];
     } else {
       messageContent = content;
     }
-    
+
     const postData = JSON.stringify({
       model: CONFIG.claudeModel,
       max_tokens: 2048,
-      messages: [{ role: 'user', content: messageContent }]
+      messages: [{ role: 'user', content: messageContent }],
     });
 
     const options = {
@@ -490,13 +484,13 @@ async function callClaude(content, apiKey, isVision = false, imageData = null) {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(postData)
-      }
+        'Content-Length': Buffer.byteLength(postData),
+      },
     };
 
     const req = https.request(options, (res) => {
       let data = '';
-      res.on('data', chunk => data += chunk);
+      res.on('data', (chunk) => (data += chunk));
       res.on('end', () => {
         try {
           const response = JSON.parse(data);
@@ -506,7 +500,7 @@ async function callClaude(content, apiKey, isVision = false, imageData = null) {
           }
           results.apiCalls.claude++;
           resolve(response);
-        } catch (e) {
+        } catch (_e) {
           reject(new Error('Failed to parse Claude response'));
         }
       });
@@ -517,7 +511,7 @@ async function callClaude(content, apiKey, isVision = false, imageData = null) {
       req.destroy();
       reject(new Error('Claude API timeout'));
     });
-    
+
     req.write(postData);
     req.end();
   });
@@ -532,11 +526,11 @@ async function callOpenAI(prompt, apiKey) {
       model: CONFIG.openaiModel,
       messages: [
         { role: 'system', content: 'You are a metadata generator. Always respond with valid JSON only.' },
-        { role: 'user', content: prompt }
+        { role: 'user', content: prompt },
       ],
       max_completion_tokens: 2048, // GPT-5.2 uses max_completion_tokens
       temperature: 0.3,
-      response_format: { type: 'json_object' }
+      response_format: { type: 'json_object' },
     });
 
     const options = {
@@ -546,14 +540,14 @@ async function callOpenAI(prompt, apiKey) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Length': Buffer.byteLength(postData)
-      }
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Length': Buffer.byteLength(postData),
+      },
     };
 
     const req = https.request(options, (res) => {
       let data = '';
-      res.on('data', chunk => data += chunk);
+      res.on('data', (chunk) => (data += chunk));
       res.on('end', () => {
         try {
           const response = JSON.parse(data);
@@ -566,7 +560,7 @@ async function callOpenAI(prompt, apiKey) {
             results.totalTokens += response.usage.total_tokens;
           }
           resolve(response);
-        } catch (e) {
+        } catch (_e) {
           reject(new Error('Failed to parse OpenAI response'));
         }
       });
@@ -577,7 +571,7 @@ async function callOpenAI(prompt, apiKey) {
       req.destroy();
       reject(new Error('OpenAI API timeout'));
     });
-    
+
     req.write(postData);
     req.end();
   });
@@ -656,7 +650,7 @@ ${sample.transcript || 'No transcript available'}
 
 Analyze the content thoroughly. Identify speakers, main topics, and key points discussed.
 
-Respond with JSON: { "title": "", "description": "", "category": "interview|tutorial|presentation|documentary|other", "topics": [], "speakers": [], "keyPoints": [], "targetAudience": "", "tags": [], "notes": "" }`
+Respond with JSON: { "title": "", "description": "", "category": "interview|tutorial|presentation|documentary|other", "topics": [], "speakers": [], "keyPoints": [], "targetAudience": "", "tags": [], "notes": "" }`,
   };
 
   return prompts[sample.type] || prompts.text;
@@ -666,15 +660,15 @@ Respond with JSON: { "title": "", "description": "", "category": "interview|tuto
  * Validate metadata has expected fields
  */
 function validateMetadata(metadata, expectedFields) {
-  const missing = expectedFields.filter(field => !(field in metadata));
-  const present = expectedFields.filter(field => field in metadata);
-  
+  const missing = expectedFields.filter((field) => !(field in metadata));
+  const present = expectedFields.filter((field) => field in metadata);
+
   return {
     valid: missing.length === 0,
     missing,
     present,
     hasTitle: !!metadata.title,
-    hasTags: Array.isArray(metadata.tags) && metadata.tags.length > 0
+    hasTags: Array.isArray(metadata.tags) && metadata.tags.length > 0,
   };
 }
 
@@ -683,24 +677,24 @@ function validateMetadata(metadata, expectedFields) {
  */
 async function runTest(name, sample) {
   const startTime = Date.now();
-  
+
   try {
     // Determine which API to use based on whether vision is needed
     const isVisionTest = sample.isVision || sample.type === 'image';
     const useOpenAI = !isVisionTest && ['code', 'text', 'data', 'html', 'url', 'audio', 'video'].includes(sample.type);
     const apiKey = useOpenAI ? CONFIG.openaiApiKey : CONFIG.claudeApiKey;
     const modelUsed = useOpenAI ? 'gpt-5.2' : 'claude-sonnet-4';
-    
+
     if (!apiKey) {
       logSkipped(name, `${useOpenAI ? 'OpenAI' : 'Claude'} API key not set`);
       return;
     }
-    
+
     // Call API
     log(`  → Testing ${name} with ${modelUsed}...`, 'dim');
-    
+
     let response;
-    
+
     if (isVisionTest) {
       // Vision test with Claude
       let imageData = null;
@@ -708,12 +702,12 @@ async function runTest(name, sample) {
         const imageBuffer = fs.readFileSync(sample.imagePath);
         imageData = imageBuffer.toString('base64');
       }
-      
+
       if (!imageData) {
         logSkipped(name, 'Image file not found');
         return;
       }
-      
+
       const prompt = `Analyze this image and generate metadata for a knowledge management system.
 
 Describe what you see in detail. Generate JSON with ALL these required fields:
@@ -735,7 +729,6 @@ Respond with valid JSON only.`;
       const text = response.content[0]?.text;
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       response.metadata = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
-      
     } else if (useOpenAI) {
       // Text test with GPT-5.2
       const prompt = buildPrompt(sample);
@@ -750,19 +743,22 @@ Respond with valid JSON only.`;
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       response.metadata = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
     }
-    
+
     // Validate
     const validation = validateMetadata(response.metadata, sample.expectedFields);
     const duration = Date.now() - startTime;
-    
+
     // Report results
     if (validation.valid) {
       logTest(name, true, `${duration}ms`, modelUsed);
-      
+
       if (CONFIG.verbose) {
         log(`    Title: "${response.metadata.title}"`, 'dim');
         if (response.metadata.tags) {
-          log(`    Tags: [${response.metadata.tags.slice(0, 5).join(', ')}${response.metadata.tags.length > 5 ? '...' : ''}]`, 'dim');
+          log(
+            `    Tags: [${response.metadata.tags.slice(0, 5).join(', ')}${response.metadata.tags.length > 5 ? '...' : ''}]`,
+            'dim'
+          );
         }
         if (response.metadata.speakers) {
           log(`    Speakers: [${response.metadata.speakers.join(', ')}]`, 'dim');
@@ -771,7 +767,6 @@ Respond with valid JSON only.`;
     } else {
       logTest(name, false, `Missing: ${validation.missing.join(', ')}`, modelUsed);
     }
-    
   } catch (error) {
     logTest(name, false, error.message, '');
   }
@@ -787,74 +782,76 @@ async function runAllTests() {
   log('║     Metadata Generation API Integration Tests            ║', 'cyan');
   log('║     Testing Claude (vision) + GPT-5.2 (text)             ║', 'cyan');
   log('╚══════════════════════════════════════════════════════════╝', 'cyan');
-  
+
   // Check API keys
   logSection('API Key Check');
-  
+
   if (CONFIG.claudeApiKey) {
     log('  ✓ Claude API key configured', 'green');
   } else {
     log('  ✗ Claude API key missing (set CLAUDE_API_KEY)', 'yellow');
   }
-  
+
   if (CONFIG.openaiApiKey) {
     log('  ✓ OpenAI API key configured', 'green');
   } else {
     log('  ✗ OpenAI API key missing (set OPENAI_API_KEY)', 'yellow');
   }
-  
+
   if (!CONFIG.claudeApiKey && !CONFIG.openaiApiKey) {
     log('\n  No API keys configured. Set environment variables:', 'red');
     log('  export CLAUDE_API_KEY=your-claude-key', 'dim');
     log('  export OPENAI_API_KEY=your-openai-key', 'dim');
     return false;
   }
-  
+
   // Run Vision Tests (Claude)
   logSection('Claude Vision Tests (Images)');
-  
-  const visionTests = [
-    ['Screenshot Analysis', testSamples.screenshot]
-  ];
-  
+
+  const visionTests = [['Screenshot Analysis', testSamples.screenshot]];
+
   for (const [name, sample] of visionTests) {
     await runTest(name, sample);
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => {
+      setTimeout(r, 500);
+    });
   }
-  
+
   // Run Video Tests (GPT-5.2 with transcript)
   logSection('Video Analysis Tests (with Transcript)');
-  
-  const videoTests = [
-    ['YouTube Video with Transcript', testSamples.youtubeVideo]
-  ];
-  
+
+  const videoTests = [['YouTube Video with Transcript', testSamples.youtubeVideo]];
+
   for (const [name, sample] of videoTests) {
     await runTest(name, sample);
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => {
+      setTimeout(r, 500);
+    });
   }
-  
+
   // Run Text Tests (GPT-5.2)
   logSection('GPT-5.2 Text Analysis Tests');
-  
+
   const textTests = [
     ['Code (small)', testSamples.codeSmall],
     ['JSON Data', testSamples.jsonData],
     ['Meeting Notes', testSamples.textNotes],
     ['URL Analysis', testSamples.url],
     ['HTML Document', testSamples.html],
-    ['Audio with Transcript', testSamples.audio]
+    ['Audio with Transcript', testSamples.audio],
   ];
-  
+
   for (const [name, sample] of textTests) {
     await runTest(name, sample);
     // Small delay between API calls
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => {
+      setTimeout(r, 500);
+    });
   }
-  
+
   // Summary
   logSection('Test Summary');
-  
+
   const total = results.passed + results.failed;
   log(`  Total tests: ${total}`, 'dim');
   log(`  ✓ Passed: ${results.passed}`, 'green');
@@ -868,55 +865,19 @@ async function runAllTests() {
     log(`    Total tokens: ${results.totalTokens.toLocaleString()}`, 'dim');
   }
   log('', 'reset');
-  
+
   const allPassed = results.failed === 0 && results.passed > 0;
   log(allPassed ? '✓ All tests passed!' : '✗ Some tests failed or were skipped', allPassed ? 'green' : 'yellow');
-  
+
   return allPassed;
 }
 
 // Run tests
-runAllTests().then(success => {
-  process.exit(success ? 0 : 1);
-}).catch(error => {
-  console.error('Test runner error:', error);
-  process.exit(1);
-});
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+runAllTests()
+  .then((success) => {
+    process.exit(success ? 0 : 1);
+  })
+  .catch((error) => {
+    console.error('Test runner error:', error);
+    process.exit(1);
+  });

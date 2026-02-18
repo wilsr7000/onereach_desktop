@@ -10,10 +10,7 @@
     "lastActive": "2024-11-15T09:45:00Z",
     "preferences": {
       "difficulty": "intermediate",
-      "categories": [
-        "workflows",
-        "integrations"
-      ],
+      "categories": ["workflows", "integrations"],
       "learningPace": "moderate"
     },
     "progress": {
@@ -24,11 +21,7 @@
       "completedMinutes": 285,
       "averageScore": 85.5,
       "streak": 7,
-      "badges": [
-        "quick-learner",
-        "workflow-master",
-        "7-day-streak"
-      ]
+      "badges": ["quick-learner", "workflow-master", "7-day-streak"]
     },
     "subscription": {
       "plan": "premium",
@@ -45,10 +38,7 @@
       "url": "https://learning.staging.onereach.ai/courses/welcome",
       "thumbnail": {
         "type": "gradient",
-        "colors": [
-          "#667eea",
-          "#764ba2"
-        ],
+        "colors": ["#667eea", "#764ba2"],
         "imageUrl": null
       },
       "featured": true,
@@ -60,11 +50,7 @@
       },
       "rating": 4.8,
       "enrollments": 15234,
-      "tags": [
-        "introduction",
-        "platform",
-        "basics"
-      ],
+      "tags": ["introduction", "platform", "basics"],
       "lastUpdated": "2024-11-01T10:00:00Z"
     },
     {
@@ -76,10 +62,7 @@
       "url": "https://learning.staging.onereach.ai/courses/first-agent",
       "thumbnail": {
         "type": "gradient",
-        "colors": [
-          "#f093fb",
-          "#f5576c"
-        ],
+        "colors": ["#f093fb", "#f5576c"],
         "imageUrl": null
       },
       "featured": true,
@@ -92,11 +75,7 @@
       },
       "rating": 4.9,
       "enrollments": 12543,
-      "tags": [
-        "agents",
-        "deployment",
-        "hands-on"
-      ],
+      "tags": ["agents", "deployment", "hands-on"],
       "lastUpdated": "2024-11-05T14:30:00Z",
       "nextLesson": "feat-003"
     },
@@ -109,10 +88,7 @@
       "url": "https://learning.staging.onereach.ai/courses/advanced-workflows",
       "thumbnail": {
         "type": "gradient",
-        "colors": [
-          "#4facfe",
-          "#00f2fe"
-        ],
+        "colors": ["#4facfe", "#00f2fe"],
         "imageUrl": null
       },
       "featured": true,
@@ -124,15 +100,8 @@
       },
       "rating": 4.7,
       "enrollments": 8765,
-      "tags": [
-        "workflows",
-        "automation",
-        "advanced"
-      ],
-      "prerequisites": [
-        "wf-001",
-        "wf-002"
-      ],
+      "tags": ["workflows", "automation", "advanced"],
+      "prerequisites": ["wf-001", "wf-002"],
       "lastUpdated": "2024-10-28T09:15:00Z"
     }
   ],
@@ -153,10 +122,7 @@
           "url": "https://learning.staging.onereach.ai/courses/intro-to-onereach",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#667eea",
-              "#764ba2"
-            ],
+            "colors": ["#667eea", "#764ba2"],
             "imageUrl": "https://example.com/thumbnails/platform-overview.jpg"
           },
           "progress": 100,
@@ -167,11 +133,7 @@
           "videoUrl": "https://example.com/videos/gs-001.mp4",
           "transcriptUrl": "https://example.com/transcripts/gs-001.pdf",
           "resourcesUrl": "https://example.com/resources/gs-001.zip",
-          "tags": [
-            "interface",
-            "navigation",
-            "basics"
-          ],
+          "tags": ["interface", "navigation", "basics"],
           "chapters": [
             {
               "title": "Welcome",
@@ -198,10 +160,7 @@
           "url": "https://learning.staging.onereach.ai/courses/first-project",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#fa709a",
-              "#fee140"
-            ],
+            "colors": ["#fa709a", "#fee140"],
             "imageUrl": null
           },
           "progress": 100,
@@ -210,11 +169,7 @@
           "score": 88,
           "difficulty": "beginner",
           "videoUrl": "https://example.com/videos/gs-002.mp4",
-          "tags": [
-            "project",
-            "setup",
-            "basics"
-          ]
+          "tags": ["project", "setup", "basics"]
         },
         {
           "id": "gs-003",
@@ -224,10 +179,7 @@
           "url": "https://learning.staging.onereach.ai/courses/environment-setup",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#a8edea",
-              "#fed6e3"
-            ],
+            "colors": ["#a8edea", "#fed6e3"],
             "imageUrl": null
           },
           "progress": 60,
@@ -237,21 +189,14 @@
           "difficulty": "beginner",
           "videoUrl": "https://example.com/videos/gs-003.mp4",
           "currentChapter": 2,
-          "bookmarks": [
-            180,
-            420
-          ],
+          "bookmarks": [180, 420],
           "notes": [
             {
               "timestamp": 180,
               "note": "Important configuration step"
             }
           ],
-          "tags": [
-            "environment",
-            "setup",
-            "configuration"
-          ]
+          "tags": ["environment", "setup", "configuration"]
         },
         {
           "id": "gs-004",
@@ -261,10 +206,7 @@
           "url": "https://learning.staging.onereach.ai/courses/workspaces",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#ffecd2",
-              "#fcb69f"
-            ],
+            "colors": ["#ffecd2", "#fcb69f"],
             "imageUrl": null
           },
           "progress": 0,
@@ -272,11 +214,7 @@
           "difficulty": "beginner",
           "releasedAt": "2024-11-12T08:00:00Z",
           "videoUrl": "https://example.com/videos/gs-004.mp4",
-          "tags": [
-            "workspaces",
-            "organization",
-            "projects"
-          ]
+          "tags": ["workspaces", "organization", "projects"]
         }
       ]
     },
@@ -296,10 +234,7 @@
           "url": "https://learning.staging.onereach.ai/courses/workflow-basics",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#ffecd2",
-              "#fcb69f"
-            ],
+            "colors": ["#ffecd2", "#fcb69f"],
             "imageUrl": null
           },
           "progress": 75,
@@ -310,15 +245,8 @@
           "videoUrl": "https://example.com/videos/wf-001.mp4",
           "currentChapter": 3,
           "estimatedCompletion": "5 min",
-          "tags": [
-            "workflows",
-            "nodes",
-            "connections"
-          ],
-          "relatedLessons": [
-            "wf-002",
-            "wf-003"
-          ]
+          "tags": ["workflows", "nodes", "connections"],
+          "relatedLessons": ["wf-002", "wf-003"]
         },
         {
           "id": "wf-002",
@@ -328,24 +256,15 @@
           "url": "https://learning.staging.onereach.ai/courses/conditional-logic",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#a1c4fd",
-              "#c2e9fb"
-            ],
+            "colors": ["#a1c4fd", "#c2e9fb"],
             "imageUrl": null
           },
           "progress": 0,
           "recommended": true,
           "difficulty": "intermediate",
           "videoUrl": "https://example.com/videos/wf-002.mp4",
-          "prerequisites": [
-            "wf-001"
-          ],
-          "tags": [
-            "logic",
-            "conditions",
-            "branching"
-          ],
+          "prerequisites": ["wf-001"],
+          "tags": ["logic", "conditions", "branching"],
           "quiz": {
             "questions": 10,
             "passingScore": 70
@@ -359,20 +278,13 @@
           "url": "https://learning.staging.onereach.ai/courses/data-transformation",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#d299c2",
-              "#fef9d7"
-            ],
+            "colors": ["#d299c2", "#fef9d7"],
             "imageUrl": null
           },
           "progress": 0,
           "difficulty": "intermediate",
           "videoUrl": "https://example.com/videos/wf-003.mp4",
-          "tags": [
-            "data",
-            "transformation",
-            "manipulation"
-          ],
+          "tags": ["data", "transformation", "manipulation"],
           "exercises": [
             {
               "title": "Transform JSON Data",
@@ -389,10 +301,7 @@
           "url": "https://learning.staging.onereach.ai/courses/error-handling",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#89f7fe",
-              "#66a6ff"
-            ],
+            "colors": ["#89f7fe", "#66a6ff"],
             "imageUrl": null
           },
           "progress": 0,
@@ -400,11 +309,7 @@
           "difficulty": "intermediate",
           "releasedAt": "2024-11-08T10:00:00Z",
           "videoUrl": "https://example.com/videos/wf-004.mp4",
-          "tags": [
-            "errors",
-            "debugging",
-            "best-practices"
-          ],
+          "tags": ["errors", "debugging", "best-practices"],
           "certification": true
         },
         {
@@ -415,25 +320,14 @@
           "url": "https://learning.staging.onereach.ai/courses/parallel-processing",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#fddb92",
-              "#d1fdff"
-            ],
+            "colors": ["#fddb92", "#d1fdff"],
             "imageUrl": null
           },
           "progress": 0,
           "difficulty": "advanced",
           "videoUrl": "https://example.com/videos/wf-005.mp4",
-          "prerequisites": [
-            "wf-001",
-            "wf-002",
-            "wf-003"
-          ],
-          "tags": [
-            "parallel",
-            "performance",
-            "optimization"
-          ],
+          "prerequisites": ["wf-001", "wf-002", "wf-003"],
+          "tags": ["parallel", "performance", "optimization"],
           "labExercise": true
         }
       ]
@@ -454,10 +348,7 @@
           "url": "https://learning.staging.onereach.ai/courses/api-integration",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#89f7fe",
-              "#66a6ff"
-            ],
+            "colors": ["#89f7fe", "#66a6ff"],
             "imageUrl": null
           },
           "progress": 25,
@@ -467,11 +358,7 @@
           "difficulty": "intermediate",
           "videoUrl": "https://example.com/videos/int-001.mp4",
           "currentChapter": 1,
-          "tags": [
-            "api",
-            "rest",
-            "integration"
-          ],
+          "tags": ["api", "rest", "integration"],
           "codeExamples": [
             {
               "language": "javascript",
@@ -493,26 +380,14 @@
           "url": "https://learning.staging.onereach.ai/courses/database-connections",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#fddb92",
-              "#d1fdff"
-            ],
+            "colors": ["#fddb92", "#d1fdff"],
             "imageUrl": null
           },
           "progress": 0,
           "difficulty": "intermediate",
           "videoUrl": "https://example.com/videos/int-002.mp4",
-          "tags": [
-            "database",
-            "sql",
-            "nosql"
-          ],
-          "supportedDatabases": [
-            "PostgreSQL",
-            "MySQL",
-            "MongoDB",
-            "Redis"
-          ]
+          "tags": ["database", "sql", "nosql"],
+          "supportedDatabases": ["PostgreSQL", "MySQL", "MongoDB", "Redis"]
         },
         {
           "id": "int-003",
@@ -522,20 +397,13 @@
           "url": "https://learning.staging.onereach.ai/courses/webhooks",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#9890e3",
-              "#b1f4cf"
-            ],
+            "colors": ["#9890e3", "#b1f4cf"],
             "imageUrl": null
           },
           "progress": 0,
           "difficulty": "intermediate",
           "videoUrl": "https://example.com/videos/int-003.mp4",
-          "tags": [
-            "webhooks",
-            "events",
-            "real-time"
-          ],
+          "tags": ["webhooks", "events", "real-time"],
           "practicalExample": {
             "title": "GitHub Webhook Integration",
             "description": "Build a workflow triggered by GitHub events"
@@ -549,30 +417,16 @@
           "url": "https://learning.staging.onereach.ai/courses/oauth",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#f093fb",
-              "#f5576c"
-            ],
+            "colors": ["#f093fb", "#f5576c"],
             "imageUrl": null
           },
           "progress": 0,
           "recommended": true,
           "difficulty": "advanced",
           "videoUrl": "https://example.com/videos/int-004.mp4",
-          "prerequisites": [
-            "int-001"
-          ],
-          "tags": [
-            "oauth",
-            "authentication",
-            "security"
-          ],
-          "providers": [
-            "Google",
-            "Microsoft",
-            "GitHub",
-            "Salesforce"
-          ]
+          "prerequisites": ["int-001"],
+          "tags": ["oauth", "authentication", "security"],
+          "providers": ["Google", "Microsoft", "GitHub", "Salesforce"]
         }
       ]
     },
@@ -592,24 +446,14 @@
           "url": "https://learning.staging.onereach.ai/courses/performance",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#4facfe",
-              "#00f2fe"
-            ],
+            "colors": ["#4facfe", "#00f2fe"],
             "imageUrl": null
           },
           "progress": 0,
           "difficulty": "advanced",
           "videoUrl": "https://example.com/videos/adv-001.mp4",
-          "prerequisites": [
-            "wf-001",
-            "wf-005"
-          ],
-          "tags": [
-            "performance",
-            "optimization",
-            "scaling"
-          ],
+          "prerequisites": ["wf-001", "wf-005"],
+          "tags": ["performance", "optimization", "scaling"],
           "benchmarks": {
             "before": "500ms average",
             "after": "50ms average"
@@ -623,20 +467,13 @@
           "url": "https://learning.staging.onereach.ai/courses/custom-components",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#fa709a",
-              "#fee140"
-            ],
+            "colors": ["#fa709a", "#fee140"],
             "imageUrl": null
           },
           "progress": 0,
           "difficulty": "advanced",
           "videoUrl": "https://example.com/videos/adv-002.mp4",
-          "tags": [
-            "components",
-            "reusability",
-            "architecture"
-          ],
+          "tags": ["components", "reusability", "architecture"],
           "projectFiles": "https://example.com/projects/custom-components.zip",
           "certification": true
         },
@@ -648,10 +485,7 @@
           "url": "https://learning.staging.onereach.ai/courses/security",
           "thumbnail": {
             "type": "gradient",
-            "colors": [
-              "#667eea",
-              "#764ba2"
-            ],
+            "colors": ["#667eea", "#764ba2"],
             "imageUrl": null
           },
           "progress": 0,
@@ -659,29 +493,13 @@
           "difficulty": "advanced",
           "releasedAt": "2024-11-10T12:00:00Z",
           "videoUrl": "https://example.com/videos/adv-003.mp4",
-          "tags": [
-            "security",
-            "encryption",
-            "authentication"
-          ],
-          "securityChecklist": [
-            "Input validation",
-            "Authentication",
-            "Authorization",
-            "Encryption",
-            "Audit logging"
-          ]
+          "tags": ["security", "encryption", "authentication"],
+          "securityChecklist": ["Input validation", "Authentication", "Authorization", "Encryption", "Audit logging"]
         }
       ]
     }
   },
-  "recommendations": [
-    "wf-002",
-    "int-004",
-    "feat-002",
-    "adv-003",
-    "gs-004"
-  ],
+  "recommendations": ["wf-002", "int-004", "feat-002", "adv-003", "gs-004"],
   "recentlyViewed": [
     {
       "lessonId": "gs-001",
@@ -704,11 +522,7 @@
       "viewedAt": "2024-11-14T16:09:00Z"
     }
   ],
-  "continueWatching": [
-    "gs-003",
-    "wf-001",
-    "int-001"
-  ],
+  "continueWatching": ["gs-003", "wf-001", "int-001"],
   "achievements": [
     {
       "id": "first-lesson",
@@ -737,31 +551,17 @@
     "milestones": [
       {
         "name": "Foundation",
-        "lessons": [
-          "gs-001",
-          "gs-002",
-          "gs-003",
-          "gs-004"
-        ],
+        "lessons": ["gs-001", "gs-002", "gs-003", "gs-004"],
         "completed": 2
       },
       {
         "name": "Core Workflows",
-        "lessons": [
-          "wf-001",
-          "wf-002",
-          "wf-003"
-        ],
+        "lessons": ["wf-001", "wf-002", "wf-003"],
         "completed": 0
       },
       {
         "name": "Integration Master",
-        "lessons": [
-          "int-001",
-          "int-002",
-          "int-003",
-          "int-004"
-        ],
+        "lessons": ["int-001", "int-002", "int-003", "int-004"],
         "completed": 0
       }
     ]

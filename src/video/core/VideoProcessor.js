@@ -68,7 +68,7 @@ export function formatTime(seconds) {
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
   const ms = Math.floor((seconds % 1) * 100);
-  
+
   if (h > 0) {
     return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   }
@@ -83,7 +83,7 @@ export function formatTime(seconds) {
 export function parseTime(timeStr) {
   if (typeof timeStr === 'number') return timeStr;
   if (!timeStr) return 0;
-  
+
   const parts = timeStr.split(':').map(Number);
   if (parts.length === 3) {
     return parts[0] * 3600 + parts[1] * 60 + parts[2];
@@ -102,14 +102,14 @@ export function parseTime(timeStr) {
 export function resampleArray(arr, targetLength) {
   if (!arr || arr.length === 0) return new Array(targetLength).fill(0);
   if (arr.length === targetLength) return arr;
-  
+
   const result = [];
   const ratio = arr.length / targetLength;
-  
+
   for (let i = 0; i < targetLength; i++) {
     const srcIndex = Math.floor(i * ratio);
     const nextIndex = Math.min(srcIndex + Math.ceil(ratio), arr.length - 1);
-    
+
     // Take max value in range for peaks
     let maxVal = 0;
     for (let j = srcIndex; j <= nextIndex; j++) {
@@ -117,7 +117,7 @@ export function resampleArray(arr, targetLength) {
     }
     result.push(maxVal);
   }
-  
+
   return result;
 }
 
@@ -129,18 +129,22 @@ export class VideoProcessor {
     this.activeJobs = new Map();
     this.outputDir = path.join(app.getPath('userData'), 'video-exports');
     this.thumbnailDir = path.join(app.getPath('userData'), 'video-thumbnails');
-    
+
     // Ensure directories exist
     this.ensureDirectories();
-    
-    log.info('video', 'VideoProcessor initialized', { ffmpegPath: ffmpegInstaller.path, ffprobePath: ffprobeInstaller.path, outputDir: this.outputDir });
+
+    log.info('video', 'VideoProcessor initialized', {
+      ffmpegPath: ffmpegInstaller.path,
+      ffprobePath: ffprobeInstaller.path,
+      outputDir: this.outputDir,
+    });
   }
 
   /**
    * Ensure output directories exist
    */
   ensureDirectories() {
-    [this.outputDir, this.thumbnailDir].forEach(dir => {
+    [this.outputDir, this.thumbnailDir].forEach((dir) => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
@@ -178,23 +182,27 @@ export class VideoProcessor {
       ffmpegLib.ffprobe(inputPath, (err, metadata) => {
         if (err) {
           log.error('video', 'FFprobe error', { error: err.message, ffprobePath: ffprobeInstaller.path, inputPath });
-          
+
           // Provide more helpful error message for spawn ENOTDIR
           if (err.message && err.message.includes('ENOTDIR')) {
-            reject(new Error(`FFprobe execution failed (spawn ENOTDIR). This usually means:\n` +
-              `1. FFprobe binary path is incorrect or points to a directory\n` +
-              `2. FFprobe binary doesn't have execute permissions\n` +
-              `3. FFprobe binary is corrupted\n` +
-              `Current FFprobe path: ${ffprobeInstaller.path}\n` +
-              `Please try reinstalling @ffprobe-installer/ffprobe: npm install @ffprobe-installer/ffprobe`));
+            reject(
+              new Error(
+                `FFprobe execution failed (spawn ENOTDIR). This usually means:\n` +
+                  `1. FFprobe binary path is incorrect or points to a directory\n` +
+                  `2. FFprobe binary doesn't have execute permissions\n` +
+                  `3. FFprobe binary is corrupted\n` +
+                  `Current FFprobe path: ${ffprobeInstaller.path}\n` +
+                  `Please try reinstalling @ffprobe-installer/ffprobe: npm install @ffprobe-installer/ffprobe`
+              )
+            );
           } else {
             reject(new Error(`Failed to analyze video: ${err.message}`));
           }
           return;
         }
 
-        const videoStream = metadata.streams.find(s => s.codec_type === 'video');
-        const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
+        const videoStream = metadata.streams.find((s) => s.codec_type === 'video');
+        const audioStream = metadata.streams.find((s) => s.codec_type === 'audio');
 
         resolve({
           duration: metadata.format.duration,
@@ -202,20 +210,24 @@ export class VideoProcessor {
           size: metadata.format.size,
           bitrate: metadata.format.bit_rate,
           format: metadata.format.format_name,
-          video: videoStream ? {
-            codec: videoStream.codec_name,
-            width: videoStream.width,
-            height: videoStream.height,
-            fps: videoStream.r_frame_rate ? eval(videoStream.r_frame_rate) : null,
-            aspectRatio: videoStream.display_aspect_ratio
-          } : null,
-          audio: audioStream ? {
-            codec: audioStream.codec_name,
-            channels: audioStream.channels,
-            sampleRate: audioStream.sample_rate,
-            bitrate: audioStream.bit_rate
-          } : null,
-          raw: metadata
+          video: videoStream
+            ? {
+                codec: videoStream.codec_name,
+                width: videoStream.width,
+                height: videoStream.height,
+                fps: videoStream.r_frame_rate ? eval(videoStream.r_frame_rate) : null,
+                aspectRatio: videoStream.display_aspect_ratio,
+              }
+            : null,
+          audio: audioStream
+            ? {
+                codec: audioStream.codec_name,
+                channels: audioStream.channels,
+                sampleRate: audioStream.sample_rate,
+                bitrate: audioStream.bit_rate,
+              }
+            : null,
+          raw: metadata,
         });
       });
     });
@@ -243,9 +255,10 @@ export class VideoProcessor {
   getExportedFiles() {
     if (!fs.existsSync(this.outputDir)) return [];
 
-    return fs.readdirSync(this.outputDir)
-      .filter(f => !f.startsWith('.') && !f.endsWith('.txt'))
-      .map(f => {
+    return fs
+      .readdirSync(this.outputDir)
+      .filter((f) => !f.startsWith('.') && !f.endsWith('.txt'))
+      .map((f) => {
         const filePath = path.join(this.outputDir, f);
         const stats = fs.statSync(filePath);
         return {
@@ -253,7 +266,7 @@ export class VideoProcessor {
           path: filePath,
           size: stats.size,
           created: stats.birthtime,
-          modified: stats.mtime
+          modified: stats.mtime,
         };
       })
       .sort((a, b) => b.modified - a.modified);
@@ -273,9 +286,3 @@ export class VideoProcessor {
     return parseTime(timeStr);
   }
 }
-
-
-
-
-
-

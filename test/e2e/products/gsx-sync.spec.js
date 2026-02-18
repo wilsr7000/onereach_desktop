@@ -9,10 +9,15 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  _sleep,
 } = require('../helpers/electron-app');
 
-let app, electronApp, mainWindow, errorSnapshot;
+let app, _electronApp, _mainWindow, errorSnapshot;
 
 test.describe('GSX Sync & Backup', () => {
   test.beforeAll(async () => {
@@ -21,7 +26,9 @@ test.describe('GSX Sync & Backup', () => {
     mainWindow = app.mainWindow;
     errorSnapshot = await snapshotErrors();
   });
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ── Module Existence ─────────────────────────────────────────────────────
   test('spaces-git module exists', async () => {
@@ -33,24 +40,52 @@ test.describe('GSX Sync & Backup', () => {
   });
 
   // ── Sync Progress ────────────────────────────────────────────────────────
-  test('progress bar fills from 0% to 100%', async () => { expect(true).toBe(true); });
-  test('files processed count increments', async () => { expect(true).toBe(true); });
-  test('data transferred shows formatted bytes', async () => { expect(true).toBe(true); });
-  test('time elapsed counter updates every second', async () => { expect(true).toBe(true); });
-  test('transfer speed calculates correctly', async () => { expect(true).toBe(true); });
-  test('current file name updates during sync', async () => { expect(true).toBe(true); });
+  test('progress bar fills from 0% to 100%', async () => {
+    expect(true).toBe(true);
+  });
+  test('files processed count increments', async () => {
+    expect(true).toBe(true);
+  });
+  test('data transferred shows formatted bytes', async () => {
+    expect(true).toBe(true);
+  });
+  test('time elapsed counter updates every second', async () => {
+    expect(true).toBe(true);
+  });
+  test('transfer speed calculates correctly', async () => {
+    expect(true).toBe(true);
+  });
+  test('current file name updates during sync', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Completion States ────────────────────────────────────────────────────
-  test('success: checkmark animation plays', async () => { expect(true).toBe(true); });
-  test('success: "Close" button appears', async () => { expect(true).toBe(true); });
-  test('error: red error message displays', async () => { expect(true).toBe(true); });
-  test('error: "Close" button allows dismissal', async () => { expect(true).toBe(true); });
-  test('error message describes what failed', async () => { expect(true).toBe(true); });
-  test('cancelling stops the sync operation', async () => { expect(true).toBe(true); });
+  test('success: checkmark animation plays', async () => {
+    expect(true).toBe(true);
+  });
+  test('success: "Close" button appears', async () => {
+    expect(true).toBe(true);
+  });
+  test('error: red error message displays', async () => {
+    expect(true).toBe(true);
+  });
+  test('error: "Close" button allows dismissal', async () => {
+    expect(true).toBe(true);
+  });
+  test('error message describes what failed', async () => {
+    expect(true).toBe(true);
+  });
+  test('cancelling stops the sync operation', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Backup ───────────────────────────────────────────────────────────────
-  test('restoring from backup applies the backup data', async () => { expect(true).toBe(true); });
-  test('history entries include timestamp, type, status, size', async () => { expect(true).toBe(true); });
+  test('restoring from backup applies the backup data', async () => {
+    expect(true).toBe(true);
+  });
+  test('history entries include timestamp, type, status, size', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Error Check ──────────────────────────────────────────────────────────
   test('no unexpected errors', async () => {

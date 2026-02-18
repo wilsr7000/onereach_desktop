@@ -11,24 +11,27 @@ function pathToFileUrl(filePath) {
   if (filePath.startsWith('file://') || filePath.startsWith('data:')) return filePath;
   let normalized = filePath.replace(/\\/g, '/');
   if (/^[a-zA-Z]:/.test(normalized)) normalized = '/' + normalized;
-  const encoded = normalized.split('/').map(c => encodeURIComponent(c).replace(/%3A/g, ':')).join('/');
+  const encoded = normalized
+    .split('/')
+    .map((c) => encodeURIComponent(c).replace(/%3A/g, ':'))
+    .join('/');
   return 'file://' + encoded;
 }
 
 export class WaveformRenderer {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Sub-modules
     this.cache = new WaveformCache(appContext);
     this.types = new WaveformTypes(appContext);
-    
+
     // State
-    this.type = 'spectrogram';  // 'bars', 'line', 'mirror', 'spectrogram'
+    this.type = 'spectrogram'; // 'bars', 'line', 'mirror', 'spectrogram'
     this.audioBuffer = null;
     this.audioContext = null;
     this.isAudioLoaded = false;
-    
+
     // Tier definitions (samples per second for each zoom level)
     this.tierDefs = [
       { maxZoom: 1, samplesPerSec: 50 },
@@ -37,7 +40,7 @@ export class WaveformRenderer {
       { maxZoom: 10, samplesPerSec: 350 },
       { maxZoom: 20, samplesPerSec: 500 },
     ];
-    
+
     // Loading animation
     this._loadingAnimation = null;
     this._regenerateTimeout = null;
@@ -55,18 +58,18 @@ export class WaveformRenderer {
    */
   setType(type) {
     this.type = type;
-    
+
     // Update UI
-    document.querySelectorAll('.waveform-option-btn').forEach(btn => {
+    document.querySelectorAll('.waveform-option-btn').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.type === type);
     });
-    
+
     // Expand track for spectrogram
     const audioTrack = document.getElementById('audioTrackContainer');
     if (audioTrack) {
       audioTrack.classList.toggle('expanded', type === 'spectrogram');
     }
-    
+
     // Regenerate waveform
     this.generate();
   }
@@ -81,7 +84,7 @@ export class WaveformRenderer {
       requestAnimationFrame(() => {
         modal.classList.add('visible');
       });
-      document.querySelectorAll('.waveform-option-btn').forEach(btn => {
+      document.querySelectorAll('.waveform-option-btn').forEach((btn) => {
         btn.classList.toggle('active', btn.dataset.type === this.type);
       });
       modal.onclick = (e) => {
@@ -118,14 +121,14 @@ export class WaveformRenderer {
    */
   async forceRegenerate() {
     window.logging.info('video', 'Waveform Force regenerating - clearing all caches..');
-    
+
     this.clearCache();
-    
+
     // Clear disk cache
     if (this.app.videoPath) {
       await this.cache.deleteDiskCache(this.app.videoPath);
     }
-    
+
     return this.generate(true);
   }
 
@@ -146,8 +149,8 @@ export class WaveformRenderer {
    * Check if zoom tier changed
    */
   didTierChange(oldZoom, newZoom) {
-    const oldTier = this.tierDefs.find(t => oldZoom <= t.maxZoom);
-    const newTier = this.tierDefs.find(t => newZoom <= t.maxZoom);
+    const oldTier = this.tierDefs.find((t) => oldZoom <= t.maxZoom);
+    const newTier = this.tierDefs.find((t) => newZoom <= t.maxZoom);
     return oldTier?.samplesPerSec !== newTier?.samplesPerSec;
   }
 
@@ -160,7 +163,7 @@ export class WaveformRenderer {
       window.logging.info('video', 'Waveform Force regeneration requested');
       this.clearCache();
     }
-    
+
     if (!this.app.videoPath) return;
 
     const canvas = document.getElementById('audioWaveform');
@@ -168,7 +171,7 @@ export class WaveformRenderer {
 
     // Get dimensions and alignment info
     const alignInfo = this._getAlignmentInfo(canvas);
-    const { width, height, rulerWidth, offsetX } = alignInfo;
+    const { width, height, rulerWidth: _rulerWidth, offsetX } = alignInfo;
     const duration = this.app.videoInfo?.duration || 0;
 
     // Setup canvas for retina
@@ -176,8 +179,7 @@ export class WaveformRenderer {
 
     // Get current tier
     const currentZoom = this.app.zoom || 1;
-    const tier = this.tierDefs.find(t => currentZoom <= t.maxZoom) || 
-                 this.tierDefs[this.tierDefs.length - 1];
+    const tier = this.tierDefs.find((t) => currentZoom <= t.maxZoom) || this.tierDefs[this.tierDefs.length - 1];
 
     // Cap samples
     const maxSamples = width * 2;
@@ -188,7 +190,7 @@ export class WaveformRenderer {
     // Try cached image first (include DPR to invalidate when display changes)
     const dpr = window.devicePixelRatio || 1;
     const imageKey = `${this.type}_${tier.samplesPerSec}_dpr${dpr}`;
-    
+
     if (!forceRegenerate) {
       // Check memory cache
       const cachedImage = this.cache.getImage(imageKey);
@@ -196,7 +198,7 @@ export class WaveformRenderer {
         await this._drawCachedImage(ctx, cachedImage, width, height);
         return;
       }
-      
+
       // Check disk cache
       const diskResult = await this.cache.loadImageFromDisk(this.app.videoPath, imageKey);
       if (diskResult.exists && diskResult.dataUrl) {
@@ -228,7 +230,7 @@ export class WaveformRenderer {
         // Initialize cache for new video
         if (!this.cache.isValidFor(this.app.videoPath)) {
           this.cache.initForVideo(this.app.videoPath, duration);
-          
+
           // Try disk cache for master peaks
           const diskMaster = await this.cache.loadMasterPeaksFromDisk(this.app.videoPath);
           if (diskMaster.exists) {
@@ -285,7 +287,6 @@ export class WaveformRenderer {
       } catch (e) {
         window.logging.warn('video', 'Waveform Could not cache image', { data: e.message });
       }
-
     } catch (error) {
       window.logging.error('video', 'Waveform Generation failed', { error: error.message || error });
       this._stopLoadingAnimation();
@@ -300,22 +301,26 @@ export class WaveformRenderer {
     const rulerMarks = document.getElementById('rulerMarks');
     const audioClip = canvas.closest('.timeline-clip');
     const height = canvas.offsetHeight;
-    
+
     let rulerWidth = canvas.offsetWidth;
     let offsetX = 0;
-    
+
     if (rulerMarks && audioClip) {
       const rulerRect = rulerMarks.getBoundingClientRect();
       const clipRect = audioClip.getBoundingClientRect();
       rulerWidth = rulerRect.width;
       offsetX = rulerRect.left - clipRect.left;
     }
-    
+
     const maxCanvasWidth = 16000;
     const width = Math.min(Math.ceil(rulerWidth), maxCanvasWidth);
-    
-    window.logging.info('video', 'Waveform Alignment - Canvas', { data: width, 'Ruler:', rulerWidth.toFixed(0 }), 'Offset:', offsetX.toFixed(1));
-    
+
+    window.logging.info('video', 'Waveform Alignment - Canvas', {
+      width,
+      ruler: rulerWidth.toFixed(0),
+      offset: offsetX.toFixed(1),
+    });
+
     return { width, height, rulerWidth, offsetX };
   }
 
@@ -324,15 +329,15 @@ export class WaveformRenderer {
    */
   _setupCanvas(canvas, ctx, width, height) {
     const dpr = window.devicePixelRatio || 1;
-    
+
     // Set buffer size (actual pixels)
     canvas.width = Math.floor(width * dpr);
     canvas.height = Math.floor(height * dpr);
-    
+
     // Set display size (CSS pixels)
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-    
+
     // Scale context to match devicePixelRatio
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
@@ -340,7 +345,7 @@ export class WaveformRenderer {
   /**
    * Draw cached image to canvas
    */
-  _drawCachedImage(ctx, dataUrl, width, height) {
+  _drawCachedImage(ctx, dataUrl, _width, _height) {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -385,50 +390,51 @@ export class WaveformRenderer {
    */
   _drawTranscript(ctx, width, height, duration, alignInfo = {}) {
     if (!this.app.transcriptSegments?.length) return;
-    
+
     const { rulerWidth = width, offsetX = 0 } = alignInfo;
-    
+
     ctx.save();
-    
+
     // Get words from teleprompter module or expand directly
-    const words = this.app.teleprompter?.expandTranscriptToWords(this.app.transcriptSegments) || 
-                  this._expandTranscriptToWords(this.app.transcriptSegments);
-    
-    window.logging.info('video', 'Waveform Drawing', { data: words.length, 'words' });
-    
+    const words =
+      this.app.teleprompter?.expandTranscriptToWords(this.app.transcriptSegments) ||
+      this._expandTranscriptToWords(this.app.transcriptSegments);
+
+    window.logging.info('video', 'Waveform Drawing', { wordCount: words.length });
+
     ctx.font = 'bold 10px system-ui, -apple-system, sans-serif';
     ctx.textBaseline = 'middle';
-    
+
     let lastWordEndX = -100;
     const minGap = 4;
-    
+
     words.forEach((wordData) => {
       const startTime = wordData.start || 0;
-      const endTime = wordData.end || (startTime + 0.3);
+      const endTime = wordData.end || startTime + 0.3;
       const text = (wordData.text || '').trim();
-      
+
       if (!text) return;
-      
+
       const startX = (startTime / duration) * rulerWidth + offsetX;
       const endX = (endTime / duration) * rulerWidth + offsetX;
       const segmentWidth = Math.max(endX - startX, 20);
-      
+
       if (startX < lastWordEndX + minGap) return;
-      
+
       const textWidth = ctx.measureText(text).width;
-      
+
       // Background
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.fillRect(startX, height - 20, Math.min(textWidth + 6, segmentWidth), 16);
-      
+
       // Text
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
       ctx.textAlign = 'left';
       ctx.fillText(text, startX + 3, height - 12, segmentWidth - 6);
-      
+
       lastWordEndX = startX + textWidth + 6;
     });
-    
+
     ctx.restore();
   }
 
@@ -437,26 +443,26 @@ export class WaveformRenderer {
    */
   _expandTranscriptToWords(segments) {
     const words = [];
-    segments.forEach(segment => {
+    segments.forEach((segment) => {
       const text = (segment.text || segment.word || '').trim();
       const startTime = segment.start || 0;
-      const endTime = segment.end || (startTime + 1);
-      
+      const endTime = segment.end || startTime + 1;
+
       if (!text.includes(' ')) {
         if (text.length > 0) {
           words.push({ text, start: startTime, end: endTime });
         }
         return;
       }
-      
-      const segmentWords = text.split(/\s+/).filter(w => w.length > 0);
+
+      const segmentWords = text.split(/\s+/).filter((w) => w.length > 0);
       const wordDuration = (endTime - startTime) / segmentWords.length;
-      
+
       segmentWords.forEach((word, i) => {
         words.push({
           text: word,
-          start: startTime + (i * wordDuration),
-          end: startTime + ((i + 1) * wordDuration)
+          start: startTime + i * wordDuration,
+          end: startTime + (i + 1) * wordDuration,
         });
       });
     });
@@ -469,27 +475,27 @@ export class WaveformRenderer {
   async _extractPeaksWebAudio(numSamples) {
     const video = document.getElementById('videoPlayer');
     if (!video?.src) throw new Error('No video source');
-    
+
     await this._initAudioContext();
-    
+
     const response = await fetch(video.src);
     if (!response.ok) throw new Error('Fetch failed');
-    
+
     const arrayBuffer = await response.arrayBuffer();
     const decodedBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-    
+
     window.logging.info('video', 'Waveform decoded audio', {
       duration: decodedBuffer.duration.toFixed(2) + 's',
       sampleRate: decodedBuffer.sampleRate,
-      channels: decodedBuffer.numberOfChannels
+      channels: decodedBuffer.numberOfChannels,
     });
-    
+
     // Store for scrubbing and spectrogram
     this.audioBuffer = decodedBuffer;
     this.isAudioLoaded = true;
     window.logging.info('video', 'Waveform Audio buffer shared for scrubbing');
     this.app.showToast?.('success', 'Audio scrubbing ready');
-    
+
     // Get channel data
     let channelData;
     if (decodedBuffer.numberOfChannels === 1) {
@@ -502,7 +508,7 @@ export class WaveformRenderer {
         channelData[i] = (left[i] + right[i]) / 2;
       }
     }
-    
+
     return this._calculatePeaks(channelData, numSamples);
   }
 
@@ -512,25 +518,25 @@ export class WaveformRenderer {
   async _extractPeaksFromVideo(numSamples) {
     const video = document.getElementById('videoPlayer');
     if (!video) throw new Error('No video element');
-    
+
     return new Promise((resolve, reject) => {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
-      
+
       try {
         const source = audioCtx.createMediaElementSource(video);
         source.connect(analyser);
         analyser.connect(audioCtx.destination);
-        
+
         const peaks = [];
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
-        
+
         const duration = video.duration;
         const interval = duration / numSamples;
         let currentSample = 0;
-        
+
         const collectSample = () => {
           if (currentSample >= numSamples) {
             source.disconnect();
@@ -538,23 +544,22 @@ export class WaveformRenderer {
             resolve(peaks);
             return;
           }
-          
+
           analyser.getByteTimeDomainData(dataArray);
-          
+
           let max = 0;
           for (let i = 0; i < bufferLength; i++) {
             const val = Math.abs(dataArray[i] - 128) / 128;
             if (val > max) max = val;
           }
-          
+
           peaks.push(max);
           currentSample++;
           video.currentTime = currentSample * interval;
         };
-        
+
         video.addEventListener('seeked', collectSample, { once: false });
         video.currentTime = 0;
-        
       } catch (e) {
         audioCtx.close();
         reject(e);
@@ -587,7 +592,7 @@ export class WaveformRenderer {
     const normalizer = p95 > 0.01 ? p95 : 1;
 
     for (let i = 0; i < numSamples; i++) {
-      peaks[i] = Math.min(1, peaks[i] / normalizer * 0.8);
+      peaks[i] = Math.min(1, (peaks[i] / normalizer) * 0.8);
     }
 
     return peaks;
@@ -610,7 +615,7 @@ export class WaveformRenderer {
    */
   _startLoadingAnimation(ctx, width, height) {
     this._stopLoadingAnimation();
-    
+
     let pulsePhase = 0;
     const animate = () => {
       pulsePhase += 0.05;
@@ -649,7 +654,7 @@ export class WaveformRenderer {
       backgroundColor = '#1a1a2e',
       type = 'bars', // 'bars', 'line', 'mirror'
       clipStartTime = 0,
-      clipDuration = null
+      clipDuration = null,
     } = options;
 
     // Create or get canvas
@@ -689,7 +694,7 @@ export class WaveformRenderer {
       if (!peaks) {
         // Load audio file and generate peaks
         await this._initAudioContext();
-        
+
         // Fetch audio data (cross-platform)
         const response = await fetch(pathToFileUrl(audioPath));
         const arrayBuffer = await response.arrayBuffer();
@@ -697,12 +702,12 @@ export class WaveformRenderer {
 
         // Generate peaks for the clip portion
         const startSample = Math.floor(clipStartTime * audioBuffer.sampleRate);
-        const numSamples = clipDuration 
+        const numSamples = clipDuration
           ? Math.floor(clipDuration * audioBuffer.sampleRate)
           : audioBuffer.length - startSample;
 
         peaks = this._generatePeaksForRange(audioBuffer, startSample, numSamples, width);
-        
+
         // Cache the result
         this.cache.set(cacheKey, peaks);
       }
@@ -713,10 +718,9 @@ export class WaveformRenderer {
 
       // Draw based on type
       this._drawTrackWaveform(ctx, peaks, width, height, color, type);
-
     } catch (error) {
       window.logging.error('video', 'Waveform renderTrackWaveform error', { error: error.message || error });
-      
+
       // Show error state
       ctx.fillStyle = backgroundColor;
       ctx.fillRect(0, 0, width, height);
@@ -736,7 +740,7 @@ export class WaveformRenderer {
     const samplesPerPeak = Math.floor(numSamples / numPeaks);
 
     for (let i = 0; i < numPeaks; i++) {
-      const start = startSample + (i * samplesPerPeak);
+      const start = startSample + i * samplesPerPeak;
       const end = Math.min(start + samplesPerPeak, channelData.length);
 
       let max = 0;
@@ -755,7 +759,7 @@ export class WaveformRenderer {
     const normalizer = p95 > 0.01 ? p95 : 1;
 
     for (let i = 0; i < numPeaks; i++) {
-      peaks[i] = Math.min(1, peaks[i] / normalizer * 0.8);
+      peaks[i] = Math.min(1, (peaks[i] / normalizer) * 0.8);
     }
 
     return peaks;
@@ -786,16 +790,16 @@ export class WaveformRenderer {
         ctx.moveTo(0, midY);
         for (let i = 0; i < peaks.length; i++) {
           const x = i * barWidth;
-          const y = midY - (peaks[i] * height * 0.45);
+          const y = midY - peaks[i] * height * 0.45;
           ctx.lineTo(x, y);
         }
         ctx.stroke();
-        
+
         ctx.beginPath();
         ctx.moveTo(0, midY);
         for (let i = 0; i < peaks.length; i++) {
           const x = i * barWidth;
-          const y = midY + (peaks[i] * height * 0.45);
+          const y = midY + peaks[i] * height * 0.45;
           ctx.lineTo(x, y);
         }
         ctx.stroke();
@@ -843,35 +847,12 @@ export class WaveformRenderer {
     for (const clip of track.clips) {
       const clipEl = trackEl.querySelector(`[data-clip-id="${clip.id}"]`);
       if (clipEl && clip.path) {
-        await this.renderTrackWaveform(
-          clip.id,
-          clip.path,
-          clipEl,
-          {
-            color: clip.color || track.color || '#4a9eff',
-            clipStartTime: clip.offset || 0,
-            clipDuration: clip.duration
-          }
-        );
+        await this.renderTrackWaveform(clip.id, clip.path, clipEl, {
+          color: clip.color || track.color || '#4a9eff',
+          clipStartTime: clip.offset || 0,
+          clipDuration: clip.duration,
+        });
       }
     }
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

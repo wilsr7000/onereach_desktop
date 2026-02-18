@@ -1,7 +1,7 @@
 /**
  * Agentic Video Player
  * A seamless video player that fetches clips in batches from an API
- * 
+ *
  * Architecture:
  * 1. Player calls API with user prompt + context
  * 2. API returns batch of 1-5 clips with video URLs
@@ -17,9 +17,9 @@ const player = {
     apiKey: null,
     apiHeaders: {},
     context: {},
-    prefetchWhenRemaining: 2,  // Fetch more when this many clips left
-    prefetchThreshold: 5,      // Seconds before clip end to check queue
-    debugMode: false           // Enable verbose logging
+    prefetchWhenRemaining: 2, // Fetch more when this many clips left
+    prefetchThreshold: 5, // Seconds before clip end to check queue
+    debugMode: false, // Enable verbose logging
   },
 
   // Session state
@@ -29,26 +29,26 @@ const player = {
     prompt: '',
     timeLimit: 0,
     timeWatched: 0,
-    watchedIds: []
+    watchedIds: [],
   },
 
   // Playback state
   playback: {
-    queue: [],              // Clips waiting to play
-    history: [],            // Clips already played
+    queue: [], // Clips waiting to play
+    history: [], // Clips already played
     currentClip: null,
     currentEndTime: null,
     isFetching: false,
-    endSignaled: false
+    endSignaled: false,
   },
 
   // Preloading
-  preloadedVideo: null,     // Hidden video element for next clip
+  preloadedVideo: null, // Hidden video element for next clip
 
   // Retry logic
   apiRetryCount: 0,
   maxRetries: 3,
-  retryDelay: 1000,         // Start with 1 second, exponential backoff
+  retryDelay: 1000, // Start with 1 second, exponential backoff
 
   // DOM
   video: null,
@@ -58,11 +58,11 @@ const player = {
 
   async init() {
     console.log('[Player] Initializing...');
-    
+
     this.loadConfig();
     this.cacheUI();
     this.setupVideoEvents();
-    
+
     console.log('[Player] Ready. API:', this.config.apiEndpoint || '(not configured)');
     this.debug('Debug mode:', this.config.debugMode ? 'ON' : 'OFF');
   },
@@ -83,7 +83,7 @@ const player = {
       apiHeaders: cfg.apiHeaders || {},
       context: cfg.context || {},
       prefetchWhenRemaining: cfg.prefetchWhenRemaining || 2,
-      prefetchThreshold: cfg.prefetchThreshold || 5
+      prefetchThreshold: cfg.prefetchThreshold || 5,
     };
   },
 
@@ -115,7 +115,7 @@ const player = {
       reasoningLog: document.getElementById('reasoningLog'),
       npName: document.getElementById('npSceneName'),
       npTime: document.getElementById('npSceneTime'),
-      npDesc: document.getElementById('npDescription')
+      npDesc: document.getElementById('npDescription'),
     };
   },
 
@@ -131,7 +131,7 @@ const player = {
 
   async startSession() {
     const prompt = this.ui.prompt.value.trim();
-    
+
     if (!prompt) {
       alert('Please enter a prompt describing what you want to see.');
       return;
@@ -149,7 +149,7 @@ const player = {
       prompt: prompt,
       timeLimit: parseInt(this.ui.timeLimit.value) || 0,
       timeWatched: 0,
-      watchedIds: []
+      watchedIds: [],
     };
 
     // Reset playback
@@ -159,7 +159,7 @@ const player = {
       currentClip: null,
       currentEndTime: null,
       isFetching: false,
-      endSignaled: false
+      endSignaled: false,
     };
 
     // Clean up any preloaded video from previous session
@@ -175,7 +175,7 @@ const player = {
     this.ui.nowPlaying.classList.remove('hidden');
     this.ui.controls.classList.remove('hidden');
     this.ui.overlay.classList.add('hidden');
-    
+
     if (this.ui.showReasoning.checked) {
       this.ui.reasoningSection.classList.remove('hidden');
       this.ui.reasoningLog.innerHTML = '';
@@ -191,7 +191,7 @@ const player = {
   endSession(reason = 'Session ended') {
     this.session.active = false;
     this.video.pause();
-    
+
     this.playback.queue = [];
     this.playback.endSignaled = false;
 
@@ -200,10 +200,10 @@ const player = {
 
     // Reset retry count
     this.apiRetryCount = 0;
-    
+
     this.ui.status.textContent = 'Ended';
     this.ui.status.classList.remove('active');
-    
+
     this.logReasoning(null, `Ended: ${reason}`);
     console.log(`[Player] Session ended: ${reason} (watched ${this.playback.history.length} clips)`);
 
@@ -234,8 +234,8 @@ const player = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(this.config.apiKey && { 'Authorization': `Bearer ${this.config.apiKey}` }),
-          ...this.config.apiHeaders
+          ...(this.config.apiKey && { Authorization: `Bearer ${this.config.apiKey}` }),
+          ...this.config.apiHeaders,
         },
         body: JSON.stringify({
           prompt: this.session.prompt,
@@ -244,8 +244,8 @@ const player = {
           timeWatched: this.session.timeWatched,
           timeLimit: this.session.timeLimit,
           queueLength: this.playback.queue.length,
-          context: this.config.context
-        })
+          context: this.config.context,
+        }),
       });
 
       if (!response.ok) {
@@ -271,7 +271,7 @@ const player = {
       if (data.scenes && data.scenes.length > 0) {
         this.playback.queue.push(...data.scenes);
         console.log(`[Player] Queued ${data.scenes.length} clips (total: ${this.playback.queue.length})`);
-        
+
         if (data.reasoning) {
           this.logReasoning(null, data.reasoning);
         }
@@ -283,31 +283,30 @@ const player = {
           this.playNext();
         }
       }
-
     } catch (error) {
       console.error('[Player] API error:', error);
-      
+
       // Retry logic with exponential backoff
       if (this.apiRetryCount < this.maxRetries) {
         this.apiRetryCount++;
         const delay = this.retryDelay * Math.pow(2, this.apiRetryCount - 1);
-        
+
         console.log(`[Player] Retrying in ${delay}ms (attempt ${this.apiRetryCount}/${this.maxRetries})`);
         this.logReasoning(null, `Connection issue, retrying... (${this.apiRetryCount}/${this.maxRetries})`);
-        
+
         // Keep isFetching true to prevent duplicate requests
         setTimeout(() => {
           this.playback.isFetching = false;
           this.fetchClips();
         }, delay);
-        
+
         return; // Don't set isFetching = false yet
       }
-      
+
       // Max retries exceeded
       this.apiRetryCount = 0; // Reset for next attempt
       this.logReasoning(null, `Error after ${this.maxRetries} retries: ${error.message}`);
-      
+
       // If we have no clips to play, end session
       if (this.playback.queue.length === 0 && !this.playback.currentClip) {
         this.endSession(`API Error: ${error.message}`);
@@ -315,7 +314,7 @@ const player = {
     } finally {
       // Only set isFetching false if not retrying
       if (this.apiRetryCount === 0) {
-      this.playback.isFetching = false;
+        this.playback.isFetching = false;
       }
     }
   },
@@ -362,27 +361,27 @@ const player = {
     // Use preloaded video if available for seamless transition
     const videoUrl = clip.videoUrl || clip.videoSrc;
     const startTime = clip.inTime || 0;
-    
+
     if (this.preloadedVideo && this.preloadedVideo.src.includes(videoUrl)) {
       console.log('[Player] Using preloaded video for seamless transition');
-      
+
       try {
         // Transfer preloaded video to main player for instant playback
         const wasPlaying = !this.video.paused;
-        
+
         // Swap the sources
         this.video.src = this.preloadedVideo.src;
         this.video.currentTime = startTime;
         this.video.muted = false; // Unmute for actual playback
-        
+
         // Play immediately (already buffered)
         if (wasPlaying || this.playback.history.length === 1) {
-          this.video.play().catch(e => console.warn('[Player] Autoplay blocked:', e));
+          this.video.play().catch((e) => console.warn('[Player] Autoplay blocked:', e));
         }
-        
+
         // Clean up preloaded video
         this.clearPreloadedVideo();
-        
+
         console.log('[Player] Seamless transition complete');
       } catch (error) {
         console.error('[Player] Error in seamless transition:', error);
@@ -393,12 +392,12 @@ const player = {
     } else {
       // No preloaded video available, use normal loading
       console.log('[Player] Loading video normally (no preload available)');
-    this.loadVideo(clip);
-      
+      this.loadVideo(clip);
+
       // Clear stale preloaded video if exists
       this.clearPreloadedVideo();
     }
-    
+
     // Update UI
     this.updateNowPlaying(clip);
     this.renderQueue();
@@ -414,29 +413,37 @@ const player = {
     console.log(`[Player] Playing: "${clip.name}" from ${videoUrl}`);
 
     // Check if we need to change source
-    const needsNewSource = !this.video.src || 
+    const needsNewSource =
+      !this.video.src ||
       (videoUrl.startsWith('http') ? this.video.src !== videoUrl : !this.video.src.endsWith(videoUrl));
 
     if (needsNewSource) {
       this.video.src = videoUrl;
-      this.video.addEventListener('loadedmetadata', () => {
-        this.video.currentTime = startTime;
-        this.video.play().catch(e => console.warn('[Player] Autoplay blocked:', e));
-      }, { once: true });
+      this.video.addEventListener(
+        'loadedmetadata',
+        () => {
+          this.video.currentTime = startTime;
+          this.video.play().catch((e) => console.warn('[Player] Autoplay blocked:', e));
+        },
+        { once: true }
+      );
     } else {
       this.video.currentTime = startTime;
-      this.video.play().catch(e => console.warn('[Player] Autoplay blocked:', e));
+      this.video.play().catch((e) => console.warn('[Player] Autoplay blocked:', e));
     }
   },
 
   checkPrefetch() {
     const remaining = this.playback.queue.length;
-    this.debug('checkPrefetch called:', { remaining, isFetching: this.playback.isFetching, endSignaled: this.playback.endSignaled, hasPreload: !!this.preloadedVideo });
-    
+    this.debug('checkPrefetch called:', {
+      remaining,
+      isFetching: this.playback.isFetching,
+      endSignaled: this.playback.endSignaled,
+      hasPreload: !!this.preloadedVideo,
+    });
+
     // Fetch more clips from API
-    if (remaining <= this.config.prefetchWhenRemaining && 
-        !this.playback.isFetching && 
-        !this.playback.endSignaled) {
+    if (remaining <= this.config.prefetchWhenRemaining && !this.playback.isFetching && !this.playback.endSignaled) {
       console.log(`[Player] Queue low (${remaining}), pre-fetching clips from API...`);
       this.fetchClips();
     }
@@ -450,15 +457,15 @@ const player = {
 
   preloadNextVideo() {
     if (this.playback.queue.length === 0) return;
-    
+
     const nextClip = this.playback.queue[0];
     const videoUrl = nextClip.videoUrl || nextClip.videoSrc;
-    
+
     if (!videoUrl) {
       console.warn('[Player] No video URL for next clip');
       return;
     }
-    
+
     // Create hidden video element for preloading
     const preload = document.createElement('video');
     preload.src = videoUrl;
@@ -466,26 +473,34 @@ const player = {
     preload.muted = true; // Muted to allow preload without user gesture
     preload.style.display = 'none';
     preload.crossOrigin = 'anonymous'; // For CORS if needed
-    
+
     // Add to DOM (required for some browsers to actually preload)
     document.body.appendChild(preload);
-    
+
     // Start loading
     preload.load();
-    
-    preload.addEventListener('loadeddata', () => {
-      console.log(`[Player] Preloaded next clip: ${nextClip.name} (buffered: ${preload.buffered.length > 0})`);
-    }, { once: true });
-    
-    preload.addEventListener('error', (e) => {
-      console.error('[Player] Preload error:', e);
-      // Clean up failed preload
-      if (this.preloadedVideo === preload) {
-        this.preloadedVideo = null;
-      }
-      preload.remove();
-    }, { once: true });
-    
+
+    preload.addEventListener(
+      'loadeddata',
+      () => {
+        console.log(`[Player] Preloaded next clip: ${nextClip.name} (buffered: ${preload.buffered.length > 0})`);
+      },
+      { once: true }
+    );
+
+    preload.addEventListener(
+      'error',
+      (e) => {
+        console.error('[Player] Preload error:', e);
+        // Clean up failed preload
+        if (this.preloadedVideo === preload) {
+          this.preloadedVideo = null;
+        }
+        preload.remove();
+      },
+      { once: true }
+    );
+
     this.preloadedVideo = preload;
   },
 
@@ -506,7 +521,7 @@ const player = {
     currentQuiz: null,
     responses: [],
     score: 0,
-    totalQuestions: 0
+    totalQuestions: 0,
   },
 
   /**
@@ -514,11 +529,11 @@ const player = {
    */
   checkForQuiz(clip) {
     if (!clip) return false;
-    
+
     // Check if this is a quiz marker or has quiz data
     const isQuizMarker = clip.markerType === 'quiz' || clip.type === 'quiz';
     const hasQuizData = clip.quizData && Object.keys(clip.quizData).length > 0;
-    
+
     return isQuizMarker || hasQuizData;
   },
 
@@ -527,27 +542,27 @@ const player = {
    */
   showQuiz(clip) {
     if (this.quiz.active) return;
-    
+
     this.quiz.active = true;
     this.quiz.currentQuiz = clip;
-    
+
     // Pause video
     this.video.pause();
-    
+
     // Get quiz data
     const quizData = clip.quizData || {
       question: clip.description || clip.name || 'Knowledge Check',
       type: 'continue', // Default to just a "continue" button if no real quiz
-      options: []
+      options: [],
     };
-    
+
     // Create quiz overlay
     const overlay = document.createElement('div');
     overlay.id = 'quiz-overlay';
     overlay.className = 'quiz-overlay';
-    
+
     let quizContent = '';
-    
+
     if (quizData.type === 'multiple-choice' && quizData.options) {
       // Multiple choice quiz
       quizContent = `
@@ -558,12 +573,16 @@ const player = {
           </div>
           <div class="quiz-question">${this.escapeHtml(quizData.question)}</div>
           <div class="quiz-options">
-            ${quizData.options.map((opt, i) => `
+            ${quizData.options
+              .map(
+                (opt, i) => `
               <button class="quiz-option" data-index="${i}" data-correct="${opt.correct || false}">
                 <span class="option-letter">${String.fromCharCode(65 + i)}</span>
                 <span class="option-text">${this.escapeHtml(opt.text || opt)}</span>
               </button>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
           <div class="quiz-feedback hidden"></div>
         </div>
@@ -604,16 +623,16 @@ const player = {
         </div>
       `;
     }
-    
+
     overlay.innerHTML = quizContent;
-    
+
     // Add to DOM
     const playerContainer = this.video.closest('.video-container') || this.video.parentElement;
     playerContainer.appendChild(overlay);
-    
+
     // Add event listeners
     this.attachQuizListeners(overlay, quizData);
-    
+
     console.log('[Player] Quiz displayed:', quizData.question);
   },
 
@@ -622,12 +641,12 @@ const player = {
    */
   attachQuizListeners(overlay, quizData) {
     // Multiple choice / True-False options
-    overlay.querySelectorAll('.quiz-option').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+    overlay.querySelectorAll('.quiz-option').forEach((btn) => {
+      btn.addEventListener('click', (_e) => {
         this.handleQuizAnswer(btn, overlay, quizData);
       });
     });
-    
+
     // Continue button for checkpoints
     const continueBtn = overlay.querySelector('.quiz-continue-btn');
     if (continueBtn) {
@@ -643,54 +662,57 @@ const player = {
   handleQuizAnswer(selectedBtn, overlay, quizData) {
     const isCorrect = selectedBtn.dataset.correct === 'true';
     const feedbackEl = overlay.querySelector('.quiz-feedback');
-    
+
     // Disable all options
-    overlay.querySelectorAll('.quiz-option').forEach(btn => {
+    overlay.querySelectorAll('.quiz-option').forEach((btn) => {
       btn.disabled = true;
       btn.classList.add('disabled');
-      
+
       // Highlight correct answer
       if (btn.dataset.correct === 'true') {
         btn.classList.add('correct');
       }
     });
-    
+
     // Highlight selected answer
     selectedBtn.classList.add(isCorrect ? 'correct' : 'incorrect');
-    
+
     // Show feedback
     if (feedbackEl) {
       feedbackEl.classList.remove('hidden');
       feedbackEl.className = `quiz-feedback ${isCorrect ? 'correct' : 'incorrect'}`;
-      feedbackEl.innerHTML = isCorrect 
-        ? '✅ Correct! Well done.'
-        : `❌ Not quite. ${quizData.explanation || ''}`;
+      feedbackEl.innerHTML = isCorrect ? '✅ Correct! Well done.' : `❌ Not quite. ${quizData.explanation || ''}`;
     }
-    
+
     // Update score
     if (isCorrect) {
       this.quiz.score++;
     }
     this.quiz.totalQuestions++;
-    
+
     // Record response
     this.quiz.responses.push({
       quizId: this.quiz.currentQuiz?.id,
       question: quizData.question,
       answerIndex: parseInt(selectedBtn.dataset.index),
       correct: isCorrect,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
-    
+
     // Send response to server
     this.sendQuizResponse(this.quiz.currentQuiz?.id, selectedBtn.dataset.index, isCorrect);
-    
-    console.log(`[Player] Quiz answer: ${isCorrect ? 'CORRECT' : 'INCORRECT'} (Score: ${this.quiz.score}/${this.quiz.totalQuestions})`);
-    
+
+    console.log(
+      `[Player] Quiz answer: ${isCorrect ? 'CORRECT' : 'INCORRECT'} (Score: ${this.quiz.score}/${this.quiz.totalQuestions})`
+    );
+
     // Auto-continue after delay
-    setTimeout(() => {
-      this.closeQuiz(overlay);
-    }, isCorrect ? 1500 : 2500);
+    setTimeout(
+      () => {
+        this.closeQuiz(overlay);
+      },
+      isCorrect ? 1500 : 2500
+    );
   },
 
   /**
@@ -699,7 +721,7 @@ const player = {
   async sendQuizResponse(quizId, answer, correct) {
     try {
       const serverUrl = this.config.apiEndpoint.replace('/playlist', '/quiz-response');
-      
+
       await fetch(serverUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -707,8 +729,8 @@ const player = {
           sessionId: this.session.id,
           quizId,
           answer,
-          correct
-        })
+          correct,
+        }),
       });
     } catch (e) {
       console.warn('[Player] Could not send quiz response:', e.message);
@@ -725,13 +747,13 @@ const player = {
         overlay.remove();
       }, 300);
     }
-    
+
     this.quiz.active = false;
     this.quiz.currentQuiz = null;
-    
+
     // Resume playback or play next
     if (this.playback.currentClip) {
-      this.video.play().catch(e => console.warn('[Player] Resume blocked:', e));
+      this.video.play().catch((e) => console.warn('[Player] Resume blocked:', e));
     } else {
       this.playNext();
     }
@@ -744,10 +766,8 @@ const player = {
     return {
       score: this.quiz.score,
       total: this.quiz.totalQuestions,
-      percentage: this.quiz.totalQuestions > 0 
-        ? Math.round((this.quiz.score / this.quiz.totalQuestions) * 100) 
-        : 0,
-      responses: this.quiz.responses
+      percentage: this.quiz.totalQuestions > 0 ? Math.round((this.quiz.score / this.quiz.totalQuestions) * 100) : 0,
+      responses: this.quiz.responses,
     };
   },
 
@@ -778,38 +798,38 @@ const player = {
       this.onClipEnded();
     }
 
-      // Enhanced buffer health monitoring with critical/warning thresholds
+    // Enhanced buffer health monitoring with critical/warning thresholds
     if (this.playback.currentEndTime) {
       const timeRemaining = this.playback.currentEndTime - currentTime;
-        const queueLength = this.playback.queue.length;
-        
-        this.debug('Buffer health:', {
-          timeRemaining: timeRemaining.toFixed(1),
-          queueLength,
-          hasPreload: !!this.preloadedVideo,
-          isFetching: this.playback.isFetching
-        });
-        
-        // CRITICAL: Less than 3 seconds and no queue - emergency fetch
-        if (timeRemaining <= 3 && queueLength === 0 && !this.playback.isFetching && !this.playback.endSignaled) {
-          console.warn('[Player] CRITICAL: Buffer almost empty! Emergency fetch...');
-          this.ui.thinking.classList.remove('hidden'); // Show loading indicator
-          this.checkPrefetch();
-        }
-        // WARNING: Less than prefetch threshold - normal prefetch
-        else if (timeRemaining <= this.config.prefetchThreshold) {
-          this.debug('Prefetch threshold reached');
+      const queueLength = this.playback.queue.length;
+
+      this.debug('Buffer health:', {
+        timeRemaining: timeRemaining.toFixed(1),
+        queueLength,
+        hasPreload: !!this.preloadedVideo,
+        isFetching: this.playback.isFetching,
+      });
+
+      // CRITICAL: Less than 3 seconds and no queue - emergency fetch
+      if (timeRemaining <= 3 && queueLength === 0 && !this.playback.isFetching && !this.playback.endSignaled) {
+        console.warn('[Player] CRITICAL: Buffer almost empty! Emergency fetch...');
+        this.ui.thinking.classList.remove('hidden'); // Show loading indicator
         this.checkPrefetch();
-          
-          // Hide loading indicator if we have clips in queue
-          if (queueLength > 0) {
-            this.ui.thinking.classList.add('hidden');
-          }
-        }
-        
-        // HEALTHY: More than 10 seconds remaining or queue has clips
-        if (timeRemaining > 10 || queueLength > 1) {
+      }
+      // WARNING: Less than prefetch threshold - normal prefetch
+      else if (timeRemaining <= this.config.prefetchThreshold) {
+        this.debug('Prefetch threshold reached');
+        this.checkPrefetch();
+
+        // Hide loading indicator if we have clips in queue
+        if (queueLength > 0) {
           this.ui.thinking.classList.add('hidden');
+        }
+      }
+
+      // HEALTHY: More than 10 seconds remaining or queue has clips
+      if (timeRemaining > 10 || queueLength > 1) {
+        this.ui.thinking.classList.add('hidden');
       }
     }
   },
@@ -827,7 +847,7 @@ const player = {
 
     this.playback.currentClip = null;
     this.playback.currentEndTime = null;
-    
+
     // Play next
     this.playNext();
   },
@@ -835,7 +855,7 @@ const player = {
   onVideoError(e) {
     console.error('[Player] Video error:', e);
     this.logReasoning(null, `Video error: ${this.video.error?.message || 'Unknown error'}`);
-    
+
     // Try next clip
     if (this.playback.queue.length > 0) {
       this.playNext();
@@ -846,19 +866,22 @@ const player = {
 
   updateNowPlaying(clip) {
     const index = this.playback.history.length;
-    
+
     this.ui.sceneNumber.textContent = index;
     this.ui.sceneName.textContent = clip.name || 'Untitled';
     this.ui.sceneInfo.classList.remove('hidden');
-    
+
     this.ui.npName.textContent = clip.name || 'Untitled';
     this.ui.npTime.textContent = `${this.formatTime(clip.inTime || 0)} - ${this.formatTime(clip.outTime || 0)}`;
     this.ui.npDesc.textContent = clip.description || '';
-    
+
     this.ui.sceneIndex.textContent = index;
-    this.ui.totalScenes.textContent = this.playback.queue.length > 0 
-      ? `${index}+${this.playback.queue.length}` 
-      : (this.playback.endSignaled ? index : `${index}+`);
+    this.ui.totalScenes.textContent =
+      this.playback.queue.length > 0
+        ? `${index}+${this.playback.queue.length}`
+        : this.playback.endSignaled
+          ? index
+          : `${index}+`;
   },
 
   renderQueue() {
@@ -874,7 +897,7 @@ const player = {
 
     // History (played clips)
     this.playback.history.forEach((clip, i) => {
-      const isCurrent = (i === this.playback.history.length - 1) && this.playback.currentClip;
+      const isCurrent = i === this.playback.history.length - 1 && this.playback.currentClip;
       html += this.renderQueueItem(clip, i + 1, isCurrent ? 'current' : 'played');
     });
 
@@ -902,7 +925,7 @@ const player = {
 
   logReasoning(clip, text) {
     if (!this.ui.showReasoning?.checked) return;
-    
+
     const entry = document.createElement('div');
     entry.className = 'reasoning-entry';
     entry.innerHTML = `
@@ -954,7 +977,7 @@ const player = {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
-  }
+  },
 };
 
 // Initialize on load

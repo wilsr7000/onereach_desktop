@@ -32,10 +32,10 @@ export class SlideshowService {
     const {
       duration = 3, // seconds per image
       fps = 30,
-      transition = 'fade',
+      transition: _transition = 'fade',
       audioPath = null,
       outputPath = null,
-      resolution = '1920x1080'
+      resolution = '1920x1080',
     } = options;
 
     if (!imagePaths || imagePaths.length === 0) {
@@ -48,7 +48,7 @@ export class SlideshowService {
     return new Promise((resolve, reject) => {
       // Create a temporary file list for FFmpeg
       const listFile = path.join(this.outputDir, `filelist_${jobId}.txt`);
-      const listContent = imagePaths.map(p => `file '${p}'\nduration ${duration}`).join('\n');
+      const listContent = imagePaths.map((p) => `file '${p}'\nduration ${duration}`).join('\n');
       fs.writeFileSync(listFile, listContent);
 
       let command = ffmpeg()
@@ -60,7 +60,7 @@ export class SlideshowService {
           '-pix_fmt yuv420p',
           `-r ${fps}`,
           '-preset medium',
-          '-crf 23'
+          '-crf 23',
         ]);
 
       if (audioPath && fs.existsSync(audioPath)) {
@@ -78,7 +78,7 @@ export class SlideshowService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -111,7 +111,7 @@ export class SlideshowService {
       fps = 30,
       audioPath = null,
       outputPath = null,
-      resolution = '1920x1080'
+      resolution = '1920x1080',
     } = options;
 
     if (!imagePaths || imagePaths.length === 0) {
@@ -123,31 +123,35 @@ export class SlideshowService {
 
     // For crossfade, we need a complex filter
     const [width, height] = resolution.split('x').map(Number);
-    
+
     return new Promise((resolve, reject) => {
       let command = ffmpeg();
-      
+
       // Add each image as input
-      imagePaths.forEach(imgPath => {
+      imagePaths.forEach((imgPath) => {
         command = command.input(imgPath).inputOptions([`-loop 1`, `-t ${duration}`]);
       });
 
       // Build complex filter for crossfades
       const filters = [];
       const n = imagePaths.length;
-      
+
       // Scale all inputs
       for (let i = 0; i < n; i++) {
-        filters.push(`[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[v${i}]`);
+        filters.push(
+          `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1[v${i}]`
+        );
       }
 
       // Create crossfade chain
       if (n > 1) {
         let prev = 'v0';
         for (let i = 1; i < n; i++) {
-          const offset = (i * duration) - (i * transitionDuration);
+          const offset = i * duration - i * transitionDuration;
           const next = i === n - 1 ? 'outv' : `cf${i}`;
-          filters.push(`[${prev}][v${i}]xfade=transition=fade:duration=${transitionDuration}:offset=${offset}[${next}]`);
+          filters.push(
+            `[${prev}][v${i}]xfade=transition=fade:duration=${transitionDuration}:offset=${offset}[${next}]`
+          );
           prev = next;
         }
       } else {
@@ -157,12 +161,7 @@ export class SlideshowService {
       command
         .complexFilter(filters.join(';'), 'outv')
         .videoCodec('libx264')
-        .outputOptions([
-          '-pix_fmt yuv420p',
-          `-r ${fps}`,
-          '-preset medium',
-          '-crf 23'
-        ]);
+        .outputOptions(['-pix_fmt yuv420p', `-r ${fps}`, '-preset medium', '-crf 23']);
 
       if (audioPath && fs.existsSync(audioPath)) {
         command = command.input(audioPath).audioCodec('aac');
@@ -170,7 +169,7 @@ export class SlideshowService {
 
       command
         .output(output)
-        .on('start', (cmd) => {
+        .on('start', (_cmd) => {
           log.info('video', '[SlideshowService] Crossfade slideshow started');
           this.activeJobs.set(jobId, command);
         })
@@ -179,7 +178,7 @@ export class SlideshowService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -195,19 +194,3 @@ export class SlideshowService {
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

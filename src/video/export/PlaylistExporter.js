@@ -52,17 +52,12 @@ export class PlaylistExporter {
       for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
         const segmentPath = path.join(tempDir, `segment_${String(i).padStart(3, '0')}.mp4`);
-        
+
         await new Promise((resolve, reject) => {
           ffmpeg(inputPath)
             .setStartTime(seg.startTime)
             .setDuration(seg.endTime - seg.startTime)
-            .outputOptions([
-              '-c:v', 'libx264',
-              '-c:a', 'aac',
-              '-avoid_negative_ts', 'make_zero',
-              '-preset', 'fast'
-            ])
+            .outputOptions(['-c:v', 'libx264', '-c:a', 'aac', '-avoid_negative_ts', 'make_zero', '-preset', 'fast'])
             .output(segmentPath)
             .on('end', () => {
               log.info('video', '[PlaylistExporter] Segment / extracted', { v0: i + 1, v1: segments.length });
@@ -71,13 +66,13 @@ export class PlaylistExporter {
             .on('error', reject)
             .run();
         });
-        
+
         segmentFiles.push(segmentPath);
       }
 
       // Create concat list file
       const listPath = path.join(tempDir, 'concat_list.txt');
-      const listContent = segmentFiles.map(f => `file '${f}'`).join('\n');
+      const listContent = segmentFiles.map((f) => `file '${f}'`).join('\n');
       fs.writeFileSync(listPath, listContent);
 
       // Concatenate all segments
@@ -100,9 +95,8 @@ export class PlaylistExporter {
       return {
         success: true,
         outputPath: output,
-        segmentCount: segments.length
+        segmentCount: segments.length,
       };
-
     } catch (error) {
       this.cleanupTempDir(tempDir, [], null);
       throw error;
@@ -124,7 +118,7 @@ export class PlaylistExporter {
     // Get OpenAI API key from settings
     const settingsPath = path.join(app.getPath('userData'), 'settings.json');
     let openaiKey = null;
-    
+
     if (fs.existsSync(settingsPath)) {
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       openaiKey = settings.openaiApiKey;
@@ -151,7 +145,9 @@ ${includeAll ? '- Include ALL scenes in the playlist' : '- Only include scenes r
     const userPrompt = `User request: "${prompt}"
 
 Available scenes:
-${scenes.map(s => `
+${scenes
+  .map(
+    (s) => `
 Scene ${s.index} (ID: ${s.id}):
 - Name: ${s.name}
 - Type: ${s.type}
@@ -161,7 +157,9 @@ ${s.description ? `- Description: ${s.description}` : ''}
 ${s.transcription ? `- Transcription: "${s.transcription.substring(0, 200)}${s.transcription.length > 200 ? '...' : ''}"` : ''}
 ${s.tags.length > 0 ? `- Tags: ${s.tags.join(', ')}` : ''}
 ${s.notes ? `- Notes: ${s.notes}` : ''}
-`).join('\n')}
+`
+  )
+  .join('\n')}
 
 Select the appropriate scenes and return JSON.`;
 
@@ -182,8 +180,8 @@ Select the appropriate scenes and return JSON.`;
       log.info('video', '[PlaylistExporter] AI playlist result', { data: result });
 
       // Validate the selected IDs
-      const validIds = scenes.map(s => s.id);
-      const selectedIds = (result.selectedSceneIds || []).filter(id => validIds.includes(id));
+      const validIds = scenes.map((s) => s.id);
+      const selectedIds = (result.selectedSceneIds || []).filter((id) => validIds.includes(id));
 
       if (selectedIds.length === 0) {
         return { success: false, error: 'AI did not select any valid scenes' };
@@ -192,9 +190,8 @@ Select the appropriate scenes and return JSON.`;
       return {
         success: true,
         selectedSceneIds: selectedIds,
-        reasoning: result.reasoning || ''
+        reasoning: result.reasoning || '',
       };
-
     } catch (error) {
       log.error('video', '[PlaylistExporter] AI playlist error', { error: error });
       return { success: false, error: error.message };
@@ -209,7 +206,7 @@ Select the appropriate scenes and return JSON.`;
    */
   cleanupTempDir(tempDir, segmentFiles, listPath) {
     try {
-      segmentFiles.forEach(f => {
+      segmentFiles.forEach((f) => {
         if (fs.existsSync(f)) fs.unlinkSync(f);
       });
       if (listPath && fs.existsSync(listPath)) fs.unlinkSync(listPath);
@@ -219,19 +216,3 @@ Select the appropriate scenes and return JSON.`;
     }
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

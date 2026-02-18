@@ -14268,124 +14268,7 @@ For each failed test:
             // Render Gantt-style branch timeline - DEPRECATED
             // Now using tabbed UI where each branch has its own tab
             renderBranchTimeline() {
-                // DEPRECATED: This function is no longer used.
-                // Branch management is now handled by TabManager.
-                // Each branch gets its own independent tab.
-                return;
-                
-                // Legacy code below (kept for reference):
-                const controlPanel = document.getElementById('branchControlPanel');
-                const timeline = document.getElementById('branchTimeline');
-                if (!controlPanel || !timeline) return;
-                
-                const branches = this.cycleState.branches || [];
-                const focusedBranchId = this.cycleState.focusedBranch || 'main';
-                
-                // Debug logging
-                console.log('[GSX Create] renderBranchTimeline: branches count =', branches.length, 'branches:', branches.map(b => b.branchId));
-                
-                // Show panel when session is active (has repoPath) or has branches
-                // This lets users see the timeline even before starting parallel branches
-                if (!this.repoPath && branches.length === 0) {
-                    controlPanel.classList.remove('visible');
-                    return;
-                }
-                
-                controlPanel.classList.add('visible');
-                
-                // Update budget indicator
-                this.updateBranchBudgetDisplay();
-                
-                // Build main branch row
-                const mainScore = this.cycleState.currentScore || 0;
-                const mainCost = this.cycleState.mainCost || 0;
-                
-                // Build all branch rows
-                const allBranches = [
-                    {
-                        branchId: 'main',
-                        title: 'Main',
-                        status: 'completed',
-                        currentPhase: 'finalize',
-                        progress: 100,
-                        totalCost: mainCost,
-                        model: this.selectedModel,
-                        costByPhase: this.cycleState.mainCostByPhase || {},
-                        isMain: true
-                    },
-                    ...branches
-                ];
-                
-                timeline.innerHTML = allBranches.map(b => {
-                    const isFocused = focusedBranchId === b.branchId;
-                    const isMain = b.isMain || b.branchId === 'main';
-                    const status = b.status || 'pending';
-                    const currentPhase = b.currentPhase || 'evaluate';
-                    const totalCost = b.totalCost || 0;
-                    
-                    // Calculate cost class
-                    let costClass = '';
-                    if (totalCost > 0.5) costClass = 'very-high';
-                    else if (totalCost > 0.2) costClass = 'high';
-                    
-                    // Build phase segments
-                    const phaseSegments = this.phaseOrder.map(phase => {
-                        const phaseIndex = this.phaseOrder.indexOf(phase);
-                        const currentIndex = this.phaseOrder.indexOf(currentPhase);
-                        let segmentClass = 'pending';
-                        if (phaseIndex < currentIndex || status === 'completed') segmentClass = 'completed';
-                        else if (phaseIndex === currentIndex && status !== 'completed') segmentClass = 'current';
-                        
-                        return `<div class="phase-segment ${phase} ${segmentClass}" 
-                                     style="flex: 1;" 
-                                     title="${phase}"></div>`;
-                    }).join('');
-                    
-                    // Status label
-                    let statusLabel = currentPhase;
-                    let statusClass = 'running';
-                    if (status === 'completed') { statusLabel = 'Done'; statusClass = 'completed'; }
-                    else if (status === 'failed') { statusLabel = 'Failed'; statusClass = 'failed'; }
-                    else if (status === 'pending') { statusLabel = 'Queued'; statusClass = ''; }
-                    
-                    // Actions (only for non-main branches)
-                    const actions = isMain ? '' : `
-                        <div class="branch-actions">
-                            ${status === 'completed' ? `<button class="promote" onclick="event.stopPropagation(); GSXCreate.promoteBranch('${b.branchId}')" title="Promote to main">⬆️</button>` : ''}
-                            <button class="delete" onclick="event.stopPropagation(); GSXCreate.deleteBranch('${b.branchId}')" title="Delete">🗑️</button>
-                        </div>
-                    `;
-                    
-                    // Tooltip with rationale (for parallel branches)
-                    const description = b.description || '';
-                    const focus = b.focus || '';
-                    const tooltip = (!isMain && (description || focus)) ? `
-                        <div class="branch-tooltip">
-                            <div class="tooltip-title">${this.escapeHtml(b.title || b.branchId)}</div>
-                            ${description ? `<div class="tooltip-desc">${this.escapeHtml(description)}</div>` : ''}
-                            ${focus ? `<div class="tooltip-focus"><span>${this.escapeHtml(focus)}</span> ${b.complexity || ''}</div>` : ''}
-                        </div>
-                    ` : '';
-                    
-                    return `
-                        <div class="branch-row ${isFocused ? 'focused' : ''} ${isMain ? 'main-branch' : ''}"
-                             onclick="GSXCreate.focusBranch('${b.branchId}')"
-                             ondblclick="GSXCreate.showBranchComparison('${b.branchId}')">
-                            ${tooltip}
-                            <div class="branch-selector"></div>
-                            <span class="branch-name" title="${b.title || b.branchId}">${isMain ? '● Main' : b.title || b.branchId}</span>
-                            <div class="branch-gantt-bar">
-                                ${phaseSegments}
-                            </div>
-                            <span class="branch-cost ${costClass}">$${totalCost.toFixed(2)}</span>
-                            <span class="branch-phase-label ${statusClass}">${statusLabel}</span>
-                            ${actions}
-                        </div>
-                    `;
-                }).join('');
-                
-                // Also update cost breakdown for focused branch
-                this.renderCostBreakdown(focusedBranchId);
+                // DEPRECATED: Branch management is now handled by TabManager.
             },
             
             // Update the budget display in the branch control panel header
@@ -15967,39 +15850,8 @@ Respond with ONLY a single number 0-100 representing the total score.`;
             
             // Start parallel planning from the Branch Control Panel
             async startParallelPlanning() {
-                // DEPRECATED: This function is replaced by the tabbed UI.
-                // Redirect users to create new branches via TabManager.
-                console.log('[GSX Create] startParallelPlanning is deprecated. Use TabManager.showNewBranchModal() instead.');
+                // DEPRECATED: Replaced by tabbed UI.
                 TabManager.showNewBranchModal();
-                return;
-                
-                // Legacy code below (kept for reference):
-                this.logBranchEvent('planning:start', { 
-                    action: 'startParallelPlanning',
-                    parallelCount: this.cycleState.parallelCount
-                });
-                
-                // Show custom prompt modal for objective
-                const objective = await this.showObjectivePrompt();
-                
-                if (!objective || !objective.trim()) {
-                    this.logBranchEvent('planning:cancelled', { 
-                        action: 'startParallelPlanning',
-                        reason: 'User cancelled objective input'
-                    });
-                    return; // User cancelled
-                }
-                
-                this.cycleState.objective = objective.trim();
-                
-                this.logBranchEvent('planning:objectiveSet', { 
-                    action: 'startParallelPlanning',
-                    objective: objective.trim(),
-                    objectiveLength: objective.trim().length
-                });
-                
-                // Always show planning modal from this entry point
-                await this.showPlanningModal(objective.trim());
             },
             
             // Custom prompt modal (replaces native prompt() which is blocked in Electron)

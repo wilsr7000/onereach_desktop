@@ -3,7 +3,7 @@
  * This file is retained for backward compatibility but all consumers
  * have been migrated to the centralized AI service.
  * See: const ai = require('./lib/ai-service');
- * 
+ *
  * Original: OpenAI API Client for GPT-5.2
  * Used for large context window tasks (text, code, data analysis)
  */
@@ -13,7 +13,7 @@ const https = require('https');
 const { getBudgetManager } = require('./budget-manager');
 const getLogger = require('./event-logger');
 const { getLLMUsageTracker } = require('./llm-usage-tracker');
-const { calculateCost } = require('./pricing-config');
+const { _calculateCost } = require('./pricing-config');
 
 class OpenAIAPI {
   constructor() {
@@ -25,7 +25,7 @@ class OpenAIAPI {
   /**
    * Generate metadata for text-based content using GPT-5.2
    * Best for: code, text, data files, HTML, URLs (large context)
-   * 
+   *
    * @param {string} content - The content to analyze
    * @param {string} contentType - Type of content
    * @param {string} apiKey - OpenAI API key
@@ -35,7 +35,7 @@ class OpenAIAPI {
    */
   async generateMetadata(content, contentType, apiKey, options = {}) {
     const logger = getLogger();
-    
+
     if (!apiKey) {
       const error = new Error('OpenAI API key is required');
       logger.logAPIError('/v1/chat/completions', error, { operation: 'generateMetadata', contentType });
@@ -43,18 +43,18 @@ class OpenAIAPI {
     }
 
     const prompt = this.buildPrompt(content, contentType, options);
-    
+
     logger.info('OpenAI API request', {
       event: 'api:request',
       provider: 'openai',
       model: this.defaultModel,
       operation: `generateMetadata:${contentType}`,
-      contentLength: content.length
+      contentLength: content.length,
     });
 
     return this.callAPI(prompt, apiKey, {
       operation: `generateMetadata:${contentType}`,
-      projectId: options.projectId
+      projectId: options.projectId,
     });
   }
 
@@ -64,7 +64,7 @@ class OpenAIAPI {
   buildPrompt(content, contentType, options = {}) {
     const spaceContext = options.spaceContext || null;
     let contextInfo = '';
-    
+
     if (spaceContext) {
       contextInfo = `\nSPACE CONTEXT: This content belongs to "${spaceContext.name}"`;
       if (spaceContext.purpose) contextInfo += ` - ${spaceContext.purpose}`;
@@ -77,7 +77,7 @@ class OpenAIAPI {
       html: this.buildHtmlPrompt(content, contextInfo, options),
       url: this.buildUrlPrompt(content, contextInfo, options),
       audio: this.buildAudioPrompt(content, contextInfo, options),
-      file: this.buildFilePrompt(content, contextInfo, options)
+      file: this.buildFilePrompt(content, contextInfo, options),
     };
 
     return prompts[contentType] || prompts.text;
@@ -86,7 +86,7 @@ class OpenAIAPI {
   buildCodePrompt(content, contextInfo, options) {
     const fileName = options.fileName || 'code';
     const fileExt = options.fileExt || '';
-    
+
     return `You are an expert code analyst. Analyze this code file thoroughly.${contextInfo}
 
 FILE: ${fileName}
@@ -117,7 +117,7 @@ Provide a comprehensive analysis in JSON format:
 Respond with valid JSON only.`;
   }
 
-  buildTextPrompt(content, contextInfo, options) {
+  buildTextPrompt(content, contextInfo, _options) {
     return `You are a content analyst. Analyze this text document thoroughly.${contextInfo}
 
 CONTENT:
@@ -144,7 +144,7 @@ Respond with valid JSON only.`;
   buildDataPrompt(content, contextInfo, options) {
     const fileName = options.fileName || 'data';
     const fileExt = options.fileExt || '';
-    
+
     return `You are a data analyst. Analyze this data file thoroughly.${contextInfo}
 
 FILE: ${fileName}
@@ -173,7 +173,7 @@ Provide a comprehensive analysis in JSON format:
 Respond with valid JSON only.`;
   }
 
-  buildHtmlPrompt(content, contextInfo, options) {
+  buildHtmlPrompt(content, contextInfo, _options) {
     return `You are a web content analyst. Analyze this HTML/web content.${contextInfo}
 
 CONTENT:
@@ -201,7 +201,7 @@ Respond with valid JSON only.`;
   buildUrlPrompt(content, contextInfo, options) {
     const pageTitle = options.pageTitle || '';
     const pageDescription = options.pageDescription || '';
-    
+
     return `You are a web resource analyst. Analyze this URL/web link.${contextInfo}
 
 URL: ${content}
@@ -229,7 +229,7 @@ Respond with valid JSON only.`;
     const fileName = options.fileName || 'audio';
     const duration = options.duration || 'Unknown';
     const transcript = options.transcript || '';
-    
+
     return `You are an audio content analyst. Analyze this audio file information.${contextInfo}
 
 FILE: ${fileName}
@@ -258,7 +258,7 @@ Respond with valid JSON only.`;
     const fileName = options.fileName || 'file';
     const fileExt = options.fileExt || '';
     const fileSize = options.fileSize || 0;
-    
+
     return `You are a file analyst. Analyze this file based on its metadata.${contextInfo}
 
 FILENAME: ${fileName}
@@ -290,33 +290,37 @@ Respond with valid JSON only.`;
    */
   async callAPI(prompt, apiKey, trackingOptions = {}) {
     const logger = getLogger();
-    
+
     // Check budget before making the call
     try {
       const budgetManager = getBudgetManager();
-      
+
       // Estimate cost based on prompt length
       const estimatedInputTokens = Math.ceil(prompt.length / 4);
       const estimatedOutputTokens = this.maxTokens;
       // Pricing is per 1M tokens, use the model-specific or default pricing
-      const pricing = budgetManager.getPricing().openai?.[this.defaultModel] || { input: 5.00, output: 15.00 };
-      const estimatedCost = (estimatedInputTokens / 1000000) * pricing.input + 
-                           (estimatedOutputTokens / 1000000) * pricing.output;
-      
-      const budgetCheck = budgetManager.checkBudgetWithWarning('openai', estimatedCost, trackingOptions.operation || 'api_call');
-      
+      const pricing = budgetManager.getPricing().openai?.[this.defaultModel] || { input: 5.0, output: 15.0 };
+      const estimatedCost =
+        (estimatedInputTokens / 1000000) * pricing.input + (estimatedOutputTokens / 1000000) * pricing.output;
+
+      const budgetCheck = budgetManager.checkBudgetWithWarning(
+        'openai',
+        estimatedCost,
+        trackingOptions.operation || 'api_call'
+      );
+
       if (budgetCheck.exceeded) {
         logger.warn('OpenAI API call proceeding despite budget exceeded', {
           event: 'budget:exceeded',
           provider: 'openai',
           operation: trackingOptions.operation,
           estimatedCost,
-          remaining: budgetCheck.remaining
+          remaining: budgetCheck.remaining,
         });
       }
     } catch (budgetError) {
       logger.warn('OpenAI budget check failed, proceeding with call', {
-        error: budgetError.message
+        error: budgetError.message,
       });
     }
 
@@ -326,16 +330,17 @@ Respond with valid JSON only.`;
         messages: [
           {
             role: 'system',
-            content: 'You are a precise metadata generator. Always respond with valid JSON only, no markdown formatting or extra text.'
+            content:
+              'You are a precise metadata generator. Always respond with valid JSON only, no markdown formatting or extra text.',
           },
           {
             role: 'user',
-            content: prompt
-          }
+            content: prompt,
+          },
         ],
         max_completion_tokens: this.maxTokens, // GPT-5.2 uses max_completion_tokens
         temperature: 0.3,
-        response_format: { type: 'json_object' }
+        response_format: { type: 'json_object' },
       });
 
       const options = {
@@ -345,9 +350,9 @@ Respond with valid JSON only.`;
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Length': Buffer.byteLength(postData)
-        }
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Length': Buffer.byteLength(postData),
+        },
       };
 
       const requestStartTime = Date.now();
@@ -361,17 +366,17 @@ Respond with valid JSON only.`;
         res.on('end', () => {
           const logger = getLogger();
           const requestDuration = Date.now() - requestStartTime;
-          
+
           try {
             const response = JSON.parse(data);
-            
+
             if (res.statusCode !== 200) {
               const errorMsg = response.error?.message || `API error: ${res.statusCode}`;
               logger.logAPIError('/v1/chat/completions', new Error(errorMsg), {
                 provider: 'openai',
                 statusCode: res.statusCode,
                 operation: trackingOptions.operation,
-                duration: requestDuration
+                duration: requestDuration,
               });
               reject(new Error(errorMsg));
               return;
@@ -381,7 +386,7 @@ Respond with valid JSON only.`;
             if (!content) {
               logger.logAPIError('/v1/chat/completions', new Error('No content in API response'), {
                 provider: 'openai',
-                operation: trackingOptions.operation
+                operation: trackingOptions.operation,
               });
               reject(new Error('No content in API response'));
               return;
@@ -389,11 +394,11 @@ Respond with valid JSON only.`;
 
             // Parse the JSON response
             const metadata = JSON.parse(content);
-            
+
             // Add model info
             metadata._model = this.defaultModel;
             metadata._provider = 'openai';
-            
+
             // Track usage if available in response
             const usage = response.usage;
             if (usage) {
@@ -409,45 +414,44 @@ Respond with valid JSON only.`;
                   purpose: trackingOptions.operation,
                   projectId: trackingOptions.projectId,
                   duration: requestDuration,
-                  success: true
+                  success: true,
                 });
-                
+
                 logger.logNetworkRequest('POST', '/v1/chat/completions', res.statusCode, requestDuration);
                 logger.info('OpenAI API usage tracked', {
                   event: 'api:usage',
                   provider: 'openai',
                   inputTokens: usage.prompt_tokens,
                   outputTokens: usage.completion_tokens,
-                  operation: trackingOptions.operation
+                  operation: trackingOptions.operation,
                 });
-                
+
                 // Add usage info to metadata
                 metadata._usage = {
                   inputTokens: usage.prompt_tokens,
                   outputTokens: usage.completion_tokens,
-                  totalTokens: usage.total_tokens
+                  totalTokens: usage.total_tokens,
                 };
               } catch (trackingError) {
                 logger.warn('OpenAI API usage tracking failed', {
                   error: trackingError.message,
-                  operation: trackingOptions.operation
+                  operation: trackingOptions.operation,
                 });
               }
             }
-            
+
             logger.info('OpenAI API request successful', {
               event: 'api:success',
               provider: 'openai',
               operation: trackingOptions.operation,
-              duration: requestDuration
+              duration: requestDuration,
             });
             resolve(metadata);
-            
           } catch (error) {
             logger.logAPIError('/v1/chat/completions', error, {
               provider: 'openai',
               operation: trackingOptions.operation,
-              parseError: true
+              parseError: true,
             });
             reject(new Error('Failed to parse API response: ' + error.message));
           }
@@ -459,7 +463,7 @@ Respond with valid JSON only.`;
         logger.logAPIError('/v1/chat/completions', error, {
           provider: 'openai',
           operation: trackingOptions.operation,
-          networkError: true
+          networkError: true,
         });
         reject(error);
       });
@@ -479,7 +483,7 @@ Respond with valid JSON only.`;
    */
   async generateAudioSuggestions(marker, type, apiKey, options = {}) {
     const logger = getLogger();
-    
+
     if (!apiKey) {
       const error = new Error('OpenAI API key is required');
       logger.logAPIError('/v1/chat/completions', error, { operation: 'generateAudioSuggestions', type });
@@ -487,17 +491,17 @@ Respond with valid JSON only.`;
     }
 
     const prompt = this.buildAudioSuggestionPrompt(marker, type, options);
-    
+
     logger.info('OpenAI audio suggestions request', {
       event: 'api:request',
       provider: 'openai',
       operation: `audioSuggestions:${type}`,
-      markerName: marker.name
+      markerName: marker.name,
     });
 
     const result = await this.callAPI(prompt, apiKey, {
       operation: `audioSuggestions:${type}`,
-      projectId: options.projectId
+      projectId: options.projectId,
     });
 
     return result.suggestions || [];
@@ -510,16 +514,16 @@ Respond with valid JSON only.`;
    * @param {Object} options - Additional context
    * @returns {string} The prompt for OpenAI
    */
-  buildAudioSuggestionPrompt(marker, type, options = {}) {
-    const duration = marker.duration || (marker.outTime - marker.inTime) || 10;
+  buildAudioSuggestionPrompt(marker, type, _options = {}) {
+    const duration = marker.duration || marker.outTime - marker.inTime || 10;
     const durationStr = duration.toFixed(1);
-    
+
     const context = {
       name: marker.name || 'Untitled Scene',
       description: marker.description || '',
       transcription: marker.transcription || '',
       tags: (marker.tags || []).join(', '),
-      duration: durationStr
+      duration: durationStr,
     };
 
     if (type === 'music') {
@@ -629,7 +633,7 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
     }
     return { model: 'gpt-4o', reason: 'Standard analysis' };
   }
-  
+
   /**
    * Map operation name to feature category for dashboard
    */
@@ -648,7 +652,7 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
   /**
    * Evaluate items for generative search
    * Optimized for fast batch evaluation with JSON responses
-   * 
+   *
    * @param {string} prompt - Evaluation prompt with criteria and items
    * @param {string} apiKey - OpenAI API key
    * @param {Object} options - Options
@@ -659,7 +663,7 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
    */
   async evaluateForGenerativeSearch(prompt, apiKey, options = {}) {
     const logger = getLogger();
-    
+
     if (!apiKey) {
       throw new Error('OpenAI API key is required for generative search');
     }
@@ -673,16 +677,17 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
         messages: [
           {
             role: 'system',
-            content: 'You are an expert content evaluator. Evaluate items precisely and return only valid JSON. Be consistent in your scoring.'
+            content:
+              'You are an expert content evaluator. Evaluate items precisely and return only valid JSON. Be consistent in your scoring.',
           },
           {
             role: 'user',
-            content: prompt
-          }
+            content: prompt,
+          },
         ],
         max_completion_tokens: maxTokens,
         temperature: temperature,
-        response_format: { type: 'json_object' }
+        response_format: { type: 'json_object' },
       });
 
       const requestOptions = {
@@ -692,9 +697,9 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Length': Buffer.byteLength(postData)
-        }
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Length': Buffer.byteLength(postData),
+        },
       };
 
       const requestStartTime = Date.now();
@@ -707,16 +712,16 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
 
         res.on('end', () => {
           const requestDuration = Date.now() - requestStartTime;
-          
+
           try {
             const response = JSON.parse(data);
-            
+
             if (res.statusCode !== 200) {
               const errorMsg = response.error?.message || `API error: ${res.statusCode}`;
               logger.logAPIError('/v1/chat/completions', new Error(errorMsg), {
                 provider: 'openai',
                 operation: 'generativeSearch',
-                statusCode: res.statusCode
+                statusCode: res.statusCode,
               });
               reject(new Error(errorMsg));
               return;
@@ -741,15 +746,14 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
                   purpose: 'generativeSearch',
                   projectId: options.projectId,
                   duration: requestDuration,
-                  success: true
+                  success: true,
                 });
-              } catch (trackingError) {
+              } catch (_trackingError) {
                 // Ignore tracking errors
               }
             }
 
             resolve(content);
-            
           } catch (error) {
             reject(new Error('Failed to parse API response: ' + error.message));
           }
@@ -760,7 +764,7 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
         logger.logAPIError('/v1/chat/completions', error, {
           provider: 'openai',
           operation: 'generativeSearch',
-          networkError: true
+          networkError: true,
         });
         reject(error);
       });
@@ -789,7 +793,7 @@ Make the prompts detailed and specific. Include layered sounds where appropriate
     return {
       model: 'gpt-4o',
       inputPer1k: 0.005,
-      outputPer1k: 0.015
+      outputPer1k: 0.015,
     };
   }
 }
@@ -805,41 +809,3 @@ function getOpenAIAPI() {
 }
 
 module.exports = { OpenAIAPI, getOpenAIAPI };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

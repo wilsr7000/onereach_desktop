@@ -22,20 +22,24 @@
 
 const { test, expect } = require('@playwright/test');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
 } = require('./helpers/electron-app');
 
 let app;
 let electronApp;
-let mainWindow;
+let _mainWindow;
 let errorSnapshot;
 
 test.describe('Voice Orb E2E', () => {
-
   test.beforeAll(async () => {
     app = await launchApp({ timeout: 40000 });
     electronApp = app.electronApp;
-    mainWindow = app.mainWindow;
+    _mainWindow = app.mainWindow;
 
     // Wait for orb infrastructure to initialize (exchange bridge, SDK, IPC handlers)
     await sleep(5000);
@@ -51,7 +55,9 @@ test.describe('Voice Orb E2E', () => {
           global.orbWindow.close();
         }
       });
-    } catch (_) {}
+    } catch (_) {
+      /* no-op */
+    }
     await closeApp(app);
   });
 
@@ -80,8 +86,12 @@ test.describe('Voice Orb E2E', () => {
     await sleep(3000); // Allow window creation + preload
 
     const afterWindows = await electronApp.windows();
-    const orbPage = afterWindows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = afterWindows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
 
     expect(orbPage).toBeTruthy();
@@ -89,8 +99,12 @@ test.describe('Voice Orb E2E', () => {
 
   test('orb window has correct URL', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
 
     expect(orbPage).toBeTruthy();
@@ -120,7 +134,7 @@ test.describe('Voice Orb E2E', () => {
           resizable: global.orbWindow.isResizable(),
           // Frameless windows have no getTitle() or it's empty
           visible: global.orbWindow.isVisible(),
-          focusable: global.orbWindow.isFocusable()
+          focusable: global.orbWindow.isFocusable(),
         };
       }
       return null;
@@ -138,10 +152,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('orbAPI is exposed on the renderer window object', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const hasOrbAPI = await orbPage.evaluate(() => typeof window.orbAPI !== 'undefined');
     expect(hasOrbAPI).toBe(true);
@@ -149,10 +170,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('orbAPI has all realtime speech methods', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const methods = await orbPage.evaluate(() => ({
       connect: typeof window.orbAPI?.connect === 'function',
@@ -179,10 +207,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('orbAPI has all voice task SDK methods', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const methods = await orbPage.evaluate(() => ({
       submit: typeof window.orbAPI?.submit === 'function',
@@ -213,10 +248,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('orbAPI has all window control methods', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const methods = await orbPage.evaluate(() => ({
       show: typeof window.orbAPI?.show === 'function',
@@ -243,10 +285,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('orbAPI has all TTS methods', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const methods = await orbPage.evaluate(() => ({
       speak: typeof window.orbAPI?.speak === 'function',
@@ -263,10 +312,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('orbAPI has all HUD integration methods', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const methods = await orbPage.evaluate(() => ({
       showHUD: typeof window.orbAPI?.showHUD === 'function',
@@ -285,10 +341,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('orbAPI has agent composer integration methods', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const methods = await orbPage.evaluate(() => ({
       onPlanSummary: typeof window.orbAPI?.onPlanSummary === 'function',
@@ -303,10 +366,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('clipboardAPI is exposed on the orb window', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => ({
       hasClipboardAPI: typeof window.clipboardAPI !== 'undefined',
@@ -321,10 +391,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('agentHUD API is exposed (or stub present)', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     // agentHUD may be a full API or a stub -- either is acceptable
     const result = await orbPage.evaluate(() => ({
@@ -340,10 +417,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('voice task SDK reports status', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const status = await orbPage.evaluate(async () => {
       try {
@@ -362,10 +446,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('voice task SDK lists queues without error', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -385,10 +476,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('realtime speech connection status is queryable', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -401,9 +499,10 @@ test.describe('Voice Orb E2E', () => {
 
     expect(result.success).toBe(true);
     // isConnected may return a boolean directly or an object with a boolean field
-    const connected = typeof result.connected === 'boolean'
-      ? result.connected
-      : (result.connected?.connected ?? result.connected?.isConnected ?? false);
+    const connected =
+      typeof result.connected === 'boolean'
+        ? result.connected
+        : (result.connected?.connected ?? result.connected?.isConnected ?? false);
     expect(typeof connected).toBe('boolean');
     // Orb should NOT be connected yet (no mic interaction)
     expect(connected).toBe(false);
@@ -411,10 +510,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('TTS availability is queryable', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -433,10 +539,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('agent composer status is queryable', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -459,10 +572,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('orb circle element renders in DOM', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const elements = await orbPage.evaluate(() => ({
       hasOrb: !!document.querySelector('.orb'),
@@ -479,19 +599,33 @@ test.describe('Voice Orb E2E', () => {
 
   test('text chat panel elements exist in DOM', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const elements = await orbPage.evaluate(() => {
       // Check for chat-related elements (may be hidden initially)
       return {
         hasChatPanel: !!document.querySelector('.text-chat-panel') || !!document.querySelector('#text-chat-panel'),
-        hasChatInput: !!document.querySelector('#chat-input') || !!document.querySelector('.chat-input') || !!document.querySelector('textarea'),
-        hasChatHistory: !!document.querySelector('#chat-history') || !!document.querySelector('.chat-history') || !!document.querySelector('.messages'),
+        hasChatInput:
+          !!document.querySelector('#chat-input') ||
+          !!document.querySelector('.chat-input') ||
+          !!document.querySelector('textarea'),
+        hasChatHistory:
+          !!document.querySelector('#chat-history') ||
+          !!document.querySelector('.chat-history') ||
+          !!document.querySelector('.messages'),
         hasContextMenu: !!document.querySelector('.orb-context-menu') || !!document.querySelector('.context-menu'),
-        hasTranscriptTooltip: !!document.querySelector('.transcript-tooltip') || !!document.querySelector('.transcript'),
+        hasTranscriptTooltip:
+          !!document.querySelector('.transcript-tooltip') || !!document.querySelector('.transcript'),
       };
     });
 
@@ -506,10 +640,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('expand-for-chat IPC resizes the window', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     // Get size before expand
     const beforeBounds = await electronApp.evaluate(() => {
@@ -551,10 +692,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('collapse-from-chat IPC restores window size', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     // Collapse via IPC
     const collapseResult = await orbPage.evaluate(async () => {
@@ -586,10 +734,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('setPosition moves the orb window', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     // Move to a known position
     const moveResult = await orbPage.evaluate(async () => {
@@ -624,10 +779,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('click-through can be toggled via IPC', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     // Enable click-through
     const enableResult = await orbPage.evaluate(async () => {
@@ -660,13 +822,24 @@ test.describe('Voice Orb E2E', () => {
 
   test('orb hides via orbAPI.hide()', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     await orbPage.evaluate(async () => {
-      try { await window.orbAPI.hide(); } catch (_) {}
+      try {
+        await window.orbAPI.hide();
+      } catch (_) {
+        /* no-op */
+      }
     });
     await sleep(500);
 
@@ -682,13 +855,24 @@ test.describe('Voice Orb E2E', () => {
 
   test('orb shows via orbAPI.show()', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     await orbPage.evaluate(async () => {
-      try { await window.orbAPI.show(); } catch (_) {}
+      try {
+        await window.orbAPI.show();
+      } catch (_) {
+        /* no-op */
+      }
     });
     await sleep(500);
 
@@ -762,10 +946,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('chat panel opens via context menu Text Chat item', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     // Trigger the menu item click (don't wait for async result inside evaluate)
     await orbPage.evaluate(() => {
@@ -793,10 +984,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('chat input field accepts text', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       const input = document.getElementById('chatInput');
@@ -822,10 +1020,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('send button exists and is clickable', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       const btn = document.getElementById('chatSendBtn');
@@ -842,10 +1047,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('addChatMessage() renders user message in DOM', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       try {
@@ -884,10 +1096,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('addChatMessage() renders assistant message in DOM', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       try {
@@ -922,10 +1141,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('chat close button closes the panel', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       const closeBtn = document.getElementById('chatCloseBtn');
@@ -944,7 +1170,11 @@ test.describe('Voice Orb E2E', () => {
 
     // Collapse the window back
     await orbPage.evaluate(async () => {
-      try { await window.orbAPI.collapseFromChat(); } catch (_) {}
+      try {
+        await window.orbAPI.collapseFromChat();
+      } catch (_) {
+        /* no-op */
+      }
     });
     await sleep(500);
   });
@@ -955,10 +1185,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('agentHUD has submitTask method', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => ({
       hasSubmitTask: typeof window.agentHUD?.submitTask === 'function',
@@ -969,10 +1206,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('agentHUD has disambiguation methods', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => ({
       hasSelectOption: typeof window.agentHUD?.selectDisambiguationOption === 'function',
@@ -987,10 +1231,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('agentHUD has needsInput methods', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => ({
       hasRespondToInput: typeof window.agentHUD?.respondToInput === 'function',
@@ -1003,10 +1254,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('agentHUD has lifecycle and result event listeners', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => ({
       hasOnLifecycle: typeof window.agentHUD?.onLifecycle === 'function',
@@ -1025,10 +1283,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('agentHUD.submitTask() accepts text and returns a result', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1051,7 +1316,10 @@ test.describe('Voice Orb E2E', () => {
       }
     });
 
-    if (result.skipped) { test.skip(); return; }
+    if (result.skipped) {
+      test.skip();
+      return;
+    }
 
     expect(result.success).toBe(true);
     // Should return a structured response with task routing info
@@ -1060,10 +1328,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('task submission returns taskId for queued tasks', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1087,7 +1362,10 @@ test.describe('Voice Orb E2E', () => {
       }
     });
 
-    if (result.skipped) { test.skip(); return; }
+    if (result.skipped) {
+      test.skip();
+      return;
+    }
 
     expect(result.success).toBe(true);
     // Task should be either queued (with taskId) or handled directly
@@ -1096,10 +1374,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('empty text submission is handled gracefully', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1117,7 +1402,10 @@ test.describe('Voice Orb E2E', () => {
       }
     });
 
-    if (result.skipped) { test.skip(); return; }
+    if (result.skipped) {
+      test.skip();
+      return;
+    }
     // Should either return gracefully or throw -- both are acceptable, not crash
     expect(result.success).toBe(true);
   });
@@ -1128,10 +1416,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('task list can be queried via listTasks', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1155,10 +1450,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('queue stats can be fetched', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1182,10 +1484,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('queue pause and resume work without error', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1210,16 +1519,23 @@ test.describe('Voice Orb E2E', () => {
 
   test('lifecycle event listener can be registered and unregistered', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       try {
-        let eventReceived = false;
-        const unsub = window.agentHUD.onLifecycle((event) => {
-          eventReceived = true;
+        let _eventReceived = false;
+        const unsub = window.agentHUD.onLifecycle((_event) => {
+          _eventReceived = true;
         });
         const canUnsub = typeof unsub === 'function';
         if (canUnsub) unsub(); // Clean up
@@ -1235,14 +1551,21 @@ test.describe('Voice Orb E2E', () => {
 
   test('result event listener can be registered and unregistered', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       try {
-        const unsub = window.agentHUD.onResult((result) => {});
+        const unsub = window.agentHUD.onResult((_result) => {});
         const canUnsub = typeof unsub === 'function';
         if (canUnsub) unsub();
         return { registered: true, canUnsubscribe: canUnsub };
@@ -1257,14 +1580,21 @@ test.describe('Voice Orb E2E', () => {
 
   test('disambiguation event listener can be registered', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       try {
-        const unsub = window.agentHUD.onDisambiguation((state) => {});
+        const unsub = window.agentHUD.onDisambiguation((_state) => {});
         const canUnsub = typeof unsub === 'function';
         if (canUnsub) unsub();
         return { registered: true, canUnsubscribe: canUnsub };
@@ -1279,14 +1609,21 @@ test.describe('Voice Orb E2E', () => {
 
   test('needsInput event listener can be registered', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       try {
-        const unsub = window.agentHUD.onNeedsInput((request) => {});
+        const unsub = window.agentHUD.onNeedsInput((_request) => {});
         const canUnsub = typeof unsub === 'function';
         if (canUnsub) unsub();
         return { registered: true, canUnsubscribe: canUnsub };
@@ -1305,14 +1642,20 @@ test.describe('Voice Orb E2E', () => {
 
   test('submitting a task fires lifecycle events', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
-      if (typeof window.agentHUD?.submitTask !== 'function' ||
-          typeof window.agentHUD?.onLifecycle !== 'function') {
+      if (typeof window.agentHUD?.submitTask !== 'function' || typeof window.agentHUD?.onLifecycle !== 'function') {
         return { skipped: true };
       }
 
@@ -1323,29 +1666,35 @@ test.describe('Voice Orb E2E', () => {
         });
 
         // Submit a task and wait for events
-        window.agentHUD.submitTask('how do you spell necessary', {
-          toolId: 'orb-test',
-          skipFilter: true,
-        }).then((response) => {
-          // Give events time to arrive
-          setTimeout(() => {
+        window.agentHUD
+          .submitTask('how do you spell necessary', {
+            toolId: 'orb-test',
+            skipFilter: true,
+          })
+          .then((response) => {
+            // Give events time to arrive
+            setTimeout(() => {
+              unsub();
+              resolve({
+                success: true,
+                taskId: response?.taskId || null,
+                handled: response?.handled || false,
+                eventCount: events.length,
+                eventTypes: events.map((e) => e.type),
+              });
+            }, 3000);
+          })
+          .catch((e) => {
             unsub();
-            resolve({
-              success: true,
-              taskId: response?.taskId || null,
-              handled: response?.handled || false,
-              eventCount: events.length,
-              eventTypes: events.map(e => e.type),
-            });
-          }, 3000);
-        }).catch((e) => {
-          unsub();
-          resolve({ success: false, error: e.message });
-        });
+            resolve({ success: false, error: e.message });
+          });
       });
     });
 
-    if (result.skipped) { test.skip(); return; }
+    if (result.skipped) {
+      test.skip();
+      return;
+    }
 
     expect(result.success).toBe(true);
     // Task should have been processed -- either events fired or handled directly
@@ -1356,14 +1705,20 @@ test.describe('Voice Orb E2E', () => {
 
   test('task result arrives after submission', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
-      if (typeof window.agentHUD?.submitTask !== 'function' ||
-          typeof window.agentHUD?.onResult !== 'function') {
+      if (typeof window.agentHUD?.submitTask !== 'function' || typeof window.agentHUD?.onResult !== 'function') {
         return { skipped: true };
       }
 
@@ -1377,38 +1732,40 @@ test.describe('Voice Orb E2E', () => {
           };
         });
 
-        window.agentHUD.submitTask('help', {
-          toolId: 'orb-test',
-          skipFilter: true,
-        }).then((response) => {
-          setTimeout(() => {
+        window.agentHUD
+          .submitTask('help', {
+            toolId: 'orb-test',
+            skipFilter: true,
+          })
+          .then((response) => {
+            setTimeout(() => {
+              unsub();
+              resolve({
+                success: true,
+                submitResponse: {
+                  handled: response?.handled || false,
+                  taskId: response?.taskId || null,
+                  message: response?.message || null,
+                },
+                resultReceived,
+              });
+            }, 4000);
+          })
+          .catch((e) => {
             unsub();
-            resolve({
-              success: true,
-              submitResponse: {
-                handled: response?.handled || false,
-                taskId: response?.taskId || null,
-                message: response?.message || null,
-              },
-              resultReceived,
-            });
-          }, 4000);
-        }).catch((e) => {
-          unsub();
-          resolve({ success: false, error: e.message });
-        });
+            resolve({ success: false, error: e.message });
+          });
       });
     });
 
-    if (result.skipped) { test.skip(); return; }
+    if (result.skipped) {
+      test.skip();
+      return;
+    }
 
     expect(result.success).toBe(true);
     // Either the submit returned a direct response or a result event arrived
-    expect(
-      result.submitResponse.handled ||
-      result.submitResponse.taskId ||
-      result.resultReceived
-    ).toBeTruthy();
+    expect(result.submitResponse.handled || result.submitResponse.taskId || result.resultReceived).toBeTruthy();
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1417,10 +1774,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('cancelDisambiguation does not throw', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1435,17 +1799,27 @@ test.describe('Voice Orb E2E', () => {
       }
     });
 
-    if (result.skipped) { test.skip(); return; }
+    if (result.skipped) {
+      test.skip();
+      return;
+    }
     // Should handle gracefully even if no active disambiguation
     expect(result.success).toBe(true);
   });
 
   test('selectDisambiguationOption handles invalid state gracefully', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1460,7 +1834,10 @@ test.describe('Voice Orb E2E', () => {
       }
     });
 
-    if (result.skipped) { test.skip(); return; }
+    if (result.skipped) {
+      test.skip();
+      return;
+    }
     expect(result.success).toBe(true);
   });
 
@@ -1470,10 +1847,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('respondToInput handles invalid taskId gracefully', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1487,7 +1871,10 @@ test.describe('Voice Orb E2E', () => {
       }
     });
 
-    if (result.skipped) { test.skip(); return; }
+    if (result.skipped) {
+      test.skip();
+      return;
+    }
     expect(result.success).toBe(true);
   });
 
@@ -1497,10 +1884,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('rapid duplicate submissions are handled (dedup or queued)', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       if (typeof window.agentHUD?.submitTask !== 'function') {
@@ -1531,7 +1925,10 @@ test.describe('Voice Orb E2E', () => {
       }
     });
 
-    if (result.skipped) { test.skip(); return; }
+    if (result.skipped) {
+      test.skip();
+      return;
+    }
     // Both should complete without crashing -- dedup may cause second to be
     // filtered, handled differently, or queued normally
     expect(result.success).toBe(true);
@@ -1543,14 +1940,25 @@ test.describe('Voice Orb E2E', () => {
 
   test('position is saved and can be read back', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     // Move to a specific position
     await orbPage.evaluate(async () => {
-      try { await window.orbAPI.setPosition(300, 400); } catch (_) {}
+      try {
+        await window.orbAPI.setPosition(300, 400);
+      } catch (_) {
+        /* no-op */
+      }
     });
     await sleep(1000); // Wait for debounced save
 
@@ -1574,17 +1982,26 @@ test.describe('Voice Orb E2E', () => {
 
   test('context menu exists with expected items', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(() => {
       const menu = document.getElementById('contextMenu');
       if (!menu) return { exists: false };
 
       const items = menu.querySelectorAll('.context-menu-item, [id^="menu"]');
-      const itemIds = Array.from(items).map(el => el.id).filter(Boolean);
+      const itemIds = Array.from(items)
+        .map((el) => el.id)
+        .filter(Boolean);
 
       return {
         exists: true,
@@ -1607,10 +2024,17 @@ test.describe('Voice Orb E2E', () => {
 
   test('orbAPI.submit() accepts text and returns classification', async () => {
     const windows = await electronApp.windows();
-    const orbPage = windows.find(w => {
-      try { return w.url().includes('orb.html'); } catch { return false; }
+    const orbPage = windows.find((w) => {
+      try {
+        return w.url().includes('orb.html');
+      } catch {
+        return false;
+      }
     });
-    if (!orbPage) { test.skip(); return; }
+    if (!orbPage) {
+      test.skip();
+      return;
+    }
 
     const result = await orbPage.evaluate(async () => {
       try {
@@ -1641,20 +2065,23 @@ test.describe('Voice Orb E2E', () => {
     const errors = await checkNewErrors(errorSnapshot);
     // Filter benign errors + agent evaluation failures (expected when agents
     // lack API keys in test environment) + TTS errors (no realtime connection)
-    const genuine = filterBenignErrors(errors).filter(e => {
+    const genuine = filterBenignErrors(errors).filter((e) => {
       const msg = e.message || '';
-      if (/Evaluation failed/i.test(msg)) return false;  // Agent bid eval without API key
-      if (/TTS error/i.test(msg)) return false;           // No realtime speech connection
-      if (/Exchange .* error/i.test(msg)) return false;    // Exchange routing in test env
+      if (/Evaluation failed/i.test(msg)) return false; // Agent bid eval without API key
+      if (/TTS error/i.test(msg)) return false; // No realtime speech connection
+      if (/Exchange .* error/i.test(msg)) return false; // Exchange routing in test env
       return true;
     });
 
     if (genuine.length > 0) {
-      console.log('Voice Orb test errors:', genuine.map(e => ({
-        message: e.message,
-        category: e.category,
-        timestamp: e.timestamp
-      })));
+      console.log(
+        'Voice Orb test errors:',
+        genuine.map((e) => ({
+          message: e.message,
+          category: e.category,
+          timestamp: e.timestamp,
+        }))
+      );
     }
 
     expect(genuine.length).toBeLessThanOrEqual(5);

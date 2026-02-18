@@ -1,13 +1,13 @@
 /**
  * Personal DJ Agent - A Thinking Agent
- * 
+ *
  * An AI-powered music assistant that:
  * - Uses OpenAI to reason about what music to play
  * - Considers time of day, mood, and available speakers
  * - Learns your preferences over time
  * - Stores preferences in GSX (user-editable markdown)
  * - Handles ALL media controls (pause, skip, volume, AirPlay)
- * 
+ *
  * Uses the Agent Memory System and shared Thinking Agent utilities.
  */
 
@@ -23,7 +23,7 @@ const log = getLogQueue();
 const djCircuit = getCircuit('dj-agent-ai', {
   failureThreshold: 3,
   resetTimeout: 30000,
-  windowMs: 60000
+  windowMs: 60000,
 });
 
 /**
@@ -33,7 +33,7 @@ const djCircuit = getCircuit('dj-agent-ai', {
  */
 async function aiReasonAboutMusic(context) {
   const { mood, partOfDay, memory, availableSpeakers, conversationHistory } = context;
-  
+
   const systemPrompt = `You are a personal DJ assistant. Based on the user's mood, time of day, and their listening history, recommend specific music to play.
 
 ${conversationHistory ? `Recent Conversation:\n${conversationHistory}\n` : ''}
@@ -79,14 +79,13 @@ What should I play?`;
         temperature: 0.7,
         maxTokens: 500,
         jsonMode: true,
-        feature: 'dj-agent'
+        feature: 'dj-agent',
       });
     });
-    
+
     const parsed = JSON.parse(result.content);
     log.info('agent', 'AI reasoning', { reasoning: parsed.reasoning });
     return parsed;
-    
   } catch (error) {
     log.warn('agent', 'AI reasoning failed', { error: error.message });
     return null;
@@ -97,7 +96,7 @@ What should I play?`;
  * AI-driven music request understanding
  * Takes a raw user request and uses LLM to understand what they want
  * Returns either: playable action OR clarification needed
- * 
+ *
  * @param {string} userRequest - Raw user request text
  * @param {Object} context - { partOfDay, memory, availableSpeakers, conversationHistory, musicStatus }
  * @param {number} retryCount - Number of retries attempted (default 0)
@@ -106,7 +105,7 @@ What should I play?`;
 async function aiUnderstandMusicRequest(userRequest, context, retryCount = 0) {
   const MAX_RETRIES = 2;
   const { partOfDay, memory, availableSpeakers, conversationHistory, musicStatus, listeningHistory } = context;
-  
+
   // Build music status context
   let musicStatusText = 'Music app not running';
   if (musicStatus?.running) {
@@ -119,37 +118,35 @@ async function aiUnderstandMusicRequest(userRequest, context, retryCount = 0) {
       musicStatusText += `. Output: ${musicStatus.currentSpeaker}`;
     }
   }
-  
+
   // Build AirPlay devices context
   let airplayText = 'No AirPlay devices available';
   if (musicStatus?.airplayDevices?.length > 0) {
-    const deviceList = musicStatus.airplayDevices.map(d => 
-      `${d.name}${d.selected ? ' (active)' : ''}`
-    ).join(', ');
+    const deviceList = musicStatus.airplayDevices.map((d) => `${d.name}${d.selected ? ' (active)' : ''}`).join(', ');
     airplayText = `Available speakers: ${deviceList}`;
   } else if (availableSpeakers?.length > 0) {
     airplayText = `Available speakers: ${availableSpeakers.join(', ')}`;
   }
-  
+
   // Build listening history context
   let historyText = 'No listening history available';
   if (listeningHistory?.recentTracks?.length > 0) {
     const recentList = listeningHistory.recentTracks
       .slice(0, 5)
-      .map(t => `"${t.name}" by ${t.artist}`)
+      .map((t) => `"${t.name}" by ${t.artist}`)
       .join(', ');
     historyText = `Recently played: ${recentList}`;
   }
-  
+
   let genresText = '';
   if (listeningHistory?.topGenres?.length > 0) {
     const topList = listeningHistory.topGenres
       .slice(0, 3)
-      .map(g => g.genre)
+      .map((g) => g.genre)
       .join(', ');
     genresText = `\nFavorite genres: ${topList}`;
   }
-  
+
   // Build podcast context if available
   let podcastText = '';
   if (context.podcastStatus?.subscriptions?.length > 0) {
@@ -236,32 +233,33 @@ What music should I play? (or what clarification do I need?)`;
         temperature: 0.7,
         maxTokens: 400,
         jsonMode: true,
-        feature: 'dj-agent'
+        feature: 'dj-agent',
       });
     });
-    
+
     const parsed = JSON.parse(result.content);
     log.info('agent', 'AI understood request', { reasoning: parsed.reasoning });
-    
+
     return parsed;
-    
   } catch (error) {
     log.warn('agent', `AI understanding failed (attempt ${retryCount + 1})`, { error: error.message });
-    
+
     // Retry logic
     if (retryCount < MAX_RETRIES) {
       log.info('agent', `Retrying... (${retryCount + 1}/${MAX_RETRIES})`);
-      await new Promise(r => setTimeout(r, 1000 * (retryCount + 1))); // Exponential backoff
+      await new Promise((r) => {
+        setTimeout(r, 1000 * (retryCount + 1));
+      }); // Exponential backoff
       return aiUnderstandMusicRequest(userRequest, context, retryCount + 1);
     }
-    
+
     // Final fallback - try to play with the raw request
     log.info('agent', 'All retries failed, using raw request as search term');
     return {
       understood: true,
       action: 'play',
       searchTerms: [userRequest.replace(/^(play|put on|start)\s+/i, '')],
-      message: "Let me find that for you..."
+      message: 'Let me find that for you...',
     };
   }
 }
@@ -284,37 +282,31 @@ const MOOD_GENRES = {
   workout: ['EDM', 'Hip Hop', 'Rock', 'Pop', 'Motivation'],
   dinner: ['Jazz', 'Classical', 'Soul', 'Acoustic', 'Chill'],
   morning: ['Acoustic', 'Pop', 'Indie', 'Jazz', 'Coffee'],
-  creative: ['Electronic', 'Lo-fi', 'Indie', 'Ambient', 'Alternative']
+  creative: ['Electronic', 'Lo-fi', 'Indie', 'Ambient', 'Alternative'],
 };
 
 const TIME_MOODS = {
   morning: ['focused', 'energetic', 'happy'],
   afternoon: ['energetic', 'focused', 'happy'],
   evening: ['relaxing', 'happy', 'romantic'],
-  night: ['relaxing', 'melancholy', 'romantic']
+  night: ['relaxing', 'melancholy', 'romantic'],
 };
 
 const TIME_GREETINGS = {
   morning: 'Good morning',
   afternoon: 'Good afternoon',
   evening: 'Good evening',
-  night: 'Hey there'
+  night: 'Hey there',
 };
 
 const djAgent = {
   id: 'dj-agent',
   name: 'Personal DJ',
   description: 'Intelligent music assistant - handles playback, preferences, and personalized recommendations',
-  voice: 'ash',  // Warm, friendly - like a radio DJ - see VOICE-GUIDE.md
-  
+  voice: 'ash', // Warm, friendly - like a radio DJ - see VOICE-GUIDE.md
+
   // Quick acknowledgments spoken immediately when agent wins bid (before execution)
-  acks: [
-    "On it!",
-    "Got it!",
-    "You got it!",
-    "Coming right up!",
-    "Let me handle that.",
-  ],
+  acks: ['On it!', 'Got it!', 'You got it!', 'Coming right up!', 'Let me handle that.'],
 
   // Prompt for LLM evaluation - describes what this agent does
   prompt: `Personal DJ controls Apple Music and Apple Podcasts apps - playback, preferences, and discovery.
@@ -354,56 +346,96 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
     'Learn and remember user music preferences',
     'Set favorite genres and artists',
     'Configure time-of-day music preferences',
-    'Handle feedback about current music'
+    'Handle feedback about current music',
   ],
-  
+
   // NOTE: Input schema removed - using AI-driven understanding instead
   // The AI analyzes the request and asks clarifying questions only when needed
   // This is more flexible and natural than keyword-based detection
-  
+
   categories: ['media', 'music', 'entertainment', 'personal', 'mood'],
   keywords: [
     // Music/DJ keywords
-    'dj', 'play music', 'play something', 'what should i listen', 'music recommendation', 'suggest music',
+    'dj',
+    'play music',
+    'play something',
+    'what should i listen',
+    'music recommendation',
+    'suggest music',
     // Basic media controls
-    'play', 'pause', 'stop', 'skip', 'next', 'previous', 'volume', 'mute', 'unmute',
+    'play',
+    'pause',
+    'stop',
+    'skip',
+    'next',
+    'previous',
+    'volume',
+    'mute',
+    'unmute',
     // AirPlay
-    'airplay', 'speaker', 'speakers', 'homepod', 'apple tv', 'output', 'living room', 'bedroom', 'kitchen',
+    'airplay',
+    'speaker',
+    'speakers',
+    'homepod',
+    'apple tv',
+    'output',
+    'living room',
+    'bedroom',
+    'kitchen',
     // Mood/emotional requests - DJ can help with music
-    'cheer me up', 'feeling down', 'feeling sad', 'need energy', 'pump me up', 'calm me down',
-    'relax', 'relaxing', 'focus', 'concentrate', 'work music', 'study music', 'party', 'celebrate',
-    'feeling happy', 'feeling energetic', 'feeling tired', 'wake me up', 'wind down', 'chill'
+    'cheer me up',
+    'feeling down',
+    'feeling sad',
+    'need energy',
+    'pump me up',
+    'calm me down',
+    'relax',
+    'relaxing',
+    'focus',
+    'concentrate',
+    'work music',
+    'study music',
+    'party',
+    'celebrate',
+    'feeling happy',
+    'feeling energetic',
+    'feeling tired',
+    'wake me up',
+    'wind down',
+    'chill',
   ],
-  
+
   // Memory store instance
   memory: null,
-  
+
   /**
    * Initialize the agent's memory
    */
   async initialize() {
     if (!this.memory) {
       this.memory = getAgentMemory('dj-agent', {
-        displayName: 'Personal DJ'
+        displayName: 'Personal DJ',
       });
       await this.memory.load();
-      
+
       // Ensure memory has required sections
       this._ensureMemorySections();
     }
     return this.memory;
   },
-  
+
   /**
    * Ensure memory has all required sections with defaults
    * @private
    */
   _ensureMemorySections() {
     const sections = this.memory.getSectionNames();
-    
+
     // Add Time-Based Preferences if missing
     if (!sections.includes('Time-Based Preferences')) {
-      this.memory.updateSection('Time-Based Preferences', `### Morning (6am-12pm)
+      this.memory.updateSection(
+        'Time-Based Preferences',
+        `### Morning (6am-12pm)
 - Genres: Jazz, Classical, Lo-fi
 - Energy: Low to Medium
 - Typical moods: Focused, Calm
@@ -421,14 +453,15 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
 ### Night (10pm-6am)
 - Genres: Ambient, Classical, Lo-fi
 - Energy: Low
-- Typical moods: Calm, Sleepy`);
+- Typical moods: Calm, Sleepy`
+      );
     }
-    
+
     // Add Speaker Preferences if missing
     if (!sections.includes('Speaker Preferences')) {
       this.memory.updateSection('Speaker Preferences', `*Will be populated as you use different speakers*`);
     }
-    
+
     // Add Favorite Artists if missing
     if (!sections.includes('Favorite Artists')) {
       this.memory.updateSection('Favorite Artists', `*Will be populated as you listen to music*`);
@@ -444,12 +477,12 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
       this.memory.save();
     }
   },
-  
+
   // NOTE: bid() function removed - using LLM-based bidding via unified-bidder.js
   // The agent's prompt, description, keywords, and capabilities are used by the LLM
   // to intelligently decide if this agent should handle a request.
   // Falls back to keyword matching if LLM is unavailable.
-  
+
   /**
    * Execute the task
    * @param {Object} task - { content, context, ... }
@@ -461,57 +494,60 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
       if (!this.memory) {
         await this.initialize();
       }
-      
+
       // ==================== MULTI-TURN CONVERSATION STATE ====================
       // Check for multi-turn FIRST before other commands
       // This ensures follow-up responses are handled correctly
       const context = this._gatherContext();
-      
+
       if (task.context?.djState === 'awaiting_mood') {
         return this._handleMoodResponse(task, context);
       }
-      
+
       if (task.context?.djState === 'awaiting_choice') {
         return this._handleChoiceResponse(task, context);
       }
-      
+
       // Handle AI clarification response
       if (task.context?.djState === 'awaiting_ai_clarification') {
         return this._handleAIClarificationResponse(task, context);
       }
-      
+
       // NOTE: AirPlay commands are now handled by AI understanding
       // The AI will detect if user wants to play on a specific speaker
       // and include that in the response
-      
+
       // ==================== AI-DRIVEN MEDIA UNDERSTANDING ====================
       // Get current music/podcast status and listening history for better AI context
       const [musicStatus, listeningHistory, podcastStatus] = await Promise.all([
         this._getMusicStatus(),
         this._getListeningHistory(),
-        this._getPodcastStatus()
+        this._getPodcastStatus(),
       ]);
 
       // Use LLM to understand what the user wants
       const aiContext = {
         partOfDay: context.partOfDay,
         memory: this.memory ? this.memory.getSection('Favorite Artists') : null,
-        availableSpeakers: musicStatus?.airplayDevices?.map(d => d.name) || await this._getAvailableSpeakers(),
+        availableSpeakers: musicStatus?.airplayDevices?.map((d) => d.name) || (await this._getAvailableSpeakers()),
         conversationHistory: task.context?.conversationText || '',
         musicStatus,
         listeningHistory,
-        podcastStatus
+        podcastStatus,
       };
 
       log.info('agent', 'Using AI to understand request', { content: task.content });
-      log.info('agent', 'Music status', { state: musicStatus?.state, podcasts: podcastStatus?.subscriptions?.length || 0 });
+      log.info('agent', 'Music status', {
+        state: musicStatus?.state,
+        podcasts: podcastStatus?.subscriptions?.length || 0,
+      });
       const aiResult = await aiUnderstandMusicRequest(task.content, aiContext);
-      
+
       if (!aiResult) {
         // AI failed completely, use simple fallback
         return this._askMood(context);
       }
-      
+
       // Handle based on AI's decision
       if (aiResult.action === 'control') {
         log.info('agent', 'Control action - letting LLM figure it out');
@@ -534,7 +570,7 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
 
       if (aiResult.action === 'clarify' || !aiResult.understood) {
         // AI needs clarification - ask the user
-        const prompt = aiResult.clarificationPrompt || "What kind of music would you like?";
+        const prompt = aiResult.clarificationPrompt || 'What kind of music would you like?';
         return {
           success: true,
           needsInput: {
@@ -542,12 +578,12 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
             agentId: this.id,
             context: {
               djState: 'awaiting_ai_clarification',
-              originalRequest: task.content
-            }
-          }
+              originalRequest: task.content,
+            },
+          },
         };
       }
-      
+
       // AI wants to create a playlist from the user's library
       if (aiResult.action === 'playlist') {
         log.info('agent', 'Creating mood playlist', { mood: aiResult.mood || aiResult.genre });
@@ -574,17 +610,16 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
 
       // Fallback to asking
       return this._askMood(context);
-      
     } catch (error) {
       log.error('agent', 'Execute error', { error: error?.message || error });
       log.error('agent', 'Stack', { stack: error?.stack });
       return {
         success: false,
-        message: "I had trouble getting your music ready. Let me try again."
+        message: 'I had trouble getting your music ready. Let me try again.',
       };
     }
   },
-  
+
   /**
    * Gather context (time, speakers, preferences)
    * Uses shared getTimeContext from thinking-agent module
@@ -594,7 +629,7 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
     // Use shared time context utility
     return getTimeContext();
   },
-  
+
   /**
    * Get available speakers/AirPlay devices
    * @private
@@ -603,14 +638,14 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
     try {
       const devices = await mediaAgent.listAirPlayDevices();
       if (devices && devices.length > 0) {
-        return devices.map(d => d.name || d);
+        return devices.map((d) => d.name || d);
       }
     } catch (e) {
       log.warn('agent', 'Could not get speakers', { error: e.message });
     }
     return ['default speaker'];
   },
-  
+
   /**
    * Get full music player status for AI context
    * @private
@@ -619,14 +654,17 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
     try {
       const { getFullMusicStatus } = require('./applescript-helper');
       const status = await getFullMusicStatus('Music');
-      log.info('agent', 'Got music status', { state: status.state, track: status.track ? `playing ${status.track}` : 'no track' });
+      log.info('agent', 'Got music status', {
+        state: status.state,
+        track: status.track ? `playing ${status.track}` : 'no track',
+      });
       return status;
     } catch (e) {
       log.warn('agent', 'Could not get music status', { error: e.message });
       return null;
     }
   },
-  
+
   /**
    * Get podcast status and subscriptions
    * @private
@@ -635,7 +673,10 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
     try {
       const { getPodcastStatus } = require('./applescript-helper');
       const status = await getPodcastStatus();
-      log.info('agent', 'Podcast status', { running: status.running ? 'running' : 'not running', subscriptions: status.subscriptions?.length || 0 });
+      log.info('agent', 'Podcast status', {
+        running: status.running ? 'running' : 'not running',
+        subscriptions: status.subscriptions?.length || 0,
+      });
       return status;
     } catch (e) {
       log.warn('agent', 'Could not get podcast status', { error: e.message });
@@ -647,83 +688,89 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
    * Play a podcast - searches subscriptions first, then catalog
    * @private
    */
-  async _playPodcast(searchTerm, message) {
+  async _playPodcast(searchTerm, _message) {
     const { playPodcast, searchAndPlayPodcast, getPodcastStatus, controlPodcast } = require('./applescript-helper');
-    
+
     log.info('agent', 'Playing podcast', { searchTerm: searchTerm || 'any available' });
-    
+
     // First try subscriptions
     const result = await playPodcast(searchTerm || '');
-    
+
     if (result.success) {
       // Verify podcast is playing
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise((r) => {
+        setTimeout(r, 2000);
+      });
       const status = await getPodcastStatus();
-      
+
       if (status.playing) {
         return {
           success: true,
-          message: result.message || `Now playing: ${status.currentEpisode} from ${status.currentShow}`
+          message: result.message || `Now playing: ${status.currentEpisode} from ${status.currentShow}`,
         };
       }
-      
+
       // Podcast app opened but not playing - try to force play
       await controlPodcast('play');
-      
-      await new Promise(r => setTimeout(r, 1500));
+
+      await new Promise((r) => {
+        setTimeout(r, 1500);
+      });
       const retryStatus = await getPodcastStatus();
-      
+
       if (retryStatus.playing) {
         return {
           success: true,
-          message: `Now playing: ${retryStatus.currentEpisode || 'podcast'}`
+          message: `Now playing: ${retryStatus.currentEpisode || 'podcast'}`,
         };
       }
     }
-    
+
     // Not in subscriptions - search the catalog!
     if (searchTerm && result.needsCatalogSearch) {
       log.info('agent', 'Not in subscriptions, searching podcast catalog for', { searchTerm });
-      
+
       const catalogResult = await searchAndPlayPodcast(searchTerm);
-      
+
       if (catalogResult.success) {
         // Verify it's playing
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise((r) => {
+          setTimeout(r, 2000);
+        });
         const status = await getPodcastStatus();
-        
+
         if (status.playing) {
           return {
             success: true,
-            message: `Found a podcast about ${searchTerm}! Now playing: ${status.currentEpisode || 'episode'} from ${status.currentShow || 'new show'}`
+            message: `Found a podcast about ${searchTerm}! Now playing: ${status.currentEpisode || 'episode'} from ${status.currentShow || 'new show'}`,
           };
         }
-        
+
         // Opened search results but not playing yet
         return {
           success: true,
-          message: catalogResult.message || `I found podcasts about "${searchTerm}" - pick one you like!`
+          message: catalogResult.message || `I found podcasts about "${searchTerm}" - pick one you like!`,
         };
       }
-      
+
       // Catalog search also failed - open app with search as last resort
       return {
         success: true,
-        message: `I opened Podcasts with a search for "${searchTerm}" - browse and pick what interests you!`
+        message: `I opened Podcasts with a search for "${searchTerm}" - browse and pick what interests you!`,
       };
     }
-    
+
     // No search term and nothing in subscriptions
     if (!searchTerm) {
       return {
         success: false,
-        message: "I couldn't find any podcasts to play. What topic interests you? I can search for something."
+        message: "I couldn't find any podcasts to play. What topic interests you? I can search for something.",
       };
     }
-    
+
     return {
       success: false,
-      message: result.message || `I had trouble finding "${searchTerm}". Try being more specific?`
+      message: result.message || `I had trouble finding "${searchTerm}". Try being more specific?`,
     };
   },
 
@@ -733,32 +780,32 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
    */
   async _handlePodcastControl(action) {
     const { controlPodcast, getPodcastStatus } = require('./applescript-helper');
-    
+
     // Map some common action names
     const actionMap = {
-      'skip': 'forward',
-      'skip_forward': 'forward',
-      'skip_back': 'rewind',
-      'back': 'rewind',
-      'resume': 'play'
+      skip: 'forward',
+      skip_forward: 'forward',
+      skip_back: 'rewind',
+      back: 'rewind',
+      resume: 'play',
     };
-    
+
     const mappedAction = actionMap[action] || action;
     log.info('agent', 'Podcast control', { mappedAction });
-    
+
     const result = await controlPodcast(mappedAction);
-    
+
     if (result.success) {
       // Get current state to report
       const status = await getPodcastStatus();
       if (status.currentEpisode && mappedAction !== 'pause') {
         return {
           success: true,
-          message: `${result.message}. Playing: ${status.currentEpisode}`
+          message: `${result.message}. Playing: ${status.currentEpisode}`,
         };
       }
     }
-    
+
     return result;
   },
 
@@ -771,23 +818,24 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
       const { getRecentlyPlayed, getTopGenres } = require('./applescript-helper');
 
       // Get recent tracks and top genres in parallel
-      const [recentTracks, topGenres] = await Promise.all([
-        getRecentlyPlayed(5),
-        getTopGenres()
-      ]);
+      const [recentTracks, topGenres] = await Promise.all([getRecentlyPlayed(5), getTopGenres()]);
 
-      log.info('agent', 'Got listening history', { length: recentTracks.length, recent_tracks: topGenres.length, detail: 'top genres' });
+      log.info('agent', 'Got listening history', {
+        length: recentTracks.length,
+        recent_tracks: topGenres.length,
+        detail: 'top genres',
+      });
 
       return {
         recentTracks,
-        topGenres
+        topGenres,
       };
     } catch (e) {
       log.warn('agent', 'Could not get listening history', { error: e.message });
       return { recentTracks: [], topGenres: [] };
     }
   },
-  
+
   /**
    * Tool library - JS functions that LLM can call
    * Each function executes AppleScript and returns result for LLM to consume
@@ -798,10 +846,12 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
       const { runScript, getFullMusicStatus } = require('./applescript-helper');
       const clampedLevel = Math.min(100, Math.max(0, parseInt(level)));
       await runScript(`tell application "Music" to set sound volume to ${clampedLevel}`);
-      
+
       // Brief delay to ensure volume change is processed
-      await new Promise(r => setTimeout(r, 100));
-      
+      await new Promise((r) => {
+        setTimeout(r, 100);
+      });
+
       // Verify music is still playing (volume change shouldn't stop it)
       const status = await getFullMusicStatus('Music');
       if (status.state === 'paused' || status.state === 'stopped') {
@@ -809,13 +859,13 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
         log.warn('agent', 'Music stopped after volume change, restarting...');
         await runScript(`tell application "Music" to play`);
       }
-      
+
       return { success: true, newVolume: clampedLevel };
     },
-    
+
     async adjustVolume({ delta }) {
       const { runScript, getFullMusicStatus } = require('./applescript-helper');
-      
+
       // Get current volume first, then calculate and set new volume
       // This avoids issues with getting/setting in one AppleScript call
       const script = `
@@ -828,13 +878,15 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
           return newVol
         end tell
       `;
-      
+
       const result = await runScript(script);
       const newVolume = parseInt(result.output) || 0;
-      
+
       // Brief delay to ensure volume change is processed
-      await new Promise(r => setTimeout(r, 100));
-      
+      await new Promise((r) => {
+        setTimeout(r, 100);
+      });
+
       // Verify music is still playing (volume change shouldn't stop it)
       const status = await getFullMusicStatus('Music');
       if (status.state === 'paused' || status.state === 'stopped') {
@@ -842,53 +894,57 @@ This agent CONTROLS Apple Music and Podcasts apps. It does not provide informati
         log.warn('agent', 'Music stopped after volume change, restarting...');
         await runScript(`tell application "Music" to play`);
       }
-      
+
       return { success: true, newVolume: newVolume };
     },
-    
+
     async pause() {
       const { runScript, getFullMusicStatus } = require('./applescript-helper');
       await runScript(`tell application "Music" to pause`);
       const status = await getFullMusicStatus('Music');
       return { success: true, state: status.state };
     },
-    
+
     async play() {
       const { runScript, getFullMusicStatus } = require('./applescript-helper');
       await runScript(`tell application "Music" to play`);
       const status = await getFullMusicStatus('Music');
       return { success: true, state: status.state, track: status.track };
     },
-    
+
     async nextTrack() {
       const { runScript, getFullMusicStatus } = require('./applescript-helper');
       await runScript(`tell application "Music" to next track`);
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise((r) => {
+        setTimeout(r, 300);
+      });
       const status = await getFullMusicStatus('Music');
       return { success: true, track: status.track, artist: status.artist };
     },
-    
+
     async previousTrack() {
       const { runScript, getFullMusicStatus } = require('./applescript-helper');
       await runScript(`tell application "Music" to previous track`);
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise((r) => {
+        setTimeout(r, 300);
+      });
       const status = await getFullMusicStatus('Music');
       return { success: true, track: status.track, artist: status.artist };
     },
-    
+
     async toggleShuffle() {
       const { runScript } = require('./applescript-helper');
       await runScript(`tell application "Music" to set shuffle enabled to (not shuffle enabled)`);
       const result = await runScript(`tell application "Music" to get shuffle enabled`);
       return { success: true, shuffleEnabled: result.trim() === 'true' };
     },
-    
+
     async runCustomScript({ script }) {
       const { runScript, getFullMusicStatus } = require('./applescript-helper');
       await runScript(`tell application "Music" to ${script}`);
       const status = await getFullMusicStatus('Music');
       return { success: true, volume: status.volume, state: status.state, track: status.track };
-    }
+    },
   },
 
   /**
@@ -939,21 +995,21 @@ AVAILABLE TOOLS:
    */
   _matchPattern(request) {
     const r = request.toLowerCase().trim();
-    
+
     // Check for specific volume level first (e.g., "volume to 23%", "set it to 50")
     const volumeMatch = r.match(/(?:volume|set it|turn it|put it)?\s*(?:to|at)\s*(\d+)\s*%?/);
     if (volumeMatch) {
       const level = Math.min(100, Math.max(0, parseInt(volumeMatch[1])));
       return { tool: 'setVolume', args: { level }, cached: true };
     }
-    
+
     // Check pattern cache - longer patterns first for better matching
     const sortedPatterns = [...this._patternCache].sort((a, b) => {
-      const aMax = Math.max(...a.keywords.map(k => k.length));
-      const bMax = Math.max(...b.keywords.map(k => k.length));
+      const aMax = Math.max(...a.keywords.map((k) => k.length));
+      const bMax = Math.max(...b.keywords.map((k) => k.length));
       return bMax - aMax;
     });
-    
+
     for (const pattern of sortedPatterns) {
       for (const keyword of pattern.keywords) {
         if (r.includes(keyword)) {
@@ -961,7 +1017,7 @@ AVAILABLE TOOLS:
         }
       }
     }
-    
+
     return null; // No match, need LLM
   },
 
@@ -1000,11 +1056,15 @@ Examples:
       temperature: 0,
       maxTokens: 200,
       jsonMode: true,
-      feature: 'dj-agent'
+      feature: 'dj-agent',
     });
 
     let content = result.content?.trim();
-    if (content.includes('```')) content = content.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    if (content.includes('```'))
+      content = content
+        .replace(/```json?\n?/g, '')
+        .replace(/```/g, '')
+        .trim();
 
     return JSON.parse(content);
   },
@@ -1019,35 +1079,35 @@ Examples:
     if (result.newVolume !== undefined) {
       return `Volume at ${result.newVolume}%`;
     }
-    
+
     // Track responses
     if (result.track) {
       const artist = result.artist ? ` by ${result.artist}` : '';
       return `Now playing: ${result.track}${artist}`;
     }
-    
+
     // State responses
     if (result.state) {
       return result.state === 'playing' ? 'Playing' : 'Paused';
     }
-    
+
     // Shuffle responses
     if (result.shuffleEnabled !== undefined) {
       return result.shuffleEnabled ? 'Shuffle on' : 'Shuffle off';
     }
-    
+
     // Tool-specific fallbacks
     const toolResponses = {
-      'adjustVolume': 'Volume adjusted',
-      'setVolume': 'Volume set',
-      'pause': 'Paused',
-      'play': 'Playing',
-      'nextTrack': 'Skipped',
-      'previousTrack': 'Going back',
-      'toggleShuffle': 'Shuffle toggled',
-      'runCustomScript': 'Done'
+      adjustVolume: 'Volume adjusted',
+      setVolume: 'Volume set',
+      pause: 'Paused',
+      play: 'Playing',
+      nextTrack: 'Skipped',
+      previousTrack: 'Going back',
+      toggleShuffle: 'Shuffle toggled',
+      runCustomScript: 'Done',
     };
-    
+
     return toolResponses[toolName] || 'Done';
   },
 
@@ -1091,7 +1151,7 @@ Examples:
     // STEP 2: Try pattern cache first (no LLM needed for common requests)
     let toolCall = this._matchPattern(originalRequest);
     let usedCache = false;
-    
+
     if (toolCall) {
       log.info('agent', `Cache hit: ${toolCall.tool}(${JSON.stringify(toolCall.args)})`);
       usedCache = true;
@@ -1132,13 +1192,11 @@ Examples:
       // LLM call - use LLM's response, enhanced with actual values
       message = this._enhanceResponse(toolCall.response || 'Done', result);
     }
-    
+
     log.info('agent', `Response: ${message}`);
     return { success: true, message };
   },
 
-
-  
   /**
    * Verify music is actually playing after an action
    * @private
@@ -1146,54 +1204,58 @@ Examples:
    */
   async _verifyMusicPlaying(waitMs = 2000) {
     const { getFullMusicStatus } = require('./applescript-helper');
-    
+
     // Wait for music to start
-    await new Promise(r => setTimeout(r, waitMs));
-    
+    await new Promise((r) => {
+      setTimeout(r, waitMs);
+    });
+
     try {
       const status = await getFullMusicStatus('Music');
-      
+
       if (!status || !status.running) {
         log.info('agent', 'Verify: Music app not running');
         return { playing: false, track: null, retryNeeded: true };
       }
-      
+
       if (status.state === 'playing') {
         log.info('agent', 'Verify: Music is playing -', { track: status.track });
-        return { 
-          playing: true, 
+        return {
+          playing: true,
           track: status.track,
           artist: status.artist,
-          retryNeeded: false 
+          retryNeeded: false,
         };
       }
-      
+
       // Music app is open but not playing
       log.info('agent', 'Verify: Music app open but state is', { state: status.state });
       return { playing: false, track: null, retryNeeded: true };
-      
     } catch (e) {
       log.warn('agent', 'Verify failed', { error: e.message });
       // Can't verify - assume it might be working
       return { playing: false, track: null, retryNeeded: false };
     }
   },
-  
+
   /**
    * Force play if music isn't playing
    * @private
    */
   async _forcePlay() {
     const { runScript } = require('./applescript-helper');
-    
+
     try {
-      await runScript(`
+      await runScript(
+        `
         tell application "Music"
           if player state is not playing then
             play
           end if
         end tell
-      `, 5000);
+      `,
+        5000
+      );
       return true;
     } catch (e) {
       log.warn('agent', 'Force play failed', { error: e.message });
@@ -1209,11 +1271,11 @@ Examples:
    */
   async _generateAndExecuteCustomAppleScript(customTask, originalRequest, aiMessage) {
     const { runScript } = require('./applescript-helper');
-    
+
     try {
       // Get Claude to generate AppleScript
       const claudeCode = require('../../lib/claude-code-runner');
-      
+
       const prompt = `You are an expert at writing AppleScript for macOS Music app (Apple Music).
 
 USER REQUEST: "${originalRequest}"
@@ -1237,60 +1299,60 @@ IMPORTANT GUIDELINES:
 Return ONLY the AppleScript code, no explanation. The code should be directly executable.`;
 
       log.info('agent', 'Generating custom AppleScript with Claude...');
-      
+
       const response = await claudeCode.complete(prompt, {
         maxTokens: 1000,
       });
-      
+
       if (!response) {
         throw new Error('No response from Claude');
       }
-      
+
       // Extract AppleScript from response (might be in code blocks)
       let script = response;
       const codeMatch = response.match(/```(?:applescript)?\n?([\s\S]*?)```/);
       if (codeMatch) {
         script = codeMatch[1].trim();
       }
-      
+
       // Clean up the script
       script = script.trim();
       if (!script) {
         throw new Error('Empty script generated');
       }
-      
+
       log.info('agent', 'Generated AppleScript', { detail: script.substring(0, 200) + '...' });
-      
+
       // Execute the generated script
       const result = await runScript(script, 15000); // 15 second timeout for complex scripts
-      
+
       log.info('agent', 'Custom script result', { result });
-      
+
       // Track successful script for potential promotion
       await this._trackCustomScriptSuccess(customTask, originalRequest, script);
-      
+
       return {
         success: true,
-        message: aiMessage || result || 'Done!'
+        message: aiMessage || result || 'Done!',
       };
-      
     } catch (error) {
       log.error('agent', 'Custom AppleScript failed', { error: error.message });
-      
+
       // Track failure for learning
       await this._trackCustomScriptFailure(customTask, originalRequest, error.message);
-      
+
       // Try to provide a helpful error message
       if (error.message.includes('not authorized')) {
         return {
           success: false,
-          message: "I need permission to control the Music app. Please grant access in System Preferences > Privacy & Security > Automation."
+          message:
+            'I need permission to control the Music app. Please grant access in System Preferences > Privacy & Security > Automation.',
         };
       }
-      
+
       return {
         success: false,
-        message: `I couldn't complete that action: ${error.message}. Try asking in a different way?`
+        message: `I couldn't complete that action: ${error.message}. Try asking in a different way?`,
       };
     }
   },
@@ -1307,30 +1369,31 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
 
       // Normalize the task for pattern matching
       const normalizedTask = customTask.toLowerCase().trim();
-      
+
       // Get existing custom scripts section
       let customScripts = this.memory.getSection('Custom AppleScripts') || '';
-      
+
       // Parse existing entries
       const entries = this._parseCustomScriptEntries(customScripts);
-      
+
       // Find existing entry for similar task
-      const existingIndex = entries.findIndex(e => 
-        this._tasksAreSimilar(e.task, normalizedTask)
-      );
-      
+      const existingIndex = entries.findIndex((e) => this._tasksAreSimilar(e.task, normalizedTask));
+
       const timestamp = new Date().toISOString().split('T')[0];
-      
+
       if (existingIndex >= 0) {
         // Update existing entry
         entries[existingIndex].successCount++;
         entries[existingIndex].lastUsed = timestamp;
         entries[existingIndex].script = script; // Keep latest working version
-        
+
         // Check if ready for promotion (3+ successes)
         if (entries[existingIndex].successCount >= 3 && !entries[existingIndex].flaggedForPromotion) {
           entries[existingIndex].flaggedForPromotion = true;
-          log.info('agent', `PROMOTION CANDIDATE: "${customTask}" has ${entries[existingIndex].successCount} successes`);
+          log.info(
+            'agent',
+            `PROMOTION CANDIDATE: "${customTask}" has ${entries[existingIndex].successCount} successes`
+          );
           log.info('agent', 'Script to add to applescript-helper.js');
           log.info('agent', '---BEGIN SCRIPT---');
           log.info('agent', script);
@@ -1345,14 +1408,13 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
           successCount: 1,
           failureCount: 0,
           lastUsed: timestamp,
-          flaggedForPromotion: false
+          flaggedForPromotion: false,
         });
       }
-      
+
       // Save back to memory
       this._saveCustomScriptEntries(entries);
       await this.memory.save();
-      
     } catch (error) {
       log.warn('agent', 'Could not track custom script', { error: error.message });
     }
@@ -1371,18 +1433,16 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       const normalizedTask = customTask.toLowerCase().trim();
       let customScripts = this.memory.getSection('Custom AppleScripts') || '';
       const entries = this._parseCustomScriptEntries(customScripts);
-      
-      const existingIndex = entries.findIndex(e => 
-        this._tasksAreSimilar(e.task, normalizedTask)
-      );
-      
+
+      const existingIndex = entries.findIndex((e) => this._tasksAreSimilar(e.task, normalizedTask));
+
       if (existingIndex >= 0) {
         entries[existingIndex].failureCount++;
         entries[existingIndex].lastError = errorMessage;
         this._saveCustomScriptEntries(entries);
         await this.memory.save();
       }
-    } catch (error) {
+    } catch (_error) {
       // Silently fail - tracking is non-critical
     }
   },
@@ -1393,12 +1453,12 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
    */
   _tasksAreSimilar(task1, task2) {
     // Simple word overlap similarity
-    const words1 = new Set(task1.split(/\s+/).filter(w => w.length > 2));
-    const words2 = new Set(task2.split(/\s+/).filter(w => w.length > 2));
-    
-    const intersection = [...words1].filter(w => words2.has(w));
+    const words1 = new Set(task1.split(/\s+/).filter((w) => w.length > 2));
+    const words2 = new Set(task2.split(/\s+/).filter((w) => w.length > 2));
+
+    const intersection = [...words1].filter((w) => words2.has(w));
     const union = new Set([...words1, ...words2]);
-    
+
     // Jaccard similarity > 0.5 = similar
     return intersection.length / union.size > 0.5;
   },
@@ -1411,16 +1471,16 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     if (!sectionContent || sectionContent.includes('*No custom')) {
       return [];
     }
-    
+
     try {
       // Try JSON format first
       if (sectionContent.startsWith('[')) {
         return JSON.parse(sectionContent);
       }
-    } catch (e) {
+    } catch (_e) {
       // Not JSON, return empty
     }
-    
+
     return [];
   },
 
@@ -1431,10 +1491,10 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
   _saveCustomScriptEntries(entries) {
     // Keep only last 20 entries to prevent unbounded growth
     const trimmed = entries.slice(-20);
-    
+
     // Sort by success count (most successful first)
     trimmed.sort((a, b) => b.successCount - a.successCount);
-    
+
     this.memory.updateSection('Custom AppleScripts', JSON.stringify(trimmed, null, 2));
   },
 
@@ -1446,26 +1506,28 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     if (!this.memory) {
       return [];
     }
-    
+
     const customScripts = this.memory.getSection('Custom AppleScripts') || '';
     const entries = this._parseCustomScriptEntries(customScripts);
-    
-    return entries.filter(e => e.flaggedForPromotion).map(e => ({
-      task: e.task,
-      originalRequest: e.originalRequest,
-      script: e.script,
-      successCount: e.successCount,
-      failureCount: e.failureCount
-    }));
+
+    return entries
+      .filter((e) => e.flaggedForPromotion)
+      .map((e) => ({
+        task: e.task,
+        originalRequest: e.originalRequest,
+        script: e.script,
+        successCount: e.successCount,
+        failureCount: e.failureCount,
+      }));
   },
 
   /**
    * Create a mood-based playlist from the user's library
    * @private
    */
-  async _createMoodPlaylist(aiResult, context) {
+  async _createMoodPlaylist(aiResult, _context) {
     const { createMoodPlaylist, runScript } = require('./applescript-helper');
-    
+
     // Set speaker/AirPlay if specified
     if (aiResult.speaker) {
       try {
@@ -1481,66 +1543,66 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         // Continue anyway - the music will play on default output
       }
     }
-    
+
     // Generate a playlist name
     const moodOrGenre = aiResult.mood || aiResult.genre || 'Custom';
     const playlistName = `DJ Mix - ${moodOrGenre.charAt(0).toUpperCase() + moodOrGenre.slice(1)}`;
-    
+
     log.info('agent', 'Creating playlist', { playlistName });
     log.info('agent', 'Criteria', { mood: aiResult.mood, genre: aiResult.genre, artist: aiResult.artist });
-    
+
     const result = await createMoodPlaylist(playlistName, {
       mood: aiResult.mood,
       genre: aiResult.genre,
       artist: aiResult.artist,
       limit: 25,
-      shuffle: true
+      shuffle: true,
     });
-    
+
     if (result.success) {
       // VERIFY music actually started playing
       log.info('agent', 'Playlist created, verifying playback...');
       let verification = await this._verifyMusicPlaying(2000);
-      
+
       if (!verification.playing && verification.retryNeeded) {
         // Try to force play
         log.info('agent', 'Music not playing, attempting force play...');
         await this._forcePlay();
         verification = await this._verifyMusicPlaying(1500);
       }
-      
+
       if (verification.playing) {
         const trackInfo = verification.track ? ` Now playing: ${verification.track}` : '';
         return {
           success: true,
-          message: `Created a ${result.trackCount}-track ${moodOrGenre} mix.${trackInfo}`
+          message: `Created a ${result.trackCount}-track ${moodOrGenre} mix.${trackInfo}`,
         };
       }
-      
+
       // Playlist was created but music didn't start - try Apple Music search as backup
       log.info('agent', 'Playlist created but music not playing, trying Apple Music...');
     } else {
       // Playlist creation failed
       log.info('agent', 'Playlist creation failed, falling back to Apple Music search');
     }
-    
+
     // Generate search terms based on the mood/genre
     const fallbackTerms = [];
     if (aiResult.mood) fallbackTerms.push(`${aiResult.mood} music`, `${aiResult.mood} playlist`);
     if (aiResult.genre) fallbackTerms.push(aiResult.genre, `${aiResult.genre} essentials`);
     if (aiResult.artist) fallbackTerms.push(aiResult.artist);
-    
+
     if (fallbackTerms.length === 0) {
       fallbackTerms.push('chill music', 'popular playlist');
     }
-    
+
     return this._playWithSearchTerms(
       fallbackTerms,
       `I couldn't find enough matching tracks in your library, but I found something similar.`,
       aiResult.speaker
     );
   },
-  
+
   /**
    * Play music with AI-provided search terms
    * Tries each search term until one works
@@ -1549,7 +1611,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
    */
   async _playWithSearchTerms(searchTerms, message, speaker = null) {
     const { smartPlayWithSearchTerms, runScript } = require('./applescript-helper');
-    
+
     // Set speaker/AirPlay if specified
     if (speaker) {
       try {
@@ -1567,7 +1629,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         // Continue anyway - play on default speaker
       }
     }
-    
+
     for (const term of searchTerms) {
       log.info('agent', 'Trying search term', { term });
       try {
@@ -1576,14 +1638,14 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
           // VERIFY music actually started
           log.info('agent', 'Search succeeded, verifying playback...');
           let verification = await this._verifyMusicPlaying(2500);
-          
+
           if (!verification.playing && verification.retryNeeded) {
             // Try force play
             log.info('agent', 'Music not playing after search, forcing play...');
             await this._forcePlay();
             verification = await this._verifyMusicPlaying(1500);
           }
-          
+
           if (verification.playing) {
             // Learn from success
             if (this.memory) {
@@ -1592,21 +1654,21 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
                   request: term,
                   response: message || 'Playing music',
                   outcome: 'success',
-                  speaker: speaker || 'default'
+                  speaker: speaker || 'default',
                 });
-              } catch (e) {
+              } catch (_e) {
                 // Non-fatal
               }
             }
-            
+
             const speakerMsg = speaker ? ` on ${speaker}` : '';
             const trackInfo = verification.track ? `"${verification.track}"` : term;
             return {
               success: true,
-              message: message || `Playing ${trackInfo}${speakerMsg}`
+              message: message || `Playing ${trackInfo}${speakerMsg}`,
             };
           }
-          
+
           // Search said success but music not playing - try next term
           log.info('agent', 'Search reported success but music not playing, trying next term...');
         }
@@ -1615,11 +1677,12 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         // Continue to next term
       }
     }
-    
+
     // All search terms failed - last resort: open Music app and try to play anything
     log.info('agent', 'All search terms failed, trying last resort...');
     try {
-      await runScript(`
+      await runScript(
+        `
         tell application "Music"
           activate
           delay 1
@@ -1630,29 +1693,32 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
             play
           end try
         end tell
-      `, 10000);
-      
+      `,
+        10000
+      );
+
       // Verify
       const verification = await this._verifyMusicPlaying(2000);
       if (verification.playing) {
         return {
           success: true,
-          message: `I couldn't find exactly what you wanted, but I started playing ${verification.track || 'some music'}`
+          message: `I couldn't find exactly what you wanted, but I started playing ${verification.track || 'some music'}`,
         };
       }
-      
+
       return {
         success: false,
-        message: "I had trouble starting the music. Could you try opening the Music app and playing something manually?"
+        message:
+          'I had trouble starting the music. Could you try opening the Music app and playing something manually?',
       };
-    } catch (e) {
+    } catch (_e) {
       return {
         success: false,
-        message: "I couldn't get the music playing. Could you try a different request?"
+        message: "I couldn't get the music playing. Could you try a different request?",
       };
     }
   },
-  
+
   /**
    * Handle response to AI clarification question
    * @private
@@ -1660,22 +1726,20 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
   async _handleAIClarificationResponse(task, context) {
     const userResponse = task.context?.userInput || task.content;
     const originalRequest = task.context?.originalRequest || '';
-    
+
     // Combine original request with clarification for better context
-    const combinedRequest = originalRequest 
-      ? `${originalRequest} - ${userResponse}`
-      : userResponse;
-    
+    const combinedRequest = originalRequest ? `${originalRequest} - ${userResponse}` : userResponse;
+
     log.info('agent', 'Processing clarification response', { combinedRequest });
-    
+
     // Use AI again with the clarified request
     const aiContext = {
       partOfDay: context.partOfDay,
       memory: this.memory ? this.memory.getSection('Favorite Artists') : null,
       availableSpeakers: await this._getAvailableSpeakers(),
-      conversationHistory: `Original request: ${originalRequest}\nClarification: ${userResponse}`
+      conversationHistory: `Original request: ${originalRequest}\nClarification: ${userResponse}`,
     };
-    
+
     const aiResult = await aiUnderstandMusicRequest(combinedRequest, aiContext);
 
     // Handle podcast action from clarification
@@ -1701,17 +1765,17 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
           agentId: this.id,
           context: {
             djState: 'awaiting_ai_clarification',
-            originalRequest: combinedRequest
-          }
-        }
+            originalRequest: combinedRequest,
+          },
+        },
       };
     }
-    
+
     // Fall back to just playing something based on time of day
     const fallbackTerms = this._getTimeBasedSearchTerms(context.partOfDay);
-    return this._playWithSearchTerms(fallbackTerms, "Let me play something nice for this time of day");
+    return this._playWithSearchTerms(fallbackTerms, 'Let me play something nice for this time of day');
   },
-  
+
   /**
    * Get search terms based on time of day
    * @private
@@ -1721,11 +1785,11 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       morning: ['Morning Coffee', 'Wake Up Happy', 'Acoustic Morning'],
       afternoon: ['Afternoon Chill', 'Focus Flow', 'Productive Pop'],
       evening: ['Evening Jazz', 'Dinner Party', 'Relaxing Evening'],
-      night: ['Late Night Vibes', 'Chill Night', 'Peaceful Piano']
+      night: ['Late Night Vibes', 'Chill Night', 'Peaceful Piano'],
     };
     return timeTerms[partOfDay] || timeTerms.afternoon;
   },
-  
+
   /**
    * Detect mood/genre from the user's request (legacy fallback)
    * @private
@@ -1736,56 +1800,56 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     // Map of keywords to mood/genre
     const moodMappings = {
       // Moods
-      'mellow': 'Relaxing',
-      'chill': 'Relaxing',
-      'calm': 'Relaxing',
-      'peaceful': 'Relaxing',
-      'relaxing': 'Relaxing',
-      'relax': 'Relaxing',
-      'happy': 'Happy',
-      'upbeat': 'Happy',
-      'cheerful': 'Happy',
-      'energetic': 'Energetic',
-      'pump': 'Energetic',
-      'workout': 'Energetic',
-      'party': 'Energetic',
-      'focused': 'Focused',
-      'focus': 'Focused',
-      'study': 'Focused',
-      'concentrate': 'Focused',
-      'romantic': 'Romantic',
-      'love': 'Romantic',
-      'sad': 'Melancholy',
-      'melancholy': 'Melancholy',
+      mellow: 'Relaxing',
+      chill: 'Relaxing',
+      calm: 'Relaxing',
+      peaceful: 'Relaxing',
+      relaxing: 'Relaxing',
+      relax: 'Relaxing',
+      happy: 'Happy',
+      upbeat: 'Happy',
+      cheerful: 'Happy',
+      energetic: 'Energetic',
+      pump: 'Energetic',
+      workout: 'Energetic',
+      party: 'Energetic',
+      focused: 'Focused',
+      focus: 'Focused',
+      study: 'Focused',
+      concentrate: 'Focused',
+      romantic: 'Romantic',
+      love: 'Romantic',
+      sad: 'Melancholy',
+      melancholy: 'Melancholy',
       // Genres (map to closest mood)
-      'jazz': 'Jazz',
-      'rock': 'Energetic',
-      'pop': 'Happy',
-      'classical': 'Focused',
-      'electronic': 'Energetic',
+      jazz: 'Jazz',
+      rock: 'Energetic',
+      pop: 'Happy',
+      classical: 'Focused',
+      electronic: 'Energetic',
       'hip hop': 'Energetic',
       'hip-hop': 'Energetic',
-      'country': 'Happy',
-      'indie': 'Relaxing',
-      'folk': 'Relaxing',
-      'blues': 'Melancholy',
-      'soul': 'Relaxing',
+      country: 'Happy',
+      indie: 'Relaxing',
+      folk: 'Relaxing',
+      blues: 'Melancholy',
+      soul: 'Relaxing',
       'r&b': 'Relaxing',
-      'ambient': 'Focused',
-      'lofi': 'Focused',
+      ambient: 'Focused',
+      lofi: 'Focused',
       'lo-fi': 'Focused',
       'lo fi': 'Focused',
     };
-    
+
     for (const [keyword, mood] of Object.entries(moodMappings)) {
       if (lower.includes(keyword)) {
         return mood;
       }
     }
-    
+
     return null;
   },
-  
+
   /**
    * Ask the user about their mood
    * @private
@@ -1793,16 +1857,16 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
   _askMood(context) {
     const greeting = TIME_GREETINGS[context.partOfDay];
     const suggestedMoods = TIME_MOODS[context.partOfDay];
-    
+
     // Get all available moods
     const allMoods = Object.keys(MOOD_GENRES);
-    
+
     // Format mood options nicely
-    const moodOptions = suggestedMoods.map(m => m.charAt(0).toUpperCase() + m.slice(1));
+    const moodOptions = suggestedMoods.map((m) => m.charAt(0).toUpperCase() + m.slice(1));
     const otherMoods = allMoods
-      .filter(m => !suggestedMoods.includes(m))
-      .map(m => m.charAt(0).toUpperCase() + m.slice(1));
-    
+      .filter((m) => !suggestedMoods.includes(m))
+      .map((m) => m.charAt(0).toUpperCase() + m.slice(1));
+
     return {
       success: true,
       needsInput: {
@@ -1812,30 +1876,30 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         agentId: 'dj-agent',
         context: {
           djState: 'awaiting_mood',
-          timeContext: context
-        }
-      }
+          timeContext: context,
+        },
+      },
     };
   },
-  
+
   /**
    * Handle the user's mood response and generate options using AI reasoning
    * @private
    */
   async _handleMoodResponse(task, context) {
     const mood = (task.context.userInput || task.content).toLowerCase().trim();
-    
+
     // Get available speakers
     let speakers = ['Computer'];
     try {
       const deviceResult = await mediaAgent.listAirPlayDevices();
       if (deviceResult.devices && deviceResult.devices.length > 0) {
-        speakers = deviceResult.devices.map(d => d.name);
+        speakers = deviceResult.devices.map((d) => d.name);
       }
-    } catch (e) {
+    } catch (_e) {
       log.info('agent', 'Could not get speakers, using default');
     }
-    
+
     // Get memory content for AI context
     let memoryContent = '';
     try {
@@ -1846,71 +1910,87 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
           memoryContent += '\n\nRecent listening history:\n' + history;
         }
       }
-    } catch (e) {
+    } catch (_e) {
       log.info('agent', 'Could not load memory for AI');
     }
-    
+
     // Get conversation history for context
-    const conversationText = task.context?.conversationText || 
-                            task.metadata?.conversationText || '';
-    
+    const conversationText = task.context?.conversationText || task.metadata?.conversationText || '';
+
     // Try AI reasoning first
     const aiResult = await aiReasonAboutMusic({
       mood,
       partOfDay: context.partOfDay,
       memory: memoryContent,
       availableSpeakers: speakers,
-      conversationHistory: conversationText
+      conversationHistory: conversationText,
     });
-    
+
     let options;
     let prompt;
     let normalizedMood = mood;
-    
+
     if (aiResult && aiResult.options && aiResult.options.length > 0) {
       // Use AI-generated options
       log.info('agent', 'Using AI-generated recommendations');
-      options = aiResult.options.map(opt => ({
+      options = aiResult.options.map((opt) => ({
         label: opt.label,
         genre: opt.genre,
         speaker: opt.speaker || speakers[0],
-        searchTerms: opt.searchTerms || [opt.genre]
+        searchTerms: opt.searchTerms || [opt.genre],
       }));
       prompt = aiResult.greeting || `${mood} mood! Here are my AI picks:`;
     } else {
       // Fallback to static mappings
       log.info('agent', 'Using fallback static recommendations');
-      
+
       // Normalize mood input
       const moodAliases = {
-        'calm': 'relaxing', 'productive': 'focused', 'concentrate': 'focused',
-        'upbeat': 'energetic', 'pumped': 'energetic', 'hype': 'energetic',
-        'sad': 'melancholy', 'down': 'melancholy', 'love': 'romantic',
-        'date': 'romantic', 'dance': 'party', 'fun': 'party', 'celebrate': 'party',
-        'coffee': 'cafe', 'coffeeshop': 'cafe', 'lounge': 'cafe',
-        'gym': 'workout', 'exercise': 'workout', 'run': 'workout', 'running': 'workout',
-        'bed': 'sleep', 'relax': 'relaxing', 'cool': 'chill', 'vibes': 'chill'
+        calm: 'relaxing',
+        productive: 'focused',
+        concentrate: 'focused',
+        upbeat: 'energetic',
+        pumped: 'energetic',
+        hype: 'energetic',
+        sad: 'melancholy',
+        down: 'melancholy',
+        love: 'romantic',
+        date: 'romantic',
+        dance: 'party',
+        fun: 'party',
+        celebrate: 'party',
+        coffee: 'cafe',
+        coffeeshop: 'cafe',
+        lounge: 'cafe',
+        gym: 'workout',
+        exercise: 'workout',
+        run: 'workout',
+        running: 'workout',
+        bed: 'sleep',
+        relax: 'relaxing',
+        cool: 'chill',
+        vibes: 'chill',
       };
-      
+
       for (const [alias, actual] of Object.entries(moodAliases)) {
         if (mood.includes(alias)) {
           normalizedMood = actual;
           break;
         }
       }
-      
+
       if (!MOOD_GENRES[normalizedMood]) {
         normalizedMood = TIME_MOODS[context.partOfDay][0];
       }
-      
+
       const genres = MOOD_GENRES[normalizedMood] || ['Pop', 'Rock', 'Jazz'];
       options = this._generateOptions(normalizedMood, genres, speakers, context);
       prompt = `${normalizedMood.charAt(0).toUpperCase() + normalizedMood.slice(1)} mood, nice! Here are my picks:`;
     }
-    
+
     // Format options for voice
     const optionList = options.map((o, i) => `${i + 1}) ${o.label}`).join(', ');
-    
+
     return {
       success: true,
       needsInput: {
@@ -1922,29 +2002,29 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
           djState: 'awaiting_choice',
           timeContext: context,
           mood: normalizedMood,
-          options: options
-        }
-      }
+          options: options,
+        },
+      },
     };
   },
-  
+
   /**
    * Generate music options based on mood and context
    * @private
    */
-  _generateOptions(mood, genres, speakers, context) {
+  _generateOptions(mood, genres, speakers, _context) {
     const options = [];
     const usedGenres = new Set();
-    
+
     // Option 1: Primary genre on current/default speaker
     const primaryGenre = genres[0];
     usedGenres.add(primaryGenre);
     options.push({
       label: `${primaryGenre} playlist`,
       genre: primaryGenre,
-      speaker: speakers[0]
+      speaker: speakers[0],
     });
-    
+
     // Option 2: Secondary genre (maybe different speaker if available)
     const secondaryGenre = genres[1] || genres[0];
     const secondSpeaker = speakers.length > 1 ? speakers[1] : speakers[0];
@@ -1954,30 +2034,30 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       options.push({
         label: `${secondaryGenre}${speakerLabel}`,
         genre: secondaryGenre,
-        speaker: secondSpeaker
+        speaker: secondSpeaker,
       });
     }
-    
+
     // Option 3: Third genre or mood-based shuffle
     if (genres.length > 2) {
       const thirdGenre = genres[2];
       options.push({
         label: `${thirdGenre} vibes`,
         genre: thirdGenre,
-        speaker: speakers[0]
+        speaker: speakers[0],
       });
     } else {
       // Offer mood-based playlist as an option
       options.push({
         label: `${mood} mix`,
         genre: mood, // Use mood as genre - smartPlayGenre handles mapping
-        speaker: speakers[0]
+        speaker: speakers[0],
       });
     }
-    
+
     return options;
   },
-  
+
   /**
    * Handle the user's choice and play music
    * @private
@@ -1986,10 +2066,10 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     const choice = task.context.userInput || task.content;
     const options = task.context.options || [];
     const mood = task.context.mood;
-    
+
     // Parse choice
     let selectedOption = null;
-    
+
     // Try to match by number
     const numMatch = choice.match(/(\d+)/);
     if (numMatch) {
@@ -1998,34 +2078,33 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         selectedOption = options[num - 1];
       }
     }
-    
+
     // Try to match by genre name or label
     if (!selectedOption) {
       const lower = choice.toLowerCase();
-      selectedOption = options.find(o => 
-        (o.genre && lower.includes(o.genre.toLowerCase())) ||
-        (o.label && o.label.toLowerCase().includes(lower))
+      selectedOption = options.find(
+        (o) => (o.genre && lower.includes(o.genre.toLowerCase())) || (o.label && o.label.toLowerCase().includes(lower))
       );
     }
-    
+
     // Default to first option
     if (!selectedOption && options.length > 0) {
       selectedOption = options[0];
     }
-    
+
     if (!selectedOption) {
       return {
         success: false,
-        message: "I couldn't understand your choice. Let's start over - just say 'play music' again."
+        message: "I couldn't understand your choice. Let's start over - just say 'play music' again.",
       };
     }
-    
+
     log.info('agent', 'Selected option', { data: JSON.stringify(selectedOption) });
-    
+
     // Play the music using intelligent genre-based playback
     let result;
     const { smartPlayGenre, smartPlayWithSearchTerms } = require('./applescript-helper');
-    
+
     // Set AirPlay device if not Computer
     if (selectedOption.speaker && selectedOption.speaker !== 'Computer') {
       try {
@@ -2035,7 +2114,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
         log.info('agent', 'Could not set AirPlay device', { error: e.message });
       }
     }
-    
+
     // Use AI-provided search terms if available, otherwise use genre
     if (selectedOption.searchTerms && selectedOption.searchTerms.length > 0) {
       // AI provided specific playlist/search terms - try each until one works
@@ -2045,24 +2124,24 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       // Fallback to genre-based playback
       result = await smartPlayGenre(selectedOption.genre, 'Music');
     }
-    
+
     // Learn from this choice
     await this._learnFromChoice(selectedOption, mood, context);
-    
+
     if (result.success) {
       const source = result.source ? ` from ${result.source}` : '';
       return {
         success: true,
-        message: result.message || `Playing ${selectedOption.label}${source}. Enjoy!`
+        message: result.message || `Playing ${selectedOption.label}${source}. Enjoy!`,
       };
     }
-    
+
     return {
       success: true, // We tried, output might be set
-      message: result.message || `I tried to play ${selectedOption.genre}. Check your Apple Music library.`
+      message: result.message || `I tried to play ${selectedOption.genre}. Check your Apple Music library.`,
     };
   },
-  
+
   /**
    * Learn from the user's choice and update preferences
    * @private
@@ -2072,24 +2151,24 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       if (!this.memory) {
         await this.initialize();
       }
-      
+
       // Add to Recent History (with consistent format for parsing)
       const historyEntry = `- ${context.timestamp.split('T')[0]} ${context.partOfDay} | ${mood} | ${choice.genre} on ${choice.speaker} | Liked`;
       this.memory.appendToSection('Recent History', historyEntry, 30);
-      
+
       // Re-evaluate and update preferences based on accumulated patterns
       await this._reEvaluatePreferences(context);
-      
+
       // Save memory (includes both history and updated preferences)
       await this.memory.save();
-      
+
       log.info('agent', `Learned: ${mood} -> ${choice.genre} on ${choice.speaker} (${context.partOfDay})`);
     } catch (error) {
       log.error('agent', 'Error learning from choice', { error });
       // Non-fatal - don't fail the request
     }
   },
-  
+
   /**
    * Get preferences for a specific time of day
    * @param {string} partOfDay - morning, afternoon, evening, night
@@ -2101,22 +2180,22 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       return {
         genres: MOOD_GENRES[TIME_MOODS[partOfDay][0]],
         energy: partOfDay === 'morning' || partOfDay === 'afternoon' ? 'Medium' : 'Low',
-        moods: TIME_MOODS[partOfDay]
+        moods: TIME_MOODS[partOfDay],
       };
     }
-    
-    const prefs = this.memory.getSection('Time-Based Preferences');
+
+    const _prefs = this.memory.getSection('Time-Based Preferences');
     // Parse the markdown section for this time of day
     // For now, return defaults - can be enhanced to parse actual stored prefs
     return {
       genres: MOOD_GENRES[TIME_MOODS[partOfDay][0]],
       energy: 'Medium',
-      moods: TIME_MOODS[partOfDay]
+      moods: TIME_MOODS[partOfDay],
     };
   },
-  
+
   // ==================== LEARNING & RE-EVALUATION ====================
-  
+
   /**
    * Parse Recent History markdown into structured entries
    * Format: "- 2026-01-27 afternoon | energetic | Pop on Living Room | Liked"
@@ -2128,33 +2207,33 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
     if (!history || history.includes('*No history')) {
       return [];
     }
-    
+
     const entries = [];
-    const lines = history.split('\n').filter(l => l.trim().startsWith('-'));
-    
+    const lines = history.split('\n').filter((l) => l.trim().startsWith('-'));
+
     for (const line of lines) {
       // Parse: "- 2026-01-27 afternoon | mood | genre on speaker | status"
       // Remove leading "- " and split by "|"
       const content = line.trim().substring(2).trim(); // Remove "- "
-      const parts = content.split('|').map(p => p.trim());
-      
+      const parts = content.split('|').map((p) => p.trim());
+
       if (parts.length >= 4) {
         // First part: "2026-01-27 afternoon"
-        const dateTimeParts = parts[0].split(' ').filter(p => p);
+        const dateTimeParts = parts[0].split(' ').filter((p) => p);
         const date = dateTimeParts[0] || '';
         const partOfDay = (dateTimeParts[1] || '').toLowerCase();
-        
+
         // Second part: mood
         const mood = parts[1].toLowerCase();
-        
+
         // Third part: "genre on speaker"
         const genreSpeakerParts = parts[2].split(' on ');
         const genre = (genreSpeakerParts[0] || '').trim();
         const speaker = (genreSpeakerParts[1] || 'Computer').trim();
-        
+
         // Fourth part: status
         const status = parts[3].toLowerCase();
-        
+
         if (date && partOfDay && mood && genre) {
           entries.push({
             date,
@@ -2162,15 +2241,15 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
             mood,
             genre,
             speaker,
-            status
+            status,
           });
         }
       }
     }
-    
+
     return entries;
   },
-  
+
   /**
    * Analyze history entries to find patterns
    * @private
@@ -2179,54 +2258,54 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
    */
   _analyzePatterns(entries) {
     const patterns = {
-      byTimeAndMood: {},  // { "afternoon_energetic": { genres: {Pop: 3, Electronic: 2}, count: 5 } }
-      byTime: {},         // { "afternoon": { genres: {Pop: 5}, moods: {energetic: 3}, count: 8 } }
-      bySpeaker: {},      // { "Living Room": { moods: {relaxing: 4}, genres: {Jazz: 3}, count: 7 } }
-      genreCounts: {}     // { "Pop": 10, "Jazz": 5 }
+      byTimeAndMood: {}, // { "afternoon_energetic": { genres: {Pop: 3, Electronic: 2}, count: 5 } }
+      byTime: {}, // { "afternoon": { genres: {Pop: 5}, moods: {energetic: 3}, count: 8 } }
+      bySpeaker: {}, // { "Living Room": { moods: {relaxing: 4}, genres: {Jazz: 3}, count: 7 } }
+      genreCounts: {}, // { "Pop": 10, "Jazz": 5 }
     };
-    
+
     for (const entry of entries) {
       // Only count liked entries
       if (entry.status !== 'liked') continue;
-      
+
       // Time + Mood pattern
       const timeMoodKey = `${entry.partOfDay}_${entry.mood}`;
       if (!patterns.byTimeAndMood[timeMoodKey]) {
         patterns.byTimeAndMood[timeMoodKey] = { genres: {}, count: 0 };
       }
-      patterns.byTimeAndMood[timeMoodKey].genres[entry.genre] = 
+      patterns.byTimeAndMood[timeMoodKey].genres[entry.genre] =
         (patterns.byTimeAndMood[timeMoodKey].genres[entry.genre] || 0) + 1;
       patterns.byTimeAndMood[timeMoodKey].count++;
-      
+
       // Time pattern
       if (!patterns.byTime[entry.partOfDay]) {
         patterns.byTime[entry.partOfDay] = { genres: {}, moods: {}, count: 0 };
       }
-      patterns.byTime[entry.partOfDay].genres[entry.genre] = 
+      patterns.byTime[entry.partOfDay].genres[entry.genre] =
         (patterns.byTime[entry.partOfDay].genres[entry.genre] || 0) + 1;
-      patterns.byTime[entry.partOfDay].moods[entry.mood] = 
+      patterns.byTime[entry.partOfDay].moods[entry.mood] =
         (patterns.byTime[entry.partOfDay].moods[entry.mood] || 0) + 1;
       patterns.byTime[entry.partOfDay].count++;
-      
+
       // Speaker pattern
       if (entry.speaker !== 'Computer') {
         if (!patterns.bySpeaker[entry.speaker]) {
           patterns.bySpeaker[entry.speaker] = { moods: {}, genres: {}, count: 0 };
         }
-        patterns.bySpeaker[entry.speaker].moods[entry.mood] = 
+        patterns.bySpeaker[entry.speaker].moods[entry.mood] =
           (patterns.bySpeaker[entry.speaker].moods[entry.mood] || 0) + 1;
-        patterns.bySpeaker[entry.speaker].genres[entry.genre] = 
+        patterns.bySpeaker[entry.speaker].genres[entry.genre] =
           (patterns.bySpeaker[entry.speaker].genres[entry.genre] || 0) + 1;
         patterns.bySpeaker[entry.speaker].count++;
       }
-      
+
       // Overall genre counts
       patterns.genreCounts[entry.genre] = (patterns.genreCounts[entry.genre] || 0) + 1;
     }
-    
+
     return patterns;
   },
-  
+
   /**
    * Sort object entries by value descending
    * @private
@@ -2236,7 +2315,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       .sort((a, b) => b[1] - a[1])
       .map(([key, count]) => ({ name: key, count }));
   },
-  
+
   /**
    * Update Time-Based Preferences section with learned patterns
    * @private
@@ -2250,30 +2329,30 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       morning: '6am-12pm',
       afternoon: '12pm-6pm',
       evening: '6pm-10pm',
-      night: '10pm-6am'
+      night: '10pm-6am',
     };
-    
+
     const sections = [];
-    
+
     for (const slot of timeSlots) {
       const timeData = patterns.byTime[slot];
       const hasData = timeData && timeData.count >= 3; // Minimum 3 choices to update
-      
+
       // Get top genres and moods
       let topGenres, topMoods, energy;
-      
+
       if (hasData) {
         topGenres = this._sortByCount(timeData.genres).slice(0, 3);
         topMoods = this._sortByCount(timeData.moods).slice(0, 3);
-        
+
         // Determine energy based on genres
         const highEnergyGenres = ['Pop', 'Dance', 'Electronic', 'Rock', 'Hip Hop', 'EDM'];
         const lowEnergyGenres = ['Ambient', 'Classical', 'Lo-fi', 'Chill', 'Jazz'];
-        const topGenreNames = topGenres.map(g => g.name);
-        
-        if (topGenreNames.some(g => highEnergyGenres.includes(g))) {
-          energy = topGenreNames.some(g => lowEnergyGenres.includes(g)) ? 'Medium to High' : 'High';
-        } else if (topGenreNames.some(g => lowEnergyGenres.includes(g))) {
+        const topGenreNames = topGenres.map((g) => g.name);
+
+        if (topGenreNames.some((g) => highEnergyGenres.includes(g))) {
+          energy = topGenreNames.some((g) => lowEnergyGenres.includes(g)) ? 'Medium to High' : 'High';
+        } else if (topGenreNames.some((g) => lowEnergyGenres.includes(g))) {
           energy = 'Low to Medium';
         } else {
           energy = 'Medium';
@@ -2281,26 +2360,26 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
       } else {
         // Use defaults
         const defaultMood = TIME_MOODS[slot][0];
-        topGenres = (MOOD_GENRES[defaultMood] || ['Pop', 'Rock']).slice(0, 3).map(g => ({ name: g, count: 0 }));
-        topMoods = TIME_MOODS[slot].map(m => ({ name: m, count: 0 }));
-        energy = (slot === 'morning' || slot === 'night') ? 'Low to Medium' : 'Medium to High';
+        topGenres = (MOOD_GENRES[defaultMood] || ['Pop', 'Rock']).slice(0, 3).map((g) => ({ name: g, count: 0 }));
+        topMoods = TIME_MOODS[slot].map((m) => ({ name: m, count: 0 }));
+        energy = slot === 'morning' || slot === 'night' ? 'Low to Medium' : 'Medium to High';
       }
-      
+
       // Format section
-      const genreList = topGenres.map(g => g.count > 0 ? `${g.name} (${g.count}x)` : g.name).join(', ');
-      const moodList = topMoods.map(m => m.count > 0 ? `${m.name} (${m.count}x)` : m.name).join(', ');
+      const genreList = topGenres.map((g) => (g.count > 0 ? `${g.name} (${g.count}x)` : g.name)).join(', ');
+      const moodList = topMoods.map((m) => (m.count > 0 ? `${m.name} (${m.count}x)` : m.name)).join(', ');
       const updatedNote = hasData ? `*Last updated: ${dateStr}*` : '*Default preferences*';
-      
+
       sections.push(`### ${slot.charAt(0).toUpperCase() + slot.slice(1)} (${timeRanges[slot]})
 ${updatedNote}
 - Genres: ${genreList}
 - Energy: ${energy}
 - Common moods: ${moodList}`);
     }
-    
+
     this.memory.updateSection('Time-Based Preferences', sections.join('\n\n'));
   },
-  
+
   /**
    * Update Speaker Preferences section with learned patterns
    * @private
@@ -2310,32 +2389,32 @@ ${updatedNote}
   _updateSpeakerPreferences(patterns, timestamp) {
     const dateStr = timestamp.split('T')[0];
     const speakerData = patterns.bySpeaker;
-    
+
     if (Object.keys(speakerData).length === 0) {
       // No speaker data yet
       return;
     }
-    
+
     const entries = [];
-    
+
     for (const [speaker, data] of Object.entries(speakerData)) {
       if (data.count < 2) continue; // Need at least 2 uses
-      
+
       const topMoods = this._sortByCount(data.moods).slice(0, 2);
       const topGenres = this._sortByCount(data.genres).slice(0, 3);
-      
-      const moodStr = topMoods.map(m => m.name).join(', ');
-      const genreStr = topGenres.map(g => g.name).join(', ');
-      
+
+      const moodStr = topMoods.map((m) => m.name).join(', ');
+      const genreStr = topGenres.map((g) => g.name).join(', ');
+
       entries.push(`- ${speaker}: ${moodStr} music, ${genreStr}
   *Learned: ${dateStr} from ${data.count} choices*`);
     }
-    
+
     if (entries.length > 0) {
       this.memory.updateSection('Speaker Preferences', entries.join('\n'));
     }
   },
-  
+
   /**
    * Update Favorite Artists/Genres section
    * @private
@@ -2345,20 +2424,20 @@ ${updatedNote}
   _updateFavoriteGenres(patterns, timestamp) {
     const dateStr = timestamp.split('T')[0];
     const genreCounts = patterns.genreCounts;
-    
+
     if (Object.keys(genreCounts).length === 0) {
       return;
     }
-    
+
     const topGenres = this._sortByCount(genreCounts).slice(0, 10);
-    
+
     if (topGenres.length > 0 && topGenres[0].count >= 2) {
-      const entries = topGenres.map(g => `- ${g.name}: ${g.count} plays`);
+      const entries = topGenres.map((g) => `- ${g.name}: ${g.count} plays`);
       entries.push(`\n*Last updated: ${dateStr}*`);
       this.memory.updateSection('Favorite Artists', entries.join('\n'));
     }
   },
-  
+
   /**
    * Re-evaluate all preferences based on accumulated history
    * Called after each choice is recorded
@@ -2369,32 +2448,32 @@ ${updatedNote}
     try {
       const history = this.memory.getSection('Recent History');
       if (!history) return;
-      
+
       // Parse history into structured entries
       const entries = this._parseHistory(history);
-      
+
       if (entries.length < 3) {
         // Not enough data to re-evaluate
         log.info('agent', `Not enough history to re-evaluate (${entries.length} entries)`);
         return;
       }
-      
+
       log.info('agent', `Re-evaluating preferences from ${entries.length} history entries`);
-      
+
       // Analyze patterns
       const patterns = this._analyzePatterns(entries);
-      
+
       // Update preference sections (replaces existing content)
       this._updateTimePreferences(patterns, context.timestamp);
       this._updateSpeakerPreferences(patterns, context.timestamp);
       this._updateFavoriteGenres(patterns, context.timestamp);
-      
+
       log.info('agent', 'Preferences re-evaluated and updated');
     } catch (error) {
       log.error('agent', 'Error re-evaluating preferences', { error });
       // Non-fatal - don't fail the request
     }
-  }
+  },
 };
 
 module.exports = djAgent;

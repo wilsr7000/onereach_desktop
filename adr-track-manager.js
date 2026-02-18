@@ -1,25 +1,25 @@
 /**
  * ADR Track Manager - Multi-track audio workflow for ADR (Automated Dialogue Replacement)
- * 
+ *
  * Provides:
  * - Track duplication
  * - Working track with dead space regions
  * - ADR clip management
  * - Fill track for room tone
  * - Right-click context menu for tracks
- * 
+ *
  * Usage:
  *   app.adrManager = new ADRTrackManager(app);
  *   app.trackContextMenu = new TrackContextMenu(app, app.adrManager);
  */
 
-(function(global) {
+(function (global) {
   'use strict';
 
   // ============================================================================
   // ADRTrackManager Class
   // ============================================================================
-  
+
   class ADRTrackManager {
     constructor(appContext) {
       this.app = appContext;
@@ -34,12 +34,12 @@
         VOICE: 'voice',
         DUB: 'dub',
         SFX: 'sfx',
-        SPEAKER: 'speaker'  // Speaker-specific tracks from split
+        SPEAKER: 'speaker', // Speaker-specific tracks from split
       };
-      
+
       // Dead space regions (visual-only markers for silence)
       this.deadSpaceRegions = [];
-      
+
       console.log('[ADRTrackManager] Initialized');
     }
 
@@ -60,9 +60,14 @@
      */
     findTrack(trackId) {
       const tracks = this.tracks;
-      const found = tracks.find(t => t.id === trackId);
+      const found = tracks.find((t) => t.id === trackId);
       if (!found && tracks.length > 0) {
-        console.warn('[ADRTrackManager] Track not found:', trackId, 'Available:', tracks.map(t => t.id));
+        console.warn(
+          '[ADRTrackManager] Track not found:',
+          trackId,
+          'Available:',
+          tracks.map((t) => t.id)
+        );
       }
       return found;
     }
@@ -71,15 +76,14 @@
      * Find a track by type
      */
     findTrackByType(type) {
-      return this.tracks.find(t => t.type === type);
+      return this.tracks.find((t) => t.type === type);
     }
 
     /**
      * Get the guide track (original or first non-working track)
      */
     getGuideTrack() {
-      return this.findTrackByType(this.TRACK_TYPES.ORIGINAL) ||
-             this.findTrackByType(this.TRACK_TYPES.GUIDE);
+      return this.findTrackByType(this.TRACK_TYPES.ORIGINAL) || this.findTrackByType(this.TRACK_TYPES.GUIDE);
     }
 
     /**
@@ -114,7 +118,7 @@
         name = `${sourceTrack.name} (Copy)`,
         type = sourceTrack.type === this.TRACK_TYPES.ORIGINAL ? this.TRACK_TYPES.WORKING : sourceTrack.type,
         copyClips = true,
-        createVisualClip = true // Create visual representation for original track
+        createVisualClip = true, // Create visual representation for original track
       } = options;
 
       // Generate new track ID
@@ -122,7 +126,7 @@
 
       // Determine clips for new track
       let clips = [];
-      
+
       if (copyClips && sourceTrack.clips && sourceTrack.clips.length > 0) {
         // Copy existing clips
         clips = this._cloneClips(sourceTrack.clips);
@@ -130,18 +134,20 @@
         // For original track, create a visual clip representing the full audio
         const video = document.getElementById('videoPlayer');
         const duration = video?.duration || this.app.videoInfo?.duration || 0;
-        
+
         if (duration > 0) {
-          clips = [{
-            id: `clip-${Date.now()}`,
-            type: 'visual-reference',
-            name: 'Original Audio',
-            startTime: 0,
-            endTime: duration,
-            duration: duration,
-            sourceTrackId: trackId,
-            isVisualOnly: true // Flag to indicate this is visual representation only
-          }];
+          clips = [
+            {
+              id: `clip-${Date.now()}`,
+              type: 'visual-reference',
+              name: 'Original Audio',
+              startTime: 0,
+              endTime: duration,
+              duration: duration,
+              sourceTrackId: trackId,
+              isVisualOnly: true, // Flag to indicate this is visual representation only
+            },
+          ];
         }
       }
 
@@ -154,7 +160,7 @@
         solo: false,
         volume: sourceTrack.volume || 1.0,
         clips: clips,
-        sourceTrackId: trackId // Reference to original for ADR workflow
+        sourceTrackId: trackId, // Reference to original for ADR workflow
       };
 
       // Add to tracks array
@@ -164,7 +170,7 @@
       if (this.app.renderAudioTrack) {
         this.app.renderAudioTrack(newTrack);
       }
-      
+
       // Render the visual clip on the new track
       if (clips.length > 0) {
         this._renderVisualClip(newTrackId, clips[0]);
@@ -175,28 +181,30 @@
         newId: newTrackId,
         type: type,
         name: name,
-        clipsCount: clips.length
+        clipsCount: clips.length,
       });
 
       this.app.showToast && this.app.showToast('success', `Created ${name}`);
-      
+
       // Load audio for the new track (async, shares buffer with original)
       if (this.app.multiTrackAudio) {
-        this.app.multiTrackAudio.loadTrackAudio(newTrackId, null, {
-          volume: newTrack.volume || 1.0,
-          muted: newTrack.muted || false,
-          solo: newTrack.solo || false
-        }).then(() => {
-          console.log('[ADRTrackManager] Audio loaded for new track:', newTrackId);
-        }).catch(err => {
-          console.warn('[ADRTrackManager] Could not load audio for track:', newTrackId, err.message);
-        });
+        this.app.multiTrackAudio
+          .loadTrackAudio(newTrackId, null, {
+            volume: newTrack.volume || 1.0,
+            muted: newTrack.muted || false,
+            solo: newTrack.solo || false,
+          })
+          .then(() => {
+            console.log('[ADRTrackManager] Audio loaded for new track:', newTrackId);
+          })
+          .catch((err) => {
+            console.warn('[ADRTrackManager] Could not load audio for track:', newTrackId, err.message);
+          });
       }
-      
-      
+
       return newTrack;
     }
-    
+
     /**
      * Render a visual clip on a track (shows waveform representation)
      */
@@ -206,21 +214,21 @@
         console.warn('[ADRTrackManager] Track content container not found:', trackId);
         return;
       }
-      
+
       // Hide empty state
       const emptyState = document.getElementById(`trackEmpty-${trackId}`);
       if (emptyState) {
         emptyState.style.display = 'none';
       }
-      
+
       // Get video duration for positioning
       const video = document.getElementById('videoPlayer');
       const totalDuration = video?.duration || this.app.videoInfo?.duration || clip.duration;
-      
+
       // Calculate clip position and width as percentage
       const leftPercent = (clip.startTime / totalDuration) * 100;
       const widthPercent = ((clip.endTime - clip.startTime) / totalDuration) * 100;
-      
+
       // Create clip element
       const clipEl = document.createElement('div');
       clipEl.className = 'track-clip visual-reference-clip';
@@ -236,7 +244,7 @@
         border-radius: 4px;
         overflow: hidden;
       `;
-      
+
       // Add waveform visualization
       const waveformContainer = document.createElement('div');
       waveformContainer.className = 'clip-waveform';
@@ -246,11 +254,13 @@
         opacity: 0.7;
         position: relative;
       `;
-      
+
       // Copy waveform from original track - but REGENERATE to avoid transcript text overlay
       // The transcript words are drawn directly on the canvas, so we can't just copy it
-      const originalWaveform = document.querySelector('#audioTrackContainer .waveform-canvas, #audioTrackContainer .audio-waveform, #audioWaveform');
-      
+      const originalWaveform = document.querySelector(
+        '#audioTrackContainer .waveform-canvas, #audioTrackContainer .audio-waveform, #audioWaveform'
+      );
+
       if (originalWaveform && originalWaveform.tagName === 'CANVAS' && this.app.waveformMasterPeaks) {
         // Create a new canvas and draw a CLEAN waveform (without transcript text)
         const waveformClone = document.createElement('canvas');
@@ -260,26 +270,26 @@
         waveformClone.height = sourceHeight;
         waveformClone.style.width = '100%';
         waveformClone.style.height = '100%';
-        
+
         // Draw a simplified waveform from the master peaks (no transcript text)
         const ctx = waveformClone.getContext('2d');
         const peaks = this.app.waveformMasterPeaks;
         const width = sourceWidth / 2; // Account for retina scaling
         const height = sourceHeight / 2;
-        
+
         ctx.scale(2, 2); // Retina scaling
-        
+
         // Draw simple bars waveform
         ctx.fillStyle = 'rgba(59, 130, 246, 0.6)';
         const barWidth = Math.max(1, width / peaks.length);
         const centerY = height / 2;
-        
+
         peaks.forEach((peak, i) => {
           const x = (i / peaks.length) * width;
           const barHeight = peak * height * 0.8;
           ctx.fillRect(x, centerY - barHeight / 2, barWidth - 0.5, barHeight);
         });
-        
+
         waveformContainer.appendChild(waveformClone);
       } else if (originalWaveform && originalWaveform.tagName === 'CANVAS') {
         // Fallback: Copy canvas but note it may have transcript text
@@ -289,10 +299,10 @@
         waveformClone.height = originalWaveform.height;
         waveformClone.style.width = '100%';
         waveformClone.style.height = '100%';
-        
+
         const ctx = waveformClone.getContext('2d');
         ctx.drawImage(originalWaveform, 0, 0);
-        
+
         waveformContainer.appendChild(waveformClone);
       } else {
         // No waveform available - show gradient placeholder
@@ -307,11 +317,11 @@
           transparent 100%
         )`;
       }
-      
+
       clipEl.appendChild(waveformContainer);
-      
+
       trackContent.appendChild(clipEl);
-      
+
       console.log('[ADRTrackManager] Rendered visual clip on track', trackId);
     }
 
@@ -321,7 +331,7 @@
      */
     ensureWorkingTrack() {
       let workingTrack = this.findTrackByType(this.TRACK_TYPES.WORKING);
-      
+
       if (!workingTrack) {
         const guideTrack = this.getGuideTrack();
         if (!guideTrack) {
@@ -332,7 +342,7 @@
         workingTrack = this.duplicateTrack(guideTrack.id, {
           name: 'Working',
           type: this.TRACK_TYPES.WORKING,
-          copyClips: false // Working track starts empty, dead space is visual-only
+          copyClips: false, // Working track starts empty, dead space is visual-only
         });
       }
 
@@ -344,10 +354,10 @@
      */
     ensureADRTrack() {
       let adrTrack = this.findTrackByType(this.TRACK_TYPES.ADR);
-      
+
       if (!adrTrack) {
         const newTrackId = `A${this.app.nextTrackId++}`;
-        
+
         adrTrack = {
           id: newTrackId,
           type: this.TRACK_TYPES.ADR,
@@ -355,14 +365,14 @@
           muted: false,
           solo: false,
           volume: 1.0,
-          clips: []
+          clips: [],
         };
 
         this.app.audioTracks.push(adrTrack);
         if (this.app.renderAudioTrack) {
           this.app.renderAudioTrack(adrTrack);
         }
-        
+
         console.log('[ADRTrackManager] Created ADR track', newTrackId);
       }
 
@@ -374,7 +384,7 @@
      */
     _cloneClips(clips) {
       if (!clips || !Array.isArray(clips)) return [];
-      return clips.map(clip => ({ ...clip }));
+      return clips.map((clip) => ({ ...clip }));
     }
 
     /**
@@ -389,7 +399,7 @@
         [this.TRACK_TYPES.FILL]: { label: 'Fill', color: '#06b6d4' },
         [this.TRACK_TYPES.VOICE]: { label: 'Voice', color: '#ec4899' },
         [this.TRACK_TYPES.SFX]: { label: 'SFX', color: '#eab308' },
-        [this.TRACK_TYPES.SPEAKER]: { label: 'Speaker', color: '#14b8a6' }
+        [this.TRACK_TYPES.SPEAKER]: { label: 'Speaker', color: '#14b8a6' },
       };
 
       return typeLabels[track.type] || { label: track.type, color: '#6b7280' };
@@ -421,48 +431,46 @@
     insertSilence(startTime, endTime, name = 'Silence') {
       // 1. Ensure Working track exists (duplicate Guide if needed)
       let workingTrack = this.ensureWorkingTrack();
-      
+
       if (!workingTrack) {
         console.error('[ADRTrackManager] Failed to create working track');
         this.app.showToast && this.app.showToast('error', 'Could not create working track');
         return null;
       }
-      
+
       // 2. Add dead space region (metadata)
       if (!workingTrack.deadSpaceRegions) {
         workingTrack.deadSpaceRegions = [];
       }
-      
+
       const region = {
         id: `dead-${Date.now()}`,
         start: startTime,
         end: endTime,
         name: name,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
       };
-      
+
       workingTrack.deadSpaceRegions.push(region);
-      
+
       // Also add to global deadSpaceRegions for easier access
       this.deadSpaceRegions.push(region);
-      
+
       // 3. Render on timeline
       this.renderDeadSpaceRegions();
-      
+
       const duration = endTime - startTime;
       const formattedDuration = this._formatTime(duration);
       const formattedStart = this._formatTime(startTime);
-      
+
       console.log('[ADRTrackManager] Inserted silence:', {
         name,
         start: formattedStart,
-        duration: formattedDuration
+        duration: formattedDuration,
       });
-      
-      this.app.showToast && this.app.showToast('success', 
-        `Inserted silence: ${formattedStart} (${formattedDuration})`
-      );
-      
+
+      this.app.showToast && this.app.showToast('success', `Inserted silence: ${formattedStart} (${formattedDuration})`);
+
       return region;
     }
 
@@ -482,7 +490,7 @@
       }
 
       // Remove existing dead space regions
-      trackContent.querySelectorAll('.dead-space-region').forEach(el => el.remove());
+      trackContent.querySelectorAll('.dead-space-region').forEach((el) => el.remove());
 
       // Get video duration for positioning
       const video = document.getElementById('videoPlayer');
@@ -490,7 +498,7 @@
 
       // Render each dead space region
       const regions = workingTrack.deadSpaceRegions || [];
-      regions.forEach(region => {
+      regions.forEach((region) => {
         const leftPercent = (region.start / totalDuration) * 100;
         const widthPercent = ((region.end - region.start) / totalDuration) * 100;
 
@@ -527,20 +535,20 @@
         return false;
       }
 
-      const index = workingTrack.deadSpaceRegions.findIndex(r => r.id === regionId);
+      const index = workingTrack.deadSpaceRegions.findIndex((r) => r.id === regionId);
       if (index !== -1) {
         workingTrack.deadSpaceRegions.splice(index, 1);
-        
+
         // Also remove from global array
-        const globalIndex = this.deadSpaceRegions.findIndex(r => r.id === regionId);
+        const globalIndex = this.deadSpaceRegions.findIndex((r) => r.id === regionId);
         if (globalIndex !== -1) {
           this.deadSpaceRegions.splice(globalIndex, 1);
         }
-        
+
         this.renderDeadSpaceRegions();
         return true;
       }
-      
+
       return false;
     }
 
@@ -568,7 +576,7 @@
         // 2. Ensure ADR track exists
         console.log('[ADRTrackManager] Step 2/3: Ensuring ADR track...');
         let adrTrack = this.ensureADRTrack();
-        
+
         if (!adrTrack) {
           throw new Error('Failed to create ADR track');
         }
@@ -576,10 +584,10 @@
         // 3. Generate ElevenLabs audio
         console.log('[ADRTrackManager] Step 3/3: Generating AI voice...');
         this.app.showProgress && this.app.showProgress('Generating AI Voice', 'Calling ElevenLabs API...');
-        
+
         const result = await window.videoEditor.generateElevenLabsAudio({
           text: text.trim(),
-          voice: voice
+          voice: voice,
         });
 
         this.app.hideProgress && this.app.hideProgress();
@@ -603,7 +611,7 @@
           text: text,
           voice: voice,
           type: 'elevenlabs',
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         };
 
         adrTrack.clips.push(clip);
@@ -619,13 +627,12 @@
         console.log('[ADRTrackManager] ADR workflow complete:', {
           clip: name,
           duration: this._formatTime(clip.duration),
-          audioPath: result.audioPath
+          audioPath: result.audioPath,
         });
 
         this.app.showToast && this.app.showToast('success', `ADR clip added: ${name}`);
-        
-        return clip;
 
+        return clip;
       } catch (error) {
         console.error('[ADRTrackManager] Re-record failed:', error);
         this.app.hideProgress && this.app.hideProgress();
@@ -678,7 +685,7 @@
       // Empty content - waveform only, no text labels
 
       trackContent.appendChild(clipEl);
-      
+
       console.log('[ADRTrackManager] Rendered ADR clip on track', trackId);
     }
 
@@ -713,28 +720,34 @@
       if (availableDuration < 60) {
         const proceed = confirm(
           `Warning: Only ${Math.round(availableDuration)} seconds of audio available.\n\n` +
-          `ElevenLabs recommends at least 1 minute for best voice cloning results.\n\n` +
-          `Continue anyway?`
+            `ElevenLabs recommends at least 1 minute for best voice cloning results.\n\n` +
+            `Continue anyway?`
         );
         if (!proceed) return null;
       }
 
       try {
-        this.app.showProgress && this.app.showProgress('Creating Custom Voice', 'Analyzing audio for optimal segments...');
+        this.app.showProgress &&
+          this.app.showProgress('Creating Custom Voice', 'Analyzing audio for optimal segments...');
 
         // Select optimal audio segments using transcript
         const segments = this._selectOptimalVoiceSegments(transcript, track, {
-          targetDuration: 180,  // 3 minutes optimal
-          maxDuration: 300,     // 5 minutes max
-          preferSpeaker: track.speakerId || null
+          targetDuration: 180, // 3 minutes optimal
+          maxDuration: 300, // 5 minutes max
+          preferSpeaker: track.speakerId || null,
         });
 
-        console.log('[ADRTrackManager] Selected', segments.length, 'segments for voice cloning, total duration:', 
-          segments.reduce((sum, s) => sum + (s.end - s.start), 0).toFixed(1), 'seconds');
+        console.log(
+          '[ADRTrackManager] Selected',
+          segments.length,
+          'segments for voice cloning, total duration:',
+          segments.reduce((sum, s) => sum + (s.end - s.start), 0).toFixed(1),
+          'seconds'
+        );
 
         // Extract audio for selected segments
         let audioPath = null;
-        
+
         if (track.type === this.TRACK_TYPES.ORIGINAL) {
           if (!this.app.videoPath) {
             throw new Error('No video loaded');
@@ -747,21 +760,20 @@
             // Single segment - extract directly
             audioPath = await window.videoEditor.extractAudio(this.app.videoPath, {
               startTime: segments[0].start,
-              duration: segments[0].end - segments[0].start
+              duration: segments[0].end - segments[0].start,
             });
           } else {
             // Multiple segments - extract the full range (simplification)
             // In production, you'd concatenate segments, but for now use contiguous range
-            const minStart = Math.min(...segments.map(s => s.start));
-            const maxEnd = Math.max(...segments.map(s => s.end));
+            const minStart = Math.min(...segments.map((s) => s.start));
+            const maxEnd = Math.max(...segments.map((s) => s.end));
             const duration = Math.min(maxEnd - minStart, 300); // Cap at 5 minutes
-            
+
             audioPath = await window.videoEditor.extractAudio(this.app.videoPath, {
               startTime: minStart,
-              duration: duration
+              duration: duration,
             });
           }
-
         } else if (track.clips && track.clips.length > 0) {
           // For other tracks, use the first clip's audio path
           const firstClip = track.clips[0];
@@ -779,12 +791,13 @@
         }
 
         // Update progress
-        this.app.showProgress && this.app.showProgress('Creating Custom Voice', 'Uploading to ElevenLabs (this may take a minute)...');
+        this.app.showProgress &&
+          this.app.showProgress('Creating Custom Voice', 'Uploading to ElevenLabs (this may take a minute)...');
 
         // Call ElevenLabs voice cloning API
         const result = await window.videoEditor.createCustomVoice({
           name: voiceName,
-          audioPath: audioPath.outputPath || audioPath
+          audioPath: audioPath.outputPath || audioPath,
         });
 
         this.app.hideProgress && this.app.hideProgress();
@@ -806,7 +819,7 @@
           id: result.voiceId,
           name: voiceName,
           createdFrom: track.name,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         });
 
         // Update voice selector dropdown
@@ -815,13 +828,12 @@
         console.log('[ADRTrackManager] Custom voice created:', {
           name: voiceName,
           voiceId: result.voiceId,
-          source: track.name
+          source: track.name,
         });
 
         this.app.showToast && this.app.showToast('success', `Custom voice "${voiceName}" created!`);
 
         return result;
-
       } catch (error) {
         console.error('[ADRTrackManager] Create custom voice failed:', error);
         this.app.hideProgress && this.app.hideProgress();
@@ -842,19 +854,23 @@
 
       // No transcript - return single segment capped at maxDuration
       if (!transcript || transcript.length === 0) {
-        console.log('[ADRTrackManager] No transcript available, using first', Math.min(maxDuration, totalDuration), 'seconds');
+        console.log(
+          '[ADRTrackManager] No transcript available, using first',
+          Math.min(maxDuration, totalDuration),
+          'seconds'
+        );
         return [{ start: 0, end: Math.min(maxDuration, totalDuration) }];
       }
 
       // Group consecutive transcript segments by speaker
       const speakerGroups = this._groupTranscriptBySpeaker(transcript);
-      
+
       console.log('[ADRTrackManager] Found', speakerGroups.length, 'speaker groups in transcript');
 
       // Filter for preferred speaker if specified
       let candidateGroups = speakerGroups;
       if (preferSpeaker) {
-        const filtered = speakerGroups.filter(g => g.speakerId === preferSpeaker);
+        const filtered = speakerGroups.filter((g) => g.speakerId === preferSpeaker);
         if (filtered.length > 0) {
           candidateGroups = filtered;
           console.log('[ADRTrackManager] Filtered to', candidateGroups.length, 'groups for speaker:', preferSpeaker);
@@ -862,7 +878,7 @@
       }
 
       // Sort by duration (longer continuous speech = better for cloning)
-      candidateGroups.sort((a, b) => (b.end - b.start) - (a.end - a.start));
+      candidateGroups.sort((a, b) => b.end - b.start - (a.end - a.start));
 
       // Accumulate segments until target duration reached
       const selected = [];
@@ -870,19 +886,23 @@
 
       for (const group of candidateGroups) {
         if (totalSelectedDuration >= targetDuration) break;
-        
+
         const groupDuration = group.end - group.start;
-        
+
         // Skip very short segments (less than 5 seconds)
         if (groupDuration < 5) continue;
-        
+
         selected.push({ start: group.start, end: group.end, speakerId: group.speakerId });
         totalSelectedDuration += groupDuration;
       }
 
       // If we couldn't get enough from speaker groups, fall back to simple extraction
       if (totalSelectedDuration < 60 && totalDuration >= 60) {
-        console.log('[ADRTrackManager] Not enough speech segments, falling back to first', Math.min(targetDuration, totalDuration), 'seconds');
+        console.log(
+          '[ADRTrackManager] Not enough speech segments, falling back to first',
+          Math.min(targetDuration, totalDuration),
+          'seconds'
+        );
         return [{ start: 0, end: Math.min(targetDuration, totalDuration) }];
       }
 
@@ -905,7 +925,7 @@
         const start = segment.start || 0;
         const end = segment.end || start + 0.5;
 
-        if (!currentGroup || currentGroup.speakerId !== speakerId || (start - currentGroup.end) > 2) {
+        if (!currentGroup || currentGroup.speakerId !== speakerId || start - currentGroup.end > 2) {
           // Start new group if speaker changed or there's a gap > 2 seconds
           if (currentGroup) {
             groups.push(currentGroup);
@@ -914,7 +934,7 @@
             speakerId,
             start,
             end,
-            wordCount: 1
+            wordCount: 1,
           };
         } else {
           // Extend current group
@@ -946,7 +966,7 @@
 
       // Remove old custom voices options (if any)
       const customOptions = voiceSelect.querySelectorAll('.custom-voice-option');
-      customOptions.forEach(opt => opt.remove());
+      customOptions.forEach((opt) => opt.remove());
 
       // Add custom voices
       const customVoices = this.app.customVoices || [];
@@ -961,7 +981,7 @@
         }
 
         // Add each custom voice
-        customVoices.forEach(voice => {
+        customVoices.forEach((voice) => {
           const option = document.createElement('option');
           option.value = voice.id;
           option.textContent = `${voice.name} (Custom)`;
@@ -972,7 +992,7 @@
 
       // Restore selection if still valid
       if (currentValue) {
-        const optionExists = Array.from(voiceSelect.options).some(opt => opt.value === currentValue);
+        const optionExists = Array.from(voiceSelect.options).some((opt) => opt.value === currentValue);
         if (optionExists) {
           voiceSelect.value = currentValue;
         }
@@ -1000,7 +1020,7 @@
         if (!quietSections || quietSections.length === 0) {
           this.app.hideProgress && this.app.hideProgress();
           this.app.showToast && this.app.showToast('warning', 'No quiet sections found - fill track will use silence');
-          
+
           // Create fill track with silence
           this._createEmptyFillTrack();
           return;
@@ -1016,7 +1036,7 @@
 
         const result = await window.videoEditor.extractAudio(this.app.videoPath, {
           startTime: bestSection.start,
-          duration: extractDuration
+          duration: extractDuration,
         });
 
         this.app.hideProgress && this.app.hideProgress();
@@ -1030,7 +1050,7 @@
 
         if (!fillTrack) {
           const newTrackId = `A${this.app.nextTrackId++}`;
-          
+
           fillTrack = {
             id: newTrackId,
             type: this.TRACK_TYPES.FILL,
@@ -1044,12 +1064,12 @@
             roomToneSource: {
               start: bestSection.start,
               end: bestSection.start + extractDuration,
-              volume: bestSection.volume || 'unknown'
-            }
+              volume: bestSection.volume || 'unknown',
+            },
           };
 
           this.app.audioTracks.push(fillTrack);
-          
+
           if (this.app.renderAudioTrack) {
             this.app.renderAudioTrack(fillTrack);
           }
@@ -1066,27 +1086,27 @@
         const video = document.getElementById('videoPlayer');
         const totalDuration = video?.duration || this.app.videoInfo?.duration || extractDuration;
 
-        fillTrack.clips = [{
-          id: `fill-${Date.now()}`,
-          type: 'room-tone',
-          name: 'Room Tone (Loops)',
-          startTime: 0,
-          endTime: totalDuration,
-          duration: totalDuration,
-          sourcePath: result.outputPath,
-          sourceDuration: extractDuration,
-          isLooping: true
-        }];
+        fillTrack.clips = [
+          {
+            id: `fill-${Date.now()}`,
+            type: 'room-tone',
+            name: 'Room Tone (Loops)',
+            startTime: 0,
+            endTime: totalDuration,
+            duration: totalDuration,
+            sourcePath: result.outputPath,
+            sourceDuration: extractDuration,
+            isLooping: true,
+          },
+        ];
 
         // Render the clip
         this._renderFillClip(fillTrack.id, fillTrack.clips[0]);
 
-        this.app.showToast && this.app.showToast('success', 
-          `Fill track created with ${this._formatTime(extractDuration)} of room tone`
-        );
+        this.app.showToast &&
+          this.app.showToast('success', `Fill track created with ${this._formatTime(extractDuration)} of room tone`);
 
         return fillTrack;
-
       } catch (error) {
         console.error('[ADRTrackManager] Create fill track failed:', error);
         this.app.hideProgress && this.app.hideProgress();
@@ -1102,7 +1122,7 @@
 
       if (!fillTrack) {
         const newTrackId = `A${this.app.nextTrackId++}`;
-        
+
         fillTrack = {
           id: newTrackId,
           type: this.TRACK_TYPES.FILL,
@@ -1111,11 +1131,11 @@
           solo: false,
           volume: 0.6,
           clips: [],
-          roomTonePath: null
+          roomTonePath: null,
         };
 
         this.app.audioTracks.push(fillTrack);
-        
+
         if (this.app.renderAudioTrack) {
           this.app.renderAudioTrack(fillTrack);
         }
@@ -1144,7 +1164,7 @@
 
       // Get video duration for positioning
       const video = document.getElementById('videoPlayer');
-      const totalDuration = video?.duration || this.app.videoInfo?.duration || clip.duration;
+      const _totalDuration = video?.duration || this.app.videoInfo?.duration || clip.duration;
 
       // Fill track spans the entire duration
       const clipEl = document.createElement('div');
@@ -1179,7 +1199,7 @@
       `;
 
       trackContent.appendChild(clipEl);
-      
+
       console.log('[ADRTrackManager] Rendered fill clip on track', trackId);
     }
 
@@ -1210,7 +1230,7 @@
         hasADR: !!adrTrack,
         hasFill: !!fillTrack,
         deadSpaceRegions: workingTrack?.deadSpaceRegions?.length || 0,
-        adrClips: adrTrack?.clips?.length || 0
+        adrClips: adrTrack?.clips?.length || 0,
       });
 
       try {
@@ -1218,11 +1238,13 @@
         const exportData = {
           deadSpaceRegions: workingTrack?.deadSpaceRegions || [],
           adrClips: adrTrack?.clips || [],
-          fillTrack: fillTrack ? {
-            roomTonePath: fillTrack.roomTonePath,
-            roomToneDuration: fillTrack.roomToneDuration,
-            volume: fillTrack.volume || 0.6
-          } : null
+          fillTrack: fillTrack
+            ? {
+                roomTonePath: fillTrack.roomTonePath,
+                roomToneDuration: fillTrack.roomToneDuration,
+                volume: fillTrack.volume || 0.6,
+              }
+            : null,
         };
 
         this.app.showProgress && this.app.showProgress('Exporting ADR Video', 'Preparing audio layers...');
@@ -1240,7 +1262,6 @@
         this.app.showToast && this.app.showToast('success', 'ADR video exported successfully!');
 
         return result;
-
       } catch (error) {
         console.error('[ADRTrackManager] Export failed:', error);
         this.app.hideProgress && this.app.hideProgress();
@@ -1279,15 +1300,15 @@
       for (let i = 0; i < words.length; i++) {
         const word = words[i];
         const nextWord = words[i + 1];
-        
+
         currentSentence.push(word);
 
         // Check if this is a sentence boundary
-        const isSentenceEnd = 
+        const isSentenceEnd =
           // End punctuation in word text
           /[.!?]$/.test(word.text || '') ||
           // Large gap to next word (pause)
-          (nextWord && (nextWord.start - word.end) > config.SENTENCE_GAP_THRESHOLD) ||
+          (nextWord && nextWord.start - word.end > config.SENTENCE_GAP_THRESHOLD) ||
           // No next word (last word)
           !nextWord;
 
@@ -1351,7 +1372,7 @@
 
       // Check if dominant speaker has clear majority
       const majorityRatio = maxCount / totalWithSpeaker;
-      
+
       if (majorityRatio >= config.SPEAKER_MAJORITY_THRESHOLD) {
         return dominantSpeaker;
       }
@@ -1359,7 +1380,9 @@
       // If no clear majority but one speaker has significantly more, use them
       // This handles cases like 60% speaker A, 40% speaker B
       if (majorityRatio >= 0.5 && Object.keys(speakerCounts).length === 2) {
-        console.log(`[ADRTrackManager] Weak majority (${(majorityRatio * 100).toFixed(0)}%) for ${dominantSpeaker} in sentence of ${totalWithSpeaker} words`);
+        console.log(
+          `[ADRTrackManager] Weak majority (${(majorityRatio * 100).toFixed(0)}%) for ${dominantSpeaker} in sentence of ${totalWithSpeaker} words`
+        );
         return dominantSpeaker;
       }
 
@@ -1382,27 +1405,28 @@
 
       // Configuration for smarter segment building
       const CONFIG = {
-        SEGMENT_PADDING: 0.15,        // Padding before/after segments (seconds)
-        MIN_SEGMENT_DURATION: 0.5,    // Minimum segment duration to create (seconds)
-        SAME_SPEAKER_MERGE_GAP: 2.0,  // Merge same-speaker segments within this gap (seconds)
-        MIN_WORDS_FOR_SPLIT: 3,       // Minimum words needed before creating a separate segment
+        SEGMENT_PADDING: 0.15, // Padding before/after segments (seconds)
+        MIN_SEGMENT_DURATION: 0.5, // Minimum segment duration to create (seconds)
+        SAME_SPEAKER_MERGE_GAP: 2.0, // Merge same-speaker segments within this gap (seconds)
+        MIN_WORDS_FOR_SPLIT: 3, // Minimum words needed before creating a separate segment
         // NEW: Sentence-aware majority voting settings
-        SENTENCE_GAP_THRESHOLD: 1.5,     // Gap indicating sentence break (seconds)
+        SENTENCE_GAP_THRESHOLD: 1.5, // Gap indicating sentence break (seconds)
         SPEAKER_MAJORITY_THRESHOLD: 0.7, // 70% of words = dominant speaker
-        MIN_SENTENCE_WORDS: 5,           // Group at least 5 words per sentence
+        MIN_SENTENCE_WORDS: 5, // Group at least 5 words per sentence
       };
 
       // Debug: Log sample of word data to understand structure
       console.log('[ADRTrackManager] Total words:', words.length);
       console.log('[ADRTrackManager] Smart segmentation config:', CONFIG);
-      console.log('[ADRTrackManager] First 5 words sample:', 
-        words.slice(0, 5).map(w => ({
+      console.log(
+        '[ADRTrackManager] First 5 words sample:',
+        words.slice(0, 5).map((w) => ({
           text: w.text,
           start: w.start?.toFixed(2),
           end: w.end?.toFixed(2),
           speaker: w.speaker,
           speakerId: w.speakerId,
-          speaker_id: w.speaker_id
+          speaker_id: w.speaker_id,
         }))
       );
 
@@ -1418,25 +1442,27 @@
       const normalizedWords = [];
       sentences.forEach((sentence, idx) => {
         const dominantSpeaker = this._determineSentenceSpeaker(sentence, CONFIG);
-        
+
         if (dominantSpeaker) {
           // Assign all words in this sentence to the dominant speaker
-          sentence.forEach(word => {
+          sentence.forEach((word) => {
             const originalSpeaker = word.speakerId || word.speaker || word.speaker_id;
             if (originalSpeaker !== dominantSpeaker) {
-              console.log(`[ADRTrackManager] Sentence ${idx}: Reassigning "${word.text}" from ${originalSpeaker} to ${dominantSpeaker}`);
+              console.log(
+                `[ADRTrackManager] Sentence ${idx}: Reassigning "${word.text}" from ${originalSpeaker} to ${dominantSpeaker}`
+              );
             }
             normalizedWords.push({
               ...word,
               speaker: dominantSpeaker,
               speakerId: dominantSpeaker,
               speaker_id: dominantSpeaker,
-              _originalSpeaker: word.speakerId || word.speaker || word.speaker_id
+              _originalSpeaker: word.speakerId || word.speaker || word.speaker_id,
             });
           });
         } else {
           // Keep original assignments if no clear majority
-          sentence.forEach(word => {
+          sentence.forEach((word) => {
             normalizedWords.push(word);
           });
         }
@@ -1460,13 +1486,13 @@
 
         const start = word.start;
         const end = word.end;
-        
+
         if (typeof start !== 'number' || typeof end !== 'number' || isNaN(start) || isNaN(end)) {
           console.warn('[ADRTrackManager] Invalid timing for word:', word.text, 'start:', start, 'end:', end);
           skippedCount++;
           continue;
         }
-        
+
         processedCount++;
 
         if (!rawSegments[speakerId]) {
@@ -1492,25 +1518,29 @@
         rawSegments[currentSpeaker].push(currentSegment);
       }
 
-      console.log('[ADRTrackManager] Raw segments (before merging):', 
-        Object.keys(rawSegments).map(s => `${s}: ${rawSegments[s].length} segments`).join(', '));
+      console.log(
+        '[ADRTrackManager] Raw segments (before merging):',
+        Object.keys(rawSegments)
+          .map((s) => `${s}: ${rawSegments[s].length} segments`)
+          .join(', ')
+      );
       console.log(`[ADRTrackManager] Processed ${processedCount} words, skipped ${skippedCount} words`);
 
       // Second pass: Merge nearby segments for the same speaker
       const speakerSegments = {};
-      Object.keys(rawSegments).forEach(speakerId => {
+      Object.keys(rawSegments).forEach((speakerId) => {
         const segments = rawSegments[speakerId];
         if (!segments.length) return;
-        
+
         segments.sort((a, b) => a.start - b.start);
-        
+
         // Merge segments that are close together
         const mergedSegments = [{ ...segments[0] }];
-        
+
         for (let i = 1; i < segments.length; i++) {
           const current = segments[i];
           const last = mergedSegments[mergedSegments.length - 1];
-          
+
           const gap = current.start - last.end;
           if (gap <= CONFIG.SAME_SPEAKER_MERGE_GAP) {
             // Merge: extend the last segment to include this one
@@ -1520,19 +1550,25 @@
             mergedSegments.push({ ...current });
           }
         }
-        
+
         speakerSegments[speakerId] = mergedSegments;
       });
 
-      console.log('[ADRTrackManager] After merging nearby segments:', 
-        Object.keys(speakerSegments).map(s => `${s}: ${speakerSegments[s].length} segments`).join(', '));
+      console.log(
+        '[ADRTrackManager] After merging nearby segments:',
+        Object.keys(speakerSegments)
+          .map((s) => `${s}: ${speakerSegments[s].length} segments`)
+          .join(', ')
+      );
 
       // Third pass: Remove very short segments (noise/interjections)
-      Object.keys(speakerSegments).forEach(speakerId => {
-        speakerSegments[speakerId] = speakerSegments[speakerId].filter(seg => {
+      Object.keys(speakerSegments).forEach((speakerId) => {
+        speakerSegments[speakerId] = speakerSegments[speakerId].filter((seg) => {
           const duration = seg.end - seg.start;
           if (duration < CONFIG.MIN_SEGMENT_DURATION && seg.wordCount < CONFIG.MIN_WORDS_FOR_SPLIT) {
-            console.log(`[ADRTrackManager] Filtering short segment for ${speakerId}: ${duration.toFixed(2)}s (${seg.wordCount} words)`);
+            console.log(
+              `[ADRTrackManager] Filtering short segment for ${speakerId}: ${duration.toFixed(2)}s (${seg.wordCount} words)`
+            );
             return false;
           }
           return true;
@@ -1541,24 +1577,25 @@
 
       // Fourth pass: Add padding and extend to fill gaps between speakers
       const allSegments = [];
-      Object.keys(speakerSegments).forEach(speakerId => {
-        speakerSegments[speakerId].forEach(seg => {
+      Object.keys(speakerSegments).forEach((speakerId) => {
+        speakerSegments[speakerId].forEach((seg) => {
           allSegments.push({ ...seg, speakerId });
         });
       });
       allSegments.sort((a, b) => a.start - b.start);
 
       // Apply padding
-      Object.keys(speakerSegments).forEach(speakerId => {
+      Object.keys(speakerSegments).forEach((speakerId) => {
         const segments = speakerSegments[speakerId];
-        
-        segments.forEach(seg => {
-          const segIndex = allSegments.findIndex(s => 
-            s.speakerId === speakerId && Math.abs(s.start - seg.start) < 0.01);
-          
+
+        segments.forEach((seg) => {
+          const segIndex = allSegments.findIndex(
+            (s) => s.speakerId === speakerId && Math.abs(s.start - seg.start) < 0.01
+          );
+
           const prevSeg = segIndex > 0 ? allSegments[segIndex - 1] : null;
           const nextSeg = segIndex < allSegments.length - 1 ? allSegments[segIndex + 1] : null;
-          
+
           // Extend start backwards
           if (prevSeg) {
             const gap = seg.start - prevSeg.end;
@@ -1569,7 +1606,7 @@
           } else {
             seg.start = Math.max(0, seg.start - CONFIG.SEGMENT_PADDING);
           }
-          
+
           // Extend end forwards
           if (nextSeg) {
             const gap = nextSeg.start - seg.end;
@@ -1581,12 +1618,12 @@
             seg.end = seg.end + CONFIG.SEGMENT_PADDING;
           }
         });
-        
+
         // Ensure no overlapping after padding
         for (let i = segments.length - 1; i > 0; i--) {
           const current = segments[i];
           const previous = segments[i - 1];
-          
+
           if (current.start < previous.end) {
             const midpoint = (previous.end + current.start) / 2;
             previous.end = midpoint;
@@ -1597,10 +1634,10 @@
 
       // Final validation
       let fixedCount = 0;
-      Object.keys(speakerSegments).forEach(speakerId => {
+      Object.keys(speakerSegments).forEach((speakerId) => {
         const segments = speakerSegments[speakerId];
-        
-        segments.forEach(seg => {
+
+        segments.forEach((seg) => {
           if (seg.end <= seg.start) {
             console.warn(`[ADRTrackManager] Fixing invalid segment for ${speakerId}: ${seg.start}-${seg.end}`);
             seg.end = seg.start + CONFIG.MIN_SEGMENT_DURATION;
@@ -1608,26 +1645,28 @@
           }
           delete seg.wordCount;
         });
-        
+
         segments.sort((a, b) => a.start - b.start);
       });
-      
+
       if (fixedCount > 0) {
         console.log(`[ADRTrackManager] Fixed ${fixedCount} segment issues`);
       }
 
       // Debug: Log final segments
-      Object.keys(speakerSegments).forEach(s => {
+      Object.keys(speakerSegments).forEach((s) => {
         const segs = speakerSegments[s];
         if (!segs.length) return;
         const firstSeg = segs[0];
         const lastSeg = segs[segs.length - 1];
         const totalDuration = segs.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
         const avgDuration = totalDuration / segs.length;
-        console.log(`[ADRTrackManager] ${s}: ${segs.length} final segments, ` +
-          `first: ${firstSeg?.start?.toFixed(2)}s-${firstSeg?.end?.toFixed(2)}s, ` +
-          `last: ${lastSeg?.start?.toFixed(2)}s-${lastSeg?.end?.toFixed(2)}s, ` +
-          `total: ${totalDuration.toFixed(2)}s, avg: ${avgDuration.toFixed(2)}s`);
+        console.log(
+          `[ADRTrackManager] ${s}: ${segs.length} final segments, ` +
+            `first: ${firstSeg?.start?.toFixed(2)}s-${firstSeg?.end?.toFixed(2)}s, ` +
+            `last: ${lastSeg?.start?.toFixed(2)}s-${lastSeg?.end?.toFixed(2)}s, ` +
+            `total: ${totalDuration.toFixed(2)}s, avg: ${avgDuration.toFixed(2)}s`
+        );
       });
 
       return speakerSegments;
@@ -1663,7 +1702,7 @@
         endTime: seg.end,
         duration: seg.end - seg.start,
         speakerId: speakerId,
-        isVisualOnly: false
+        isVisualOnly: false,
       }));
 
       // Create the track
@@ -1676,7 +1715,7 @@
         solo: false,
         volume: 1.0,
         clips: clips,
-        color: trackColor
+        color: trackColor,
       };
 
       // Add to tracks array
@@ -1688,9 +1727,11 @@
       }
 
       // Wait for DOM to update before rendering clips
-      await new Promise(resolve => requestAnimationFrame(() => {
-        requestAnimationFrame(resolve);
-      }));
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(resolve);
+        });
+      });
 
       // Render clips on the track
       this._renderSpeakerClips(newTrackId, clips, trackColor);
@@ -1699,7 +1740,7 @@
         trackId: newTrackId,
         speaker: speakerName,
         segments: segments.length,
-        totalDuration: segments.reduce((sum, s) => sum + (s.end - s.start), 0).toFixed(2) + 's'
+        totalDuration: segments.reduce((sum, s) => sum + (s.end - s.start), 0).toFixed(2) + 's',
       });
 
       return newTrack;
@@ -1724,25 +1765,36 @@
       // Get video duration for positioning
       const video = document.getElementById('videoPlayer');
       const totalDuration = video?.duration || this.app.videoInfo?.duration || 1;
-      
-      console.log(`[ADRTrackManager] Rendering ${clips.length} clips on track ${trackId}, video duration: ${totalDuration.toFixed(2)}s`);
+
+      console.log(
+        `[ADRTrackManager] Rendering ${clips.length} clips on track ${trackId}, video duration: ${totalDuration.toFixed(2)}s`
+      );
 
       // Find the original waveform canvas to copy from
-      const originalWaveform = document.querySelector('#audioTrackContainer .waveform-canvas, #audioTrackContainer .audio-waveform, #audioWaveform, canvas[class*="waveform"]');
+      const originalWaveform = document.querySelector(
+        '#audioTrackContainer .waveform-canvas, #audioTrackContainer .audio-waveform, #audioWaveform, canvas[class*="waveform"]'
+      );
       const hasWaveform = originalWaveform && originalWaveform.tagName === 'CANVAS';
-      
+
       if (hasWaveform) {
-        console.log('[ADRTrackManager] Found waveform canvas to copy from:', originalWaveform.width, 'x', originalWaveform.height);
+        console.log(
+          '[ADRTrackManager] Found waveform canvas to copy from:',
+          originalWaveform.width,
+          'x',
+          originalWaveform.height
+        );
       }
 
       // Render each clip
       clips.forEach((clip, idx) => {
         const leftPercent = (clip.startTime / totalDuration) * 100;
         const widthPercent = ((clip.endTime - clip.startTime) / totalDuration) * 100;
-        
+
         // Debug first few clips
         if (idx < 3) {
-          console.log(`[ADRTrackManager] Clip ${idx}: ${clip.startTime.toFixed(2)}s-${clip.endTime.toFixed(2)}s = left:${leftPercent.toFixed(1)}%, width:${widthPercent.toFixed(1)}%`);
+          console.log(
+            `[ADRTrackManager] Clip ${idx}: ${clip.startTime.toFixed(2)}s-${clip.endTime.toFixed(2)}s = left:${leftPercent.toFixed(1)}%, width:${widthPercent.toFixed(1)}%`
+          );
         }
 
         const clipEl = document.createElement('div');
@@ -1768,11 +1820,11 @@
           const waveformCanvas = document.createElement('canvas');
           const clipWidthRatio = (clip.endTime - clip.startTime) / totalDuration;
           const clipStartRatio = clip.startTime / totalDuration;
-          
+
           // Calculate source region from original waveform
           const srcX = Math.floor(clipStartRatio * originalWaveform.width);
           const srcWidth = Math.floor(clipWidthRatio * originalWaveform.width);
-          
+
           // Set canvas size to match the clip portion
           waveformCanvas.width = Math.max(srcWidth, 1);
           waveformCanvas.height = originalWaveform.height;
@@ -1781,16 +1833,22 @@
             height: 100%;
             opacity: 0.8;
           `;
-          
+
           // Copy the relevant portion of the waveform
           const ctx = waveformCanvas.getContext('2d');
           try {
             ctx.drawImage(
               originalWaveform,
-              srcX, 0, srcWidth, originalWaveform.height,  // Source rect
-              0, 0, waveformCanvas.width, waveformCanvas.height  // Dest rect
+              srcX,
+              0,
+              srcWidth,
+              originalWaveform.height, // Source rect
+              0,
+              0,
+              waveformCanvas.width,
+              waveformCanvas.height // Dest rect
             );
-            
+
             // Apply color tint overlay
             ctx.globalCompositeOperation = 'source-atop';
             ctx.fillStyle = color + '40';
@@ -1799,7 +1857,7 @@
           } catch (e) {
             console.warn('[ADRTrackManager] Could not copy waveform portion:', e.message);
           }
-          
+
           clipEl.appendChild(waveformCanvas);
         } else {
           // Fallback: simple striped pattern if no waveform available
@@ -1835,13 +1893,13 @@
 
       // 1. Get transcription words with speaker data
       const words = this.app.teleprompterWords || this.app.transcriptSegments || [];
-      
+
       if (words.length === 0) {
         throw new Error('No transcription data available. Please transcribe the video first.');
       }
 
       // Check if we have speaker data
-      const hasSpeakers = words.some(w => w.speaker || w.speakerId || w.speaker_id);
+      const hasSpeakers = words.some((w) => w.speaker || w.speakerId || w.speaker_id);
       if (!hasSpeakers) {
         throw new Error('No speaker data found. Please transcribe with speaker diarization enabled.');
       }
@@ -1860,7 +1918,7 @@
       const createdTracks = [];
       for (const speakerId of speakerIds) {
         const segments = speakerSegments[speakerId];
-        
+
         // Get speaker name from app's speakerNames map, or format the ID
         let speakerName = this.app.speakerNames?.[speakerId];
         if (!speakerName) {
@@ -1890,15 +1948,15 @@
 
       // Get current words with speaker data
       const words = this.app.teleprompterWords || this.app.transcriptSegments || [];
-      
+
       if (words.length === 0) {
         console.warn('[ADRTrackManager] No words available for clip update');
         return;
       }
 
       // Find all speaker tracks
-      const speakerTracks = this.app.audioTracks?.filter(t => t.type === this.TRACK_TYPES.SPEAKER) || [];
-      
+      const speakerTracks = this.app.audioTracks?.filter((t) => t.type === this.TRACK_TYPES.SPEAKER) || [];
+
       if (speakerTracks.length === 0) {
         console.log('[ADRTrackManager] No speaker tracks to update');
         return;
@@ -1906,9 +1964,13 @@
 
       // Recalculate segments from updated words
       const newSegments = this._groupWordsBySpeaker(words);
-      
-      console.log('[ADRTrackManager] Recalculated segments:', 
-        Object.keys(newSegments).map(s => `${s}: ${newSegments[s].length}`).join(', '));
+
+      console.log(
+        '[ADRTrackManager] Recalculated segments:',
+        Object.keys(newSegments)
+          .map((s) => `${s}: ${newSegments[s].length}`)
+          .join(', ')
+      );
 
       // Get video duration for positioning
       const video = document.getElementById('videoPlayer');
@@ -1918,8 +1980,10 @@
       for (const track of speakerTracks) {
         const speakerId = track.speakerId;
         const newSegs = newSegments[speakerId] || [];
-        
-        console.log(`[ADRTrackManager] Updating track ${track.id} (${speakerId}): ${track.clips?.length || 0} clips -> ${newSegs.length} segments`);
+
+        console.log(
+          `[ADRTrackManager] Updating track ${track.id} (${speakerId}): ${track.clips?.length || 0} clips -> ${newSegs.length} segments`
+        );
 
         // Update track clips
         track.clips = newSegs.map((seg, idx) => ({
@@ -1930,7 +1994,7 @@
           endTime: seg.end,
           duration: seg.end - seg.start,
           speakerId: speakerId,
-          isVisualOnly: false
+          isVisualOnly: false,
         }));
 
         // Re-render clips on this track
@@ -1938,12 +2002,12 @@
       }
 
       // Check if any new speakers need tracks created
-      const existingSpeakerIds = speakerTracks.map(t => t.speakerId);
-      const newSpeakerIds = Object.keys(newSegments).filter(s => !existingSpeakerIds.includes(s));
-      
+      const existingSpeakerIds = speakerTracks.map((t) => t.speakerId);
+      const newSpeakerIds = Object.keys(newSegments).filter((s) => !existingSpeakerIds.includes(s));
+
       if (newSpeakerIds.length > 0) {
         console.log('[ADRTrackManager] Creating tracks for new speakers:', newSpeakerIds);
-        
+
         for (const speakerId of newSpeakerIds) {
           const segments = newSegments[speakerId];
           if (segments && segments.length > 0) {
@@ -1958,13 +2022,13 @@
       }
 
       // Remove tracks for speakers that no longer have any words
-      const emptySpeakers = existingSpeakerIds.filter(s => !newSegments[s] || newSegments[s].length === 0);
+      const emptySpeakers = existingSpeakerIds.filter((s) => !newSegments[s] || newSegments[s].length === 0);
       for (const speakerId of emptySpeakers) {
-        const trackToRemove = speakerTracks.find(t => t.speakerId === speakerId);
+        const trackToRemove = speakerTracks.find((t) => t.speakerId === speakerId);
         if (trackToRemove) {
           console.log(`[ADRTrackManager] Removing empty track for ${speakerId}`);
-          this.app.audioTracks = this.app.audioTracks.filter(t => t.id !== trackToRemove.id);
-          
+          this.app.audioTracks = this.app.audioTracks.filter((t) => t.id !== trackToRemove.id);
+
           // Remove from DOM
           const trackEl = document.getElementById(`track-${trackToRemove.id}`);
           if (trackEl) trackEl.remove();
@@ -1997,11 +2061,13 @@
       const color = track.color || '#4a9eff';
 
       // Find original waveform to copy from
-      const originalWaveform = document.querySelector('#audioTrackContainer .waveform-canvas, #audioTrackContainer .audio-waveform, #audioWaveform, canvas[class*="waveform"]');
+      const originalWaveform = document.querySelector(
+        '#audioTrackContainer .waveform-canvas, #audioTrackContainer .audio-waveform, #audioWaveform, canvas[class*="waveform"]'
+      );
       const hasWaveform = originalWaveform && originalWaveform.tagName === 'CANVAS';
 
       // Render each clip
-      track.clips.forEach((clip, idx) => {
+      track.clips.forEach((clip, _idx) => {
         const leftPercent = (clip.startTime / totalDuration) * 100;
         const widthPercent = ((clip.endTime - clip.startTime) / totalDuration) * 100;
 
@@ -2027,20 +2093,26 @@
           const waveformCanvas = document.createElement('canvas');
           const clipWidthRatio = (clip.endTime - clip.startTime) / totalDuration;
           const clipStartRatio = clip.startTime / totalDuration;
-          
+
           const srcX = Math.floor(clipStartRatio * originalWaveform.width);
           const srcWidth = Math.floor(clipWidthRatio * originalWaveform.width);
-          
+
           waveformCanvas.width = Math.max(srcWidth, 1);
           waveformCanvas.height = originalWaveform.height;
           waveformCanvas.style.cssText = `width: 100%; height: 100%; opacity: 0.8;`;
-          
+
           const ctx = waveformCanvas.getContext('2d');
           try {
             ctx.drawImage(
               originalWaveform,
-              srcX, 0, srcWidth, originalWaveform.height,
-              0, 0, waveformCanvas.width, waveformCanvas.height
+              srcX,
+              0,
+              srcWidth,
+              originalWaveform.height,
+              0,
+              0,
+              waveformCanvas.width,
+              waveformCanvas.height
             );
             ctx.globalCompositeOperation = 'source-atop';
             ctx.fillStyle = color + '40';
@@ -2048,7 +2120,7 @@
           } catch (e) {
             console.warn('[ADRTrackManager] Could not copy waveform:', e.message);
           }
-          
+
           clipEl.appendChild(waveformCanvas);
         } else {
           const waveEl = document.createElement('div');
@@ -2070,7 +2142,7 @@
      */
     hasSpeakerData() {
       const words = this.app.teleprompterWords || this.app.transcriptSegments || [];
-      return words.some(w => w.speaker || w.speakerId || w.speaker_id);
+      return words.some((w) => w.speaker || w.speakerId || w.speaker_id);
     }
   }
 
@@ -2098,7 +2170,7 @@
     _createMenuElement() {
       // Check if menu already exists
       this.menuElement = document.getElementById('trackContextMenu');
-      
+
       if (!this.menuElement) {
         this.menuElement = document.createElement('div');
         this.menuElement.id = 'trackContextMenu';
@@ -2107,8 +2179,9 @@
         document.body.appendChild(this.menuElement);
       }
 
-      this.itemsContainer = this.menuElement.querySelector('#trackContextMenuItems') || 
-                            this.menuElement.querySelector('.context-menu-items');
+      this.itemsContainer =
+        this.menuElement.querySelector('#trackContextMenuItems') ||
+        this.menuElement.querySelector('.context-menu-items');
     }
 
     /**
@@ -2148,11 +2221,11 @@
       // Wait for DOM to be ready
       setTimeout(() => {
         const tracks = this.app.audioTracks || [];
-        
-        tracks.forEach(track => {
-          const trackEl = document.getElementById(`track-${track.id}`) || 
-                          document.querySelector(`[data-track-id="${track.id}"]`);
-          
+
+        tracks.forEach((track) => {
+          const trackEl =
+            document.getElementById(`track-${track.id}`) || document.querySelector(`[data-track-id="${track.id}"]`);
+
           if (trackEl) {
             const label = trackEl.querySelector('.track-label');
             if (label) {
@@ -2169,7 +2242,7 @@
             this.attachToLabel(label, 'A1');
           }
         }
-        
+
         console.log('[TrackContextMenu] Attached to existing tracks');
       }, 500);
     }
@@ -2184,7 +2257,7 @@
     show(trackId, x, y) {
       this.currentTrackId = trackId;
       const track = this.adrManager.findTrack(trackId);
-      
+
       if (!track) {
         // Track not found - this can happen during initialization or if track hasn't been loaded yet
         // Log at debug level instead of error since it's often a timing issue
@@ -2193,7 +2266,7 @@
       }
 
       const items = this._buildMenuItems(track);
-      
+
       if (this.itemsContainer) {
         this.itemsContainer.innerHTML = this._buildMenuHTML(items);
       }
@@ -2256,7 +2329,7 @@
       // Header
       items.push({
         type: 'header',
-        label: `${track.name} (${displayInfo.label})`
+        label: `${track.name} (${displayInfo.label})`,
       });
 
       items.push({ type: 'divider' });
@@ -2266,7 +2339,7 @@
         icon: '📋',
         label: 'Duplicate Track',
         action: 'duplicate',
-        shortcut: '⌘D'
+        shortcut: '⌘D',
       });
 
       // Rename - available for non-original tracks
@@ -2274,7 +2347,7 @@
         icon: '✏️',
         label: 'Rename Track',
         action: 'rename',
-        disabled: isOriginal
+        disabled: isOriginal,
       });
 
       items.push({ type: 'divider' });
@@ -2283,13 +2356,13 @@
       items.push({
         icon: track.solo ? '🔊' : '🎯',
         label: track.solo ? 'Unsolo Track' : 'Solo Track',
-        action: 'toggle-solo'
+        action: 'toggle-solo',
       });
 
       items.push({
         icon: track.muted ? '🔊' : '🔇',
         label: track.muted ? 'Unmute Track' : 'Mute Track',
-        action: 'toggle-mute'
+        action: 'toggle-mute',
       });
 
       items.push({ type: 'divider' });
@@ -2299,7 +2372,7 @@
         icon: '↓',
         label: 'Extract Audio to MP3',
         action: 'extract-audio',
-        shortcut: '⌥E'
+        shortcut: '⌥E',
       });
 
       items.push({ type: 'divider' });
@@ -2309,13 +2382,13 @@
         items.push({
           icon: '📝',
           label: 'Create Working Track',
-          action: 'create-working'
+          action: 'create-working',
         });
-        
+
         items.push({
           icon: '🎵',
           label: 'Create Fill Track (Room Tone)',
-          action: 'create-fill'
+          action: 'create-fill',
         });
 
         // Split by speaker - only show if speaker data exists
@@ -2323,7 +2396,7 @@
           items.push({
             icon: '👥',
             label: 'Split All Speakers',
-            action: 'split-speakers'
+            action: 'split-speakers',
           });
         }
       }
@@ -2333,7 +2406,7 @@
       items.push({
         icon: '🎤',
         label: 'Create Custom Voice from Track',
-        action: 'create-voice'
+        action: 'create-voice',
       });
 
       // Language/Voice transformation section
@@ -2341,12 +2414,12 @@
       items.push({
         icon: '🌍',
         label: 'Change Language...',
-        action: 'change-language'
+        action: 'change-language',
       });
       items.push({
         icon: '🎭',
         label: 'Change Voice...',
-        action: 'change-voice'
+        action: 'change-voice',
       });
 
       // Delete - not for original track
@@ -2356,7 +2429,7 @@
           icon: '🗑️',
           label: 'Delete Track',
           action: 'delete',
-          danger: true
+          danger: true,
         });
       }
 
@@ -2368,7 +2441,7 @@
      */
     _buildMenuHTML(items) {
       let html = '';
-      
+
       for (const item of items) {
         if (item.type === 'header') {
           html += `<div class="context-menu-header">${item.label}</div>`;
@@ -2378,7 +2451,7 @@
           const disabledClass = item.disabled ? 'disabled' : '';
           const dangerClass = item.danger ? 'danger' : '';
           const dataAction = item.action ? `data-action="${item.action}"` : '';
-          
+
           html += `
             <div class="context-menu-item ${disabledClass} ${dangerClass}" ${dataAction}>
               ${item.icon ? `<span class="context-menu-item-icon">${item.icon}</span>` : ''}
@@ -2388,7 +2461,7 @@
           `;
         }
       }
-      
+
       return html;
     }
 
@@ -2397,7 +2470,7 @@
      */
     _handleAction(action) {
       const trackId = this.currentTrackId;
-      
+
       if (!trackId) {
         console.error('[TrackContextMenu] No track selected');
         this.hide();
@@ -2491,17 +2564,17 @@
       try {
         // Push undo state BEFORE making changes
         this.app.pushUndoState && this.app.pushUndoState('Split by speaker');
-        
+
         this.app.showProgress && this.app.showProgress('Splitting Speakers', 'Analyzing speaker segments...');
         const tracks = await this.adrManager.splitBySpeaker(trackId);
         this.app.hideProgress && this.app.hideProgress();
-        
+
         // Save immediately so speaker tracks persist to the project
         if (this.app.saveCurrentVersion) {
           await this.app.saveCurrentVersion();
           console.log('[TrackContextMenu] Speaker tracks saved to project');
         }
-        
+
         this.app.showToast && this.app.showToast('success', `Created ${tracks.length} speaker tracks`);
       } catch (error) {
         console.error('[TrackContextMenu] Split speakers error:', error);
@@ -2517,9 +2590,9 @@
       try {
         // Push undo state BEFORE making changes
         this.app.pushUndoState && this.app.pushUndoState('Create fill track');
-        
+
         await this.adrManager.createFillTrack();
-        
+
         // Save immediately so fill track persists to the project
         if (this.app.saveCurrentVersion) {
           await this.app.saveCurrentVersion();
@@ -2541,8 +2614,7 @@
       // Use track name as default suggestion for voice name
       const defaultName = track.name || 'Custom Voice';
       const voiceName = prompt(
-        'Enter name for your custom voice:\n\n' +
-        '(This will clone the voice from this track\'s audio)',
+        'Enter name for your custom voice:\n\n' + "(This will clone the voice from this track's audio)",
         defaultName
       );
       if (!voiceName || !voiceName.trim()) return;
@@ -2567,22 +2639,22 @@
       if (newName && newName.trim()) {
         // Push undo state BEFORE making changes
         this.app.pushUndoState && this.app.pushUndoState(`Rename track to "${newName.trim()}"`);
-        
+
         track.name = newName.trim();
-        
+
         // Update UI
         const nameEl = document.querySelector(`#track-${trackId} .track-name`);
         if (nameEl) {
           nameEl.textContent = track.name;
         }
-        
+
         // Save immediately so rename persists
         if (this.app.saveCurrentVersion) {
           this.app.saveCurrentVersion().then(() => {
             console.log('[TrackContextMenu] Track rename saved to project');
           });
         }
-        
+
         this.app.showToast && this.app.showToast('success', `Renamed to "${track.name}"`);
       }
     }
@@ -2597,9 +2669,9 @@
       if (confirm(`Delete "${track.name}" track?`)) {
         // Push undo state BEFORE making changes (so user can undo delete)
         this.app.pushUndoState && this.app.pushUndoState(`Delete track "${track.name}"`);
-        
+
         this.app.removeTrack && this.app.removeTrack(trackId);
-        
+
         // Save immediately so deletion persists
         if (this.app.saveCurrentVersion) {
           this.app.saveCurrentVersion().then(() => {
@@ -2618,7 +2690,8 @@
 
       // Check if transcription exists
       if (!this.app.transcriptSegments || this.app.transcriptSegments.length === 0) {
-        this.app.showToast && this.app.showToast('warning', 'Please transcribe the audio first before changing language');
+        this.app.showToast &&
+          this.app.showToast('warning', 'Please transcribe the audio first before changing language');
         return;
       }
 
@@ -2638,7 +2711,7 @@
         { code: 'ru', name: 'Russian' },
         { code: 'nl', name: 'Dutch' },
         { code: 'tr', name: 'Turkish' },
-        { code: 'sv', name: 'Swedish' }
+        { code: 'sv', name: 'Swedish' },
       ];
 
       const dialog = document.createElement('div');
@@ -2658,7 +2731,7 @@
 
             <label style="display: block; margin-bottom: 8px; font-weight: 500;">Target Language:</label>
             <select id="targetLanguageSelect" class="input" style="width: 100%; padding: 8px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
-              ${languages.map(lang => `<option value="${lang.code}">${lang.name}</option>`).join('')}
+              ${languages.map((lang) => `<option value="${lang.code}">${lang.name}</option>`).join('')}
             </select>
 
             <div style="margin-top: 16px; padding: 12px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.3);">
@@ -2681,7 +2754,7 @@
       // Handle start button
       document.getElementById('startChangeLanguageBtn').onclick = async () => {
         const languageCode = document.getElementById('targetLanguageSelect').value;
-        const languageName = languages.find(l => l.code === languageCode)?.name || languageCode;
+        const languageName = languages.find((l) => l.code === languageCode)?.name || languageCode;
 
         dialog.remove();
 
@@ -2719,7 +2792,7 @@
         { id: 'XB0fDUnXU5powFXDhCwa', name: 'Charlotte' },
         { id: 'Xb7hH8MSUJpSbSDYk0k2', name: 'Alice' },
         { id: 'pFZP5JQG7iQjIQuC4Bku', name: 'Lily' },
-        { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam' }
+        { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam' },
       ];
 
       const dialog = document.createElement('div');
@@ -2739,7 +2812,7 @@
 
             <label style="display: block; margin-bottom: 8px; font-weight: 500;">Select Voice:</label>
             <select id="targetVoiceSelect" class="input" style="width: 100%; padding: 8px; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
-              ${voices.map(voice => `<option value="${voice.id}">${voice.name}</option>`).join('')}
+              ${voices.map((voice) => `<option value="${voice.id}">${voice.name}</option>`).join('')}
             </select>
 
             <div style="margin-top: 16px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; border: 1px solid rgba(139, 92, 246, 0.3);">
@@ -2762,7 +2835,7 @@
       // Handle start button
       document.getElementById('startChangeVoiceBtn').onclick = async () => {
         const voiceId = document.getElementById('targetVoiceSelect').value;
-        const voiceName = voices.find(v => v.id === voiceId)?.name || 'Custom';
+        const voiceName = voices.find((v) => v.id === voiceId)?.name || 'Custom';
 
         dialog.remove();
 
@@ -2788,12 +2861,13 @@
 
       // Find or create the target track
       const targetTrackName = `Dub: ${languageName}`;
-      const targetTrack = this.app.findOrCreateTrack 
+      const targetTrack = this.app.findOrCreateTrack
         ? this.app.findOrCreateTrack(targetTrackName, 'dub')
         : this._findOrCreateTrack(targetTrackName, 'dub');
 
       // Show progress
-      this.app.showProgress && this.app.showProgress(`Dubbing to ${languageName}`, `Processing ${segments.length} segments...`);
+      this.app.showProgress &&
+        this.app.showProgress(`Dubbing to ${languageName}`, `Processing ${segments.length} segments...`);
 
       let successCount = 0;
       let errorCount = 0;
@@ -2803,11 +2877,12 @@
           const segment = segments[i];
           const segmentDuration = segment.end - segment.start;
 
-          this.app.showProgress && this.app.showProgress(
-            `Dubbing to ${languageName}`,
-            `Segment ${i + 1}/${segments.length}: "${segment.text?.substring(0, 30)}..."`,
-            Math.round(((i + 1) / segments.length) * 100)
-          );
+          this.app.showProgress &&
+            this.app.showProgress(
+              `Dubbing to ${languageName}`,
+              `Segment ${i + 1}/${segments.length}: "${segment.text?.substring(0, 30)}..."`,
+              Math.round(((i + 1) / segments.length) * 100)
+            );
 
           try {
             // Extract audio segment
@@ -2818,7 +2893,7 @@
               videoPath: segmentPath,
               targetLanguages: [languageCode],
               sourceLanguage: 'en',
-              numSpeakers: 1
+              numSpeakers: 1,
             });
 
             if (!createResult.success) {
@@ -2839,12 +2914,11 @@
               duration: segmentDuration,
               type: 'dub',
               language: languageName,
-              sourceSegmentIndex: i
+              sourceSegmentIndex: i,
             };
 
             this.app.addClipToTrack && this.app.addClipToTrack(targetTrack.id, clip);
             successCount++;
-
           } catch (segmentError) {
             console.error('[TrackContextMenu] Segment dubbing error:', i, segmentError);
             errorCount++;
@@ -2861,9 +2935,9 @@
         if (errorCount === 0) {
           this.app.showToast && this.app.showToast('success', `✅ Dubbed ${successCount} segments to ${languageName}`);
         } else {
-          this.app.showToast && this.app.showToast('warning', `Dubbed ${successCount}/${segments.length} segments (${errorCount} failed)`);
+          this.app.showToast &&
+            this.app.showToast('warning', `Dubbed ${successCount}/${segments.length} segments (${errorCount} failed)`);
         }
-
       } catch (error) {
         console.error('[TrackContextMenu] Track dubbing error:', error);
         this.app.hideProgress && this.app.hideProgress();
@@ -2888,12 +2962,13 @@
 
       // Find or create the target track
       const targetTrackName = `Voice: ${voiceName}`;
-      const targetTrack = this.app.findOrCreateTrack 
+      const targetTrack = this.app.findOrCreateTrack
         ? this.app.findOrCreateTrack(targetTrackName, 'voice')
         : this._findOrCreateTrack(targetTrackName, 'voice');
 
       // Show progress
-      this.app.showProgress && this.app.showProgress(`Generating ${voiceName} voice`, `Processing ${segments.length} segments...`);
+      this.app.showProgress &&
+        this.app.showProgress(`Generating ${voiceName} voice`, `Processing ${segments.length} segments...`);
 
       let successCount = 0;
       let errorCount = 0;
@@ -2903,18 +2978,19 @@
           const segment = segments[i];
           const segmentDuration = segment.end - segment.start;
 
-          this.app.showProgress && this.app.showProgress(
-            `Generating ${voiceName} voice`,
-            `Segment ${i + 1}/${segments.length}: "${segment.text?.substring(0, 30)}..."`,
-            Math.round(((i + 1) / segments.length) * 100)
-          );
+          this.app.showProgress &&
+            this.app.showProgress(
+              `Generating ${voiceName} voice`,
+              `Segment ${i + 1}/${segments.length}: "${segment.text?.substring(0, 30)}..."`,
+              Math.round(((i + 1) / segments.length) * 100)
+            );
 
           try {
             // Generate TTS with duration constraint
             const result = await window.videoEditor.generateTimedTTS({
               text: segment.text,
               voiceId: voiceId,
-              targetDuration: segmentDuration
+              targetDuration: segmentDuration,
             });
 
             if (!result.success) {
@@ -2932,12 +3008,11 @@
               type: 'voice',
               voiceId: voiceId,
               voiceName: voiceName,
-              sourceSegmentIndex: i
+              sourceSegmentIndex: i,
             };
 
             this.app.addClipToTrack && this.app.addClipToTrack(targetTrack.id, clip);
             successCount++;
-
           } catch (segmentError) {
             console.error('[TrackContextMenu] Segment voice change error:', i, segmentError);
             errorCount++;
@@ -2952,11 +3027,15 @@
         }
 
         if (errorCount === 0) {
-          this.app.showToast && this.app.showToast('success', `✅ Generated ${successCount} segments with ${voiceName} voice`);
+          this.app.showToast &&
+            this.app.showToast('success', `✅ Generated ${successCount} segments with ${voiceName} voice`);
         } else {
-          this.app.showToast && this.app.showToast('warning', `Generated ${successCount}/${segments.length} segments (${errorCount} failed)`);
+          this.app.showToast &&
+            this.app.showToast(
+              'warning',
+              `Generated ${successCount}/${segments.length} segments (${errorCount} failed)`
+            );
         }
-
       } catch (error) {
         console.error('[TrackContextMenu] Voice change error:', error);
         this.app.hideProgress && this.app.hideProgress();
@@ -2969,7 +3048,7 @@
      */
     _findOrCreateTrack(trackName, trackType) {
       // Search existing tracks by name
-      let track = this.app.audioTracks?.find(t => t.name === trackName);
+      let track = this.app.audioTracks?.find((t) => t.name === trackName);
 
       if (!track) {
         // Create ONE new track
@@ -2981,7 +3060,7 @@
           muted: false,
           solo: false,
           volume: 1.0,
-          clips: []
+          clips: [],
         };
         this.app.audioTracks.push(track);
         this.app.renderAudioTrack && this.app.renderAudioTrack(track);
@@ -3005,7 +3084,7 @@
         }
         throw new Error(result.error || 'Failed to extract audio segment');
       }
-      
+
       // Fallback: extract video segment (dubbing API accepts video too)
       if (this.app.extractVideoSegment) {
         return await this.app.extractVideoSegment(startTime, endTime);
@@ -3036,7 +3115,9 @@
         }
 
         // Wait 5 seconds before checking again
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5000);
+        });
         attempts++;
       }
 
@@ -3054,7 +3135,7 @@
       labelElement.addEventListener('contextmenu', (e) => {
         // Try to show the track context menu
         const success = this.show(trackId, e.clientX, e.clientY);
-        
+
         // Only prevent default if we successfully showed the menu
         if (success) {
           e.preventDefault();
@@ -3062,7 +3143,7 @@
         }
         // If show() failed, let the event bubble up so the global handler can show audioTrack menu
       });
-      
+
       labelElement.dataset.contextMenuAttached = 'true';
       labelElement.style.cursor = 'context-menu';
     }
@@ -3071,25 +3152,7 @@
   // ============================================================================
   // Export to global scope
   // ============================================================================
-  
+
   global.ADRTrackManager = ADRTrackManager;
   global.TrackContextMenu = TrackContextMenu;
-
 })(typeof window !== 'undefined' ? window : this);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

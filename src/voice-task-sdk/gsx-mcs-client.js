@@ -1,6 +1,6 @@
 /**
  * GSX MCS Client
- * 
+ *
  * Connects to GSX/MCS servers for remote agent integration.
  * Uses WebSocket for real-time communication and HTTP for configuration.
  */
@@ -19,13 +19,13 @@ const log = getLogQueue();
 class GSXMCSClient extends EventEmitter {
   constructor(config) {
     super();
-    
+
     this.id = config.id;
     this.name = config.name;
     this.wsUrl = config.url;
     this.httpUrl = config.configUrl || this.deriveHttpUrl(config.url);
     this.apiKey = config.apiKey;
-    
+
     this.ws = null;
     this.connected = false;
     this.reconnecting = false;
@@ -33,10 +33,10 @@ class GSXMCSClient extends EventEmitter {
     this.maxReconnectAttempts = 10;
     this.reconnectIntervalMs = 3000;
     this.heartbeatInterval = null;
-    
+
     this.agents = [];
   }
-  
+
   /**
    * Derive HTTP URL from WebSocket URL
    */
@@ -46,43 +46,43 @@ class GSXMCSClient extends EventEmitter {
       url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
       url.pathname = '/api';
       return url.toString();
-    } catch (e) {
+    } catch (_e) {
       return null;
     }
   }
-  
+
   /**
    * Connect to the MCS server
    */
   async connect() {
     if (this.connected || this.reconnecting) return;
-    
+
     log.info('voice', '[MCSClient:${this.name}] Connecting to ...', { v0: this.wsUrl });
-    
+
     try {
       this.ws = new WebSocket(this.wsUrl, {
-        headers: this.apiKey ? { 'Authorization': `Bearer ${this.apiKey}` } : {},
+        headers: this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {},
       });
-      
+
       this.ws.on('open', () => {
         log.info('voice', '[MCSClient:${this.name}] Connected');
         this.connected = true;
         this.reconnecting = false;
         this.reconnectAttempts = 0;
-        
+
         // Start heartbeat
         this.startHeartbeat();
-        
+
         // Register with server
         this.send({
           type: 'register',
           clientType: 'desktop-app',
           version: '1.0.0',
         });
-        
+
         this.emit('connected');
       });
-      
+
       this.ws.on('message', (data) => {
         try {
           const message = JSON.parse(data.toString());
@@ -91,45 +91,44 @@ class GSXMCSClient extends EventEmitter {
           log.error('voice', '[MCSClient:${this.name}] Invalid message:', { arg0: e });
         }
       });
-      
+
       this.ws.on('close', (code, reason) => {
         log.info('voice', '[MCSClient] Disconnected', { name: this.name, code, reason: reason?.toString() });
         this.connected = false;
         this.stopHeartbeat();
         this.emit('disconnected', { code, reason: reason?.toString() });
-        
+
         // Attempt reconnection
         this.scheduleReconnect();
       });
-      
+
       this.ws.on('error', (error) => {
         log.error('voice', '[MCSClient:${this.name}] WebSocket error:', { arg0: error.message });
         this.emit('error', error);
       });
-      
     } catch (error) {
       log.error('voice', '[MCSClient:${this.name}] Connection failed:', { arg0: error });
       this.emit('error', error);
       this.scheduleReconnect();
     }
   }
-  
+
   /**
    * Disconnect from the MCS server
    */
   disconnect() {
     this.reconnecting = false;
     this.stopHeartbeat();
-    
+
     if (this.ws) {
       this.ws.close(1000, 'Client disconnect');
       this.ws = null;
     }
-    
+
     this.connected = false;
     log.info('voice', '[MCSClient:${this.name}] Disconnected');
   }
-  
+
   /**
    * Schedule reconnection attempt
    */
@@ -141,18 +140,21 @@ class GSXMCSClient extends EventEmitter {
       }
       return;
     }
-    
+
     this.reconnecting = true;
     this.reconnectAttempts++;
-    
-    log.info('voice', '[MCSClient:${this.name}] Reconnecting in ms (attempt )', { v0: this.reconnectIntervalMs, v1: this.reconnectAttempts });
-    
+
+    log.info('voice', '[MCSClient:${this.name}] Reconnecting in ms (attempt )', {
+      v0: this.reconnectIntervalMs,
+      v1: this.reconnectAttempts,
+    });
+
     setTimeout(() => {
       this.reconnecting = false;
       this.connect();
     }, this.reconnectIntervalMs);
   }
-  
+
   /**
    * Start heartbeat
    */
@@ -163,7 +165,7 @@ class GSXMCSClient extends EventEmitter {
       }
     }, 30000);
   }
-  
+
   /**
    * Stop heartbeat
    */
@@ -173,7 +175,7 @@ class GSXMCSClient extends EventEmitter {
       this.heartbeatInterval = null;
     }
   }
-  
+
   /**
    * Send a message to the server
    */
@@ -182,7 +184,7 @@ class GSXMCSClient extends EventEmitter {
       log.warn('voice', '[MCSClient:${this.name}] Not connected, cannot send');
       return false;
     }
-    
+
     try {
       this.ws.send(JSON.stringify(message));
       return true;
@@ -191,7 +193,7 @@ class GSXMCSClient extends EventEmitter {
       return false;
     }
   }
-  
+
   /**
    * Handle incoming message
    */
@@ -200,29 +202,29 @@ class GSXMCSClient extends EventEmitter {
       case 'pong':
         // Heartbeat response
         break;
-        
+
       case 'agents':
         // List of available agents
         this.agents = message.agents || [];
         log.info('voice', '[MCSClient:${this.name}] Received agents', { v0: this.agents.length });
         this.emit('agents', this.agents);
         break;
-        
+
       case 'task_result':
         // Result from a task execution
         this.emit('task_result', message);
         break;
-        
+
       case 'error':
         log.error('voice', '[MCSClient:${this.name}] Server error:', { arg0: message.error });
         this.emit('server_error', message);
         break;
-        
+
       default:
         this.emit('message', message);
     }
   }
-  
+
   /**
    * Fetch available agents via HTTP
    */
@@ -230,46 +232,46 @@ class GSXMCSClient extends EventEmitter {
     if (!this.httpUrl) {
       throw new Error('No HTTP URL configured');
     }
-    
+
     log.info('voice', '[MCSClient:${this.name}] Fetching agents from /agents', { v0: this.httpUrl });
-    
+
     return new Promise((resolve, reject) => {
       const url = new URL(`${this.httpUrl}/agents`);
       const isHttps = url.protocol === 'https:';
       const lib = isHttps ? https : http;
-      
+
       const options = {
         hostname: url.hostname,
         port: url.port || (isHttps ? 443 : 80),
         path: url.pathname,
         method: 'GET',
         headers: {
-          'Accept': 'application/json',
-          ...(this.apiKey ? { 'Authorization': `Bearer ${this.apiKey}` } : {}),
+          Accept: 'application/json',
+          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
         },
       };
-      
+
       const req = lib.request(options, (res) => {
         let data = '';
-        
-        res.on('data', chunk => data += chunk);
+
+        res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
           try {
             if (res.statusCode >= 400) {
               reject(new Error(`HTTP ${res.statusCode}: ${data}`));
               return;
             }
-            
+
             const json = JSON.parse(data);
             this.agents = json.agents || json || [];
             log.info('voice', '[MCSClient:${this.name}] Fetched agents', { v0: this.agents.length });
             resolve(this.agents);
-          } catch (e) {
+          } catch (_e) {
             reject(new Error('Failed to parse response'));
           }
         });
       });
-      
+
       req.on('error', reject);
       req.setTimeout(10000, () => {
         req.destroy();
@@ -278,7 +280,7 @@ class GSXMCSClient extends EventEmitter {
       req.end();
     });
   }
-  
+
   /**
    * Send a task to a specific agent
    */
@@ -286,7 +288,7 @@ class GSXMCSClient extends EventEmitter {
     if (!this.connected) {
       throw new Error('Not connected to MCS server');
     }
-    
+
     const taskMessage = {
       type: 'task',
       agentId,
@@ -296,17 +298,17 @@ class GSXMCSClient extends EventEmitter {
         metadata: task.metadata || {},
       },
     };
-    
+
     log.info('voice', '[MCSClient:${this.name}] Sending task to agent', { v0: agentId });
     this.send(taskMessage);
-    
+
     // Return a promise that resolves when we get the result
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.removeListener('task_result', handler);
         reject(new Error('Task timeout'));
       }, 60000); // 60 second timeout
-      
+
       const handler = (result) => {
         if (result.taskId === taskMessage.task.id) {
           clearTimeout(timeout);
@@ -314,11 +316,11 @@ class GSXMCSClient extends EventEmitter {
           resolve(result);
         }
       };
-      
+
       this.on('task_result', handler);
     });
   }
-  
+
   /**
    * Get connection status
    */
@@ -341,7 +343,7 @@ class MCSClientManager {
   constructor() {
     this.clients = new Map();
   }
-  
+
   /**
    * Add a client
    */
@@ -350,14 +352,14 @@ class MCSClientManager {
       log.warn('voice', '[MCSManager] Client already exists', { v0: config.id });
       return this.clients.get(config.id);
     }
-    
+
     const client = new GSXMCSClient(config);
     this.clients.set(config.id, client);
-    
+
     log.info('voice', '[MCSManager] Added client:', { v0: config.name });
     return client;
   }
-  
+
   /**
    * Remove a client
    */
@@ -369,21 +371,21 @@ class MCSClientManager {
       log.info('voice', '[MCSManager] Removed client:', { v0: id });
     }
   }
-  
+
   /**
    * Get a client
    */
   getClient(id) {
     return this.clients.get(id);
   }
-  
+
   /**
    * Get all clients
    */
   getAllClients() {
     return Array.from(this.clients.values());
   }
-  
+
   /**
    * Connect all enabled clients
    */
@@ -394,7 +396,7 @@ class MCSClientManager {
     }
     await Promise.allSettled(promises);
   }
-  
+
   /**
    * Disconnect all clients
    */
@@ -403,7 +405,7 @@ class MCSClientManager {
       client.disconnect();
     }
   }
-  
+
   /**
    * Get all agents from all connected clients
    */

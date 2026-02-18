@@ -6,12 +6,14 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 vi.mock('highlight.js', () => ({
   default: {
     highlightAuto: vi.fn().mockReturnValue({
-      value: '<span class="hljs-keyword">function</span> <span class="hljs-title">hello</span>() { <span class="hljs-keyword">return</span> <span class="hljs-string">&quot;world&quot;</span>; }',
+      value:
+        '<span class="hljs-keyword">function</span> <span class="hljs-title">hello</span>() { <span class="hljs-keyword">return</span> <span class="hljs-string">&quot;world&quot;</span>; }',
       language: 'javascript',
       relevance: 10,
     }),
     highlight: vi.fn().mockReturnValue({
-      value: '<span class="hljs-keyword">function</span> <span class="hljs-title">hello</span>() { <span class="hljs-keyword">return</span> <span class="hljs-string">&quot;world&quot;</span>; }',
+      value:
+        '<span class="hljs-keyword">function</span> <span class="hljs-title">hello</span>() { <span class="hljs-keyword">return</span> <span class="hljs-string">&quot;world&quot;</span>; }',
     }),
     getLanguage: vi.fn().mockReturnValue(true),
     listLanguages: vi.fn().mockReturnValue(['javascript', 'python', 'typescript']),

@@ -4,7 +4,6 @@
  */
 
 import { TranslationEvaluator } from './TranslationEvaluator.js';
-import https from 'https';
 import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
@@ -30,7 +29,7 @@ export class TranslationPipeline {
     const settingsPath = path.join(app.getPath('userData'), 'settings.json');
     let openaiKey = null;
     let anthropicKey = null;
-    
+
     if (fs.existsSync(settingsPath)) {
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       openaiKey = settings.openaiApiKey;
@@ -55,7 +54,7 @@ export class TranslationPipeline {
       videoContext = 'general',
       tone = 'professional',
       maxIterations = 5,
-      qualityThreshold = 9.0
+      qualityThreshold = 9.0,
     } = options;
 
     const { openaiKey, anthropicKey } = this.getApiKeys();
@@ -73,13 +72,17 @@ export class TranslationPipeline {
 
       // Step 1: Translate (or refine)
       if (i === 1) {
-        currentTranslation = await this.translateText(sourceText, {
-          sourceLanguage,
-          targetLanguage,
-          sourceDuration,
-          videoContext,
-          tone
-        }, openaiKey);
+        currentTranslation = await this.translateText(
+          sourceText,
+          {
+            sourceLanguage,
+            targetLanguage,
+            sourceDuration,
+            videoContext,
+            tone,
+          },
+          openaiKey
+        );
       } else {
         // Refine based on previous feedback
         currentTranslation = await this.refineTranslation(
@@ -102,31 +105,36 @@ export class TranslationPipeline {
       iterations.push({
         iteration: i,
         translation: currentTranslation,
-        evaluation: currentEvaluation
+        evaluation: currentEvaluation,
       });
 
       // Check if we've reached quality threshold
       if (currentEvaluation.composite >= qualityThreshold) {
-        log.info('video', '[TranslationPipeline] Quality threshold met at iteration :', { v0: i, v1: currentEvaluation.composite });
+        log.info('video', '[TranslationPipeline] Quality threshold met at iteration :', {
+          v0: i,
+          v1: currentEvaluation.composite,
+        });
         return {
           success: true,
           translation: currentTranslation,
           finalScore: currentEvaluation.composite,
           iterations: iterations,
-          evaluation: currentEvaluation
+          evaluation: currentEvaluation,
         };
       }
 
       // If we've exhausted iterations
       if (i === maxIterations) {
-        log.info('video', '[TranslationPipeline] Max iterations reached. Final score:', { v0: currentEvaluation.composite });
+        log.info('video', '[TranslationPipeline] Max iterations reached. Final score:', {
+          v0: currentEvaluation.composite,
+        });
         return {
           success: false,
           translation: currentTranslation,
           finalScore: currentEvaluation.composite,
           iterations: iterations,
           evaluation: currentEvaluation,
-          warning: `Quality threshold (${qualityThreshold}) not met after ${maxIterations} iterations`
+          warning: `Quality threshold (${qualityThreshold}) not met after ${maxIterations} iterations`,
         };
       }
     }
@@ -139,7 +147,7 @@ export class TranslationPipeline {
    * @param {string} apiKey - OpenAI API key
    * @returns {Promise<string>} Translated text
    */
-  async translateText(sourceText, options, apiKey) {
+  async translateText(sourceText, options, _apiKey) {
     const { sourceLanguage, targetLanguage, sourceDuration, videoContext, tone } = options;
 
     const systemPrompt = `You are a professional video translator specializing in high-quality dubbing translations.
@@ -171,9 +179,9 @@ TRANSLATION:`;
         messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
         maxTokens: 2000,
-        feature: 'translation-pipeline'
+        feature: 'translation-pipeline',
       });
-      
+
       const translation = result.content.trim();
       // Remove quotes if the model added them
       return translation.replace(/^["']|["']$/g, '');
@@ -191,7 +199,7 @@ TRANSLATION:`;
    * @param {string} apiKey - OpenAI API key
    * @returns {Promise<string>} Refined translation
    */
-  async refineTranslation(sourceText, currentTranslation, improvements, options, apiKey) {
+  async refineTranslation(sourceText, currentTranslation, improvements, options, _apiKey) {
     const { sourceLanguage, targetLanguage, sourceDuration } = options;
 
     const systemPrompt = `You are a professional translation editor. Your task is to improve an existing translation based on specific feedback.
@@ -224,30 +232,14 @@ IMPROVED TRANSLATION:`;
         messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.3,
         maxTokens: 2000,
-        feature: 'translation-pipeline'
+        feature: 'translation-pipeline',
       });
-      
+
       const refined = result.content.trim();
       return refined.replace(/^["']|["']$/g, '');
-    } catch (err) {
+    } catch (_err) {
       // Return current translation if refinement fails
       return currentTranslation;
     }
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

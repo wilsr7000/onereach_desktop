@@ -12,7 +12,7 @@ export const app = {
   isReady: vi.fn(() => true),
   whenReady: vi.fn(() => Promise.resolve()),
   on: vi.fn(),
-  quit: vi.fn()
+  quit: vi.fn(),
 };
 
 export const ipcMain = {
@@ -20,7 +20,7 @@ export const ipcMain = {
   on: vi.fn(),
   once: vi.fn(),
   removeHandler: vi.fn(),
-  removeListener: vi.fn()
+  removeListener: vi.fn(),
 };
 
 export const ipcRenderer = {
@@ -28,7 +28,7 @@ export const ipcRenderer = {
   on: vi.fn(),
   once: vi.fn(),
   send: vi.fn(),
-  removeListener: vi.fn()
+  removeListener: vi.fn(),
 };
 
 export const BrowserWindow = vi.fn().mockImplementation(() => ({
@@ -42,23 +42,23 @@ export const BrowserWindow = vi.fn().mockImplementation(() => ({
   webContents: {
     send: vi.fn(),
     on: vi.fn(),
-    executeJavaScript: vi.fn(() => Promise.resolve())
+    executeJavaScript: vi.fn(() => Promise.resolve()),
   },
   on: vi.fn(),
-  once: vi.fn()
+  once: vi.fn(),
 }));
 
 export const dialog = {
   showOpenDialog: vi.fn(() => Promise.resolve({ canceled: false, filePaths: ['/mock/file.txt'] })),
   showSaveDialog: vi.fn(() => Promise.resolve({ canceled: false, filePath: '/mock/save.txt' })),
   showMessageBox: vi.fn(() => Promise.resolve({ response: 0 })),
-  showErrorBox: vi.fn()
+  showErrorBox: vi.fn(),
 };
 
 export const shell = {
   openExternal: vi.fn(() => Promise.resolve()),
   openPath: vi.fn(() => Promise.resolve('')),
-  showItemInFolder: vi.fn()
+  showItemInFolder: vi.fn(),
 };
 
 export const clipboard = {
@@ -67,7 +67,7 @@ export const clipboard = {
   readImage: vi.fn(() => ({ isEmpty: () => true })),
   writeImage: vi.fn(),
   readHTML: vi.fn(() => ''),
-  writeHTML: vi.fn()
+  writeHTML: vi.fn(),
 };
 
 export default {
@@ -77,7 +77,5 @@ export default {
   BrowserWindow,
   dialog,
   shell,
-  clipboard
+  clipboard,
 };
-
-

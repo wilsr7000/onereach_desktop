@@ -11,15 +11,17 @@ function MockAdmZip() {
   this.getEntries = vi.fn().mockReturnValue([
     {
       entryName: 'ppt/slides/slide1.xml',
-      getData: vi.fn().mockReturnValue(
-        Buffer.from('<p:sld><a:p><a:t>Welcome</a:t></a:p><a:p><a:t>Introduction content</a:t></a:p></p:sld>'),
-      ),
+      getData: vi
+        .fn()
+        .mockReturnValue(
+          Buffer.from('<p:sld><a:p><a:t>Welcome</a:t></a:p><a:p><a:t>Introduction content</a:t></a:p></p:sld>')
+        ),
     },
     {
       entryName: 'ppt/slides/slide2.xml',
-      getData: vi.fn().mockReturnValue(
-        Buffer.from('<p:sld><a:p><a:t>Key Points</a:t></a:p><a:p><a:t>Point A</a:t></a:p></p:sld>'),
-      ),
+      getData: vi
+        .fn()
+        .mockReturnValue(Buffer.from('<p:sld><a:p><a:t>Key Points</a:t></a:p><a:p><a:t>Point A</a:t></a:p></p:sld>')),
     },
   ]);
 }
@@ -42,7 +44,7 @@ const { PptxToMdAgent } = require('../../../lib/converters/pptx-to-md.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(PptxToMdAgent, {
-  sampleInput: Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)]),
+  sampleInput: Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)]),
   expectedFromFormats: ['pptx'],
   expectedToFormats: ['md', 'markdown'],
   expectedStrategies: ['flat', 'sectioned', 'enhanced'],
@@ -75,7 +77,7 @@ describe('PptxToMdAgent (specific)', () => {
     await agent.execute(Buffer.from('mock-pptx'), 'enhanced');
     expect(mockAI.complete).toHaveBeenCalledWith(
       expect.stringContaining('Improve the following Markdown'),
-      expect.objectContaining({ profile: 'fast' }),
+      expect.objectContaining({ profile: 'fast' })
     );
   });
 });

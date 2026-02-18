@@ -1,6 +1,6 @@
 /**
  * Conversation State Manager
- * 
+ *
  * Manages conversational context for the voice assistant:
  * - Pending questions (agent needs more info)
  * - Pending confirmations (dangerous actions)
@@ -13,15 +13,15 @@ const conversationState = {
   // Pending question from agent needing user input
   // { prompt, field, agentId, taskId, resolve, timeoutId }
   pendingQuestion: null,
-  
+
   // Pending confirmation for dangerous action
   // { action, dangerous, resolve, timeoutId }
   pendingConfirmation: null,
-  
+
   // Recent conversation items for context (last 3)
   // [{ subject, response, timestamp }]
   recentContext: [],
-  
+
   /**
    * Set a pending question that needs user input
    * @param {Object} options - { prompt, field, agentId, taskId }
@@ -30,23 +30,23 @@ const conversationState = {
    */
   setPendingQuestion(options, resolve, timeoutMs = 15000) {
     this.clearPendingQuestion();
-    
+
     const timeoutId = setTimeout(() => {
       log.info('voice', '[ConversationState] Pending question timed out');
       this.pendingQuestion = null;
       resolve({ timedOut: true });
     }, timeoutMs);
-    
+
     this.pendingQuestion = {
       ...options,
       resolve,
       timeoutId,
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
-    
+
     log.info('voice', '[ConversationState] Set pending question', { data: options.prompt });
   },
-  
+
   /**
    * Resolve a pending question with the user's answer
    * @param {string} answer - The user's response
@@ -54,18 +54,18 @@ const conversationState = {
    */
   resolvePendingQuestion(answer) {
     if (!this.pendingQuestion) return null;
-    
+
     const { resolve, timeoutId, agentId, taskId, field } = this.pendingQuestion;
     clearTimeout(timeoutId);
     this.pendingQuestion = null;
-    
+
     log.info('voice', '[ConversationState] Resolved pending question with answer');
-    
+
     // Return routing info so answer goes back to correct agent
     resolve({ answer, agentId, taskId, field });
     return { agentId, taskId, field };
   },
-  
+
   /**
    * Clear any pending question
    */
@@ -75,7 +75,7 @@ const conversationState = {
     }
     this.pendingQuestion = null;
   },
-  
+
   /**
    * Set a pending confirmation request
    * @param {string} action - Description of action needing confirmation
@@ -85,24 +85,24 @@ const conversationState = {
    */
   setPendingConfirmation(action, resolve, dangerous = false, timeoutMs = 10000) {
     this.clearPendingConfirmation();
-    
+
     const timeoutId = setTimeout(() => {
       log.info('voice', '[ConversationState] Pending confirmation timed out');
       this.pendingConfirmation = null;
       resolve({ confirmed: false, timedOut: true });
     }, timeoutMs);
-    
+
     this.pendingConfirmation = {
       action,
       dangerous,
       resolve,
       timeoutId,
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
-    
+
     log.info('voice', '[ConversationState] Set pending confirmation', { action, dangerous });
   },
-  
+
   /**
    * Resolve a pending confirmation
    * @param {boolean} confirmed - Whether user confirmed
@@ -110,17 +110,17 @@ const conversationState = {
    */
   resolvePendingConfirmation(confirmed) {
     if (!this.pendingConfirmation) return null;
-    
+
     const { resolve, timeoutId, action, dangerous } = this.pendingConfirmation;
     clearTimeout(timeoutId);
     this.pendingConfirmation = null;
-    
+
     log.info('voice', '[ConversationState] Resolved confirmation', { data: confirmed ? 'YES' : 'NO' });
-    
+
     resolve({ confirmed });
     return { action, dangerous, confirmed };
   },
-  
+
   /**
    * Clear any pending confirmation
    */
@@ -130,7 +130,7 @@ const conversationState = {
     }
     this.pendingConfirmation = null;
   },
-  
+
   /**
    * Add an item to recent context for pronoun resolution
    * @param {Object} item - { subject, response, timestamp }
@@ -138,17 +138,20 @@ const conversationState = {
   addContext(item) {
     this.recentContext.unshift({
       ...item,
-      timestamp: item.timestamp || Date.now()
+      timestamp: item.timestamp || Date.now(),
     });
-    
+
     // Keep only last 3 items
     if (this.recentContext.length > 3) {
       this.recentContext.pop();
     }
-    
-    log.info('voice', '[ConversationState] Added context, now have', { arg0: this.recentContext.length, arg1: 'items' });
+
+    log.info('voice', '[ConversationState] Added context, now have', {
+      arg0: this.recentContext.length,
+      arg1: 'items',
+    });
   },
-  
+
   /**
    * Get the most recent context item
    * @returns {Object|null}
@@ -156,7 +159,7 @@ const conversationState = {
   getRecentSubject() {
     return this.recentContext[0] || null;
   },
-  
+
   /**
    * Clear all pending state (on cancel)
    */
@@ -166,7 +169,7 @@ const conversationState = {
     // Keep recentContext for potential follow-ups after cancel
     log.info('voice', '[ConversationState] Cleared pending state');
   },
-  
+
   /**
    * Clear everything including context
    */
@@ -175,7 +178,7 @@ const conversationState = {
     this.recentContext = [];
     log.info('voice', '[ConversationState] Cleared all state');
   },
-  
+
   /**
    * Get routing context for the Router
    * @returns {Object}
@@ -187,17 +190,17 @@ const conversationState = {
       pendingAgentId: this.pendingQuestion?.agentId,
       pendingField: this.pendingQuestion?.field,
       lastSubject: this.recentContext[0]?.subject,
-      contextCount: this.recentContext.length
+      contextCount: this.recentContext.length,
     };
   },
-  
+
   /**
    * Check if we're in any pending state
    * @returns {boolean}
    */
   hasPendingState() {
     return !!(this.pendingQuestion || this.pendingConfirmation);
-  }
+  },
 };
 
 module.exports = conversationState;

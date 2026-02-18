@@ -1,6 +1,6 @@
 /**
  * MockAgent - Factory for creating deterministic test agents
- * 
+ *
  * Creates agents with configurable bidding and execution behavior
  * for testing the distributed bidding system without LLM calls.
  */
@@ -31,7 +31,7 @@ function createMockAgent(id, options = {}) {
     categories: options.categories || ['general'],
     enabled: options.enabled !== false,
     executionType: options.executionType || 'mock',
-    
+
     /**
      * Bid on a task - deterministic behavior
      */
@@ -40,12 +40,12 @@ function createMockAgent(id, options = {}) {
       if (options.customBidFn) {
         return options.customBidFn(task);
       }
-      
+
       // Explicitly disabled bidding
       if (options.shouldBid === false) {
         return null;
       }
-      
+
       // Fixed confidence
       if (options.bidConfidence !== undefined) {
         return {
@@ -54,17 +54,15 @@ function createMockAgent(id, options = {}) {
           tier: 'mock',
         };
       }
-      
+
       // Keyword-based bidding (default)
       const content = (task.content || '').toLowerCase();
-      const keywordMatches = agent.keywords.filter(k => 
-        content.includes(k.toLowerCase())
-      );
-      
+      const keywordMatches = agent.keywords.filter((k) => content.includes(k.toLowerCase()));
+
       if (keywordMatches.length === 0) {
         return null;
       }
-      
+
       // Base confidence 0.5, +0.1 per match, max 0.9
       const confidence = Math.min(0.9, 0.5 + keywordMatches.length * 0.1);
       return {
@@ -73,7 +71,7 @@ function createMockAgent(id, options = {}) {
         tier: 'keyword',
       };
     },
-    
+
     /**
      * Execute a task - deterministic behavior
      */
@@ -82,12 +80,14 @@ function createMockAgent(id, options = {}) {
       if (options.customExecuteFn) {
         return options.customExecuteFn(task);
       }
-      
+
       // Simulate execution delay
       if (options.executionDelayMs) {
-        await new Promise(r => setTimeout(r, options.executionDelayMs));
+        await new Promise((r) => {
+          setTimeout(r, options.executionDelayMs);
+        });
       }
-      
+
       // Configured to fail - throw error to trigger dead letter
       if (options.shouldFail) {
         if (options.throwError !== false) {
@@ -98,7 +98,7 @@ function createMockAgent(id, options = {}) {
           error: options.errorMessage || 'Mock execution failure',
         };
       }
-      
+
       // Success
       return {
         success: true,
@@ -107,7 +107,7 @@ function createMockAgent(id, options = {}) {
       };
     },
   };
-  
+
   return agent;
 }
 
@@ -172,7 +172,7 @@ function createMockBuiltInAgent(id, config = {}) {
     capabilities: config.capabilities || [],
     ...config,
   });
-  
+
   // Built-in agents have bid() and execute() methods directly on the object
   // (not via the wrapper pattern)
   return {
@@ -181,11 +181,11 @@ function createMockBuiltInAgent(id, config = {}) {
     version: agent.version,
     keywords: agent.keywords,
     capabilities: agent.capabilities,
-    
+
     bid(task) {
       return agent.bid(task);
     },
-    
+
     async execute(task) {
       return agent.execute(task);
     },

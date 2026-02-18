@@ -9,7 +9,10 @@ vi.mock('sharp', () => ({ default: mockSharp }));
 // Mock child_process (pdftoppm / FFmpeg)
 vi.mock('child_process', () => ({
   execFile: vi.fn((cmd, args, opts, cb) => {
-    if (typeof opts === 'function') { cb = opts; opts = {}; }
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
     if (cb) cb(null, 'mock output', '');
     return { on: vi.fn(), stdout: { on: vi.fn() }, stderr: { on: vi.fn() } };
   }),
@@ -30,7 +33,7 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     writeFileSync: vi.fn(),
-    readFileSync: vi.fn(() => Buffer.from([0x89, 0x50, 0x4E, 0x47])),
+    readFileSync: vi.fn(() => Buffer.from([0x89, 0x50, 0x4e, 0x47])),
     unlinkSync: vi.fn(),
     existsSync: vi.fn(() => true),
     statSync: vi.fn(() => ({ size: 4096 })),
@@ -74,7 +77,7 @@ describe('PdfToImageAgent (specific)', () => {
   });
 
   it('has three rendering strategies', () => {
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toEqual(['single-page', 'all-pages', 'thumbnail']);
   });
 

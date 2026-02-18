@@ -14,9 +14,25 @@ const mockPlaybookOutput = {
   keywords: ['project', 'management'],
   framework: {
     who: { primary: 'Project managers', characteristics: ['leadership'], context: 'Corporate', notFor: [] },
-    why: { coreValue: 'Efficiency', emotionalHook: 'Success', practicalBenefit: 'Better outcomes', uniqueAngle: 'Framework-based' },
-    what: { primaryAction: 'Manage projects', secondaryActions: ['Plan', 'Execute'], successLooksLike: 'On-time delivery', failureLooksLike: 'Missed deadlines' },
-    where: { platform: 'Web', format: 'Playbook', distribution: 'Internal', consumptionContext: 'Work', constraints: [] },
+    why: {
+      coreValue: 'Efficiency',
+      emotionalHook: 'Success',
+      practicalBenefit: 'Better outcomes',
+      uniqueAngle: 'Framework-based',
+    },
+    what: {
+      primaryAction: 'Manage projects',
+      secondaryActions: ['Plan', 'Execute'],
+      successLooksLike: 'On-time delivery',
+      failureLooksLike: 'Missed deadlines',
+    },
+    where: {
+      platform: 'Web',
+      format: 'Playbook',
+      distribution: 'Internal',
+      consumptionContext: 'Work',
+      constraints: [],
+    },
     when: { raw: 'Ongoing', parsed: { type: 'ongoing', display: 'Ongoing' }, confirmed: true },
   },
   doFramework: {},

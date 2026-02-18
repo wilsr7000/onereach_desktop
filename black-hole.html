@@ -1,650 +1,671 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Space Drop</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        html, body {
-            width: 100%;
-            height: 100%;
-            background: transparent;
-            overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            -webkit-font-smoothing: antialiased;
-            user-select: none;
-            -webkit-app-region: no-drag;
-        }
-        
-        .container {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-        }
-        
-        /* Ghost zone bubble */
-        .ghost-zone {
-            position: relative;
-            width: 80px;
-            height: 80px;
-            cursor: grab;
-            transition: all 0.3s ease;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(30px);
-            -webkit-backdrop-filter: blur(30px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 
-                0 8px 32px rgba(0, 0, 0, 0.2),
-                inset 0 2px 4px rgba(255, 255, 255, 0.1);
-        }
-        
-        .ghost-zone:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.15);
-        }
-        
-        .ghost-zone:active {
-            cursor: grabbing;
-            transform: scale(0.95);
-        }
-        
-        /* Shine effect */
-        .ghost-zone::before {
-            content: '';
-            position: absolute;
-            top: 10%;
-            left: 10%;
-            width: 35%;
-            height: 35%;
-            background: radial-gradient(ellipse at top left, rgba(255,255,255,0.25) 0%, transparent 70%);
-            border-radius: 50%;
-            pointer-events: none;
-        }
-        
-        .zone-icon {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 28px;
-            opacity: 0.6;
-            pointer-events: none;
-        }
-        
-        /* Drag over state */
-        .ghost-zone.dragging-over {
-            width: 120px;
-            height: 120px;
-            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.15));
-            border: 2px solid rgba(99, 102, 241, 0.5);
-            box-shadow: 0 0 40px rgba(99, 102, 241, 0.3);
-        }
-        
-        /* Success ripple */
-        .success-ripple {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            background: radial-gradient(circle, rgba(34, 197, 94, 0.3) 0%, transparent 70%);
-            border: 2px solid rgba(34, 197, 94, 0.7);
-            opacity: 0;
-            pointer-events: none;
-        }
-        
-        .success-ripple.active {
-            animation: ripple 0.6s ease-out forwards;
-        }
-        
-        @keyframes ripple {
-            0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0; }
-            30% { opacity: 1; }
-            100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
-        }
-        
-        /* Status text */
-        .status-text {
-            position: absolute;
-            bottom: -35px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 12px;
-            font-weight: 500;
-            color: rgba(255, 255, 255, 0.9);
-            white-space: nowrap;
-            opacity: 0;
-            transition: opacity 0.2s;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 6px 14px;
-            border-radius: 6px;
-            pointer-events: none;
-        }
-        
-        .status-text.visible { opacity: 1; }
-        .status-text.error { color: #f87171; }
-        
-        /* ===== MODAL ===== */
-        .modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: flex-start;
-            justify-content: center;
-            padding: 30px 20px;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.2s ease;
-            z-index: 1000;
-            background: transparent;
-        }
-        
-        .modal.show {
-            opacity: 1;
-            visibility: visible;
-        }
-        
-        .modal-content {
-            background: rgba(30, 30, 32, 0.98);
-            backdrop-filter: blur(40px);
-            -webkit-backdrop-filter: blur(40px);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 16px;
-            width: 100%;
-            max-width: 420px;
-            max-height: calc(100vh - 80px);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            transform: scale(0.95) translateY(-15px);
-            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 
-                0 30px 60px rgba(0, 0, 0, 0.5),
-                0 0 0 1px rgba(255, 255, 255, 0.05),
-                inset 0 1px 0 rgba(255, 255, 255, 0.1);
-        }
-        
-        .modal.show .modal-content {
-            transform: scale(1) translateY(0);
-        }
-        
-        /* Shrink animation */
-        .modal.shrinking .modal-content {
-            transform: scale(0.1) translateY(300px);
-            opacity: 0;
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        /* Modal header - FIXED */
-        .modal-header {
-            padding: 16px 20px 12px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            flex-shrink: 0;
-        }
-        
-        .modal-header h2 {
-            font-size: 16px;
-            font-weight: 600;
-            color: #fff;
-            margin: 0;
-        }
-        
-        .modal-header p {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.5);
-            margin: 2px 0 0;
-        }
-        
-        .modal-close-btn {
-            background: none;
-            border: none;
-            color: rgba(255, 255, 255, 0.4);
-            font-size: 22px;
-            cursor: pointer;
-            padding: 0;
-            line-height: 1;
-            transition: color 0.15s;
-        }
-        
-        .modal-close-btn:hover {
-            color: rgba(255, 255, 255, 0.8);
-        }
-        
-        /* Content preview - FIXED */
-        .content-preview {
-            margin: 12px 20px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 8px;
-            padding: 10px 12px;
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            flex-shrink: 0;
-        }
-        
-        .content-preview-type {
-            font-size: 9px;
-            font-weight: 500;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-            color: rgba(99, 102, 241, 0.9);
-            background: rgba(99, 102, 241, 0.1);
-            padding: 2px 6px;
-            border-radius: 4px;
-            display: inline-block;
-            margin-bottom: 4px;
-        }
-        
-        .content-preview-text {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.7);
-            line-height: 1.4;
-            max-height: 40px;
-            overflow: hidden;
-            word-break: break-all;
-        }
-        
-        /* Recent spaces section - FIXED */
-        .recent-spaces-section {
-            padding: 12px 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-            flex-shrink: 0;
-        }
-        
-        .recent-spaces-label {
-            font-size: 11px;
-            font-weight: 500;
-            color: rgba(255, 255, 255, 0.5);
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-        
-        .recent-spaces-list {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        
-        .recent-space-chip {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 10px;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.15s ease;
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.8);
-        }
-        
-        .recent-space-chip:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: rgba(255, 255, 255, 0.2);
-        }
-        
-        .recent-space-chip.selected {
-            background: rgba(99, 102, 241, 0.2);
-            border-color: rgba(99, 102, 241, 0.5);
-            color: #a5b4fc;
-        }
-        
-        .recent-space-chip .chip-icon {
-            font-size: 14px;
-        }
-        
-        .recent-space-chip .chip-name {
-            max-width: 80px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        /* Search input - FIXED */
-        .space-search-container {
-            padding: 12px 20px;
-            flex-shrink: 0;
-        }
-        
-        .space-search {
-            width: 100%;
-            padding: 10px 12px 10px 34px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(0, 0, 0, 0.3);
-            color: #ffffff;
-            border-radius: 8px;
-            font-size: 13px;
-            transition: all 0.2s ease;
-        }
-        
-        .space-search:focus {
-            outline: none;
-            border-color: rgba(99, 102, 241, 0.5);
-            background: rgba(0, 0, 0, 0.4);
-        }
-        
-        .space-search::placeholder {
-            color: rgba(255, 255, 255, 0.4);
-        }
-        
-        .space-search-wrapper {
-            position: relative;
-        }
-        
-        .space-search-icon {
-            position: absolute;
-            left: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 13px;
-            opacity: 0.5;
-            pointer-events: none;
-        }
-        
-        /* All spaces header - FIXED */
-        .space-list-header {
-            padding: 8px 20px;
-            font-size: 11px;
-            font-weight: 500;
-            color: rgba(255, 255, 255, 0.5);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-shrink: 0;
-        }
-        
-        /* Space list container - SCROLLS */
-        .space-list-container {
-            flex: 1;
-            min-height: 0;
-            overflow-y: auto;
-            padding: 0 20px 12px;
-        }
-        
-        /* Compact list view */
-        .space-list {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        
-        .space-list-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 12px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid transparent;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-        
-        .space-list-item:hover {
-            background: rgba(255, 255, 255, 0.06);
-            border-color: rgba(255, 255, 255, 0.1);
-        }
-        
-        .space-list-item.selected {
-            background: rgba(99, 102, 241, 0.15);
-            border-color: rgba(99, 102, 241, 0.4);
-        }
-        
-        .space-list-item .item-icon {
-            font-size: 20px;
-            flex-shrink: 0;
-        }
-        
-        .space-list-item .item-info {
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .space-list-item .item-name {
-            font-size: 13px;
-            font-weight: 500;
-            color: rgba(255, 255, 255, 0.9);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        .space-list-item .item-count {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.4);
-        }
-        
-        .space-list-item .item-check {
-            font-size: 16px;
-            color: #6366f1;
-            opacity: 0;
-            transition: opacity 0.15s;
-        }
-        
-        .space-list-item.selected .item-check {
-            opacity: 1;
-        }
-        
-        /* Empty state */
-        .space-empty-state {
-            text-align: center;
-            padding: 30px 20px;
-            color: rgba(255, 255, 255, 0.5);
-        }
-        
-        .space-empty-state .icon {
-            font-size: 32px;
-            margin-bottom: 8px;
-            opacity: 0.6;
-        }
-        
-        .space-empty-state .message {
-            font-size: 13px;
-        }
-        
-        /* Modal footer - FIXED */
-        .modal-footer {
-            padding: 12px 20px 16px;
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(0, 0, 0, 0.2);
-            flex-shrink: 0;
-        }
-        
-        .modal-actions {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .btn {
-            flex: 1;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 10px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            color: white;
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
-        }
-        
-        .btn-primary:hover:not(:disabled) {
-            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45);
-            transform: translateY(-1px);
-        }
-        
-        .btn-primary:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.08);
-            color: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.12);
-        }
-        
-        /* Saving state */
-        .saving-indicator {
-            display: none;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            padding: 12px;
-        }
-        
-        .saving-indicator.active {
-            display: flex;
-        }
-        
-        .saving-indicator.active + .modal-actions {
-            display: none;
-        }
-        
-        .saving-spinner {
-            width: 20px;
-            height: 20px;
-            border: 2px solid rgba(99, 102, 241, 0.3);
-            border-top-color: #6366f1;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        .saving-text {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.8);
-        }
-        
-        /* Hide bubble when modal open */
-        body.modal-open .ghost-zone {
-            opacity: 0;
-            transform: scale(0.3);
-            pointer-events: none;
-        }
-        
-        /* Scrollbar */
-        .space-list-container::-webkit-scrollbar {
-            width: 6px;
-        }
-        
-        .space-list-container::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        
-        .space-list-container::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 3px;
-        }
-        
-        .space-list-container::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.25);
-        }
-        
-        /* No recent spaces */
-        .no-recent {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.4);
-            font-style: italic;
-        }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        user-select: none;
+        -webkit-app-region: no-drag;
+      }
+
+      .container {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+      }
+
+      /* Ghost zone bubble */
+      .ghost-zone {
+        position: relative;
+        width: 80px;
+        height: 80px;
+        cursor: grab;
+        transition: all 0.3s ease;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(30px);
+        -webkit-backdrop-filter: blur(30px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow:
+          0 8px 32px rgba(0, 0, 0, 0.2),
+          inset 0 2px 4px rgba(255, 255, 255, 0.1);
+      }
+
+      .ghost-zone:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+
+      .ghost-zone:active {
+        cursor: grabbing;
+        transform: scale(0.95);
+      }
+
+      /* Shine effect */
+      .ghost-zone::before {
+        content: '';
+        position: absolute;
+        top: 10%;
+        left: 10%;
+        width: 35%;
+        height: 35%;
+        background: radial-gradient(ellipse at top left, rgba(255, 255, 255, 0.25) 0%, transparent 70%);
+        border-radius: 50%;
+        pointer-events: none;
+      }
+
+      .zone-icon {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 28px;
+        opacity: 0.6;
+        pointer-events: none;
+      }
+
+      /* Drag over state */
+      .ghost-zone.dragging-over {
+        width: 120px;
+        height: 120px;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.15));
+        border: 2px solid rgba(99, 102, 241, 0.5);
+        box-shadow: 0 0 40px rgba(99, 102, 241, 0.3);
+      }
+
+      /* Success ripple */
+      .success-ripple {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(34, 197, 94, 0.3) 0%, transparent 70%);
+        border: 2px solid rgba(34, 197, 94, 0.7);
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .success-ripple.active {
+        animation: ripple 0.6s ease-out forwards;
+      }
+
+      @keyframes ripple {
+        0% {
+          transform: translate(-50%, -50%) scale(0.8);
+          opacity: 0;
+        }
+        30% {
+          opacity: 1;
+        }
+        100% {
+          transform: translate(-50%, -50%) scale(2.2);
+          opacity: 0;
+        }
+      }
+
+      /* Status text */
+      .status-text {
+        position: absolute;
+        bottom: -35px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 12px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.9);
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 0.2s;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 6px 14px;
+        border-radius: 6px;
+        pointer-events: none;
+      }
+
+      .status-text.visible {
+        opacity: 1;
+      }
+      .status-text.error {
+        color: #f87171;
+      }
+
+      /* ===== MODAL ===== */
+      .modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 30px 20px;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s ease;
+        z-index: 1000;
+        background: transparent;
+      }
+
+      .modal.show {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .modal-content {
+        background: rgba(30, 30, 32, 0.98);
+        backdrop-filter: blur(40px);
+        -webkit-backdrop-filter: blur(40px);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 16px;
+        width: 100%;
+        max-width: 420px;
+        max-height: calc(100vh - 80px);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        transform: scale(0.95) translateY(-15px);
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow:
+          0 30px 60px rgba(0, 0, 0, 0.5),
+          0 0 0 1px rgba(255, 255, 255, 0.05),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      }
+
+      .modal.show .modal-content {
+        transform: scale(1) translateY(0);
+      }
+
+      /* Shrink animation */
+      .modal.shrinking .modal-content {
+        transform: scale(0.1) translateY(300px);
+        opacity: 0;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      /* Modal header - FIXED */
+      .modal-header {
+        padding: 16px 20px 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-shrink: 0;
+      }
+
+      .modal-header h2 {
+        font-size: 16px;
+        font-weight: 600;
+        color: #fff;
+        margin: 0;
+      }
+
+      .modal-header p {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.5);
+        margin: 2px 0 0;
+      }
+
+      .modal-close-btn {
+        background: none;
+        border: none;
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 22px;
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+        transition: color 0.15s;
+      }
+
+      .modal-close-btn:hover {
+        color: rgba(255, 255, 255, 0.8);
+      }
+
+      /* Content preview - FIXED */
+      .content-preview {
+        margin: 12px 20px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        padding: 10px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        flex-shrink: 0;
+      }
+
+      .content-preview-type {
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: rgba(99, 102, 241, 0.9);
+        background: rgba(99, 102, 241, 0.1);
+        padding: 2px 6px;
+        border-radius: 4px;
+        display: inline-block;
+        margin-bottom: 4px;
+      }
+
+      .content-preview-text {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.7);
+        line-height: 1.4;
+        max-height: 40px;
+        overflow: hidden;
+        word-break: break-all;
+      }
+
+      /* Recent spaces section - FIXED */
+      .recent-spaces-section {
+        padding: 12px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        flex-shrink: 0;
+      }
+
+      .recent-spaces-label {
+        font-size: 11px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.5);
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .recent-spaces-list {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .recent-space-chip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.8);
+      }
+
+      .recent-space-chip:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.2);
+      }
+
+      .recent-space-chip.selected {
+        background: rgba(99, 102, 241, 0.2);
+        border-color: rgba(99, 102, 241, 0.5);
+        color: #a5b4fc;
+      }
+
+      .recent-space-chip .chip-icon {
+        font-size: 14px;
+      }
+
+      .recent-space-chip .chip-name {
+        max-width: 80px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Search input - FIXED */
+      .space-search-container {
+        padding: 12px 20px;
+        flex-shrink: 0;
+      }
+
+      .space-search {
+        width: 100%;
+        padding: 10px 12px 10px 34px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(0, 0, 0, 0.3);
+        color: #ffffff;
+        border-radius: 8px;
+        font-size: 13px;
+        transition: all 0.2s ease;
+      }
+
+      .space-search:focus {
+        outline: none;
+        border-color: rgba(99, 102, 241, 0.5);
+        background: rgba(0, 0, 0, 0.4);
+      }
+
+      .space-search::placeholder {
+        color: rgba(255, 255, 255, 0.4);
+      }
+
+      .space-search-wrapper {
+        position: relative;
+      }
+
+      .space-search-icon {
+        position: absolute;
+        left: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 13px;
+        opacity: 0.5;
+        pointer-events: none;
+      }
+
+      /* All spaces header - FIXED */
+      .space-list-header {
+        padding: 8px 20px;
+        font-size: 11px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.5);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-shrink: 0;
+      }
+
+      /* Space list container - SCROLLS */
+      .space-list-container {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 0 20px 12px;
+      }
+
+      /* Compact list view */
+      .space-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .space-list-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid transparent;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .space-list-item:hover {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.1);
+      }
+
+      .space-list-item.selected {
+        background: rgba(99, 102, 241, 0.15);
+        border-color: rgba(99, 102, 241, 0.4);
+      }
+
+      .space-list-item .item-icon {
+        font-size: 20px;
+        flex-shrink: 0;
+      }
+
+      .space-list-item .item-info {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .space-list-item .item-name {
+        font-size: 13px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.9);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .space-list-item .item-count {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.4);
+      }
+
+      .space-list-item .item-check {
+        font-size: 16px;
+        color: #6366f1;
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+
+      .space-list-item.selected .item-check {
+        opacity: 1;
+      }
+
+      /* Empty state */
+      .space-empty-state {
+        text-align: center;
+        padding: 30px 20px;
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      .space-empty-state .icon {
+        font-size: 32px;
+        margin-bottom: 8px;
+        opacity: 0.6;
+      }
+
+      .space-empty-state .message {
+        font-size: 13px;
+      }
+
+      /* Modal footer - FIXED */
+      .modal-footer {
+        padding: 12px 20px 16px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(0, 0, 0, 0.2);
+        flex-shrink: 0;
+      }
+
+      .modal-actions {
+        display: flex;
+        gap: 10px;
+      }
+
+      .btn {
+        flex: 1;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: white;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+      }
+
+      .btn-primary:hover:not(:disabled) {
+        box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45);
+        transform: translateY(-1px);
+      }
+
+      .btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .btn-secondary {
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      /* Saving state */
+      .saving-indicator {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .saving-indicator.active {
+        display: flex;
+      }
+
+      .saving-indicator.active + .modal-actions {
+        display: none;
+      }
+
+      .saving-spinner {
+        width: 20px;
+        height: 20px;
+        border: 2px solid rgba(99, 102, 241, 0.3);
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .saving-text {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.8);
+      }
+
+      /* Hide bubble when modal open */
+      body.modal-open .ghost-zone {
+        opacity: 0;
+        transform: scale(0.3);
+        pointer-events: none;
+      }
+
+      /* Scrollbar */
+      .space-list-container::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .space-list-container::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .space-list-container::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 3px;
+      }
+
+      .space-list-container::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.25);
+      }
+
+      /* No recent spaces */
+      .no-recent {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.4);
+        font-style: italic;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="container">
-        <div class="ghost-zone" id="dropZone">
-            <div class="zone-icon"></div>
-            <div class="success-ripple" id="successRipple"></div>
-        </div>
-        <div class="status-text" id="statusText"></div>
+      <div class="ghost-zone" id="dropZone">
+        <div class="zone-icon"></div>
+        <div class="success-ripple" id="successRipple"></div>
+      </div>
+      <div class="status-text" id="statusText"></div>
     </div>
-    
+
     <!-- Modal -->
     <div class="modal" id="spaceModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <div>
-                    <h2>Save to Space</h2>
-                    <p id="modalDescription">Select a destination for your content</p>
-                </div>
-                <button class="modal-close-btn" id="modalCloseBtn" title="Close (Esc)">×</button>
-            </div>
-            
-            <div class="content-preview" id="contentPreview">
-                <div class="content-preview-type" id="contentPreviewType">Content</div>
-                <div class="content-preview-text" id="contentPreviewText">Loading...</div>
-            </div>
-            
-            <!-- Recent Spaces -->
-            <div class="recent-spaces-section" id="recentSpacesSection">
-                <div class="recent-spaces-label">⭐ Recent</div>
-                <div class="recent-spaces-list" id="recentSpacesList">
-                    <span class="no-recent">No recent spaces</span>
-                </div>
-            </div>
-            
-            <!-- Search Input -->
-            <div class="space-search-container">
-                <div class="space-search-wrapper">
-                    <span class="space-search-icon">🔍</span>
-                    <input type="text" class="space-search" id="spaceSearchInput" placeholder="Search spaces..." autocomplete="off">
-                </div>
-            </div>
-            
-            <!-- All Spaces Header -->
-            <div class="space-list-header">
-                <span>All Spaces</span>
-                <span id="spaceCountBadge">0</span>
-            </div>
-            
-            <!-- Scrollable Space List -->
-            <div class="space-list-container">
-                <div class="space-list" id="spaceList"></div>
-            </div>
-            
-            <div class="modal-footer">
-                <div class="saving-indicator" id="savingIndicator">
-                    <div class="saving-spinner"></div>
-                    <span class="saving-text">Saving...</span>
-                </div>
-                <div class="modal-actions" id="modalActions">
-                    <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
-                    <button class="btn btn-primary" id="confirmBtn">Save</button>
-                </div>
-            </div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h2>Save to Space</h2>
+            <p id="modalDescription">Select a destination for your content</p>
+          </div>
+          <button class="modal-close-btn" id="modalCloseBtn" title="Close (Esc)">×</button>
         </div>
+
+        <div class="content-preview" id="contentPreview">
+          <div class="content-preview-type" id="contentPreviewType">Content</div>
+          <div class="content-preview-text" id="contentPreviewText">Loading...</div>
+        </div>
+
+        <!-- Recent Spaces -->
+        <div class="recent-spaces-section" id="recentSpacesSection">
+          <div class="recent-spaces-label">⭐ Recent</div>
+          <div class="recent-spaces-list" id="recentSpacesList">
+            <span class="no-recent">No recent spaces</span>
+          </div>
+        </div>
+
+        <!-- Search Input -->
+        <div class="space-search-container">
+          <div class="space-search-wrapper">
+            <span class="space-search-icon">🔍</span>
+            <input
+              type="text"
+              class="space-search"
+              id="spaceSearchInput"
+              placeholder="Search spaces..."
+              autocomplete="off"
+            />
+          </div>
+        </div>
+
+        <!-- All Spaces Header -->
+        <div class="space-list-header">
+          <span>All Spaces</span>
+          <span id="spaceCountBadge">0</span>
+        </div>
+
+        <!-- Scrollable Space List -->
+        <div class="space-list-container">
+          <div class="space-list" id="spaceList"></div>
+        </div>
+
+        <div class="modal-footer">
+          <div class="saving-indicator" id="savingIndicator">
+            <div class="saving-spinner"></div>
+            <span class="saving-text">Saving...</span>
+          </div>
+          <div class="modal-actions" id="modalActions">
+            <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
+            <button class="btn btn-primary" id="confirmBtn">Save</button>
+          </div>
+        </div>
+      </div>
     </div>
-    
+
     <script src="black-hole.js"></script>
-</body>
+  </body>
 </html>

@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "./lib/*": ["./lib/*"],
+      "./packages/*": ["./packages/*"],
+      "./src/*": ["./src/*"]
+    },
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false
+  },
+  "include": ["*.js", "lib/**/*.js", "packages/**/*.js", "src/**/*.js"],
+  "exclude": [
+    "node_modules",
+    "_legacy",
+    "dist",
+    "build",
+    "voice-sdk-package",
+    "packages/task-exchange",
+    "test",
+    "example-module"
+  ]
+}

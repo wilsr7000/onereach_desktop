@@ -1,6 +1,6 @@
 /**
  * Correction Detector
- * 
+ *
  * Detects when the user is correcting a previous command using LLM.
  * No brittle regex - the LLM understands context and nuance.
  */
@@ -14,10 +14,10 @@ const log = getLogQueue();
 const openaiCircuit = getCircuit('openai-correction', {
   failureThreshold: 3,
   resetTimeout: 30000,
-  windowMs: 60000
+  windowMs: 60000,
 });
 
-function getOpenAIApiKey() {
+function _getOpenAIApiKey() {
   if (global.settingsManager) {
     const openaiKey = global.settingsManager.get('openaiApiKey');
     if (openaiKey) return openaiKey;
@@ -67,27 +67,23 @@ Examples:
 
   try {
     const result = await openaiCircuit.execute(async () => {
-      return await ai.json(
-        transcript,
-        {
-          profile: 'fast',
-          system: systemPrompt,
-          temperature: 0.1,
-          maxTokens: 200,
-          feature: 'correction-detector'
-        }
-      );
+      return await ai.json(transcript, {
+        profile: 'fast',
+        system: systemPrompt,
+        temperature: 0.1,
+        maxTokens: 200,
+        feature: 'correction-detector',
+      });
     });
-    
+
     log.info('voice', '[CorrectionDetector] LLM analysis', { data: result.reasoning });
-    
+
     return {
       isCorrection: result.isCorrection === true,
       correctedIntent: result.correctedIntent || null,
       confidence: result.confidence || 0.5,
-      reasoning: result.reasoning || 'LLM analysis'
+      reasoning: result.reasoning || 'LLM analysis',
     };
-
   } catch (error) {
     log.error('voice', '[CorrectionDetector] LLM error', { error: error.message });
     return { isCorrection: false, reasoning: `LLM error: ${error.message}` };
@@ -97,28 +93,35 @@ Examples:
 /**
  * Quick check if this could possibly be a correction (to avoid unnecessary LLM calls)
  * Uses simple string checks, not regex
- * @param {string} transcript 
+ * @param {string} transcript
  * @returns {boolean}
  */
 function mightBeCorrection(transcript) {
   if (!transcript) return false;
-  
+
   const lower = transcript.toLowerCase().trim();
-  
+
   // Quick negative - very short responses that are clearly not corrections
-  if (lower === 'yes' || lower === 'yeah' || lower === 'yep' || lower === 'sure' || lower === 'ok' || lower === 'okay') {
+  if (
+    lower === 'yes' ||
+    lower === 'yeah' ||
+    lower === 'yep' ||
+    lower === 'sure' ||
+    lower === 'ok' ||
+    lower === 'okay'
+  ) {
     return false;
   }
-  
+
   // Keywords that suggest a correction
   const correctionHints = ['no ', 'no,', 'not ', 'i said', 'i meant', 'actually', 'wait', 'wrong'];
-  
+
   for (const hint of correctionHints) {
     if (lower.startsWith(hint) || lower.includes(' ' + hint)) {
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -134,12 +137,12 @@ async function detect(transcript, context = {}, useLLM = true) {
   if (!mightBeCorrection(transcript)) {
     return { isCorrection: false, reasoning: 'Does not appear to be a correction' };
   }
-  
+
   // Use LLM to properly analyze the correction
   if (useLLM && context.lastRequest) {
     return analyzeWithLLM(transcript, context);
   }
-  
+
   // No context available - can't determine if it's a correction
   return { isCorrection: false, reasoning: 'No context to compare against' };
 }
@@ -147,5 +150,5 @@ async function detect(transcript, context = {}, useLLM = true) {
 module.exports = {
   detect,
   analyzeWithLLM,
-  mightBeCorrection
+  mightBeCorrection,
 };

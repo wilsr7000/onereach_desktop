@@ -1,464 +1,471 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GSX Power User</title>
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            width: 100%;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background-color: #1a1a1a;
-            color: #ffffff;
-            overflow: hidden;
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        background-color: #1a1a1a;
+        color: #ffffff;
+        overflow: hidden;
+      }
+
+      .container {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        width: 100%;
+      }
+
+      .tab-bar {
+        display: flex;
+        background: linear-gradient(to bottom, #2a2a2a, #252525);
+        height: 44px;
+        align-items: center;
+        padding: 0 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        user-select: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .tab {
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        height: 36px;
+        background: linear-gradient(to bottom, #333333, #2a2a2a);
+        margin-right: 4px;
+        border-radius: 8px 8px 0 0;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        max-width: 200px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        position: relative;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: none;
+      }
+
+      .tab.active {
+        background: linear-gradient(to bottom, #3a3a3a, #2a2a2a);
+        border-color: rgba(255, 255, 255, 0.1);
+        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .tab.active::after {
+        content: '';
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: #0099ff;
+        border-radius: 2px;
+      }
+
+      .tab:hover {
+        background: linear-gradient(to bottom, #383838, #2f2f2f);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .tab-favicon {
+        width: 16px;
+        height: 16px;
+        margin-right: 10px;
+        background-size: contain;
+        background-position: center;
+        background-repeat: no-repeat;
+        flex-shrink: 0;
+        transition: transform 0.2s ease;
+      }
+
+      .tab:hover .tab-favicon {
+        transform: scale(1.1);
+      }
+
+      .tab-favicon.default-favicon {
+        background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23999999"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h10v2H7z"/></svg>');
+      }
+
+      .tab-title {
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.9);
+        transition: color 0.2s ease;
+      }
+
+      .tab:hover .tab-title {
+        color: #ffffff;
+      }
+
+      .tab-close {
+        margin-left: 8px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background-color: rgba(255, 255, 255, 0.05);
+        color: rgba(255, 255, 255, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        opacity: 0;
+      }
+
+      .tab:hover .tab-close {
+        opacity: 1;
+      }
+
+      .tab-close:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+        color: #ffffff;
+        transform: scale(1.1);
+      }
+
+      .new-tab {
+        width: 32px;
+        height: 32px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: linear-gradient(to bottom, #333333, #2a2a2a);
+        border-radius: 8px;
+        cursor: pointer;
+        margin-left: 8px;
+        transition: all 0.2s ease;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 20px;
+      }
+
+      .new-tab:hover {
+        background: linear-gradient(to bottom, #383838, #2f2f2f);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        color: #ffffff;
+      }
+
+      .browser-container {
+        flex: 1;
+        position: relative;
+        background-color: #242424;
+      }
+
+      .webview-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: none;
+      }
+
+      .webview-container.active {
+        display: block;
+      }
+
+      webview {
+        width: 100%;
+        height: 100%;
+        border: none;
+      }
+
+      .browser-controls {
+        display: flex;
+        margin-right: 12px;
+        gap: 4px;
+      }
+
+      .control-button {
+        width: 32px;
+        height: 32px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: linear-gradient(to bottom, #333333, #2a2a2a);
+        border-radius: 8px;
+        cursor: pointer;
+        color: rgba(255, 255, 255, 0.7);
+        transition: all 0.2s ease;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .control-button:hover {
+        background: linear-gradient(to bottom, #383838, #2f2f2f);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        color: #ffffff;
+      }
+
+      .control-button.active {
+        color: #0099ff;
+        background: linear-gradient(to bottom, #383838, #2f2f2f);
+        border-color: rgba(0, 153, 255, 0.2);
+      }
+
+      .loading-indicator {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 3px;
+        background: linear-gradient(to right, #0099ff, #00ccff);
+        transition: width 0.3s ease-out;
+        z-index: 1000;
+        border-radius: 0 2px 2px 0;
+        box-shadow: 0 0 8px rgba(0, 153, 255, 0.5);
+      }
+
+      /* Special styling for the Black Hole Widget button */
+      #black-hole-button {
+        position: relative;
+        overflow: hidden;
+        width: 40px !important;
+        height: 40px !important;
+        background: linear-gradient(135deg, #6a1b9a 0%, #4a148c 100%) !important;
+        border: 2px solid #9c27b0 !important;
+        margin: 0 8px;
+        font-size: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(147, 51, 234, 0.4);
+        transition: all 0.3s ease;
+      }
+
+      /* Add OneReach logo overlay */
+      #black-hole-button::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 16px;
+        height: 16px;
+        background-color: rgba(255, 255, 255, 0.9);
+        -webkit-mask-image: url('assets/or-logo.png');
+        -webkit-mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        -webkit-mask-mode: luminance;
+        mask-image: url('assets/or-logo.png');
+        mask-size: contain;
+        mask-repeat: no-repeat;
+        mask-position: center;
+        mask-mode: luminance;
+        transform: translate(-50%, -50%);
+        transition:
+          opacity 0.3s ease,
+          transform 0.3s ease;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      #black-hole-button::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.2) 0%, transparent 70%);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        transition:
+          width 0.5s ease,
+          height 0.5s ease;
+        pointer-events: none;
+      }
+
+      #black-hole-button:hover {
+        background: linear-gradient(135deg, #7b1fa2 0%, #6a1b9a 100%) !important;
+        border-color: #ab47bc !important;
+        transform: translateY(-2px) scale(1.05);
+        box-shadow: 0 4px 16px rgba(147, 51, 234, 0.6);
+        animation: glow 2s ease-in-out infinite;
+      }
+
+      #black-hole-button:hover::after {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1.2);
+      }
+
+      #black-hole-button:hover::before {
+        width: 150%;
+        height: 150%;
+      }
+
+      @keyframes glow {
+        0% {
+          box-shadow: 0 4px 16px rgba(147, 51, 234, 0.6);
         }
-        
-        .container {
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            width: 100%;
+        50% {
+          box-shadow:
+            0 4px 24px rgba(147, 51, 234, 0.8),
+            0 0 32px rgba(147, 51, 234, 0.4);
         }
-        
-        .tab-bar {
-            display: flex;
-            background: linear-gradient(to bottom, #2a2a2a, #252525);
-            height: 44px;
-            align-items: center;
-            padding: 0 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            user-select: none;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+        100% {
+          box-shadow: 0 4px 16px rgba(147, 51, 234, 0.6);
         }
-        
-        .tab {
-            display: flex;
-            align-items: center;
-            padding: 0 16px;
-            height: 36px;
-            background: linear-gradient(to bottom, #333333, #2a2a2a);
-            margin-right: 4px;
-            border-radius: 8px 8px 0 0;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            max-width: 200px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            position: relative;
-            border: 1px solid rgba(255,255,255,0.05);
-            border-bottom: none;
+      }
+
+      @keyframes pulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(147, 51, 234, 0.4);
         }
-        
-        .tab.active {
-            background: linear-gradient(to bottom, #3a3a3a, #2a2a2a);
-            border-color: rgba(255,255,255,0.1);
-            box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+        70% {
+          box-shadow: 0 0 0 8px rgba(147, 51, 234, 0);
         }
-        
-        .tab.active::after {
-            content: '';
-            position: absolute;
-            bottom: -1px;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: #0099ff;
-            border-radius: 2px;
+        100% {
+          box-shadow: 0 0 0 0 rgba(147, 51, 234, 0);
         }
-        
-        .tab:hover {
-            background: linear-gradient(to bottom, #383838, #2f2f2f);
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      }
+
+      /* LLM Badge Indicator */
+      #llm-badge {
+        display: none;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        background: linear-gradient(135deg, #1e3a5f 0%, #0d2137 100%);
+        border: 1px solid rgba(59, 130, 246, 0.5);
+        border-radius: 16px;
+        margin-right: 12px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.9);
+        transition: all 0.3s ease;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+      }
+
+      #llm-badge.active {
+        display: flex;
+        animation: badgePulse 0.5s ease-out;
+      }
+
+      #llm-badge.calling {
+        background: linear-gradient(135deg, #1e4620 0%, #0d2910 100%);
+        border-color: rgba(34, 197, 94, 0.7);
+        box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
+      }
+
+      #llm-badge .badge-icon {
+        font-size: 14px;
+      }
+
+      #llm-badge .badge-text {
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      #llm-badge .badge-cost {
+        color: rgba(147, 197, 253, 0.9);
+        font-size: 10px;
+      }
+
+      #llm-badge:hover {
+        transform: scale(1.05);
+        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+      }
+
+      @keyframes badgePulse {
+        0% {
+          transform: scale(0.8);
+          opacity: 0;
         }
-        
-        .tab-favicon {
-            width: 16px;
-            height: 16px;
-            margin-right: 10px;
-            background-size: contain;
-            background-position: center;
-            background-repeat: no-repeat;
-            flex-shrink: 0;
-            transition: transform 0.2s ease;
+        50% {
+          transform: scale(1.1);
         }
-        
-        .tab:hover .tab-favicon {
-            transform: scale(1.1);
+        100% {
+          transform: scale(1);
+          opacity: 1;
         }
-        
-        .tab-favicon.default-favicon {
-            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23999999"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-9h10v2H7z"/></svg>');
+      }
+
+      @keyframes badgeFlash {
+        0%,
+        100% {
+          background: linear-gradient(135deg, #1e3a5f 0%, #0d2137 100%);
         }
-        
-        .tab-title {
-            max-width: 150px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            font-size: 13px;
-            color: rgba(255,255,255,0.9);
-            transition: color 0.2s ease;
+        50% {
+          background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
         }
-        
-        .tab:hover .tab-title {
-            color: #ffffff;
-        }
-        
-        .tab-close {
-            margin-left: 8px;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background-color: rgba(255,255,255,0.05);
-            color: rgba(255,255,255,0.5);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            opacity: 0;
-        }
-        
-        .tab:hover .tab-close {
-            opacity: 1;
-        }
-        
-        .tab-close:hover {
-            background-color: rgba(255,255,255,0.1);
-            color: #ffffff;
-            transform: scale(1.1);
-        }
-        
-        .new-tab {
-            width: 32px;
-            height: 32px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: linear-gradient(to bottom, #333333, #2a2a2a);
-            border-radius: 8px;
-            cursor: pointer;
-            margin-left: 8px;
-            transition: all 0.2s ease;
-            border: 1px solid rgba(255,255,255,0.05);
-            color: rgba(255,255,255,0.7);
-            font-size: 20px;
-        }
-        
-        .new-tab:hover {
-            background: linear-gradient(to bottom, #383838, #2f2f2f);
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            color: #ffffff;
-        }
-        
-        .browser-container {
-            flex: 1;
-            position: relative;
-            background-color: #242424;
-        }
-        
-        .webview-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: none;
-        }
-        
-        .webview-container.active {
-            display: block;
-        }
-        
-        webview {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-        
-        .browser-controls {
-            display: flex;
-            margin-right: 12px;
-            gap: 4px;
-        }
-        
-        .control-button {
-            width: 32px;
-            height: 32px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: linear-gradient(to bottom, #333333, #2a2a2a);
-            border-radius: 8px;
-            cursor: pointer;
-            color: rgba(255,255,255,0.7);
-            transition: all 0.2s ease;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-        
-        .control-button:hover {
-            background: linear-gradient(to bottom, #383838, #2f2f2f);
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            color: #ffffff;
-        }
-        
-        .control-button.active {
-            color: #0099ff;
-            background: linear-gradient(to bottom, #383838, #2f2f2f);
-            border-color: rgba(0,153,255,0.2);
-        }
-        
-        .loading-indicator {
-            position: absolute;
-            top: 0;
-            left: 0;
-            height: 3px;
-            background: linear-gradient(to right, #0099ff, #00ccff);
-            transition: width 0.3s ease-out;
-            z-index: 1000;
-            border-radius: 0 2px 2px 0;
-            box-shadow: 0 0 8px rgba(0,153,255,0.5);
-        }
-        
-        /* Special styling for the Black Hole Widget button */
-        #black-hole-button {
-            position: relative;
-            overflow: hidden;
-            width: 40px !important;
-            height: 40px !important;
-            background: linear-gradient(135deg, #6a1b9a 0%, #4a148c 100%) !important;
-            border: 2px solid #9c27b0 !important;
-            margin: 0 8px;
-            font-size: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 2px 8px rgba(147,51,234,0.4);
-            transition: all 0.3s ease;
-        }
-        
-        /* Add OneReach logo overlay */
-        #black-hole-button::after {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 16px;
-            height: 16px;
-            background-color: rgba(255, 255, 255, 0.9);
-            -webkit-mask-image: url('assets/or-logo.png');
-            -webkit-mask-size: contain;
-            -webkit-mask-repeat: no-repeat;
-            -webkit-mask-position: center;
-            -webkit-mask-mode: luminance;
-            mask-image: url('assets/or-logo.png');
-            mask-size: contain;
-            mask-repeat: no-repeat;
-            mask-position: center;
-            mask-mode: luminance;
-            transform: translate(-50%, -50%);
-            transition: opacity 0.3s ease, transform 0.3s ease;
-            pointer-events: none;
-            z-index: 2;
-        }
-        
-        #black-hole-button::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 0;
-            height: 0;
-            background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            transition: width 0.5s ease, height 0.5s ease;
-            pointer-events: none;
-        }
-        
-        #black-hole-button:hover {
-            background: linear-gradient(135deg, #7b1fa2 0%, #6a1b9a 100%) !important;
-            border-color: #ab47bc !important;
-            transform: translateY(-2px) scale(1.05);
-            box-shadow: 0 4px 16px rgba(147,51,234,0.6);
-            animation: glow 2s ease-in-out infinite;
-        }
-        
-        #black-hole-button:hover::after {
-            opacity: 1;
-            transform: translate(-50%, -50%) scale(1.2);
-        }
-        
-        #black-hole-button:hover::before {
-            width: 150%;
-            height: 150%;
-        }
-        
-        @keyframes glow {
-            0% {
-                box-shadow: 0 4px 16px rgba(147,51,234,0.6);
-            }
-            50% {
-                box-shadow: 0 4px 24px rgba(147,51,234,0.8), 0 0 32px rgba(147,51,234,0.4);
-            }
-            100% {
-                box-shadow: 0 4px 16px rgba(147,51,234,0.6);
-            }
-        }
-        
-        @keyframes pulse {
-            0% {
-                box-shadow: 0 0 0 0 rgba(147,51,234,0.4);
-            }
-            70% {
-                box-shadow: 0 0 0 8px rgba(147,51,234,0);
-            }
-            100% {
-                box-shadow: 0 0 0 0 rgba(147,51,234,0);
-            }
-        }
-        
-        /* LLM Badge Indicator */
-        #llm-badge {
-            display: none;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            background: linear-gradient(135deg, #1e3a5f 0%, #0d2137 100%);
-            border: 1px solid rgba(59, 130, 246, 0.5);
-            border-radius: 16px;
-            margin-right: 12px;
-            font-size: 11px;
-            color: rgba(255,255,255,0.9);
-            transition: all 0.3s ease;
-            cursor: pointer;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        #llm-badge.active {
-            display: flex;
-            animation: badgePulse 0.5s ease-out;
-        }
-        
-        #llm-badge.calling {
-            background: linear-gradient(135deg, #1e4620 0%, #0d2910 100%);
-            border-color: rgba(34, 197, 94, 0.7);
-            box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
-        }
-        
-        #llm-badge .badge-icon {
-            font-size: 14px;
-        }
-        
-        #llm-badge .badge-text {
-            font-weight: 500;
-            white-space: nowrap;
-        }
-        
-        #llm-badge .badge-cost {
-            color: rgba(147, 197, 253, 0.9);
-            font-size: 10px;
-        }
-        
-        #llm-badge:hover {
-            transform: scale(1.05);
-            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
-        }
-        
-        @keyframes badgePulse {
-            0% {
-                transform: scale(0.8);
-                opacity: 0;
-            }
-            50% {
-                transform: scale(1.1);
-            }
-            100% {
-                transform: scale(1);
-                opacity: 1;
-            }
-        }
-        
-        @keyframes badgeFlash {
-            0%, 100% {
-                background: linear-gradient(135deg, #1e3a5f 0%, #0d2137 100%);
-            }
-            50% {
-                background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-            }
-        }
-        /* Custom context menu styles */
-        .custom-context-menu {
-            position: fixed;
-            background: #2a2a2a;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            padding: 4px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-            z-index: 10000;
-            min-width: 200px;
-            display: none;
-            max-height: calc(100vh - 16px);
-            overflow-y: auto;
-        }
-        
-        .custom-context-menu-item {
-            padding: 8px 16px;
-            color: rgba(255,255,255,0.9);
-            cursor: pointer;
-            border-radius: 4px;
-            transition: all 0.2s ease;
-            font-size: 13px;
-        }
-        
-        .custom-context-menu-item:hover {
-            background: #9c27b0;
-            color: #ffffff;
-        }
+      }
+      /* Custom context menu styles */
+      .custom-context-menu {
+        position: fixed;
+        background: #2a2a2a;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 4px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        z-index: 10000;
+        min-width: 200px;
+        display: none;
+        max-height: calc(100vh - 16px);
+        overflow-y: auto;
+      }
+
+      .custom-context-menu-item {
+        padding: 8px 16px;
+        color: rgba(255, 255, 255, 0.9);
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        font-size: 13px;
+      }
+
+      .custom-context-menu-item:hover {
+        background: #9c27b0;
+        color: #ffffff;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <!-- Custom context menu -->
     <div class="custom-context-menu" id="custom-context-menu">
-        <div class="custom-context-menu-item" id="paste-to-black-hole">Paste to Black Hole</div>
+      <div class="custom-context-menu-item" id="paste-to-black-hole">Paste to Black Hole</div>
     </div>
     <div class="container">
-        <div class="tab-bar">
-            <!-- Tabs will be dynamically added here -->
-            <!-- LLM Badge Indicator -->
-            <div id="llm-badge" title="LLM API Calls">
-                <span class="badge-icon">🤖</span>
-                <span class="badge-text" id="llm-badge-text">LLM</span>
-                <span class="badge-cost" id="llm-badge-cost"></span>
-            </div>
-            <div class="browser-controls">
-                <div class="control-button" id="back-button">←</div>
-                <div class="control-button" id="forward-button">→</div>
-                <div class="control-button" id="refresh-button">↻</div>
-                <!-- Debug button hidden for production build -->
-                <!-- <div class="control-button" id="debug-button" title="Debug Session Isolation (Cmd+Shift+D)" style="font-size: 12px;">🐛</div> -->
-                <div class="control-button" id="black-hole-button" title="Black Hole Widget">
-                </div>
-            </div>
-            <div class="new-tab" id="new-tab-button">+</div>
+      <div class="tab-bar">
+        <!-- Tabs will be dynamically added here -->
+        <!-- LLM Badge Indicator -->
+        <div id="llm-badge" title="LLM API Calls">
+          <span class="badge-icon">🤖</span>
+          <span class="badge-text" id="llm-badge-text">LLM</span>
+          <span class="badge-cost" id="llm-badge-cost"></span>
         </div>
-        
-        <div class="browser-container" id="browser-container">
-            <!-- WebViews will be dynamically added here -->
-            <div class="loading-indicator" id="loading-indicator"></div>
+        <div class="browser-controls">
+          <div class="control-button" id="back-button">←</div>
+          <div class="control-button" id="forward-button">→</div>
+          <div class="control-button" id="refresh-button">↻</div>
+          <!-- Debug button hidden for production build -->
+          <!-- <div class="control-button" id="debug-button" title="Debug Session Isolation (Cmd+Shift+D)" style="font-size: 12px;">🐛</div> -->
+          <div class="control-button" id="black-hole-button" title="Black Hole Widget"></div>
         </div>
+        <div class="new-tab" id="new-tab-button">+</div>
+      </div>
+
+      <div class="browser-container" id="browser-container">
+        <!-- WebViews will be dynamically added here -->
+        <div class="loading-indicator" id="loading-indicator"></div>
+      </div>
     </div>
-    
+
     <script src="idw-registry.js"></script>
     <script src="browser-renderer.js"></script>
-</body>
-</html> 
+  </body>
+</html>

@@ -1,631 +1,684 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
+  <head>
     <title>GSX Power User User Guide</title>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
     <style>
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 1000px; 
-            margin: 0 auto; 
-            padding: 40px 20px;
-            line-height: 1.7;
-            color: #e2e8f0;
-            background: #0f1419;
-        }
-        .logo {
-            width: 60px;
-            height: 60px;
-            vertical-align: middle;
-            margin-right: 15px;
-            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
-        }
-        .header-nav {
-            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
-            color: white;
-            padding: 40px;
-            border-radius: 16px;
-            margin-bottom: 40px;
-            text-align: center;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-        }
-        .header-nav h1 {
-            margin: 0;
-            font-size: 3em;
-            font-weight: 300;
-            letter-spacing: -1px;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-        }
-        .header-nav p {
-            margin: 15px 0 0 0;
-            opacity: 0.95;
-            font-size: 1.3em;
-        }
-        .nav-pills {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin: 30px 0;
-            flex-wrap: wrap;
-        }
-        .nav-pill {
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 25px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            backdrop-filter: blur(10px);
-        }
-        .nav-pill:hover {
-            transform: translateY(-2px);
-            background: rgba(255, 255, 255, 0.2);
-            box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3);
-        }
-        h1 { 
-            color: #f1f5f9; 
-            border-bottom: 3px solid #3b82f6; 
-            padding-bottom: 15px;
-            margin-top: 50px;
-            font-size: 2.2em;
-            position: relative;
-        }
-        h2 { 
-            color: #e2e8f0; 
-            border-bottom: 2px solid #334155; 
-            padding-bottom: 10px;
-            margin-top: 40px;
-            font-size: 1.7em;
-        }
-        h3 { 
-            color: #cbd5e1; 
-            margin-top: 30px;
-            font-size: 1.4em;
-        }
-        .hero-section {
-            background: #1a202c;
-            padding: 40px;
-            border-radius: 16px;
-            margin: 30px 0;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4);
-            text-align: center;
-            border: 1px solid #2d3748;
-        }
-        .hero-section h2 {
-            border: none;
-            color: #60a5fa;
-            margin-top: 0;
-        }
-        .hero-section p {
-            font-size: 1.2em;
-            color: #94a3b8;
-        }
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 25px;
-            margin: 40px 0;
-        }
-        .feature-card {
-            background: #1a202c;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
-            transition: all 0.3s ease;
-            border-top: 4px solid #3b82f6;
-            border: 1px solid #2d3748;
-        }
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.2);
-            border-color: #3b82f6;
-        }
-        .feature-card h3 {
-            margin-top: 0;
-            color: #60a5fa;
-            font-size: 1.3em;
-        }
-        .feature-card p {
-            color: #94a3b8;
-            margin: 10px 0 0 0;
-        }
-        .step-container {
-            background: #1a202c;
-            padding: 30px;
-            border-radius: 12px;
-            margin: 25px 0;
-            box-shadow: 0 3px 15px rgba(0, 0, 0, 0.3);
-            border: 1px solid #2d3748;
-        }
-        .step {
-            display: flex;
-            align-items: flex-start;
-            margin: 20px 0;
-            padding: 20px;
-            background: #0f1419;
-            border-radius: 10px;
-            border-left: 4px solid #10b981;
-        }
-        .step-number {
-            background: #10b981;
-            color: white;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            margin-right: 20px;
-            flex-shrink: 0;
-            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
-        }
-        .step-content {
-            flex: 1;
-        }
-        .step-content strong {
-            color: #f1f5f9;
-        }
-        .step-content p {
-            color: #94a3b8;
-            margin: 5px 0 0 0;
-        }
-        .info-box {
-            background: #1e3a8a;
-            padding: 25px;
-            border-radius: 10px;
-            margin: 20px 0;
-            border-left: 4px solid #3b82f6;
-            color: #dbeafe;
-        }
-        .info-box strong {
-            color: #ffffff;
-        }
-        .warning-box {
-            background: #422006;
-            padding: 25px;
-            border-radius: 10px;
-            margin: 20px 0;
-            border-left: 4px solid #f59e0b;
-            color: #fef3c7;
-        }
-        .warning-box h3 {
-            color: #fbbf24;
-            margin-top: 0;
-        }
-        .success-box {
-            background: #052e16;
-            padding: 25px;
-            border-radius: 10px;
-            margin: 20px 0;
-            border-left: 4px solid #10b981;
-            color: #d1fae5;
-        }
-        .success-box strong {
-            color: #34d399;
-        }
-        .menu-path {
-            background: #3b82f6;
-            color: white;
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-            font-size: 0.9em;
-            display: inline-block;
-            margin: 2px;
-            box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
-        }
-        .shortcut {
-            background: #374151;
-            color: #f3f4f6;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 0.9em;
-            border: 1px solid #4b5563;
-            display: inline-block;
-        }
-        .emoji {
-            font-size: 1.3em;
-            margin-right: 10px;
-            vertical-align: middle;
-        }
-        .faq-item {
-            background: #1a202c;
-            padding: 25px;
-            margin: 15px 0;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            border-left: 4px solid #8b5cf6;
-            border: 1px solid #2d3748;
-        }
-        .faq-item h3 {
-            margin-top: 0;
-            color: #a78bfa;
-        }
-        .faq-item p {
-            color: #94a3b8;
-        }
-        .tip-box {
-            background: #312e81;
-            padding: 20px;
-            border-radius: 10px;
-            margin: 20px 0;
-            border-left: 4px solid #8b5cf6;
-            color: #e9d5ff;
-        }
-        .tip-box strong {
-            color: #c4b5fd;
-        }
-        table {
-            width: 100%;
-            background: #1a202c;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            margin: 20px 0;
-            border: 1px solid #2d3748;
-        }
-        th {
-            background: #1e40af;
-            color: white;
-            padding: 15px;
-            text-align: left;
-        }
-        td {
-            padding: 15px;
-            border-bottom: 1px solid #2d3748;
-            color: #cbd5e1;
-        }
-        tr:last-child td {
-            border-bottom: none;
-        }
-        tr:hover td {
-            background: #0f1419;
-        }
-        .button-group {
-            display: flex;
-            gap: 15px;
-            margin: 25px 0;
-            flex-wrap: wrap;
-        }
-        .button {
-            background: #3b82f6;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            display: inline-block;
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-        }
-        .button:hover {
-            background: #2563eb;
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
-        }
-        .button-secondary {
-            background: #4b5563;
-            box-shadow: 0 4px 12px rgba(75, 85, 99, 0.3);
-        }
-        .button-secondary:hover {
-            background: #374151;
-            box-shadow: 0 6px 20px rgba(75, 85, 99, 0.4);
-        }
-        ul, ol {
-            padding-left: 25px;
-            margin: 15px 0;
-            color: #cbd5e1;
-        }
-        li {
-            margin: 10px 0;
-        }
-        code {
-            background: #1e293b;
-            color: #60a5fa;
-            padding: 3px 6px;
-            border-radius: 4px;
-            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-            font-size: 0.9em;
-            border: 1px solid #334155;
-        }
-        /* Scrollbar styling for dark mode */
-        ::-webkit-scrollbar {
-            width: 12px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #1a202c;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #4b5563;
-            border-radius: 6px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #6b7280;
-        }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 40px 20px;
+        line-height: 1.7;
+        color: #e2e8f0;
+        background: #0f1419;
+      }
+      .logo {
+        width: 60px;
+        height: 60px;
+        vertical-align: middle;
+        margin-right: 15px;
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+      }
+      .header-nav {
+        background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+        color: white;
+        padding: 40px;
+        border-radius: 16px;
+        margin-bottom: 40px;
+        text-align: center;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      }
+      .header-nav h1 {
+        margin: 0;
+        font-size: 3em;
+        font-weight: 300;
+        letter-spacing: -1px;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+      }
+      .header-nav p {
+        margin: 15px 0 0 0;
+        opacity: 0.95;
+        font-size: 1.3em;
+      }
+      .nav-pills {
+        display: flex;
+        justify-content: center;
+        gap: 15px;
+        margin: 30px 0;
+        flex-wrap: wrap;
+      }
+      .nav-pill {
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 25px;
+        text-decoration: none;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(10px);
+      }
+      .nav-pill:hover {
+        transform: translateY(-2px);
+        background: rgba(255, 255, 255, 0.2);
+        box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3);
+      }
+      h1 {
+        color: #f1f5f9;
+        border-bottom: 3px solid #3b82f6;
+        padding-bottom: 15px;
+        margin-top: 50px;
+        font-size: 2.2em;
+        position: relative;
+      }
+      h2 {
+        color: #e2e8f0;
+        border-bottom: 2px solid #334155;
+        padding-bottom: 10px;
+        margin-top: 40px;
+        font-size: 1.7em;
+      }
+      h3 {
+        color: #cbd5e1;
+        margin-top: 30px;
+        font-size: 1.4em;
+      }
+      .hero-section {
+        background: #1a202c;
+        padding: 40px;
+        border-radius: 16px;
+        margin: 30px 0;
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4);
+        text-align: center;
+        border: 1px solid #2d3748;
+      }
+      .hero-section h2 {
+        border: none;
+        color: #60a5fa;
+        margin-top: 0;
+      }
+      .hero-section p {
+        font-size: 1.2em;
+        color: #94a3b8;
+      }
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 25px;
+        margin: 40px 0;
+      }
+      .feature-card {
+        background: #1a202c;
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+        transition: all 0.3s ease;
+        border-top: 4px solid #3b82f6;
+        border: 1px solid #2d3748;
+      }
+      .feature-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 30px rgba(59, 130, 246, 0.2);
+        border-color: #3b82f6;
+      }
+      .feature-card h3 {
+        margin-top: 0;
+        color: #60a5fa;
+        font-size: 1.3em;
+      }
+      .feature-card p {
+        color: #94a3b8;
+        margin: 10px 0 0 0;
+      }
+      .step-container {
+        background: #1a202c;
+        padding: 30px;
+        border-radius: 12px;
+        margin: 25px 0;
+        box-shadow: 0 3px 15px rgba(0, 0, 0, 0.3);
+        border: 1px solid #2d3748;
+      }
+      .step {
+        display: flex;
+        align-items: flex-start;
+        margin: 20px 0;
+        padding: 20px;
+        background: #0f1419;
+        border-radius: 10px;
+        border-left: 4px solid #10b981;
+      }
+      .step-number {
+        background: #10b981;
+        color: white;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        margin-right: 20px;
+        flex-shrink: 0;
+        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+      }
+      .step-content {
+        flex: 1;
+      }
+      .step-content strong {
+        color: #f1f5f9;
+      }
+      .step-content p {
+        color: #94a3b8;
+        margin: 5px 0 0 0;
+      }
+      .info-box {
+        background: #1e3a8a;
+        padding: 25px;
+        border-radius: 10px;
+        margin: 20px 0;
+        border-left: 4px solid #3b82f6;
+        color: #dbeafe;
+      }
+      .info-box strong {
+        color: #ffffff;
+      }
+      .warning-box {
+        background: #422006;
+        padding: 25px;
+        border-radius: 10px;
+        margin: 20px 0;
+        border-left: 4px solid #f59e0b;
+        color: #fef3c7;
+      }
+      .warning-box h3 {
+        color: #fbbf24;
+        margin-top: 0;
+      }
+      .success-box {
+        background: #052e16;
+        padding: 25px;
+        border-radius: 10px;
+        margin: 20px 0;
+        border-left: 4px solid #10b981;
+        color: #d1fae5;
+      }
+      .success-box strong {
+        color: #34d399;
+      }
+      .menu-path {
+        background: #3b82f6;
+        color: white;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+        font-size: 0.9em;
+        display: inline-block;
+        margin: 2px;
+        box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+      }
+      .shortcut {
+        background: #374151;
+        color: #f3f4f6;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 0.9em;
+        border: 1px solid #4b5563;
+        display: inline-block;
+      }
+      .emoji {
+        font-size: 1.3em;
+        margin-right: 10px;
+        vertical-align: middle;
+      }
+      .faq-item {
+        background: #1a202c;
+        padding: 25px;
+        margin: 15px 0;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        border-left: 4px solid #8b5cf6;
+        border: 1px solid #2d3748;
+      }
+      .faq-item h3 {
+        margin-top: 0;
+        color: #a78bfa;
+      }
+      .faq-item p {
+        color: #94a3b8;
+      }
+      .tip-box {
+        background: #312e81;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 20px 0;
+        border-left: 4px solid #8b5cf6;
+        color: #e9d5ff;
+      }
+      .tip-box strong {
+        color: #c4b5fd;
+      }
+      table {
+        width: 100%;
+        background: #1a202c;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        margin: 20px 0;
+        border: 1px solid #2d3748;
+      }
+      th {
+        background: #1e40af;
+        color: white;
+        padding: 15px;
+        text-align: left;
+      }
+      td {
+        padding: 15px;
+        border-bottom: 1px solid #2d3748;
+        color: #cbd5e1;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      tr:hover td {
+        background: #0f1419;
+      }
+      .button-group {
+        display: flex;
+        gap: 15px;
+        margin: 25px 0;
+        flex-wrap: wrap;
+      }
+      .button {
+        background: #3b82f6;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        display: inline-block;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+      }
+      .button:hover {
+        background: #2563eb;
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+      }
+      .button-secondary {
+        background: #4b5563;
+        box-shadow: 0 4px 12px rgba(75, 85, 99, 0.3);
+      }
+      .button-secondary:hover {
+        background: #374151;
+        box-shadow: 0 6px 20px rgba(75, 85, 99, 0.4);
+      }
+      ul,
+      ol {
+        padding-left: 25px;
+        margin: 15px 0;
+        color: #cbd5e1;
+      }
+      li {
+        margin: 10px 0;
+      }
+      code {
+        background: #1e293b;
+        color: #60a5fa;
+        padding: 3px 6px;
+        border-radius: 4px;
+        font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+        font-size: 0.9em;
+        border: 1px solid #334155;
+      }
+      /* Scrollbar styling for dark mode */
+      ::-webkit-scrollbar {
+        width: 12px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #1a202c;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #4b5563;
+        border-radius: 6px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #6b7280;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="header-nav">
-        <h1><img src="onereach_logo.jpg" alt="Onereach Logo" class="logo">Onereach.ai</h1>
-        <p>Your Complete Guide to Getting Work Done Faster</p>
-        <div class="nav-pills">
-            <a href="#getting-started" class="nav-pill">Getting Started</a>
-            <a href="#daily-use" class="nav-pill">Daily Use</a>
-            <a href="#ai-insights" class="nav-pill">AI Run Times</a>
-            <a href="#troubleshooting" class="nav-pill">Troubleshooting</a>
-            <a href="#faq" class="nav-pill">FAQ</a>
-        </div>
+      <h1><img src="onereach_logo.jpg" alt="Onereach Logo" class="logo" />Onereach.ai</h1>
+      <p>Your Complete Guide to Getting Work Done Faster</p>
+      <div class="nav-pills">
+        <a href="#getting-started" class="nav-pill">Getting Started</a>
+        <a href="#daily-use" class="nav-pill">Daily Use</a>
+        <a href="#ai-insights" class="nav-pill">AI Run Times</a>
+        <a href="#troubleshooting" class="nav-pill">Troubleshooting</a>
+        <a href="#faq" class="nav-pill">FAQ</a>
+      </div>
     </div>
 
     <div class="hero-section">
-        <h2>Welcome to Onereach.ai!</h2>
-        <p>Onereach.ai brings all your digital work environments together in one powerful desktop app. Access your IDW environments, GSX services, and stay informed with AI-powered insights - all from a single, secure application.</p>
-        <div class="button-group" style="justify-content: center;">
-            <a href="#getting-started" class="button">Get Started Now</a>
-            <a href="#daily-use" class="button button-secondary">See Daily Workflows</a>
-        </div>
+      <h2>Welcome to Onereach.ai!</h2>
+      <p>
+        Onereach.ai brings all your digital work environments together in one powerful desktop app. Access your IDW
+        environments, GSX services, and stay informed with AI-powered insights - all from a single, secure application.
+      </p>
+      <div class="button-group" style="justify-content: center">
+        <a href="#getting-started" class="button">Get Started Now</a>
+        <a href="#daily-use" class="button button-secondary">See Daily Workflows</a>
+      </div>
     </div>
 
     <h1 id="getting-started"><span class="emoji">🎯</span>Getting Started</h1>
-    
+
     <div class="info-box">
-        <strong>First time using Onereach.ai?</strong> Follow these simple steps to set up your work environments and start being more productive in minutes.
+      <strong>First time using Onereach.ai?</strong> Follow these simple steps to set up your work environments and
+      start being more productive in minutes.
     </div>
 
     <div class="step-container">
-        <h2>Quick Setup in 4 Steps</h2>
-        
-        <div class="step">
-            <div class="step-number">1</div>
-            <div class="step-content">
-                <strong>Open the Setup Wizard</strong>
-                <p>Click <span class="menu-path">IDW → Add/Remove</span> or press <span class="shortcut">Ctrl+A</span> (Windows) / <span class="shortcut">Cmd+A</span> (Mac)</p>
-            </div>
-        </div>
+      <h2>Quick Setup in 4 Steps</h2>
 
-        <div class="step">
-            <div class="step-number">2</div>
-            <div class="step-content">
-                <strong>Add Your First Environment</strong>
-                <p>Enter a friendly name (like "Production" or "Development") and the URL of your IDW environment</p>
-            </div>
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <strong>Open the Setup Wizard</strong>
+          <p>
+            Click <span class="menu-path">IDW → Add/Remove</span> or press
+            <span class="shortcut">Ctrl+A</span> (Windows) / <span class="shortcut">Cmd+A</span> (Mac)
+          </p>
         </div>
+      </div>
 
-        <div class="step">
-            <div class="step-number">3</div>
-            <div class="step-content">
-                <strong>Add GSX Services (Optional)</strong>
-                <p>If you use GSX services, add their URLs and assign them to the right environment</p>
-            </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <strong>Add Your First Environment</strong>
+          <p>Enter a friendly name (like "Production" or "Development") and the URL of your IDW environment</p>
         </div>
+      </div>
 
-        <div class="step">
-            <div class="step-number">4</div>
-            <div class="step-content">
-                <strong>Start Working!</strong>
-                <p>Your environments now appear in the IDW and GSX menus. Click any to start working</p>
-            </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <strong>Add GSX Services (Optional)</strong>
+          <p>If you use GSX services, add their URLs and assign them to the right environment</p>
         </div>
+      </div>
+
+      <div class="step">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <strong>Start Working!</strong>
+          <p>Your environments now appear in the IDW and GSX menus. Click any to start working</p>
+        </div>
+      </div>
     </div>
 
     <div class="success-box">
-        <strong><span class="emoji">💡</span>Pro Tip:</strong> Name your environments clearly like "Production - Main", "Staging - Test", or "Dev - Personal" to easily identify them later.
+      <strong><span class="emoji">💡</span>Pro Tip:</strong> Name your environments clearly like "Production - Main",
+      "Staging - Test", or "Dev - Personal" to easily identify them later.
     </div>
 
     <h1 id="daily-use"><span class="emoji">💼</span>Daily Use Guide</h1>
-    
+
     <h2>Your Typical Workflow</h2>
-    
+
     <div class="feature-grid">
-        <div class="feature-card">
-            <h3><span class="emoji">🌅</span>Morning Startup</h3>
-            <p>Launch Onereach.ai and click your main IDW environment from the menu. It opens in the main window, ready for work.</p>
-        </div>
-        
-        <div class="feature-card">
-            <h3><span class="emoji">🔄</span>Switching Environments</h3>
-            <p>Need to check something in staging? Just click <span class="menu-path">IDW → Staging</span> to switch instantly.</p>
-        </div>
-        
-        <div class="feature-card">
-            <h3><span class="emoji">🛠️</span>Using GSX Services</h3>
-            <p>Open GSX tools via <span class="menu-path">GSX → [Environment] → [Service]</span>. They open in separate windows for multitasking.</p>
-        </div>
-        
-        <div class="feature-card">
-            <h3><span class="emoji">🧬</span>Integrated Testing</h3>
-            <p>Run automated tests and track manual QA with the built-in test runner. Access via <span class="shortcut">Cmd+Alt+H</span> then <span class="menu-path">Help → 🧬 Test Runner</span>.</p>
-        </div>
+      <div class="feature-card">
+        <h3><span class="emoji">🌅</span>Morning Startup</h3>
+        <p>
+          Launch Onereach.ai and click your main IDW environment from the menu. It opens in the main window, ready for
+          work.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <h3><span class="emoji">🔄</span>Switching Environments</h3>
+        <p>
+          Need to check something in staging? Just click <span class="menu-path">IDW → Staging</span> to switch
+          instantly.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <h3><span class="emoji">🛠️</span>Using GSX Services</h3>
+        <p>
+          Open GSX tools via <span class="menu-path">GSX → [Environment] → [Service]</span>. They open in separate
+          windows for multitasking.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <h3><span class="emoji">🧬</span>Integrated Testing</h3>
+        <p>
+          Run automated tests and track manual QA with the built-in test runner. Access via
+          <span class="shortcut">Cmd+Alt+H</span> then <span class="menu-path">Help → 🧬 Test Runner</span>.
+        </p>
+      </div>
     </div>
 
     <h2>Common Tasks</h2>
-    
+
     <table>
-        <tr>
-            <th>Task</th>
-            <th>How to Do It</th>
-            <th>Keyboard Shortcut</th>
-        </tr>
-        <tr>
-            <td>Switch IDW Environment</td>
-            <td>Click environment name in IDW menu</td>
-            <td>-</td>
-        </tr>
-        <tr>
-            <td>Open GSX Service</td>
-            <td>GSX → Environment → Service</td>
-            <td>-</td>
-        </tr>
-        <tr>
-            <td>Refresh Current Page</td>
-            <td>View → Reload</td>
-            <td><span class="shortcut">Ctrl+R</span> / <span class="shortcut">Cmd+R</span></td>
-        </tr>
-        <tr>
-            <td>Manage Environments</td>
-            <td>IDW → Add/Remove</td>
-            <td><span class="shortcut">Ctrl+A</span> / <span class="shortcut">Cmd+A</span></td>
-        </tr>
-        <tr>
-            <td>View AI Run Times</td>
-            <td>View → AI Run Times</td>
-            <td>-</td>
-        </tr>
-        <tr>
-            <td>Run Tests</td>
-            <td>Help → 🧬 Integrated Test Runner</td>
-            <td><span class="shortcut">Cmd+Shift+T</span> (after activating)</td>
-        </tr>
+      <tr>
+        <th>Task</th>
+        <th>How to Do It</th>
+        <th>Keyboard Shortcut</th>
+      </tr>
+      <tr>
+        <td>Switch IDW Environment</td>
+        <td>Click environment name in IDW menu</td>
+        <td>-</td>
+      </tr>
+      <tr>
+        <td>Open GSX Service</td>
+        <td>GSX → Environment → Service</td>
+        <td>-</td>
+      </tr>
+      <tr>
+        <td>Refresh Current Page</td>
+        <td>View → Reload</td>
+        <td><span class="shortcut">Ctrl+R</span> / <span class="shortcut">Cmd+R</span></td>
+      </tr>
+      <tr>
+        <td>Manage Environments</td>
+        <td>IDW → Add/Remove</td>
+        <td><span class="shortcut">Ctrl+A</span> / <span class="shortcut">Cmd+A</span></td>
+      </tr>
+      <tr>
+        <td>View AI Run Times</td>
+        <td>View → AI Run Times</td>
+        <td>-</td>
+      </tr>
+      <tr>
+        <td>Run Tests</td>
+        <td>Help → 🧬 Integrated Test Runner</td>
+        <td><span class="shortcut">Cmd+Shift+T</span> (after activating)</td>
+      </tr>
     </table>
 
     <h2>Window Management Tips</h2>
-    
+
     <div class="tip-box">
-        <strong>Working with Multiple Services?</strong>
-        <ul>
-            <li>Keep your main IDW environment in the primary window</li>
-            <li>Open GSX services in separate windows for side-by-side work</li>
-            <li>Each window maintains its own login session</li>
-            <li>Arrange windows on different monitors for maximum productivity</li>
-        </ul>
+      <strong>Working with Multiple Services?</strong>
+      <ul>
+        <li>Keep your main IDW environment in the primary window</li>
+        <li>Open GSX services in separate windows for side-by-side work</li>
+        <li>Each window maintains its own login session</li>
+        <li>Arrange windows on different monitors for maximum productivity</li>
+      </ul>
     </div>
 
     <h1 id="ai-insights"><span class="emoji">🤖</span>AI Run Times</h1>
-    
+
     <div class="hero-section">
-        <h2>Stay Informed with Smart Reading</h2>
-        <p>AI Run Times analyzes UX Magazine articles to give you accurate reading times and track your progress through industry content.</p>
+      <h2>Stay Informed with Smart Reading</h2>
+      <p>
+        AI Run Times analyzes UX Magazine articles to give you accurate reading times and track your progress through
+        industry content.
+      </p>
     </div>
 
     <h2>Using AI Run Times</h2>
-    
+
     <div class="step-container">
-        <div class="step">
-            <div class="step-number">1</div>
-            <div class="step-content">
-                <strong>Open AI Run Times</strong>
-                <p>Click <span class="menu-path">View → AI Run Times</span> to open the reader</p>
-            </div>
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <strong>Open AI Run Times</strong>
+          <p>Click <span class="menu-path">View → AI Run Times</span> to open the reader</p>
         </div>
+      </div>
 
-        <div class="step">
-            <div class="step-number">2</div>
-            <div class="step-content">
-                <strong>Browse Articles</strong>
-                <p>See a grid of latest UX articles with preview images and summaries</p>
-            </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <strong>Browse Articles</strong>
+          <p>See a grid of latest UX articles with preview images and summaries</p>
         </div>
+      </div>
 
-        <div class="step">
-            <div class="step-number">3</div>
-            <div class="step-content">
-                <strong>Check Reading Times</strong>
-                <p>Wait a moment for accurate reading times to appear (replaces "Loading...")</p>
-            </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <strong>Check Reading Times</strong>
+          <p>Wait a moment for accurate reading times to appear (replaces "Loading...")</p>
         </div>
+      </div>
 
-        <div class="step">
-            <div class="step-number">4</div>
-            <div class="step-content">
-                <strong>Read and Track Progress</strong>
-                <p>Click any article to read. Progress bars show how much you've completed</p>
-            </div>
+      <div class="step">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <strong>Read and Track Progress</strong>
+          <p>Click any article to read. Progress bars show how much you've completed</p>
         </div>
+      </div>
     </div>
 
     <div class="info-box">
-        <strong>Why are reading times accurate?</strong> Unlike other RSS readers that guess, AI Run Times downloads and analyzes each article's full content to calculate real reading times based on word count.
+      <strong>Why are reading times accurate?</strong> Unlike other RSS readers that guess, AI Run Times downloads and
+      analyzes each article's full content to calculate real reading times based on word count.
     </div>
 
     <h1 id="troubleshooting"><span class="emoji">🛠️</span>Troubleshooting</h1>
-    
+
     <h2>Quick Fixes for Common Issues</h2>
-    
+
     <div class="warning-box">
-        <h3><span class="emoji">🔌</span>Environment Won't Load</h3>
-        <ul>
-            <li><strong>Check your internet connection</strong> - Try loading a website in your browser</li>
-            <li><strong>Verify the URL</strong> - Go to <span class="menu-path">IDW → Add/Remove</span> and check the URL is correct</li>
-            <li><strong>Refresh the window</strong> - Press <span class="shortcut">Ctrl+R</span> or <span class="shortcut">Cmd+R</span></li>
-            <li><strong>Login required?</strong> - You may need to log in to the environment first</li>
-        </ul>
+      <h3><span class="emoji">🔌</span>Environment Won't Load</h3>
+      <ul>
+        <li><strong>Check your internet connection</strong> - Try loading a website in your browser</li>
+        <li>
+          <strong>Verify the URL</strong> - Go to <span class="menu-path">IDW → Add/Remove</span> and check the URL is
+          correct
+        </li>
+        <li>
+          <strong>Refresh the window</strong> - Press <span class="shortcut">Ctrl+R</span> or
+          <span class="shortcut">Cmd+R</span>
+        </li>
+        <li><strong>Login required?</strong> - You may need to log in to the environment first</li>
+      </ul>
     </div>
 
     <div class="warning-box">
-        <h3><span class="emoji">📊</span>AI Run Times Issues</h3>
-        <ul>
-            <li><strong>"Loading..." won't go away</strong> - Wait 30 seconds, then refresh the window</li>
-            <li><strong>Articles not appearing</strong> - Check internet connection and try restarting the app</li>
-            <li><strong>Wrong reading times</strong> - This is rare; report persistent issues</li>
-        </ul>
+      <h3><span class="emoji">📊</span>AI Run Times Issues</h3>
+      <ul>
+        <li><strong>"Loading..." won't go away</strong> - Wait 30 seconds, then refresh the window</li>
+        <li><strong>Articles not appearing</strong> - Check internet connection and try restarting the app</li>
+        <li><strong>Wrong reading times</strong> - This is rare; report persistent issues</li>
+      </ul>
     </div>
 
     <div class="warning-box">
-        <h3><span class="emoji">🚪</span>Missing Menu Items</h3>
-        <ul>
-            <li><strong>No environments in menu</strong> - Set them up via <span class="menu-path">IDW → Add/Remove</span></li>
-            <li><strong>GSX services missing</strong> - Add them in the setup wizard and assign to environments</li>
-            <li><strong>Changes not appearing</strong> - Restart the application after making changes</li>
-        </ul>
+      <h3><span class="emoji">🚪</span>Missing Menu Items</h3>
+      <ul>
+        <li>
+          <strong>No environments in menu</strong> - Set them up via <span class="menu-path">IDW → Add/Remove</span>
+        </li>
+        <li><strong>GSX services missing</strong> - Add them in the setup wizard and assign to environments</li>
+        <li><strong>Changes not appearing</strong> - Restart the application after making changes</li>
+      </ul>
     </div>
 
     <h2>Advanced Troubleshooting</h2>
-    
+
     <div class="info-box">
-        <strong>For technical issues:</strong>
-        <ol>
-            <li>Open Developer Tools: <span class="menu-path">View → Toggle Developer Tools</span></li>
-            <li>Check the Console tab for error messages</li>
-            <li>Take a screenshot of any errors for support</li>
-        </ol>
+      <strong>For technical issues:</strong>
+      <ol>
+        <li>Open Developer Tools: <span class="menu-path">View → Toggle Developer Tools</span></li>
+        <li>Check the Console tab for error messages</li>
+        <li>Take a screenshot of any errors for support</li>
+      </ol>
     </div>
 
     <h1 id="faq"><span class="emoji">❓</span>Frequently Asked Questions</h1>
-    
+
     <div class="faq-item">
-        <h3>Can I use multiple IDW environments at the same time?</h3>
-        <p>Yes! While only one environment can be in the main window, you can open others in your regular browser alongside Onereach.ai.</p>
+      <h3>Can I use multiple IDW environments at the same time?</h3>
+      <p>
+        Yes! While only one environment can be in the main window, you can open others in your regular browser alongside
+        Onereach.ai.
+      </p>
     </div>
 
     <div class="faq-item">
-        <h3>Do I need to log in every time I switch environments?</h3>
-        <p>No. Each environment maintains its own session. Once logged in, you stay logged in until you explicitly log out or the session expires.</p>
+      <h3>Do I need to log in every time I switch environments?</h3>
+      <p>
+        No. Each environment maintains its own session. Once logged in, you stay logged in until you explicitly log out
+        or the session expires.
+      </p>
     </div>
 
     <div class="faq-item">
-        <h3>Can I add custom links that aren't GSX services?</h3>
-        <p>Yes! In the setup wizard, you can add any custom links and assign them to specific environments. They'll appear in the GSX menu.</p>
+      <h3>Can I add custom links that aren't GSX services?</h3>
+      <p>
+        Yes! In the setup wizard, you can add any custom links and assign them to specific environments. They'll appear
+        in the GSX menu.
+      </p>
     </div>
 
     <div class="faq-item">
-        <h3>How do I update the application?</h3>
-        <p>Check for updates via <span class="menu-path">Help → Check for Updates</span>. The app will notify you when updates are available.</p>
+      <h3>How do I update the application?</h3>
+      <p>
+        Check for updates via <span class="menu-path">Help → Check for Updates</span>. The app will notify you when
+        updates are available.
+      </p>
     </div>
 
     <div class="faq-item">
-        <h3>Is my data secure?</h3>
-        <p>Yes. Each environment and service runs in isolation. Your credentials and data from one environment cannot be accessed by another.</p>
+      <h3>Is my data secure?</h3>
+      <p>
+        Yes. Each environment and service runs in isolation. Your credentials and data from one environment cannot be
+        accessed by another.
+      </p>
     </div>
 
     <div class="faq-item">
-        <h3>Can I export/import my environment settings?</h3>
-        <p>Your settings are automatically saved. To transfer to another computer, you can copy the configuration files from the application data folder.</p>
+      <h3>Can I export/import my environment settings?</h3>
+      <p>
+        Your settings are automatically saved. To transfer to another computer, you can copy the configuration files
+        from the application data folder.
+      </p>
     </div>
 
     <h1><span class="emoji">🚀</span>Ready to Boost Your Productivity?</h1>
-    
-    <div class="hero-section">
-        <h2>You're All Set!</h2>
-        <p>With Onereach.ai, you have everything you need to manage your digital work environments efficiently. Start by adding your first environment and experience the difference.</p>
-        <div class="button-group" style="justify-content: center;">
-            <span class="menu-path" style="font-size: 1.2em; padding: 15px 30px;">IDW → Add/Remove</span>
-        </div>
-        <p style="margin-top: 20px;">Questions? Check the <span class="menu-path">Help</span> menu for more resources.</p>
-    </div>
 
-</body>
-</html> 
+    <div class="hero-section">
+      <h2>You're All Set!</h2>
+      <p>
+        With Onereach.ai, you have everything you need to manage your digital work environments efficiently. Start by
+        adding your first environment and experience the difference.
+      </p>
+      <div class="button-group" style="justify-content: center">
+        <span class="menu-path" style="font-size: 1.2em; padding: 15px 30px">IDW → Add/Remove</span>
+      </div>
+      <p style="margin-top: 20px">Questions? Check the <span class="menu-path">Help</span> menu for more resources.</p>
+    </div>
+  </body>
+</html>

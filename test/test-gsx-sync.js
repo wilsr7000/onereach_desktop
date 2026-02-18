@@ -14,66 +14,67 @@ const os = require('os');
 const TEST_CONFIG = {
   token: process.env.GSX_TOKEN || '', // Set GSX_TOKEN environment variable or update here
   environment: process.env.GSX_ENV || 'qa', // Use qa for testing
-  testDir: path.join(os.tmpdir(), 'gsx-sync-test')
+  testDir: path.join(os.tmpdir(), 'gsx-sync-test'),
 };
 
 async function createTestFiles() {
   console.log('Creating test files...');
-  
+
   // Create test directory
   await fs.mkdir(TEST_CONFIG.testDir, { recursive: true });
-  
+
   // Create some test files
   await fs.writeFile(
     path.join(TEST_CONFIG.testDir, 'test-file-1.txt'),
     'This is test file 1 content\n' + new Date().toISOString()
   );
-  
+
   await fs.writeFile(
     path.join(TEST_CONFIG.testDir, 'test-file-2.json'),
-    JSON.stringify({ 
-      test: true, 
-      timestamp: new Date().toISOString(),
-      message: 'GSX sync test file'
-    }, null, 2)
+    JSON.stringify(
+      {
+        test: true,
+        timestamp: new Date().toISOString(),
+        message: 'GSX sync test file',
+      },
+      null,
+      2
+    )
   );
-  
+
   // Create a subdirectory with files
   const subDir = path.join(TEST_CONFIG.testDir, 'subdirectory');
   await fs.mkdir(subDir, { recursive: true });
-  
-  await fs.writeFile(
-    path.join(subDir, 'nested-file.md'),
-    '# Test Markdown File\n\nThis file is in a subdirectory.'
-  );
-  
+
+  await fs.writeFile(path.join(subDir, 'nested-file.md'), '# Test Markdown File\n\nThis file is in a subdirectory.');
+
   console.log(`Test files created in: ${TEST_CONFIG.testDir}`);
 }
 
 async function testConnection() {
   console.log('\n=== Testing GSX Connection ===');
-  
+
   if (!TEST_CONFIG.token) {
     console.error('ERROR: No GSX token provided!');
     console.log('Please set the GSX_TOKEN environment variable or update TEST_CONFIG.token');
     return false;
   }
-  
+
   const discoveryUrls = {
     qa: 'https://discovery.qa.api.onereach.ai',
     staging: 'https://discovery.staging.api.onereach.ai',
-    production: 'https://discovery.api.onereach.ai'
+    production: 'https://discovery.api.onereach.ai',
   };
-  
+
   const discoveryUrl = discoveryUrls[TEST_CONFIG.environment];
   console.log(`Using discovery URL: ${discoveryUrl}`);
-  
+
   try {
     const client = new FilesSyncNode({
       token: TEST_CONFIG.token,
-      discoveryUrl: discoveryUrl
+      discoveryUrl: discoveryUrl,
     });
-    
+
     console.log('✓ Client initialized successfully');
     return client;
   } catch (error) {
@@ -84,32 +85,32 @@ async function testConnection() {
 
 async function testSync(client) {
   console.log('\n=== Testing File Sync ===');
-  
+
   const remotePath = `test-sync-${Date.now()}`;
   console.log(`Syncing to remote path: ${remotePath}`);
-  
+
   try {
     // Test basic sync
     console.log('Starting sync...');
     await client.pushLocalPathToFiles(TEST_CONFIG.testDir, remotePath);
     console.log(`✓ Successfully synced ${TEST_CONFIG.testDir} to GSX Files/${remotePath}`);
-    
+
     // Test with options
     console.log('\nTesting sync with options...');
     const remotePathPublic = `${remotePath}-public`;
     await client.pushLocalPathToFiles(TEST_CONFIG.testDir, remotePathPublic, {
-      isPublic: true
+      isPublic: true,
     });
     console.log(`✓ Successfully synced with public access to GSX Files/${remotePathPublic}`);
-    
+
     // Test with TTL
     console.log('\nTesting sync with TTL (1 hour expiration)...');
     const remotePathTTL = `${remotePath}-ttl`;
     await client.pushLocalPathToFiles(TEST_CONFIG.testDir, remotePathTTL, {
-      ttl: Date.now() + 3600000 // 1 hour from now
+      ttl: Date.now() + 3600000, // 1 hour from now
     });
     console.log(`✓ Successfully synced with 1 hour TTL to GSX Files/${remotePathTTL}`);
-    
+
     return true;
   } catch (error) {
     console.error('✗ Sync failed:', error.message);
@@ -122,7 +123,7 @@ async function testSync(client) {
 
 async function cleanup() {
   console.log('\n=== Cleanup ===');
-  
+
   try {
     await fs.rm(TEST_CONFIG.testDir, { recursive: true, force: true });
     console.log(`✓ Cleaned up test directory: ${TEST_CONFIG.testDir}`);
@@ -138,11 +139,11 @@ async function runTests() {
   console.log(`- Environment: ${TEST_CONFIG.environment}`);
   console.log(`- Token: ${TEST_CONFIG.token ? '***' + TEST_CONFIG.token.slice(-4) : 'NOT SET'}`);
   console.log(`- Test Directory: ${TEST_CONFIG.testDir}`);
-  
+
   try {
     // Create test files
     await createTestFiles();
-    
+
     // Test connection
     const client = await testConnection();
     if (!client) {
@@ -150,13 +151,13 @@ async function runTests() {
       await cleanup();
       process.exit(1);
     }
-    
+
     // Test sync
     const syncSuccess = await testSync(client);
-    
+
     // Cleanup
     await cleanup();
-    
+
     // Summary
     console.log('\n=== Test Summary ===');
     if (syncSuccess) {

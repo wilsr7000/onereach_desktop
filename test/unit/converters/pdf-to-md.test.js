@@ -48,7 +48,7 @@ describe('PdfToMdAgent (specific)', () => {
   });
 
   it('offers three structuring strategies', () => {
-    const ids = agent.strategies.map(s => s.id);
+    const ids = agent.strategies.map((s) => s.id);
     expect(ids).toEqual(['structured', 'layout-aware', 'semantic']);
   });
 

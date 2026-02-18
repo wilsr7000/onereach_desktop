@@ -35,7 +35,9 @@ function createMockMemory(agentId, sections = {}) {
         .join('\n\n')
     ),
     getSection: vi.fn((name) => _sections[name] || null),
-    updateSection: vi.fn((name, content) => { _sections[name] = content; }),
+    updateSection: vi.fn((name, content) => {
+      _sections[name] = content;
+    }),
     getSectionNames: vi.fn(() => Object.keys(_sections)),
     parseSectionAsKeyValue: vi.fn(() => ({})),
     updateSectionAsKeyValue: vi.fn(),
@@ -47,7 +49,9 @@ function createMockMemory(agentId, sections = {}) {
 
 function createMockProfile(initialFacts = {}) {
   const _facts = { ...initialFacts };
-  const updateFact = vi.fn((key, value) => { _facts[key] = value; });
+  const updateFact = vi.fn((key, value) => {
+    _facts[key] = value;
+  });
   const save = vi.fn(async () => true);
   const storeUpdateSection = vi.fn();
   const storeParseSectionAsKeyValue = vi.fn((section) => {
@@ -147,7 +151,6 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Context Gathering', () => {
-
     it('should load user profile facts', async () => {
       const { factsStr, currentFacts } = await agent._loadUserProfile();
       expect(currentFacts.Name).toBe('Isaac');
@@ -193,7 +196,6 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Update Flow', () => {
-
     it('should update user profile on name change', async () => {
       mockAiJson.mockResolvedValueOnce({
         action: 'update',
@@ -245,8 +247,16 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
         response: 'Updated everything.',
         profileChanges: { facts: { 'Home City': 'Portland' }, deleteKeys: [] },
         agentChanges: [
-          { agentId: 'weather-agent', reason: 'city', sectionUpdates: { 'Learned Preferences': '- Home Location: Portland' } },
-          { agentId: 'daily-brief-agent', reason: 'style', sectionUpdates: { 'Briefing Preferences': '- Style: concise\n- Length: short' } },
+          {
+            agentId: 'weather-agent',
+            reason: 'city',
+            sectionUpdates: { 'Learned Preferences': '- Home Location: Portland' },
+          },
+          {
+            agentId: 'daily-brief-agent',
+            reason: 'style',
+            sectionUpdates: { 'Briefing Preferences': '- Style: concise\n- Length: short' },
+          },
         ],
       });
 
@@ -263,9 +273,7 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
         action: 'update',
         response: 'Done.',
         profileChanges: { facts: {}, deleteKeys: [] },
-        agentChanges: [
-          { agentId: 'nonexistent-agent', reason: 'test', sectionUpdates: { Foo: 'bar' } },
-        ],
+        agentChanges: [{ agentId: 'nonexistent-agent', reason: 'test', sectionUpdates: { Foo: 'bar' } }],
       });
 
       const result = await agent.execute({ content: 'test' });
@@ -278,7 +286,6 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('View Flow', () => {
-
     it('should return synthesized view without modifying anything', async () => {
       mockAiJson.mockResolvedValueOnce({
         action: 'view',
@@ -301,14 +308,17 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Delete Flow', () => {
-
     it('should delete from profile and clean agent memories', async () => {
       mockAiJson.mockResolvedValueOnce({
         action: 'delete',
         response: 'Forgotten your home city.',
         profileChanges: { facts: {}, deleteKeys: ['Home City'] },
         agentChanges: [
-          { agentId: 'weather-agent', reason: 'Remove city', sectionUpdates: { 'Learned Preferences': '*No preferences learned yet.*' } },
+          {
+            agentId: 'weather-agent',
+            reason: 'Remove city',
+            sectionUpdates: { 'Learned Preferences': '*No preferences learned yet.*' },
+          },
         ],
       });
 
@@ -325,7 +335,6 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Clear All Flow', () => {
-
     it('should reset profile and all agent learned preferences', async () => {
       mockAiJson.mockResolvedValueOnce({
         action: 'clear_all',
@@ -353,14 +362,12 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('LLM Call Verification', () => {
-
-    it('should use powerful profile with adaptive thinking', async () => {
+    it('should use standard profile for orchestration', async () => {
       await agent.execute({ content: 'test' });
       expect(mockAiJson).toHaveBeenCalledTimes(1);
 
-      const [prompt, options] = mockAiJson.mock.calls[0];
-      expect(options.profile).toBe('powerful');
-      expect(options.thinking).toBe(true);
+      const [_prompt, options] = mockAiJson.mock.calls[0];
+      expect(options.profile).toBe('standard');
       expect(options.feature).toBe('memory-agent-orchestrator');
     });
 
@@ -396,7 +403,6 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Edge Cases', () => {
-
     it('should handle empty content', async () => {
       const result = await agent.execute({ content: '' });
       expect(result.success).toBe(false);
@@ -449,7 +455,6 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Passive Observation', () => {
-
     beforeEach(() => {
       // Reset observation state between tests
       agent._lastObservationTime = 0;
@@ -462,13 +467,17 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
         reasoning: 'User mentioned they live in Portland now',
         profileChanges: { facts: { 'Home City': 'Portland' } },
         agentChanges: [
-          { agentId: 'weather-agent', reason: 'New home city', sectionUpdates: { 'Learned Preferences': '- Home Location: Portland' } },
+          {
+            agentId: 'weather-agent',
+            reason: 'New home city',
+            sectionUpdates: { 'Learned Preferences': '- Home Location: Portland' },
+          },
         ],
       });
 
       const result = await agent.observeConversation(
-        { content: 'What\'s the weather in Portland? I just moved there' },
-        { success: true, message: 'It\'s 55F and cloudy in Portland.' },
+        { content: "What's the weather in Portland? I just moved there" },
+        { success: true, message: "It's 55F and cloudy in Portland." },
         'weather-agent'
       );
 
@@ -524,7 +533,7 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
 
       await agent.observeConversation(
         { content: 'What time is it in New York?' },
-        { success: true, message: 'It\'s 3:15 PM EST.' },
+        { success: true, message: "It's 3:15 PM EST." },
         'time-agent'
       );
 
@@ -578,7 +587,7 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
       });
 
       const result = await agent.observeConversation(
-        { content: 'What\'s the weather?' },
+        { content: "What's the weather?" },
         { success: true, message: 'Sunny and 72F in Berkeley.' },
         'weather-agent'
       );
@@ -592,12 +601,12 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
       mockAiJson.mockResolvedValueOnce({
         shouldUpdate: true,
         reasoning: 'Agent addressed user by name',
-        profileChanges: { facts: { Name: 'Isaac' } },  // same as existing
+        profileChanges: { facts: { Name: 'Isaac' } }, // same as existing
         agentChanges: [],
       });
 
       const result = await agent.observeConversation(
-        { content: 'Good morning Isaac, here\'s your brief' },
+        { content: "Good morning Isaac, here's your brief" },
         { success: true, message: 'Morning brief delivered.' },
         'daily-brief-agent'
       );
@@ -613,13 +622,21 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
         reasoning: 'User revealed preference for Celsius and Portland location',
         profileChanges: { facts: { 'Temperature Units': 'Celsius', 'Home City': 'Portland' } },
         agentChanges: [
-          { agentId: 'weather-agent', reason: 'New city + units', sectionUpdates: { 'Learned Preferences': '- Home Location: Portland\n- Units: Celsius' } },
-          { agentId: 'daily-brief-agent', reason: 'User moved', sectionUpdates: { 'Learned Patterns': '- User relocated to Portland' } },
+          {
+            agentId: 'weather-agent',
+            reason: 'New city + units',
+            sectionUpdates: { 'Learned Preferences': '- Home Location: Portland\n- Units: Celsius' },
+          },
+          {
+            agentId: 'daily-brief-agent',
+            reason: 'User moved',
+            sectionUpdates: { 'Learned Patterns': '- User relocated to Portland' },
+          },
         ],
       });
 
       const result = await agent.observeConversation(
-        { content: 'Give me the Portland weather in Celsius, that\'s where I live now' },
+        { content: "Give me the Portland weather in Celsius, that's where I live now" },
         { success: true, message: '12C and rainy in Portland.' },
         'weather-agent'
       );
@@ -698,8 +715,10 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
 
       // Observe one more -- should push out the oldest
       mockAiJson.mockResolvedValueOnce({
-        shouldUpdate: false, reasoning: 'nothing',
-        profileChanges: { facts: {} }, agentChanges: [],
+        shouldUpdate: false,
+        reasoning: 'nothing',
+        profileChanges: { facts: {} },
+        agentChanges: [],
       });
 
       await agent.observeConversation(
@@ -719,7 +738,6 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Truncation and Error Resilience', () => {
-
     it('should truncate agent memories exceeding per-agent char limit', async () => {
       // Create a mock memory with content > 2000 chars
       const longContent = 'x'.repeat(3000);
@@ -754,7 +772,7 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
         const id = `agent-${i}`;
         agentIds.push(id);
         mems[id] = createMockMemory(id, {
-          'Data': 'y'.repeat(1500),
+          Data: 'y'.repeat(1500),
         });
       }
       agentIds.push('memory-agent', 'user-profile');
@@ -778,7 +796,9 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
 
     it('should continue loading if one agent memory fails', async () => {
       const failingMemory = createMockMemory('failing-agent', {});
-      failingMemory.load = vi.fn(async () => { throw new Error('Corrupted file'); });
+      failingMemory.load = vi.fn(async () => {
+        throw new Error('Corrupted file');
+      });
 
       agent._setDeps({
         getUserProfile: () => mockProfile.instance,
@@ -804,7 +824,6 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Audit Trail', () => {
-
     it('should log changes to Change Log after execute() update', async () => {
       mockAiJson.mockResolvedValueOnce({
         action: 'update',
@@ -849,7 +868,6 @@ describe('Memory Agent: Cross-Agent Orchestration', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Additional Edge Cases', () => {
-
     it('should not crash on clear_all when agent has no Learned Preferences section', async () => {
       // Create an agent with no Learned Preferences
       const bareMemory = createMockMemory('bare-agent', {

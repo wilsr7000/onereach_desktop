@@ -35,7 +35,7 @@ if (!elevenLabsApiKey) {
           break;
         }
       }
-    } catch (e) {
+    } catch (_e) {
       // Try next path
     }
   }
@@ -44,7 +44,7 @@ if (!elevenLabsApiKey) {
 // If still no key, provide instructions
 if (!elevenLabsApiKey) {
   console.log('\nChecked these paths for settings:');
-  possiblePaths.forEach(p => console.log('  -', p));
+  possiblePaths.forEach((p) => console.log('  -', p));
   console.log('\nYou can also pass API key as: node test/test-elevenlabs-new-apis.js YOUR_API_KEY');
   console.log('Or set ELEVENLABS_API_KEY environment variable');
 }
@@ -86,7 +86,7 @@ class TestElevenLabsService {
     formData.append('name', name);
     if (options.defaultModelId) formData.append('default_model_id', options.defaultModelId);
     if (options.qualityPreset) formData.append('quality_preset', options.qualityPreset);
-    
+
     return this._makeRequest('POST', '/v1/studio/projects', formData.toString(), 'application/x-www-form-urlencoded');
   }
 
@@ -121,7 +121,7 @@ class TestElevenLabsService {
       age: options.age || 'middle_aged',
       accent: options.accent || 'american',
       accent_strength: options.accentStrength || 1.0,
-      text: options.text || 'Hello, this is a test.'
+      text: options.text || 'Hello, this is a test.',
     });
 
     return new Promise((resolve, reject) => {
@@ -131,18 +131,18 @@ class TestElevenLabsService {
         path: '/v1/voice-generation/generate-voice',
         method: 'POST',
         headers: {
-          'Accept': 'audio/mpeg',
+          Accept: 'audio/mpeg',
           'xi-api-key': this.apiKey,
           'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body)
-        }
+          'Content-Length': Buffer.byteLength(body),
+        },
       };
 
       const file = fs.createWriteStream(outputPath);
       const req = https.request(reqOptions, (res) => {
         if (res.statusCode !== 200) {
           let errorData = '';
-          res.on('data', chunk => errorData += chunk);
+          res.on('data', (chunk) => (errorData += chunk));
           res.on('end', () => reject(new Error(`Voice design error: ${res.statusCode} - ${errorData}`)));
           return;
         }
@@ -165,7 +165,7 @@ class TestElevenLabsService {
     const body = JSON.stringify({
       text: text,
       model_id: options.modelId || 'eleven_monolingual_v1',
-      voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+      voice_settings: { stability: 0.5, similarity_boost: 0.75 },
     });
 
     return new Promise((resolve, reject) => {
@@ -175,11 +175,11 @@ class TestElevenLabsService {
         path: `/v1/text-to-speech/${voiceId}/stream`,
         method: 'POST',
         headers: {
-          'Accept': 'audio/mpeg',
+          Accept: 'audio/mpeg',
           'xi-api-key': this.apiKey,
           'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body)
-        }
+          'Content-Length': Buffer.byteLength(body),
+        },
       };
 
       const file = fs.createWriteStream(outputPath);
@@ -187,12 +187,18 @@ class TestElevenLabsService {
       const req = https.request(reqOptions, (res) => {
         if (res.statusCode !== 200) {
           let errorData = '';
-          res.on('data', chunk => errorData += chunk);
+          res.on('data', (chunk) => (errorData += chunk));
           res.on('end', () => reject(new Error(`Stream error: ${res.statusCode} - ${errorData}`)));
           return;
         }
-        res.on('data', chunk => { file.write(chunk); chunkCount++; });
-        res.on('end', () => { file.end(); resolve({ audioPath: outputPath, chunksReceived: chunkCount }); });
+        res.on('data', (chunk) => {
+          file.write(chunk);
+          chunkCount++;
+        });
+        res.on('end', () => {
+          file.end();
+          resolve({ audioPath: outputPath, chunksReceived: chunkCount });
+        });
       });
       req.on('error', reject);
       req.write(body);
@@ -207,11 +213,13 @@ class TestElevenLabsService {
     }
     const audioBuffer = fs.readFileSync(audioPath);
     const boundary = '----Boundary' + Date.now();
-    
+
     const parts = [
-      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="audio.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n`),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="audio.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n`
+      ),
       audioBuffer,
-      Buffer.from(`\r\n--${boundary}--\r\n`)
+      Buffer.from(`\r\n--${boundary}--\r\n`),
     ];
     const body = Buffer.concat(parts);
 
@@ -224,13 +232,13 @@ class TestElevenLabsService {
         headers: {
           'xi-api-key': this.apiKey,
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': body.length
-        }
+          'Content-Length': body.length,
+        },
       };
 
       let responseData = '';
       const req = https.request(reqOptions, (res) => {
-        res.on('data', chunk => responseData += chunk);
+        res.on('data', (chunk) => (responseData += chunk));
         res.on('end', () => {
           try {
             const result = JSON.parse(responseData);
@@ -258,7 +266,7 @@ class TestElevenLabsService {
         port: 443,
         path: path,
         method: method,
-        headers: { 'xi-api-key': this.apiKey }
+        headers: { 'xi-api-key': this.apiKey },
       };
 
       if (body) {
@@ -268,7 +276,7 @@ class TestElevenLabsService {
 
       let responseData = '';
       const req = https.request(options, (res) => {
-        res.on('data', chunk => responseData += chunk);
+        res.on('data', (chunk) => (responseData += chunk));
         res.on('end', () => {
           if (res.statusCode === 204) {
             resolve(true);
@@ -281,7 +289,7 @@ class TestElevenLabsService {
               return;
             }
             resolve(result);
-          } catch (e) {
+          } catch (_e) {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               resolve(responseData);
             } else {
@@ -304,7 +312,7 @@ const service = new TestElevenLabsService(elevenLabsApiKey);
 const results = {
   passed: [],
   failed: [],
-  skipped: []
+  skipped: [],
 };
 
 // Helper to run a test
@@ -314,7 +322,7 @@ async function runTest(name, testFn, skipReason = null) {
     results.skipped.push({ name, reason: skipReason });
     return null;
   }
-  
+
   try {
     console.log(`\n🧪 Testing: ${name}...`);
     const result = await testFn();
@@ -337,7 +345,7 @@ async function runAllTests() {
   console.log('='.repeat(60));
   console.log('ElevenLabs New APIs Test Suite');
   console.log('='.repeat(60));
-  
+
   // Check API key first
   const apiKey = service.getApiKey();
   if (!apiKey) {
@@ -351,8 +359,8 @@ async function runAllTests() {
   console.log('\n' + '='.repeat(40));
   console.log('MODELS API');
   console.log('='.repeat(40));
-  
-  const models = await runTest('List Models', async () => {
+
+  const _models = await runTest('List Models', async () => {
     return await service.listModels();
   });
 
@@ -360,9 +368,9 @@ async function runAllTests() {
   console.log('\n' + '='.repeat(40));
   console.log('STUDIO PROJECTS API');
   console.log('='.repeat(40));
-  
+
   // List existing projects first
-  const existingProjects = await runTest('List Studio Projects', async () => {
+  const _existingProjects = await runTest('List Studio Projects', async () => {
     return await service.listStudioProjects();
   });
 
@@ -371,7 +379,7 @@ async function runAllTests() {
   const createdProject = await runTest('Create Studio Project', async () => {
     return await service.createStudioProject(testProjectName, {
       defaultModelId: 'eleven_multilingual_v2',
-      qualityPreset: 'standard'
+      qualityPreset: 'standard',
     });
   });
 
@@ -422,7 +430,7 @@ async function runAllTests() {
       age: 'young',
       accent: 'american',
       accentStrength: 1.0,
-      text: 'Hello, this is a test of the voice design feature.'
+      text: 'Hello, this is a test of the voice design feature.',
     });
   });
 
@@ -455,7 +463,7 @@ async function runAllTests() {
       'This is a test of the streaming text to speech API.',
       'Rachel',
       { modelId: 'eleven_monolingual_v1' },
-      (chunk) => {
+      (_chunk) => {
         chunkCount++;
       }
     );
@@ -474,7 +482,7 @@ async function runAllTests() {
   // Get first history item if available
   if (history?.history?.length > 0) {
     const firstItemId = history.history[0].history_item_id;
-    
+
     await runTest('Get History Item', async () => {
       return await service.getHistoryItem(firstItemId);
     });
@@ -494,36 +502,40 @@ async function runAllTests() {
   console.log(`✅ Passed: ${results.passed.length}`);
   console.log(`❌ Failed: ${results.failed.length}`);
   console.log(`⏭️  Skipped: ${results.skipped.length}`);
-  
+
   if (results.failed.length > 0) {
     console.log('\nFailed tests:');
-    results.failed.forEach(f => {
+    results.failed.forEach((f) => {
       console.log(`  - ${f.name}: ${f.error}`);
     });
   }
-  
+
   if (results.skipped.length > 0) {
     console.log('\nSkipped tests:');
-    results.skipped.forEach(s => {
+    results.skipped.forEach((s) => {
       console.log(`  - ${s.name}: ${s.reason}`);
     });
   }
 
   console.log('\n' + '='.repeat(60));
-  
+
   // Cleanup: remove generated test files
   const fs = require('fs');
   if (designedVoice?.audioPath && fs.existsSync(designedVoice.audioPath)) {
     try {
       fs.unlinkSync(designedVoice.audioPath);
       console.log('Cleaned up voice design test audio');
-    } catch (e) {}
+    } catch (_e) {
+      /* no-op */
+    }
   }
   if (streamedAudioPath && fs.existsSync(streamedAudioPath)) {
     try {
       fs.unlinkSync(streamedAudioPath);
       console.log('Cleaned up streaming test audio');
-    } catch (e) {}
+    } catch (_e) {
+      /* no-op */
+    }
   }
 
   return results;
@@ -531,21 +543,10 @@ async function runAllTests() {
 
 // Run the tests
 runAllTests()
-  .then(results => {
+  .then((results) => {
     process.exit(results.failed.length > 0 ? 1 : 0);
   })
-  .catch(error => {
+  .catch((error) => {
     console.error('Test suite error:', error);
     process.exit(1);
   });
-
-
-
-
-
-
-
-
-
-
-

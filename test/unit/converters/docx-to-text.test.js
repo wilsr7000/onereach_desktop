@@ -28,7 +28,7 @@ const { DocxToTextAgent } = require('../../../lib/converters/docx-to-text.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(DocxToTextAgent, {
-  sampleInput: Buffer.from([0x50, 0x4B, 0x03, 0x04, ...Array(96).fill(0)]),
+  sampleInput: Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(96).fill(0)]),
   expectedFromFormats: ['docx'],
   expectedToFormats: ['text'],
   expectedStrategies: ['mammoth', 'preserving', 'tables-as-csv'],

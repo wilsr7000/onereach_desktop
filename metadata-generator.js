@@ -2,7 +2,7 @@
  * Specialized Metadata Generation for Different Asset Types
  * Each asset type has its own prompt and processing logic
  * Incorporates Space metadata for better contextualization
- * 
+ *
  * MODEL ROUTING:
  * - Claude Sonnet 4: Vision tasks (images, video thumbnails, PDF thumbnails)
  * - GPT-5.2: Large context text tasks (code, text, data, HTML, URLs, audio transcripts)
@@ -10,19 +10,18 @@
 
 const ai = require('./lib/ai-service');
 const fs = require('fs');
-const path = require('path');
 
 class MetadataGenerator {
   constructor(clipboardManager) {
     this.clipboardManager = clipboardManager;
-    
+
     // Model profiles (using ai-service profile names)
     this.models = {
-      vision: 'vision',    // Vision tasks use 'vision' profile
-      text: 'large'        // Large context text tasks use 'large' profile
+      vision: 'vision', // Vision tasks use 'vision' profile
+      text: 'large', // Large context text tasks use 'large' profile
     };
   }
-  
+
   /**
    * Determine which model to use based on content type
    * @param {string} contentType - Type of content
@@ -35,25 +34,25 @@ class MetadataGenerator {
       return {
         provider: 'claude',
         model: this.models.vision,
-        reason: 'Visual content requires vision model'
+        reason: 'Visual content requires vision model',
       };
     }
-    
+
     // Text-based tasks use GPT-5.2 for better context handling
     const textTypes = ['code', 'text', 'data', 'html', 'url', 'audio', 'file'];
     if (textTypes.includes(contentType)) {
       return {
         provider: 'openai',
         model: this.models.text,
-        reason: `GPT-5.2 for ${contentType} analysis (256K context)`
+        reason: `GPT-5.2 for ${contentType} analysis (256K context)`,
       };
     }
-    
+
     // Default to Claude for anything else
     return {
       provider: 'claude',
       model: this.models.vision,
-      reason: 'Default handler'
+      reason: 'Default handler',
     };
   }
 
@@ -66,12 +65,12 @@ class MetadataGenerator {
     }
 
     try {
-      const space = this.clipboardManager.spaces.find(s => s.id === spaceId);
+      const space = this.clipboardManager.spaces.find((s) => s.id === spaceId);
       if (!space) return null;
 
       // Get Space metadata if available
       const spaceMetadata = this.clipboardManager.storage.getSpaceMetadata(spaceId);
-      
+
       return {
         name: space.name,
         description: space.description || '',
@@ -79,7 +78,7 @@ class MetadataGenerator {
         purpose: spaceMetadata?.purpose || '',
         tags: spaceMetadata?.tags || [],
         category: spaceMetadata?.category || '',
-        projectType: spaceMetadata?.projectType || ''
+        projectType: spaceMetadata?.projectType || '',
       };
     } catch (error) {
       console.error('[MetadataGen] Error getting space context:', error);
@@ -92,9 +91,9 @@ class MetadataGenerator {
    */
   async generateImageMetadata(item, imageData, apiKey, spaceContext) {
     const prompt = this.buildImagePrompt(item, spaceContext);
-    
+
     const base64Data = this.extractBase64(imageData);
-    const mediaType = this.extractMediaType(imageData);
+    const _mediaType = this.extractMediaType(imageData);
 
     const result = await ai.vision(base64Data, prompt, {
       profile: 'vision',
@@ -176,7 +175,7 @@ Respond with JSON only:
    */
   async generateVideoMetadata(item, thumbnail, apiKey, spaceContext) {
     const prompt = this.buildVideoPrompt(item, spaceContext);
-    
+
     if (thumbnail) {
       // Use vision API if thumbnail available
       const base64Data = this.extractBase64(thumbnail);
@@ -231,9 +230,13 @@ Respond with JSON only:
       `Size: ${item.fileSize ? this.formatBytes(item.fileSize) : 'Unknown'}`,
       item.metadata?.resolution ? `Resolution: ${item.metadata.resolution}` : '',
       item.metadata?.uploader ? `Uploader: ${item.metadata.uploader}` : '',
-      item.metadata?.youtubeDescription ? `YouTube Description:\n${item.metadata.youtubeDescription.substring(0, 500)}` : '',
-      item.metadata?.transcript ? `Has Transcript: Yes (${item.metadata.transcript.length} chars)` : ''
-    ].filter(Boolean).join('\n');
+      item.metadata?.youtubeDescription
+        ? `YouTube Description:\n${item.metadata.youtubeDescription.substring(0, 500)}`
+        : '',
+      item.metadata?.transcript ? `Has Transcript: Yes (${item.metadata.transcript.length} chars)` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     return `You are analyzing a VIDEO file for a knowledge management system.${contextInfo}
 
@@ -242,10 +245,14 @@ ${videoInfo}
 
 ${thumbnail ? 'THUMBNAIL: A preview frame from the video is attached. Use it to understand the video content.' : ''}
 
-${item.metadata?.transcript ? `
+${
+  item.metadata?.transcript
+    ? `
 TRANSCRIPT EXCERPT (first 500 chars):
 ${item.metadata.transcript.substring(0, 500)}...
-` : ''}
+`
+    : ''
+}
 
 ANALYSIS REQUIREMENTS:
 
@@ -294,7 +301,7 @@ Respond with JSON only:
   async generateAudioMetadata(item, apiKey, spaceContext) {
     // Build the prompt for audio analysis
     const prompt = this.buildAudioPrompt(item, spaceContext);
-    
+
     try {
       console.log('[MetadataGen] Generating audio metadata with ai-service...');
       const result = await ai.chat({
@@ -332,19 +339,25 @@ Respond with JSON only:
       `Format: ${item.fileExt || 'Unknown'}`,
       `Size: ${item.fileSize ? this.formatBytes(item.fileSize) : 'Unknown'}`,
       item.metadata?.duration ? `Duration: ${item.metadata.duration}` : '',
-      item.metadata?.transcript ? `Has Transcript: Yes` : 'No transcript available'
-    ].filter(Boolean).join('\n');
+      item.metadata?.transcript ? `Has Transcript: Yes` : 'No transcript available',
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     return `You are analyzing an AUDIO file for a knowledge management system.${contextInfo}
 
 AUDIO FILE INFORMATION:
 ${audioInfo}
 
-${item.metadata?.transcript ? `
+${
+  item.metadata?.transcript
+    ? `
 TRANSCRIPT:
 ${item.metadata.transcript.substring(0, 2000)}
 ${item.metadata.transcript.length > 2000 ? '...[truncated]' : ''}
-` : ''}
+`
+    : ''
+}
 
 ANALYSIS REQUIREMENTS:
 
@@ -390,12 +403,12 @@ Respond with JSON only:
    * Uses ai-service with 'large' profile for better context handling
    */
   async generateTextMetadata(item, apiKey, spaceContext) {
-    const content = item.content || item.text || item.preview || '';
-    const isCode = item.fileCategory === 'code' || item.source === 'code';
-    
+    const _content = item.content || item.text || item.preview || '';
+    const _isCode = item.fileCategory === 'code' || item.source === 'code';
+
     // Build the prompt for text/code analysis
     const prompt = this.buildTextPrompt(item, spaceContext);
-    
+
     try {
       console.log('[MetadataGen] Generating text/code metadata with ai-service...');
       const result = await ai.chat({
@@ -527,9 +540,9 @@ Respond with JSON only:
    * Uses ai-service with 'large' profile for better context handling
    */
   async generateHtmlMetadata(item, apiKey, spaceContext) {
-    const plainText = item.plainText || this.stripHtml(item.content || item.html || '');
+    const _plainText = item.plainText || this.stripHtml(item.content || item.html || '');
     const prompt = this.buildHtmlPrompt(item, spaceContext);
-    
+
     try {
       console.log('[MetadataGen] Generating HTML metadata with ai-service...');
       const result = await ai.chat({
@@ -616,7 +629,7 @@ Respond with JSON only:
    */
   async generatePdfMetadata(item, thumbnail, apiKey, spaceContext) {
     const prompt = this.buildPdfPrompt(item, spaceContext, !!thumbnail);
-    
+
     if (thumbnail) {
       // Use vision API if thumbnail available
       const base64Data = this.extractBase64(thumbnail);
@@ -718,9 +731,9 @@ Respond with JSON only:
    * Uses ai-service with 'large' profile for better context handling
    */
   async generateDataMetadata(item, apiKey, spaceContext) {
-    const content = item.content || item.text || item.preview || '';
+    const _content = item.content || item.text || item.preview || '';
     const prompt = this.buildDataPrompt(item, spaceContext);
-    
+
     try {
       console.log('[MetadataGen] Generating data metadata with ai-service...');
       const result = await ai.chat({
@@ -809,7 +822,7 @@ Respond with JSON only:
    */
   async generateStyleGuideMetadata(item, apiKey, spaceContext) {
     const content = item.content || item.text || item.preview || '';
-    
+
     // Parse JSON to extract key information
     let styleGuideInfo = '';
     try {
@@ -823,12 +836,12 @@ Has Spacing: ${data.spacing ? 'Yes' : 'No'}
 Has Shadows: ${data.shadows ? 'Yes' : 'No'}
 Has Animations: ${data.animations ? 'Yes' : 'No'}
 Components: ${data.components?.length || 0} defined`;
-    } catch (e) {
+    } catch (_e) {
       styleGuideInfo = content.substring(0, 2000);
     }
-    
+
     const prompt = this.buildStyleGuidePrompt(item, styleGuideInfo, spaceContext);
-    
+
     try {
       console.log('[MetadataGen] Generating style guide metadata with ai-service...');
       const result = await ai.chat({
@@ -908,7 +921,7 @@ Respond with JSON only:
    */
   async generateJourneyMapMetadata(item, apiKey, spaceContext) {
     const content = item.content || item.text || item.preview || '';
-    
+
     // Parse JSON to extract key information
     let journeyInfo = '';
     try {
@@ -923,12 +936,12 @@ Persona Role: ${journeyData.persona?.role || 'N/A'}
 Number of Journeys: ${journeyData.persona?.journeys?.length || 0}
 Number of Stages: ${journeyData.persona?.journeys?.[0]?.stages?.length || 0}
 Has Triggers: ${journeyData.persona?.journeys?.[0]?.triggers ? 'Yes' : 'No'}`;
-    } catch (e) {
+    } catch (_e) {
       journeyInfo = content.substring(0, 2000);
     }
-    
+
     const prompt = this.buildJourneyMapPrompt(item, journeyInfo, spaceContext);
-    
+
     try {
       console.log('[MetadataGen] Generating journey map metadata with ai-service...');
       const result = await ai.chat({
@@ -1008,9 +1021,9 @@ Respond with JSON only:
    * Uses ai-service with 'large' profile for better context handling
    */
   async generateUrlMetadata(item, apiKey, spaceContext) {
-    const url = item.content || item.text || item.url || '';
+    const _url = item.content || item.text || item.url || '';
     const prompt = this.buildUrlPrompt(item, spaceContext);
-    
+
     try {
       console.log('[MetadataGen] Generating URL metadata with ai-service...');
       const result = await ai.chat({
@@ -1044,7 +1057,7 @@ Respond with JSON only:
     }
 
     const url = item.content || item.text || item.url || '';
-    
+
     let urlInfo = '';
     try {
       const urlObj = new URL(url);
@@ -1053,7 +1066,7 @@ Domain: ${urlObj.hostname}
 Path: ${urlObj.pathname}
 Parameters: ${urlObj.search || 'None'}
       `;
-    } catch (e) {
+    } catch (_e) {
       urlInfo = `URL: ${url}`;
     }
 
@@ -1112,14 +1125,14 @@ Respond with JSON only:
     const conn = ds.connection || {};
     const auth = ds.auth || {};
     const ops = ds.operations || {};
-    
+
     const enabledOps = ['create', 'read', 'update', 'delete', 'list']
-      .filter(op => ops[op] && ops[op].enabled)
-      .map(op => `${op.toUpperCase()}: ${ops[op].method || 'GET'} ${ops[op].endpoint || ''}`)
+      .filter((op) => ops[op] && ops[op].enabled)
+      .map((op) => `${op.toUpperCase()}: ${ops[op].method || 'GET'} ${ops[op].endpoint || ''}`)
       .join('\n');
-    
+
     const subtypeLabels = { mcp: 'MCP (Model Context Protocol)', api: 'REST/API', 'web-scraping': 'Web Scraping' };
-    
+
     const prompt = `Analyze this data source configuration and generate descriptive metadata.
 
 Data Source:
@@ -1150,7 +1163,7 @@ Return a JSON object with these fields:
         messages: [{ role: 'user', content: prompt }],
         jsonMode: true,
         maxTokens: 300,
-        feature: 'metadata-gen-datasource'
+        feature: 'metadata-gen-datasource',
       });
 
       const parsed = typeof result.content === 'string' ? JSON.parse(result.content) : result.content;
@@ -1159,7 +1172,7 @@ Return a JSON object with these fields:
         description: parsed.description || '',
         category: parsed.category || 'other',
         tags: parsed.tags || [],
-        notes: parsed.notes || ''
+        notes: parsed.notes || '',
       };
     } catch (error) {
       console.error('[MetadataGen] Data source metadata generation failed:', error.message);
@@ -1168,7 +1181,7 @@ Return a JSON object with these fields:
         description: `${subtypeLabels[ds.sourceType] || 'Data source'} at ${conn.url || 'unknown URL'}`,
         category: ds.sourceType === 'web-scraping' ? 'scraping' : ds.sourceType === 'mcp' ? 'ai-service' : 'api',
         tags: [ds.sourceType || 'data-source'],
-        notes: ''
+        notes: '',
       };
     }
   }
@@ -1179,7 +1192,7 @@ Return a JSON object with these fields:
    */
   async generateFileMetadata(item, apiKey, spaceContext) {
     const prompt = this.buildFilePrompt(item, spaceContext);
-    
+
     try {
       console.log('[MetadataGen] Generating file metadata with ai-service...');
       const result = await ai.chat({
@@ -1256,7 +1269,7 @@ Respond with JSON only:
   /**
    * Main routing function - calls specialized handler based on asset type
    */
-  async generateMetadataForItem(itemId, apiKey, customPrompt = '') {
+  async generateMetadataForItem(itemId, apiKey, _customPrompt = '') {
     try {
       const item = this.clipboardManager.storage.loadItem(itemId);
       if (!item) {
@@ -1265,14 +1278,14 @@ Respond with JSON only:
 
       // Get Space context
       const spaceContext = this.getSpaceContext(item.spaceId);
-      
+
       console.log('[MetadataGen] Generating metadata for:', {
         itemId: item.id,
         type: item.type,
         fileType: item.fileType,
         fileCategory: item.fileCategory,
         spaceId: item.spaceId,
-        spaceName: spaceContext?.name
+        spaceName: spaceContext?.name,
       });
 
       let metadata;
@@ -1285,55 +1298,43 @@ Respond with JSON only:
           return { success: false, error: 'Could not load image data' };
         }
         metadata = await this.generateImageMetadata(item, imageData, apiKey, spaceContext);
-      }
-      else if (item.fileType === 'video' || item.fileCategory === 'video') {
+      } else if (item.fileType === 'video' || item.fileCategory === 'video') {
         // VIDEO
         const thumbnail = item.thumbnail;
         metadata = await this.generateVideoMetadata(item, thumbnail, apiKey, spaceContext);
-      }
-      else if (item.fileType === 'audio' || item.fileCategory === 'audio') {
+      } else if (item.fileType === 'audio' || item.fileCategory === 'audio') {
         // AUDIO
         metadata = await this.generateAudioMetadata(item, apiKey, spaceContext);
-      }
-      else if (item.fileType === 'pdf' || item.fileExt === '.pdf') {
+      } else if (item.fileType === 'pdf' || item.fileExt === '.pdf') {
         // PDF
         const thumbnail = item.thumbnail;
         metadata = await this.generatePdfMetadata(item, thumbnail, apiKey, spaceContext);
-      }
-      else if (item.jsonSubtype === 'style-guide') {
+      } else if (item.jsonSubtype === 'style-guide') {
         // STYLE GUIDE - Specialized JSON file for design systems
         metadata = await this.generateStyleGuideMetadata(item, apiKey, spaceContext);
-      }
-      else if (item.jsonSubtype === 'journey-map') {
+      } else if (item.jsonSubtype === 'journey-map') {
         // JOURNEY MAP - Specialized JSON file for customer journey mapping
         metadata = await this.generateJourneyMapMetadata(item, apiKey, spaceContext);
-      }
-      else if (item.fileCategory === 'data' || ['.json', '.csv', '.yaml', '.yml', '.xml'].includes(item.fileExt)) {
+      } else if (item.fileCategory === 'data' || ['.json', '.csv', '.yaml', '.yml', '.xml'].includes(item.fileExt)) {
         // DATA FILES
         metadata = await this.generateDataMetadata(item, apiKey, spaceContext);
-      }
-      else if (item.type === 'html' || item.html || item.metadata?.type === 'generated-document') {
+      } else if (item.type === 'html' || item.html || item.metadata?.type === 'generated-document') {
         // HTML/RICH CONTENT
         metadata = await this.generateHtmlMetadata(item, apiKey, spaceContext);
-      }
-      else if (item.content && item.content.trim().match(/^https?:\/\/[^\s]+$/)) {
+      } else if (item.content && item.content.trim().match(/^https?:\/\/[^\s]+$/)) {
         // URL - Check this BEFORE plain text to properly route URLs
         // Must be a single URL (no spaces) to be treated as a URL
         metadata = await this.generateUrlMetadata(item, apiKey, spaceContext);
-      }
-      else if (item.type === 'text' || item.fileCategory === 'code') {
+      } else if (item.type === 'text' || item.fileCategory === 'code') {
         // TEXT/CODE
         metadata = await this.generateTextMetadata(item, apiKey, spaceContext);
-      }
-      else if (item.type === 'data-source') {
+      } else if (item.type === 'data-source') {
         // DATA SOURCE
         metadata = await this.generateDataSourceMetadata(item, apiKey, spaceContext);
-      }
-      else if (item.type === 'file') {
+      } else if (item.type === 'file') {
         // GENERIC FILE
         metadata = await this.generateFileMetadata(item, apiKey, spaceContext);
-      }
-      else {
+      } else {
         // FALLBACK - use text handler
         metadata = await this.generateTextMetadata(item, apiKey, spaceContext);
       }
@@ -1344,7 +1345,7 @@ Respond with JSON only:
         ...metadata,
         ai_metadata_generated: true,
         ai_metadata_timestamp: new Date().toISOString(),
-        space_context_used: !!spaceContext
+        space_context_used: !!spaceContext,
       };
 
       // Update the item's metadata using the clipboardManager method
@@ -1352,14 +1353,13 @@ Respond with JSON only:
 
       return {
         success: true,
-        metadata: updatedMetadata
+        metadata: updatedMetadata,
       };
-
     } catch (error) {
       console.error('[MetadataGen] Error generating metadata:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -1368,15 +1368,14 @@ Respond with JSON only:
    * Helper: Get image data for item
    */
   async getImageData(item) {
-    
     if (item.thumbnail && !item.thumbnail.includes('svg+xml')) {
       return item.thumbnail;
     }
-    
+
     if (item.content && item.content.startsWith('data:image')) {
       return item.content;
     }
-    
+
     if (item.filePath && fs.existsSync(item.filePath)) {
       try {
         const buffer = fs.readFileSync(item.filePath);
@@ -1388,7 +1387,7 @@ Respond with JSON only:
         return null;
       }
     }
-    
+
     // Try loading from stored file path in items directory
     if (item.fileName && item.id) {
       const storedPath = require('path').join(
@@ -1397,7 +1396,7 @@ Respond with JSON only:
         item.id,
         item.fileName
       );
-      
+
       if (require('fs').existsSync(storedPath)) {
         try {
           const buffer = require('fs').readFileSync(storedPath);
@@ -1409,8 +1408,7 @@ Respond with JSON only:
         }
       }
     }
-    
-    
+
     return null;
   }
 
@@ -1421,14 +1419,14 @@ Respond with JSON only:
     if (!buffer || buffer.length < 4) {
       return 'image/png'; // Default fallback
     }
-    
+
     // Check magic bytes
     // JPEG: FF D8 FF
-    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
       return 'image/jpeg';
     }
     // PNG: 89 50 4E 47
-    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
       return 'image/png';
     }
     // GIF: 47 49 46 38
@@ -1436,12 +1434,21 @@ Respond with JSON only:
       return 'image/gif';
     }
     // WebP: 52 49 46 46 ... 57 45 42 50
-    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
-        buffer.length > 11 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+    if (
+      buffer[0] === 0x52 &&
+      buffer[1] === 0x49 &&
+      buffer[2] === 0x46 &&
+      buffer[3] === 0x46 &&
+      buffer.length > 11 &&
+      buffer[8] === 0x57 &&
+      buffer[9] === 0x45 &&
+      buffer[10] === 0x42 &&
+      buffer[11] === 0x50
+    ) {
       return 'image/webp';
     }
     // BMP: 42 4D
-    if (buffer[0] === 0x42 && buffer[1] === 0x4D) {
+    if (buffer[0] === 0x42 && buffer[1] === 0x4d) {
       return 'image/bmp';
     }
     // ICO: 00 00 01 00
@@ -1449,8 +1456,10 @@ Respond with JSON only:
       return 'image/x-icon';
     }
     // TIFF: 49 49 2A 00 (little endian) or 4D 4D 00 2A (big endian)
-    if ((buffer[0] === 0x49 && buffer[1] === 0x49 && buffer[2] === 0x2A && buffer[3] === 0x00) ||
-        (buffer[0] === 0x4D && buffer[1] === 0x4D && buffer[2] === 0x00 && buffer[3] === 0x2A)) {
+    if (
+      (buffer[0] === 0x49 && buffer[1] === 0x49 && buffer[2] === 0x2a && buffer[3] === 0x00) ||
+      (buffer[0] === 0x4d && buffer[1] === 0x4d && buffer[2] === 0x00 && buffer[3] === 0x2a)
+    ) {
       return 'image/tiff';
     }
     // AVIF: starts with ftyp box containing 'avif'
@@ -1463,11 +1472,11 @@ Respond with JSON only:
         return 'image/heic';
       }
     }
-    
+
     // Default to PNG
     return 'image/png';
   }
-  
+
   /**
    * Helper: Extract media type from data URL
    */
@@ -1485,7 +1494,7 @@ Respond with JSON only:
   extractBase64(dataUrl) {
     if (!dataUrl) return '';
     if (!dataUrl.startsWith('data:')) return dataUrl;
-    
+
     const match = dataUrl.match(/^data:[^;]+;base64,(.+)$/);
     return match ? match[1] : dataUrl;
   }
@@ -1494,7 +1503,10 @@ Respond with JSON only:
    * Helper: Strip HTML tags
    */
   stripHtml(html) {
-    return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    return html
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   /**
@@ -1506,7 +1518,6 @@ Respond with JSON only:
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
   }
-
 }
 
 module.exports = MetadataGenerator;

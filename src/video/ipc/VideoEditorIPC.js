@@ -79,11 +79,11 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
     try {
       const path = await import('path');
       const fs = await import('fs/promises');
-      
+
       const videoDir = path.dirname(videoPath);
       const videoName = path.basename(videoPath, path.extname(videoPath));
       const cachePath = path.join(videoDir, `.${videoName}.waveform-cache.json`);
-      
+
       await fs.writeFile(cachePath, JSON.stringify(cacheData), 'utf8');
       log.info('video', 'Waveform cache saved', { cachePath });
       return { success: true, cachePath };
@@ -98,18 +98,18 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
     try {
       const path = await import('path');
       const fs = await import('fs/promises');
-      
+
       const videoDir = path.dirname(videoPath);
       const videoName = path.basename(videoPath, path.extname(videoPath));
       const cachePath = path.join(videoDir, `.${videoName}.waveform-cache.json`);
-      
+
       // Check if cache exists
       try {
         await fs.access(cachePath);
       } catch {
         return { exists: false };
       }
-      
+
       const data = await fs.readFile(cachePath, 'utf8');
       const cacheData = JSON.parse(data);
       log.info('video', 'Waveform cache loaded', { cachePath });
@@ -125,11 +125,11 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
     try {
       const path = await import('path');
       const fs = await import('fs/promises');
-      
+
       const videoDir = path.dirname(videoPath);
       const videoName = path.basename(videoPath, path.extname(videoPath));
       const imagePath = path.join(videoDir, `.${videoName}.waveform-${imageKey}.png`);
-      
+
       // Convert dataURL to buffer
       const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
       await fs.writeFile(imagePath, base64Data, 'base64');
@@ -146,18 +146,18 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
     try {
       const path = await import('path');
       const fs = await import('fs/promises');
-      
+
       const videoDir = path.dirname(videoPath);
       const videoName = path.basename(videoPath, path.extname(videoPath));
       const imagePath = path.join(videoDir, `.${videoName}.waveform-${imageKey}.png`);
-      
+
       // Check if image exists
       try {
         await fs.access(imagePath);
       } catch {
         return { exists: false };
       }
-      
+
       const imageBuffer = await fs.readFile(imagePath);
       const dataUrl = `data:image/png;base64,${imageBuffer.toString('base64')}`;
       log.info('video', 'Waveform image loaded', { imagePath });
@@ -173,18 +173,16 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
     try {
       const path = await import('path');
       const fs = await import('fs/promises');
-      const fsSync = await import('fs');
 
       const videoDir = path.dirname(videoPath);
       const videoName = path.basename(videoPath, path.extname(videoPath));
-      
+
       // Find all waveform cache files for this video
       const files = await fs.readdir(videoDir);
-      const cacheFiles = files.filter(f => 
-        f.startsWith(`.${videoName}.waveform-`) && 
-        (f.endsWith('.json') || f.endsWith('.png'))
+      const cacheFiles = files.filter(
+        (f) => f.startsWith(`.${videoName}.waveform-`) && (f.endsWith('.json') || f.endsWith('.png'))
       );
-      
+
       let deleted = 0;
       for (const file of cacheFiles) {
         const filePath = path.join(videoDir, file);
@@ -196,7 +194,7 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
           log.warn('video', 'Could not delete waveform cache file', { file, error: e.message });
         }
       }
-      
+
       log.info('video', 'Deleted waveform cache files', { deleted });
       return { success: true, deleted };
     } catch (error) {
@@ -334,17 +332,17 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
   });
 
   // ==================== AUDIO CACHE FOR GUIDE/MASTER TRACKS ====================
-  
+
   // Check if cached audio exists for a video
   ipcMain.handle('video-editor:check-audio-cache', async (event, videoPath) => {
     try {
       const path = await import('path');
       const fs = await import('fs/promises');
-      
+
       const videoDir = path.dirname(videoPath);
       const videoName = path.basename(videoPath, path.extname(videoPath));
       const cachePath = path.join(videoDir, `.${videoName}-audio-cache.aac`);
-      
+
       try {
         const stats = await fs.stat(cachePath);
         log.info('video', 'Audio cache found', { cachePath });
@@ -363,11 +361,11 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
     try {
       const path = await import('path');
       const fs = await import('fs/promises');
-      
+
       const videoDir = path.dirname(videoPath);
       const videoName = path.basename(videoPath, path.extname(videoPath));
       const cachePath = path.join(videoDir, `.${videoName}-audio-cache.aac`);
-      
+
       // Check if cache exists
       try {
         const stats = await fs.stat(cachePath);
@@ -376,38 +374,45 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
       } catch {
         // Cache miss - need to extract
       }
-      
+
       log.info('video', 'Cache miss, extracting audio to', { cachePath });
-      
+
       // Extract audio using codec copy for speed (no re-encoding)
-      const result = await videoEditor.extractAudio(videoPath, {
-        outputPath: cachePath,
-        format: 'aac',
-        codec: 'copy'  // Fast - just copy audio stream
-      }, (progress) => {
-        mainWindow?.webContents.send('video-editor:extraction-progress', progress);
-      });
-      
+      const result = await videoEditor.extractAudio(
+        videoPath,
+        {
+          outputPath: cachePath,
+          format: 'aac',
+          codec: 'copy', // Fast - just copy audio stream
+        },
+        (progress) => {
+          mainWindow?.webContents.send('video-editor:extraction-progress', progress);
+        }
+      );
+
       if (result.error) {
         // If codec copy fails (incompatible format), try with re-encoding
         log.info('video', 'Codec copy failed, re-encoding...');
-        const reencodeResult = await videoEditor.extractAudio(videoPath, {
-          outputPath: cachePath,
-          format: 'aac',
-          audioBitrate: '192k'
-        }, (progress) => {
-          mainWindow?.webContents.send('video-editor:extraction-progress', progress);
-        });
-        
+        const reencodeResult = await videoEditor.extractAudio(
+          videoPath,
+          {
+            outputPath: cachePath,
+            format: 'aac',
+            audioBitrate: '192k',
+          },
+          (progress) => {
+            mainWindow?.webContents.send('video-editor:extraction-progress', progress);
+          }
+        );
+
         if (reencodeResult.error) {
           return { success: false, error: reencodeResult.error };
         }
       }
-      
+
       const stats = await fs.stat(cachePath);
       log.info('video', 'Audio extracted and cached', { cachePath });
       return { success: true, path: cachePath, cached: false, size: stats.size };
-      
     } catch (error) {
       log.error('video', 'Extract audio cached error', { error: error.message });
       return { success: false, error: error.message };
@@ -479,7 +484,7 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
     // Sends progress updates as each chunk completes
     try {
       log.info('video', 'Transcribe range called', { videoPath, options });
-      
+
       // Progress callback to send updates to renderer
       const onChunkComplete = (progressData) => {
         try {
@@ -488,7 +493,7 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
           log.warn('video', 'Could not send progress', { error: e.message });
         }
       };
-      
+
       return await videoEditor.transcribeRange(videoPath, { ...options, onChunkComplete });
     } catch (error) {
       log.error('video', 'Transcribe error', { error: error.message });
@@ -500,24 +505,24 @@ export function setupVideoEditorIPC(videoEditor, mainWindow) {
   ipcMain.handle('video-editor:generate-scene-description', async (event, options) => {
     try {
       const { transcript, timeContext, videoName, existingDescription } = options;
-      
+
       if (!transcript || transcript.trim().length === 0) {
         return { success: false, error: 'No transcript provided' };
       }
-      
+
       // Get API key from settings
       const { getSettingsManager } = await import('../../../settings-manager.js');
       const settingsManager = getSettingsManager();
       const apiKey = settingsManager.get('llmApiKey');
       const provider = settingsManager.get('llmProvider') || 'anthropic';
       const model = settingsManager.get('llmModel') || 'claude-sonnet-4-5-20250929';
-      
+
       if (!apiKey) {
         return { success: false, error: 'No LLM API key configured. Please set your API key in Settings.' };
       }
-      
+
       log.info('video', 'Generating scene description', { provider, model });
-      
+
       // Build prompt
       const prompt = `You are a professional video editor's assistant. Analyze the following transcript from a video segment and write a concise, descriptive scene description.
 
@@ -538,25 +543,24 @@ Write a brief (1-3 sentences) scene description that:
 Respond with ONLY the description text, no quotes or additional formatting.`;
 
       let description;
-      
+
       // Use centralized AI service
       const result = await ai.chat({
         profile: provider === 'anthropic' || apiKey.startsWith('sk-ant-') ? 'standard' : 'fast',
         messages: [{ role: 'user', content: prompt }],
         maxTokens: 500,
-        feature: 'video-editor-ipc'
+        feature: 'video-editor-ipc',
       });
-      
+
       description = result.content.trim();
-      
+
       if (!description) {
         throw new Error('Empty response from LLM');
       }
-      
+
       log.info('video', 'Generated scene description', { descriptionPreview: description.substring(0, 100) });
-      
+
       return { success: true, description };
-      
     } catch (error) {
       log.error('video', 'Generate scene description error', { error: error.message });
       return { success: false, error: error.message };
@@ -625,21 +629,19 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   });
 
   // Select single image file
-  ipcMain.handle('video-editor:select-image', async (event) => {
+  ipcMain.handle('video-editor:select-image', async (_event) => {
     try {
       const { dialog } = await import('electron');
       const result = await dialog.showOpenDialog(mainWindow, {
         title: 'Select Image',
-        filters: [
-          { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }
-        ],
-        properties: ['openFile']
+        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }],
+        properties: ['openFile'],
       });
-      
+
       if (result.canceled || result.filePaths.length === 0) {
         return { canceled: true };
       }
-      
+
       return { filePath: result.filePaths[0] };
     } catch (error) {
       log.error('video', 'Select image error', { error: error.message });
@@ -648,21 +650,19 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   });
 
   // Select multiple image files
-  ipcMain.handle('video-editor:select-images', async (event) => {
+  ipcMain.handle('video-editor:select-images', async (_event) => {
     try {
       const { dialog } = await import('electron');
       const result = await dialog.showOpenDialog(mainWindow, {
         title: 'Select Images for Slideshow',
-        filters: [
-          { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }
-        ],
-        properties: ['openFile', 'multiSelections']
+        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }],
+        properties: ['openFile', 'multiSelections'],
       });
-      
+
       if (result.canceled || result.filePaths.length === 0) {
         return { canceled: true };
       }
-      
+
       return { filePaths: result.filePaths };
     } catch (error) {
       log.error('video', 'Select images error', { error: error.message });
@@ -678,12 +678,12 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       if (process.env.ELEVENLABS_API_KEY) {
         return { hasKey: true };
       }
-      
+
       // Check settings manager
       const { getSettingsManager } = await import('../../../settings-manager.js');
       const settingsManager = getSettingsManager();
       const apiKey = settingsManager.get('elevenLabsApiKey');
-      
+
       return { hasKey: !!apiKey && apiKey.trim() !== '' };
     } catch (error) {
       log.error('video', 'Check ElevenLabs key error', { error: error.message });
@@ -752,10 +752,10 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       log.info('video', 'Generating music', { promptPreview: options.prompt?.substring(0, 50) });
       const audioPath = await videoEditor.elevenLabsService.generateMusic(
         options.prompt,
-        { 
-          durationMs: options.durationMs, 
+        {
+          durationMs: options.durationMs,
           instrumental: options.instrumental !== false,
-          modelId: options.modelId 
+          modelId: options.modelId,
         },
         { projectId: options.projectId }
       );
@@ -770,10 +770,9 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   ipcMain.handle('video-editor:get-music-plan', async (event, options) => {
     try {
       log.info('video', 'Getting music plan', { promptPreview: options.prompt?.substring(0, 50) });
-      const plan = await videoEditor.elevenLabsService.getMusicCompositionPlan(
-        options.prompt,
-        { durationMs: options.durationMs }
-      );
+      const plan = await videoEditor.elevenLabsService.getMusicCompositionPlan(options.prompt, {
+        durationMs: options.durationMs,
+      });
       return { success: true, plan };
     } catch (error) {
       log.error('video', 'Get music plan error', { error: error.message });
@@ -786,30 +785,31 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
     try {
       const { marker, type } = options;
       log.info('video', 'Getting audio suggestions', { markerName: marker?.name, type });
-      
+
       // Use centralized AI service instead of deprecated openai-api.js
       const ai = require('../../../lib/ai-service');
-      
-      const duration = marker.duration || (marker.outTime - marker.inTime) || 10;
+
+      const duration = marker.duration || marker.outTime - marker.inTime || 10;
       const durationStr = duration.toFixed(1);
       const context = {
         name: marker.name || 'Untitled Scene',
         description: marker.description || '',
         transcription: marker.transcription || '',
         tags: (marker.tags || []).join(', '),
-        duration: durationStr
+        duration: durationStr,
       };
 
-      const prompt = type === 'music'
-        ? `You are a professional music supervisor for film and video. Based on the scene context below, suggest 5 different music options that would work well as background music.\n\nSCENE CONTEXT:\n- Scene Name: ${context.name}\n- Description: ${context.description || 'No description provided'}\n- Transcript/Dialogue: ${context.transcription || 'No dialogue'}\n- Tags: ${context.tags || 'None'}\n- Duration: ${context.duration} seconds\n\nGenerate 5 diverse music suggestions. Each suggestion should be distinctly different in style, mood, or genre.\n\nRespond with valid JSON only:\n{"suggestions":[{"id":1,"title":"Short title","prompt":"Detailed prompt for AI music generation","description":"Why this works","genre":"Genre","mood":"Mood","tempo":"slow|medium|fast","instrumental":true}]}`
-        : `You are a professional sound designer for film and video. Based on the scene context below, suggest 5 different sound effect options.\n\nSCENE CONTEXT:\n- Scene Name: ${context.name}\n- Description: ${context.description || 'No description provided'}\n- Transcript/Dialogue: ${context.transcription || 'No dialogue'}\n- Tags: ${context.tags || 'None'}\n- Duration: ${context.duration} seconds\n\nGenerate 5 diverse sound effect suggestions.\n\nRespond with valid JSON only:\n{"suggestions":[{"id":1,"title":"Short title","prompt":"Detailed sound description","description":"Why this works","category":"Category","layers":["layer1"]}]}`;
+      const prompt =
+        type === 'music'
+          ? `You are a professional music supervisor for film and video. Based on the scene context below, suggest 5 different music options that would work well as background music.\n\nSCENE CONTEXT:\n- Scene Name: ${context.name}\n- Description: ${context.description || 'No description provided'}\n- Transcript/Dialogue: ${context.transcription || 'No dialogue'}\n- Tags: ${context.tags || 'None'}\n- Duration: ${context.duration} seconds\n\nGenerate 5 diverse music suggestions. Each suggestion should be distinctly different in style, mood, or genre.\n\nRespond with valid JSON only:\n{"suggestions":[{"id":1,"title":"Short title","prompt":"Detailed prompt for AI music generation","description":"Why this works","genre":"Genre","mood":"Mood","tempo":"slow|medium|fast","instrumental":true}]}`
+          : `You are a professional sound designer for film and video. Based on the scene context below, suggest 5 different sound effect options.\n\nSCENE CONTEXT:\n- Scene Name: ${context.name}\n- Description: ${context.description || 'No description provided'}\n- Transcript/Dialogue: ${context.transcription || 'No dialogue'}\n- Tags: ${context.tags || 'None'}\n- Duration: ${context.duration} seconds\n\nGenerate 5 diverse sound effect suggestions.\n\nRespond with valid JSON only:\n{"suggestions":[{"id":1,"title":"Short title","prompt":"Detailed sound description","description":"Why this works","category":"Category","layers":["layer1"]}]}`;
 
       const result = await ai.json(prompt, {
         profile: 'fast',
         maxTokens: 2000,
-        feature: 'video-audio-suggestions'
+        feature: 'video-audio-suggestions',
       });
-      
+
       const suggestions = result.suggestions || [];
       return { success: true, suggestions };
     } catch (error) {
@@ -821,7 +821,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Speech-to-Speech voice transformation
   ipcMain.handle('video-editor:speech-to-speech', async (event, options) => {
     try {
-      log.info('video', 'Speech-to-Speech', { options.audioPath });
+      log.info('video', 'Speech-to-Speech', { audioPath: options.audioPath });
       const audioPath = await videoEditor.elevenLabsService.speechToSpeech(
         options.audioPath,
         options.voiceId,
@@ -839,10 +839,9 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   ipcMain.handle('video-editor:isolate-audio', async (event, audioPath, options = {}) => {
     try {
       log.info('video', 'Isolating audio', { audioPath });
-      const isolatedPath = await videoEditor.elevenLabsService.isolateAudio(
-        audioPath,
-        { projectId: options.projectId }
-      );
+      const isolatedPath = await videoEditor.elevenLabsService.isolateAudio(audioPath, {
+        projectId: options.projectId,
+      });
       return { success: true, audioPath: isolatedPath };
     } catch (error) {
       log.error('video', 'Isolate audio error', { error: error.message });
@@ -853,7 +852,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Create dubbing project
   ipcMain.handle('video-editor:create-dubbing', async (event, options) => {
     try {
-      log.info('video', 'Creating dubbing project', { options.videoPath });
+      log.info('video', 'Creating dubbing project', { videoPath: options.videoPath });
       const result = await videoEditor.elevenLabsService.createDubbingProject(
         options.videoPath,
         options.targetLanguages,
@@ -861,7 +860,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
           sourceLanguage: options.sourceLanguage,
           numSpeakers: options.numSpeakers,
           watermark: options.watermark,
-          projectName: options.projectName
+          projectName: options.projectName,
         },
         { projectId: options.projectId }
       );
@@ -1062,10 +1061,10 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
 
       // Get video path and metadata
       const videoPath = item.content;
-      const metadataPath = item.metadataPath 
+      const metadataPath = item.metadataPath
         ? require('path').join(clipboardManager.storage.storageRoot, item.metadataPath)
         : null;
-      
+
       let metadata = {};
       if (metadataPath && require('fs').existsSync(metadataPath)) {
         metadata = JSON.parse(require('fs').readFileSync(metadataPath, 'utf8'));
@@ -1075,7 +1074,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
         success: true,
         videoPath,
         scenes: metadata.scenes || [],
-        metadata
+        metadata,
       };
     } catch (error) {
       log.error('video', 'Get space video error', { error: error.message });
@@ -1117,17 +1116,17 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // ==================== RELEASE & VERSIONING ====================
 
   // Get release options for current project
-  ipcMain.handle('video-editor:get-release-options', async (event) => {
+  ipcMain.handle('video-editor:get-release-options', async (_event) => {
     try {
       const { ReleaseManager } = await import('../release/ReleaseManager.js');
       const releaseManager = new ReleaseManager();
-      
+
       // Get current project path from global state
       const projectPath = global.currentVideoProjectPath;
       if (!projectPath) {
         return { branches: [], summary: { totalBranches: 0 } };
       }
-      
+
       return await releaseManager.getReleaseOptions(projectPath);
     } catch (error) {
       log.error('video', 'Get release options error', { error: error.message });
@@ -1140,12 +1139,12 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
     try {
       const { ReleaseManager } = await import('../release/ReleaseManager.js');
       const releaseManager = new ReleaseManager();
-      
+
       // For current video release, we use a simplified flow
       const result = await releaseManager._releaseVideoDirectly(videoPath, destination, metadata, (progress) => {
         mainWindow?.webContents.send('video-editor:release-progress', progress);
       });
-      
+
       return result;
     } catch (error) {
       log.error('video', 'Release current video error', { error: error.message });
@@ -1158,16 +1157,16 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
     try {
       const { ReleaseManager } = await import('../release/ReleaseManager.js');
       const releaseManager = new ReleaseManager();
-      
+
       const projectPath = global.currentVideoProjectPath;
       if (!projectPath) {
         return { error: 'No project loaded' };
       }
-      
+
       const result = await releaseManager.startRelease(projectPath, branchId, destination, metadata, (progress) => {
         mainWindow?.webContents.send('video-editor:release-progress', progress);
       });
-      
+
       return result;
     } catch (error) {
       log.error('video', 'Release branch error', { error: error.message });
@@ -1230,7 +1229,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   });
 
   // Get all projects
-  ipcMain.handle('video-editor:get-projects', async (event) => {
+  ipcMain.handle('video-editor:get-projects', async (_event) => {
     try {
       const { VersionManager } = await import('../versioning/VersionManager.js');
       const versionManager = new VersionManager();
@@ -1246,17 +1245,17 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
     try {
       const { VersionManager } = await import('../versioning/VersionManager.js');
       const versionManager = new VersionManager();
-      
+
       const projectPath = global.currentVideoProjectPath;
       if (!projectPath) {
         return { error: 'No project loaded' };
       }
-      
+
       return await versionManager.createBranch(projectPath, {
         name,
         type,
         forkFromBranch,
-        forkFromVersion
+        forkFromVersion,
       });
     } catch (error) {
       log.error('video', 'Create branch error', { error: error.message });
@@ -1265,16 +1264,16 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   });
 
   // Get branches
-  ipcMain.handle('video-editor:get-branches', async (event) => {
+  ipcMain.handle('video-editor:get-branches', async (_event) => {
     try {
       const { VersionManager } = await import('../versioning/VersionManager.js');
       const versionManager = new VersionManager();
-      
+
       const projectPath = global.currentVideoProjectPath;
       if (!projectPath) {
         return [];
       }
-      
+
       return versionManager.getBranches(projectPath);
     } catch (error) {
       log.error('video', 'Get branches error', { error: error.message });
@@ -1287,12 +1286,12 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
     try {
       const { VersionManager } = await import('../versioning/VersionManager.js');
       const versionManager = new VersionManager();
-      
+
       const projectPath = global.currentVideoProjectPath;
       if (!projectPath) {
         return { error: 'No project loaded' };
       }
-      
+
       return await versionManager.saveVersion(projectPath, branchId, edlData, message);
     } catch (error) {
       log.error('video', 'Save version error', { error: error.message });
@@ -1305,12 +1304,12 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
     try {
       const { VersionManager } = await import('../versioning/VersionManager.js');
       const versionManager = new VersionManager();
-      
+
       const projectPath = global.currentVideoProjectPath;
       if (!projectPath) {
         return { error: 'No project loaded' };
       }
-      
+
       return versionManager.loadEDL(projectPath, branchId, version);
     } catch (error) {
       log.error('video', 'Load EDL error', { error: error.message });
@@ -1430,16 +1429,19 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   });
 
   // Save a designed voice to library
-  ipcMain.handle('video-editor:elevenlabs-save-designed-voice', async (event, generatedVoiceId, name, description = '') => {
-    try {
-      log.info('video', 'Saving designed voice', { name });
-      const result = await videoEditor.elevenLabsService.saveDesignedVoice(generatedVoiceId, name, description);
-      return { success: true, ...result };
-    } catch (error) {
-      log.error('video', 'Save designed voice error', { error: error.message });
-      return { success: false, error: error.message };
+  ipcMain.handle(
+    'video-editor:elevenlabs-save-designed-voice',
+    async (event, generatedVoiceId, name, description = '') => {
+      try {
+        log.info('video', 'Saving designed voice', { name });
+        const result = await videoEditor.elevenLabsService.saveDesignedVoice(generatedVoiceId, name, description);
+        return { success: true, ...result };
+      } catch (error) {
+        log.error('video', 'Save designed voice error', { error: error.message });
+        return { success: false, error: error.message };
+      }
     }
-  });
+  );
 
   // ==================== ELEVENLABS LANGUAGE DETECTION ====================
 
@@ -1551,16 +1553,16 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   ipcMain.handle('video-editor:capture-frame-at-time', async (event, videoPath, timestamp, options = {}) => {
     try {
       log.info('video', 'Capturing frame at', { timestamp });
-      
+
       const { width = 640, format = 'base64' } = options;
-      
+
       // Use thumbnail service to capture frame
       const thumbnail = await videoEditor.generateSingleThumbnail(videoPath, timestamp, { width });
-      
+
       if (format === 'base64') {
         return { success: true, frameBase64: thumbnail, timestamp };
       }
-      
+
       return { success: true, framePath: thumbnail, timestamp };
     } catch (error) {
       log.error('video', 'Capture frame error', { error: error.message });
@@ -1571,15 +1573,7 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
   // Analyze scene with GPT Vision
   ipcMain.handle('video-editor:analyze-scene-with-vision', async (event, options) => {
     try {
-      const { 
-        transcript, 
-        speaker, 
-        startTime, 
-        endTime, 
-        frameBase64, 
-        prompt, 
-        templateId 
-      } = options;
+      const { transcript, speaker, startTime, endTime, frameBase64, prompt, templateId } = options;
 
       log.info('video', 'Analyzing scene with vision', { startTime, endTime, templateId });
 
@@ -1594,7 +1588,9 @@ Respond with ONLY the description text, no quotes or additional formatting.`;
       }
 
       // Build prompt for vision analysis
-      const fullPrompt = prompt || `Analyze this video frame in context of the transcript.
+      const fullPrompt =
+        prompt ||
+        `Analyze this video frame in context of the transcript.
         
 Speaker: ${speaker || 'Unknown'}
 Transcript: "${transcript}"
@@ -1614,9 +1610,9 @@ Provide analysis in JSON format:
         const result = await ai.vision(imageData, fullPrompt, {
           profile: 'fast',
           maxTokens: 1000,
-          feature: 'video-editor-ipc'
+          feature: 'video-editor-ipc',
         });
-        
+
         const content = result.content || '';
 
         // Try to parse JSON from response
@@ -1626,12 +1622,12 @@ Provide analysis in JSON format:
             const parsed = JSON.parse(jsonMatch[0]);
             return { success: true, ...parsed };
           }
-        } catch (parseError) {
+        } catch (_parseError) {
           // Return as text if not valid JSON
-          return { 
-            success: true, 
+          return {
+            success: true,
             sceneHeading: 'Scene Analysis',
-            visualDescription: content 
+            visualDescription: content,
           };
         }
 
@@ -1639,13 +1635,12 @@ Provide analysis in JSON format:
       }
 
       // Fallback: text-only analysis
-      return { 
-        success: true, 
+      return {
+        success: true,
         sceneHeading: speaker ? `${speaker} speaks` : 'Scene',
         visualDescription: 'Vision analysis requires OpenAI API with image support',
-        mood: 'neutral'
+        mood: 'neutral',
       };
-
     } catch (error) {
       log.error('video', 'Analyze scene error', { error: error.message });
       return { success: false, error: error.message };
@@ -1669,8 +1664,8 @@ Provide analysis in JSON format:
         return { success: false, error: 'No LLM API key configured.' };
       }
 
-      const criteriaText = criteria.length > 0 ? criteria.join('\n- ') : 
-        'impactful statements\n- memorable phrases\n- emotional moments';
+      const criteriaText =
+        criteria.length > 0 ? criteria.join('\n- ') : 'impactful statements\n- memorable phrases\n- emotional moments';
 
       const prompt = `Find the ${maxQuotes} most quotable moments in this transcript.
 
@@ -1692,15 +1687,15 @@ Return JSON array of quotes:
 
       // Use centralized AI service
       let quotes = [];
-      
+
       try {
         const result = await ai.chat({
           profile: provider === 'anthropic' ? 'standard' : 'fast',
           messages: [{ role: 'user', content: prompt }],
           maxTokens: 2000,
-          feature: 'video-editor-ipc'
+          feature: 'video-editor-ipc',
         });
-        
+
         const content = result.content || '';
         const jsonMatch = content.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
@@ -1711,7 +1706,6 @@ Return JSON array of quotes:
       }
 
       return { success: true, quotes };
-
     } catch (error) {
       log.error('video', 'Find quotes error', { error: error.message });
       return { success: false, error: error.message };
@@ -1721,7 +1715,7 @@ Return JSON array of quotes:
   // Detect topics in transcript
   ipcMain.handle('video-editor:detect-topics', async (event, options) => {
     try {
-      const { transcript, detectSpeakerChanges = true, detectMoodShifts = true } = options;
+      const { transcript } = options;
 
       log.info('video', 'Detecting topics in transcript');
 
@@ -1759,9 +1753,9 @@ Return JSON array:
           profile: 'standard',
           messages: [{ role: 'user', content: prompt }],
           maxTokens: 2000,
-          feature: 'video-editor-ipc'
+          feature: 'video-editor-ipc',
         });
-        
+
         const content = result.content || '';
         const jsonMatch = content.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
@@ -1772,7 +1766,6 @@ Return JSON array:
       }
 
       return { success: true, topics };
-
     } catch (error) {
       log.error('video', 'Detect topics error', { error: error.message });
       return { success: false, error: error.message };
@@ -1782,7 +1775,7 @@ Return JSON array:
   // Analyze hooks in transcript
   ipcMain.handle('video-editor:analyze-hooks', async (event, options) => {
     try {
-      const { transcript, segments } = options;
+      const { transcript } = options;
 
       log.info('video', 'Analyzing hooks');
 
@@ -1825,9 +1818,9 @@ Return JSON:
           profile: 'standard',
           messages: [{ role: 'user', content: prompt }],
           maxTokens: 2000,
-          feature: 'video-editor-ipc'
+          feature: 'video-editor-ipc',
         });
-        
+
         const content = aiResult.content || '';
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
@@ -1838,7 +1831,6 @@ Return JSON:
       }
 
       return { success: true, ...result };
-
     } catch (error) {
       log.error('video', 'Analyze hooks error', { error: error.message });
       return { success: false, error: error.message };
@@ -1848,7 +1840,7 @@ Return JSON:
   // Rate project with AI
   ipcMain.handle('video-editor:rate-project', async (event, options) => {
     try {
-      const { transcript, criteria, templateId, customGoals } = options;
+      const { transcript, criteria, customGoals } = options;
 
       log.info('video', 'Rating project with AI');
 
@@ -1861,7 +1853,7 @@ Return JSON:
         return { success: false, error: 'No LLM API key configured.' };
       }
 
-      const criteriaList = criteria.map(c => `- ${c.name}: ${c.prompt}`).join('\n');
+      const criteriaList = criteria.map((c) => `- ${c.name}: ${c.prompt}`).join('\n');
 
       const prompt = `Rate this video content on the following criteria (1-10 scale):
 
@@ -1905,9 +1897,9 @@ Return JSON:
           profile: 'standard',
           messages: [{ role: 'user', content: prompt }],
           maxTokens: 3000,
-          feature: 'video-editor-ipc'
+          feature: 'video-editor-ipc',
         });
-        
+
         const content = aiResult.content || '';
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
@@ -1918,7 +1910,6 @@ Return JSON:
       }
 
       return { success: true, ...result };
-
     } catch (error) {
       log.error('video', 'Rate project error', { error: error.message });
       return { success: false, error: error.message };
@@ -1927,5 +1918,3 @@ Return JSON:
 
   log.info('video', 'All IPC handlers registered successfully');
 }
-
-

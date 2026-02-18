@@ -1,912 +1,960 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;">
-  <title>Project Budget</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
-      min-height: 100vh;
-    }
-
-    /* Header */
-    .header {
-      background: #161b22;
-      border-bottom: 1px solid #30363d;
-      padding: 16px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .header h1 {
-      font-size: 18px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .header h1 svg {
-      width: 24px;
-      height: 24px;
-      color: #58a6ff;
-    }
-
-    .header-actions {
-      display: flex;
-      gap: 8px;
-    }
-
-    .btn {
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      border: 1px solid transparent;
-      transition: all 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .btn-primary {
-      background: #238636;
-      color: #fff;
-      border-color: #238636;
-    }
-
-    .btn-primary:hover {
-      background: #2ea043;
-    }
-
-    .btn-secondary {
-      background: #21262d;
-      color: #c9d1d9;
-      border-color: #30363d;
-    }
-
-    .btn-secondary:hover {
-      background: #30363d;
-    }
-
-    .btn-ghost {
-      background: transparent;
-      color: #8b949e;
-      border: none;
-    }
-
-    .btn-ghost:hover {
-      color: #e6edf3;
-    }
-
-    /* Main Container */
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 24px;
-    }
-
-    /* Project Selector */
-    .project-selector {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      margin-bottom: 24px;
-      padding: 16px;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-    }
-
-    .project-selector label {
-      font-size: 13px;
-      color: #8b949e;
-    }
-
-    .project-selector select {
-      flex: 1;
-      max-width: 400px;
-      padding: 8px 12px;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #e6edf3;
-      font-size: 14px;
-    }
-
-    .project-selector select:focus {
-      outline: none;
-      border-color: #58a6ff;
-    }
-
-    /* Summary Cards */
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-
-    .summary-card {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 20px;
-    }
-
-    .summary-card.highlight {
-      border-color: #238636;
-    }
-
-    .summary-card.warning {
-      border-color: #d29922;
-    }
-
-    .summary-card.danger {
-      border-color: #da3633;
-    }
-
-    .summary-label {
-      font-size: 12px;
-      color: #8b949e;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
-
-    .summary-value {
-      font-size: 28px;
-      font-weight: 700;
-    }
-
-    .summary-value.positive { color: #3fb950; }
-    .summary-value.negative { color: #f85149; }
-    .summary-value.neutral { color: #e6edf3; }
-
-    .summary-detail {
-      font-size: 12px;
-      color: #8b949e;
-      margin-top: 4px;
-    }
-
-    /* Budget Table */
-    .budget-section {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      margin-bottom: 24px;
-      overflow: hidden;
-    }
-
-    .section-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid #30363d;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #0d1117;
-    }
-
-    .section-title {
-      font-size: 14px;
-      font-weight: 600;
-    }
-
-    .budget-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .budget-table th {
-      padding: 12px 20px;
-      text-align: left;
-      font-size: 11px;
-      font-weight: 600;
-      color: #8b949e;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      background: #0d1117;
-      border-bottom: 1px solid #30363d;
-    }
-
-    .budget-table th.amount {
-      text-align: right;
-    }
-
-    .budget-table td {
-      padding: 16px 20px;
-      font-size: 14px;
-      border-bottom: 1px solid #21262d;
-    }
-
-    .budget-table td.amount {
-      text-align: right;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-    }
-
-    .budget-table tr:last-child td {
-      border-bottom: none;
-    }
-
-    .budget-table tr:hover {
-      background: #161b2280;
-    }
-
-    .budget-table .total-row {
-      background: #0d1117;
-      font-weight: 600;
-    }
-
-    .budget-table .total-row td {
-      border-top: 2px solid #30363d;
-      padding: 16px 20px;
-    }
-
-    /* Line Item */
-    .line-item-name {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .line-item-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 14px;
-    }
-
-    .line-item-icon.voice { background: #8957e520; color: #8957e5; }
-    .line-item-icon.transcription { background: #23863620; color: #238636; }
-    .line-item-icon.translation { background: #d2992220; color: #d29922; }
-    .line-item-icon.description { background: #58a6ff20; color: #58a6ff; }
-    .line-item-icon.sfx { background: #f778ba20; color: #f778ba; }
-    .line-item-icon.dubbing { background: #a371f720; color: #a371f7; }
-
-    .line-item-details {
-      font-size: 12px;
-      color: #8b949e;
-      margin-top: 2px;
-    }
-
-    /* Variance */
-    .variance {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: 500;
-    }
-
-    .variance.under {
-      background: #23863620;
-      color: #3fb950;
-    }
-
-    .variance.over {
-      background: #da363320;
-      color: #f85149;
-    }
-
-    .variance.on-budget {
-      background: #21262d;
-      color: #8b949e;
-    }
-
-    /* Progress Bar */
-    .budget-progress {
-      margin-top: 8px;
-    }
-
-    .progress-bar {
-      height: 6px;
-      background: #21262d;
-      border-radius: 3px;
-      overflow: hidden;
-    }
-
-    .progress-fill {
-      height: 100%;
-      border-radius: 3px;
-      transition: width 0.3s ease;
-    }
-
-    .progress-fill.ok { background: #238636; }
-    .progress-fill.warning { background: #d29922; }
-    .progress-fill.danger { background: #da3633; }
-
-    /* Edit Estimate Modal */
-    .modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.7);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      opacity: 0;
-      visibility: hidden;
-      transition: all 0.2s ease;
-    }
-
-    .modal-overlay.visible {
-      opacity: 1;
-      visibility: visible;
-    }
-
-    .modal {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 12px;
-      width: 600px;
-      max-height: 80vh;
-      overflow-y: auto;
-    }
-
-    .modal-header {
-      padding: 20px;
-      border-bottom: 1px solid #30363d;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .modal-title {
-      font-size: 16px;
-      font-weight: 600;
-    }
-
-    .modal-close {
-      background: none;
-      border: none;
-      color: #8b949e;
-      cursor: pointer;
-      padding: 4px;
-    }
-
-    .modal-close:hover {
-      color: #e6edf3;
-    }
-
-    .modal-body {
-      padding: 20px;
-    }
-
-    .form-group {
-      margin-bottom: 16px;
-    }
-
-    .form-group label {
-      display: block;
-      font-size: 12px;
-      color: #8b949e;
-      margin-bottom: 6px;
-    }
-
-    .form-group input,
-    .form-group textarea {
-      width: 100%;
-      padding: 10px 12px;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #e6edf3;
-      font-size: 14px;
-    }
-
-    .form-group input:focus,
-    .form-group textarea:focus {
-      outline: none;
-      border-color: #58a6ff;
-    }
-
-    .form-group textarea {
-      min-height: 100px;
-      resize: vertical;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-    }
-
-    .modal-footer {
-      padding: 16px 20px;
-      border-top: 1px solid #30363d;
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-
-    /* History */
-    .history-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 20px;
-      border-bottom: 1px solid #21262d;
-    }
-
-    .history-item:last-child {
-      border-bottom: none;
-    }
-
-    .history-info {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .history-date {
-      font-size: 12px;
-      color: #8b949e;
-    }
-
-    .history-operation {
-      font-size: 13px;
-    }
-
-    .history-cost {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 13px;
-    }
-
-    /* Toast */
-    .toast {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      padding: 12px 20px;
-      background: #238636;
-      color: #fff;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      opacity: 0;
-      transform: translateY(10px);
-      transition: all 0.2s ease;
-      z-index: 1000;
-    }
-
-    .toast.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .toast.error {
-      background: #da3633;
-    }
-
-    /* Empty State */
-    .empty-state {
-      text-align: center;
-      padding: 48px;
-      color: #8b949e;
-    }
-
-    .empty-state svg {
-      width: 48px;
-      height: 48px;
-      margin-bottom: 16px;
-      opacity: 0.5;
-    }
-
-    .empty-state p {
-      margin-bottom: 16px;
-    }
-
-    /* Responsive */
-    @media (max-width: 1024px) {
-      .summary-grid {
-        grid-template-columns: repeat(2, 1fr);
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;"
+    />
+    <title>Project Budget</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
-    }
 
-    @media (max-width: 768px) {
-      .summary-grid {
-        grid-template-columns: 1fr;
+      body {
+        font-family:
+          'Inter',
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        background: #0d1117;
+        color: #e6edf3;
+        min-height: 100vh;
       }
-      
-      .budget-table {
+
+      /* Header */
+      .header {
+        background: #161b22;
+        border-bottom: 1px solid #30363d;
+        padding: 16px 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .header h1 {
+        font-size: 18px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .header h1 svg {
+        width: 24px;
+        height: 24px;
+        color: #58a6ff;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .btn-primary {
+        background: #238636;
+        color: #fff;
+        border-color: #238636;
+      }
+
+      .btn-primary:hover {
+        background: #2ea043;
+      }
+
+      .btn-secondary {
+        background: #21262d;
+        color: #c9d1d9;
+        border-color: #30363d;
+      }
+
+      .btn-secondary:hover {
+        background: #30363d;
+      }
+
+      .btn-ghost {
+        background: transparent;
+        color: #8b949e;
+        border: none;
+      }
+
+      .btn-ghost:hover {
+        color: #e6edf3;
+      }
+
+      /* Main Container */
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      /* Project Selector */
+      .project-selector {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 24px;
+        padding: 16px;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+      }
+
+      .project-selector label {
+        font-size: 13px;
+        color: #8b949e;
+      }
+
+      .project-selector select {
+        flex: 1;
+        max-width: 400px;
+        padding: 8px 12px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        color: #e6edf3;
+        font-size: 14px;
+      }
+
+      .project-selector select:focus {
+        outline: none;
+        border-color: #58a6ff;
+      }
+
+      /* Summary Cards */
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .summary-card {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 20px;
+      }
+
+      .summary-card.highlight {
+        border-color: #238636;
+      }
+
+      .summary-card.warning {
+        border-color: #d29922;
+      }
+
+      .summary-card.danger {
+        border-color: #da3633;
+      }
+
+      .summary-label {
         font-size: 12px;
+        color: #8b949e;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
       }
-      
-      .budget-table th,
+
+      .summary-value {
+        font-size: 28px;
+        font-weight: 700;
+      }
+
+      .summary-value.positive {
+        color: #3fb950;
+      }
+      .summary-value.negative {
+        color: #f85149;
+      }
+      .summary-value.neutral {
+        color: #e6edf3;
+      }
+
+      .summary-detail {
+        font-size: 12px;
+        color: #8b949e;
+        margin-top: 4px;
+      }
+
+      /* Budget Table */
+      .budget-section {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        margin-bottom: 24px;
+        overflow: hidden;
+      }
+
+      .section-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid #30363d;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #0d1117;
+      }
+
+      .section-title {
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .budget-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .budget-table th {
+        padding: 12px 20px;
+        text-align: left;
+        font-size: 11px;
+        font-weight: 600;
+        color: #8b949e;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        background: #0d1117;
+        border-bottom: 1px solid #30363d;
+      }
+
+      .budget-table th.amount {
+        text-align: right;
+      }
+
       .budget-table td {
-        padding: 12px;
+        padding: 16px 20px;
+        font-size: 14px;
+        border-bottom: 1px solid #21262d;
       }
-    }
-  </style>
-</head>
-<body>
-  <!-- Header -->
-  <header class="header">
-    <h1>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-      </svg>
-      Project Budget
-    </h1>
-    <div class="header-actions">
-      <button class="btn btn-secondary" onclick="exportBudget()">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-          <polyline points="7 10 12 15 17 10"/>
-          <line x1="12" y1="15" x2="12" y2="3"/>
+
+      .budget-table td.amount {
+        text-align: right;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+      }
+
+      .budget-table tr:last-child td {
+        border-bottom: none;
+      }
+
+      .budget-table tr:hover {
+        background: #161b2280;
+      }
+
+      .budget-table .total-row {
+        background: #0d1117;
+        font-weight: 600;
+      }
+
+      .budget-table .total-row td {
+        border-top: 2px solid #30363d;
+        padding: 16px 20px;
+      }
+
+      /* Line Item */
+      .line-item-name {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .line-item-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+      }
+
+      .line-item-icon.voice {
+        background: #8957e520;
+        color: #8957e5;
+      }
+      .line-item-icon.transcription {
+        background: #23863620;
+        color: #238636;
+      }
+      .line-item-icon.translation {
+        background: #d2992220;
+        color: #d29922;
+      }
+      .line-item-icon.description {
+        background: #58a6ff20;
+        color: #58a6ff;
+      }
+      .line-item-icon.sfx {
+        background: #f778ba20;
+        color: #f778ba;
+      }
+      .line-item-icon.dubbing {
+        background: #a371f720;
+        color: #a371f7;
+      }
+
+      .line-item-details {
+        font-size: 12px;
+        color: #8b949e;
+        margin-top: 2px;
+      }
+
+      /* Variance */
+      .variance {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .variance.under {
+        background: #23863620;
+        color: #3fb950;
+      }
+
+      .variance.over {
+        background: #da363320;
+        color: #f85149;
+      }
+
+      .variance.on-budget {
+        background: #21262d;
+        color: #8b949e;
+      }
+
+      /* Progress Bar */
+      .budget-progress {
+        margin-top: 8px;
+      }
+
+      .progress-bar {
+        height: 6px;
+        background: #21262d;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+      }
+
+      .progress-fill.ok {
+        background: #238636;
+      }
+      .progress-fill.warning {
+        background: #d29922;
+      }
+      .progress-fill.danger {
+        background: #da3633;
+      }
+
+      /* Edit Estimate Modal */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.2s ease;
+      }
+
+      .modal-overlay.visible {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .modal {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        width: 600px;
+        max-height: 80vh;
+        overflow-y: auto;
+      }
+
+      .modal-header {
+        padding: 20px;
+        border-bottom: 1px solid #30363d;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .modal-title {
+        font-size: 16px;
+        font-weight: 600;
+      }
+
+      .modal-close {
+        background: none;
+        border: none;
+        color: #8b949e;
+        cursor: pointer;
+        padding: 4px;
+      }
+
+      .modal-close:hover {
+        color: #e6edf3;
+      }
+
+      .modal-body {
+        padding: 20px;
+      }
+
+      .form-group {
+        margin-bottom: 16px;
+      }
+
+      .form-group label {
+        display: block;
+        font-size: 12px;
+        color: #8b949e;
+        margin-bottom: 6px;
+      }
+
+      .form-group input,
+      .form-group textarea {
+        width: 100%;
+        padding: 10px 12px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        color: #e6edf3;
+        font-size: 14px;
+      }
+
+      .form-group input:focus,
+      .form-group textarea:focus {
+        outline: none;
+        border-color: #58a6ff;
+      }
+
+      .form-group textarea {
+        min-height: 100px;
+        resize: vertical;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+
+      .modal-footer {
+        padding: 16px 20px;
+        border-top: 1px solid #30363d;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      /* History */
+      .history-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 20px;
+        border-bottom: 1px solid #21262d;
+      }
+
+      .history-item:last-child {
+        border-bottom: none;
+      }
+
+      .history-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .history-date {
+        font-size: 12px;
+        color: #8b949e;
+      }
+
+      .history-operation {
+        font-size: 13px;
+      }
+
+      .history-cost {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+      }
+
+      /* Toast */
+      .toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        padding: 12px 20px;
+        background: #238636;
+        color: #fff;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        opacity: 0;
+        transform: translateY(10px);
+        transition: all 0.2s ease;
+        z-index: 1000;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .toast.error {
+        background: #da3633;
+      }
+
+      /* Empty State */
+      .empty-state {
+        text-align: center;
+        padding: 48px;
+        color: #8b949e;
+      }
+
+      .empty-state svg {
+        width: 48px;
+        height: 48px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+      }
+
+      .empty-state p {
+        margin-bottom: 16px;
+      }
+
+      /* Responsive */
+      @media (max-width: 1024px) {
+        .summary-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 768px) {
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .budget-table {
+          font-size: 12px;
+        }
+
+        .budget-table th,
+        .budget-table td {
+          padding: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Header -->
+    <header class="header">
+      <h1>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
         </svg>
-        Export
-      </button>
-      <button class="btn btn-primary" onclick="openEstimateModal()">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"/>
-          <line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-        New Estimate
-      </button>
-    </div>
-  </header>
-
-  <!-- Main Container -->
-  <div class="container">
-    <!-- Project Selector -->
-    <div class="project-selector">
-      <label>Project:</label>
-      <select id="projectSelect" onchange="loadProjectBudget()">
-        <option value="all">All Projects (Global Budget)</option>
-      </select>
-      <button class="btn btn-ghost" onclick="refreshData()">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M23 4v6h-6M1 20v-6h6"/>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-        </svg>
-        Refresh
-      </button>
-    </div>
-
-    <!-- Summary Cards -->
-    <div class="summary-grid">
-      <div class="summary-card highlight">
-        <div class="summary-label">Budget Limit</div>
-        <div class="summary-value neutral" id="budgetLimit">$50.00</div>
-        <div class="summary-detail">Monthly allocation</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">Estimated</div>
-        <div class="summary-value neutral" id="totalEstimated">$0.00</div>
-        <div class="summary-detail" id="estimatedDetail">Planned spending</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">Actual Spent</div>
-        <div class="summary-value neutral" id="totalActual">$0.00</div>
-        <div class="summary-detail" id="actualDetail">0 API calls</div>
-      </div>
-      <div class="summary-card" id="varianceCard">
-        <div class="summary-label">Variance</div>
-        <div class="summary-value positive" id="totalVariance">$0.00</div>
-        <div class="summary-detail" id="varianceDetail">Under budget</div>
-        <div class="budget-progress">
-          <div class="progress-bar">
-            <div class="progress-fill ok" id="budgetProgress" style="width: 0%"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Budget Line Items -->
-    <div class="budget-section">
-      <div class="section-header">
-        <span class="section-title">Budget Line Items</span>
-        <button class="btn btn-ghost" onclick="openEstimateModal()">+ Add Line Item</button>
-      </div>
-      <table class="budget-table">
-        <thead>
-          <tr>
-            <th style="width: 30%">Category</th>
-            <th class="amount">Estimated</th>
-            <th class="amount">Actual</th>
-            <th class="amount">Variance</th>
-            <th style="width: 15%">Status</th>
-          </tr>
-        </thead>
-        <tbody id="budgetTableBody">
-          <!-- Populated by JS -->
-        </tbody>
-        <tfoot>
-          <tr class="total-row">
-            <td><strong>TOTAL</strong></td>
-            <td class="amount" id="footerEstimated">$0.00</td>
-            <td class="amount" id="footerActual">$0.00</td>
-            <td class="amount" id="footerVariance">$0.00</td>
-            <td></td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-
-    <!-- Recent Activity -->
-    <div class="budget-section">
-      <div class="section-header">
-        <span class="section-title">Recent Activity</span>
-        <span style="font-size: 12px; color: #8b949e;" id="activityCount">Last 10 transactions</span>
-      </div>
-      <div id="activityList">
-        <!-- Populated by JS -->
-      </div>
-    </div>
-  </div>
-
-  <!-- Estimate Modal -->
-  <div class="modal-overlay" id="estimateModal">
-    <div class="modal">
-      <div class="modal-header">
-        <span class="modal-title">Add Budget Estimate</span>
-        <button class="modal-close" onclick="closeEstimateModal()">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
+        Project Budget
+      </h1>
+      <div class="header-actions">
+        <button class="btn btn-secondary" onclick="exportBudget()">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
+          Export
+        </button>
+        <button class="btn btn-primary" onclick="openEstimateModal()">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          New Estimate
         </button>
       </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Category</label>
-          <select id="estimateCategory">
-            <option value="voice">AI Voice Generation (ElevenLabs)</option>
-            <option value="transcription">Audio Transcription (OpenAI Whisper)</option>
-            <option value="translation">AI Translation (Claude)</option>
-            <option value="description">Scene Descriptions (Claude)</option>
-            <option value="sfx">Sound Effects (ElevenLabs)</option>
-            <option value="dubbing">Video Dubbing (ElevenLabs)</option>
-          </select>
+    </header>
+
+    <!-- Main Container -->
+    <div class="container">
+      <!-- Project Selector -->
+      <div class="project-selector">
+        <label>Project:</label>
+        <select id="projectSelect" onchange="loadProjectBudget()">
+          <option value="all">All Projects (Global Budget)</option>
+        </select>
+        <button class="btn btn-ghost" onclick="refreshData()">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6M1 20v-6h6" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+          Refresh
+        </button>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="summary-grid">
+        <div class="summary-card highlight">
+          <div class="summary-label">Budget Limit</div>
+          <div class="summary-value neutral" id="budgetLimit">$50.00</div>
+          <div class="summary-detail">Monthly allocation</div>
         </div>
-        <div class="form-group">
-          <label>Description</label>
-          <textarea id="estimateDescription" placeholder="Describe what this budget is for..."></textarea>
+        <div class="summary-card">
+          <div class="summary-label">Estimated</div>
+          <div class="summary-value neutral" id="totalEstimated">$0.00</div>
+          <div class="summary-detail" id="estimatedDetail">Planned spending</div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Estimated Amount ($)</label>
-            <input type="number" id="estimateAmount" step="0.01" min="0" placeholder="0.00">
-          </div>
-          <div class="form-group">
-            <label>Units (for reference)</label>
-            <input type="text" id="estimateUnits" placeholder="e.g., 5000 characters, 10 minutes">
+        <div class="summary-card">
+          <div class="summary-label">Actual Spent</div>
+          <div class="summary-value neutral" id="totalActual">$0.00</div>
+          <div class="summary-detail" id="actualDetail">0 API calls</div>
+        </div>
+        <div class="summary-card" id="varianceCard">
+          <div class="summary-label">Variance</div>
+          <div class="summary-value positive" id="totalVariance">$0.00</div>
+          <div class="summary-detail" id="varianceDetail">Under budget</div>
+          <div class="budget-progress">
+            <div class="progress-bar">
+              <div class="progress-fill ok" id="budgetProgress" style="width: 0%"></div>
+            </div>
           </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeEstimateModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveEstimate()">Add Estimate</button>
+
+      <!-- Budget Line Items -->
+      <div class="budget-section">
+        <div class="section-header">
+          <span class="section-title">Budget Line Items</span>
+          <button class="btn btn-ghost" onclick="openEstimateModal()">+ Add Line Item</button>
+        </div>
+        <table class="budget-table">
+          <thead>
+            <tr>
+              <th style="width: 30%">Category</th>
+              <th class="amount">Estimated</th>
+              <th class="amount">Actual</th>
+              <th class="amount">Variance</th>
+              <th style="width: 15%">Status</th>
+            </tr>
+          </thead>
+          <tbody id="budgetTableBody">
+            <!-- Populated by JS -->
+          </tbody>
+          <tfoot>
+            <tr class="total-row">
+              <td><strong>TOTAL</strong></td>
+              <td class="amount" id="footerEstimated">$0.00</td>
+              <td class="amount" id="footerActual">$0.00</td>
+              <td class="amount" id="footerVariance">$0.00</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="budget-section">
+        <div class="section-header">
+          <span class="section-title">Recent Activity</span>
+          <span style="font-size: 12px; color: #8b949e" id="activityCount">Last 10 transactions</span>
+        </div>
+        <div id="activityList">
+          <!-- Populated by JS -->
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- Toast -->
-  <div class="toast" id="toast"></div>
+    <!-- Estimate Modal -->
+    <div class="modal-overlay" id="estimateModal">
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">Add Budget Estimate</span>
+          <button class="modal-close" onclick="closeEstimateModal()">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Category</label>
+            <select id="estimateCategory">
+              <option value="voice">AI Voice Generation (ElevenLabs)</option>
+              <option value="transcription">Audio Transcription (OpenAI Whisper)</option>
+              <option value="translation">AI Translation (Claude)</option>
+              <option value="description">Scene Descriptions (Claude)</option>
+              <option value="sfx">Sound Effects (ElevenLabs)</option>
+              <option value="dubbing">Video Dubbing (ElevenLabs)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="estimateDescription" placeholder="Describe what this budget is for..."></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Estimated Amount ($)</label>
+              <input type="number" id="estimateAmount" step="0.01" min="0" placeholder="0.00" />
+            </div>
+            <div class="form-group">
+              <label>Units (for reference)</label>
+              <input type="text" id="estimateUnits" placeholder="e.g., 5000 characters, 10 minutes" />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeEstimateModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveEstimate()">Add Estimate</button>
+        </div>
+      </div>
+    </div>
 
-  <script>
-    // Budget line item categories
-    const CATEGORIES = {
-      voice: { name: 'AI Voice Generation', icon: '🎙️', provider: 'ElevenLabs' },
-      transcription: { name: 'Audio Transcription', icon: '📝', provider: 'OpenAI Whisper' },
-      translation: { name: 'AI Translation', icon: '🌐', provider: 'Claude' },
-      description: { name: 'Scene Descriptions', icon: '🎬', provider: 'Claude' },
-      sfx: { name: 'Sound Effects', icon: '🔊', provider: 'ElevenLabs' },
-      dubbing: { name: 'Video Dubbing', icon: '🎭', provider: 'ElevenLabs' }
-    };
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
 
-    // State
-    let currentProject = 'all';
-    let budgetData = {
-      limit: 50.00,
-      estimates: [],
-      actuals: {}
-    };
+    <script>
+      // Budget line item categories
+      const CATEGORIES = {
+        voice: { name: 'AI Voice Generation', icon: '🎙️', provider: 'ElevenLabs' },
+        transcription: { name: 'Audio Transcription', icon: '📝', provider: 'OpenAI Whisper' },
+        translation: { name: 'AI Translation', icon: '🌐', provider: 'Claude' },
+        description: { name: 'Scene Descriptions', icon: '🎬', provider: 'Claude' },
+        sfx: { name: 'Sound Effects', icon: '🔊', provider: 'ElevenLabs' },
+        dubbing: { name: 'Video Dubbing', icon: '🎭', provider: 'ElevenLabs' },
+      };
 
-    // Initialize
-    document.addEventListener('DOMContentLoaded', async () => {
-      await loadProjects();
-      await refreshData();
-    });
+      // State
+      let currentProject = 'all';
+      let budgetData = {
+        limit: 50.0,
+        estimates: [],
+        actuals: {},
+      };
 
-    // Load projects
-    async function loadProjects() {
-      try {
-        if (window.budgetAPI) {
-          const projects = await window.budgetAPI.getAllProjects();
-          const select = document.getElementById('projectSelect');
-          
-          Object.entries(projects).forEach(([id, project]) => {
-            const option = document.createElement('option');
-            option.value = id;
-            option.textContent = project.name || id;
-            select.appendChild(option);
-          });
+      // Initialize
+      document.addEventListener('DOMContentLoaded', async () => {
+        await loadProjects();
+        await refreshData();
+      });
+
+      // Load projects
+      async function loadProjects() {
+        try {
+          if (window.budgetAPI) {
+            const projects = await window.budgetAPI.getAllProjects();
+            const select = document.getElementById('projectSelect');
+
+            Object.entries(projects).forEach(([id, project]) => {
+              const option = document.createElement('option');
+              option.value = id;
+              option.textContent = project.name || id;
+              select.appendChild(option);
+            });
+          }
+        } catch (error) {
+          console.error('Error loading projects:', error);
         }
-      } catch (error) {
-        console.error('Error loading projects:', error);
       }
-    }
 
-    // Load project budget
-    async function loadProjectBudget() {
-      currentProject = document.getElementById('projectSelect').value;
-      await refreshData();
-    }
+      // Load project budget
+      async function loadProjectBudget() {
+        currentProject = document.getElementById('projectSelect').value;
+        await refreshData();
+      }
 
-    // Refresh all data
-    async function refreshData() {
-      try {
-        // Load budget limits
-        if (window.budgetAPI) {
-          const limits = await window.budgetAPI.getAllBudgetLimits();
-          budgetData.limit = limits.global?.limit || 50.00;
-          
-          // Load actual usage
-          const summary = await window.budgetAPI.getCostSummary('month');
-          budgetData.actuals = summary.byProvider || {};
-          
-          // Load usage history for activity
-          const usage = await window.budgetAPI.getUsageHistory({ 
-            limit: 10,
-            projectId: currentProject === 'all' ? null : currentProject
-          });
-          
-          // Load saved estimates from persistent storage
-          await loadEstimates();
-          
-          // Update UI
-          updateSummary(summary);
-          updateBudgetTable();
-          updateActivityList(usage);
+      // Refresh all data
+      async function refreshData() {
+        try {
+          // Load budget limits
+          if (window.budgetAPI) {
+            const limits = await window.budgetAPI.getAllBudgetLimits();
+            budgetData.limit = limits.global?.limit || 50.0;
+
+            // Load actual usage
+            const summary = await window.budgetAPI.getCostSummary('month');
+            budgetData.actuals = summary.byProvider || {};
+
+            // Load usage history for activity
+            const usage = await window.budgetAPI.getUsageHistory({
+              limit: 10,
+              projectId: currentProject === 'all' ? null : currentProject,
+            });
+
+            // Load saved estimates from persistent storage
+            await loadEstimates();
+
+            // Update UI
+            updateSummary(summary);
+            updateBudgetTable();
+            updateActivityList(usage);
+          }
+        } catch (error) {
+          console.error('Error refreshing data:', error);
+          showToast('Error loading data', true);
         }
-      } catch (error) {
-        console.error('Error refreshing data:', error);
-        showToast('Error loading data', true);
       }
-    }
 
-    // Load estimates from persistent storage via IPC
-    async function loadEstimates() {
-      try {
-        if (window.budgetAPI) {
-          // Use persistent storage via IPC
-          budgetData.estimates = await window.budgetAPI.getEstimates(currentProject);
-          console.log('[BudgetDashboard] Loaded estimates from persistent storage:', budgetData.estimates.length);
-        } else {
+      // Load estimates from persistent storage via IPC
+      async function loadEstimates() {
+        try {
+          if (window.budgetAPI) {
+            // Use persistent storage via IPC
+            budgetData.estimates = await window.budgetAPI.getEstimates(currentProject);
+            console.log('[BudgetDashboard] Loaded estimates from persistent storage:', budgetData.estimates.length);
+          } else {
+            budgetData.estimates = getDefaultEstimates();
+          }
+        } catch (e) {
+          console.error('[BudgetDashboard] Error loading estimates:', e);
           budgetData.estimates = getDefaultEstimates();
         }
-      } catch (e) {
-        console.error('[BudgetDashboard] Error loading estimates:', e);
-        budgetData.estimates = getDefaultEstimates();
       }
-    }
 
-    // Get default estimates
-    function getDefaultEstimates() {
-      return Object.keys(CATEGORIES).map(cat => ({
-        category: cat,
-        amount: 0,
-        description: '',
-        units: ''
-      }));
-    }
+      // Get default estimates
+      function getDefaultEstimates() {
+        return Object.keys(CATEGORIES).map((cat) => ({
+          category: cat,
+          amount: 0,
+          description: '',
+          units: '',
+        }));
+      }
 
-    // Save estimates to persistent storage via IPC
-    async function saveEstimatesToStorage() {
-      try {
-        if (window.budgetAPI) {
-          await window.budgetAPI.saveEstimates(currentProject, budgetData.estimates);
-          console.log('[BudgetDashboard] Saved estimates to persistent storage');
+      // Save estimates to persistent storage via IPC
+      async function saveEstimatesToStorage() {
+        try {
+          if (window.budgetAPI) {
+            await window.budgetAPI.saveEstimates(currentProject, budgetData.estimates);
+            console.log('[BudgetDashboard] Saved estimates to persistent storage');
+          }
+        } catch (e) {
+          console.error('[BudgetDashboard] Error saving estimates:', e);
+          showToast('Error saving estimates', true);
         }
-      } catch (e) {
-        console.error('[BudgetDashboard] Error saving estimates:', e);
-        showToast('Error saving estimates', true);
       }
-    }
 
-    // Update summary cards
-    function updateSummary(summary) {
-      // Budget limit
-      document.getElementById('budgetLimit').textContent = formatCurrency(budgetData.limit);
-      
-      // Calculate totals
-      const totalEstimated = budgetData.estimates.reduce((sum, e) => sum + (e.amount || 0), 0);
-      const totalActual = summary.total || 0;
-      const variance = totalEstimated - totalActual;
-      
-      document.getElementById('totalEstimated').textContent = formatCurrency(totalEstimated);
-      document.getElementById('estimatedDetail').textContent = `${budgetData.estimates.filter(e => e.amount > 0).length} line items`;
-      
-      document.getElementById('totalActual').textContent = formatCurrency(totalActual);
-      document.getElementById('actualDetail').textContent = `${summary.entryCount || 0} API calls`;
-      
-      // Variance
-      const varianceEl = document.getElementById('totalVariance');
-      const varianceDetailEl = document.getElementById('varianceDetail');
-      const varianceCardEl = document.getElementById('varianceCard');
-      
-      if (variance >= 0) {
-        varianceEl.textContent = formatCurrency(variance);
-        varianceEl.className = 'summary-value positive';
-        varianceDetailEl.textContent = 'Under budget';
-        varianceCardEl.className = 'summary-card';
-      } else {
-        varianceEl.textContent = formatCurrency(Math.abs(variance));
-        varianceEl.className = 'summary-value negative';
-        varianceDetailEl.textContent = 'Over budget';
-        varianceCardEl.className = 'summary-card danger';
+      // Update summary cards
+      function updateSummary(summary) {
+        // Budget limit
+        document.getElementById('budgetLimit').textContent = formatCurrency(budgetData.limit);
+
+        // Calculate totals
+        const totalEstimated = budgetData.estimates.reduce((sum, e) => sum + (e.amount || 0), 0);
+        const totalActual = summary.total || 0;
+        const variance = totalEstimated - totalActual;
+
+        document.getElementById('totalEstimated').textContent = formatCurrency(totalEstimated);
+        document.getElementById('estimatedDetail').textContent =
+          `${budgetData.estimates.filter((e) => e.amount > 0).length} line items`;
+
+        document.getElementById('totalActual').textContent = formatCurrency(totalActual);
+        document.getElementById('actualDetail').textContent = `${summary.entryCount || 0} API calls`;
+
+        // Variance
+        const varianceEl = document.getElementById('totalVariance');
+        const varianceDetailEl = document.getElementById('varianceDetail');
+        const varianceCardEl = document.getElementById('varianceCard');
+
+        if (variance >= 0) {
+          varianceEl.textContent = formatCurrency(variance);
+          varianceEl.className = 'summary-value positive';
+          varianceDetailEl.textContent = 'Under budget';
+          varianceCardEl.className = 'summary-card';
+        } else {
+          varianceEl.textContent = formatCurrency(Math.abs(variance));
+          varianceEl.className = 'summary-value negative';
+          varianceDetailEl.textContent = 'Over budget';
+          varianceCardEl.className = 'summary-card danger';
+        }
+
+        // Progress bar
+        const percentUsed = Math.min(100, (totalActual / budgetData.limit) * 100);
+        const progressEl = document.getElementById('budgetProgress');
+        progressEl.style.width = `${percentUsed}%`;
+        progressEl.className = 'progress-fill ' + (percentUsed >= 90 ? 'danger' : percentUsed >= 75 ? 'warning' : 'ok');
       }
-      
-      // Progress bar
-      const percentUsed = Math.min(100, (totalActual / budgetData.limit) * 100);
-      const progressEl = document.getElementById('budgetProgress');
-      progressEl.style.width = `${percentUsed}%`;
-      progressEl.className = 'progress-fill ' + (percentUsed >= 90 ? 'danger' : percentUsed >= 75 ? 'warning' : 'ok');
-    }
 
-    // Update budget table
-    function updateBudgetTable() {
-      const tbody = document.getElementById('budgetTableBody');
-      
-      // Map provider names to categories
-      const providerToCategory = {
-        elevenlabs: ['voice', 'sfx', 'dubbing'],
-        openai: ['transcription'],
-        anthropic: ['translation', 'description']
-      };
-      
-      // Calculate actuals per category
-      const actualsByCategory = {};
-      Object.entries(budgetData.actuals).forEach(([provider, data]) => {
-        const cats = providerToCategory[provider] || [];
-        const costPerCat = data.cost / (cats.length || 1);
-        cats.forEach(cat => {
-          actualsByCategory[cat] = (actualsByCategory[cat] || 0) + costPerCat;
+      // Update budget table
+      function updateBudgetTable() {
+        const tbody = document.getElementById('budgetTableBody');
+
+        // Map provider names to categories
+        const providerToCategory = {
+          elevenlabs: ['voice', 'sfx', 'dubbing'],
+          openai: ['transcription'],
+          anthropic: ['translation', 'description'],
+        };
+
+        // Calculate actuals per category
+        const actualsByCategory = {};
+        Object.entries(budgetData.actuals).forEach(([provider, data]) => {
+          const cats = providerToCategory[provider] || [];
+          const costPerCat = data.cost / (cats.length || 1);
+          cats.forEach((cat) => {
+            actualsByCategory[cat] = (actualsByCategory[cat] || 0) + costPerCat;
+          });
         });
-      });
-      
-      let totalEstimated = 0;
-      let totalActual = 0;
-      
-      tbody.innerHTML = budgetData.estimates.map(estimate => {
-        const cat = CATEGORIES[estimate.category];
-        const actual = actualsByCategory[estimate.category] || 0;
-        const variance = (estimate.amount || 0) - actual;
-        
-        totalEstimated += estimate.amount || 0;
-        totalActual += actual;
-        
-        const varianceClass = variance > 0 ? 'under' : variance < 0 ? 'over' : 'on-budget';
-        const varianceText = variance > 0 ? `${formatCurrency(variance)} under` : 
-                           variance < 0 ? `${formatCurrency(Math.abs(variance))} over` : 'On budget';
-        
-        return `
+
+        let totalEstimated = 0;
+        let totalActual = 0;
+
+        tbody.innerHTML = budgetData.estimates
+          .map((estimate) => {
+            const cat = CATEGORIES[estimate.category];
+            const actual = actualsByCategory[estimate.category] || 0;
+            const variance = (estimate.amount || 0) - actual;
+
+            totalEstimated += estimate.amount || 0;
+            totalActual += actual;
+
+            const varianceClass = variance > 0 ? 'under' : variance < 0 ? 'over' : 'on-budget';
+            const varianceText =
+              variance > 0
+                ? `${formatCurrency(variance)} under`
+                : variance < 0
+                  ? `${formatCurrency(Math.abs(variance))} over`
+                  : 'On budget';
+
+            return `
           <tr onclick="editEstimate('${estimate.category}')" style="cursor: pointer;">
             <td>
               <div class="line-item-name">
@@ -927,37 +975,39 @@
             </td>
           </tr>
         `;
-      }).join('');
-      
-      // Update footer
-      const totalVariance = totalEstimated - totalActual;
-      document.getElementById('footerEstimated').textContent = formatCurrency(totalEstimated);
-      document.getElementById('footerActual').textContent = formatCurrency(totalActual);
-      document.getElementById('footerVariance').innerHTML = totalVariance >= 0 
-        ? `<span class="variance under">${formatCurrency(totalVariance)} under</span>`
-        : `<span class="variance over">${formatCurrency(Math.abs(totalVariance))} over</span>`;
-    }
+          })
+          .join('');
 
-    // Get status badge
-    function getStatusBadge(estimated, actual) {
-      if (estimated === 0 && actual === 0) {
-        return '<span style="color: #8b949e; font-size: 12px;">No activity</span>';
+        // Update footer
+        const totalVariance = totalEstimated - totalActual;
+        document.getElementById('footerEstimated').textContent = formatCurrency(totalEstimated);
+        document.getElementById('footerActual').textContent = formatCurrency(totalActual);
+        document.getElementById('footerVariance').innerHTML =
+          totalVariance >= 0
+            ? `<span class="variance under">${formatCurrency(totalVariance)} under</span>`
+            : `<span class="variance over">${formatCurrency(Math.abs(totalVariance))} over</span>`;
       }
-      if (actual === 0) {
-        return '<span style="color: #58a6ff; font-size: 12px;">Planned</span>';
-      }
-      if (actual <= estimated) {
-        return '<span style="color: #3fb950; font-size: 12px;">On track</span>';
-      }
-      return '<span style="color: #f85149; font-size: 12px;">Over estimate</span>';
-    }
 
-    // Update activity list
-    function updateActivityList(usage) {
-      const list = document.getElementById('activityList');
-      
-      if (!usage || usage.length === 0) {
-        list.innerHTML = `
+      // Get status badge
+      function getStatusBadge(estimated, actual) {
+        if (estimated === 0 && actual === 0) {
+          return '<span style="color: #8b949e; font-size: 12px;">No activity</span>';
+        }
+        if (actual === 0) {
+          return '<span style="color: #58a6ff; font-size: 12px;">Planned</span>';
+        }
+        if (actual <= estimated) {
+          return '<span style="color: #3fb950; font-size: 12px;">On track</span>';
+        }
+        return '<span style="color: #f85149; font-size: 12px;">Over estimate</span>';
+      }
+
+      // Update activity list
+      function updateActivityList(usage) {
+        const list = document.getElementById('activityList');
+
+        if (!usage || usage.length === 0) {
+          list.innerHTML = `
           <div class="empty-state">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"/>
@@ -966,16 +1016,18 @@
             <p>No recent activity</p>
           </div>
         `;
-        return;
-      }
-      
-      document.getElementById('activityCount').textContent = `Last ${usage.length} transactions`;
-      
-      list.innerHTML = usage.map(entry => {
-        const date = new Date(entry.timestamp);
-        const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        
-        return `
+          return;
+        }
+
+        document.getElementById('activityCount').textContent = `Last ${usage.length} transactions`;
+
+        list.innerHTML = usage
+          .map((entry) => {
+            const date = new Date(entry.timestamp);
+            const dateStr =
+              date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            return `
           <div class="history-item">
             <div class="history-info">
               <span class="history-date">${dateStr}</span>
@@ -984,99 +1036,97 @@
             <span class="history-cost">${formatCurrency(entry.cost)}</span>
           </div>
         `;
-      }).join('');
-    }
+          })
+          .join('');
+      }
 
-    // Open estimate modal
-    function openEstimateModal(category = null) {
-      if (category) {
-        const estimate = budgetData.estimates.find(e => e.category === category);
-        if (estimate) {
-          document.getElementById('estimateCategory').value = category;
-          document.getElementById('estimateDescription').value = estimate.description || '';
-          document.getElementById('estimateAmount').value = estimate.amount || '';
-          document.getElementById('estimateUnits').value = estimate.units || '';
+      // Open estimate modal
+      function openEstimateModal(category = null) {
+        if (category) {
+          const estimate = budgetData.estimates.find((e) => e.category === category);
+          if (estimate) {
+            document.getElementById('estimateCategory').value = category;
+            document.getElementById('estimateDescription').value = estimate.description || '';
+            document.getElementById('estimateAmount').value = estimate.amount || '';
+            document.getElementById('estimateUnits').value = estimate.units || '';
+          }
+        } else {
+          document.getElementById('estimateCategory').value = 'voice';
+          document.getElementById('estimateDescription').value = '';
+          document.getElementById('estimateAmount').value = '';
+          document.getElementById('estimateUnits').value = '';
         }
-      } else {
-        document.getElementById('estimateCategory').value = 'voice';
-        document.getElementById('estimateDescription').value = '';
-        document.getElementById('estimateAmount').value = '';
-        document.getElementById('estimateUnits').value = '';
+
+        document.getElementById('estimateModal').classList.add('visible');
       }
-      
-      document.getElementById('estimateModal').classList.add('visible');
-    }
 
-    // Edit estimate
-    function editEstimate(category) {
-      openEstimateModal(category);
-    }
-
-    // Close estimate modal
-    function closeEstimateModal() {
-      document.getElementById('estimateModal').classList.remove('visible');
-    }
-
-    // Save estimate
-    async function saveEstimate() {
-      const category = document.getElementById('estimateCategory').value;
-      const description = document.getElementById('estimateDescription').value;
-      const amount = parseFloat(document.getElementById('estimateAmount').value) || 0;
-      const units = document.getElementById('estimateUnits').value;
-      
-      const existingIndex = budgetData.estimates.findIndex(e => e.category === category);
-      if (existingIndex >= 0) {
-        budgetData.estimates[existingIndex] = { category, description, amount, units };
-      } else {
-        budgetData.estimates.push({ category, description, amount, units });
+      // Edit estimate
+      function editEstimate(category) {
+        openEstimateModal(category);
       }
-      
-      await saveEstimatesToStorage();
-      closeEstimateModal();
-      updateBudgetTable();
-      await refreshData();
-      showToast('Estimate saved');
-    }
 
-    // Export budget
-    function exportBudget() {
-      const data = {
-        project: currentProject,
-        limit: budgetData.limit,
-        estimates: budgetData.estimates,
-        actuals: budgetData.actuals,
-        exportedAt: new Date().toISOString()
-      };
-      
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `budget-${currentProject}-${new Date().toISOString().split('T')[0]}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast('Budget exported');
-    }
+      // Close estimate modal
+      function closeEstimateModal() {
+        document.getElementById('estimateModal').classList.remove('visible');
+      }
 
-    // Format currency
-    function formatCurrency(amount) {
-      return '$' + (amount || 0).toFixed(2);
-    }
+      // Save estimate
+      async function saveEstimate() {
+        const category = document.getElementById('estimateCategory').value;
+        const description = document.getElementById('estimateDescription').value;
+        const amount = parseFloat(document.getElementById('estimateAmount').value) || 0;
+        const units = document.getElementById('estimateUnits').value;
 
-    // Show toast
-    function showToast(message, isError = false) {
-      const toast = document.getElementById('toast');
-      toast.textContent = message;
-      toast.className = 'toast' + (isError ? ' error' : '');
-      toast.classList.add('show');
-      
-      setTimeout(() => {
-        toast.classList.remove('show');
-      }, 3000);
-    }
-  </script>
-</body>
+        const existingIndex = budgetData.estimates.findIndex((e) => e.category === category);
+        if (existingIndex >= 0) {
+          budgetData.estimates[existingIndex] = { category, description, amount, units };
+        } else {
+          budgetData.estimates.push({ category, description, amount, units });
+        }
+
+        await saveEstimatesToStorage();
+        closeEstimateModal();
+        updateBudgetTable();
+        await refreshData();
+        showToast('Estimate saved');
+      }
+
+      // Export budget
+      function exportBudget() {
+        const data = {
+          project: currentProject,
+          limit: budgetData.limit,
+          estimates: budgetData.estimates,
+          actuals: budgetData.actuals,
+          exportedAt: new Date().toISOString(),
+        };
+
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `budget-${currentProject}-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Budget exported');
+      }
+
+      // Format currency
+      function formatCurrency(amount) {
+        return '$' + (amount || 0).toFixed(2);
+      }
+
+      // Show toast
+      function showToast(message, isError = false) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.className = 'toast' + (isError ? ' error' : '');
+        toast.classList.add('show');
+
+        setTimeout(() => {
+          toast.classList.remove('show');
+        }, 3000);
+      }
+    </script>
+  </body>
 </html>
-
-
-

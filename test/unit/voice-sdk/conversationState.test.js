@@ -9,7 +9,7 @@ const conversationState = {
   pendingQuestion: null,
   pendingConfirmation: null,
   recentContext: [],
-  
+
   setPendingQuestion(options, resolve, timeoutMs = 15000) {
     this.clearPendingQuestion();
     const timeoutId = setTimeout(() => {
@@ -18,7 +18,7 @@ const conversationState = {
     }, timeoutMs);
     this.pendingQuestion = { ...options, resolve, timeoutId, createdAt: Date.now() };
   },
-  
+
   resolvePendingQuestion(answer) {
     if (!this.pendingQuestion) return null;
     const { resolve, timeoutId, agentId, taskId, field } = this.pendingQuestion;
@@ -27,14 +27,14 @@ const conversationState = {
     resolve({ answer, agentId, taskId, field });
     return { agentId, taskId, field };
   },
-  
+
   clearPendingQuestion() {
     if (this.pendingQuestion?.timeoutId) {
       clearTimeout(this.pendingQuestion.timeoutId);
     }
     this.pendingQuestion = null;
   },
-  
+
   setPendingConfirmation(action, resolve, dangerous = false, timeoutMs = 10000) {
     this.clearPendingConfirmation();
     const timeoutId = setTimeout(() => {
@@ -43,24 +43,24 @@ const conversationState = {
     }, timeoutMs);
     this.pendingConfirmation = { action, dangerous, resolve, timeoutId, createdAt: Date.now() };
   },
-  
+
   clearPendingConfirmation() {
     if (this.pendingConfirmation?.timeoutId) {
       clearTimeout(this.pendingConfirmation.timeoutId);
     }
     this.pendingConfirmation = null;
   },
-  
+
   addContext(item) {
     this.recentContext.unshift({ ...item, timestamp: item.timestamp || Date.now() });
     if (this.recentContext.length > 3) this.recentContext.pop();
   },
-  
+
   clear() {
     this.clearPendingQuestion();
     this.clearPendingConfirmation();
   },
-  
+
   getRoutingContext() {
     return {
       hasPendingQuestion: !!this.pendingQuestion,
@@ -68,7 +68,7 @@ const conversationState = {
       pendingAgentId: this.pendingQuestion?.agentId,
       lastSubject: this.recentContext[0]?.subject,
     };
-  }
+  },
 };
 
 describe('conversationState', () => {
@@ -85,7 +85,7 @@ describe('conversationState', () => {
         { prompt: 'What city?', field: 'location', agentId: 'weather-agent', taskId: 't1' },
         resolve
       );
-      
+
       expect(conversationState.pendingQuestion).not.toBeNull();
       expect(conversationState.pendingQuestion.prompt).toBe('What city?');
       expect(conversationState.pendingQuestion.agentId).toBe('weather-agent');
@@ -97,15 +97,15 @@ describe('conversationState', () => {
         { prompt: 'What city?', field: 'location', agentId: 'weather-agent', taskId: 't1' },
         resolve
       );
-      
+
       const routing = conversationState.resolvePendingQuestion('San Francisco');
-      
+
       expect(routing).toEqual({ agentId: 'weather-agent', taskId: 't1', field: 'location' });
       expect(resolve).toHaveBeenCalledWith({
         answer: 'San Francisco',
         agentId: 'weather-agent',
         taskId: 't1',
-        field: 'location'
+        field: 'location',
       });
       expect(conversationState.pendingQuestion).toBeNull();
     });
@@ -122,9 +122,11 @@ describe('conversationState', () => {
         resolve,
         50 // 50ms timeout
       );
-      
-      await new Promise(r => setTimeout(r, 100));
-      
+
+      await new Promise((r) => {
+        setTimeout(r, 100);
+      });
+
       expect(resolve).toHaveBeenCalledWith({ timedOut: true });
       expect(conversationState.pendingQuestion).toBeNull();
     });
@@ -136,9 +138,9 @@ describe('conversationState', () => {
         resolve,
         5000
       );
-      
+
       conversationState.resolvePendingQuestion('SF');
-      
+
       // Should have cleared the timeout (won't call resolve again)
       expect(resolve).toHaveBeenCalledTimes(1);
     });
@@ -148,7 +150,7 @@ describe('conversationState', () => {
     it('should set a pending confirmation', () => {
       const resolve = vi.fn();
       conversationState.setPendingConfirmation('delete file', resolve, true);
-      
+
       expect(conversationState.pendingConfirmation).not.toBeNull();
       expect(conversationState.pendingConfirmation.action).toBe('delete file');
       expect(conversationState.pendingConfirmation.dangerous).toBe(true);
@@ -158,7 +160,7 @@ describe('conversationState', () => {
   describe('recentContext', () => {
     it('should add context items', () => {
       conversationState.addContext({ subject: 'jazz', response: 'Playing jazz' });
-      
+
       expect(conversationState.recentContext).toHaveLength(1);
       expect(conversationState.recentContext[0].subject).toBe('jazz');
     });
@@ -168,7 +170,7 @@ describe('conversationState', () => {
       conversationState.addContext({ subject: 'b' });
       conversationState.addContext({ subject: 'c' });
       conversationState.addContext({ subject: 'd' });
-      
+
       expect(conversationState.recentContext).toHaveLength(3);
       expect(conversationState.recentContext[0].subject).toBe('d'); // Most recent
       expect(conversationState.recentContext[2].subject).toBe('b'); // Oldest kept
@@ -178,13 +180,10 @@ describe('conversationState', () => {
   describe('getRoutingContext', () => {
     it('should return correct routing context', () => {
       conversationState.addContext({ subject: 'test' });
-      conversationState.setPendingQuestion(
-        { agentId: 'agent1' },
-        vi.fn()
-      );
-      
+      conversationState.setPendingQuestion({ agentId: 'agent1' }, vi.fn());
+
       const ctx = conversationState.getRoutingContext();
-      
+
       expect(ctx.hasPendingQuestion).toBe(true);
       expect(ctx.hasPendingConfirmation).toBe(false);
       expect(ctx.pendingAgentId).toBe('agent1');

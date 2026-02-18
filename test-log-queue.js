@@ -10,17 +10,19 @@ console.log('=== Test 1: LogEventQueue in-process ===\n');
 
 // Mock electron app for event-logger (it requires app.getPath)
 const mockApp = { getPath: () => '/tmp', isReady: () => true, getVersion: () => '0.0.0-test' };
-try { require('electron'); } catch (e) {
+try {
+  require('electron');
+} catch (_e) {
   // Provide a minimal mock so the queue can load (file writer will gracefully fail)
   require.cache[require.resolve('electron')] = {
     id: 'electron',
     filename: 'electron',
     loaded: true,
-    exports: { app: mockApp }
+    exports: { app: mockApp },
   };
 }
 
-const { LogEventQueue, getLogQueue, LOG_LEVELS, CATEGORIES } = require('./lib/log-event-queue');
+const { _LogEventQueue, getLogQueue, _LOG_LEVELS, _CATEGORIES } = require('./lib/log-event-queue');
 
 // Test singleton
 const q1 = getLogQueue();
@@ -49,7 +51,9 @@ console.log('Query search test:', searched.length === 1 ? 'PASS' : 'FAIL');
 
 // Test subscribe
 let receivedEvent = null;
-const unsub = q1.subscribe({ level: 'error' }, (e) => { receivedEvent = e; });
+const unsub = q1.subscribe({ level: 'error' }, (e) => {
+  receivedEvent = e;
+});
 q1.error('test', 'Subscribed error');
 console.log('Subscribe test:', receivedEvent && receivedEvent.message === 'Subscribed error' ? 'PASS' : 'FAIL');
 
@@ -67,7 +71,7 @@ console.log('  Stats:', JSON.stringify(stats, null, 2));
 // --- Test 2: LogServer REST API ---
 console.log('\n=== Test 2: LogServer REST API ===\n');
 
-const { LogServer, getLogServer } = require('./lib/log-server');
+const { _LogServer, getLogServer } = require('./lib/log-server');
 
 const server = getLogServer(q1);
 
@@ -79,37 +83,43 @@ async function testREST() {
     // Helper for HTTP requests
     function httpGet(path) {
       return new Promise((resolve, reject) => {
-        http.get(`http://127.0.0.1:47292${path}`, (res) => {
-          let data = '';
-          res.on('data', (chunk) => data += chunk);
-          res.on('end', () => {
-            try {
-              resolve({ status: res.statusCode, body: JSON.parse(data) });
-            } catch (e) {
-              resolve({ status: res.statusCode, body: data });
-            }
-          });
-        }).on('error', reject);
+        http
+          .get(`http://127.0.0.1:47292${path}`, (res) => {
+            let data = '';
+            res.on('data', (chunk) => (data += chunk));
+            res.on('end', () => {
+              try {
+                resolve({ status: res.statusCode, body: JSON.parse(data) });
+              } catch (_e) {
+                resolve({ status: res.statusCode, body: data });
+              }
+            });
+          })
+          .on('error', reject);
       });
     }
 
     function httpPost(path, body) {
       return new Promise((resolve, reject) => {
         const data = JSON.stringify(body);
-        const req = http.request(`http://127.0.0.1:47292${path}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
-        }, (res) => {
-          let resData = '';
-          res.on('data', (chunk) => resData += chunk);
-          res.on('end', () => {
-            try {
-              resolve({ status: res.statusCode, body: JSON.parse(resData) });
-            } catch (e) {
-              resolve({ status: res.statusCode, body: resData });
-            }
-          });
-        });
+        const req = http.request(
+          `http://127.0.0.1:47292${path}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+          },
+          (res) => {
+            let resData = '';
+            res.on('data', (chunk) => (resData += chunk));
+            res.on('end', () => {
+              try {
+                resolve({ status: res.statusCode, body: JSON.parse(resData) });
+              } catch (_e) {
+                resolve({ status: res.statusCode, body: resData });
+              }
+            });
+          }
+        );
         req.on('error', reject);
         req.write(data);
         req.end();
@@ -127,7 +137,10 @@ async function testREST() {
 
     // GET /logs?level=error
     const errorLogs = await httpGet('/logs?level=error');
-    console.log('GET /logs?level=error test:', errorLogs.status === 200 && errorLogs.body.data.every(e => e.level === 'error') ? 'PASS' : 'FAIL');
+    console.log(
+      'GET /logs?level=error test:',
+      errorLogs.status === 200 && errorLogs.body.data.every((e) => e.level === 'error') ? 'PASS' : 'FAIL'
+    );
 
     // GET /logs/stats
     const statsRes = await httpGet('/logs/stats');
@@ -138,7 +151,7 @@ async function testREST() {
       level: 'info',
       category: 'external',
       message: 'Posted from test',
-      data: { source: 'test-script' }
+      data: { source: 'test-script' },
     });
     console.log('POST /logs test:', posted.status === 201 && posted.body.success ? 'PASS' : 'FAIL');
 
@@ -162,7 +175,6 @@ async function testREST() {
 
     server.stop();
     process.exit(0);
-
   } catch (error) {
     console.error('Test error:', error);
     server.stop();

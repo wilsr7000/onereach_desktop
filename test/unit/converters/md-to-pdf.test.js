@@ -59,9 +59,7 @@ describe('MdToPdfAgent (specific)', () => {
     const result = await agent.convert('# Test\n\nParagraph here.');
     expect(result.report).toBeDefined();
     if (result.success && result.output) {
-      const output = Buffer.isBuffer(result.output)
-        ? result.output.toString()
-        : String(result.output);
+      const output = Buffer.isBuffer(result.output) ? result.output.toString() : String(result.output);
       expect(output).toContain('%PDF');
     }
   });

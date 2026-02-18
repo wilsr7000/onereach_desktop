@@ -1,9 +1,9 @@
 /**
  * TranscriptionService - Unified transcription using ElevenLabs Scribe
- * 
+ *
  * This is the SINGLE source of truth for all transcription in the app.
  * Replaces: OpenAI Whisper, AssemblyAI, and other transcription services.
- * 
+ *
  * Features:
  * - High-quality speech-to-text transcription
  * - Word-level timestamps
@@ -11,7 +11,7 @@
  * - Language detection and multi-language support
  * - Multi-channel audio support
  * - LLM-powered speaker name identification
- * 
+ *
  * @module src/transcription/TranscriptionService
  */
 
@@ -20,7 +20,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const ai = require('../../lib/ai-service');
 const { getSettingsManager } = require('../../settings-manager.js');
-const { getBudgetManager } = require('../../budget-manager.js');
+
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 
@@ -35,7 +35,7 @@ export class TranscriptionService {
 
   /**
    * Transcribe audio/video file with speaker diarization
-   * 
+   *
    * @param {string} audioPath - Path to audio or video file
    * @param {Object} options - Transcription options
    * @param {string} [options.language] - ISO language code (e.g., 'en', 'es', 'fr'). Auto-detects if not specified.
@@ -44,7 +44,7 @@ export class TranscriptionService {
    * @param {boolean} [options.multiChannel=false] - Separate transcripts per audio channel
    * @param {string} [options.projectId] - Project ID for budget tracking
    * @returns {Promise<TranscriptionResult>} Transcription result
-   * 
+   *
    * @example
    * const service = new TranscriptionService();
    * const result = await service.transcribe('/path/to/audio.mp3', {
@@ -56,63 +56,70 @@ export class TranscriptionService {
    * console.log(result.speakers);       // List of identified speakers
    */
   async transcribe(audioPath, options = {}) {
-    const {
-      language = null,
-      diarize = true,
-      numSpeakers = null,
-      multiChannel = false,
-      projectId = null
-    } = options;
+    const { language = null, diarize = true, numSpeakers = null, multiChannel = false, projectId = null } = options;
 
-    log.info('voice', 'TranscriptionService starting transcription', { audioPath, language, diarize, numSpeakers, multiChannel });
+    log.info('voice', 'TranscriptionService starting transcription', {
+      audioPath,
+      language,
+      diarize,
+      numSpeakers,
+      multiChannel,
+    });
 
     try {
-      const result = await this.elevenLabs.transcribeAudio(audioPath, {
-        languageCode: language,
-        diarize,
-        numSpeakers,
-        multiChannel
-      }, {
-        projectId,
-        operation: 'transcribe'
-      });
+      const result = await this.elevenLabs.transcribeAudio(
+        audioPath,
+        {
+          languageCode: language,
+          diarize,
+          numSpeakers,
+          multiChannel,
+        },
+        {
+          projectId,
+          operation: 'transcribe',
+        }
+      );
 
       // Transform to standard format
       const transcriptionResult = {
         success: true,
         // Full text
         text: result.text || result.transcription,
-        
+
         // Language info
         language: result.language,
         languageProbability: result.languageProbability,
-        
+
         // Word-level timestamps with speaker IDs
-        words: (result.words || []).map(w => ({
+        words: (result.words || []).map((w) => ({
           text: w.text,
           start: w.start,
           end: w.end,
           speaker: w.speaker_id || w.speakerId || null,
           confidence: w.logprob ? Math.exp(w.logprob) : null,
-          type: w.type || 'word'
+          type: w.type || 'word',
         })),
-        
+
         // Segments (grouped by speaker or punctuation)
         segments: result.segments || [],
-        
+
         // Speaker information
         speakers: result.speakers || [],
-        speakerCount: result.speakerCount || (result.speakers?.length || 0),
-        
+        speakerCount: result.speakerCount || result.speakers?.length || 0,
+
         // Source tracking
         source: 'elevenlabs-scribe',
-        
+
         // Timing info
         duration: this._calculateDuration(result.words),
-        wordCount: (result.words || []).length
+        wordCount: (result.words || []).length,
       };
 
-      log.info('voice', 'TranscriptionService completed', { wordCount: transcriptionResult.wordCount, speakerCount: transcriptionResult.speakerCount });
+      log.info('voice', 'TranscriptionService completed', {
+        wordCount: transcriptionResult.wordCount,
+        speakerCount: transcriptionResult.speakerCount,
+      });
 
       return transcriptionResult;
     } catch (error) {
@@ -120,7 +127,7 @@ export class TranscriptionService {
       return {
         success: false,
         error: error.message,
-        source: 'elevenlabs-scribe'
+        source: 'elevenlabs-scribe',
       };
     }
   }
@@ -128,7 +135,7 @@ export class TranscriptionService {
   /**
    * Transcribe a specific time range from a video/audio file
    * Extracts audio segment first, then transcribes
-   * 
+   *
    * @param {string} inputPath - Path to video/audio file
    * @param {Object} options - Options
    * @param {number} options.startTime - Start time in seconds
@@ -145,11 +152,11 @@ export class TranscriptionService {
     // For range transcription, we need to extract audio first
     // This requires ffmpeg - delegate to video editor for audio extraction
     // For now, pass through to main transcription with a note about range
-    
+
     const result = await this.transcribe(inputPath, {
       language,
       diarize,
-      projectId
+      projectId,
     });
 
     if (!result.success) {
@@ -157,43 +164,43 @@ export class TranscriptionService {
     }
 
     // Filter words to the specified range and adjust timestamps
-    const filteredWords = result.words.filter(w => 
-      w.start >= startTime && (endTime === undefined || w.end <= endTime)
+    const filteredWords = result.words.filter(
+      (w) => w.start >= startTime && (endTime === undefined || w.end <= endTime)
     );
 
     // Adjust timestamps to be relative to startTime
-    const adjustedWords = filteredWords.map(w => ({
+    const adjustedWords = filteredWords.map((w) => ({
       ...w,
       start: w.start - startTime,
-      end: w.end - startTime
+      end: w.end - startTime,
     }));
 
     return {
       ...result,
       words: adjustedWords,
-      text: adjustedWords.map(w => w.text).join(' '),
+      text: adjustedWords.map((w) => w.text).join(' '),
       startTime,
       endTime,
-      duration: endTime - startTime
+      duration: endTime - startTime,
     };
   }
 
   /**
    * Identify speaker names from transcription using LLM analysis
-   * 
+   *
    * Analyzes the transcript to identify who each speaker might be based on:
    * - Greetings and introductions ("Hi, I'm John")
    * - Name mentions ("Thanks Sarah", "John said...")
    * - Role indicators (interviewer vs interviewee patterns)
    * - Conversational context
-   * 
+   *
    * @param {TranscriptionResult} transcriptionResult - Result from transcribe()
    * @param {Object} options - Options
    * @param {string} [options.context] - Additional context about the recording (e.g., "podcast interview", "team meeting")
    * @param {Array<string>} [options.expectedNames] - List of expected participant names to help identification
    * @param {string} [options.projectId] - Project ID for budget tracking
    * @returns {Promise<SpeakerIdentificationResult>} Speaker identification result
-   * 
+   *
    * @example
    * const transcription = await service.transcribe('/path/to/meeting.mp3');
    * const identified = await service.identifySpeakers(transcription, {
@@ -203,17 +210,13 @@ export class TranscriptionService {
    * console.log(identified.speakerMap); // { speaker_0: 'Alice', speaker_1: 'Bob' }
    */
   async identifySpeakers(transcriptionResult, options = {}) {
-    const {
-      context = null,
-      expectedNames = [],
-      projectId = null
-    } = options;
+    const { context = null, expectedNames = [], projectId = null } = options;
 
     if (!transcriptionResult || !transcriptionResult.success) {
       return {
         success: false,
         error: 'Invalid transcription result provided',
-        speakerMap: {}
+        speakerMap: {},
       };
     }
 
@@ -225,7 +228,7 @@ export class TranscriptionService {
         success: true,
         speakerMap: {},
         confidence: 1,
-        message: 'No distinct speakers detected in transcription'
+        message: 'No distinct speakers detected in transcription',
       };
     }
 
@@ -242,7 +245,7 @@ export class TranscriptionService {
       return {
         success: false,
         error: 'OpenAI API key not configured. Please set it in Settings.',
-        speakerMap: {}
+        speakerMap: {},
       };
     }
 
@@ -252,11 +255,12 @@ export class TranscriptionService {
     const formattedTranscript = this._formatTranscriptForSpeakerIdentification(transcriptionResult);
 
     try {
-      const result = await this._callOpenAIForSpeakerIdentification(
-        formattedTranscript,
-        speakers,
-        { context, expectedNames, apiKey, projectId }
-      );
+      const result = await this._callOpenAIForSpeakerIdentification(formattedTranscript, speakers, {
+        context,
+        expectedNames,
+        apiKey,
+        projectId,
+      });
 
       // Apply speaker names to the transcription result if requested
       if (result.success && result.speakerMap) {
@@ -264,13 +268,12 @@ export class TranscriptionService {
       }
 
       return result;
-
     } catch (error) {
       log.error('voice', 'TranscriptionService speaker identification error', { error: error.message });
       return {
         success: false,
         error: error.message,
-        speakerMap: {}
+        speakerMap: {},
       };
     }
   }
@@ -278,7 +281,7 @@ export class TranscriptionService {
   /**
    * Transcribe and identify speakers in one call
    * Convenience method that combines transcription with speaker identification
-   * 
+   *
    * @param {string} audioPath - Path to audio file
    * @param {Object} options - Combined options for transcription and speaker identification
    * @returns {Promise<TranscriptionResult>} Transcription with identified speaker names
@@ -293,7 +296,7 @@ export class TranscriptionService {
       // Speaker identification options
       context = null,
       expectedNames = [],
-      projectId = null
+      projectId = null,
     } = options;
 
     // First, transcribe the audio
@@ -302,7 +305,7 @@ export class TranscriptionService {
       diarize,
       numSpeakers,
       multiChannel,
-      projectId
+      projectId,
     });
 
     if (!transcription.success) {
@@ -314,7 +317,7 @@ export class TranscriptionService {
       const identification = await this.identifySpeakers(transcription, {
         context,
         expectedNames,
-        projectId
+        projectId,
       });
 
       if (identification.success && Object.keys(identification.speakerMap).length > 0) {
@@ -324,9 +327,9 @@ export class TranscriptionService {
         transcription.speakerRoles = identification.roles || {};
 
         // Update words with speaker names
-        transcription.words = transcription.words.map(w => ({
+        transcription.words = transcription.words.map((w) => ({
           ...w,
-          speakerName: w.speaker ? identification.speakerMap[w.speaker] || w.speaker : null
+          speakerName: w.speaker ? identification.speakerMap[w.speaker] || w.speaker : null,
         }));
 
         // Create enriched text with speaker names
@@ -351,12 +354,12 @@ export class TranscriptionService {
 
     for (const word of words) {
       const speaker = word.speaker || 'unknown';
-      
+
       if (speaker !== currentSegment.speaker) {
         if (currentSegment.text.length > 0) {
           segments.push({
             speaker: currentSegment.speaker,
-            text: currentSegment.text.join(' ')
+            text: currentSegment.text.join(' '),
           });
         }
         currentSegment = { speaker, text: [word.text] };
@@ -369,14 +372,12 @@ export class TranscriptionService {
     if (currentSegment.text.length > 0) {
       segments.push({
         speaker: currentSegment.speaker,
-        text: currentSegment.text.join(' ')
+        text: currentSegment.text.join(' '),
       });
     }
 
     // Format as dialogue
-    return segments
-      .map(s => `[${s.speaker}]: ${s.text}`)
-      .join('\n\n');
+    return segments.map((s) => `[${s.speaker}]: ${s.text}`).join('\n\n');
   }
 
   /**
@@ -384,12 +385,11 @@ export class TranscriptionService {
    * @private
    */
   async _callOpenAIForSpeakerIdentification(formattedTranscript, speakers, options) {
-    const { context, expectedNames, apiKey, projectId, videoTitle } = options;
-    const https = require('https');
+    const { context, expectedNames, videoTitle } = options;
 
     // Step 1: First pass - analyze transcript and determine if web search would help
     log.info('voice', 'TranscriptionService step 1: analyzing transcript for speaker clues');
-    
+
     const analysisPrompt = `You are an expert at analyzing conversations to identify speakers.
 
 Analyze this transcribed conversation and extract any clues that could help identify the speakers.
@@ -428,15 +428,15 @@ Analyze and respond with JSON:
     let webSearchResults = [];
     if (analysisResult.needsWebSearch && analysisResult.suggestedSearchQueries?.length > 0) {
       log.info('voice', 'TranscriptionService step 2: performing web searches');
-      
+
       // Combine context for smarter searches
       const searchQueries = analysisResult.suggestedSearchQueries.slice(0, 3); // Limit to 3 searches
-      
+
       // Add video title based search if available
-      if (videoTitle && !searchQueries.some(q => q.includes(videoTitle))) {
+      if (videoTitle && !searchQueries.some((q) => q.includes(videoTitle))) {
         searchQueries.unshift(`${videoTitle} interview speakers`);
       }
-      
+
       for (const query of searchQueries) {
         try {
           log.info('voice', 'TranscriptionService web search', { query });
@@ -444,7 +444,7 @@ Analyze and respond with JSON:
           if (searchResult) {
             webSearchResults.push({
               query,
-              results: searchResult
+              results: searchResult,
             });
           }
         } catch (searchError) {
@@ -456,7 +456,7 @@ Analyze and respond with JSON:
 
     // Step 3: Final identification with all gathered information
     log.info('voice', 'TranscriptionService step 3: final speaker identification');
-    
+
     let finalPrompt = `You are an expert at identifying speakers in conversations.
 
 Based on the following information, identify who each speaker is.
@@ -524,7 +524,7 @@ Be confident in your identification if the evidence is strong. Use full names wh
       webSearchUsed: webSearchResults.length > 0,
       sourcesUsed: finalResult.sourcesUsed || [],
       _model: 'gpt-4o',
-      _provider: 'openai'
+      _provider: 'openai',
     };
   }
 
@@ -532,16 +532,16 @@ Be confident in your identification if the evidence is strong. Use full names wh
    * Make a request to OpenAI API
    * @private
    */
-  async _makeOpenAIRequest(apiKey, prompt, model = 'gpt-4o-mini') {
+  async _makeOpenAIRequest(apiKey, prompt, _model = 'gpt-4o-mini') {
     try {
       const result = await ai.json(prompt, {
         profile: 'fast',
         system: 'You are an expert analyst. Always respond with valid JSON only, no markdown formatting or extra text.',
         maxTokens: 2000,
         temperature: 0.3,
-        feature: 'transcription'
+        feature: 'transcription',
       });
-      
+
       return result;
     } catch (error) {
       throw new Error('Failed to parse API response: ' + error.message);
@@ -554,52 +554,51 @@ Be confident in your identification if the evidence is strong. Use full names wh
    */
   async _performWebSearch(query) {
     const https = require('https');
-    
-    return new Promise((resolve, reject) => {
+
+    return new Promise((resolve, _reject) => {
       // Use DuckDuckGo instant answer API (free, no API key needed)
       const encodedQuery = encodeURIComponent(query);
       const url = `https://api.duckduckgo.com/?q=${encodedQuery}&format=json&no_html=1&skip_disambig=1`;
-      
+
       log.info('voice', 'TranscriptionService DuckDuckGo search', { query });
-      
+
       const req = https.get(url, (res) => {
         let data = '';
-        
+
         res.on('data', (chunk) => {
           data += chunk;
         });
-        
+
         res.on('end', () => {
           try {
             const result = JSON.parse(data);
-            
+
             // Extract useful information from DuckDuckGo response
             let searchSummary = '';
-            
+
             if (result.Abstract) {
               searchSummary += `Abstract: ${result.Abstract}\n`;
             }
-            
+
             if (result.RelatedTopics && result.RelatedTopics.length > 0) {
-              const topics = result.RelatedTopics
-                .filter(t => t.Text)
+              const topics = result.RelatedTopics.filter((t) => t.Text)
                 .slice(0, 5)
-                .map(t => t.Text);
+                .map((t) => t.Text);
               if (topics.length > 0) {
                 searchSummary += `Related: ${topics.join(' | ')}\n`;
               }
             }
-            
+
             if (result.Infobox?.content) {
               const infoboxData = result.Infobox.content
-                .filter(item => item.label && item.value)
+                .filter((item) => item.label && item.value)
                 .slice(0, 5)
-                .map(item => `${item.label}: ${item.value}`);
+                .map((item) => `${item.label}: ${item.value}`);
               if (infoboxData.length > 0) {
                 searchSummary += `Info: ${infoboxData.join(', ')}\n`;
               }
             }
-            
+
             // If DuckDuckGo didn't return much, try a fallback search
             if (!searchSummary || searchSummary.length < 50) {
               // Return a note that we should try Google search or other method
@@ -608,7 +607,7 @@ Be confident in your identification if the evidence is strong. Use full names wh
                 searchSummary += `Source: ${result.AbstractSource}. `;
               }
             }
-            
+
             resolve(searchSummary || null);
           } catch (error) {
             log.warn('voice', 'TranscriptionService search parse error', { error: error.message });
@@ -616,12 +615,12 @@ Be confident in your identification if the evidence is strong. Use full names wh
           }
         });
       });
-      
+
       req.on('error', (error) => {
         log.warn('voice', 'TranscriptionService search request error', { error: error.message });
         resolve(null); // Don't reject, just return null
       });
-      
+
       // Set timeout
       req.setTimeout(5000, () => {
         req.destroy();
@@ -636,8 +635,7 @@ Be confident in your identification if the evidence is strong. Use full names wh
    * @deprecated Use _callOpenAIForSpeakerIdentification instead
    */
   async _callOpenAIForSpeakerIdentificationSimple(formattedTranscript, speakers, options) {
-    const { context, expectedNames, apiKey, projectId } = options;
-    const https = require('https');
+    const { context, expectedNames } = options;
 
     // Build the prompt
     let prompt = `You are an expert at analyzing conversations and identifying speakers.
@@ -689,12 +687,13 @@ Respond with valid JSON only.`;
     try {
       const result = await ai.json(prompt, {
         profile: 'fast',
-        system: 'You are an expert conversation analyst. Always respond with valid JSON only, no markdown formatting or extra text.',
+        system:
+          'You are an expert conversation analyst. Always respond with valid JSON only, no markdown formatting or extra text.',
         maxTokens: 1000,
         temperature: 0.3,
-        feature: 'transcription'
+        feature: 'transcription',
       });
-      
+
       return {
         success: true,
         speakerMap: result.speakerMap || {},
@@ -703,7 +702,7 @@ Respond with valid JSON only.`;
         roles: result.roles || {},
         clues: result.clues || [],
         _model: 'gpt-4o-mini',
-        _provider: 'openai'
+        _provider: 'openai',
       };
     } catch (error) {
       log.error('voice', 'TranscriptionService request error', { error: error.message });
@@ -718,7 +717,7 @@ Respond with valid JSON only.`;
   _formatTranscriptWithNames(transcriptionResult) {
     const words = transcriptionResult.words || [];
     const speakerMap = transcriptionResult.speakerNames || {};
-    
+
     if (words.length === 0) return transcriptionResult.text;
 
     // Group words by speaker
@@ -727,8 +726,8 @@ Respond with valid JSON only.`;
 
     for (const word of words) {
       const speakerId = word.speaker || 'unknown';
-      const speakerName = speakerMap[speakerId] || speakerId;
-      
+      const _speakerName = speakerMap[speakerId] || speakerId;
+
       if (speakerId !== currentSegment.speaker) {
         if (currentSegment.text.length > 0) {
           const name = speakerMap[currentSegment.speaker] || currentSegment.speaker;
@@ -770,15 +769,9 @@ Respond with valid JSON only.`;
     return {
       name: 'ElevenLabs Scribe',
       provider: 'elevenlabs',
-      features: [
-        'speech-to-text',
-        'word-timestamps',
-        'speaker-diarization',
-        'language-detection',
-        'multi-channel'
-      ],
+      features: ['speech-to-text', 'word-timestamps', 'speaker-diarization', 'language-detection', 'multi-channel'],
       maxSpeakers: 32,
-      supportedFormats: ['mp3', 'wav', 'm4a', 'mp4', 'webm', 'ogg', 'flac']
+      supportedFormats: ['mp3', 'wav', 'm4a', 'mp4', 'webm', 'ogg', 'flac'],
     };
   }
 
@@ -853,14 +846,3 @@ export function getTranscriptionService() {
 }
 
 export default TranscriptionService;
-
-
-
-
-
-
-
-
-
-
-

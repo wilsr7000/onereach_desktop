@@ -36,7 +36,7 @@ export function createRecorder() {
    */
   const init = async () => {
     window.logging.info('recorder', 'Recorder Initializing..');
-    
+
     // Request permissions
     try {
       const devices = await capture.getDevices();
@@ -162,12 +162,12 @@ export function createRecorder() {
     togglePause,
     save,
     discard,
-    
+
     // Expose for debugging
     capture,
     recording,
     ui,
-    saver
+    saver,
   };
 }
 
@@ -181,19 +181,3 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 export default createRecorder;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

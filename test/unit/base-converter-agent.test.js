@@ -7,7 +7,7 @@ const { BaseConverterAgent, ConverterEventLogger } = require('../../lib/converte
 
 describe('BaseConverterAgent', () => {
   let mockAI;
-  
+
   beforeEach(() => {
     mockAI = createMockAIService();
   });
@@ -49,7 +49,7 @@ describe('BaseConverterAgent', () => {
     it('emits events for external listeners', async () => {
       const agent = new BaseConverterAgent({ silent: true });
       const received = [];
-      agent.logger.on('converter:event', e => received.push(e));
+      agent.logger.on('converter:event', (e) => received.push(e));
       agent.logger.log('custom:event', { hello: 'world' });
       expect(received.length).toBe(1);
       expect(received[0].hello).toBe('world');
@@ -142,7 +142,7 @@ describe('BaseConverterAgent', () => {
       const agent = new BaseConverterAgent({ ai: mockAI, silent: true });
       agent.strategies = [{ id: 'test', description: 'Test', when: 'always', speed: 'fast', quality: 'ok' }];
       agent.execute = vi.fn().mockResolvedValue({ output: 'converted data', metadata: { format: 'text' } });
-      
+
       const result = await agent.convert('input');
       expect(result.success).toBe(true);
       expect(result.output).toBe('converted data');
@@ -158,10 +158,11 @@ describe('BaseConverterAgent', () => {
         { id: 'a', description: 'A', when: 'first', speed: 'fast', quality: 'ok' },
         { id: 'b', description: 'B', when: 'fallback', speed: 'slow', quality: 'ok' },
       ];
-      agent.execute = vi.fn()
+      agent.execute = vi
+        .fn()
         .mockRejectedValueOnce(new Error('Boom'))
         .mockResolvedValueOnce({ output: 'recovered', metadata: {} });
-      
+
       const result = await agent.convert('input');
       expect(result.report.attempts.length).toBe(2);
     });
@@ -170,7 +171,7 @@ describe('BaseConverterAgent', () => {
       const agent = new BaseConverterAgent({ ai: mockAI, silent: true, maxAttempts: 1 });
       agent.strategies = [{ id: 'fail', description: 'Fail', when: 'always', speed: 'fast', quality: 'ok' }];
       agent.execute = vi.fn().mockResolvedValue({ output: null });
-      
+
       const result = await agent.convert('input');
       expect(result.success).toBe(false);
       expect(result.report.events).toBeDefined();
@@ -181,7 +182,7 @@ describe('BaseConverterAgent', () => {
       const agent = new BaseConverterAgent({ ai: mockAI, silent: true });
       agent.strategies = [{ id: 'test', description: 'Test', when: 'always', speed: 'fast', quality: 'ok' }];
       agent.execute = vi.fn().mockResolvedValue({ output: 'done' });
-      
+
       const progress = [];
       await agent.convert('input', { onProgress: (phase, attempt, max) => progress.push({ phase, attempt, max }) });
       expect(progress).toContainEqual({ phase: 'planning', attempt: 1, max: 3 });
@@ -217,7 +218,7 @@ describe('ConverterEventLogger', () => {
     logger.log('test:mid', { data: 'middle' });
     logger.log('test:end', { data: 'end' });
     console.log = orig;
-    
+
     const events = logger.getEvents();
     expect(events.length).toBe(3);
     expect(events[0].event).toBe('converter:start');
@@ -225,6 +226,6 @@ describe('ConverterEventLogger', () => {
     expect(events[1].event).toBe('test:mid');
     expect(events[2].event).toBe('test:end');
     // Elapsed should be non-negative
-    events.forEach(e => expect(e.elapsed).toBeGreaterThanOrEqual(0));
+    events.forEach((e) => expect(e.elapsed).toBeGreaterThanOrEqual(0));
   });
 });

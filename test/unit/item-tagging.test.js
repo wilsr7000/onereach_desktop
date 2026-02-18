@@ -10,15 +10,19 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 
 // Mock Electron
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp'), getVersion: vi.fn(() => '3.12.5') },
-  ipcMain: { handle: vi.fn(), on: vi.fn(), removeHandler: vi.fn() },
-  ipcRenderer: { invoke: vi.fn(), on: vi.fn(), send: vi.fn() },
-  BrowserWindow: vi.fn(),
-  dialog: { showSaveDialog: vi.fn(), showOpenDialog: vi.fn() },
-  shell: { openExternal: vi.fn() },
-  clipboard: { readText: vi.fn(), writeText: vi.fn() },
-}), { virtual: true });
+vi.mock(
+  'electron',
+  () => ({
+    app: { getPath: vi.fn(() => '/tmp'), getVersion: vi.fn(() => '3.12.5') },
+    ipcMain: { handle: vi.fn(), on: vi.fn(), removeHandler: vi.fn() },
+    ipcRenderer: { invoke: vi.fn(), on: vi.fn(), send: vi.fn() },
+    BrowserWindow: vi.fn(),
+    dialog: { showSaveDialog: vi.fn(), showOpenDialog: vi.fn() },
+    shell: { openExternal: vi.fn() },
+    clipboard: { readText: vi.fn(), writeText: vi.fn() },
+  }),
+  { virtual: true }
+);
 
 // ---------------------------------------------------------------------------
 // Content Type Detection
@@ -108,14 +112,16 @@ describe('Content Type Detection', () => {
 
   it('Python code detected as py/code', () => {
     if (!detectContentType) return;
-    const pyCode = 'def greet(name: str) -> str:\n    """Return greeting."""\n    return f"Hello, {name}"\n\nif __name__ == "__main__":\n    print(greet("World"))';
+    const pyCode =
+      'def greet(name: str) -> str:\n    """Return greeting."""\n    return f"Hello, {name}"\n\nif __name__ == "__main__":\n    print(greet("World"))';
     const result = detectContentType(pyCode);
     expect(['py', 'code', 'python']).toContain(result);
   });
 
   it('Markdown content detected as markdown/md', () => {
     if (!detectContentType) return;
-    const md = '# Heading\n\n## Subheading\n\n- Item 1\n- Item 2\n\n[Link](https://example.com)\n\n```js\nconsole.log("hi");\n```';
+    const md =
+      '# Heading\n\n## Subheading\n\n- Item 1\n- Item 2\n\n[Link](https://example.com)\n\n```js\nconsole.log("hi");\n```';
     const result = detectContentType(md);
     expect(['md', 'markdown']).toContain(result);
   });
@@ -157,7 +163,9 @@ describe('File Extension to Type Mapping', () => {
       try {
         const mod = require('../../clipboard-storage-v2');
         if (mod.getFileType) getFileType = mod.getFileType;
-      } catch {}
+      } catch {
+        /* no-op */
+      }
     }
   });
 
@@ -221,7 +229,6 @@ describe('File Extension to Type Mapping', () => {
 // ---------------------------------------------------------------------------
 
 describe('File Extension to Category Mapping', () => {
-
   // We test the category logic inline since the asset-pipeline module
   // may not be easily importable in isolation
   const categoryMap = {

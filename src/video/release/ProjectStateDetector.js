@@ -19,7 +19,7 @@ export const RELEASE_STATE = {
   NEEDS_RENDER: 'needs_render',
   HAS_UNSAVED_CHANGES: 'has_unsaved_changes',
   NO_VERSIONS: 'no_versions',
-  ERROR: 'error'
+  ERROR: 'error',
 };
 
 /**
@@ -37,8 +37,8 @@ export class ProjectStateDetector {
    * @returns {Object} Finalization status
    */
   isBranchFinalized(projectPath, project, branchId, currentEditorState = null) {
-    const branch = project.branches.find(b => b.id === branchId);
-    
+    const branch = project.branches.find((b) => b.id === branchId);
+
     if (!branch) {
       return {
         finalized: false,
@@ -46,7 +46,7 @@ export class ProjectStateDetector {
         error: `Branch not found: ${branchId}`,
         latestVersion: null,
         hasRenderedRelease: false,
-        needsRender: true
+        needsRender: true,
       };
     }
 
@@ -58,14 +58,14 @@ export class ProjectStateDetector {
         error: 'Branch has no versions',
         latestVersion: null,
         hasRenderedRelease: false,
-        needsRender: true
+        needsRender: true,
       };
     }
 
     const latestVersion = branch.versions[branch.versions.length - 1];
-    
+
     // Check if there are unsaved changes
-    const hasUnsavedChanges = currentEditorState 
+    const hasUnsavedChanges = currentEditorState
       ? this._hasUnsavedChanges(projectPath, branch, latestVersion, currentEditorState)
       : false;
 
@@ -77,23 +77,21 @@ export class ProjectStateDetector {
         latestVersion: latestVersion,
         hasRenderedRelease: false,
         needsRender: true,
-        unsavedChanges: true
+        unsavedChanges: true,
       };
     }
 
     // Check if latest version has a rendered release file
     let hasRenderedRelease = false;
     let fullReleasePath = null;
-    
+
     if (latestVersion.releasePath) {
       fullReleasePath = path.join(projectPath, latestVersion.releasePath);
       hasRenderedRelease = fs.existsSync(fullReleasePath);
     }
 
     // Determine state
-    const state = hasRenderedRelease 
-      ? RELEASE_STATE.READY 
-      : RELEASE_STATE.NEEDS_RENDER;
+    const state = hasRenderedRelease ? RELEASE_STATE.READY : RELEASE_STATE.NEEDS_RENDER;
 
     return {
       finalized: true,
@@ -107,8 +105,8 @@ export class ProjectStateDetector {
         id: branch.id,
         name: branch.name,
         type: branch.type,
-        currentVersion: branch.currentVersion
-      }
+        currentVersion: branch.currentVersion,
+      },
     };
   }
 
@@ -123,19 +121,14 @@ export class ProjectStateDetector {
     const results = [];
 
     for (const branch of project.branches) {
-      const status = this.isBranchFinalized(
-        projectPath, 
-        project, 
-        branch.id, 
-        currentEditorState
-      );
+      const status = this.isBranchFinalized(projectPath, project, branch.id, currentEditorState);
 
       results.push({
         ...status,
         branchId: branch.id,
         branchName: branch.name,
         branchType: branch.type,
-        versionCount: branch.versions?.length || 0
+        versionCount: branch.versions?.length || 0,
       });
     }
 
@@ -145,7 +138,7 @@ export class ProjectStateDetector {
       [RELEASE_STATE.NEEDS_RENDER]: 1,
       [RELEASE_STATE.HAS_UNSAVED_CHANGES]: 2,
       [RELEASE_STATE.NO_VERSIONS]: 3,
-      [RELEASE_STATE.ERROR]: 4
+      [RELEASE_STATE.ERROR]: 4,
     };
 
     return results.sort((a, b) => {
@@ -167,7 +160,7 @@ export class ProjectStateDetector {
 
     try {
       const savedEDL = JSON.parse(fs.readFileSync(edlPath, 'utf8'));
-      
+
       // Compare key aspects of the state
       // Markers
       if (this._markersChanged(savedEDL.markers, editorState.markers)) {
@@ -200,10 +193,10 @@ export class ProjectStateDetector {
 
     for (let i = 0; i < savedMarkers.length; i++) {
       const saved = savedMarkers[i];
-      const current = currentMarkers.find(m => m.id === saved.id);
-      
+      const current = currentMarkers.find((m) => m.id === saved.id);
+
       if (!current) return true;
-      
+
       // Compare key properties
       if (saved.name !== current.name) return true;
       if (saved.time !== current.time) return true;
@@ -221,21 +214,21 @@ export class ProjectStateDetector {
    */
   _segmentsChanged(savedSegments = [], currentPlaylist = []) {
     // Filter to include segments only
-    const savedIncludes = savedSegments.filter(s => s.type === 'include');
-    
+    const savedIncludes = savedSegments.filter((s) => s.type === 'include');
+
     if (savedIncludes.length !== currentPlaylist.length) return true;
 
     for (let i = 0; i < savedIncludes.length; i++) {
       const saved = savedIncludes[i];
       const current = currentPlaylist[i];
-      
+
       if (!current) return true;
-      
+
       const savedStart = saved.startTime;
       const savedEnd = saved.endTime;
       const currentStart = current.inTime || current.startTime;
       const currentEnd = current.outTime || current.endTime;
-      
+
       if (Math.abs(savedStart - currentStart) > 0.01) return true;
       if (savedEnd && currentEnd && Math.abs(savedEnd - currentEnd) > 0.01) return true;
     }
@@ -253,10 +246,10 @@ export class ProjectStateDetector {
 
     for (let i = 0; i < savedTracks.length; i++) {
       const saved = savedTracks[i];
-      const current = currentTracks.find(t => t.id === saved.id);
-      
+      const current = currentTracks.find((t) => t.id === saved.id);
+
       if (!current) return true;
-      
+
       // Check clip counts
       const savedClips = saved.clips?.length || 0;
       const currentClips = current.clips?.length || 0;
@@ -274,7 +267,7 @@ export class ProjectStateDetector {
    */
   getReleaseSummary(projectPath, project) {
     const branches = this.getReleasableBranches(projectPath, project);
-    
+
     const summary = {
       totalBranches: branches.length,
       readyToRelease: 0,
@@ -282,7 +275,7 @@ export class ProjectStateDetector {
       hasUnsavedChanges: 0,
       noVersions: 0,
       errors: 0,
-      branches: []
+      branches: [],
     };
 
     for (const branch of branches) {
@@ -310,7 +303,7 @@ export class ProjectStateDetector {
         type: branch.branchType,
         state: branch.state,
         version: branch.latestVersion?.version || null,
-        hasRenderedFile: branch.hasRenderedRelease
+        hasRenderedFile: branch.hasRenderedRelease,
       });
     }
 
@@ -325,10 +318,7 @@ export class ProjectStateDetector {
    */
   hasReleasableBranch(projectPath, project) {
     const branches = this.getReleasableBranches(projectPath, project);
-    return branches.some(b => 
-      b.state === RELEASE_STATE.READY || 
-      b.state === RELEASE_STATE.NEEDS_RENDER
-    );
+    return branches.some((b) => b.state === RELEASE_STATE.READY || b.state === RELEASE_STATE.NEEDS_RENDER);
   }
 
   /**
@@ -339,38 +329,27 @@ export class ProjectStateDetector {
    */
   getBestReleaseCandidate(projectPath, project) {
     const branches = this.getReleasableBranches(projectPath, project);
-    
+
     // Filter to finalized branches
-    const candidates = branches.filter(b => b.finalized);
-    
+    const candidates = branches.filter((b) => b.finalized);
+
     if (candidates.length === 0) return null;
 
     // Prefer ready over needs_render
-    const ready = candidates.filter(b => b.state === RELEASE_STATE.READY);
+    const ready = candidates.filter((b) => b.state === RELEASE_STATE.READY);
     if (ready.length > 0) {
       // Prefer default/main branch
-      const defaultBranch = ready.find(b => b.branch?.isDefault || b.branchType === 'main');
+      const defaultBranch = ready.find((b) => b.branch?.isDefault || b.branchType === 'main');
       return defaultBranch || ready[0];
     }
 
     // Fall back to needs_render
-    const needsRender = candidates.filter(b => b.state === RELEASE_STATE.NEEDS_RENDER);
+    const needsRender = candidates.filter((b) => b.state === RELEASE_STATE.NEEDS_RENDER);
     if (needsRender.length > 0) {
-      const defaultBranch = needsRender.find(b => b.branch?.isDefault || b.branchType === 'main');
+      const defaultBranch = needsRender.find((b) => b.branch?.isDefault || b.branchType === 'main');
       return defaultBranch || needsRender[0];
     }
 
     return null;
   }
 }
-
-
-
-
-
-
-
-
-
-
-

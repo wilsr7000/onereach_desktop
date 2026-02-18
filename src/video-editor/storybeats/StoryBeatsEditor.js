@@ -1,6 +1,6 @@
 /**
  * StoryBeatsEditor - Comprehensive Line Script Editor
- * 
+ *
  * Full screenplay/lined script format with:
  * - Multiple templates (Podcast, Learning, Promo, Highlight, Dynamic)
  * - Scene headers (INT/EXT, location, time of day)
@@ -29,13 +29,13 @@ const LINE_SCRIPT_TEMPLATES = {
       showTechnical: false,
       showTakes: false,
       sceneLabel: 'SEGMENT',
-      speakerStyle: 'conversation',  // Side-by-side speaker labels
+      speakerStyle: 'conversation', // Side-by-side speaker labels
       showTimecodes: true,
       showRunningTime: true,
       showWordCount: true,
       emphasisElements: ['speakers', 'timing', 'topics'],
       dialogueWidth: 'wide',
-    }
+    },
   },
   learning: {
     id: 'learning',
@@ -49,14 +49,14 @@ const LINE_SCRIPT_TEMPLATES = {
       showTechnical: false,
       showTakes: false,
       sceneLabel: 'CHAPTER',
-      speakerStyle: 'instructor',  // Single speaker with content blocks
+      speakerStyle: 'instructor', // Single speaker with content blocks
       showTimecodes: true,
       showRunningTime: true,
       showKeyPoints: true,
       showObjectives: true,
       emphasisElements: ['chapters', 'keyPoints', 'duration'],
       dialogueWidth: 'medium',
-    }
+    },
   },
   promo: {
     id: 'promo',
@@ -70,14 +70,14 @@ const LINE_SCRIPT_TEMPLATES = {
       showTechnical: true,
       showTakes: true,
       sceneLabel: 'SHOT',
-      speakerStyle: 'voiceover',  // VO labels
+      speakerStyle: 'voiceover', // VO labels
       showTimecodes: true,
       showRunningTime: true,
       showHooks: true,
       showCTA: true,
       emphasisElements: ['visuals', 'hooks', 'cta', 'branding'],
       dialogueWidth: 'narrow',
-    }
+    },
   },
   highlight: {
     id: 'highlight',
@@ -91,14 +91,14 @@ const LINE_SCRIPT_TEMPLATES = {
       showTechnical: false,
       showTakes: false,
       sceneLabel: 'HIGHLIGHT',
-      speakerStyle: 'minimal',  // Just timestamps and content
+      speakerStyle: 'minimal', // Just timestamps and content
       showTimecodes: true,
       showRunningTime: true,
-      showMomentType: true,  // Best quote, funny, dramatic, etc.
-      showSource: true,  // Original source reference
+      showMomentType: true, // Best quote, funny, dramatic, etc.
+      showSource: true, // Original source reference
       emphasisElements: ['moments', 'impact', 'timing'],
       dialogueWidth: 'wide',
-    }
+    },
   },
   dynamic: {
     id: 'dynamic',
@@ -112,7 +112,7 @@ const LINE_SCRIPT_TEMPLATES = {
       showTechnical: false,
       showTakes: false,
       sceneLabel: 'BEAT',
-      speakerStyle: 'beat',  // Story beat format
+      speakerStyle: 'beat', // Story beat format
       showTimecodes: true,
       showRunningTime: true,
       showCheckpoints: true,
@@ -120,56 +120,56 @@ const LINE_SCRIPT_TEMPLATES = {
       showInteractivity: true,
       emphasisElements: ['beats', 'checkpoints', 'engagement'],
       dialogueWidth: 'medium',
-      listView: true,  // Compact list of beats
-    }
-  }
+      listView: true, // Compact list of beats
+    },
+  },
 };
 
 export class StoryBeatsEditor {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Template state
     this.templates = LINE_SCRIPT_TEMPLATES;
-    this.selectedTemplate = 'podcast';  // Default template
-    
+    this.selectedTemplate = 'podcast'; // Default template
+
     // Core transcript state
-    this.words = [];           // Words with timing from transcript
-    this.markers = [];         // Markers/story beats (drive scenes)
-    this.dialogueBlocks = [];  // Parsed dialogue with speakers
-    this.speakers = [];        // Identified speakers
-    this.selection = null;     // Current text selection
-    this.edits = [];           // Pending edits queue
+    this.words = []; // Words with timing from transcript
+    this.markers = []; // Markers/story beats (drive scenes)
+    this.dialogueBlocks = []; // Parsed dialogue with speakers
+    this.speakers = []; // Identified speakers
+    this.selection = null; // Current text selection
+    this.edits = []; // Pending edits queue
     this.visible = false;
-    
+
     // Script metadata state
     this.scriptTitle = '';
-    this.scriptRevision = 'WHITE';  // Revision color
+    this.scriptRevision = 'WHITE'; // Revision color
     this.scriptDate = new Date().toISOString().split('T')[0];
     this.pageNumber = 1;
     this.runningTime = 0;
-    
+
     // Scene-level notes (keyed by marker ID)
-    this.sceneNotes = {};      // { markerId: { location, timeOfDay, intExt, description } }
-    this.directorNotes = {};   // { markerId: [{ note, timestamp }] }
+    this.sceneNotes = {}; // { markerId: { location, timeOfDay, intExt, description } }
+    this.directorNotes = {}; // { markerId: [{ note, timestamp }] }
     this.supervisorNotes = {}; // { markerId: [{ type, note, timestamp }] }
-    
+
     // Coverage tracking
-    this.coverage = {};        // { markerId: [{ shotId, setup, startTime, endTime, covered }] }
-    this.takes = {};           // { markerId: [{ takeNum, circled, print, notes, duration }] }
-    
+    this.coverage = {}; // { markerId: [{ shotId, setup, startTime, endTime, covered }] }
+    this.takes = {}; // { markerId: [{ takeNum, circled, print, notes, duration }] }
+
     // Technical notes
-    this.technicalNotes = {};  // { markerId: { camera, lens, lighting, sound } }
-    
+    this.technicalNotes = {}; // { markerId: { camera, lens, lighting, sound } }
+
     // Editorial guidance
-    this.editorialNotes = {};  // { markerId: [{ cutPoint, syncRef, vfxNote }] }
-    
+    this.editorialNotes = {}; // { markerId: [{ cutPoint, syncRef, vfxNote }] }
+
     // DOM references
     this.container = null;
     this.editorContent = null;
     this.toolbar = null;
     this.miniTimeline = null;
-    
+
     // Bind methods
     this.handleWordClick = this.handleWordClick.bind(this);
     this.handleWordMouseDown = this.handleWordMouseDown.bind(this);
@@ -202,28 +202,32 @@ export class StoryBeatsEditor {
   init() {
     this.container = document.getElementById('storyBeatsEditorContainer');
     this.editorContent = document.getElementById('storyBeatsEditorContent');
-    
+
     if (!this.container || !this.editorContent) {
       window.logging.warn('video', 'StoryBeatsEditor Container not found');
       return;
     }
-    
+
     // Load transcript data with speaker identification
     this.loadTranscriptWithSpeakers();
-    
+
     // Load markers (these drive scene headers)
     this.loadMarkers();
-    
+
     // Parse dialogue blocks from transcript
     this.parseDialogueBlocks();
-    
+
     // Render the editor
     this.render();
-    
+
     // Setup event listeners
     this.setupEventListeners();
-    
-    window.logging.info('video', 'StoryBeatsEditor initialized', { words: this.words.length, scenes: this.markers.length, speakers: this.speakers.length });
+
+    window.logging.info('video', 'StoryBeatsEditor initialized', {
+      words: this.words.length,
+      scenes: this.markers.length,
+      speakers: this.speakers.length,
+    });
   }
 
   /**
@@ -238,10 +242,10 @@ export class StoryBeatsEditor {
     } else {
       this.words = [];
     }
-    
+
     // Load speaker list from metadata if available
     this.speakers = this.app.speakers || [];
-    
+
     // Check if we have speaker-identified transcript text
     this.speakersIdentified = !!this.app.speakersIdentified;
     this.rawTranscript = this.app.rawTranscript || '';
@@ -253,19 +257,19 @@ export class StoryBeatsEditor {
    */
   parseDialogueBlocks() {
     this.dialogueBlocks = [];
-    
+
     // If we have speaker-identified raw transcript, parse it
     if (this.rawTranscript && this.speakersIdentified) {
-      const speakerPattern = /\*\*\[([^\]]+)\]\*\*:?\s*/g;
-      const lines = this.rawTranscript.split('\n').filter(l => l.trim());
-      
+      const _speakerPattern = /\*\*\[([^\]]+)\]\*\*:?\s*/g;
+      const lines = this.rawTranscript.split('\n').filter((l) => l.trim());
+
       let currentSpeaker = null;
       let currentText = [];
       let blockStart = 0;
-      
+
       lines.forEach((line, lineIdx) => {
         const match = line.match(/^\*\*\[([^\]]+)\]\*\*:?\s*(.*)$/);
-        
+
         if (match) {
           // Save previous block
           if (currentSpeaker && currentText.length > 0) {
@@ -273,14 +277,14 @@ export class StoryBeatsEditor {
               speaker: currentSpeaker,
               text: currentText.join(' '),
               lineStart: blockStart,
-              lineEnd: lineIdx - 1
+              lineEnd: lineIdx - 1,
             });
           }
-          
+
           currentSpeaker = match[1].trim();
           currentText = match[2] ? [match[2].trim()] : [];
           blockStart = lineIdx;
-          
+
           // Track unique speakers
           if (!this.speakers.includes(currentSpeaker)) {
             this.speakers.push(currentSpeaker);
@@ -289,20 +293,20 @@ export class StoryBeatsEditor {
           currentText.push(line.trim());
         }
       });
-      
+
       // Save final block
       if (currentSpeaker && currentText.length > 0) {
         this.dialogueBlocks.push({
           speaker: currentSpeaker,
           text: currentText.join(' '),
           lineStart: blockStart,
-          lineEnd: lines.length - 1
+          lineEnd: lines.length - 1,
         });
       }
-      
+
       window.logging.info('video', 'StoryBeatsEditor parsed dialogue blocks', { count: this.dialogueBlocks.length });
     }
-    
+
     // If no speaker-identified transcript, create blocks from words grouped by timing
     if (this.dialogueBlocks.length === 0 && this.words.length > 0) {
       this.createBlocksFromWords();
@@ -314,19 +318,19 @@ export class StoryBeatsEditor {
    */
   createBlocksFromWords() {
     if (this.words.length === 0) return;
-    
+
     const WORDS_PER_BLOCK = 30; // Group words into blocks
     let blockWords = [];
     let blockStartIdx = 0;
-    
+
     this.words.forEach((word, idx) => {
       blockWords.push(word.text);
-      
+
       // Create block at sentence end or word limit
       const isEndOfSentence = /[.!?]$/.test(word.text);
       const isLastWord = idx === this.words.length - 1;
       const isBlockFull = blockWords.length >= WORDS_PER_BLOCK;
-      
+
       if ((isEndOfSentence && blockWords.length >= 10) || isBlockFull || isLastWord) {
         this.dialogueBlocks.push({
           speaker: null, // Unknown speaker
@@ -334,7 +338,7 @@ export class StoryBeatsEditor {
           wordStartIdx: blockStartIdx,
           wordEndIdx: idx,
           startTime: this.words[blockStartIdx].start,
-          endTime: word.end
+          endTime: word.end,
         });
         blockWords = [];
         blockStartIdx = idx + 1;
@@ -348,10 +352,10 @@ export class StoryBeatsEditor {
   expandTranscriptToWords(segments) {
     const words = [];
 
-    segments.forEach(segment => {
+    segments.forEach((segment) => {
       const text = (segment.text || segment.word || '').trim();
       const startTime = segment.start || 0;
-      const endTime = segment.end || (startTime + 1);
+      const endTime = segment.end || startTime + 1;
       const speaker = segment.speaker || null;
 
       if (!text.includes(' ')) {
@@ -361,16 +365,16 @@ export class StoryBeatsEditor {
         return;
       }
 
-      const segmentWords = text.split(/\s+/).filter(w => w.length > 0);
+      const segmentWords = text.split(/\s+/).filter((w) => w.length > 0);
       const segmentDuration = endTime - startTime;
       const wordDuration = segmentDuration / segmentWords.length;
 
       segmentWords.forEach((word, i) => {
         words.push({
           text: word,
-          start: startTime + (i * wordDuration),
-          end: startTime + ((i + 1) * wordDuration),
-          speaker
+          start: startTime + i * wordDuration,
+          end: startTime + (i + 1) * wordDuration,
+          speaker,
         });
       });
     });
@@ -388,11 +392,11 @@ export class StoryBeatsEditor {
     } else {
       this.markers = this.app.markers || [];
     }
-    
+
     // Sort markers by time
     this.markers.sort((a, b) => {
-      const aTime = a.type === 'range' ? a.inTime : (a.time || 0);
-      const bTime = b.type === 'range' ? b.inTime : (b.time || 0);
+      const aTime = a.type === 'range' ? a.inTime : a.time || 0;
+      const bTime = b.type === 'range' ? b.inTime : b.time || 0;
       return aTime - bTime;
     });
   }
@@ -437,7 +441,7 @@ export class StoryBeatsEditor {
    * Get marker at a specific time
    */
   getMarkerAtTime(time) {
-    return this.markers.find(m => {
+    return this.markers.find((m) => {
       if (m.type === 'range') {
         return time >= m.inTime && time <= m.outTime;
       }
@@ -449,7 +453,7 @@ export class StoryBeatsEditor {
    * Get marker that starts at or near a time
    */
   getMarkerStartingAt(time, tolerance = 0.5) {
-    return this.markers.find(m => {
+    return this.markers.find((m) => {
       if (m.type === 'range') {
         return Math.abs(m.inTime - time) <= tolerance;
       }
@@ -461,7 +465,7 @@ export class StoryBeatsEditor {
    * Get marker that ends at or near a time
    */
   getMarkerEndingAt(time, tolerance = 0.5) {
-    return this.markers.find(m => {
+    return this.markers.find((m) => {
       if (m.type === 'range') {
         return Math.abs(m.outTime - time) <= tolerance;
       }
@@ -475,8 +479,8 @@ export class StoryBeatsEditor {
   getEditForWord(wordIndex) {
     const word = this.words[wordIndex];
     if (!word) return null;
-    
-    return this.edits.find(edit => {
+
+    return this.edits.find((edit) => {
       return word.start >= edit.startTime && word.end <= edit.endTime;
     });
   }
@@ -486,17 +490,13 @@ export class StoryBeatsEditor {
    */
   render() {
     if (!this.editorContent) return;
-    
+
     // Calculate running time
-    this.runningTime = this.words.length > 0 
-      ? this.words[this.words.length - 1].end 
-      : 0;
-    
+    this.runningTime = this.words.length > 0 ? this.words[this.words.length - 1].end : 0;
+
     // Get video/project title
-    this.scriptTitle = this.app.videoInfo?.name || 
-                       this.app.currentVideoMetadata?.title || 
-                       'Untitled Script';
-    
+    this.scriptTitle = this.app.videoInfo?.name || this.app.currentVideoMetadata?.title || 'Untitled Script';
+
     // Empty state
     if (this.words.length === 0 && this.dialogueBlocks.length === 0) {
       this.editorContent.innerHTML = `
@@ -522,16 +522,16 @@ export class StoryBeatsEditor {
       `;
       return;
     }
-    
+
     // Build comprehensive line script HTML
     let html = '';
-    
+
     // Script Title Page / Header
     html += this.renderScriptHeader();
-    
+
     // Main script content
     html += '<div class="storybeats-lines">';
-    
+
     // If we have dialogue blocks with speakers, render in screenplay format
     if (this.dialogueBlocks.length > 0) {
       html += this.renderScreenplayFormat();
@@ -539,14 +539,14 @@ export class StoryBeatsEditor {
       // Fall back to word-by-word rendering with scene markers
       html += this.renderWordByWordFormat();
     }
-    
+
     html += '</div>';
-    
+
     // Script footer with metadata
     html += this.renderScriptFooter();
-    
+
     this.editorContent.innerHTML = html;
-    
+
     // Attach event listeners
     this.attachWordListeners();
     this.attachNoteListeners();
@@ -558,7 +558,7 @@ export class StoryBeatsEditor {
    * Attach template selector button listeners
    */
   attachTemplateListeners() {
-    this.editorContent?.querySelectorAll('.template-btn').forEach(btn => {
+    this.editorContent?.querySelectorAll('.template-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const templateId = e.currentTarget.dataset.template;
         if (templateId && templateId !== this.selectedTemplate) {
@@ -578,24 +578,28 @@ export class StoryBeatsEditor {
     const totalDuration = this.formatTime(this.runningTime);
     const totalScenes = this.markers.length;
     const totalSpeakers = this.speakers.length;
-    
+
     // Get scene label from template
     const sceneLabel = config.sceneLabel || 'SCENE';
-    
+
     return `
       <div class="linescript-header">
         <!-- Template Selector -->
         <div class="template-selector">
           <div class="template-label">SCRIPT FORMAT</div>
           <div class="template-buttons">
-            ${Object.values(this.templates).map(t => `
+            ${Object.values(this.templates)
+              .map(
+                (t) => `
               <button class="template-btn ${t.id === this.selectedTemplate ? 'active' : ''}" 
                       data-template="${t.id}"
                       title="${t.description}">
                 <span class="template-icon">${t.icon}</span>
                 <span class="template-name">${t.name}</span>
               </button>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
         </div>
         
@@ -632,16 +636,24 @@ export class StoryBeatsEditor {
           </div>
         </div>
         
-        ${this.speakers.length > 0 ? `
+        ${
+          this.speakers.length > 0
+            ? `
           <div class="linescript-cast">
             <div class="cast-label">${this.getCastLabel(template)}</div>
             <div class="cast-list">
-              ${this.speakers.map((speaker, idx) => `
+              ${this.speakers
+                .map(
+                  (speaker, idx) => `
                 <span class="cast-member speaker-${idx % 6}">${this.escapeHtml(speaker)}</span>
-              `).join('')}
+              `
+                )
+                .join('')}
             </div>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Template-specific info -->
         ${this.renderTemplateInfo(template)}
@@ -654,12 +666,18 @@ export class StoryBeatsEditor {
    */
   getSpeakerLabel(template) {
     switch (template.id) {
-      case 'podcast': return 'Speakers';
-      case 'learning': return 'Instructors';
-      case 'promo': return 'Voices';
-      case 'highlight': return 'Featured';
-      case 'dynamic': return 'Characters';
-      default: return 'Speakers';
+      case 'podcast':
+        return 'Speakers';
+      case 'learning':
+        return 'Instructors';
+      case 'promo':
+        return 'Voices';
+      case 'highlight':
+        return 'Featured';
+      case 'dynamic':
+        return 'Characters';
+      default:
+        return 'Speakers';
     }
   }
 
@@ -668,12 +686,18 @@ export class StoryBeatsEditor {
    */
   getCastLabel(template) {
     switch (template.id) {
-      case 'podcast': return 'SPEAKERS';
-      case 'learning': return 'PRESENTERS';
-      case 'promo': return 'TALENT';
-      case 'highlight': return 'FEATURED';
-      case 'dynamic': return 'CAST';
-      default: return 'CAST';
+      case 'podcast':
+        return 'SPEAKERS';
+      case 'learning':
+        return 'PRESENTERS';
+      case 'promo':
+        return 'TALENT';
+      case 'highlight':
+        return 'FEATURED';
+      case 'dynamic':
+        return 'CAST';
+      default:
+        return 'CAST';
     }
   }
 
@@ -681,9 +705,9 @@ export class StoryBeatsEditor {
    * Render template-specific info section
    */
   renderTemplateInfo(template) {
-    const config = template.config;
+    const _config = template.config;
     let info = '';
-    
+
     switch (template.id) {
       case 'podcast':
         info = `
@@ -695,11 +719,11 @@ export class StoryBeatsEditor {
           </div>
         `;
         break;
-        
+
       case 'learning':
         info = this.renderLearningPanels();
         break;
-        
+
       case 'promo':
         info = `
           <div class="template-info promo-info">
@@ -710,7 +734,7 @@ export class StoryBeatsEditor {
           </div>
         `;
         break;
-        
+
       case 'highlight':
         info = `
           <div class="template-info highlight-info">
@@ -721,12 +745,12 @@ export class StoryBeatsEditor {
           </div>
         `;
         break;
-        
+
       case 'dynamic':
         info = this.renderDynamicLearningPanels();
         break;
     }
-    
+
     return info;
   }
 
@@ -740,13 +764,13 @@ export class StoryBeatsEditor {
     const quizzes = this.getLearningMarkers('quiz');
     const concepts = this.getLearningMarkers('concept');
     const examples = this.getLearningMarkers('example');
-    
+
     // Calculate progress stats
-    const totalDuration = this.runningTime || 0;
-    const completedChapters = chapters.filter(c => c.completed).length;
+    const _totalDuration = this.runningTime || 0;
+    const completedChapters = chapters.filter((c) => c.completed).length;
     const totalChapters = chapters.length;
     const progressPercent = totalChapters > 0 ? Math.round((completedChapters / totalChapters) * 100) : 0;
-    
+
     return `
       <div class="template-info learning-info">
         <!-- Progress Tracker -->
@@ -769,7 +793,9 @@ export class StoryBeatsEditor {
         </div>
         
         <!-- Learning Objectives Section -->
-        ${chapters.length > 0 ? `
+        ${
+          chapters.length > 0
+            ? `
           <div class="learning-objectives-panel">
             <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
               <span class="panel-icon">🎯</span>
@@ -779,20 +805,28 @@ export class StoryBeatsEditor {
             </div>
             <div class="panel-content">
               <ul class="objectives-list">
-                ${chapters.map((ch, i) => `
+                ${chapters
+                  .map(
+                    (ch, i) => `
                   <li class="objective-item ${ch.completed ? 'completed' : ''}">
                     <span class="objective-number">${i + 1}</span>
                     <span class="objective-text">${this.escapeHtml(ch.description || ch.name || 'Chapter ' + (i + 1))}</span>
                     <button class="objective-goto" data-time="${ch.inTime || ch.time}" title="Go to chapter">▶</button>
                   </li>
-                `).join('')}
+                `
+                  )
+                  .join('')}
               </ul>
             </div>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Key Points Summary -->
-        ${keyPoints.length > 0 ? `
+        ${
+          keyPoints.length > 0
+            ? `
           <div class="learning-keypoints-panel">
             <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
               <span class="panel-icon">💡</span>
@@ -802,7 +836,9 @@ export class StoryBeatsEditor {
             </div>
             <div class="panel-content">
               <div class="keypoints-grid">
-                ${keyPoints.map((kp, i) => `
+                ${keyPoints
+                  .map(
+                    (kp, i) => `
                   <div class="keypoint-card" data-marker-id="${kp.id}" style="--keypoint-color: ${kp.color || '#eab308'};">
                     <div class="keypoint-header">
                       <span class="keypoint-icon">💡</span>
@@ -814,14 +850,20 @@ export class StoryBeatsEditor {
                     </div>
                     <button class="keypoint-goto" data-time="${kp.time || kp.inTime}" title="Go to this point">▶</button>
                   </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
               </div>
             </div>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Quiz Markers Section -->
-        ${quizzes.length > 0 ? `
+        ${
+          quizzes.length > 0
+            ? `
           <div class="learning-quiz-panel">
             <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
               <span class="panel-icon">❓</span>
@@ -831,7 +873,9 @@ export class StoryBeatsEditor {
             </div>
             <div class="panel-content">
               <div class="quiz-list">
-                ${quizzes.map((quiz, i) => `
+                ${quizzes
+                  .map(
+                    (quiz, i) => `
                   <div class="quiz-item" data-marker-id="${quiz.id}">
                     <div class="quiz-number">${i + 1}</div>
                     <div class="quiz-info">
@@ -843,14 +887,20 @@ export class StoryBeatsEditor {
                       <button class="quiz-preview" data-marker-id="${quiz.id}" title="Preview question">👁</button>
                     </div>
                   </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
               </div>
             </div>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Concepts & Examples Summary -->
-        ${(concepts.length > 0 || examples.length > 0) ? `
+        ${
+          concepts.length > 0 || examples.length > 0
+            ? `
           <div class="learning-concepts-panel">
             <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
               <span class="panel-icon">🧠</span>
@@ -860,46 +910,66 @@ export class StoryBeatsEditor {
             </div>
             <div class="panel-content">
               <div class="concepts-examples-list">
-                ${concepts.map(c => `
+                ${concepts
+                  .map(
+                    (c) => `
                   <div class="concept-item" data-marker-id="${c.id}">
                     <span class="item-icon">🧠</span>
                     <span class="item-name">${this.escapeHtml(c.name)}</span>
                     <span class="item-time">${this.formatTimecode(c.time || c.inTime)}</span>
                     <button class="item-goto" data-time="${c.time || c.inTime}">▶</button>
                   </div>
-                `).join('')}
-                ${examples.map(e => `
+                `
+                  )
+                  .join('')}
+                ${examples
+                  .map(
+                    (e) => `
                   <div class="example-item" data-marker-id="${e.id}">
                     <span class="item-icon">📝</span>
                     <span class="item-name">${this.escapeHtml(e.name)}</span>
                     <span class="item-time">${this.formatTimecode(e.time || e.inTime)}</span>
                     <button class="item-goto" data-time="${e.time || e.inTime}">▶</button>
                   </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
               </div>
             </div>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Chapter Navigation -->
-        ${chapters.length > 0 ? `
+        ${
+          chapters.length > 0
+            ? `
           <div class="learning-chapter-nav">
             <div class="chapter-nav-title">Chapter Navigation</div>
             <div class="chapter-nav-items">
-              ${chapters.map((ch, i) => `
+              ${chapters
+                .map(
+                  (ch, i) => `
                 <button class="chapter-nav-btn ${ch.completed ? 'completed' : ''}" 
                         data-time="${ch.inTime || ch.time}"
                         title="${this.escapeHtml(ch.name || 'Chapter ' + (i + 1))}">
                   <span class="chapter-num">${i + 1}</span>
                   ${ch.completed ? '<span class="chapter-check">✓</span>' : ''}
                 </button>
-              `).join('')}
+              `
+                )
+                .join('')}
             </div>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Empty State for Learning Template -->
-        ${chapters.length === 0 && keyPoints.length === 0 ? `
+        ${
+          chapters.length === 0 && keyPoints.length === 0
+            ? `
           <div class="learning-empty-state">
             <div class="empty-icon">📚</div>
             <div class="empty-title">No Learning Content Marked</div>
@@ -913,7 +983,9 @@ export class StoryBeatsEditor {
               </ul>
             </div>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
     `;
   }
@@ -924,11 +996,13 @@ export class StoryBeatsEditor {
    * @returns {Array} Filtered markers
    */
   getLearningMarkers(markerType) {
-    return this.markers.filter(m => m.markerType === markerType).sort((a, b) => {
-      const aTime = a.inTime || a.time || 0;
-      const bTime = b.inTime || b.time || 0;
-      return aTime - bTime;
-    });
+    return this.markers
+      .filter((m) => m.markerType === markerType)
+      .sort((a, b) => {
+        const aTime = a.inTime || a.time || 0;
+        const bTime = b.inTime || b.time || 0;
+        return aTime - bTime;
+      });
   }
 
   /**
@@ -937,17 +1011,19 @@ export class StoryBeatsEditor {
    */
   renderDynamicLearningPanels() {
     // Get all range markers as beats
-    const beats = this.markers.filter(m => m.type === 'range').sort((a, b) => {
-      const aTime = a.inTime || 0;
-      const bTime = b.inTime || 0;
-      return aTime - bTime;
-    });
-    
+    const beats = this.markers
+      .filter((m) => m.type === 'range')
+      .sort((a, b) => {
+        const aTime = a.inTime || 0;
+        const bTime = b.inTime || 0;
+        return aTime - bTime;
+      });
+
     // Calculate checkpoint progress
-    const completedBeats = beats.filter(b => b.completed).length;
+    const completedBeats = beats.filter((b) => b.completed).length;
     const totalBeats = beats.length;
     const progressPercent = totalBeats > 0 ? Math.round((completedBeats / totalBeats) * 100) : 0;
-    
+
     return `
       <div class="template-info dynamic-info">
         <!-- Checkpoint Progress -->
@@ -958,13 +1034,17 @@ export class StoryBeatsEditor {
             <span class="progress-badge">${completedBeats}/${totalBeats}</span>
           </div>
           <div class="checkpoint-progress-bar">
-            ${beats.map((beat, i) => `
+            ${beats
+              .map(
+                (beat, i) => `
               <div class="checkpoint-segment ${beat.completed ? 'completed' : ''}" 
                    style="width: ${100 / Math.max(totalBeats, 1)}%;"
                    data-beat-id="${beat.id}"
                    title="${this.escapeHtml(beat.name || 'Beat ' + (i + 1))}">
               </div>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
           <div class="progress-stats">
             <span class="stat">${progressPercent}% complete</span>
@@ -973,7 +1053,9 @@ export class StoryBeatsEditor {
         </div>
         
         <!-- Checkpoint List -->
-        ${beats.length > 0 ? `
+        ${
+          beats.length > 0
+            ? `
           <div class="dynamic-checkpoints-panel">
             <div class="panel-header" onclick="this.parentElement.classList.toggle('collapsed')">
               <span class="panel-icon">📍</span>
@@ -983,14 +1065,15 @@ export class StoryBeatsEditor {
             </div>
             <div class="panel-content">
               <div class="checkpoints-list">
-                ${beats.map((beat, i) => {
-                  const duration = (beat.outTime || 0) - (beat.inTime || 0);
-                  return `
+                ${beats
+                  .map((beat, i) => {
+                    const duration = (beat.outTime || 0) - (beat.inTime || 0);
+                    return `
                     <div class="checkpoint-item ${beat.completed ? 'completed' : ''}" 
                          data-beat-id="${beat.id}">
                       <div class="checkpoint-status">
                         <button class="checkpoint-toggle" data-beat-id="${beat.id}" title="Toggle complete">
-                          ${beat.completed ? '✓' : (i + 1)}
+                          ${beat.completed ? '✓' : i + 1}
                         </button>
                       </div>
                       <div class="checkpoint-info">
@@ -1005,11 +1088,14 @@ export class StoryBeatsEditor {
                       </div>
                     </div>
                   `;
-                }).join('')}
+                  })
+                  .join('')}
               </div>
             </div>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Quick Actions -->
         <div class="dynamic-actions">
@@ -1024,7 +1110,9 @@ export class StoryBeatsEditor {
         </div>
         
         <!-- Empty State -->
-        ${beats.length === 0 ? `
+        ${
+          beats.length === 0
+            ? `
           <div class="dynamic-empty-state">
             <div class="empty-icon">⚡</div>
             <div class="empty-title">No Checkpoints Yet</div>
@@ -1032,7 +1120,9 @@ export class StoryBeatsEditor {
               Add story beats using <kbd>I</kbd> and <kbd>O</kbd> to mark in/out points.
             </div>
           </div>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
     `;
   }
@@ -1065,7 +1155,7 @@ export class StoryBeatsEditor {
    */
   attachNoteListeners() {
     // Scene header click handlers for notes
-    this.editorContent?.querySelectorAll('.scene-note-btn').forEach(btn => {
+    this.editorContent?.querySelectorAll('.scene-note-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const markerId = e.target.closest('[data-marker-id]')?.dataset.markerId;
         if (markerId) {
@@ -1080,17 +1170,19 @@ export class StoryBeatsEditor {
    */
   showNotesPanel(markerId, noteType = 'director') {
     window.logging.info('video', 'LineScript show notes panel', { markerId, noteType });
-    
+
     // Initialize notes panel if needed
     if (!this.notesPanel) {
       // Dynamically import NotesPanel
-      import('./NotesPanel.js').then(({ NotesPanel }) => {
-        this.notesPanel = new NotesPanel(this.app);
-        this.notesPanel.show(markerId, noteType);
-      }).catch(err => {
-        window.logging.error('video', 'LineScript Failed to load NotesPanel', { error: { error: err } });
-        this.app.showToast?.('error', 'Failed to load notes panel');
-      });
+      import('./NotesPanel.js')
+        .then(({ NotesPanel }) => {
+          this.notesPanel = new NotesPanel(this.app);
+          this.notesPanel.show(markerId, noteType);
+        })
+        .catch((err) => {
+          window.logging.error('video', 'LineScript Failed to load NotesPanel', { error: { error: err } });
+          this.app.showToast?.('error', 'Failed to load notes panel');
+        });
     } else {
       this.notesPanel.show(markerId, noteType);
     }
@@ -1102,32 +1194,34 @@ export class StoryBeatsEditor {
   attachLearningListeners() {
     // Only attach if we're using learning or dynamic templates
     if (this.selectedTemplate !== 'learning' && this.selectedTemplate !== 'dynamic') return;
-    
+
     // === Learning Template Listeners ===
     if (this.selectedTemplate === 'learning') {
       // Goto buttons (chapters, key points, quizzes, concepts, examples)
-      this.editorContent?.querySelectorAll('.objective-goto, .keypoint-goto, .quiz-goto, .item-goto, .chapter-nav-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const time = parseFloat(btn.dataset.time);
-          if (!isNaN(time)) {
-            this.seekToTime(time);
-            this.app.showToast?.('info', `Jumped to ${this.formatTimecode(time)}`);
-          }
+      this.editorContent
+        ?.querySelectorAll('.objective-goto, .keypoint-goto, .quiz-goto, .item-goto, .chapter-nav-btn')
+        .forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const time = parseFloat(btn.dataset.time);
+            if (!isNaN(time)) {
+              this.seekToTime(time);
+              this.app.showToast?.('info', `Jumped to ${this.formatTimecode(time)}`);
+            }
+          });
         });
-      });
-      
+
       // Quiz preview buttons
-      this.editorContent?.querySelectorAll('.quiz-preview').forEach(btn => {
+      this.editorContent?.querySelectorAll('.quiz-preview').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const markerId = btn.dataset.markerId;
           this.showQuizPreview(markerId);
         });
       });
-      
+
       // Mark chapter as completed on double-click (toggle)
-      this.editorContent?.querySelectorAll('.objective-item').forEach(item => {
+      this.editorContent?.querySelectorAll('.objective-item').forEach((item) => {
         item.addEventListener('dblclick', (e) => {
           if (e.target.closest('.objective-goto')) return;
           item.classList.toggle('completed');
@@ -1135,25 +1229,28 @@ export class StoryBeatsEditor {
           const chapters = this.getLearningMarkers('chapter');
           if (chapters[index]) {
             chapters[index].completed = item.classList.contains('completed');
-            this.app.showToast?.('info', chapters[index].completed ? 'Chapter marked complete' : 'Chapter marked incomplete');
+            this.app.showToast?.(
+              'info',
+              chapters[index].completed ? 'Chapter marked complete' : 'Chapter marked incomplete'
+            );
           }
         });
       });
     }
-    
+
     // === Dynamic Template Listeners ===
     if (this.selectedTemplate === 'dynamic') {
       // Checkpoint toggle buttons
-      this.editorContent?.querySelectorAll('.checkpoint-toggle').forEach(btn => {
+      this.editorContent?.querySelectorAll('.checkpoint-toggle').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const beatId = btn.dataset.beatId;
           this.toggleCheckpointComplete(beatId);
         });
       });
-      
+
       // Checkpoint play buttons
-      this.editorContent?.querySelectorAll('.checkpoint-play').forEach(btn => {
+      this.editorContent?.querySelectorAll('.checkpoint-play').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           const time = parseFloat(btn.dataset.time);
@@ -1163,22 +1260,22 @@ export class StoryBeatsEditor {
           }
         });
       });
-      
+
       // Checkpoint segment clicks
-      this.editorContent?.querySelectorAll('.checkpoint-segment').forEach(seg => {
-        seg.addEventListener('click', (e) => {
+      this.editorContent?.querySelectorAll('.checkpoint-segment').forEach((seg) => {
+        seg.addEventListener('click', (_e) => {
           const beatId = seg.dataset.beatId;
-          const beat = this.markers.find(m => String(m.id) === String(beatId));
+          const beat = this.markers.find((m) => String(m.id) === String(beatId));
           if (beat) {
             this.seekToTime(beat.inTime || beat.time || 0);
           }
         });
       });
     }
-    
+
     // === Common Listeners ===
     // Collapsible panel headers
-    this.editorContent?.querySelectorAll('.panel-header').forEach(header => {
+    this.editorContent?.querySelectorAll('.panel-header').forEach((header) => {
       header.style.cursor = 'pointer';
     });
   }
@@ -1188,33 +1285,34 @@ export class StoryBeatsEditor {
    * @param {string} beatId - Beat/marker ID
    */
   toggleCheckpointComplete(beatId) {
-    const marker = this.markers.find(m => String(m.id) === String(beatId));
+    const marker = this.markers.find((m) => String(m.id) === String(beatId));
     if (!marker) return;
-    
+
     marker.completed = !marker.completed;
-    
+
     // Update UI
     const item = this.editorContent?.querySelector(`.checkpoint-item[data-beat-id="${beatId}"]`);
     const toggle = this.editorContent?.querySelector(`.checkpoint-toggle[data-beat-id="${beatId}"]`);
     const segment = this.editorContent?.querySelector(`.checkpoint-segment[data-beat-id="${beatId}"]`);
-    
+
     if (item) item.classList.toggle('completed', marker.completed);
-    if (toggle) toggle.textContent = marker.completed ? '✓' : (this.markers.filter(m => m.type === 'range').indexOf(marker) + 1);
+    if (toggle)
+      toggle.textContent = marker.completed ? '✓' : this.markers.filter((m) => m.type === 'range').indexOf(marker) + 1;
     if (segment) segment.classList.toggle('completed', marker.completed);
-    
+
     // Update progress display
-    const beats = this.markers.filter(m => m.type === 'range');
-    const completedBeats = beats.filter(b => b.completed).length;
+    const beats = this.markers.filter((m) => m.type === 'range');
+    const completedBeats = beats.filter((b) => b.completed).length;
     const progressPercent = beats.length > 0 ? Math.round((completedBeats / beats.length) * 100) : 0;
-    
+
     const badge = this.editorContent?.querySelector('.progress-badge');
     const statPercent = this.editorContent?.querySelector('.progress-stats .stat:first-child');
     const statRemaining = this.editorContent?.querySelector('.progress-stats .stat:last-child');
-    
+
     if (badge) badge.textContent = `${completedBeats}/${beats.length}`;
     if (statPercent) statPercent.textContent = `${progressPercent}% complete`;
     if (statRemaining) statRemaining.textContent = `${beats.length - completedBeats} remaining`;
-    
+
     this.app.showToast?.('info', marker.completed ? 'Checkpoint completed!' : 'Checkpoint uncompleted');
   }
 
@@ -1223,12 +1321,12 @@ export class StoryBeatsEditor {
    * @param {string} markerId - Marker ID of the quiz
    */
   showQuizPreview(markerId) {
-    const marker = this.markers.find(m => String(m.id) === String(markerId));
+    const marker = this.markers.find((m) => String(m.id) === String(markerId));
     if (!marker) {
       this.app.showToast?.('error', 'Quiz not found');
       return;
     }
-    
+
     // Simple modal preview
     const modal = document.createElement('div');
     modal.className = 'quiz-preview-modal';
@@ -1244,11 +1342,15 @@ export class StoryBeatsEditor {
           <div class="quiz-question">
             <strong>Question:</strong> ${this.escapeHtml(marker.name || 'No question set')}
           </div>
-          ${marker.description ? `
+          ${
+            marker.description
+              ? `
             <div class="quiz-details">
               <strong>Details:</strong> ${this.escapeHtml(marker.description)}
             </div>
-          ` : ''}
+          `
+              : ''
+          }
           <div class="quiz-timestamp">
             <strong>Timestamp:</strong> ${this.formatTimecode(marker.time || marker.inTime)}
           </div>
@@ -1259,7 +1361,7 @@ export class StoryBeatsEditor {
         </div>
       </div>
     `;
-    
+
     // Add modal styles if not present
     if (!document.getElementById('quiz-preview-styles')) {
       const styles = document.createElement('style');
@@ -1283,7 +1385,7 @@ export class StoryBeatsEditor {
       `;
       document.head.appendChild(styles);
     }
-    
+
     document.body.appendChild(modal);
   }
 
@@ -1307,21 +1409,21 @@ export class StoryBeatsEditor {
   renderScreenplayFormat() {
     const template = this.getTemplate();
     const config = template.config;
-    
+
     // Use list view for Dynamic Learning template
     if (config.listView) {
       return this.renderBeatsList();
     }
-    
+
     let html = '';
     let lineNumber = 1;
     let sceneNumber = 0;
     let lastMarkerId = null;
     let cumulativeTime = 0;
-    
+
     this.dialogueBlocks.forEach((block, blockIdx) => {
-      const blockTime = block.startTime || (this.words[block.wordStartIdx]?.start) || 0;
-      
+      const blockTime = block.startTime || this.words[block.wordStartIdx]?.start || 0;
+
       // Check if a new scene/marker starts before this block
       const sceneMarker = this.getMarkerAtTime(blockTime);
       if (sceneMarker && sceneMarker.id !== lastMarkerId) {
@@ -1330,38 +1432,45 @@ export class StoryBeatsEditor {
         html += this.renderSceneByTemplate(sceneMarker, sceneNumber, cumulativeTime, template);
         lastMarkerId = sceneMarker.id;
       }
-      
+
       // Render speaker cue based on template style
       if (block.speaker) {
         html += this.renderSpeakerByTemplate(block.speaker, lineNumber, block.parenthetical, template);
         lineNumber++;
       }
-      
+
       // Calculate line width based on template
-      const lineWidth = config.dialogueWidth === 'wide' ? 70 : 
-                        config.dialogueWidth === 'narrow' ? 40 : 55;
-      
+      const lineWidth = config.dialogueWidth === 'wide' ? 70 : config.dialogueWidth === 'narrow' ? 40 : 55;
+
       // Render dialogue lines with coverage tracking
       const dialogueLines = this.splitTextIntoLines(block.text, lineWidth);
       dialogueLines.forEach((lineText, lineIdx) => {
         const lineTime = this.interpolateTime(block, lineIdx, dialogueLines.length);
         const coverage = config.showCoverage ? this.getCoverageForTime(lineTime, lastMarkerId) : null;
-        html += this.renderDialogueByTemplate(lineNumber, lineTime, lineText, block.speaker, blockIdx, coverage, template);
+        html += this.renderDialogueByTemplate(
+          lineNumber,
+          lineTime,
+          lineText,
+          block.speaker,
+          blockIdx,
+          coverage,
+          template
+        );
         lineNumber++;
       });
-      
+
       // Add action/stage direction if present
       if (block.action) {
         html += this.renderActionLine(block.action, lineNumber);
         lineNumber++;
       }
-      
+
       // Add spacing between dialogue blocks
       if (blockIdx < this.dialogueBlocks.length - 1) {
         html += '<div class="storybeats-block-spacer"></div>';
       }
     });
-    
+
     return html;
   }
 
@@ -1371,13 +1480,13 @@ export class StoryBeatsEditor {
   renderBeatsList() {
     let html = '<div class="beats-list-view">';
     let beatNumber = 0;
-    
-    this.markers.forEach((marker, idx) => {
+
+    this.markers.forEach((marker, _idx) => {
       if (marker.type === 'range') {
         beatNumber++;
         const duration = (marker.outTime || 0) - (marker.inTime || 0);
         const wordsInRange = this.getWordsInTimeRange(marker.inTime, marker.outTime);
-        
+
         html += `
           <div class="beat-item" data-marker-id="${marker.id}" style="--beat-color: ${marker.color || '#4a9eff'};">
             <div class="beat-number">${beatNumber}</div>
@@ -1391,7 +1500,10 @@ export class StoryBeatsEditor {
               </div>
               ${marker.description ? `<div class="beat-description">${this.escapeHtml(marker.description)}</div>` : ''}
               <div class="beat-preview">
-                ${wordsInRange.slice(0, 20).map(w => w.text).join(' ')}${wordsInRange.length > 20 ? '...' : ''}
+                ${wordsInRange
+                  .slice(0, 20)
+                  .map((w) => w.text)
+                  .join(' ')}${wordsInRange.length > 20 ? '...' : ''}
               </div>
               <div class="beat-actions">
                 <button class="beat-action-btn" onclick="app.seekToTime(${marker.inTime})">▶ Play</button>
@@ -1406,7 +1518,7 @@ export class StoryBeatsEditor {
         `;
       }
     });
-    
+
     if (beatNumber === 0) {
       html += `
         <div class="beats-empty">
@@ -1416,7 +1528,7 @@ export class StoryBeatsEditor {
         </div>
       `;
     }
-    
+
     html += '</div>';
     return html;
   }
@@ -1425,20 +1537,20 @@ export class StoryBeatsEditor {
    * Get words in a time range
    */
   getWordsInTimeRange(startTime, endTime) {
-    return this.words.filter(w => w.start >= startTime && w.end <= endTime);
+    return this.words.filter((w) => w.start >= startTime && w.end <= endTime);
   }
 
   /**
    * Render scene header based on template
    */
   renderSceneByTemplate(marker, sceneNumber, cumulativeTime, template) {
-    const config = template.config;
-    
+    const _config = template.config;
+
     // Use full scene header for promo template (has all production elements)
     if (template.id === 'promo') {
       return this.renderFullSceneHeader(marker, sceneNumber, cumulativeTime);
     }
-    
+
     // Use template-specific scene header
     return this.renderTemplateSceneHeader(marker, sceneNumber, cumulativeTime, template);
   }
@@ -1451,9 +1563,9 @@ export class StoryBeatsEditor {
     const color = marker.color || '#4a9eff';
     const name = marker.name || `${config.sceneLabel} ${sceneNumber}`;
     const duration = (marker.outTime || 0) - (marker.inTime || 0);
-    
+
     let headerClass = `linescript-scene template-${template.id}`;
-    
+
     return `
       <div class="${headerClass}" data-marker-id="${marker.id}" style="--scene-color: ${color};">
         <div class="scene-slugline">
@@ -1466,17 +1578,25 @@ export class StoryBeatsEditor {
         <div class="scene-meta-bar">
           <div class="scene-timing">
             <span class="meta-value">${this.formatTimecode(marker.inTime)} - ${this.formatTimecode(marker.outTime)}</span>
-            ${config.showRunningTime ? `
+            ${
+              config.showRunningTime
+                ? `
               <span class="meta-separator">|</span>
               <span class="meta-label">RT:</span>
               <span class="meta-value">${this.formatTime(cumulativeTime + duration)}</span>
-            ` : ''}
+            `
+                : ''
+            }
           </div>
         </div>
         
-        ${marker.description ? `
+        ${
+          marker.description
+            ? `
           <div class="scene-description">${this.escapeHtml(marker.description)}</div>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
     `;
   }
@@ -1486,28 +1606,28 @@ export class StoryBeatsEditor {
    */
   renderSpeakerByTemplate(speaker, lineNumber, parenthetical, template) {
     const config = template.config;
-    
+
     switch (config.speakerStyle) {
       case 'conversation':
         // Podcast style - speaker label inline
         return this.renderConversationSpeaker(speaker, lineNumber);
-        
+
       case 'instructor':
         // Learning style - presenter label
         return this.renderInstructorSpeaker(speaker, lineNumber);
-        
+
       case 'voiceover':
         // Promo style - VO label
         return this.renderVoiceoverSpeaker(speaker, lineNumber);
-        
+
       case 'minimal':
         // Highlight style - minimal speaker
         return this.renderMinimalSpeaker(speaker, lineNumber);
-        
+
       case 'beat':
         // Dynamic style - no separate speaker cue
         return '';
-        
+
       default:
         return this.renderCharacterCue(speaker, lineNumber, parenthetical);
     }
@@ -1522,14 +1642,12 @@ export class StoryBeatsEditor {
     // Check planning data for character mapping
     const planning = this.app.planning || this.app.planningPanel?.planning;
     if (planning?.characters) {
-      const character = planning.characters.find(c => 
-        c.speakerIds && c.speakerIds.includes(String(speakerId))
-      );
+      const character = planning.characters.find((c) => c.speakerIds && c.speakerIds.includes(String(speakerId)));
       if (character) {
         return { name: character.name, color: character.color, role: character.role };
       }
     }
-    
+
     // Fall back to original speaker ID
     return { name: speakerId, color: null, role: null };
   }
@@ -1542,7 +1660,7 @@ export class StoryBeatsEditor {
     const character = this.getCharacterForSpeaker(speaker);
     const displayName = character.name || speaker;
     const avatarStyle = character.color ? `background: ${character.color}` : '';
-    
+
     return `
       <div class="speaker-cue conversation-style speaker-${speakerIdx}" data-line="${lineNumber}">
         <div class="speaker-avatar" style="${avatarStyle}">${displayName.charAt(0).toUpperCase()}</div>
@@ -1558,7 +1676,7 @@ export class StoryBeatsEditor {
     const character = this.getCharacterForSpeaker(speaker);
     const displayName = character.name || speaker;
     const roleLabel = character.role || 'PRESENTER';
-    
+
     return `
       <div class="speaker-cue instructor-style" data-line="${lineNumber}">
         <div class="instructor-badge">👤 ${roleLabel.toUpperCase()}</div>
@@ -1573,7 +1691,7 @@ export class StoryBeatsEditor {
   renderVoiceoverSpeaker(speaker, lineNumber) {
     const character = this.getCharacterForSpeaker(speaker);
     const displayName = character.name || speaker;
-    
+
     return `
       <div class="speaker-cue voiceover-style" data-line="${lineNumber}">
         <div class="vo-label">V.O.</div>
@@ -1590,7 +1708,7 @@ export class StoryBeatsEditor {
     const character = this.getCharacterForSpeaker(speaker);
     const displayName = character.name || speaker;
     const dotStyle = character.color ? `background: ${character.color}` : '';
-    
+
     return `
       <div class="speaker-cue minimal-style speaker-${speakerIdx}" data-line="${lineNumber}">
         <span class="speaker-dot" style="${dotStyle}"></span>
@@ -1607,7 +1725,7 @@ export class StoryBeatsEditor {
     const speakerClass = speaker ? `speaker-${this.getSpeakerIndex(speaker)}` : '';
     const templateClass = `template-${template.id}`;
     const coveredClass = coverage?.covered ? 'line-covered' : '';
-    
+
     return `
       <div class="storybeats-line storybeats-dialogue ${speakerClass} ${templateClass} ${coveredClass}" 
            data-line="${lineNumber}" data-block="${blockIdx}">
@@ -1629,13 +1747,13 @@ export class StoryBeatsEditor {
     let lineNumber = 1;
     let sceneNumber = 0;
     const wordsPerLine = 10;
-    
+
     const openMarkers = new Set();
     const renderedSceneHeaders = new Set();
-    
+
     this.words.forEach((word, index) => {
       // Check for scene markers
-      this.markers.forEach(marker => {
+      this.markers.forEach((marker) => {
         if (marker.type === 'range') {
           if (!openMarkers.has(marker.id) && word.start >= marker.inTime && word.start < marker.inTime + 0.5) {
             // Flush current line
@@ -1646,25 +1764,25 @@ export class StoryBeatsEditor {
               currentLineStart = index;
               lineNumber++;
             }
-            
+
             // Render scene header
             if (!renderedSceneHeaders.has(marker.id)) {
               sceneNumber++;
               html += this.renderSceneHeader(marker, sceneNumber);
               renderedSceneHeaders.add(marker.id);
             }
-            
+
             openMarkers.add(marker.id);
           }
         }
       });
-      
+
       // Render word
       const edit = this.getEditForWord(index);
       currentLine.push(this.renderWord(word, index, edit));
-      
+
       // Check for marker ends
-      this.markers.forEach(marker => {
+      this.markers.forEach((marker) => {
         if (marker.type === 'range' && openMarkers.has(marker.id)) {
           if (word.end >= marker.outTime - 0.5 && word.end <= marker.outTime + 0.5) {
             currentLine.push(this.renderMarkerEnd(marker));
@@ -1672,19 +1790,18 @@ export class StoryBeatsEditor {
           }
         }
       });
-      
+
       // Check for gap edits
-      this.edits.forEach(edit => {
+      this.edits.forEach((edit) => {
         if (edit.type === 'insert_gap' && Math.abs(edit.insertAfterTime - word.end) < 0.5) {
           currentLine.push(this.renderGapPlaceholder(edit));
         }
       });
-      
+
       // Line break logic
-      const isLineBreak = currentLine.length >= wordsPerLine || 
-                          this.isSentenceEnd(word.text) ||
-                          index === this.words.length - 1;
-      
+      const isLineBreak =
+        currentLine.length >= wordsPerLine || this.isSentenceEnd(word.text) || index === this.words.length - 1;
+
       if (isLineBreak) {
         const lineTime = this.words[currentLineStart]?.start || 0;
         html += this.renderScriptLine(lineNumber, lineTime, currentLine);
@@ -1693,7 +1810,7 @@ export class StoryBeatsEditor {
         lineNumber++;
       }
     });
-    
+
     return html;
   }
 
@@ -1705,20 +1822,20 @@ export class StoryBeatsEditor {
     const name = (marker.name || 'Scene').toUpperCase();
     const duration = (marker.outTime || 0) - (marker.inTime || 0);
     const timeRange = `${this.formatTimecode(marker.inTime)} - ${this.formatTimecode(marker.outTime)}`;
-    
+
     // Get scene notes or use defaults
     const notes = this.sceneNotes[marker.id] || {};
     const intExt = notes.intExt || this.guessIntExt(marker);
     const location = notes.location || name;
     const timeOfDay = notes.timeOfDay || this.guessTimeOfDay(marker);
     const sceneType = this.getSceneType(marker);
-    
+
     // Get director/supervisor notes
     const dirNotes = this.directorNotes[marker.id] || [];
     const supNotes = this.supervisorNotes[marker.id] || [];
     const techNotes = this.technicalNotes[marker.id] || {};
     const takes = this.takes[marker.id] || [];
-    
+
     return `
       <div class="linescript-scene" data-marker-id="${marker.id}" style="--scene-color: ${color};">
         <!-- Scene Slugline -->
@@ -1748,11 +1865,15 @@ export class StoryBeatsEditor {
         </div>
         
         <!-- Scene Description (if present) -->
-        ${marker.description ? `
+        ${
+          marker.description
+            ? `
           <div class="scene-description">
             ${this.escapeHtml(marker.description)}
           </div>
-        ` : ''}
+        `
+            : ''
+        }
         
         <!-- Notes & Technical Section (collapsible) -->
         <div class="scene-notes-section">
@@ -1771,22 +1892,35 @@ export class StoryBeatsEditor {
             </button>
           </div>
           
-          ${dirNotes.length > 0 ? `
+          ${
+            dirNotes.length > 0
+              ? `
             <div class="director-notes-preview">
-              ${dirNotes.slice(0, 2).map(n => `
+              ${dirNotes
+                .slice(0, 2)
+                .map(
+                  (n) => `
                 <div class="note-item">💡 ${this.escapeHtml(n.note)}</div>
-              `).join('')}
+              `
+                )
+                .join('')}
               ${dirNotes.length > 2 ? `<div class="note-more">+${dirNotes.length - 2} more</div>` : ''}
             </div>
-          ` : ''}
+          `
+              : ''
+          }
           
-          ${Object.keys(techNotes).length > 0 ? `
+          ${
+            Object.keys(techNotes).length > 0
+              ? `
             <div class="tech-notes-preview">
               ${techNotes.camera ? `<span class="tech-item">📹 ${techNotes.camera}</span>` : ''}
               ${techNotes.lens ? `<span class="tech-item">🔍 ${techNotes.lens}</span>` : ''}
               ${techNotes.sound ? `<span class="tech-item">🎤 ${techNotes.sound}</span>` : ''}
             </div>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
         
         <!-- Coverage Track (visual line through covered portions) -->
@@ -1803,7 +1937,7 @@ export class StoryBeatsEditor {
   renderCoverageTrack(markerId, startTime, endTime) {
     const coverage = this.coverage[markerId] || [];
     const duration = endTime - startTime;
-    
+
     // Always show the track container with add button
     let html = `
       <div class="coverage-track-interactive" 
@@ -1812,7 +1946,7 @@ export class StoryBeatsEditor {
            data-end="${endTime}"
            onclick="app.storyBeatsEditor?.handleCoverageTrackClick(event, '${markerId}', ${startTime}, ${endTime})">
     `;
-    
+
     if (coverage.length === 0) {
       html += `
         <div class="coverage-empty-interactive">
@@ -1821,12 +1955,13 @@ export class StoryBeatsEditor {
       `;
     } else {
       // Render existing coverage segments
-      html += coverage.map((c, index) => {
-        const left = ((c.startTime - startTime) / duration) * 100;
-        const width = ((c.endTime - c.startTime) / duration) * 100;
-        const colorClass = this._getCoverageColorClass(c.setup);
-        
-        return `
+      html += coverage
+        .map((c, index) => {
+          const left = ((c.startTime - startTime) / duration) * 100;
+          const width = ((c.endTime - c.startTime) / duration) * 100;
+          const colorClass = this._getCoverageColorClass(c.setup);
+
+          return `
           <div class="coverage-segment interactive ${c.covered ? 'covered' : ''} ${colorClass}" 
                style="left: ${left}%; width: ${width}%;"
                data-coverage-index="${index}"
@@ -1841,9 +1976,10 @@ export class StoryBeatsEditor {
                  onmousedown="event.stopPropagation(); app.storyBeatsEditor?.startCoverageDrag(event, '${markerId}', ${index}, 'right')"></div>
           </div>
         `;
-      }).join('');
+        })
+        .join('');
     }
-    
+
     // Add button for new coverage
     html += `
       <button class="coverage-add-btn" 
@@ -1853,7 +1989,7 @@ export class StoryBeatsEditor {
       </button>
     </div>
     `;
-    
+
     return html;
   }
 
@@ -1880,11 +2016,11 @@ export class StoryBeatsEditor {
     const clickX = event.clientX - rect.left;
     const trackWidth = rect.width;
     const clickPercent = clickX / trackWidth;
-    
+
     // Calculate time at click position
     const duration = endTime - startTime;
-    const clickTime = startTime + (duration * clickPercent);
-    
+    const clickTime = startTime + duration * clickPercent;
+
     // Add new coverage segment at this position
     this.addCoverageSegmentAtTime(markerId, clickTime, startTime, endTime);
   }
@@ -1896,23 +2032,23 @@ export class StoryBeatsEditor {
     // Prompt for shot info
     const shotId = prompt('Shot ID (e.g., 1A, 2B, etc.):', `${(this.coverage[markerId]?.length || 0) + 1}A`);
     if (!shotId) return;
-    
+
     const setup = prompt('Shot setup (e.g., Wide, Medium, Close-up, OTS):', 'Medium');
-    
+
     // Initialize coverage array if needed
     if (!this.coverage[markerId]) {
       this.coverage[markerId] = [];
     }
-    
+
     // Add new segment covering the full scene by default
     this.coverage[markerId].push({
       shotId: shotId.trim(),
       setup: setup?.trim() || 'Medium',
       startTime: startTime,
       endTime: endTime,
-      covered: false
+      covered: false,
     });
-    
+
     // Re-render
     this.render();
     this.app.showToast?.('success', `Added shot ${shotId}`);
@@ -1924,27 +2060,27 @@ export class StoryBeatsEditor {
   addCoverageSegmentAtTime(markerId, clickTime, sceneStart, sceneEnd) {
     const shotId = prompt('Shot ID:', `${(this.coverage[markerId]?.length || 0) + 1}A`);
     if (!shotId) return;
-    
+
     const setup = prompt('Shot setup:', 'Medium');
-    
+
     if (!this.coverage[markerId]) {
       this.coverage[markerId] = [];
     }
-    
+
     // Create segment starting at click position with default 5 second duration
     const segmentDuration = Math.min(5, sceneEnd - clickTime);
-    
+
     this.coverage[markerId].push({
       shotId: shotId.trim(),
       setup: setup?.trim() || 'Medium',
       startTime: clickTime,
       endTime: clickTime + segmentDuration,
-      covered: false
+      covered: false,
     });
-    
+
     // Sort by start time
     this.coverage[markerId].sort((a, b) => a.startTime - b.startTime);
-    
+
     this.render();
     this.app.showToast?.('success', `Added shot ${shotId}`);
   }
@@ -1955,24 +2091,24 @@ export class StoryBeatsEditor {
   editCoverageSegment(markerId, index) {
     const coverage = this.coverage[markerId];
     if (!coverage || !coverage[index]) return;
-    
+
     const segment = coverage[index];
-    
+
     // Create edit modal
     const action = prompt(
       `Shot ${segment.shotId} (${segment.setup})\n\n` +
-      `Options:\n` +
-      `- Enter new shot ID to rename\n` +
-      `- Type 'setup' to change setup\n` +
-      `- Type 'toggle' to mark as covered/uncovered\n` +
-      `- Type 'delete' to remove`,
+        `Options:\n` +
+        `- Enter new shot ID to rename\n` +
+        `- Type 'setup' to change setup\n` +
+        `- Type 'toggle' to mark as covered/uncovered\n` +
+        `- Type 'delete' to remove`,
       segment.shotId
     );
-    
+
     if (!action) return;
-    
+
     const actionLower = action.toLowerCase().trim();
-    
+
     if (actionLower === 'delete') {
       if (confirm(`Delete shot ${segment.shotId}?`)) {
         coverage.splice(index, 1);
@@ -2001,38 +2137,38 @@ export class StoryBeatsEditor {
    */
   startCoverageDrag(event, markerId, index, edge) {
     event.preventDefault();
-    
+
     const coverage = this.coverage[markerId];
     if (!coverage || !coverage[index]) return;
-    
+
     const segment = coverage[index];
     const track = event.target.closest('.coverage-track-interactive');
     if (!track) return;
-    
+
     const startTime = parseFloat(track.dataset.start);
     const endTime = parseFloat(track.dataset.end);
     const duration = endTime - startTime;
     const rect = track.getBoundingClientRect();
-    
+
     const handleMouseMove = (e) => {
       const x = e.clientX - rect.left;
       const percent = Math.max(0, Math.min(1, x / rect.width));
-      const time = startTime + (duration * percent);
-      
+      const time = startTime + duration * percent;
+
       if (edge === 'left') {
         segment.startTime = Math.min(time, segment.endTime - 0.5); // Min 0.5s duration
       } else {
         segment.endTime = Math.max(time, segment.startTime + 0.5);
       }
-      
+
       this.render();
     };
-    
+
     const handleMouseUp = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-    
+
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
   }
@@ -2042,8 +2178,8 @@ export class StoryBeatsEditor {
    */
   guessIntExt(marker) {
     const name = (marker.name || '').toLowerCase();
-    const tags = (marker.tags || []).map(t => t.toLowerCase());
-    
+    const tags = (marker.tags || []).map((t) => t.toLowerCase());
+
     if (name.includes('ext') || tags.includes('exterior') || tags.includes('outside')) return 'EXT';
     if (name.includes('int') || tags.includes('interior') || tags.includes('inside')) return 'INT';
     return 'INT'; // Default
@@ -2054,8 +2190,8 @@ export class StoryBeatsEditor {
    */
   guessTimeOfDay(marker) {
     const name = (marker.name || '').toLowerCase();
-    const tags = (marker.tags || []).map(t => t.toLowerCase());
-    
+    const tags = (marker.tags || []).map((t) => t.toLowerCase());
+
     if (name.includes('night') || tags.includes('night')) return 'NIGHT';
     if (name.includes('dawn') || tags.includes('dawn')) return 'DAWN';
     if (name.includes('dusk') || tags.includes('dusk')) return 'DUSK';
@@ -2069,7 +2205,7 @@ export class StoryBeatsEditor {
    */
   getCoverageForTime(time, markerId) {
     const coverage = this.coverage[markerId] || [];
-    return coverage.find(c => time >= c.startTime && time <= c.endTime);
+    return coverage.find((c) => time >= c.startTime && time <= c.endTime);
   }
 
   /**
@@ -2092,7 +2228,7 @@ export class StoryBeatsEditor {
     const character = this.getCharacterForSpeaker(speaker);
     const displayName = (character.name || speaker).toUpperCase();
     const colorStyle = character.color ? `border-left: 3px solid ${character.color}; padding-left: 8px;` : '';
-    
+
     return `
       <div class="storybeats-character-cue" data-line="${lineNumber}" style="${colorStyle}">
         <div class="storybeats-line-number">${lineNumber}</div>
@@ -2112,7 +2248,7 @@ export class StoryBeatsEditor {
     const speakerClass = speaker ? `speaker-${this.getSpeakerIndex(speaker)}` : '';
     const coveredClass = coverage?.covered ? 'line-covered' : '';
     const shotLabel = coverage?.shotId ? `<span class="line-shot-label">${coverage.shotId}</span>` : '';
-    
+
     return `
       <div class="storybeats-line storybeats-dialogue ${speakerClass} ${coveredClass}" 
            data-line="${lineNumber}" data-block="${blockIdx}">
@@ -2147,10 +2283,10 @@ export class StoryBeatsEditor {
     const name = (marker.name || 'Scene').toUpperCase();
     const timeRange = `${this.formatTimecode(marker.inTime)} - ${this.formatTimecode(marker.outTime)}`;
     const duration = ((marker.outTime || 0) - (marker.inTime || 0)).toFixed(1);
-    
+
     // Determine scene type from marker name/tags
     const sceneType = this.getSceneType(marker);
-    
+
     return `
       <div class="storybeats-scene-header" style="--scene-color: ${color};" data-marker-id="${marker.id}">
         <div class="scene-header-line">
@@ -2171,8 +2307,8 @@ export class StoryBeatsEditor {
    */
   getSceneType(marker) {
     const name = (marker.name || '').toLowerCase();
-    const tags = (marker.tags || []).map(t => t.toLowerCase());
-    
+    const tags = (marker.tags || []).map((t) => t.toLowerCase());
+
     if (name.includes('reel') || tags.includes('reel')) return 'REEL';
     if (name.includes('segment') || tags.includes('segment')) return 'SEGMENT';
     if (name.includes('act') || tags.includes('act')) return 'ACT';
@@ -2206,8 +2342,8 @@ export class StoryBeatsEditor {
     const lines = [];
     let currentLine = [];
     let currentLength = 0;
-    
-    words.forEach(word => {
+
+    words.forEach((word) => {
       if (currentLength + word.length + 1 > maxChars && currentLine.length > 0) {
         lines.push(currentLine.join(' '));
         currentLine = [word];
@@ -2217,11 +2353,11 @@ export class StoryBeatsEditor {
         currentLength += word.length + 1;
       }
     });
-    
+
     if (currentLine.length > 0) {
       lines.push(currentLine.join(' '));
     }
-    
+
     return lines;
   }
 
@@ -2232,8 +2368,8 @@ export class StoryBeatsEditor {
     const startTime = block.startTime || 0;
     const endTime = block.endTime || startTime + 5;
     const duration = endTime - startTime;
-    
-    return startTime + (duration * lineIdx / totalLines);
+
+    return startTime + (duration * lineIdx) / totalLines;
   }
 
   /**
@@ -2244,7 +2380,7 @@ export class StoryBeatsEditor {
    */
   renderTextWithEdits(text, blockStartTime = 0, blockEndTime = 0) {
     // Get edits in the time range of this text block
-    const editsInRange = (this.edits || []).filter(edit => {
+    const editsInRange = (this.edits || []).filter((edit) => {
       if (!blockStartTime && !blockEndTime) return false;
       const editStart = edit.startTime || edit.insertAfterTime || 0;
       const editEnd = edit.endTime || editStart;
@@ -2267,14 +2403,14 @@ export class StoryBeatsEditor {
       // Calculate approximate word positions based on time
       const editStartOffset = Math.max(0, (edit.startTime - blockStartTime) / blockDuration);
       const editEndOffset = Math.min(1, (edit.endTime - blockStartTime) / blockDuration);
-      
+
       const startWordIdx = Math.floor(editStartOffset * textWords.length);
       const endWordIdx = Math.ceil(editEndOffset * textWords.length);
 
       // Find character positions
       let charStart = 0;
       let charEnd = escapedText.length;
-      
+
       for (let i = 0; i < textWords.length; i++) {
         if (i === startWordIdx) {
           charStart = escapedText.indexOf(textWords[i], currentPos);
@@ -2357,17 +2493,15 @@ export class StoryBeatsEditor {
    * Render a single word element in script format
    */
   renderWord(word, index, edit = null) {
-    const isSelected = this.selection && 
-                       index >= this.selection.startIndex && 
-                       index <= this.selection.endIndex;
-    
+    const isSelected = this.selection && index >= this.selection.startIndex && index <= this.selection.endIndex;
+
     let classes = ['storybeats-word'];
     let styles = [];
-    
+
     if (isSelected) {
       classes.push('selected');
     }
-    
+
     if (edit) {
       if (edit.type === 'delete') {
         classes.push('edit-delete');
@@ -2375,15 +2509,15 @@ export class StoryBeatsEditor {
         classes.push('edit-replace');
       }
     }
-    
+
     // Check if within a marker for subtle underline
     const marker = this.getMarkerAtTime(word.start);
     if (marker && !isSelected && !edit) {
       styles.push(`border-bottom: 1px dotted ${marker.color || '#4a9eff'}40`);
     }
-    
+
     const styleAttr = styles.length > 0 ? `style="${styles.join(';')}"` : '';
-    
+
     return `<span class="${classes.join(' ')}" 
                   data-index="${index}" 
                   data-start="${word.start}" 
@@ -2410,13 +2544,13 @@ export class StoryBeatsEditor {
   attachWordListeners() {
     const words = this.editorContent?.querySelectorAll('.storybeats-word');
     if (!words) return;
-    
-    words.forEach(wordEl => {
+
+    words.forEach((wordEl) => {
       wordEl.addEventListener('mousedown', this.handleWordMouseDown);
       wordEl.addEventListener('mouseup', this.handleWordMouseUp);
       wordEl.addEventListener('click', this.handleWordClick);
     });
-    
+
     // Listen for mouse up anywhere to complete selection
     document.addEventListener('mouseup', this.handleDocumentMouseUp);
   }
@@ -2427,16 +2561,15 @@ export class StoryBeatsEditor {
   setupEventListeners() {
     // Click outside to clear selection
     document.addEventListener('click', (e) => {
-      if (!this.container?.contains(e.target) && 
-          !e.target.closest('.storybeats-edit-toolbar')) {
+      if (!this.container?.contains(e.target) && !e.target.closest('.storybeats-edit-toolbar')) {
         this.clearSelection();
       }
     });
-    
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if (!this.visible) return;
-      
+
       if (e.key === 'Escape') {
         this.clearSelection();
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -2454,9 +2587,9 @@ export class StoryBeatsEditor {
   handleWordMouseDown(e) {
     const wordEl = e.target;
     const index = parseInt(wordEl.dataset.index);
-    
+
     if (isNaN(index)) return;
-    
+
     this.selectionStart = index;
     this.isSelecting = true;
   }
@@ -2466,19 +2599,19 @@ export class StoryBeatsEditor {
    */
   handleWordMouseUp(e) {
     if (!this.isSelecting) return;
-    
+
     const wordEl = e.target;
     const index = parseInt(wordEl.dataset.index);
-    
+
     if (isNaN(index)) return;
-    
+
     this.completeSelection(this.selectionStart, index);
   }
 
   /**
    * Handle document mouse up (complete selection)
    */
-  handleDocumentMouseUp(e) {
+  handleDocumentMouseUp(_e) {
     if (this.isSelecting && this.selectionStart !== undefined) {
       // If we haven't completed selection on a word, use the start as single selection
       if (this.selection === null) {
@@ -2494,9 +2627,9 @@ export class StoryBeatsEditor {
   handleWordClick(e) {
     const wordEl = e.target;
     const index = parseInt(wordEl.dataset.index);
-    
+
     if (isNaN(index)) return;
-    
+
     // If shift key, extend selection
     if (e.shiftKey && this.selection) {
       this.completeSelection(this.selection.startIndex, index);
@@ -2512,23 +2645,26 @@ export class StoryBeatsEditor {
     // Ensure start <= end
     const start = Math.min(startIndex, endIndex);
     const end = Math.max(startIndex, endIndex);
-    
+
     const startWord = this.words[start];
     const endWord = this.words[end];
-    
+
     if (!startWord || !endWord) return;
-    
+
     this.selection = {
       startIndex: start,
       endIndex: end,
       startTime: startWord.start,
       endTime: endWord.end,
-      text: this.words.slice(start, end + 1).map(w => w.text).join(' ')
+      text: this.words
+        .slice(start, end + 1)
+        .map((w) => w.text)
+        .join(' '),
     };
-    
+
     // Re-render to show selection
     this.render();
-    
+
     // Show edit toolbar
     this.showEditToolbar();
   }
@@ -2540,10 +2676,10 @@ export class StoryBeatsEditor {
     this.selection = null;
     this.selectionStart = undefined;
     this.isSelecting = false;
-    
+
     // Re-render
     this.render();
-    
+
     // Hide toolbar
     this.hideEditToolbar();
   }
@@ -2553,7 +2689,7 @@ export class StoryBeatsEditor {
    */
   showEditToolbar() {
     if (!this.selection) return;
-    
+
     // Notify the EditToolbar component
     if (this.app.storyBeatsToolbar) {
       this.app.storyBeatsToolbar.show(this.selection);
@@ -2575,20 +2711,20 @@ export class StoryBeatsEditor {
   addEdit(edit) {
     edit.id = `edit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.edits.push(edit);
-    
+
     // Re-render to show the edit
     this.render();
-    
+
     // Update mini timeline
     if (this.app.storyBeatsMiniTimeline) {
       this.app.storyBeatsMiniTimeline.updatePreview(this.edits);
     }
-    
+
     // Notify sync engine
     if (this.app.videoSyncEngine) {
       this.app.videoSyncEngine.onEditAdded(edit);
     }
-    
+
     return edit;
   }
 
@@ -2596,9 +2732,9 @@ export class StoryBeatsEditor {
    * Remove an edit from the queue
    */
   removeEdit(editId) {
-    this.edits = this.edits.filter(e => e.id !== editId);
+    this.edits = this.edits.filter((e) => e.id !== editId);
     this.render();
-    
+
     if (this.app.storyBeatsMiniTimeline) {
       this.app.storyBeatsMiniTimeline.updatePreview(this.edits);
     }
@@ -2610,7 +2746,7 @@ export class StoryBeatsEditor {
   clearEdits() {
     this.edits = [];
     this.render();
-    
+
     if (this.app.storyBeatsMiniTimeline) {
       this.app.storyBeatsMiniTimeline.updatePreview(this.edits);
     }
@@ -2621,19 +2757,19 @@ export class StoryBeatsEditor {
    */
   deleteSelection() {
     if (!this.selection) return;
-    
+
     const edit = {
       type: 'delete',
       startTime: this.selection.startTime,
       endTime: this.selection.endTime,
       startIndex: this.selection.startIndex,
       endIndex: this.selection.endIndex,
-      originalText: this.selection.text
+      originalText: this.selection.text,
     };
-    
+
     this.addEdit(edit);
     this.clearSelection();
-    
+
     this.app.showToast?.('info', `Marked "${edit.originalText.substring(0, 30)}..." for deletion`);
   }
 
@@ -2642,17 +2778,17 @@ export class StoryBeatsEditor {
    */
   insertGapAtSelection(duration = 3.0) {
     if (!this.selection) return;
-    
+
     const edit = {
       type: 'insert_gap',
       insertAfterTime: this.selection.endTime,
       insertAfterIndex: this.selection.endIndex,
-      gapDuration: duration
+      gapDuration: duration,
     };
-    
+
     this.addEdit(edit);
     this.clearSelection();
-    
+
     this.app.showToast?.('info', `Inserted ${duration}s gap for new content`);
   }
 
@@ -2661,7 +2797,7 @@ export class StoryBeatsEditor {
    */
   replaceSelection(newText = '') {
     if (!this.selection) return;
-    
+
     const edit = {
       type: 'replace',
       startTime: this.selection.startTime,
@@ -2669,12 +2805,12 @@ export class StoryBeatsEditor {
       startIndex: this.selection.startIndex,
       endIndex: this.selection.endIndex,
       originalText: this.selection.text,
-      newText: newText
+      newText: newText,
     };
-    
+
     this.addEdit(edit);
     this.clearSelection();
-    
+
     this.app.showToast?.('info', 'Marked for replacement');
   }
 
@@ -2683,21 +2819,21 @@ export class StoryBeatsEditor {
    */
   createMarkerFromSelection() {
     if (!this.selection) return;
-    
+
     // Open marker modal with the selection info
     if (this.app.markerModal) {
       this.app.markerModal.rangeInTime = this.selection.startTime;
       this.app.markerModal.rangeOutTime = this.selection.endTime;
       this.app.markerModal.selectedType = 'range';
       this.app.markerModal.show(this.selection.startTime, null, 'range');
-      
+
       // Pre-fill transcription
       const transcriptField = document.getElementById('markerTranscription');
       if (transcriptField) {
         transcriptField.value = this.selection.text;
       }
     }
-    
+
     this.clearSelection();
   }
 
@@ -2719,9 +2855,9 @@ export class StoryBeatsEditor {
    * Scroll to a specific time in the editor
    */
   scrollToTime(time) {
-    const wordIndex = this.words.findIndex(w => w.start >= time);
+    const wordIndex = this.words.findIndex((w) => w.start >= time);
     if (wordIndex === -1) return;
-    
+
     const wordEl = this.editorContent?.querySelector(`[data-index="${wordIndex}"]`);
     if (wordEl) {
       wordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -2738,5 +2874,3 @@ export class StoryBeatsEditor {
     this.render();
   }
 }
-
-

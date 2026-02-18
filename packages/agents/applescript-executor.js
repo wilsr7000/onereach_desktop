@@ -1,6 +1,6 @@
 /**
  * Smart AppleScript Executor
- * 
+ *
  * An intelligent, self-correcting AppleScript execution engine that:
  * 1. Understands the intent and generates appropriate scripts
  * 2. Executes with detailed feedback capture
@@ -32,7 +32,7 @@ const ERROR_TYPES = {
   CONNECTION_INVALID: 'connection_invalid',
   TIMEOUT: 'timeout',
   NO_CONTENT: 'no_content',
-  UNKNOWN: 'unknown'
+  UNKNOWN: 'unknown',
 };
 
 /**
@@ -40,20 +40,20 @@ const ERROR_TYPES = {
  */
 function categorizeError(error) {
   const e = error.toLowerCase();
-  
-  if (e.includes('not running') || e.includes('isn\'t running')) {
+
+  if (e.includes('not running') || e.includes("isn't running")) {
     return { type: ERROR_TYPES.APP_NOT_RUNNING, fixStrategy: 'activate_app' };
   }
-  if (e.includes('not find application') || e.includes('can\'t find application')) {
+  if (e.includes('not find application') || e.includes("can't find application")) {
     return { type: ERROR_TYPES.APP_NOT_INSTALLED, fixStrategy: 'none', unfixable: true };
   }
   if (e.includes('not allowed') || e.includes('permission') || e.includes('access')) {
     return { type: ERROR_TYPES.PERMISSION_DENIED, fixStrategy: 'request_permission', unfixable: true };
   }
-  if (e.includes('syntax error') || e.includes('expected') || e.includes('can\'t continue')) {
+  if (e.includes('syntax error') || e.includes('expected') || e.includes("can't continue")) {
     return { type: ERROR_TYPES.SYNTAX_ERROR, fixStrategy: 'rewrite_script' };
   }
-  if (e.includes('can\'t get') || e.includes('doesn\'t understand')) {
+  if (e.includes("can't get") || e.includes("doesn't understand")) {
     return { type: ERROR_TYPES.PROPERTY_NOT_FOUND, fixStrategy: 'add_existence_check' };
   }
   if (e.includes('connection is invalid') || e.includes('lost connection')) {
@@ -65,7 +65,7 @@ function categorizeError(error) {
   if (e.includes('no track') || e.includes('nothing to') || e.includes('empty')) {
     return { type: ERROR_TYPES.NO_CONTENT, fixStrategy: 'check_content_first' };
   }
-  
+
   return { type: ERROR_TYPES.UNKNOWN, fixStrategy: 'llm_analyze' };
 }
 
@@ -78,32 +78,32 @@ function categorizeError(error) {
  */
 async function runAppleScript(script, options = {}) {
   const { timeout = 15000, captureState = false, app = null } = options;
-  
+
   // Optionally capture state before execution
   let stateBefore = null;
   if (captureState && app) {
     stateBefore = await getAppState(app);
   }
-  
+
   try {
     // Write to temp file to avoid escaping issues
     const tempFile = path.join(os.tmpdir(), `applescript_${Date.now()}.scpt`);
     fs.writeFileSync(tempFile, script);
-    
+
     const startTime = Date.now();
-    
+
     try {
       const { stdout, stderr } = await execAsync(`osascript "${tempFile}"`, { timeout });
       const duration = Date.now() - startTime;
-      
+
       fs.unlinkSync(tempFile);
-      
+
       // Capture state after execution
       let stateAfter = null;
       if (captureState && app) {
         stateAfter = await getAppState(app);
       }
-      
+
       return {
         success: true,
         output: stdout.trim(),
@@ -112,8 +112,7 @@ async function runAppleScript(script, options = {}) {
         duration,
         stateBefore,
         stateAfter,
-        stateChanged: stateBefore && stateAfter ? 
-          JSON.stringify(stateBefore) !== JSON.stringify(stateAfter) : null
+        stateChanged: stateBefore && stateAfter ? JSON.stringify(stateBefore) !== JSON.stringify(stateAfter) : null,
       };
     } catch (execError) {
       fs.unlinkSync(tempFile);
@@ -121,7 +120,7 @@ async function runAppleScript(script, options = {}) {
     }
   } catch (error) {
     const errorInfo = categorizeError(error.message || error.stderr || '');
-    
+
     return {
       success: false,
       output: '',
@@ -130,7 +129,7 @@ async function runAppleScript(script, options = {}) {
       errorType: errorInfo.type,
       fixStrategy: errorInfo.fixStrategy,
       unfixable: errorInfo.unfixable || false,
-      stateBefore
+      stateBefore,
     };
   }
 }
@@ -170,24 +169,24 @@ async function getAppState(app) {
     end tell
     return output
   `;
-  
+
   try {
     const tempFile = path.join(os.tmpdir(), `state_${Date.now()}.scpt`);
     fs.writeFileSync(tempFile, stateScript);
     const { stdout } = await execAsync(`osascript "${tempFile}"`, { timeout: 5000 });
     fs.unlinkSync(tempFile);
-    
+
     const output = stdout.trim();
     if (output === 'NOT_RUNNING') {
       return { running: false, state: 'not_running' };
     }
-    
+
     const parts = output.split('|');
     return {
       running: true,
       state: parts[0] || 'unknown',
       track: parts[1] || null,
-      artist: parts[2] || null
+      artist: parts[2] || null,
     };
   } catch {
     return { running: false, state: 'error' };
@@ -202,12 +201,7 @@ async function getAppState(app) {
  * Generate an AppleScript with comprehensive error handling
  */
 async function generateScript(intent, context = {}) {
-  const { 
-    previousAttempts = [], 
-    targetApp = null,
-    currentState = null,
-    constraints = []
-  } = context;
+  const { previousAttempts = [], _targetApp = null, currentState = null, constraints = [] } = context;
 
   const systemPrompt = `You are an expert AppleScript developer. Generate robust, production-quality AppleScript code.
 
@@ -248,10 +242,14 @@ VERIFICATION IS MANDATORY:
 - After search, check if results were found
 - After any action, confirm the expected state change occurred
 
-${previousAttempts.length > 0 ? `
+${
+  previousAttempts.length > 0
+    ? `
 PREVIOUS FAILED ATTEMPTS (avoid these mistakes):
 ${previousAttempts.map((a, i) => `${i + 1}. Script failed with: ${a.error}`).join('\n')}
-` : ''}
+`
+    : ''
+}
 
 ${currentState ? `CURRENT APP STATE: ${JSON.stringify(currentState)}` : ''}
 ${constraints.length > 0 ? `CONSTRAINTS: ${constraints.join(', ')}` : ''}`;
@@ -259,19 +257,20 @@ ${constraints.length > 0 ? `CONSTRAINTS: ${constraints.join(', ')}` : ''}`;
   const result = await ai.chat({
     profile: 'fast',
     system: systemPrompt,
-    messages: [
-      { role: 'user', content: `Generate AppleScript to: ${intent}` }
-    ],
+    messages: [{ role: 'user', content: `Generate AppleScript to: ${intent}` }],
     temperature: 0.1,
     maxTokens: 1500,
     feature: 'applescript-executor',
   });
-  
+
   let script = result.content || '';
-  
+
   // Clean up any markdown
-  script = script.replace(/^```applescript\n?/i, '').replace(/^```\n?/i, '').replace(/\n?```$/gi, '');
-  
+  script = script
+    .replace(/^```applescript\n?/i, '')
+    .replace(/^```\n?/i, '')
+    .replace(/\n?```$/gi, '');
+
   return script.trim();
 }
 
@@ -288,15 +287,7 @@ async function analyzeAndFix(context) {
     throw new Error('OpenAI API key required for error analysis');
   }
 
-  const { 
-    originalScript, 
-    error, 
-    errorType,
-    fixStrategy,
-    intent, 
-    stateBefore,
-    previousFixes = []
-  } = context;
+  const { originalScript, error, errorType, fixStrategy, intent, stateBefore, previousFixes = [] } = context;
 
   // Quick fixes for known error types
   if (fixStrategy === 'activate_app' && !previousFixes.includes('activate_app')) {
@@ -312,7 +303,7 @@ ${originalScript}`;
         fixedScript,
         explanation: `Added app activation for ${app}`,
         canFix: true,
-        fixApplied: 'activate_app'
+        fixApplied: 'activate_app',
       };
     }
   }
@@ -344,14 +335,19 @@ For all other errors, provide a fix. Be creative but practical.`;
   const aiResult = await ai.chat({
     profile: 'fast',
     system: systemPrompt,
-    messages: [{ role: 'user', content: `Intent: ${intent}
+    messages: [
+      {
+        role: 'user',
+        content: `Intent: ${intent}
 
 Script that failed:
 ${originalScript}
 
 Error: ${error}
 
-${stateBefore ? `State before execution: ${JSON.stringify(stateBefore)}` : ''}` }],
+${stateBefore ? `State before execution: ${JSON.stringify(stateBefore)}` : ''}`,
+      },
+    ],
     temperature: 0.2,
     maxTokens: 2000,
     jsonMode: true,
@@ -359,7 +355,7 @@ ${stateBefore ? `State before execution: ${JSON.stringify(stateBefore)}` : ''}` 
   });
 
   const result = JSON.parse(aiResult.content || '{}');
-  
+
   // Clean up script if needed
   if (result.fixedScript) {
     result.fixedScript = result.fixedScript
@@ -368,7 +364,7 @@ ${stateBefore ? `State before execution: ${JSON.stringify(stateBefore)}` : ''}` 
       .replace(/\n?```$/gi, '')
       .trim();
   }
-  
+
   return result;
 }
 
@@ -380,21 +376,21 @@ ${stateBefore ? `State before execution: ${JSON.stringify(stateBefore)}` : ''}` 
  * Verify that the action accomplished what was intended
  */
 async function verifyOutcome(intent, result, options = {}) {
-  const { app, expectedState, stateBefore, stateAfter } = options;
-  
+  const { _app, _expectedState, stateBefore, stateAfter } = options;
+
   // Basic checks
   if (!result.success) {
     return { verified: false, reason: 'Script execution failed' };
   }
-  
+
   if (result.output?.toLowerCase().includes('error')) {
     return { verified: false, reason: `Script returned error: ${result.output}` };
   }
-  
+
   // State-based verification
   if (stateBefore && stateAfter) {
     const intentLower = intent.toLowerCase();
-    
+
     // Play verification
     if (intentLower.includes('play')) {
       if (stateAfter.state === 'playing') {
@@ -402,7 +398,7 @@ async function verifyOutcome(intent, result, options = {}) {
       }
       return { verified: false, reason: `Expected playing but state is ${stateAfter.state}` };
     }
-    
+
     // Pause verification
     if (intentLower.includes('pause')) {
       if (stateAfter.state === 'paused') {
@@ -410,7 +406,7 @@ async function verifyOutcome(intent, result, options = {}) {
       }
       return { verified: false, reason: `Expected paused but state is ${stateAfter.state}` };
     }
-    
+
     // Skip/next verification
     if (intentLower.includes('skip') || intentLower.includes('next')) {
       if (stateAfter.track && stateAfter.track !== stateBefore.track) {
@@ -421,7 +417,7 @@ async function verifyOutcome(intent, result, options = {}) {
         return { verified: true, reason: 'Reached end of playlist' };
       }
     }
-    
+
     // Search/play specific song
     if (intentLower.includes('play') && (intentLower.includes('"') || intentLower.includes("'"))) {
       // Extract the song name from intent
@@ -432,15 +428,15 @@ async function verifyOutcome(intent, result, options = {}) {
         if (nowPlaying.includes(requestedSong) || requestedSong.includes(nowPlaying)) {
           return { verified: true, reason: `Now playing "${stateAfter.track}"` };
         }
-        return { 
-          verified: false, 
+        return {
+          verified: false,
           reason: `Requested "${songMatch[1]}" but playing "${stateAfter.track}"`,
-          partialSuccess: true
+          partialSuccess: true,
         };
       }
     }
   }
-  
+
   // Default: trust the output if no errors
   return { verified: true, reason: 'Script completed without errors' };
 }
@@ -453,17 +449,11 @@ async function verifyOutcome(intent, result, options = {}) {
  * Execute an intent with intelligent retry, self-correction, and verification
  */
 async function executeIntent(intent, options = {}) {
-  const {
-    maxAttempts = 4,
-    timeout = 15000,
-    verbose = true,
-    verifyOutcome: shouldVerify = true,
-    app = null
-  } = options;
+  const { maxAttempts = 4, timeout = 15000, verbose = true, verifyOutcome: shouldVerify = true, app = null } = options;
 
   // Detect app from intent if not provided
   const detectedApp = app || detectAppFromIntent(intent);
-  
+
   const attempts = [];
   const appliedFixes = [];
   let currentScript = null;
@@ -489,7 +479,7 @@ async function executeIntent(intent, options = {}) {
       if (attempt === 1) {
         currentScript = await generateScript(intent, {
           targetApp: detectedApp,
-          currentState: initialState
+          currentState: initialState,
         });
         if (verbose) {
           log.info('agent', 'Generated script', { detail: currentScript.substring(0, 150) + '...' });
@@ -503,9 +493,9 @@ async function executeIntent(intent, options = {}) {
           fixStrategy: attempts[attempts.length - 1]?.fixStrategy,
           intent,
           stateBefore: initialState,
-          previousFixes: appliedFixes
+          previousFixes: appliedFixes,
         });
-        
+
         if (!fix.canFix) {
           if (verbose) {
             log.info('agent', 'Unfixable', { explanation: fix.explanation });
@@ -514,13 +504,13 @@ async function executeIntent(intent, options = {}) {
             success: false,
             output: fix.explanation,
             attempts,
-            unfixable: true
+            unfixable: true,
           };
         }
-        
+
         currentScript = fix.fixedScript;
         appliedFixes.push(fix.fixApplied);
-        
+
         if (verbose) {
           log.info('agent', `Applied fix: ${fix.fixApplied} - ${fix.explanation}`);
         }
@@ -530,9 +520,9 @@ async function executeIntent(intent, options = {}) {
       const result = await runAppleScript(currentScript, {
         timeout,
         captureState: shouldVerify,
-        app: detectedApp
+        app: detectedApp,
       });
-      
+
       attempts.push({
         attempt,
         script: currentScript,
@@ -542,7 +532,7 @@ async function executeIntent(intent, options = {}) {
         errorType: result.errorType,
         fixStrategy: result.fixStrategy,
         stateBefore: result.stateBefore,
-        stateAfter: result.stateAfter
+        stateAfter: result.stateAfter,
       });
 
       if (result.success) {
@@ -551,42 +541,42 @@ async function executeIntent(intent, options = {}) {
           const verification = await verifyOutcome(intent, result, {
             app: detectedApp,
             stateBefore: initialState,
-            stateAfter: result.stateAfter
+            stateAfter: result.stateAfter,
           });
-          
+
           if (verbose) {
             log.info('agent', `Verification: ${verification.verified ? '✓' : '✗'} ${verification.reason}`);
           }
-          
+
           if (!verification.verified && !verification.partialSuccess && attempt < maxAttempts) {
             // Script ran but didn't achieve the goal - treat as failure
             lastError = verification.reason;
             lastErrorType = 'verification_failed';
             continue;
           }
-          
+
           return {
             success: verification.verified || verification.partialSuccess,
             output: result.output || verification.reason,
             verified: verification.verified,
             verificationReason: verification.reason,
             attempts,
-            finalState: result.stateAfter
+            finalState: result.stateAfter,
           };
         }
-        
+
         return {
           success: true,
           output: result.output || 'Done',
           attempts,
-          finalState: result.stateAfter
+          finalState: result.stateAfter,
         };
       }
 
       // Failed - prepare for retry
       lastError = result.error;
       lastErrorType = result.errorType;
-      
+
       if (result.unfixable) {
         if (verbose) {
           log.info('agent', 'Error is unfixable', { error: result.error });
@@ -595,14 +585,13 @@ async function executeIntent(intent, options = {}) {
           success: false,
           output: result.error,
           attempts,
-          unfixable: true
+          unfixable: true,
         };
       }
-      
+
       if (verbose) {
         log.info('agent', `Failed (${result.errorType}): ${result.error}`);
       }
-
     } catch (error) {
       if (verbose) {
         log.error('agent', 'Exception', { error: error.message });
@@ -611,7 +600,7 @@ async function executeIntent(intent, options = {}) {
         attempt,
         script: currentScript,
         success: false,
-        error: error.message
+        error: error.message,
       });
       lastError = error.message;
       lastErrorType = 'exception';
@@ -623,7 +612,7 @@ async function executeIntent(intent, options = {}) {
     success: false,
     output: `Failed after ${maxAttempts} attempts. Last error: ${lastError}`,
     attempts,
-    appliedFixes
+    appliedFixes,
   };
 }
 
@@ -633,8 +622,14 @@ async function executeIntent(intent, options = {}) {
 function detectAppFromIntent(intent) {
   const lower = intent.toLowerCase();
   if (lower.includes('spotify')) return 'Spotify';
-  if (lower.includes('music') || lower.includes('play') || lower.includes('song') || 
-      lower.includes('track') || lower.includes('artist') || lower.includes('album')) {
+  if (
+    lower.includes('music') ||
+    lower.includes('play') ||
+    lower.includes('song') ||
+    lower.includes('track') ||
+    lower.includes('artist') ||
+    lower.includes('album')
+  ) {
     return 'Music';
   }
   if (lower.includes('safari') || lower.includes('browser') || lower.includes('web')) return 'Safari';
@@ -713,7 +708,7 @@ const QUICK_PATTERNS = {
         return "Music not available: " & errMsg
       end try
     end tell
-  `
+  `,
 };
 
 /**
@@ -721,30 +716,30 @@ const QUICK_PATTERNS = {
  */
 async function executeQuickOrIntent(patternKey, intent, options = {}) {
   const pattern = QUICK_PATTERNS[patternKey];
-  
+
   if (pattern) {
-    const result = await runAppleScript(pattern, { 
+    const result = await runAppleScript(pattern, {
       timeout: options.timeout || 10000,
       captureState: true,
-      app: detectAppFromIntent(intent)
+      app: detectAppFromIntent(intent),
     });
-    
+
     if (result.success && !result.output?.toUpperCase().includes('ERROR')) {
       return {
         success: true,
         output: result.output,
         method: 'quick_pattern',
-        stateAfter: result.stateAfter
+        stateAfter: result.stateAfter,
       };
     }
-    
+
     log.info('agent', `Quick pattern failed, using intelligent execution...`);
   }
-  
+
   const intentResult = await executeIntent(intent, options);
   return {
     ...intentResult,
-    method: 'intelligent'
+    method: 'intelligent',
   };
 }
 
@@ -759,5 +754,5 @@ module.exports = {
   categorizeError,
   detectAppFromIntent,
   QUICK_PATTERNS,
-  ERROR_TYPES
+  ERROR_TYPES,
 };

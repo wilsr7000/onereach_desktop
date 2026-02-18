@@ -1,6 +1,6 @@
 /**
  * LineScriptAI.js - Progressive AI Metadata Generation
- * 
+ *
  * Features:
  * - Smart chunking based on speaker changes, pauses, topics
  * - Optimal snapshot selection avoiding motion blur
@@ -15,22 +15,22 @@ import { getAIPrompts, getTemplate } from './ContentTemplates.js';
  * Chunking configuration
  */
 const CHUNK_CONFIG = {
-  minDuration: 10,      // Minimum chunk duration in seconds
-  maxDuration: 60,      // Maximum chunk duration in seconds
-  minWords: 20,         // Minimum words per chunk
-  maxWords: 200,        // Maximum words per chunk
-  pauseThreshold: 1.5,  // Pause duration to consider for chunk break
+  minDuration: 10, // Minimum chunk duration in seconds
+  maxDuration: 60, // Maximum chunk duration in seconds
+  minWords: 20, // Minimum words per chunk
+  maxWords: 200, // Maximum words per chunk
+  pauseThreshold: 1.5, // Pause duration to consider for chunk break
   speakerChangeWeight: 0.8, // Weight for speaker change as chunk break
-  sentenceEndWeight: 0.5,   // Weight for sentence end as chunk break
+  sentenceEndWeight: 0.5, // Weight for sentence end as chunk break
 };
 
 /**
  * Snapshot selection configuration
  */
 const SNAPSHOT_CONFIG = {
-  analysisWindow: 2,     // Seconds around target time to analyze
-  motionThreshold: 0.1,  // Motion threshold for blur detection
-  preferredOffset: 0.5,  // Preferred offset from start of chunk
+  analysisWindow: 2, // Seconds around target time to analyze
+  motionThreshold: 0.1, // Motion threshold for blur detection
+  preferredOffset: 0.5, // Preferred offset from start of chunk
   fallbackIntervals: [0.25, 0.5, 0.75, 1.0], // Fallback positions within chunk
 };
 
@@ -41,23 +41,23 @@ export class LineScriptAI {
   constructor(appContext, lineScriptPanel) {
     this.app = appContext;
     this.panel = lineScriptPanel;
-    
+
     // Processing state
     this.isProcessing = false;
     this.isPaused = false;
     this.isCancelled = false;
-    
+
     // Chunk queue
     this.chunks = [];
     this.currentChunkIndex = 0;
     this.processedChunks = [];
-    
+
     // Results
     this.results = [];
-    
+
     // Event listeners
     this.eventListeners = {};
-    
+
     // Template reference
     this.templateId = 'podcast';
   }
@@ -78,34 +78,34 @@ export class LineScriptAI {
    */
   async analyzeAndChunk(transcriptSegments, words) {
     this.chunks = [];
-    
+
     if (!words || words.length === 0) {
       return this.chunks;
     }
-    
+
     let currentChunk = {
       startTime: words[0].start,
       endTime: words[0].end,
       words: [],
       text: '',
       speaker: null,
-      sentenceCount: 0
+      sentenceCount: 0,
     };
-    
+
     let chunkId = 1;
-    
+
     words.forEach((word, idx) => {
       const prevWord = words[idx - 1];
-      const nextWord = words[idx + 1];
-      
+      const _nextWord = words[idx + 1];
+
       // Calculate break score
       let breakScore = 0;
-      
+
       // Check for speaker change
       if (prevWord && word.speaker && word.speaker !== prevWord.speaker) {
         breakScore += CHUNK_CONFIG.speakerChangeWeight;
       }
-      
+
       // Check for pause
       if (prevWord) {
         const pause = word.start - prevWord.end;
@@ -113,30 +113,29 @@ export class LineScriptAI {
           breakScore += 0.6;
         }
       }
-      
+
       // Check for sentence end
       if (prevWord && /[.!?]$/.test(prevWord.text)) {
         breakScore += CHUNK_CONFIG.sentenceEndWeight;
         currentChunk.sentenceCount++;
       }
-      
+
       // Check if we should break here
       const chunkDuration = word.end - currentChunk.startTime;
-      const shouldBreak = (
+      const shouldBreak =
         (breakScore >= 0.5 && currentChunk.words.length >= CHUNK_CONFIG.minWords) ||
-        (chunkDuration >= CHUNK_CONFIG.maxDuration) ||
-        (currentChunk.words.length >= CHUNK_CONFIG.maxWords)
-      );
-      
+        chunkDuration >= CHUNK_CONFIG.maxDuration ||
+        currentChunk.words.length >= CHUNK_CONFIG.maxWords;
+
       if (shouldBreak && currentChunk.words.length > 0) {
         // Finalize current chunk
         currentChunk.endTime = prevWord?.end || word.start;
-        currentChunk.text = currentChunk.words.map(w => w.text).join(' ');
+        currentChunk.text = currentChunk.words.map((w) => w.text).join(' ');
         currentChunk.id = `chunk-${chunkId++}`;
         currentChunk.duration = currentChunk.endTime - currentChunk.startTime;
-        
+
         this.chunks.push(currentChunk);
-        
+
         // Start new chunk
         currentChunk = {
           startTime: word.start,
@@ -144,30 +143,30 @@ export class LineScriptAI {
           words: [],
           text: '',
           speaker: word.speaker,
-          sentenceCount: 0
+          sentenceCount: 0,
         };
       }
-      
+
       // Add word to current chunk
       currentChunk.words.push(word);
       currentChunk.endTime = word.end;
-      
+
       // Track speaker
       if (word.speaker) {
         currentChunk.speaker = word.speaker;
       }
     });
-    
+
     // Add final chunk
     if (currentChunk.words.length > 0) {
-      currentChunk.text = currentChunk.words.map(w => w.text).join(' ');
+      currentChunk.text = currentChunk.words.map((w) => w.text).join(' ');
       currentChunk.id = `chunk-${chunkId}`;
       currentChunk.duration = currentChunk.endTime - currentChunk.startTime;
       this.chunks.push(currentChunk);
     }
-    
+
     window.logging.info('video', `LineScriptAI Created ${this.chunks.length} chunks from ${words.length} words`);
-    
+
     return this.chunks;
   }
 
@@ -177,43 +176,43 @@ export class LineScriptAI {
    * @returns {number} Optimal time for snapshot
    */
   async selectSnapshotTime(chunk) {
-    const targetTime = chunk.startTime + (chunk.duration * SNAPSHOT_CONFIG.preferredOffset);
-    
+    const targetTime = chunk.startTime + chunk.duration * SNAPSHOT_CONFIG.preferredOffset;
+
     // Try to find a frame with minimal motion
     // In a full implementation, this would analyze frame differences
     // For now, we use a simple heuristic
-    
+
     const intervals = SNAPSHOT_CONFIG.fallbackIntervals;
     let bestTime = targetTime;
     let bestScore = 0;
-    
+
     for (const interval of intervals) {
-      const testTime = chunk.startTime + (chunk.duration * interval);
-      
+      const testTime = chunk.startTime + chunk.duration * interval;
+
       // Simple heuristic: prefer times not during speaker transitions
       // and not at the very start or end
       let score = 1;
-      
+
       // Penalize very start/end
       if (interval < 0.1 || interval > 0.9) {
         score *= 0.5;
       }
-      
+
       // Prefer middle of sentences (not right after punctuation)
-      const wordsBeforeTime = chunk.words.filter(w => w.end < testTime);
+      const wordsBeforeTime = chunk.words.filter((w) => w.end < testTime);
       if (wordsBeforeTime.length > 0) {
         const lastWord = wordsBeforeTime[wordsBeforeTime.length - 1];
         if (/[.!?]$/.test(lastWord.text)) {
           score *= 0.7;
         }
       }
-      
+
       if (score > bestScore) {
         bestScore = score;
         bestTime = testTime;
       }
     }
-    
+
     return bestTime;
   }
 
@@ -226,40 +225,40 @@ export class LineScriptAI {
       window.logging.warn('video', 'LineScriptAI Already processing');
       return;
     }
-    
+
     this.isProcessing = true;
     this.isPaused = false;
     this.isCancelled = false;
     this.currentChunkIndex = 0;
     this.results = [];
-    
+
     this.emit('processingStarted', { totalChunks: this.chunks.length });
-    
+
     try {
       while (this.currentChunkIndex < this.chunks.length && !this.isCancelled) {
         // Wait if paused
         if (this.isPaused) {
           await this.waitForResume();
         }
-        
+
         if (this.isCancelled) break;
-        
+
         // Process current chunk
         const chunk = this.chunks[this.currentChunkIndex];
         const result = await this.processChunk(chunk);
-        
+
         // Wait for user approval
         const approved = await this.waitForApproval(result);
-        
+
         if (approved.approved) {
           // Apply any edits from user
           const finalResult = { ...result, ...approved.edits };
           this.results.push(finalResult);
           this.processedChunks.push(chunk.id);
-          
-          this.emit('chunkApproved', { 
-            chunkIndex: this.currentChunkIndex, 
-            result: finalResult 
+
+          this.emit('chunkApproved', {
+            chunkIndex: this.currentChunkIndex,
+            result: finalResult,
           });
         } else if (approved.regenerate) {
           // Don't advance, will regenerate on next iteration
@@ -268,21 +267,20 @@ export class LineScriptAI {
           // Skip this chunk
           this.emit('chunkSkipped', { chunkIndex: this.currentChunkIndex });
         }
-        
+
         this.currentChunkIndex++;
-        
+
         this.emit('progress', {
           current: this.currentChunkIndex,
           total: this.chunks.length,
-          percentage: (this.currentChunkIndex / this.chunks.length) * 100
+          percentage: (this.currentChunkIndex / this.chunks.length) * 100,
         });
       }
-      
+
       this.isProcessing = false;
       this.emit('processingComplete', { results: this.results });
-      
+
       return this.results;
-      
     } catch (error) {
       this.isProcessing = false;
       this.emit('processingError', { error });
@@ -296,15 +294,15 @@ export class LineScriptAI {
    * @returns {Object} Processing result
    */
   async processChunk(chunk) {
-    this.emit('chunkProcessing', { 
-      chunkIndex: this.currentChunkIndex, 
-      chunk 
+    this.emit('chunkProcessing', {
+      chunkIndex: this.currentChunkIndex,
+      chunk,
     });
-    
+
     try {
       // Select optimal snapshot time
       const snapshotTime = await this.selectSnapshotTime(chunk);
-      
+
       // Capture frame
       let frameBase64 = null;
       if (window.videoEditor?.captureFrameAtTime) {
@@ -314,14 +312,14 @@ export class LineScriptAI {
           window.logging.warn('video', 'LineScriptAI Failed to capture frame', { data: e });
         }
       }
-      
+
       // Get template-specific prompts
       const prompts = getAIPrompts(this.templateId);
       const template = getTemplate(this.templateId);
-      
+
       // Build analysis prompt
       const analysisPrompt = this.buildAnalysisPrompt(chunk, prompts, template);
-      
+
       // Call AI for analysis
       let aiResult = null;
       if (window.videoEditor?.analyzeSceneWithVision) {
@@ -332,13 +330,13 @@ export class LineScriptAI {
           endTime: chunk.endTime,
           frameBase64: frameBase64,
           prompt: analysisPrompt,
-          templateId: this.templateId
+          templateId: this.templateId,
         });
       } else {
         // Fallback to text-only analysis
         aiResult = await this.textOnlyAnalysis(chunk, analysisPrompt);
       }
-      
+
       // Build result
       const result = {
         chunkId: chunk.id,
@@ -350,7 +348,7 @@ export class LineScriptAI {
         wordCount: chunk.words.length,
         snapshotTime: snapshotTime,
         snapshotBase64: frameBase64,
-        
+
         // AI-generated metadata
         sceneHeading: aiResult?.sceneHeading || this.generateSceneHeading(chunk),
         visualDescription: aiResult?.visualDescription || '',
@@ -358,23 +356,22 @@ export class LineScriptAI {
         topics: aiResult?.topics || [],
         keyMoments: aiResult?.keyMoments || [],
         suggestedMarkers: aiResult?.suggestedMarkers || [],
-        
+
         // Processing metadata
         aiGenerated: true,
         processedAt: new Date().toISOString(),
-        templateId: this.templateId
+        templateId: this.templateId,
       };
-      
-      this.emit('chunkProcessed', { 
-        chunkIndex: this.currentChunkIndex, 
-        result 
+
+      this.emit('chunkProcessed', {
+        chunkIndex: this.currentChunkIndex,
+        result,
       });
-      
+
       return result;
-      
     } catch (error) {
       window.logging.error('video', 'LineScriptAI Chunk processing error', { error: error.message || error });
-      
+
       // Return basic result without AI analysis
       return {
         chunkId: chunk.id,
@@ -388,7 +385,7 @@ export class LineScriptAI {
         visualDescription: '',
         aiGenerated: false,
         error: error.message,
-        processedAt: new Date().toISOString()
+        processedAt: new Date().toISOString(),
       };
     }
   }
@@ -402,7 +399,7 @@ export class LineScriptAI {
    */
   buildAnalysisPrompt(chunk, prompts, template) {
     const basePrompt = prompts.chunkAnalysis || '';
-    
+
     return `${basePrompt}
 
 Context:
@@ -431,29 +428,29 @@ Provide analysis in JSON format with these fields:
    * @param {string} prompt - Analysis prompt
    * @returns {Object} Analysis result
    */
-  async textOnlyAnalysis(chunk, prompt) {
+  async textOnlyAnalysis(chunk, _prompt) {
     // Try to use OpenAI API directly if available
     if (window.videoEditor?.generateSceneDescription) {
       try {
         const description = await window.videoEditor.generateSceneDescription({
           transcript: chunk.text,
           speaker: chunk.speaker,
-          templateId: this.templateId
+          templateId: this.templateId,
         });
-        
+
         return {
           sceneHeading: this.generateSceneHeading(chunk),
           visualDescription: description,
           mood: this.detectMood(chunk.text),
           topics: this.extractTopics(chunk.text),
           keyMoments: [],
-          suggestedMarkers: []
+          suggestedMarkers: [],
         };
       } catch (e) {
         window.logging.warn('video', 'LineScriptAI Text analysis fallback error', { data: e });
       }
     }
-    
+
     // Simple heuristic-based analysis
     return {
       sceneHeading: this.generateSceneHeading(chunk),
@@ -461,7 +458,7 @@ Provide analysis in JSON format with these fields:
       mood: this.detectMood(chunk.text),
       topics: this.extractTopics(chunk.text),
       keyMoments: [],
-      suggestedMarkers: []
+      suggestedMarkers: [],
     };
   }
 
@@ -474,7 +471,7 @@ Provide analysis in JSON format with these fields:
     if (chunk.speaker) {
       return `${chunk.speaker.toUpperCase()} SPEAKS`;
     }
-    
+
     // Extract first few words for heading
     const firstWords = chunk.text.split(/\s+/).slice(0, 5).join(' ');
     return firstWords.length > 30 ? firstWords.substring(0, 30) + '...' : firstWords;
@@ -487,7 +484,7 @@ Provide analysis in JSON format with these fields:
    */
   detectMood(text) {
     const lowerText = text.toLowerCase();
-    
+
     // Simple keyword-based mood detection
     if (lowerText.includes('exciting') || lowerText.includes('amazing') || lowerText.includes('!')) {
       return 'energetic';
@@ -501,7 +498,7 @@ Provide analysis in JSON format with these fields:
     if (lowerText.includes('learn') || lowerText.includes('understand') || lowerText.includes('explain')) {
       return 'educational';
     }
-    
+
     return 'conversational';
   }
 
@@ -513,20 +510,32 @@ Provide analysis in JSON format with these fields:
   extractTopics(text) {
     const topics = [];
     const lowerText = text.toLowerCase();
-    
+
     // Simple keyword extraction
     const keywords = [
-      'product', 'feature', 'demo', 'tutorial', 'interview',
-      'question', 'answer', 'story', 'example', 'tip',
-      'strategy', 'technique', 'tool', 'software', 'service'
+      'product',
+      'feature',
+      'demo',
+      'tutorial',
+      'interview',
+      'question',
+      'answer',
+      'story',
+      'example',
+      'tip',
+      'strategy',
+      'technique',
+      'tool',
+      'software',
+      'service',
     ];
-    
-    keywords.forEach(keyword => {
+
+    keywords.forEach((keyword) => {
       if (lowerText.includes(keyword)) {
         topics.push(keyword);
       }
     });
-    
+
     return topics.slice(0, 3); // Return top 3 topics
   }
 
@@ -539,11 +548,11 @@ Provide analysis in JSON format with these fields:
     return new Promise((resolve) => {
       // Emit event for UI to show approval dialog
       this.emit('awaitingApproval', { result });
-      
+
       // Store resolver for external approval
       this.pendingApproval = {
         resolve,
-        result
+        result,
       };
     });
   }
@@ -600,7 +609,7 @@ Provide analysis in JSON format with these fields:
    * @returns {Promise} Resume promise
    */
   waitForResume() {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const checkResume = () => {
         if (!this.isPaused || this.isCancelled) {
           resolve();
@@ -618,12 +627,12 @@ Provide analysis in JSON format with these fields:
   cancel() {
     this.isCancelled = true;
     this.isPaused = false;
-    
+
     if (this.pendingApproval) {
       this.pendingApproval.resolve({ approved: false, cancelled: true });
       this.pendingApproval = null;
     }
-    
+
     this.emit('processingCancelled');
   }
 
@@ -638,7 +647,7 @@ Provide analysis in JSON format with these fields:
       currentChunk: this.currentChunkIndex,
       totalChunks: this.chunks.length,
       processedChunks: this.processedChunks.length,
-      progress: this.chunks.length > 0 ? (this.currentChunkIndex / this.chunks.length) * 100 : 0
+      progress: this.chunks.length > 0 ? (this.currentChunkIndex / this.chunks.length) * 100 : 0,
     };
   }
 
@@ -656,14 +665,11 @@ Provide analysis in JSON format with these fields:
    */
   applyResultsToMarkers(markerManager) {
     if (!markerManager) return;
-    
-    this.results.forEach(result => {
+
+    this.results.forEach((result) => {
       // Create or update range marker for each chunk
-      const existingMarker = markerManager.getMarkersInRange(
-        result.startTime - 0.5, 
-        result.startTime + 0.5
-      )[0];
-      
+      const existingMarker = markerManager.getMarkersInRange(result.startTime - 0.5, result.startTime + 0.5)[0];
+
       if (existingMarker) {
         // Update existing marker
         markerManager.updateMarker(existingMarker.id, {
@@ -676,8 +682,8 @@ Provide analysis in JSON format with these fields:
             topics: result.topics,
             snapshotBase64: result.snapshotBase64,
             aiGenerated: result.aiGenerated,
-            processedAt: result.processedAt
-          }
+            processedAt: result.processedAt,
+          },
         });
       } else {
         // Create new marker
@@ -695,18 +701,18 @@ Provide analysis in JSON format with these fields:
               topics: result.topics,
               snapshotBase64: result.snapshotBase64,
               aiGenerated: result.aiGenerated,
-              processedAt: result.processedAt
-            }
+              processedAt: result.processedAt,
+            },
           }
         );
       }
     });
-    
+
     window.logging.info('video', `LineScriptAI Applied ${this.results.length} results to markers`);
   }
 
   // Event emitter methods
-  
+
   on(event, callback) {
     if (!this.eventListeners[event]) {
       this.eventListeners[event] = [];
@@ -716,13 +722,13 @@ Provide analysis in JSON format with these fields:
 
   emit(event, data = {}) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event].forEach(callback => callback(data));
+      this.eventListeners[event].forEach((callback) => callback(data));
     }
   }
 
   off(event, callback) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+      this.eventListeners[event] = this.eventListeners[event].filter((cb) => cb !== callback);
     }
   }
 
@@ -742,14 +748,3 @@ Provide analysis in JSON format with these fields:
 }
 
 export default LineScriptAI;
-
-
-
-
-
-
-
-
-
-
-

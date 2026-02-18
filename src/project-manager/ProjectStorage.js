@@ -24,7 +24,7 @@ class ProjectStorage {
     if (!fs.existsSync(this.baseDir)) {
       fs.mkdirSync(this.baseDir, { recursive: true });
     }
-    
+
     // Create versions subdirectory
     const versionsDir = path.join(this.baseDir, 'versions');
     if (!fs.existsSync(versionsDir)) {
@@ -72,7 +72,7 @@ class ProjectStorage {
   createProject(projectData) {
     const index = this.loadIndex();
     const projectId = projectData.id || `proj-${Date.now()}`;
-    
+
     const project = {
       id: projectId,
       name: projectData.name || 'Untitled Project',
@@ -81,18 +81,18 @@ class ProjectStorage {
       versions: [],
       defaultVersion: null,
       createdAt: new Date().toISOString(),
-      modifiedAt: new Date().toISOString()
+      modifiedAt: new Date().toISOString(),
     };
-    
+
     index.projects[projectId] = project;
     this.saveIndex(index);
-    
+
     // Create project directory for assets
     const projectDir = path.join(this.baseDir, projectId);
     if (!fs.existsSync(projectDir)) {
       fs.mkdirSync(projectDir, { recursive: true });
     }
-    
+
     log.info('app', '[ProjectStorage] Created project', { data: projectId });
     return project;
   }
@@ -123,7 +123,7 @@ class ProjectStorage {
    */
   getProjectsBySpace(spaceId) {
     const projects = this.getAllProjects();
-    return projects.filter(p => p.spaceId === spaceId);
+    return projects.filter((p) => p.spaceId === spaceId);
   }
 
   /**
@@ -135,17 +135,17 @@ class ProjectStorage {
   updateProject(projectId, updates) {
     const index = this.loadIndex();
     const project = index.projects[projectId];
-    
+
     if (!project) {
       throw new Error(`Project not found: ${projectId}`);
     }
-    
+
     // Apply updates (except id and createdAt)
-    const { id, createdAt, ...allowedUpdates } = updates;
+    const { id: _id, createdAt: _createdAt, ...allowedUpdates } = updates;
     Object.assign(project, allowedUpdates, {
-      modifiedAt: new Date().toISOString()
+      modifiedAt: new Date().toISOString(),
     });
-    
+
     this.saveIndex(index);
     log.info('app', '[ProjectStorage] Updated project', { data: projectId });
     return project;
@@ -159,26 +159,26 @@ class ProjectStorage {
   deleteProject(projectId) {
     const index = this.loadIndex();
     const project = index.projects[projectId];
-    
+
     if (!project) {
       return false;
     }
-    
+
     // Delete all versions
     for (const versionId of project.versions) {
       this.deleteVersion(versionId, false); // Don't update project
     }
-    
+
     // Delete project directory
     const projectDir = path.join(this.baseDir, projectId);
     if (fs.existsSync(projectDir)) {
       fs.rmSync(projectDir, { recursive: true, force: true });
     }
-    
+
     // Remove from index
     delete index.projects[projectId];
     this.saveIndex(index);
-    
+
     log.info('app', '[ProjectStorage] Deleted project', { data: projectId });
     return true;
   }
@@ -194,11 +194,11 @@ class ProjectStorage {
   addAsset(projectId, assetData) {
     const index = this.loadIndex();
     const project = index.projects[projectId];
-    
+
     if (!project) {
       throw new Error(`Project not found: ${projectId}`);
     }
-    
+
     const assetId = assetData.id || `asset-${Date.now()}`;
     const asset = {
       id: assetId,
@@ -207,13 +207,13 @@ class ProjectStorage {
       name: assetData.name || path.basename(assetData.path),
       size: assetData.size || 0,
       duration: assetData.duration || null,
-      addedAt: new Date().toISOString()
+      addedAt: new Date().toISOString(),
     };
-    
+
     project.assets.push(asset);
     project.modifiedAt = new Date().toISOString();
     this.saveIndex(index);
-    
+
     log.info('app', '[ProjectStorage] Added asset to project', { arg0: projectId, arg1: assetId });
     return asset;
   }
@@ -227,20 +227,20 @@ class ProjectStorage {
   removeAsset(projectId, assetId) {
     const index = this.loadIndex();
     const project = index.projects[projectId];
-    
+
     if (!project) {
       return false;
     }
-    
-    const assetIndex = project.assets.findIndex(a => a.id === assetId);
+
+    const assetIndex = project.assets.findIndex((a) => a.id === assetId);
     if (assetIndex === -1) {
       return false;
     }
-    
+
     project.assets.splice(assetIndex, 1);
     project.modifiedAt = new Date().toISOString();
     this.saveIndex(index);
-    
+
     log.info('app', '[ProjectStorage] Removed asset from project', { arg0: projectId, arg1: assetId });
     return true;
   }
@@ -265,13 +265,13 @@ class ProjectStorage {
   createVersion(projectId, versionData) {
     const index = this.loadIndex();
     const project = index.projects[projectId];
-    
+
     if (!project) {
       throw new Error(`Project not found: ${projectId}`);
     }
-    
+
     const versionId = versionData.id || `ver-${Date.now()}`;
-    
+
     const version = {
       id: versionId,
       name: versionData.name || 'Main',
@@ -284,25 +284,25 @@ class ProjectStorage {
       playlist: versionData.playlist || [],
       timeline: versionData.timeline || { zoom: 1, scrollOffset: 0 },
       transcriptSegments: versionData.transcriptSegments || [],
-      transcriptSource: versionData.transcriptSource || null,  // Track transcript source to avoid regeneration
+      transcriptSource: versionData.transcriptSource || null, // Track transcript source to avoid regeneration
       fades: versionData.fades || { fadeIn: 0, fadeOut: 0 },
       trimStart: versionData.trimStart || 0,
       trimEnd: versionData.trimEnd || 0,
       // Planning data for Line Script
       planning: versionData.planning || {
-        characters: [],    // { id, name, role, color, speakerIds: [] }
-        scenes: [],        // { id, title, description, intExt, location, timeOfDay, order }
-        locations: [],     // { id, name, intExt, description }
-        storyBeats: []     // { id, title, description, sceneId, order }
+        characters: [], // { id, name, role, color, speakerIds: [] }
+        scenes: [], // { id, title, description, intExt, location, timeOfDay, order }
+        locations: [], // { id, name, intExt, description }
+        storyBeats: [], // { id, title, description, sceneId, order }
       },
       createdAt: new Date().toISOString(),
-      modifiedAt: new Date().toISOString()
+      modifiedAt: new Date().toISOString(),
     };
-    
+
     // Save version to file
     const versionPath = this.getVersionPath(versionId);
     fs.writeFileSync(versionPath, JSON.stringify(version, null, 2));
-    
+
     // Update project
     project.versions.push(versionId);
     if (!project.defaultVersion) {
@@ -310,7 +310,7 @@ class ProjectStorage {
     }
     project.modifiedAt = new Date().toISOString();
     this.saveIndex(index);
-    
+
     log.info('app', '[ProjectStorage] Created version', { arg0: versionId, arg1: 'for project:', arg2: projectId });
     return version;
   }
@@ -344,10 +344,8 @@ class ProjectStorage {
     if (!project) {
       return [];
     }
-    
-    return project.versions
-      .map(versionId => this.getVersion(versionId))
-      .filter(v => v !== null);
+
+    return project.versions.map((versionId) => this.getVersion(versionId)).filter((v) => v !== null);
   }
 
   /**
@@ -358,23 +356,21 @@ class ProjectStorage {
    */
   updateVersion(versionId, updates) {
     const version = this.getVersion(versionId);
-    
+
     if (!version) {
       throw new Error(`Version not found: ${versionId}`);
     }
-    
-    
+
     // Apply updates (except id, projectId, and createdAt)
-    const { id, projectId, createdAt, ...allowedUpdates } = updates;
+    const { id: _id, projectId: _projectId, createdAt: _createdAt, ...allowedUpdates } = updates;
     Object.assign(version, allowedUpdates, {
-      modifiedAt: new Date().toISOString()
+      modifiedAt: new Date().toISOString(),
     });
-    
+
     // Save version
     const versionPath = this.getVersionPath(versionId);
     fs.writeFileSync(versionPath, JSON.stringify(version, null, 2));
-    
-    
+
     log.info('app', '[ProjectStorage] Updated version', { data: versionId });
     return version;
   }
@@ -387,38 +383,38 @@ class ProjectStorage {
    */
   deleteVersion(versionId, updateProject = true) {
     const version = this.getVersion(versionId);
-    
+
     if (!version) {
       return false;
     }
-    
+
     // Delete version file
     const versionPath = this.getVersionPath(versionId);
     if (fs.existsSync(versionPath)) {
       fs.unlinkSync(versionPath);
     }
-    
+
     // Update project if requested
     if (updateProject) {
       const index = this.loadIndex();
       const project = index.projects[version.projectId];
-      
+
       if (project) {
         const versionIndex = project.versions.indexOf(versionId);
         if (versionIndex !== -1) {
           project.versions.splice(versionIndex, 1);
         }
-        
+
         // Update default version if necessary
         if (project.defaultVersion === versionId) {
           project.defaultVersion = project.versions[0] || null;
         }
-        
+
         project.modifiedAt = new Date().toISOString();
         this.saveIndex(index);
       }
     }
-    
+
     log.info('app', '[ProjectStorage] Deleted version', { data: versionId });
     return true;
   }
@@ -431,11 +427,11 @@ class ProjectStorage {
    */
   branchVersion(sourceVersionId, newName) {
     const sourceVersion = this.getVersion(sourceVersionId);
-    
+
     if (!sourceVersion) {
       throw new Error(`Source version not found: ${sourceVersionId}`);
     }
-    
+
     // Create new version with copied data
     const newVersion = this.createVersion(sourceVersion.projectId, {
       name: newName,
@@ -447,13 +443,15 @@ class ProjectStorage {
       playlist: JSON.parse(JSON.stringify(sourceVersion.playlist)),
       timeline: JSON.parse(JSON.stringify(sourceVersion.timeline)),
       transcriptSegments: JSON.parse(JSON.stringify(sourceVersion.transcriptSegments)),
-      transcriptSource: sourceVersion.transcriptSource || null,  // Preserve transcript source when branching
+      transcriptSource: sourceVersion.transcriptSource || null, // Preserve transcript source when branching
       fades: JSON.parse(JSON.stringify(sourceVersion.fades || { fadeIn: 0, fadeOut: 0 })),
       trimStart: sourceVersion.trimStart || 0,
       trimEnd: sourceVersion.trimEnd || 0,
-      planning: JSON.parse(JSON.stringify(sourceVersion.planning || { characters: [], scenes: [], locations: [], storyBeats: [] }))
+      planning: JSON.parse(
+        JSON.stringify(sourceVersion.planning || { characters: [], scenes: [], locations: [], storyBeats: [] })
+      ),
     });
-    
+
     log.info('app', '[ProjectStorage] Branched version', { arg0: sourceVersionId, arg1: '->', arg2: newVersion.id });
     return newVersion;
   }
@@ -465,20 +463,20 @@ class ProjectStorage {
    */
   getVersionTree(projectId) {
     const versions = this.getProjectVersions(projectId);
-    
+
     // Build tree structure
     const tree = {
       root: null,
       nodes: {},
-      children: {}
+      children: {},
     };
-    
+
     // Initialize all nodes
     for (const version of versions) {
       tree.nodes[version.id] = version;
       tree.children[version.id] = [];
     }
-    
+
     // Build parent-child relationships
     for (const version of versions) {
       if (version.parentVersionId && tree.nodes[version.parentVersionId]) {
@@ -490,12 +488,12 @@ class ProjectStorage {
         }
       }
     }
-    
+
     // If no explicit root, use the first version
     if (!tree.root && versions.length > 0) {
       tree.root = versions[0].id;
     }
-    
+
     return tree;
   }
 
@@ -510,12 +508,12 @@ class ProjectStorage {
     const projects = Object.values(index.projects);
     const totalVersions = projects.reduce((sum, p) => sum + p.versions.length, 0);
     const totalAssets = projects.reduce((sum, p) => sum + p.assets.length, 0);
-    
+
     return {
       projectCount: projects.length,
       versionCount: totalVersions,
       assetCount: totalAssets,
-      lastModified: index.lastModified
+      lastModified: index.lastModified,
     };
   }
 
@@ -529,13 +527,13 @@ class ProjectStorage {
     if (!project) {
       return null;
     }
-    
+
     const versions = this.getProjectVersions(projectId);
-    
+
     return {
       ...project,
       versionsData: versions,
-      exportedAt: new Date().toISOString()
+      exportedAt: new Date().toISOString(),
     };
   }
 
@@ -548,42 +546,31 @@ class ProjectStorage {
     // Create project with new ID to avoid conflicts
     const newProjectId = `proj-${Date.now()}`;
     const versionIdMap = {};
-    
+
     // Create the project
-    const project = this.createProject({
+    const _project = this.createProject({
       ...data,
       id: newProjectId,
-      versions: []
+      versions: [],
     });
-    
+
     // Import versions with new IDs
     if (data.versionsData) {
       for (const versionData of data.versionsData) {
         const oldId = versionData.id;
         const newVersionId = `ver-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         versionIdMap[oldId] = newVersionId;
-        
+
         this.createVersion(newProjectId, {
           ...versionData,
           id: newVersionId,
-          parentVersionId: versionData.parentVersionId ? versionIdMap[versionData.parentVersionId] : null
+          parentVersionId: versionData.parentVersionId ? versionIdMap[versionData.parentVersionId] : null,
         });
       }
     }
-    
+
     return this.getProject(newProjectId);
   }
 }
 
 module.exports = ProjectStorage;
-
-
-
-
-
-
-
-
-
-
-

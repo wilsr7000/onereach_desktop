@@ -10,11 +10,17 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep,
-  SPACES_API, listSpaces
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  _sleep,
+  SPACES_API,
+  listSpaces,
 } = require('../helpers/electron-app');
 
-let app, electronApp, mainWindow, errorSnapshot;
+let app, _electronApp, mainWindow, errorSnapshot;
 
 test.describe('Metadata Generation', () => {
   test.beforeAll(async () => {
@@ -23,7 +29,9 @@ test.describe('Metadata Generation', () => {
     mainWindow = app.mainWindow;
     errorSnapshot = await snapshotErrors();
   });
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ── Module Existence ─────────────────────────────────────────────────────
   test('metadata-generator module exists', async () => {
@@ -38,7 +46,11 @@ test.describe('Metadata Generation', () => {
   test('adding an image to a space auto-triggers metadata generation', async () => {
     // Verify IPC handler is available
     const r = await mainWindow.evaluate(async () => {
-      try { return { hasInvoke: typeof window.api?.invoke === 'function' }; } catch { return {}; }
+      try {
+        return { hasInvoke: typeof window.api?.invoke === 'function' };
+      } catch {
+        return {};
+      }
     });
     expect(r.hasInvoke).toBe(true);
   });
@@ -61,17 +73,31 @@ test.describe('Metadata Generation', () => {
     }
   });
 
-  test('category is one of: screenshot, photo, diagram, design, chart', async () => { expect(true).toBe(true); });
-  test('vision model used (check _method field)', async () => { expect(true).toBe(true); });
+  test('category is one of: screenshot, photo, diagram, design, chart', async () => {
+    expect(true).toBe(true);
+  });
+  test('vision model used (check _method field)', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Code Metadata ────────────────────────────────────────────────────────
-  test('code metadata includes title, description, language, purpose', async () => { expect(true).toBe(true); });
-  test('language correctly identified (JavaScript, Python, etc.)', async () => { expect(true).toBe(true); });
-  test('large context model used (check _model_used field)', async () => { expect(true).toBe(true); });
+  test('code metadata includes title, description, language, purpose', async () => {
+    expect(true).toBe(true);
+  });
+  test('language correctly identified (JavaScript, Python, etc.)', async () => {
+    expect(true).toBe(true);
+  });
+  test('large context model used (check _model_used field)', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Text Metadata ────────────────────────────────────────────────────────
-  test('text metadata includes title, description, contentType, topics', async () => { expect(true).toBe(true); });
-  test('content type classified correctly', async () => { expect(true).toBe(true); });
+  test('text metadata includes title, description, contentType, topics', async () => {
+    expect(true).toBe(true);
+  });
+  test('content type classified correctly', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Error Check ──────────────────────────────────────────────────────────
   test('no unexpected errors', async () => {

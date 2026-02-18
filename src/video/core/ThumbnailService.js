@@ -41,7 +41,7 @@ export class ThumbnailService {
       count = 1,
       timestamps = null, // Array of specific timestamps like ['00:00:05', '00:00:10']
       size = '320x180',
-      filename = 'thumb_%i.png'
+      filename = 'thumb_%i.png',
     } = options;
 
     const outputFolder = options.outputFolder || this.thumbnailDir;
@@ -49,10 +49,10 @@ export class ThumbnailService {
 
     return new Promise((resolve, reject) => {
       const thumbs = [];
-      
+
       const command = ffmpeg(inputPath)
         .on('filenames', (filenames) => {
-          filenames.forEach(f => thumbs.push(path.join(outputFolder, f)));
+          filenames.forEach((f) => thumbs.push(path.join(outputFolder, f)));
         })
         .on('end', () => {
           resolve(thumbs);
@@ -66,14 +66,14 @@ export class ThumbnailService {
           timestamps: timestamps,
           folder: outputFolder,
           filename: `${baseName}_${filename}`,
-          size: size
+          size: size,
         });
       } else {
         command.screenshots({
           count: count,
           folder: outputFolder,
           filename: `${baseName}_${filename}`,
-          size: size
+          size: size,
         });
       }
     });
@@ -96,7 +96,7 @@ export class ThumbnailService {
           timestamps: [timestamp],
           folder: path.dirname(output),
           filename: path.basename(output),
-          size: '640x360'
+          size: '640x360',
         })
         .on('end', () => resolve(output))
         .on('error', reject);
@@ -111,11 +111,7 @@ export class ThumbnailService {
    * @returns {Promise<Array>} Array of thumbnail paths
    */
   async generateTimelineThumbnails(inputPath, options = {}) {
-    const {
-      count = 10,
-      width = 160,
-      height = 90
-    } = options;
+    const { count = 10, width = 160, height = 90 } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
     const outputFolder = path.join(this.thumbnailDir, baseName);
@@ -126,11 +122,11 @@ export class ThumbnailService {
       try {
         const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
         // Verify all files exist
-        if (cached.thumbnails && cached.thumbnails.every(f => fs.existsSync(f))) {
+        if (cached.thumbnails && cached.thumbnails.every((f) => fs.existsSync(f))) {
           log.info('video', '[ThumbnailService] Using cached thumbnails', { v0: count });
           return cached.thumbnails;
         }
-      } catch (e) {
+      } catch (_e) {
         // Cache invalid, regenerate
       }
     }
@@ -144,10 +140,10 @@ export class ThumbnailService {
       ffmpeg.ffprobe(inputPath, (err, metadata) => {
         if (err) reject(err);
         else {
-          const videoStream = metadata.streams.find(s => s.codec_type === 'video');
+          const videoStream = metadata.streams.find((s) => s.codec_type === 'video');
           resolve({
             duration: metadata.format.duration || 0,
-            hasVideo: !!videoStream
+            hasVideo: !!videoStream,
           });
         }
       });
@@ -176,29 +172,31 @@ export class ThumbnailService {
     // Generate thumbnails in parallel batches (4 at a time to avoid overwhelming system)
     const batchSize = 4;
     const thumbnails = new Array(count);
-    
+
     for (let batch = 0; batch < Math.ceil(count / batchSize); batch++) {
       const batchStart = batch * batchSize;
       const batchEnd = Math.min(batchStart + batchSize, count);
-      
+
       const promises = [];
       for (let i = batchStart; i < batchEnd; i++) {
         const time = timestamps[i];
         const outputPath = path.join(outputFolder, `timeline_${String(i + 1).padStart(3, '0')}.jpg`);
-        
+
         // Skip if already exists (incremental generation)
         if (fs.existsSync(outputPath)) {
           thumbnails[i] = outputPath;
           continue;
         }
-        
+
         const promise = new Promise((resolve) => {
           ffmpeg(inputPath)
-            .seekInput(time)  // Fast seek BEFORE input (I-frame seeking)
+            .seekInput(time) // Fast seek BEFORE input (I-frame seeking)
             .frames(1)
             .outputOptions([
-              '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`,
-              '-q:v', '5'  // Lower quality for speed (2=best, 31=worst)
+              '-vf',
+              `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`,
+              '-q:v',
+              '5', // Lower quality for speed (2=best, 31=worst)
             ])
             .output(outputPath)
             .on('end', () => {
@@ -213,17 +211,17 @@ export class ThumbnailService {
         });
         promises.push(promise);
       }
-      
+
       await Promise.all(promises);
     }
 
     // Filter out failed thumbnails
-    const validThumbnails = thumbnails.filter(t => t && fs.existsSync(t));
-    
+    const validThumbnails = thumbnails.filter((t) => t && fs.existsSync(t));
+
     // Cache results
     try {
       fs.writeFileSync(cacheFile, JSON.stringify({ thumbnails: validThumbnails, count, duration }));
-    } catch (e) {
+    } catch (_e) {
       // Non-critical
     }
 
@@ -241,13 +239,7 @@ export class ThumbnailService {
    * @returns {Promise<Object>} Result with frames array
    */
   async generateRangeScreengrabs(inputPath, options = {}) {
-    const {
-      startTime = 0,
-      endTime,
-      count = 5,
-      outputDir = null,
-      prefix = 'frame'
-    } = options;
+    const { startTime = 0, endTime, count = 5, outputDir = null, prefix = 'frame' } = options;
 
     // Get video info if endTime not specified
     let duration;
@@ -260,11 +252,11 @@ export class ThumbnailService {
 
     // Calculate the time interval between captures
     const interval = count > 1 ? duration / (count - 1) : 0;
-    
+
     // Generate list of timestamps
     const timestamps = [];
     for (let i = 0; i < count; i++) {
-      const time = startTime + (interval * i);
+      const time = startTime + interval * i;
       timestamps.push(time);
     }
 
@@ -277,20 +269,22 @@ export class ThumbnailService {
     log.info('video', '[ThumbnailService] Generating screengrabs', { v0: count });
 
     const results = [];
-    
+
     // Generate each screengrab
     for (let i = 0; i < timestamps.length; i++) {
       const time = timestamps[i];
       const outputPath = path.join(grabsDir, `${prefix}_${String(i + 1).padStart(3, '0')}.jpg`);
-      
+
       try {
         await new Promise((resolve, reject) => {
           ffmpeg(inputPath)
             .seekInput(time)
             .frames(1)
             .outputOptions([
-              '-vf', 'scale=1920:-1',  // Full HD width, maintain aspect ratio
-              '-q:v', '2'  // High quality JPEG
+              '-vf',
+              'scale=1920:-1', // Full HD width, maintain aspect ratio
+              '-q:v',
+              '2', // High quality JPEG
             ])
             .output(outputPath)
             .on('end', resolve)
@@ -303,9 +297,8 @@ export class ThumbnailService {
           time: time,
           timeFormatted: this.formatTime(time),
           path: outputPath,
-          filename: path.basename(outputPath)
+          filename: path.basename(outputPath),
         });
-
       } catch (error) {
         log.error('video', '[ThumbnailService] Error generating frame at :', { v0: time, arg0: error });
       }
@@ -318,7 +311,7 @@ export class ThumbnailService {
       frames: results,
       startTime,
       endTime: startTime + duration,
-      duration
+      duration,
     };
   }
 
@@ -332,19 +325,10 @@ export class ThumbnailService {
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
     const ms = Math.floor((seconds % 1) * 100);
-    
+
     if (h > 0) {
       return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }
     return `${m}:${String(s).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
   }
 }
-
-
-
-
-
-
-
-
-

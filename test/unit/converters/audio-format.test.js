@@ -5,7 +5,10 @@ import { createMockAIService } from '../../mocks/conversion-mocks.js';
 // Mock child_process (FFmpeg-dependent)
 vi.mock('child_process', () => ({
   execFile: vi.fn((cmd, args, opts, cb) => {
-    if (typeof opts === 'function') { cb = opts; opts = {}; }
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
     if (cb) cb(null, 'mock output', '');
     return { on: vi.fn(), stdout: { on: vi.fn() }, stderr: { on: vi.fn() } };
   }),
@@ -17,7 +20,7 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     writeFileSync: vi.fn(),
-    readFileSync: vi.fn(() => Buffer.from([0xFF, 0xFB, 0x90, 0x00])),
+    readFileSync: vi.fn(() => Buffer.from([0xff, 0xfb, 0x90, 0x00])),
     unlinkSync: vi.fn(),
     existsSync: vi.fn(() => true),
     statSync: vi.fn(() => ({ size: 2048 })),
@@ -40,7 +43,7 @@ const { AudioFormatConverter } = require('../../../lib/converters/audio-format.j
 
 // Run the standard lifecycle test harness
 testConverterAgent(AudioFormatConverter, {
-  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1C, 0x66, 0x74, 0x79, 0x70]),
+  sampleInput: Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]),
   expectedFromFormats: ['mp3', 'wav', 'aac', 'ogg', 'flac'],
   expectedToFormats: ['mp3', 'wav', 'aac', 'ogg', 'flac'],
   expectedStrategies: ['direct', 'normalized', 'optimized'],

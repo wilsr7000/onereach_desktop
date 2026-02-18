@@ -1,6 +1,6 @@
 /**
  * ADRTrackManager - Manages ADR (Automated Dialogue Replacement) tracks
- * 
+ *
  * Handles track duplication, working tracks, and ADR clip management.
  * Part of the non-destructive multi-track audio workflow.
  */
@@ -10,7 +10,7 @@ const log = getLogQueue();
 export class ADRTrackManager {
   constructor(appContext) {
     this.app = appContext;
-    
+
     // Track type constants
     this.TRACK_TYPES = {
       ORIGINAL: 'original',
@@ -19,9 +19,9 @@ export class ADRTrackManager {
       ADR: 'adr',
       FILL: 'fill',
       VOICE: 'voice',
-      SFX: 'sfx'
+      SFX: 'sfx',
     };
-    
+
     // Dead space regions (visual-only markers for silence)
     this.deadSpaceRegions = [];
   }
@@ -37,22 +37,21 @@ export class ADRTrackManager {
    * Find a track by ID
    */
   findTrack(trackId) {
-    return this.tracks.find(t => t.id === trackId);
+    return this.tracks.find((t) => t.id === trackId);
   }
 
   /**
    * Find a track by type
    */
   findTrackByType(type) {
-    return this.tracks.find(t => t.type === type);
+    return this.tracks.find((t) => t.type === type);
   }
 
   /**
    * Get the guide track (original or first non-working track)
    */
   getGuideTrack() {
-    return this.findTrackByType(this.TRACK_TYPES.ORIGINAL) ||
-           this.findTrackByType(this.TRACK_TYPES.GUIDE);
+    return this.findTrackByType(this.TRACK_TYPES.ORIGINAL) || this.findTrackByType(this.TRACK_TYPES.GUIDE);
   }
 
   /**
@@ -86,7 +85,7 @@ export class ADRTrackManager {
     const {
       name = `${sourceTrack.name} (Copy)`,
       type = sourceTrack.type === this.TRACK_TYPES.ORIGINAL ? this.TRACK_TYPES.WORKING : sourceTrack.type,
-      copyClips = true
+      copyClips = true,
     } = options;
 
     // Generate new track ID
@@ -101,7 +100,7 @@ export class ADRTrackManager {
       solo: false,
       volume: sourceTrack.volume || 1.0,
       clips: copyClips ? this._cloneClips(sourceTrack.clips) : [],
-      sourceTrackId: trackId // Reference to original for ADR workflow
+      sourceTrackId: trackId, // Reference to original for ADR workflow
     };
 
     // Add to tracks array
@@ -110,12 +109,15 @@ export class ADRTrackManager {
     // Render the new track in UI
     this.app.renderAudioTrack?.(newTrack);
 
-    log.info('video', '[ADRTrackManager] Duplicated track', { arg0: {
-      sourceId: trackId, arg1: newId: newTrackId, arg2: type: type, arg3: name: name
-    } });
+    log.info('video', '[ADRTrackManager] Duplicated track', {
+      sourceId: trackId,
+      newId: newTrackId,
+      type,
+      name,
+    });
 
     this.app.showToast?.('success', `Created ${name}`);
-    
+
     return newTrack;
   }
 
@@ -125,7 +127,7 @@ export class ADRTrackManager {
    */
   ensureWorkingTrack() {
     let workingTrack = this.findTrackByType(this.TRACK_TYPES.WORKING);
-    
+
     if (!workingTrack) {
       const guideTrack = this.getGuideTrack();
       if (!guideTrack) {
@@ -136,7 +138,7 @@ export class ADRTrackManager {
       workingTrack = this.duplicateTrack(guideTrack.id, {
         name: 'Working',
         type: this.TRACK_TYPES.WORKING,
-        copyClips: false // Working track starts empty, dead space is visual-only
+        copyClips: false, // Working track starts empty, dead space is visual-only
       });
     }
 
@@ -148,10 +150,10 @@ export class ADRTrackManager {
    */
   ensureADRTrack() {
     let adrTrack = this.findTrackByType(this.TRACK_TYPES.ADR);
-    
+
     if (!adrTrack) {
       const newTrackId = `A${this.app.nextTrackId++}`;
-      
+
       adrTrack = {
         id: newTrackId,
         type: this.TRACK_TYPES.ADR,
@@ -159,12 +161,12 @@ export class ADRTrackManager {
         muted: false,
         solo: false,
         volume: 1.0,
-        clips: []
+        clips: [],
       };
 
       this.app.audioTracks.push(adrTrack);
       this.app.renderAudioTrack?.(adrTrack);
-      
+
       log.info('video', '[ADRTrackManager] Created ADR track', { arg0: newTrackId });
     }
 
@@ -176,24 +178,7 @@ export class ADRTrackManager {
    */
   _cloneClips(clips) {
     if (!clips || !Array.isArray(clips)) return [];
-    return clips.map(clip => ({ ...clip }));
-  }
-
-  /**
-   * Get track display info for UI
-   */
-  getTrackDisplayInfo(track) {
-    const typeLabels = {
-      [this.TRACK_TYPES.ORIGINAL]: { label: 'Original', color: '#3b82f6' },
-      [this.TRACK_TYPES.GUIDE]: { label: 'Guide', color: '#22c55e' },
-      [this.TRACK_TYPES.WORKING]: { label: 'Working', color: '#f97316' },
-      [this.TRACK_TYPES.ADR]: { label: 'ADR', color: '#8b5cf6' },
-      [this.TRACK_TYPES.FILL]: { label: 'Fill', color: '#06b6d4' },
-      [this.TRACK_TYPES.VOICE]: { label: 'Voice', color: '#ec4899' },
-      [this.TRACK_TYPES.SFX]: { label: 'SFX', color: '#eab308' }
-    };
-
-    return typeLabels[track.type] || { label: track.type, color: '#6b7280' };
+    return clips.map((clip) => ({ ...clip }));
   }
 
   /**
@@ -223,13 +208,13 @@ export class ADRTrackManager {
     if (!track) return;
 
     track.volume = Math.max(0, Math.min(1, volume));
-    
+
     // Update UI
     const volumeSlider = document.querySelector(`#track-${trackId} .track-volume-slider`);
     if (volumeSlider) {
       volumeSlider.value = track.volume;
     }
-    
+
     const volumeValue = document.querySelector(`#track-${trackId} .track-volume-value`);
     if (volumeValue) {
       volumeValue.textContent = this._volumeToDb(track.volume);
@@ -237,7 +222,7 @@ export class ADRTrackManager {
 
     // Emit event
     this.app.emit?.('trackVolumeChanged', { trackId, volume: track.volume });
-    
+
     log.info('video', '[ADRTrackManager] Set volume', { arg0: trackId, arg1: track.volume });
   }
 
@@ -251,13 +236,13 @@ export class ADRTrackManager {
     if (!track) return;
 
     track.pan = Math.max(-1, Math.min(1, pan));
-    
+
     // Update UI
     const panKnob = document.querySelector(`#track-${trackId} .track-pan-knob`);
     if (panKnob) {
       panKnob.style.setProperty('--pan-rotation', `${track.pan * 135}deg`);
     }
-    
+
     const panValue = document.querySelector(`#track-${trackId} .track-pan-value`);
     if (panValue) {
       panValue.textContent = this._formatPan(track.pan);
@@ -265,7 +250,7 @@ export class ADRTrackManager {
 
     // Emit event
     this.app.emit?.('trackPanChanged', { trackId, pan: track.pan });
-    
+
     log.info('video', '[ADRTrackManager] Set pan', { arg0: trackId, arg1: track.pan });
   }
 
@@ -362,7 +347,7 @@ export class ADRTrackManager {
       document.addEventListener('mousemove', (e) => {
         if (!isDragging) return;
         const deltaY = startY - e.clientY;
-        const newPan = startPan + (deltaY / 100);
+        const newPan = startPan + deltaY / 100;
         this.setTrackPan(trackId, newPan);
       });
 
@@ -389,27 +374,9 @@ export class ADRTrackManager {
       [this.TRACK_TYPES.ADR]: { label: 'ADR', icon: '🎤', color: '#ef4444' },
       [this.TRACK_TYPES.FILL]: { label: 'Fill', icon: '📍', color: '#10b981' },
       [this.TRACK_TYPES.VOICE]: { label: 'Voice', icon: '🗣️', color: '#ec4899' },
-      [this.TRACK_TYPES.SFX]: { label: 'SFX', icon: '🔊', color: '#06b6d4' }
+      [this.TRACK_TYPES.SFX]: { label: 'SFX', icon: '🔊', color: '#06b6d4' },
     };
 
     return typeLabels[track.type] || { label: track.type || 'Audio', icon: '🎵', color: '#6b7280' };
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -42,7 +42,7 @@ async function launchApp(opts = {}) {
   const electronApp = await electron.launch({
     args: [path.join(__dirname, '../../..')],
     env,
-    timeout
+    timeout,
   });
 
   const mainWindow = await electronApp.firstWindow();
@@ -69,24 +69,34 @@ async function closeApp({ electronApp }) {
     // Signal the app to quit via the main process (sets global.isQuitting
     // and triggers the controlled shutdown with hard timeout in before-quit)
     try {
-      await electronApp.evaluate(({ app }) => { app.quit(); });
-    } catch (_) { /* app may already be exiting */ }
+      await electronApp.evaluate(({ app }) => {
+        app.quit();
+      });
+    } catch (_) {
+      /* app may already be exiting */
+    }
 
     const closePromise = electronApp.close();
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Close timeout after 15s')), 15000)
-    );
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Close timeout after 15s')), 15000);
+    });
     await Promise.race([closePromise, timeoutPromise]);
-  } catch (e) {
+  } catch (_e) {
     // Graceful close failed -- force exit via main process
-    try { await electronApp.evaluate(({ app }) => { app.exit(0); }); } catch (_) {}
+    try {
+      await electronApp.evaluate(({ app }) => {
+        app.exit(0);
+      });
+    } catch (_) {
+      /* no-op */
+    }
 
     // Give it 2 seconds to respond to app.exit()
     try {
       const closePromise = electronApp.close();
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Force close timeout')), 2000)
-      );
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Force close timeout')), 2000);
+      });
       await Promise.race([closePromise, timeoutPromise]);
     } catch (_) {
       // Last resort: Playwright will kill the process tree on GC
@@ -110,7 +120,7 @@ async function waitForHealth(maxAttempts = HEALTH_POLL_MAX) {
     try {
       const res = await fetch(`${LOG_SERVER}/health`);
       if (res.ok) return await res.json();
-    } catch (e) {
+    } catch (_e) {
       // Not ready yet
     }
     await sleep(HEALTH_POLL_INTERVAL);
@@ -140,7 +150,7 @@ async function snapshotErrors() {
   return {
     timestamp,
     errorCount: stats.byLevel?.error || 0,
-    warnCount: stats.byLevel?.warn || 0
+    warnCount: stats.byLevel?.warn || 0,
   };
 }
 
@@ -151,12 +161,10 @@ async function snapshotErrors() {
  */
 async function checkNewErrors(snapshot) {
   try {
-    const res = await fetch(
-      `${LOG_SERVER}/logs?level=error&since=${encodeURIComponent(snapshot.timestamp)}&limit=50`
-    );
+    const res = await fetch(`${LOG_SERVER}/logs?level=error&since=${encodeURIComponent(snapshot.timestamp)}&limit=50`);
     const data = await res.json();
     return data.data || [];
-  } catch (e) {
+  } catch (_e) {
     return [];
   }
 }
@@ -165,9 +173,7 @@ async function checkNewErrors(snapshot) {
  * Get all errors since a given ISO timestamp.
  */
 async function getErrorsSince(timestamp) {
-  const res = await fetch(
-    `${LOG_SERVER}/logs?level=error&since=${encodeURIComponent(timestamp)}&limit=100`
-  );
+  const res = await fetch(`${LOG_SERVER}/logs?level=error&since=${encodeURIComponent(timestamp)}&limit=100`);
   const data = await res.json();
   return data.data || [];
 }
@@ -201,7 +207,7 @@ async function setLogLevel(level) {
   const res = await fetch(`${LOG_SERVER}/logging/level`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ level })
+    body: JSON.stringify({ level }),
   });
   return res.json();
 }
@@ -225,7 +231,7 @@ async function checkSpacesApi() {
   try {
     const res = await fetch(`${SPACES_API}/api/spaces`, { signal: AbortSignal.timeout(5000) });
     return res.ok;
-  } catch (e) {
+  } catch (_e) {
     return false;
   }
 }
@@ -249,7 +255,7 @@ async function createSpace(name, description = 'Test space') {
   const res = await fetch(`${SPACES_API}/api/spaces`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description })
+    body: JSON.stringify({ name, description }),
   });
   const data = await res.json();
   return data.space || data; // Unwrap { success, space } envelope
@@ -260,7 +266,7 @@ async function createSpace(name, description = 'Test space') {
  */
 async function deleteSpace(spaceId) {
   const res = await fetch(`${SPACES_API}/api/spaces/${spaceId}`, {
-    method: 'DELETE'
+    method: 'DELETE',
   });
   return res.ok;
 }
@@ -285,7 +291,7 @@ async function checkExchangeHealth(electronApp) {
         port: bridge.DEFAULT_EXCHANGE_CONFIG.port,
         url: bridge.getExchangeUrl(),
         agentCount: exchange?.agents?.getCount() || 0,
-        queueDepth: exchange?.getQueueStats()?.depth?.total || 0
+        queueDepth: exchange?.getQueueStats()?.depth?.total || 0,
       };
     });
   } catch (e) {
@@ -305,7 +311,7 @@ async function checkExchangeHealth(electronApp) {
  */
 async function getAppAiCost(electronApp, period = 'daily') {
   try {
-    return await electronApp.evaluate(async ({ }, p) => {
+    return await electronApp.evaluate(async (_modules, p) => {
       const { getBudgetManager } = require('./budget-manager');
       const bm = getBudgetManager();
       return bm.getCostSummary(p);
@@ -324,15 +330,15 @@ const BENIGN_ERROR_PATTERNS = [
   /Built-in agent WebSocket error/i,
   /Failed to inject Chrome-like behavior/i,
   /Failed to check for Material Symbols/i,
-  /Database IO error/i,              // Electron service worker storage
+  /Database IO error/i, // Electron service worker storage
   /console-message.*deprecated/i,
-  /ERR_CONNECTION_REFUSED/i,          // Agents connecting before server ready
-  /ECONNREFUSED/i,                    // Same, Node-level
-  /net::ERR_/i,                       // Network errors during startup race
-  /ResizeObserver loop/i,             // Benign Chrome layout warning
-  /ServiceWorker/i,                   // SW registration timing
-  /log is not defined/i,              // Renderer script injection timing
-  /Content Security Policy/i,         // CSP violations (e.g. favicon loading)
+  /ERR_CONNECTION_REFUSED/i, // Agents connecting before server ready
+  /ECONNREFUSED/i, // Same, Node-level
+  /net::ERR_/i, // Network errors during startup race
+  /ResizeObserver loop/i, // Benign Chrome layout warning
+  /ServiceWorker/i, // SW registration timing
+  /log is not defined/i, // Renderer script injection timing
+  /Content Security Policy/i, // CSP violations (e.g. favicon loading)
   /violates the following Content Security Policy/i,
 ];
 
@@ -342,9 +348,9 @@ const BENIGN_ERROR_PATTERNS = [
  * @returns {Array} Only genuine errors
  */
 function filterBenignErrors(errors) {
-  return errors.filter(err => {
+  return errors.filter((err) => {
     const msg = err.message || '';
-    return !BENIGN_ERROR_PATTERNS.some(pattern => pattern.test(msg));
+    return !BENIGN_ERROR_PATTERNS.some((pattern) => pattern.test(msg));
   });
 }
 
@@ -353,7 +359,9 @@ function filterBenignErrors(errors) {
 // ---------------------------------------------------------------------------
 
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -393,11 +401,87 @@ module.exports = {
   // App AI costs
   getAppAiCost,
 
+  // Spaces items
+  addItem,
+  getItems,
+
+  // Playbook API
+  executePlaybook,
+  getPlaybookJob,
+  respondToPlaybook,
+  cancelPlaybookJob,
+  listPlaybooks,
+
   // Utilities
   sleep,
 
   // Constants
   LOG_SERVER,
   SPACES_API,
-  BENIGN_ERROR_PATTERNS
+  BENIGN_ERROR_PATTERNS,
 };
+
+// ---------------------------------------------------------------------------
+// Spaces item helpers
+// ---------------------------------------------------------------------------
+
+async function addItem(spaceId, item) {
+  const res = await fetch(`${SPACES_API}/api/spaces/${spaceId}/items`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) throw new Error(`addItem failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function getItems(spaceId) {
+  const res = await fetch(`${SPACES_API}/api/spaces/${spaceId}/items`);
+  if (!res.ok) throw new Error(`getItems failed: ${res.status}`);
+  const data = await res.json();
+  return data.items || data;
+}
+
+// ---------------------------------------------------------------------------
+// Playbook API helpers
+// ---------------------------------------------------------------------------
+
+async function executePlaybook(opts) {
+  const res = await fetch(`${SPACES_API}/api/playbook/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) throw new Error(`executePlaybook failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function getPlaybookJob(jobId) {
+  const res = await fetch(`${SPACES_API}/api/playbook/jobs/${jobId}`);
+  if (!res.ok) throw new Error(`getPlaybookJob failed: ${res.status}`);
+  return res.json();
+}
+
+async function respondToPlaybook(jobId, questionId, answer) {
+  const res = await fetch(`${SPACES_API}/api/playbook/jobs/${jobId}/respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questionId, answer }),
+  });
+  if (!res.ok) throw new Error(`respondToPlaybook failed: ${res.status}`);
+  return res.json();
+}
+
+async function cancelPlaybookJob(jobId) {
+  const res = await fetch(`${SPACES_API}/api/playbook/jobs/${jobId}/cancel`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`cancelPlaybookJob failed: ${res.status}`);
+  return res.json();
+}
+
+async function listPlaybooks(spaceId) {
+  const res = await fetch(`${SPACES_API}/api/playbook/spaces/${spaceId}/playbooks`);
+  if (!res.ok) throw new Error(`listPlaybooks failed: ${res.status}`);
+  return res.json();
+}

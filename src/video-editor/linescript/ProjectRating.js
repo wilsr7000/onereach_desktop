@@ -1,6 +1,6 @@
 /**
  * ProjectRating.js - Project Rating & Retrospective System
- * 
+ *
  * Features:
  * - Generic rating criteria per content template
  * - Custom user-defined criteria
@@ -14,10 +14,10 @@ import { getRatingCriteria, getTemplate } from './ContentTemplates.js';
 /**
  * Default rating scale
  */
-const RATING_SCALE = {
+const _RATING_SCALE = {
   MIN: 1,
   MAX: 10,
-  PASS_THRESHOLD: 6
+  PASS_THRESHOLD: 6,
 };
 
 /**
@@ -27,12 +27,12 @@ export class ProjectRating {
   constructor(appContext, ratingStorage) {
     this.app = appContext;
     this.storage = ratingStorage;
-    
+
     // Current rating state
     this.currentRating = null;
     this.customCriteria = [];
     this.projectGoals = '';
-    
+
     // Event listeners
     this.eventListeners = {};
   }
@@ -45,32 +45,32 @@ export class ProjectRating {
    * @returns {Promise<Object>} Rating result
    */
   async rateProject(projectData, templateId, analysisResults = {}) {
-    const template = getTemplate(templateId);
+    const _template = getTemplate(templateId);
     const criteria = getRatingCriteria(templateId);
-    
+
     if (!criteria || criteria.length === 0) {
       throw new Error(`No rating criteria for template: ${templateId}`);
     }
-    
+
     this.emit('ratingStarted', { projectData, templateId });
-    
+
     try {
       // Rate each criterion
       const criteriaScores = await this.rateCriteria(criteria, projectData, analysisResults);
-      
+
       // Calculate overall score
       const overallScore = this.calculateOverallScore(criteriaScores);
-      
+
       // Get previous scores for trend
       const history = await this.getProjectHistory(templateId);
       const trend = this.calculateTrend(overallScore, history);
-      
+
       // Generate improvements
       const improvements = this.generateImprovements(criteriaScores, analysisResults);
-      
+
       // Generate "next time" lessons
       const nextTime = this.generateNextTimeLessons(criteriaScores, analysisResults);
-      
+
       // Build rating result
       this.currentRating = {
         projectId: projectData.id || `project-${Date.now()}`,
@@ -78,39 +78,38 @@ export class ProjectRating {
         videoPath: projectData.videoPath,
         templateId,
         ratedAt: new Date().toISOString(),
-        
+
         overall: {
           score: overallScore,
           trend: trend.change,
           trendDirection: trend.direction,
-          percentile: await this.calculatePercentile(overallScore, templateId)
+          percentile: await this.calculatePercentile(overallScore, templateId),
         },
-        
+
         criteria: criteriaScores,
-        
+
         improvements,
         nextTime,
-        
+
         history: {
-          previousScores: history.map(h => h.overall.score),
+          previousScores: history.map((h) => h.overall.score),
           averageImprovement: trend.averageImprovement,
           strongestAreas: this.findStrongestAreas(criteriaScores),
-          needsWork: this.findWeakestAreas(criteriaScores)
+          needsWork: this.findWeakestAreas(criteriaScores),
         },
-        
-        customCriteria: this.customCriteria.length > 0 ? 
-          await this.rateCustomCriteria(projectData, analysisResults) : null
+
+        customCriteria:
+          this.customCriteria.length > 0 ? await this.rateCustomCriteria(projectData, analysisResults) : null,
       };
-      
+
       // Save rating
       if (this.storage) {
         await this.storage.saveRating(this.currentRating);
       }
-      
+
       this.emit('ratingComplete', { rating: this.currentRating });
-      
+
       return this.currentRating;
-      
     } catch (error) {
       this.emit('ratingError', { error });
       throw error;
@@ -126,7 +125,7 @@ export class ProjectRating {
    */
   async rateCriteria(criteria, projectData, analysisResults) {
     const scores = [];
-    
+
     for (const criterion of criteria) {
       const score = await this.rateSingleCriterion(criterion, projectData, analysisResults);
       scores.push({
@@ -136,10 +135,10 @@ export class ProjectRating {
         score: score.value,
         positives: score.positives,
         issues: score.issues,
-        suggestions: score.suggestions
+        suggestions: score.suggestions,
       });
     }
-    
+
     return scores;
   }
 
@@ -155,9 +154,9 @@ export class ProjectRating {
       value: 5, // Default mid-score
       positives: [],
       issues: [],
-      suggestions: []
+      suggestions: [],
     };
-    
+
     // Use analysis results if available
     switch (criterion.id) {
       case 'hook_strength':
@@ -174,13 +173,13 @@ export class ProjectRating {
           }
         }
         break;
-        
+
       case 'pacing':
       case 'pacing_energy':
         if (analysisResults.energy?.pacing) {
           const pacing = analysisResults.energy.pacing;
           result.value = Math.round(pacing.overallVariation / 10);
-          
+
           if (pacing.energyArc === 'building' || pacing.energyArc === 'wave') {
             result.positives.push(`Good ${pacing.energyArc} energy arc`);
           }
@@ -189,14 +188,14 @@ export class ProjectRating {
           }
         }
         break;
-        
+
       case 'audio_quality':
         if (analysisResults.zzz?.sections) {
-          const zzzTime = analysisResults.zzz.totalZZZTime || 0;
+          const _zzzTime = analysisResults.zzz.totalZZZTime || 0;
           const percentage = analysisResults.zzz.percentageOfVideo || 0;
-          
+
           result.value = Math.max(1, 10 - Math.floor(percentage / 5));
-          
+
           if (percentage < 10) {
             result.positives.push('Good audio consistency');
           } else {
@@ -204,7 +203,7 @@ export class ProjectRating {
           }
         }
         break;
-        
+
       case 'value_delivery':
       case 'clarity':
         // Use transcript analysis if available
@@ -217,14 +216,14 @@ export class ProjectRating {
           }
         }
         break;
-        
+
       default:
         // Default scoring based on analysis presence
         if (analysisResults.hooks || analysisResults.energy) {
           result.value = 6; // Has been analyzed
         }
     }
-    
+
     return result;
   }
 
@@ -236,12 +235,12 @@ export class ProjectRating {
   calculateOverallScore(criteriaScores) {
     let weightedSum = 0;
     let totalWeight = 0;
-    
-    criteriaScores.forEach(cs => {
+
+    criteriaScores.forEach((cs) => {
       weightedSum += cs.score * cs.weight;
       totalWeight += cs.weight;
     });
-    
+
     return totalWeight > 0 ? Math.round((weightedSum / totalWeight) * 10) / 10 : 0;
   }
 
@@ -255,10 +254,10 @@ export class ProjectRating {
     if (history.length === 0) {
       return { change: 0, direction: 'new', averageImprovement: 0 };
     }
-    
+
     const lastScore = history[history.length - 1]?.overall?.score || 0;
     const change = currentScore - lastScore;
-    
+
     // Calculate average improvement
     let totalImprovement = 0;
     for (let i = 1; i < history.length; i++) {
@@ -266,11 +265,11 @@ export class ProjectRating {
     }
     totalImprovement += change;
     const averageImprovement = history.length > 0 ? totalImprovement / history.length : change;
-    
+
     return {
       change: Math.round(change * 10) / 10,
       direction: change > 0 ? 'improving' : change < 0 ? 'declining' : 'stable',
-      averageImprovement: Math.round(averageImprovement * 10) / 10
+      averageImprovement: Math.round(averageImprovement * 10) / 10,
     };
   }
 
@@ -282,13 +281,13 @@ export class ProjectRating {
    */
   async calculatePercentile(score, templateId) {
     if (!this.storage) return 50;
-    
+
     const allRatings = await this.storage.getAllRatings(templateId);
     if (allRatings.length === 0) return 50;
-    
-    const scores = allRatings.map(r => r.overall?.score || 0);
-    const belowCount = scores.filter(s => s < score).length;
-    
+
+    const scores = allRatings.map((r) => r.overall?.score || 0);
+    const belowCount = scores.filter((s) => s < score).length;
+
     return Math.round((belowCount / scores.length) * 100);
   }
 
@@ -299,7 +298,7 @@ export class ProjectRating {
    */
   async getProjectHistory(templateId) {
     if (!this.storage) return [];
-    
+
     const allRatings = await this.storage.getAllRatings(templateId);
     return allRatings.slice(-5); // Last 5 ratings
   }
@@ -311,10 +310,10 @@ export class ProjectRating {
    */
   findStrongestAreas(criteriaScores) {
     return criteriaScores
-      .filter(cs => cs.score >= 8)
+      .filter((cs) => cs.score >= 8)
       .sort((a, b) => b.score - a.score)
       .slice(0, 3)
-      .map(cs => cs.name);
+      .map((cs) => cs.name);
   }
 
   /**
@@ -324,10 +323,10 @@ export class ProjectRating {
    */
   findWeakestAreas(criteriaScores) {
     return criteriaScores
-      .filter(cs => cs.score < 6)
+      .filter((cs) => cs.score < 6)
       .sort((a, b) => a.score - b.score)
       .slice(0, 3)
-      .map(cs => cs.name);
+      .map((cs) => cs.name);
   }
 
   /**
@@ -339,7 +338,7 @@ export class ProjectRating {
   generateImprovements(criteriaScores, analysisResults) {
     const immediate = [];
     const content = [];
-    
+
     // From ZZZ detector
     if (analysisResults.zzz?.autoEditList) {
       const editList = analysisResults.zzz.autoEditList;
@@ -353,24 +352,24 @@ export class ProjectRating {
         immediate.push(`Add B-roll to ${editList.summary.brollNeeded} static sections`);
       }
     }
-    
+
     // From hook detector
     if (analysisResults.hooks?.openingSuggestion?.hook) {
       content.push('Consider using a stronger hook from detected moments');
     }
-    
+
     // From energy analysis
     if (analysisResults.energy?.pacing?.openingEnergy < 50) {
       content.push('Re-record intro with higher energy');
     }
-    
+
     // From low criteria scores
-    criteriaScores.forEach(cs => {
+    criteriaScores.forEach((cs) => {
       if (cs.score < 6 && cs.suggestions.length > 0) {
         content.push(...cs.suggestions);
       }
     });
-    
+
     return { immediate, content };
   }
 
@@ -385,39 +384,39 @@ export class ProjectRating {
     const tryNext = {
       preProduction: [],
       during: [],
-      postProduction: []
+      postProduction: [],
     };
-    
+
     // What worked well
-    criteriaScores.forEach(cs => {
+    criteriaScores.forEach((cs) => {
       if (cs.score >= 8) {
-        cs.positives.forEach(p => whatWorked.push(p));
+        cs.positives.forEach((p) => whatWorked.push(p));
       }
     });
-    
+
     // Pre-production suggestions
-    if (criteriaScores.find(cs => cs.id === 'audio_quality' && cs.score < 7)) {
+    if (criteriaScores.find((cs) => cs.id === 'audio_quality' && cs.score < 7)) {
       tryNext.preProduction.push('Check audio levels before recording');
     }
-    
-    if (criteriaScores.find(cs => cs.id === 'host_questions' && cs.score < 7)) {
+
+    if (criteriaScores.find((cs) => cs.id === 'host_questions' && cs.score < 7)) {
       tryNext.preProduction.push('Prepare deeper follow-up questions');
     }
-    
+
     // During recording
     if (analysisResults.zzz?.sections?.length > 3) {
       tryNext.during.push('Watch for energy dips - take breaks if needed');
     }
-    
+
     if (analysisResults.energy?.pacing?.energyArc === 'flat') {
       tryNext.during.push('Vary your delivery for more engagement');
     }
-    
+
     // Post-production
     if (analysisResults.hooks?.currentOpeningScore?.score < 6) {
       tryNext.postProduction.push('Review first 30s carefully for hook strength');
     }
-    
+
     return { whatWorked, tryNext };
   }
 
@@ -430,7 +429,7 @@ export class ProjectRating {
       id: c.id || `custom-${idx}`,
       name: c.name,
       prompt: c.prompt,
-      weight: c.weight || 10
+      weight: c.weight || 10,
     }));
   }
 
@@ -448,9 +447,9 @@ export class ProjectRating {
    * @param {Object} analysisResults - Analysis results
    * @returns {Promise<Array>} Custom criteria scores
    */
-  async rateCustomCriteria(projectData, analysisResults) {
+  async rateCustomCriteria(_projectData, _analysisResults) {
     const scores = [];
-    
+
     for (const criterion of this.customCriteria) {
       // For custom criteria, use AI or default to mid-score
       // In full implementation, this would call AI with the prompt
@@ -461,10 +460,10 @@ export class ProjectRating {
         score: 6, // Default - would be AI-generated
         positives: [],
         issues: [],
-        suggestions: [`Evaluate: ${criterion.prompt}`]
+        suggestions: [`Evaluate: ${criterion.prompt}`],
       });
     }
-    
+
     return scores;
   }
 
@@ -483,9 +482,9 @@ export class ProjectRating {
    */
   exportReport(format = 'markdown') {
     if (!this.currentRating) return '';
-    
+
     const r = this.currentRating;
-    
+
     switch (format) {
       case 'markdown':
         return this.generateMarkdownReport(r);
@@ -508,12 +507,12 @@ export class ProjectRating {
     md += `**Project:** ${rating.projectName}\n`;
     md += `**Date:** ${new Date(rating.ratedAt).toLocaleDateString()}\n`;
     md += `**Template:** ${rating.templateId}\n\n`;
-    
+
     md += `## Overall Score: ${rating.overall.score}/10\n`;
     md += `Trend: ${rating.overall.trendDirection} (${rating.overall.trend > 0 ? '+' : ''}${rating.overall.trend})\n\n`;
-    
+
     md += `## Criteria Breakdown\n\n`;
-    rating.criteria.forEach(c => {
+    rating.criteria.forEach((c) => {
       md += `### ${c.name}: ${c.score}/10\n`;
       if (c.positives.length > 0) {
         md += `✓ ${c.positives.join(', ')}\n`;
@@ -523,17 +522,17 @@ export class ProjectRating {
       }
       md += '\n';
     });
-    
+
     md += `## Improvements\n\n`;
     md += `### Immediate\n`;
-    rating.improvements.immediate.forEach(i => md += `- ${i}\n`);
+    rating.improvements.immediate.forEach((i) => (md += `- ${i}\n`));
     md += `\n### Content\n`;
-    rating.improvements.content.forEach(i => md += `- ${i}\n`);
-    
+    rating.improvements.content.forEach((i) => (md += `- ${i}\n`));
+
     md += `\n## Next Time\n\n`;
     md += `### What Worked\n`;
-    rating.nextTime.whatWorked.forEach(w => md += `- ${w}\n`);
-    
+    rating.nextTime.whatWorked.forEach((w) => (md += `- ${w}\n`));
+
     return md;
   }
 
@@ -552,18 +551,18 @@ Date: ${new Date(rating.ratedAt).toLocaleDateString()}
 Overall Score: ${rating.overall.score}/10 (${rating.overall.trendDirection})
 
 CRITERIA:
-${rating.criteria.map(c => `  ${c.name}: ${c.score}/10`).join('\n')}
+${rating.criteria.map((c) => `  ${c.name}: ${c.score}/10`).join('\n')}
 
 IMPROVEMENTS:
-${rating.improvements.immediate.map(i => `  - ${i}`).join('\n')}
+${rating.improvements.immediate.map((i) => `  - ${i}`).join('\n')}
 
 NEXT TIME:
-${rating.nextTime.whatWorked.map(w => `  + ${w}`).join('\n')}
+${rating.nextTime.whatWorked.map((w) => `  + ${w}`).join('\n')}
     `.trim();
   }
 
   // Event emitter methods
-  
+
   on(event, callback) {
     if (!this.eventListeners[event]) {
       this.eventListeners[event] = [];
@@ -573,13 +572,13 @@ ${rating.nextTime.whatWorked.map(w => `  + ${w}`).join('\n')}
 
   emit(event, data = {}) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event].forEach(callback => callback(data));
+      this.eventListeners[event].forEach((callback) => callback(data));
     }
   }
 
   off(event, callback) {
     if (this.eventListeners[event]) {
-      this.eventListeners[event] = this.eventListeners[event].filter(cb => cb !== callback);
+      this.eventListeners[event] = this.eventListeners[event].filter((cb) => cb !== callback);
     }
   }
 
@@ -594,14 +593,3 @@ ${rating.nextTime.whatWorked.map(w => `  + ${w}`).join('\n')}
 }
 
 export default ProjectRating;
-
-
-
-
-
-
-
-
-
-
-

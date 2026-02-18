@@ -34,8 +34,8 @@ export class TrimService {
       duration = null,
       outputPath = null,
       format = null,
-      fadeIn = null,    // Fade in duration in seconds
-      fadeOut = null    // Fade out duration in seconds
+      fadeIn = null, // Fade in duration in seconds
+      fadeOut = null, // Fade out duration in seconds
     } = options;
 
     const ext = format || path.extname(inputPath).slice(1) || 'mp4';
@@ -47,8 +47,7 @@ export class TrimService {
     const hasFades = fadeIn || fadeOut;
 
     return new Promise((resolve, reject) => {
-      let command = ffmpeg(inputPath)
-        .setStartTime(parseTime(startTime));
+      let command = ffmpeg(inputPath).setStartTime(parseTime(startTime));
 
       // Calculate the output duration
       let outputDuration = null;
@@ -86,11 +85,16 @@ export class TrimService {
 
         // Use reasonable encoding settings for re-encode
         command = command.outputOptions([
-          '-c:v', 'libx264',
-          '-preset', 'medium',
-          '-crf', '23',
-          '-c:a', 'aac',
-          '-b:a', '192k'
+          '-c:v',
+          'libx264',
+          '-preset',
+          'medium',
+          '-crf',
+          '23',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '192k',
         ]);
       } else {
         // No fades - use fast copy without re-encoding
@@ -108,7 +112,7 @@ export class TrimService {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -124,19 +128,3 @@ export class TrimService {
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

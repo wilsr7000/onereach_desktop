@@ -1,9 +1,9 @@
 /**
  * Webview Search Service
- * 
+ *
  * Uses a hidden BrowserWindow to perform web searches by loading
  * actual search pages and extracting results via JavaScript injection.
- * 
+ *
  * This is more reliable than API-based approaches which can be blocked
  * or return empty results.
  */
@@ -29,7 +29,7 @@ function getSearchWindow() {
   if (searchWindow && !searchWindow.isDestroyed()) {
     return searchWindow;
   }
-  
+
   searchWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -39,20 +39,20 @@ function getSearchWindow() {
       contextIsolation: true,
       sandbox: true,
       // Allow loading external pages
-      webSecurity: true
-    }
+      webSecurity: true,
+    },
   });
-  
+
   // Set a realistic user agent
   searchWindow.webContents.setUserAgent(
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   );
-  
+
   // Handle window errors
   searchWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     log.error('agent', 'Load failed', { errorCode, errorDescription });
   });
-  
+
   return searchWindow;
 }
 
@@ -111,7 +111,7 @@ const GOOGLE_EXTRACTION_SCRIPT = `
 /**
  * Extract search results from DuckDuckGo search page (fallback)
  */
-const DDG_EXTRACTION_SCRIPT = `
+const _DDG_EXTRACTION_SCRIPT = `
   (function() {
     const results = [];
     
@@ -147,7 +147,7 @@ async function search(query) {
   if (!query || typeof query !== 'string') {
     return [];
   }
-  
+
   // Check cache first
   const cacheKey = query.toLowerCase().trim();
   const cached = searchCache.get(cacheKey);
@@ -155,18 +155,18 @@ async function search(query) {
     log.info('agent', 'Returning cached results for', { query });
     return cached.results;
   }
-  
+
   log.info('agent', 'Searching for', { query });
-  
+
   const win = getSearchWindow();
   const encodedQuery = encodeURIComponent(query);
-  
+
   // Try Google first
   const searchUrl = `https://www.google.com/search?q=${encodedQuery}&hl=en`;
-  
+
   return new Promise((resolve) => {
     let resolved = false;
-    
+
     // Timeout handler
     const timeout = setTimeout(() => {
       if (!resolved) {
@@ -175,48 +175,51 @@ async function search(query) {
         resolve([]);
       }
     }, SEARCH_TIMEOUT);
-    
+
     // Load the search page
-    win.loadURL(searchUrl).then(() => {
-      // Wait for page to fully render
-      setTimeout(async () => {
-        if (resolved) return;
-        
-        try {
-          // Execute extraction script
-          const results = await win.webContents.executeJavaScript(GOOGLE_EXTRACTION_SCRIPT);
-          
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timeout);
-            
-            log.info('agent', 'Found', { length: results.length, detail: 'results' });
-            
-            // Cache results
-            searchCache.set(cacheKey, {
-              results,
-              timestamp: Date.now()
-            });
-            
-            resolve(results);
+    win
+      .loadURL(searchUrl)
+      .then(() => {
+        // Wait for page to fully render
+        setTimeout(async () => {
+          if (resolved) return;
+
+          try {
+            // Execute extraction script
+            const results = await win.webContents.executeJavaScript(GOOGLE_EXTRACTION_SCRIPT);
+
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+
+              log.info('agent', 'Found', { length: results.length, detail: 'results' });
+
+              // Cache results
+              searchCache.set(cacheKey, {
+                results,
+                timestamp: Date.now(),
+              });
+
+              resolve(results);
+            }
+          } catch (error) {
+            log.error('agent', 'Extraction error', { error: error.message });
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              resolve([]);
+            }
           }
-        } catch (error) {
-          log.error('agent', 'Extraction error', { error: error.message });
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timeout);
-            resolve([]);
-          }
+        }, 2000); // Wait 2s for page to render
+      })
+      .catch((error) => {
+        log.error('agent', 'Load error', { error: error.message });
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          resolve([]);
         }
-      }, 2000); // Wait 2s for page to render
-    }).catch(error => {
-      log.error('agent', 'Load error', { error: error.message });
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        resolve([]);
-      }
-    });
+      });
   });
 }
 
@@ -242,5 +245,5 @@ function destroy() {
 module.exports = {
   search,
   clearCache,
-  destroy
+  destroy,
 };

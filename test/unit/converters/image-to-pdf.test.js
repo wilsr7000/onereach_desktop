@@ -19,7 +19,7 @@ const { ImageToPdfAgent } = require('../../../lib/converters/image-to-pdf.js');
 
 // Run the standard lifecycle test harness
 testConverterAgent(ImageToPdfAgent, {
-  sampleInput: Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+  sampleInput: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   expectedFromFormats: ['png', 'jpg', 'webp'],
   expectedToFormats: ['pdf'],
   expectedStrategies: ['single-page', 'fitted'],
@@ -36,13 +36,11 @@ describe('ImageToPdfAgent (specific)', () => {
   });
 
   it('rejects non-Buffer input in execute', async () => {
-    await expect(agent.execute('not-a-buffer', 'single-page'))
-      .rejects.toThrow('Input must be a Buffer');
+    await expect(agent.execute('not-a-buffer', 'single-page')).rejects.toThrow('Input must be a Buffer');
   });
 
   it('rejects empty buffer in execute', async () => {
-    await expect(agent.execute(Buffer.alloc(0), 'fitted'))
-      .rejects.toThrow('Input image buffer is empty');
+    await expect(agent.execute(Buffer.alloc(0), 'fitted')).rejects.toThrow('Input image buffer is empty');
   });
 
   it('defaults output format to png', () => {

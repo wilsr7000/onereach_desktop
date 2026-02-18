@@ -1,6 +1,6 @@
 /**
  * AI Conversation Capture - Simple Smoke Test
- * 
+ *
  * Quick validation that the test infrastructure is working.
  * Run with: npm run test:e2e:ai-conversation:smoke
  */
@@ -19,21 +19,21 @@ test.describe('AI Conversation Capture - Smoke Test', () => {
       env: {
         ...process.env,
         NODE_ENV: 'test',
-        TEST_MODE: 'true'
+        TEST_MODE: 'true',
       },
-      timeout: 30000
+      timeout: 30000,
     });
 
     expect(electronApp).toBeDefined();
-    
+
     mainWindow = await electronApp.firstWindow();
     expect(mainWindow).toBeDefined();
-    
+
     await mainWindow.waitForLoadState('domcontentloaded');
-    
+
     const title = await mainWindow.title();
     console.log('App launched:', title);
-    
+
     expect(title).toBeTruthy();
   });
 
@@ -44,8 +44,8 @@ test.describe('AI Conversation Capture - Smoke Test', () => {
         env: {
           ...process.env,
           NODE_ENV: 'test',
-          TEST_MODE: 'true'
-        }
+          TEST_MODE: 'true',
+        },
       });
       mainWindow = await electronApp.firstWindow();
     }
@@ -64,8 +64,8 @@ test.describe('AI Conversation Capture - Smoke Test', () => {
         env: {
           ...process.env,
           NODE_ENV: 'test',
-          TEST_MODE: 'true'
-        }
+          TEST_MODE: 'true',
+        },
       });
       mainWindow = await electronApp.firstWindow();
     }
@@ -86,8 +86,8 @@ test.describe('AI Conversation Capture - Smoke Test', () => {
         env: {
           ...process.env,
           NODE_ENV: 'test',
-          TEST_MODE: 'true'
-        }
+          TEST_MODE: 'true',
+        },
       });
       mainWindow = await electronApp.firstWindow();
     }
@@ -96,12 +96,12 @@ test.describe('AI Conversation Capture - Smoke Test', () => {
     const result = await mainWindow.evaluate(async () => {
       // Get or create Claude Conversations space
       const spaces = await window.spaces.list();
-      let claudeSpace = spaces.find(s => s.name === 'Claude Conversations');
-      
+      let claudeSpace = spaces.find((s) => s.name === 'Claude Conversations');
+
       if (!claudeSpace) {
         claudeSpace = await window.spaces.create('Claude Conversations', {
           icon: '🤖',
-          color: '#ff6b35'
+          color: '#ff6b35',
         });
       }
 
@@ -112,8 +112,8 @@ test.describe('AI Conversation Capture - Smoke Test', () => {
         metadata: {
           aiService: 'Claude',
           exchangeCount: 1,
-          tags: ['test', 'ai-conversation']
-        }
+          tags: ['test', 'ai-conversation'],
+        },
       });
 
       return { success: true, itemId: item.id, spaceId: claudeSpace.id };
@@ -125,9 +125,12 @@ test.describe('AI Conversation Capture - Smoke Test', () => {
 
     // Clean up - delete the test item
     if (result.itemId && result.spaceId) {
-      await mainWindow.evaluate(({ spaceId, itemId }) => {
-        return window.spaces.items.delete(spaceId, itemId);
-      }, { spaceId: result.spaceId, itemId: result.itemId });
+      await mainWindow.evaluate(
+        ({ spaceId, itemId }) => {
+          return window.spaces.items.delete(spaceId, itemId);
+        },
+        { spaceId: result.spaceId, itemId: result.itemId }
+      );
       console.log('Test item cleaned up');
     }
   });

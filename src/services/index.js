@@ -1,7 +1,7 @@
 /**
  * Services Module
  * Part of the Governed Self-Improving Agent Runtime
- * 
+ *
  * Core evaluation services for multi-agent assessment
  */
 
@@ -14,5 +14,5 @@ const { EvaluationConsolidator } = require('../../lib/evaluation/consolidator');
 module.exports = {
   AgentGenerator,
   EvalAgent,
-  EvaluationConsolidator
+  EvaluationConsolidator,
 };

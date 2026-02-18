@@ -129,7 +129,7 @@ const result = await window.ai.chat({ profile: 'fast', messages: [...] });
 
 Profiles are configurable in settings. Change the model for the whole app by updating one profile.
 
-**Extended thinking:** The `calendar-agent` and `daily-brief-agent` use the `powerful` profile with adaptive thinking enabled (`thinking: true`). This gives Claude 4.6 Opus deep reasoning for calendar scheduling and briefing composition. The adapter supports both adaptive thinking (Opus 4.6) and manual `budget_tokens` (older models). Pass `thinking: true` or `thinking: { type: 'adaptive' }` in any `ai.chat()` call to enable it.
+**Extended thinking:** The adapter supports both adaptive thinking (Opus 4.6) and manual `budget_tokens` (older models). Pass `thinking: true` or `thinking: { type: 'adaptive' }` in any `ai.chat()` call to enable it. **Note:** `calendar-agent` and `daily-brief-agent` use the `standard` profile (Sonnet) for queries and composition -- Opus with thinking caused empty-content failures and is overkill for data-lookup tasks. Reserve `powerful` + `thinking: true` for tasks that genuinely need deep multi-step reasoning.
 
 ### State Persistence
 - Use localStorage for UI state (positions, preferences)

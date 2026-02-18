@@ -1,836 +1,858 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Smart Export Style Guide</title>
-    
+
     <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;1,400;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    
+    <link
+      href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;1,400;1,600&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
     <!-- Smart Export Styles -->
-    <link rel="stylesheet" href="smart-export-styles.css">
-    
+    <link rel="stylesheet" href="smart-export-styles.css" />
+
     <style>
-        /* Style guide specific styles */
-        .style-guide-section {
-            margin-bottom: 4rem;
-            padding: 2rem;
-            background: rgba(255, 255, 255, 0.5);
-            border-radius: 8px;
-        }
-        
-        .style-guide-title {
+      /* Style guide specific styles */
+      .style-guide-section {
+        margin-bottom: 4rem;
+        padding: 2rem;
+        background: rgba(255, 255, 255, 0.5);
+        border-radius: 8px;
+      }
+
+      .style-guide-title {
+        font-family: var(--font-sans);
+        font-size: 14px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #666;
+        margin-bottom: 1rem;
+      }
+
+      .color-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+      }
+
+      .color-swatch {
+        padding: 3rem 1rem 1rem;
+        border-radius: 4px;
+        text-align: center;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: white;
+        position: relative;
+      }
+
+      .color-swatch.light {
+        color: var(--text-primary);
+        border: 1px solid var(--accent-line);
+      }
+
+      .color-name {
+        position: absolute;
+        top: 1rem;
+        left: 1rem;
+        font-family: var(--font-sans);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .type-sample {
+        margin-bottom: 2rem;
+        padding: 1rem;
+        background: white;
+        border: 1px solid var(--accent-line);
+      }
+
+      .type-label {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: #666;
+        margin-bottom: 0.5rem;
+      }
+
+      .spacing-demo {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+
+      .spacing-box {
+        background: var(--accent-dot);
+        height: 40px;
+        margin-right: 1rem;
+      }
+
+      .spacing-label {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: #666;
+      }
+
+      .component-example {
+        margin-bottom: 3rem;
+      }
+
+      .example-label {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: #999;
+        margin-bottom: 1rem;
+        padding: 0.5rem;
+        background: #f5f5f5;
+        border-radius: 4px;
+      }
+
+      .grid-demo {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
+        margin-bottom: 2rem;
+      }
+
+      .grid-item {
+        background: rgba(0, 0, 0, 0.05);
+        padding: 2rem;
+        text-align: center;
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="smart-export-document">
+      <header class="document-header">
+        <h1 class="document-title">Style Guide</h1>
+        <div class="document-meta">
+          <span class="document-date">Smart Export Design System</span>
+          <span class="document-context">Journey Map Aesthetic</span>
+        </div>
+      </header>
+
+      <!-- Edit Mode Toggle -->
+      <div style="position: fixed; top: 20px; right: 20px; z-index: 1000">
+        <button
+          id="editToggle"
+          onclick="toggleEditMode()"
+          style="
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
             font-family: var(--font-sans);
             font-size: 14px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: #666;
-            margin-bottom: 1rem;
-        }
-        
-        .color-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 2rem;
-        }
-        
-        .color-swatch {
-            padding: 3rem 1rem 1rem;
-            border-radius: 4px;
-            text-align: center;
-            font-family: var(--font-mono);
-            font-size: 12px;
-            color: white;
-            position: relative;
-        }
-        
-        .color-swatch.light {
-            color: var(--text-primary);
-            border: 1px solid var(--accent-line);
-        }
-        
-        .color-name {
-            position: absolute;
-            top: 1rem;
-            left: 1rem;
-            font-family: var(--font-sans);
-            font-size: 12px;
-            font-weight: 600;
-        }
-        
-        .type-sample {
-            margin-bottom: 2rem;
-            padding: 1rem;
-            background: white;
-            border: 1px solid var(--accent-line);
-        }
-        
-        .type-label {
-            font-family: var(--font-mono);
-            font-size: 11px;
-            color: #666;
-            margin-bottom: 0.5rem;
-        }
-        
-        .spacing-demo {
-            display: flex;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-        
-        .spacing-box {
-            background: var(--accent-dot);
-            height: 40px;
-            margin-right: 1rem;
-        }
-        
-        .spacing-label {
-            font-family: var(--font-mono);
-            font-size: 12px;
-            color: #666;
-        }
-        
-        .component-example {
-            margin-bottom: 3rem;
-        }
-        
-        .example-label {
-            font-family: var(--font-mono);
-            font-size: 11px;
-            color: #999;
-            margin-bottom: 1rem;
-            padding: 0.5rem;
-            background: #f5f5f5;
-            border-radius: 4px;
-        }
-        
-        .grid-demo {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 1rem;
-            margin-bottom: 2rem;
-        }
-        
-        .grid-item {
-            background: rgba(0, 0, 0, 0.05);
-            padding: 2rem;
-            text-align: center;
-            border-radius: 4px;
-        }
-    </style>
-</head>
-<body>
-    <div class="smart-export-document">
-        <header class="document-header">
-            <h1 class="document-title">Style Guide</h1>
-            <div class="document-meta">
-                <span class="document-date">Smart Export Design System</span>
-                <span class="document-context">Journey Map Aesthetic</span>
+            transition: all 0.2s;
+          "
+        >
+          ✏️ Edit CSS
+        </button>
+      </div>
+
+      <!-- CSS Editor (hidden by default) -->
+      <div
+        id="cssEditor"
+        style="
+          display: none;
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0, 0, 0, 0.9);
+          z-index: 2000;
+          overflow: auto;
+        "
+      >
+        <div style="background: #2d2d2d; margin: 40px auto; max-width: 1200px; border-radius: 8px; overflow: hidden">
+          <div
+            style="
+              padding: 20px;
+              border-bottom: 1px solid #3e3e3e;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            "
+          >
+            <h2 style="margin: 0; color: white; font-family: var(--font-sans)">Edit CSS Styles</h2>
+            <div>
+              <button
+                onclick="restoreDefault()"
+                style="
+                  background: #ff9800;
+                  color: white;
+                  border: none;
+                  padding: 8px 16px;
+                  border-radius: 4px;
+                  cursor: pointer;
+                  margin-right: 10px;
+                "
+              >
+                🔄 Restore Default
+              </button>
+              <button
+                onclick="saveCSS()"
+                style="
+                  background: #4caf50;
+                  color: white;
+                  border: none;
+                  padding: 8px 16px;
+                  border-radius: 4px;
+                  cursor: pointer;
+                  margin-right: 10px;
+                "
+              >
+                💾 Save Changes
+              </button>
+              <button
+                onclick="cancelEditMode()"
+                style="
+                  background: #666;
+                  color: white;
+                  border: none;
+                  padding: 8px 16px;
+                  border-radius: 4px;
+                  cursor: pointer;
+                "
+              >
+                Cancel
+              </button>
             </div>
-        </header>
-        
-        <!-- Edit Mode Toggle -->
-        <div style="position: fixed; top: 20px; right: 20px; z-index: 1000;">
-            <button id="editToggle" onclick="toggleEditMode()" style="
-                background: #0e639c;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 6px;
-                cursor: pointer;
-                font-family: var(--font-sans);
-                font-size: 14px;
-                transition: all 0.2s;
-            ">✏️ Edit CSS</button>
+          </div>
+          <textarea
+            id="cssEditArea"
+            style="
+              width: 100%;
+              height: 600px;
+              background: #1e1e1e;
+              color: #e0e0e0;
+              border: none;
+              padding: 20px;
+              font-family: 'Monaco', 'Menlo', monospace;
+              font-size: 13px;
+              line-height: 1.5;
+              resize: none;
+            "
+          ></textarea>
         </div>
-        
-        <!-- CSS Editor (hidden by default) -->
-        <div id="cssEditor" style="
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.9);
-            z-index: 2000;
-            overflow: auto;
-        ">
-            <div style="
-                background: #2d2d2d;
-                margin: 40px auto;
-                max-width: 1200px;
-                border-radius: 8px;
-                overflow: hidden;
-            ">
-                <div style="
-                    padding: 20px;
-                    border-bottom: 1px solid #3e3e3e;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                ">
-                    <h2 style="margin: 0; color: white; font-family: var(--font-sans);">Edit CSS Styles</h2>
-                    <div>
-                        <button onclick="restoreDefault()" style="
-                            background: #ff9800;
-                            color: white;
-                            border: none;
-                            padding: 8px 16px;
-                            border-radius: 4px;
-                            cursor: pointer;
-                            margin-right: 10px;
-                        ">🔄 Restore Default</button>
-                        <button onclick="saveCSS()" style="
-                            background: #4caf50;
-                            color: white;
-                            border: none;
-                            padding: 8px 16px;
-                            border-radius: 4px;
-                            cursor: pointer;
-                            margin-right: 10px;
-                        ">💾 Save Changes</button>
-                        <button onclick="cancelEditMode()" style="
-                            background: #666;
-                            color: white;
-                            border: none;
-                            padding: 8px 16px;
-                            border-radius: 4px;
-                            cursor: pointer;
-                        ">Cancel</button>
-                    </div>
-                </div>
-                <textarea id="cssEditArea" style="
-                    width: 100%;
-                    height: 600px;
-                    background: #1e1e1e;
-                    color: #e0e0e0;
-                    border: none;
-                    padding: 20px;
-                    font-family: 'Monaco', 'Menlo', monospace;
-                    font-size: 13px;
-                    line-height: 1.5;
-                    resize: none;
-                "></textarea>
-            </div>
+      </div>
+
+      <!-- Color Palette Section -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Color Palette</h2>
+        <div class="color-grid" id="colorGrid">
+          <div class="color-swatch light" style="background-color: #f5f2ed">
+            <span class="color-name">Background</span>
+            #F5F2ED
+          </div>
+          <div class="color-swatch" style="background-color: #2c2c2c">
+            <span class="color-name">Primary Text</span>
+            #2C2C2C
+          </div>
+          <div class="color-swatch" style="background-color: #5a5a5a">
+            <span class="color-name">Secondary Text</span>
+            #5A5A5A
+          </div>
+          <div class="color-swatch light" style="background-color: #d4d4d4">
+            <span class="color-name">Lines/Borders</span>
+            #D4D4D4
+          </div>
+          <div class="color-swatch" style="background-color: #8b8b8b">
+            <span class="color-name">Accent Dots</span>
+            #8B8B8B
+          </div>
+        </div>
+      </section>
+
+      <!-- Typography Section -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Typography</h2>
+
+        <div class="type-sample">
+          <div class="type-label">Document Title (.document-title) - Crimson Text, 3rem</div>
+          <h1 class="document-title">Journey Map Title</h1>
         </div>
 
-        <!-- Color Palette Section -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Color Palette</h2>
-            <div class="color-grid" id="colorGrid">
-                <div class="color-swatch light" style="background-color: #F5F2ED;">
-                    <span class="color-name">Background</span>
-                    #F5F2ED
-                </div>
-                <div class="color-swatch" style="background-color: #2C2C2C;">
-                    <span class="color-name">Primary Text</span>
-                    #2C2C2C
-                </div>
-                <div class="color-swatch" style="background-color: #5A5A5A;">
-                    <span class="color-name">Secondary Text</span>
-                    #5A5A5A
-                </div>
-                <div class="color-swatch light" style="background-color: #D4D4D4;">
-                    <span class="color-name">Lines/Borders</span>
-                    #D4D4D4
-                </div>
-                <div class="color-swatch" style="background-color: #8B8B8B;">
-                    <span class="color-name">Accent Dots</span>
-                    #8B8B8B
-                </div>
-            </div>
-        </section>
-
-        <!-- Typography Section -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Typography</h2>
-            
-            <div class="type-sample">
-                <div class="type-label">Document Title (.document-title) - Crimson Text, 3rem</div>
-                <h1 class="document-title">Journey Map Title</h1>
-            </div>
-            
-            <div class="type-sample">
-                <div class="type-label">Section Header (.section-header) - Crimson Text, 1.5rem</div>
-                <h2 class="section-header">Section Header</h2>
-            </div>
-            
-            <div class="type-sample">
-                <div class="type-label">Card Title (.card-title) - Crimson Text, 1.125rem</div>
-                <h3 class="card-title">Card Title</h3>
-            </div>
-            
-            <div class="type-sample">
-                <div class="type-label">Body Text (.body-text) - Crimson Text, 1rem</div>
-                <p class="body-text">
-                    This is body text using the Crimson Text serif font. It has a line height of 1.8 for optimal readability. The warm typography creates an elegant, sophisticated feeling that matches the journey map aesthetic.
-                </p>
-            </div>
-            
-            <div class="type-sample">
-                <div class="type-label">Emphasized Text (.emphasized-text) - Crimson Text Italic, 1.125rem</div>
-                <p class="emphasized-text">
-                    This emphasized text stands out with italic styling and slightly larger size.
-                </p>
-            </div>
-        </section>
-
-        <!-- Spacing System -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Spacing System</h2>
-            
-            <div class="spacing-demo">
-                <div class="spacing-box" style="width: 0.25rem;"></div>
-                <span class="spacing-label">xs: 0.25rem (4px)</span>
-            </div>
-            <div class="spacing-demo">
-                <div class="spacing-box" style="width: 0.5rem;"></div>
-                <span class="spacing-label">sm: 0.5rem (8px)</span>
-            </div>
-            <div class="spacing-demo">
-                <div class="spacing-box" style="width: 1rem;"></div>
-                <span class="spacing-label">md: 1rem (16px)</span>
-            </div>
-            <div class="spacing-demo">
-                <div class="spacing-box" style="width: 2rem;"></div>
-                <span class="spacing-label">lg: 2rem (32px)</span>
-            </div>
-            <div class="spacing-demo">
-                <div class="spacing-box" style="width: 3rem;"></div>
-                <span class="spacing-label">xl: 3rem (48px)</span>
-            </div>
-            <div class="spacing-demo">
-                <div class="spacing-box" style="width: 4rem;"></div>
-                <span class="spacing-label">xxl: 4rem (64px)</span>
-            </div>
-        </section>
-
-        <!-- Components -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Components</h2>
-            
-            <!-- Content Card -->
-            <div class="component-example">
-                <div class="example-label">Content Card (.content-card)</div>
-                <div class="content-card">
-                    <h3 class="card-title">Content Card Example</h3>
-                    <p class="body-text">
-                        Content cards have a subtle border and generous padding. They're perfect for grouping related information.
-                    </p>
-                </div>
-            </div>
-            
-            <!-- Insight Card -->
-            <div class="component-example">
-                <div class="example-label">Insight Card (.insight-card)</div>
-                <div class="insight-card">
-                    <h3 class="card-title">Key Insight</h3>
-                    <p class="body-text">
-                        Insight cards are used for highlighting important findings or conclusions.
-                    </p>
-                </div>
-            </div>
-            
-            <!-- Lists -->
-            <div class="component-example">
-                <div class="example-label">Styled List (.styled-list)</div>
-                <ul class="styled-list">
-                    <li>First item with custom bullet</li>
-                    <li>Second item maintaining consistent spacing</li>
-                    <li>Third item in elegant serif typography</li>
-                </ul>
-            </div>
-            
-            <!-- Quote Block -->
-            <div class="component-example">
-                <div class="example-label">Quote Block (.quote-block)</div>
-                <div class="quote-block">
-                    "This is a quote block with italic text and a subtle left border. It's perfect for highlighting important excerpts or testimonials."
-                </div>
-            </div>
-            
-            <!-- Table -->
-            <div class="component-example">
-                <div class="example-label">Styled Table (.styled-table)</div>
-                <table class="styled-table">
-                    <thead>
-                        <tr>
-                            <th>Stage</th>
-                            <th>Description</th>
-                            <th>Duration</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Awareness</td>
-                            <td>User discovers the need</td>
-                            <td>1-2 days</td>
-                        </tr>
-                        <tr>
-                            <td>Consideration</td>
-                            <td>Evaluating options</td>
-                            <td>3-5 days</td>
-                        </tr>
-                        <tr>
-                            <td>Decision</td>
-                            <td>Making the choice</td>
-                            <td>1 day</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- Timeline Components -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Timeline Components</h2>
-            
-            <div class="component-example">
-                <div class="example-label">Timeline (.timeline-container)</div>
-                <div class="timeline-container">
-                    <div class="timeline-line"></div>
-                    <div class="timeline-stages">
-                        <div class="timeline-stage">
-                            <div class="timeline-marker"></div>
-                            Awareness
-                        </div>
-                        <div class="timeline-stage">
-                            <div class="timeline-marker"></div>
-                            Consideration
-                        </div>
-                        <div class="timeline-stage">
-                            <div class="timeline-marker"></div>
-                            Purchase
-                        </div>
-                        <div class="timeline-stage">
-                            <div class="timeline-marker"></div>
-                            Support
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Grid Layouts -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Grid Layouts</h2>
-            
-            <div class="component-example">
-                <div class="example-label">Opportunity Grid (.opportunity-grid)</div>
-                <div class="opportunity-grid">
-                    <div class="opportunity-cell">
-                        <div class="opportunity-dot"></div>
-                    </div>
-                    <div class="opportunity-cell"></div>
-                    <div class="opportunity-cell">
-                        <div class="opportunity-dot"></div>
-                    </div>
-                    <div class="opportunity-cell"></div>
-                    <div class="opportunity-cell"></div>
-                    <div class="opportunity-cell">
-                        <div class="opportunity-dot"></div>
-                    </div>
-                    <div class="opportunity-cell"></div>
-                    <div class="opportunity-cell">
-                        <div class="opportunity-dot"></div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Metrics Display -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Metrics & Data</h2>
-            
-            <div class="component-example">
-                <div class="example-label">Metric Display</div>
-                <div class="content-card text-center">
-                    <div class="metric-display">87%</div>
-                    <div class="metric-label">Customer Satisfaction</div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Utility Classes -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Utility Classes</h2>
-            
-            <div class="grid-demo">
-                <div class="grid-item">
-                    <p class="text-center">.text-center</p>
-                </div>
-                <div class="grid-item">
-                    <p class="text-right">.text-right</p>
-                </div>
-                <div class="grid-item">
-                    <p class="text-muted">.text-muted</p>
-                </div>
-                <div class="grid-item">
-                    <p>.mb-lg (margin bottom)</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- Usage Examples -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Usage Examples</h2>
-            
-            <div class="content-card">
-                <h3 class="card-title">Complete Component Example</h3>
-                <p class="body-text mb-md">
-                    This demonstrates how components work together to create a cohesive design.
-                </p>
-                <ul class="styled-list mb-lg">
-                    <li>Consistent spacing using utility classes</li>
-                    <li>Proper typography hierarchy</li>
-                    <li>Subtle borders and backgrounds</li>
-                </ul>
-                <div class="quote-block">
-                    "The journey map aesthetic creates documents that feel both professional and approachable."
-                </div>
-            </div>
-        </section>
-
-        <!-- Journey Map Elements -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Journey Map Elements</h2>
-            
-            <!-- Journey Header Example -->
-            <div class="component-example">
-                <div class="example-label">Journey Header (.journey-header)</div>
-                <div class="journey-header">
-                    <div class="journey-header-left">
-                        <h1 class="document-title">Journey Map</h1>
-                        <div class="journey-subtitle">APRIL 24 AM Sophia</div>
-                    </div>
-                    <div class="journey-header-right">
-                        <div>April 24, 2024</div>
-                        <div style="font-style: italic;">New Customer</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Emotion Curve -->
-            <div class="component-example">
-                <div class="example-label">Emotion Curve (.emotion-curve)</div>
-                <div class="emotion-curve">
-                    <svg viewBox="0 0 800 150">
-                        <path d="M 0 75 Q 100 50, 200 75 T 400 75 Q 500 30, 600 75 T 800 75" />
-                    </svg>
-                </div>
-            </div>
-            
-            <!-- Journey Stages -->
-            <div class="component-example">
-                <div class="example-label">Journey Stages with Line (.journey-stages)</div>
-                <div class="journey-stages">
-                    <div class="journey-stages-line"></div>
-                    <div class="timeline-stages">
-                        <div class="journey-stage-item">
-                            <div class="journey-stage-marker"></div>
-                            <div>Explore</div>
-                        </div>
-                        <div class="journey-stage-item">
-                            <div class="journey-stage-marker"></div>
-                            <div>Sign Up</div>
-                        </div>
-                        <div class="journey-stage-item">
-                            <div class="journey-stage-marker active"></div>
-                            <div>Onboarding</div>
-                        </div>
-                        <div class="journey-stage-item">
-                            <div class="journey-stage-marker"></div>
-                            <div>Retention</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Thought Annotations -->
-            <div class="component-example">
-                <div class="example-label">Thought Annotations (.thought-annotation)</div>
-                <div style="position: relative; padding: 40px 0;">
-                    <div class="thought-annotation">
-                        Complex process is a barrier
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Experience Sweeteners -->
-            <div class="component-example">
-                <div class="example-label">Experience Sweeteners (.sweeteners-section)</div>
-                <div class="sweeteners-section">
-                    <div class="sweeteners-title">Experience sweeteners</div>
-                    <ul class="styled-list">
-                        <li>Clear explanations</li>
-                        <li>Use of interactive tools</li>
-                    </ul>
-                </div>
-            </div>
-            
-            <!-- Opportunity Pattern -->
-            <div class="component-example">
-                <div class="example-label">Opportunity Dots Pattern (.opportunity-pattern)</div>
-                <div class="opportunity-pattern" style="max-width: 200px;">
-                    <div class="opportunity-pattern-dot"></div>
-                    <div class="opportunity-pattern-dot active"></div>
-                    <div class="opportunity-pattern-dot"></div>
-                    <div class="opportunity-pattern-dot"></div>
-                    <div class="opportunity-pattern-dot active"></div>
-                    <div class="opportunity-pattern-dot"></div>
-                    <div class="opportunity-pattern-dot"></div>
-                    <div class="opportunity-pattern-dot active"></div>
-                    <div class="opportunity-pattern-dot"></div>
-                    <div class="opportunity-pattern-dot"></div>
-                    <div class="opportunity-pattern-dot"></div>
-                    <div class="opportunity-pattern-dot active"></div>
-                </div>
-            </div>
-            
-            <!-- Journey Map Grid -->
-            <div class="component-example">
-                <div class="example-label">Journey Map Grid Layout (.journey-map-grid)</div>
-                <div class="journey-map-grid">
-                    <div class="journey-map-label">Thoughts</div>
-                    <div>Unsure where to start → Which option is best fit? → This is helpful</div>
-                </div>
-                <div class="journey-map-grid">
-                    <div class="journey-map-label">Emotions</div>
-                    <div>Initial confusion, then understanding, finally satisfaction</div>
-                </div>
-            </div>
-            
-            <!-- Sources Citation -->
-            <div class="component-example">
-                <div class="example-label">Sources Citation (.sources-citation)</div>
-                <div class="sources-citation">
-                    Sources: a la ta-tu.
-                </div>
-            </div>
-        </section>
-
-        <!-- Complete Journey Map Examples -->
-        <section class="style-guide-section">
-            <h2 class="section-header">Complete Journey Map Examples</h2>
-            
-            <!-- Example 1: Customer Journey -->
-            <div class="component-example">
-                <div class="example-label">Full Journey Map Example</div>
-                <div class="content-card">
-                    <div class="journey-header">
-                        <div class="journey-header-left">
-                            <h2 class="document-title" style="font-size: var(--text-2xl);">Customer Journey</h2>
-                            <div class="journey-subtitle">New User Onboarding</div>
-                        </div>
-                        <div class="journey-header-right">
-                            <div>March 2024</div>
-                            <div style="font-style: italic;">Digital Experience</div>
-                        </div>
-                    </div>
-                    
-                    <div class="journey-map-grid">
-                        <div class="journey-map-label">Emotions</div>
-                        <div class="emotion-curve" style="height: 100px;">
-                            <svg viewBox="0 0 600 100">
-                                <path d="M 0 50 Q 100 70, 200 50 T 400 50 Q 500 20, 600 50" stroke-dasharray="4,4" />
-                            </svg>
-                        </div>
-                    </div>
-                    
-                    <div class="journey-stages">
-                        <div class="journey-stages-line"></div>
-                        <div class="timeline-stages">
-                            <div class="journey-stage-item">
-                                <div class="journey-stage-marker"></div>
-                                <div>Awareness</div>
-                                <div class="thought-annotation" style="margin-top: 20px;">I need a solution</div>
-                            </div>
-                            <div class="journey-stage-item">
-                                <div class="journey-stage-marker active"></div>
-                                <div>Consideration</div>
-                                <div class="thought-annotation" style="margin-top: 20px;">Comparing options</div>
-                            </div>
-                            <div class="journey-stage-item">
-                                <div class="journey-stage-marker"></div>
-                                <div>Decision</div>
-                                <div class="thought-annotation" style="margin-top: 20px;">Ready to commit</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="sources-citation">
-                        Based on user research conducted Q1 2024
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Navigation -->
-        <div class="document-navigation">
-            <a href="#" class="nav-arrow">←</a>
-            <span class="page-indicator">Smart Export Style Guide v1.0</span>
-            <a href="#" class="nav-arrow">→</a>
+        <div class="type-sample">
+          <div class="type-label">Section Header (.section-header) - Crimson Text, 1.5rem</div>
+          <h2 class="section-header">Section Header</h2>
         </div>
+
+        <div class="type-sample">
+          <div class="type-label">Card Title (.card-title) - Crimson Text, 1.125rem</div>
+          <h3 class="card-title">Card Title</h3>
+        </div>
+
+        <div class="type-sample">
+          <div class="type-label">Body Text (.body-text) - Crimson Text, 1rem</div>
+          <p class="body-text">
+            This is body text using the Crimson Text serif font. It has a line height of 1.8 for optimal readability.
+            The warm typography creates an elegant, sophisticated feeling that matches the journey map aesthetic.
+          </p>
+        </div>
+
+        <div class="type-sample">
+          <div class="type-label">Emphasized Text (.emphasized-text) - Crimson Text Italic, 1.125rem</div>
+          <p class="emphasized-text">This emphasized text stands out with italic styling and slightly larger size.</p>
+        </div>
+      </section>
+
+      <!-- Spacing System -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Spacing System</h2>
+
+        <div class="spacing-demo">
+          <div class="spacing-box" style="width: 0.25rem"></div>
+          <span class="spacing-label">xs: 0.25rem (4px)</span>
+        </div>
+        <div class="spacing-demo">
+          <div class="spacing-box" style="width: 0.5rem"></div>
+          <span class="spacing-label">sm: 0.5rem (8px)</span>
+        </div>
+        <div class="spacing-demo">
+          <div class="spacing-box" style="width: 1rem"></div>
+          <span class="spacing-label">md: 1rem (16px)</span>
+        </div>
+        <div class="spacing-demo">
+          <div class="spacing-box" style="width: 2rem"></div>
+          <span class="spacing-label">lg: 2rem (32px)</span>
+        </div>
+        <div class="spacing-demo">
+          <div class="spacing-box" style="width: 3rem"></div>
+          <span class="spacing-label">xl: 3rem (48px)</span>
+        </div>
+        <div class="spacing-demo">
+          <div class="spacing-box" style="width: 4rem"></div>
+          <span class="spacing-label">xxl: 4rem (64px)</span>
+        </div>
+      </section>
+
+      <!-- Components -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Components</h2>
+
+        <!-- Content Card -->
+        <div class="component-example">
+          <div class="example-label">Content Card (.content-card)</div>
+          <div class="content-card">
+            <h3 class="card-title">Content Card Example</h3>
+            <p class="body-text">
+              Content cards have a subtle border and generous padding. They're perfect for grouping related information.
+            </p>
+          </div>
+        </div>
+
+        <!-- Insight Card -->
+        <div class="component-example">
+          <div class="example-label">Insight Card (.insight-card)</div>
+          <div class="insight-card">
+            <h3 class="card-title">Key Insight</h3>
+            <p class="body-text">Insight cards are used for highlighting important findings or conclusions.</p>
+          </div>
+        </div>
+
+        <!-- Lists -->
+        <div class="component-example">
+          <div class="example-label">Styled List (.styled-list)</div>
+          <ul class="styled-list">
+            <li>First item with custom bullet</li>
+            <li>Second item maintaining consistent spacing</li>
+            <li>Third item in elegant serif typography</li>
+          </ul>
+        </div>
+
+        <!-- Quote Block -->
+        <div class="component-example">
+          <div class="example-label">Quote Block (.quote-block)</div>
+          <div class="quote-block">
+            "This is a quote block with italic text and a subtle left border. It's perfect for highlighting important
+            excerpts or testimonials."
+          </div>
+        </div>
+
+        <!-- Table -->
+        <div class="component-example">
+          <div class="example-label">Styled Table (.styled-table)</div>
+          <table class="styled-table">
+            <thead>
+              <tr>
+                <th>Stage</th>
+                <th>Description</th>
+                <th>Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Awareness</td>
+                <td>User discovers the need</td>
+                <td>1-2 days</td>
+              </tr>
+              <tr>
+                <td>Consideration</td>
+                <td>Evaluating options</td>
+                <td>3-5 days</td>
+              </tr>
+              <tr>
+                <td>Decision</td>
+                <td>Making the choice</td>
+                <td>1 day</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Timeline Components -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Timeline Components</h2>
+
+        <div class="component-example">
+          <div class="example-label">Timeline (.timeline-container)</div>
+          <div class="timeline-container">
+            <div class="timeline-line"></div>
+            <div class="timeline-stages">
+              <div class="timeline-stage">
+                <div class="timeline-marker"></div>
+                Awareness
+              </div>
+              <div class="timeline-stage">
+                <div class="timeline-marker"></div>
+                Consideration
+              </div>
+              <div class="timeline-stage">
+                <div class="timeline-marker"></div>
+                Purchase
+              </div>
+              <div class="timeline-stage">
+                <div class="timeline-marker"></div>
+                Support
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Grid Layouts -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Grid Layouts</h2>
+
+        <div class="component-example">
+          <div class="example-label">Opportunity Grid (.opportunity-grid)</div>
+          <div class="opportunity-grid">
+            <div class="opportunity-cell">
+              <div class="opportunity-dot"></div>
+            </div>
+            <div class="opportunity-cell"></div>
+            <div class="opportunity-cell">
+              <div class="opportunity-dot"></div>
+            </div>
+            <div class="opportunity-cell"></div>
+            <div class="opportunity-cell"></div>
+            <div class="opportunity-cell">
+              <div class="opportunity-dot"></div>
+            </div>
+            <div class="opportunity-cell"></div>
+            <div class="opportunity-cell">
+              <div class="opportunity-dot"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Metrics Display -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Metrics & Data</h2>
+
+        <div class="component-example">
+          <div class="example-label">Metric Display</div>
+          <div class="content-card text-center">
+            <div class="metric-display">87%</div>
+            <div class="metric-label">Customer Satisfaction</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Utility Classes -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Utility Classes</h2>
+
+        <div class="grid-demo">
+          <div class="grid-item">
+            <p class="text-center">.text-center</p>
+          </div>
+          <div class="grid-item">
+            <p class="text-right">.text-right</p>
+          </div>
+          <div class="grid-item">
+            <p class="text-muted">.text-muted</p>
+          </div>
+          <div class="grid-item">
+            <p>.mb-lg (margin bottom)</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Usage Examples -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Usage Examples</h2>
+
+        <div class="content-card">
+          <h3 class="card-title">Complete Component Example</h3>
+          <p class="body-text mb-md">This demonstrates how components work together to create a cohesive design.</p>
+          <ul class="styled-list mb-lg">
+            <li>Consistent spacing using utility classes</li>
+            <li>Proper typography hierarchy</li>
+            <li>Subtle borders and backgrounds</li>
+          </ul>
+          <div class="quote-block">
+            "The journey map aesthetic creates documents that feel both professional and approachable."
+          </div>
+        </div>
+      </section>
+
+      <!-- Journey Map Elements -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Journey Map Elements</h2>
+
+        <!-- Journey Header Example -->
+        <div class="component-example">
+          <div class="example-label">Journey Header (.journey-header)</div>
+          <div class="journey-header">
+            <div class="journey-header-left">
+              <h1 class="document-title">Journey Map</h1>
+              <div class="journey-subtitle">APRIL 24 AM Sophia</div>
+            </div>
+            <div class="journey-header-right">
+              <div>April 24, 2024</div>
+              <div style="font-style: italic">New Customer</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Emotion Curve -->
+        <div class="component-example">
+          <div class="example-label">Emotion Curve (.emotion-curve)</div>
+          <div class="emotion-curve">
+            <svg viewBox="0 0 800 150">
+              <path d="M 0 75 Q 100 50, 200 75 T 400 75 Q 500 30, 600 75 T 800 75" />
+            </svg>
+          </div>
+        </div>
+
+        <!-- Journey Stages -->
+        <div class="component-example">
+          <div class="example-label">Journey Stages with Line (.journey-stages)</div>
+          <div class="journey-stages">
+            <div class="journey-stages-line"></div>
+            <div class="timeline-stages">
+              <div class="journey-stage-item">
+                <div class="journey-stage-marker"></div>
+                <div>Explore</div>
+              </div>
+              <div class="journey-stage-item">
+                <div class="journey-stage-marker"></div>
+                <div>Sign Up</div>
+              </div>
+              <div class="journey-stage-item">
+                <div class="journey-stage-marker active"></div>
+                <div>Onboarding</div>
+              </div>
+              <div class="journey-stage-item">
+                <div class="journey-stage-marker"></div>
+                <div>Retention</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Thought Annotations -->
+        <div class="component-example">
+          <div class="example-label">Thought Annotations (.thought-annotation)</div>
+          <div style="position: relative; padding: 40px 0">
+            <div class="thought-annotation">Complex process is a barrier</div>
+          </div>
+        </div>
+
+        <!-- Experience Sweeteners -->
+        <div class="component-example">
+          <div class="example-label">Experience Sweeteners (.sweeteners-section)</div>
+          <div class="sweeteners-section">
+            <div class="sweeteners-title">Experience sweeteners</div>
+            <ul class="styled-list">
+              <li>Clear explanations</li>
+              <li>Use of interactive tools</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Opportunity Pattern -->
+        <div class="component-example">
+          <div class="example-label">Opportunity Dots Pattern (.opportunity-pattern)</div>
+          <div class="opportunity-pattern" style="max-width: 200px">
+            <div class="opportunity-pattern-dot"></div>
+            <div class="opportunity-pattern-dot active"></div>
+            <div class="opportunity-pattern-dot"></div>
+            <div class="opportunity-pattern-dot"></div>
+            <div class="opportunity-pattern-dot active"></div>
+            <div class="opportunity-pattern-dot"></div>
+            <div class="opportunity-pattern-dot"></div>
+            <div class="opportunity-pattern-dot active"></div>
+            <div class="opportunity-pattern-dot"></div>
+            <div class="opportunity-pattern-dot"></div>
+            <div class="opportunity-pattern-dot"></div>
+            <div class="opportunity-pattern-dot active"></div>
+          </div>
+        </div>
+
+        <!-- Journey Map Grid -->
+        <div class="component-example">
+          <div class="example-label">Journey Map Grid Layout (.journey-map-grid)</div>
+          <div class="journey-map-grid">
+            <div class="journey-map-label">Thoughts</div>
+            <div>Unsure where to start → Which option is best fit? → This is helpful</div>
+          </div>
+          <div class="journey-map-grid">
+            <div class="journey-map-label">Emotions</div>
+            <div>Initial confusion, then understanding, finally satisfaction</div>
+          </div>
+        </div>
+
+        <!-- Sources Citation -->
+        <div class="component-example">
+          <div class="example-label">Sources Citation (.sources-citation)</div>
+          <div class="sources-citation">Sources: a la ta-tu.</div>
+        </div>
+      </section>
+
+      <!-- Complete Journey Map Examples -->
+      <section class="style-guide-section">
+        <h2 class="section-header">Complete Journey Map Examples</h2>
+
+        <!-- Example 1: Customer Journey -->
+        <div class="component-example">
+          <div class="example-label">Full Journey Map Example</div>
+          <div class="content-card">
+            <div class="journey-header">
+              <div class="journey-header-left">
+                <h2 class="document-title" style="font-size: var(--text-2xl)">Customer Journey</h2>
+                <div class="journey-subtitle">New User Onboarding</div>
+              </div>
+              <div class="journey-header-right">
+                <div>March 2024</div>
+                <div style="font-style: italic">Digital Experience</div>
+              </div>
+            </div>
+
+            <div class="journey-map-grid">
+              <div class="journey-map-label">Emotions</div>
+              <div class="emotion-curve" style="height: 100px">
+                <svg viewBox="0 0 600 100">
+                  <path d="M 0 50 Q 100 70, 200 50 T 400 50 Q 500 20, 600 50" stroke-dasharray="4,4" />
+                </svg>
+              </div>
+            </div>
+
+            <div class="journey-stages">
+              <div class="journey-stages-line"></div>
+              <div class="timeline-stages">
+                <div class="journey-stage-item">
+                  <div class="journey-stage-marker"></div>
+                  <div>Awareness</div>
+                  <div class="thought-annotation" style="margin-top: 20px">I need a solution</div>
+                </div>
+                <div class="journey-stage-item">
+                  <div class="journey-stage-marker active"></div>
+                  <div>Consideration</div>
+                  <div class="thought-annotation" style="margin-top: 20px">Comparing options</div>
+                </div>
+                <div class="journey-stage-item">
+                  <div class="journey-stage-marker"></div>
+                  <div>Decision</div>
+                  <div class="thought-annotation" style="margin-top: 20px">Ready to commit</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sources-citation">Based on user research conducted Q1 2024</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Navigation -->
+      <div class="document-navigation">
+        <a href="#" class="nav-arrow">←</a>
+        <span class="page-indicator">Smart Export Style Guide v1.0</span>
+        <a href="#" class="nav-arrow">→</a>
+      </div>
     </div>
-    
-            <script>
-        let originalCSS = '';
-        let defaultCSS = ''; // Store the default CSS
-        
-        // Load and store default CSS on page load
-        window.addEventListener('DOMContentLoaded', async function() {
-            try {
-                const response = await fetch('smart-export-styles.css');
-                defaultCSS = await response.text();
-            } catch (error) {
-                console.error('Could not load default CSS:', error);
-            }
-        });
-        
-        // Toggle edit mode
-        async function toggleEditMode() {
-            const editor = document.getElementById('cssEditor');
-            const editArea = document.getElementById('cssEditArea');
-            
-            // Load the current CSS file
-            try {
-                const response = await fetch('smart-export-styles.css');
-                originalCSS = await response.text();
-                editArea.value = originalCSS;
-                editor.style.display = 'block';
-            } catch (error) {
-                alert('Could not load CSS file: ' + error.message);
-            }
+
+    <script>
+      let originalCSS = '';
+      let defaultCSS = ''; // Store the default CSS
+
+      // Load and store default CSS on page load
+      window.addEventListener('DOMContentLoaded', async function () {
+        try {
+          const response = await fetch('smart-export-styles.css');
+          defaultCSS = await response.text();
+        } catch (error) {
+          console.error('Could not load default CSS:', error);
         }
-        
-        // Cancel edit mode
-        function cancelEditMode() {
-            document.getElementById('cssEditor').style.display = 'none';
-            // Restore original CSS
-            updateStyles(originalCSS);
+      });
+
+      // Toggle edit mode
+      async function toggleEditMode() {
+        const editor = document.getElementById('cssEditor');
+        const editArea = document.getElementById('cssEditArea');
+
+        // Load the current CSS file
+        try {
+          const response = await fetch('smart-export-styles.css');
+          originalCSS = await response.text();
+          editArea.value = originalCSS;
+          editor.style.display = 'block';
+        } catch (error) {
+          alert('Could not load CSS file: ' + error.message);
         }
-        
-        // Save CSS changes
-        async function saveCSS() {
-            const newCSS = document.getElementById('cssEditArea').value;
-            
-            // Update the styles on the page immediately
-            updateStyles(newCSS);
-            
-            // Note to user about saving
-            alert('CSS changes applied to this preview!\n\nNote: To permanently save these changes, you\'ll need to manually update the smart-export-styles.css file in your project.');
-            
-            // Close editor
-            document.getElementById('cssEditor').style.display = 'none';
+      }
+
+      // Cancel edit mode
+      function cancelEditMode() {
+        document.getElementById('cssEditor').style.display = 'none';
+        // Restore original CSS
+        updateStyles(originalCSS);
+      }
+
+      // Save CSS changes
+      async function saveCSS() {
+        const newCSS = document.getElementById('cssEditArea').value;
+
+        // Update the styles on the page immediately
+        updateStyles(newCSS);
+
+        // Note to user about saving
+        alert(
+          "CSS changes applied to this preview!\n\nNote: To permanently save these changes, you'll need to manually update the smart-export-styles.css file in your project."
+        );
+
+        // Close editor
+        document.getElementById('cssEditor').style.display = 'none';
+      }
+
+      // Update styles on the page
+      function updateStyles(css) {
+        // Find or create a style element for our custom CSS
+        let styleEl = document.getElementById('customStyles');
+        if (!styleEl) {
+          styleEl = document.createElement('style');
+          styleEl.id = 'customStyles';
+          document.head.appendChild(styleEl);
         }
-        
-        // Update styles on the page
-        function updateStyles(css) {
-            // Find or create a style element for our custom CSS
-            let styleEl = document.getElementById('customStyles');
-            if (!styleEl) {
-                styleEl = document.createElement('style');
-                styleEl.id = 'customStyles';
-                document.head.appendChild(styleEl);
-            }
-            styleEl.textContent = css;
+        styleEl.textContent = css;
+      }
+
+      // Add keyboard shortcut for save (Cmd/Ctrl + S)
+      document.addEventListener('keydown', function (e) {
+        if (
+          (e.metaKey || e.ctrlKey) &&
+          e.key === 's' &&
+          document.getElementById('cssEditor').style.display === 'block'
+        ) {
+          e.preventDefault();
+          saveCSS();
         }
-        
-        // Add keyboard shortcut for save (Cmd/Ctrl + S)
-        document.addEventListener('keydown', function(e) {
-            if ((e.metaKey || e.ctrlKey) && e.key === 's' && document.getElementById('cssEditor').style.display === 'block') {
-                e.preventDefault();
-                saveCSS();
-            }
-        });
-        
-        // Restore default CSS
-        function restoreDefault() {
-            if (confirm('Restore default styles? This will overwrite any custom changes.')) {
-                document.getElementById('cssEditArea').value = defaultCSS;
-                updateStyles(defaultCSS);
-            }
+      });
+
+      // Restore default CSS
+      function restoreDefault() {
+        if (confirm('Restore default styles? This will overwrite any custom changes.')) {
+          document.getElementById('cssEditArea').value = defaultCSS;
+          updateStyles(defaultCSS);
         }
-        
-        // Also add live preview as you type
-        document.getElementById('cssEditArea')?.addEventListener('input', function(e) {
-            updateStyles(e.target.value);
-        });
-        // Function to update color palette from CSS variables
-        function updateColorPalette() {
-            const computedStyle = getComputedStyle(document.documentElement);
-            const colorGrid = document.getElementById('colorGrid');
-            
-            // Define the color variables to check
-            const colorVars = [
-                { var: '--color-primary', name: 'Primary', light: false },
-                { var: '--color-secondary', name: 'Secondary', light: false },
-                { var: '--color-text', name: 'Text', light: false },
-                { var: '--color-background', name: 'Background', light: true },
-                { var: '--text-primary', name: 'Primary Text', light: false },
-                { var: '--text-secondary', name: 'Secondary Text', light: false },
-                { var: '--accent-line', name: 'Lines/Borders', light: true },
-                { var: '--accent-dot', name: 'Accent', light: false },
-                { var: '--color-accent-1', name: 'Accent 1', light: false },
-                { var: '--color-accent-2', name: 'Accent 2', light: false }
-            ];
-            
-            let html = '';
-            
-            colorVars.forEach(color => {
-                const value = computedStyle.getPropertyValue(color.var).trim();
-                if (value) {
-                    // Determine if the color is light or dark
-                    const isLight = color.light || isLightColor(value);
-                    
-                    html += `
+      }
+
+      // Also add live preview as you type
+      document.getElementById('cssEditArea')?.addEventListener('input', function (e) {
+        updateStyles(e.target.value);
+      });
+      // Function to update color palette from CSS variables
+      function updateColorPalette() {
+        const computedStyle = getComputedStyle(document.documentElement);
+        const colorGrid = document.getElementById('colorGrid');
+
+        // Define the color variables to check
+        const colorVars = [
+          { var: '--color-primary', name: 'Primary', light: false },
+          { var: '--color-secondary', name: 'Secondary', light: false },
+          { var: '--color-text', name: 'Text', light: false },
+          { var: '--color-background', name: 'Background', light: true },
+          { var: '--text-primary', name: 'Primary Text', light: false },
+          { var: '--text-secondary', name: 'Secondary Text', light: false },
+          { var: '--accent-line', name: 'Lines/Borders', light: true },
+          { var: '--accent-dot', name: 'Accent', light: false },
+          { var: '--color-accent-1', name: 'Accent 1', light: false },
+          { var: '--color-accent-2', name: 'Accent 2', light: false },
+        ];
+
+        let html = '';
+
+        colorVars.forEach((color) => {
+          const value = computedStyle.getPropertyValue(color.var).trim();
+          if (value) {
+            // Determine if the color is light or dark
+            const isLight = color.light || isLightColor(value);
+
+            html += `
                         <div class="color-swatch ${isLight ? 'light' : ''}" style="background-color: ${value};">
                             <span class="color-name">${color.name}</span>
                             ${value}
                         </div>
                     `;
-                }
-            });
-            
-            // Only update if we found custom colors
-            if (html) {
-                colorGrid.innerHTML = html;
-            }
+          }
+        });
+
+        // Only update if we found custom colors
+        if (html) {
+          colorGrid.innerHTML = html;
         }
-        
-        // Helper function to determine if a color is light or dark
-        function isLightColor(color) {
-            // Convert color to RGB
-            const hex = color.replace('#', '');
-            const r = parseInt(hex.substr(0, 2), 16);
-            const g = parseInt(hex.substr(2, 2), 16);
-            const b = parseInt(hex.substr(4, 2), 16);
-            
-            // Calculate luminance
-            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-            
-            return luminance > 0.5;
-        }
-        
-        // Update color palette when page loads
-        window.addEventListener('load', () => {
-            // Wait a bit for any injected styles to be applied
-            setTimeout(updateColorPalette, 200);
-        });
-        
-        // Also update when styles change
-        const observer = new MutationObserver(() => {
-            updateColorPalette();
-        });
-        
-        observer.observe(document.head, {
-            childList: true,
-            subtree: true
-        });
+      }
+
+      // Helper function to determine if a color is light or dark
+      function isLightColor(color) {
+        // Convert color to RGB
+        const hex = color.replace('#', '');
+        const r = parseInt(hex.substr(0, 2), 16);
+        const g = parseInt(hex.substr(2, 2), 16);
+        const b = parseInt(hex.substr(4, 2), 16);
+
+        // Calculate luminance
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
+        return luminance > 0.5;
+      }
+
+      // Update color palette when page loads
+      window.addEventListener('load', () => {
+        // Wait a bit for any injected styles to be applied
+        setTimeout(updateColorPalette, 200);
+      });
+
+      // Also update when styles change
+      const observer = new MutationObserver(() => {
+        updateColorPalette();
+      });
+
+      observer.observe(document.head, {
+        childList: true,
+        subtree: true,
+      });
     </script>
-</body>
-</html> 
+  </body>
+</html>

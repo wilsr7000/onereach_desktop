@@ -19,10 +19,7 @@
       {
         "type": "objectives",
         "title": "Objectives",
-        "items": [
-          "Primary objective 1",
-          "Primary objective 2"
-        ]
+        "items": ["Primary objective 1", "Primary objective 2"]
       },
       {
         "type": "user-stories",
@@ -41,20 +38,14 @@
         "categories": [
           {
             "name": "Core Features",
-            "requirements": [
-              "FR1: Requirement description",
-              "FR2: Requirement description"
-            ]
+            "requirements": ["FR1: Requirement description", "FR2: Requirement description"]
           }
         ]
       },
       {
         "type": "success-metrics",
         "title": "Success Metrics",
-        "metrics": [
-          "Metric 1: Target value",
-          "Metric 2: Target value"
-        ]
+        "metrics": ["Metric 1: Target value", "Metric 2: Target value"]
       }
     ]
   },
@@ -70,4 +61,4 @@
     "maxWidth": "900px"
   },
   "htmlTemplate": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>{{title}}</title>\n    <style>\n        * {\n            margin: 0;\n            padding: 0;\n            box-sizing: border-box;\n        }\n        \n        body {\n            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n            line-height: 1.6;\n            color: #2c3e50;\n            background-color: #fff;\n            padding: 40px 20px;\n        }\n        \n        .container {\n            max-width: 900px;\n            margin: 0 auto;\n        }\n        \n        .header {\n            background: #2c3e50;\n            color: white;\n            padding: 40px;\n            border-radius: 8px;\n            margin-bottom: 40px;\n        }\n        \n        .header h1 {\n            font-size: 2.5em;\n            margin-bottom: 10px;\n        }\n        \n        .header-meta {\n            display: flex;\n            gap: 30px;\n            font-size: 0.9em;\n            opacity: 0.9;\n        }\n        \n        .meta-item {\n            display: flex;\n            gap: 8px;\n        }\n        \n        .meta-label {\n            font-weight: 600;\n        }\n        \n        .toc {\n            background: #f8f9fa;\n            padding: 25px;\n            border-radius: 8px;\n            margin-bottom: 40px;\n        }\n        \n        .toc h2 {\n            font-size: 1.3em;\n            margin-bottom: 15px;\n            color: #2c3e50;\n        }\n        \n        .toc-list {\n            list-style: none;\n        }\n        \n        .toc-item {\n            padding: 5px 0;\n        }\n        \n        .toc-link {\n            color: #3498db;\n            text-decoration: none;\n            display: flex;\n            align-items: center;\n        }\n        \n        .toc-link:hover {\n            text-decoration: underline;\n        }\n        \n        .toc-number {\n            font-weight: 600;\n            margin-right: 10px;\n            color: #7f8c8d;\n        }\n        \n        .section {\n            margin-bottom: 40px;\n            page-break-inside: avoid;\n        }\n        \n        h2 {\n            font-size: 1.8em;\n            color: #2c3e50;\n            margin-bottom: 20px;\n            padding-bottom: 10px;\n            border-bottom: 2px solid #e0e0e0;\n            display: flex;\n            align-items: center;\n        }\n        \n        .section-number {\n            font-weight: 700;\n            margin-right: 15px;\n            color: #3498db;\n        }\n        \n        h3 {\n            font-size: 1.3em;\n            color: #34495e;\n            margin-top: 25px;\n            margin-bottom: 15px;\n        }\n        \n        .user-story {\n            background: #f8f9fa;\n            padding: 20px;\n            border-radius: 6px;\n            margin: 15px 0;\n            border-left: 4px solid #3498db;\n        }\n        \n        .user-story-role {\n            font-weight: 600;\n            color: #3498db;\n        }\n        \n        .requirement {\n            padding: 15px;\n            margin: 10px 0;\n            border: 1px solid #e0e0e0;\n            border-radius: 6px;\n            background: #fafafa;\n        }\n        \n        .requirement-id {\n            font-weight: 700;\n            color: #3498db;\n            margin-right: 10px;\n        }\n        \n        .requirement-priority {\n            display: inline-block;\n            padding: 3px 8px;\n            border-radius: 4px;\n            font-size: 0.8em;\n            font-weight: 600;\n            margin-left: 10px;\n        }\n        \n        .priority-high {\n            background: #fee;\n            color: #e74c3c;\n        }\n        \n        .priority-medium {\n            background: #fff3cd;\n            color: #f39c12;\n        }\n        \n        .priority-low {\n            background: #d1ecf1;\n            color: #3498db;\n        }\n        \n        .metrics-grid {\n            display: grid;\n            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));\n            gap: 20px;\n            margin: 20px 0;\n        }\n        \n        .metric-card {\n            background: #f8f9fa;\n            padding: 20px;\n            border-radius: 6px;\n            text-align: center;\n        }\n        \n        .metric-value {\n            font-size: 2em;\n            font-weight: 700;\n            color: #3498db;\n            margin: 10px 0;\n        }\n        \n        .metric-label {\n            font-size: 0.9em;\n            color: #7f8c8d;\n        }\n        \n        table {\n            width: 100%;\n            border-collapse: collapse;\n            margin: 20px 0;\n        }\n        \n        th, td {\n            padding: 12px;\n            text-align: left;\n            border-bottom: 1px solid #e0e0e0;\n        }\n        \n        th {\n            background: #f8f9fa;\n            font-weight: 600;\n            color: #2c3e50;\n        }\n        \n        .timeline {\n            margin: 20px 0;\n        }\n        \n        .milestone {\n            display: flex;\n            align-items: center;\n            margin: 15px 0;\n        }\n        \n        .milestone-date {\n            font-weight: 600;\n            color: #3498db;\n            min-width: 120px;\n        }\n        \n        .milestone-content {\n            flex: 1;\n            padding-left: 20px;\n            border-left: 2px solid #e0e0e0;\n        }\n        \n        @media print {\n            body {\n                padding: 0;\n            }\n            \n            .header {\n                background: none;\n                color: #2c3e50;\n                border: 2px solid #2c3e50;\n            }\n            \n            .section {\n                page-break-inside: avoid;\n            }\n        }\n    </style>\n</head>\n<body>\n    <div class=\"container\">\n        {{content}}\n    </div>\n</body>\n</html>"
-} 
+}

@@ -7,10 +7,13 @@
  */
 
 const { test, expect } = require('@playwright/test');
-const fs = require('fs');
-const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  sleep,
 } = require('./helpers/electron-app');
 
 let app;
@@ -19,7 +22,6 @@ let mainWindow;
 let errorSnapshot;
 
 test.describe('Pickers & Floating UI', () => {
-
   test.beforeAll(async () => {
     app = await launchApp();
     electronApp = app.electronApp;
@@ -54,8 +56,12 @@ test.describe('Pickers & Floating UI', () => {
 
   test('tab picker window closes cleanly', async () => {
     const windows = await electronApp.windows();
-    const picker = windows.find(p => {
-      try { return p.url().includes('tab-picker') || p.url().includes('picker'); } catch { return false; }
+    const picker = windows.find((p) => {
+      try {
+        return p.url().includes('tab-picker') || p.url().includes('picker');
+      } catch {
+        return false;
+      }
     });
 
     if (picker) {
@@ -109,14 +115,18 @@ test.describe('Pickers & Floating UI', () => {
 
   test('float card window has glassmorphism effect', async () => {
     const windows = await electronApp.windows();
-    const floatCard = windows.find(p => {
-      try { return p.url().includes('float-card') || p.url().includes('floating'); } catch { return false; }
+    const floatCard = windows.find((p) => {
+      try {
+        return p.url().includes('float-card') || p.url().includes('floating');
+      } catch {
+        return false;
+      }
     });
 
     if (floatCard) {
       const result = await floatCard.evaluate(() => ({
         hasCSS: document.styleSheets.length > 0,
-        bodyClasses: document.body.className
+        bodyClasses: document.body.className,
       }));
       expect(result).toBeDefined();
     }
@@ -124,8 +134,12 @@ test.describe('Pickers & Floating UI', () => {
 
   test('float card window closes cleanly', async () => {
     const windows = await electronApp.windows();
-    const floatCard = windows.find(p => {
-      try { return p.url().includes('float-card') || p.url().includes('floating'); } catch { return false; }
+    const floatCard = windows.find((p) => {
+      try {
+        return p.url().includes('float-card') || p.url().includes('floating');
+      } catch {
+        return false;
+      }
     });
 
     if (floatCard) {
@@ -158,8 +172,12 @@ test.describe('Pickers & Floating UI', () => {
 
   test('detached player is always-on-top by default', async () => {
     const windows = await electronApp.windows();
-    const player = windows.find(p => {
-      try { return p.url().includes('detached') || p.url().includes('player'); } catch { return false; }
+    const player = windows.find((p) => {
+      try {
+        return p.url().includes('detached') || p.url().includes('player');
+      } catch {
+        return false;
+      }
     });
 
     if (player) {

@@ -30,8 +30,9 @@ const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 
 // Timeouts for briefing collection
-const PER_AGENT_TIMEOUT_MS = 5000;
-const TOTAL_TIMEOUT_MS = 12000;
+// Calendar agent fetches from omnical API which can take 2-3s cold, so allow more time
+const PER_AGENT_TIMEOUT_MS = 8000;
+const TOTAL_TIMEOUT_MS = 15000;
 
 // Maximum recent briefings to keep in memory
 const MAX_BRIEFING_HISTORY = 5;
@@ -39,12 +40,21 @@ const MAX_BRIEFING_HISTORY = 5;
 module.exports = {
   id: 'daily-brief-agent',
   name: 'Daily Brief',
-  description: 'Orchestrates a morning briefing from time, weather, calendar, email, and other agents. Remembers your preferences for style, length, and which sections to include.',
+  description:
+    'Orchestrates a morning briefing from time, weather, calendar, email, and other agents. Remembers your preferences for style, length, and which sections to include.',
   categories: ['productivity', 'briefing', 'schedule'],
   keywords: [
-    'daily brief', 'morning brief', 'briefing', 'rundown',
-    'brief me', 'my day', 'day look like', 'run me through today',
-    'morning rundown', 'daily rundown', 'morning update',
+    'daily brief',
+    'morning brief',
+    'briefing',
+    'rundown',
+    'brief me',
+    'my day',
+    'day look like',
+    'run me through today',
+    'morning rundown',
+    'daily rundown',
+    'morning update',
   ],
   executionType: 'action',
   estimatedExecutionMs: 8000,
@@ -60,11 +70,11 @@ HIGH CONFIDENCE (0.95) for:
 - Any request for a combined overview of time, schedule, weather, and tasks
 
 This agent is the ONLY correct handler for daily/morning briefings.
-It gathers live data from time-agent, weather-agent, calendar-agent, email-agent, and others.
+It gathers live data from time-agent, weather-agent, calendar-query-agent, email-agent, and others.
 It remembers your preferred briefing style (concise vs detailed) and which sections matter to you.
 
 LOW CONFIDENCE (0.00) -- do NOT bid on:
-- Pure calendar queries: "what meetings do I have" (calendar-agent)
+- Pure calendar queries: "what meetings do I have" (calendar-query-agent)
 - Pure time queries: "what time is it" (time-agent)
 - Pure weather queries: "what's the weather" (weather-agent)
 - Single-topic requests that don't ask for a combined briefing
@@ -90,12 +100,15 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     const sections = this.memory.getSectionNames();
 
     if (!sections.includes('Briefing Preferences')) {
-      this.memory.updateSection('Briefing Preferences', `- Style: radio-morning-show
+      this.memory.updateSection(
+        'Briefing Preferences',
+        `- Style: radio-morning-show
 - Length: standard (80-150 words)
 - Sections: all
 - Excluded Sections: none
 - Greeting Style: time-of-day appropriate
-- Sign-Off: brief forward-looking line`);
+- Sign-Off: brief forward-looking line`
+      );
     }
 
     if (!sections.includes('Briefing History')) {
@@ -103,10 +116,13 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     }
 
     if (!sections.includes('Learned Patterns')) {
-      this.memory.updateSection('Learned Patterns', `*Patterns learned from user feedback*
+      this.memory.updateSection(
+        'Learned Patterns',
+        `*Patterns learned from user feedback*
 - Sections user asks about most: (not yet learned)
 - Preferred detail level: (not yet learned)
-- Common follow-up questions after briefs: (not yet learned)`);
+- Common follow-up questions after briefs: (not yet learned)`
+      );
     }
 
     if (this.memory.isDirty()) {
@@ -128,15 +144,18 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
 
   /**
    * Get the user's name from global profile for personalized greeting
+   * @param {Function} [_profileGetter] - optional override for getUserProfile (testing)
    */
-  async _getUserName() {
+  async _getUserName(_profileGetter) {
     try {
-      const profile = getUserProfile();
+      const profile = (_profileGetter || getUserProfile)();
       if (!profile.isLoaded()) await profile.load();
       const facts = profile.getFacts('Identity');
       const name = facts['Name'] || facts['First Name'];
       if (name && !name.includes('not yet learned')) return name;
-    } catch (_) {}
+    } catch (err) {
+      console.warn('[daily-brief-agent] _getUserName:', err.message);
+    }
     return null;
   },
 
@@ -150,7 +169,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
    * 4. Compose contributions into radio-show style speech
    * 5. Log briefing to history
    */
-  async execute(task) {
+  async execute(_task) {
     // Ensure memory is loaded
     if (!this.memory) {
       await this.initialize();
@@ -162,13 +181,29 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     // 1. Read preferences from memory
     const prefs = this._getPreferences();
     const excludedSections = (prefs['Excluded Sections'] || 'none')
-      .toLowerCase().split(',').map(s => s.trim()).filter(s => s && s !== 'none');
+      .toLowerCase()
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s && s !== 'none');
 
-    // 2. Discover briefing-capable agents
-    const briefingAgents = getBriefingAgents().filter(a => a.id !== this.id);
-    log.info('agent', `[DailyBrief] Discovered ${briefingAgents.length} contributors`, {
-      agents: briefingAgents.map(a => a.id),
-    });
+    // 2. Discover briefing-capable agents (built-in + custom)
+    const builtInBriefing = getBriefingAgents().filter((a) => a.id !== this.id);
+    let customBriefing = [];
+    try {
+      const { getCustomBriefingAgents } = require('../../src/voice-task-sdk/exchange-bridge');
+      customBriefing = getCustomBriefingAgents();
+    } catch (_) {
+      /* exchange bridge may not be available */
+    }
+
+    const briefingAgents = [...builtInBriefing, ...customBriefing];
+    log.info(
+      'agent',
+      `[DailyBrief] Discovered ${briefingAgents.length} contributors (${builtInBriefing.length} built-in, ${customBriefing.length} custom)`,
+      {
+        agents: briefingAgents.map((a) => a.id),
+      }
+    );
 
     if (briefingAgents.length === 0) {
       const now = new Date();
@@ -190,7 +225,9 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
       try {
         const result = await Promise.race([
           agent.getBriefing(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error(`${agent.id} timed out`)), agentTimeout)),
+          new Promise((_, rej) => {
+            setTimeout(() => rej(new Error(`${agent.id} timed out`)), agentTimeout);
+          }),
         ]);
         if (result && result.content) {
           log.info('agent', `[DailyBrief] ${agent.id} contributed`, { section: result.section });
@@ -207,26 +244,26 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     // Race all contributions against a total timeout
     const settled = await Promise.race([
       Promise.allSettled(contributionPromises),
-      new Promise(resolve => setTimeout(() => {
-        log.info('agent', '[DailyBrief] Total timeout reached, using available contributions');
-        resolve(contributionPromises.map(() => ({ status: 'rejected', reason: 'total timeout' })));
-      }, TOTAL_TIMEOUT_MS)),
+      new Promise((resolve) => {
+        setTimeout(() => {
+          log.info('agent', '[DailyBrief] Total timeout reached, using available contributions');
+          resolve(contributionPromises.map(() => ({ status: 'rejected', reason: 'total timeout' })));
+        }, TOTAL_TIMEOUT_MS);
+      }),
     ]);
 
     let contributions = settled
-      .filter(r => r.status === 'fulfilled' && r.value)
-      .map(r => r.value)
+      .filter((r) => r.status === 'fulfilled' && r.value)
+      .map((r) => r.value)
       .sort((a, b) => (a.priority || 99) - (b.priority || 99));
 
     // 4. Filter out excluded sections (from preferences)
     if (excludedSections.length > 0) {
-      contributions = contributions.filter(c =>
-        !excludedSections.includes((c.section || '').toLowerCase())
-      );
+      contributions = contributions.filter((c) => !excludedSections.includes((c.section || '').toLowerCase()));
     }
 
     log.info('agent', `[DailyBrief] ${contributions.length}/${briefingAgents.length} agents contributed`, {
-      sections: contributions.map(c => c.section),
+      sections: contributions.map((c) => c.section),
       collectTimeMs: Date.now() - briefStart,
     });
 
@@ -236,7 +273,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
 
     log.info('agent', '[DailyBrief] Brief generated', {
       contributorCount: contributions.length,
-      sections: contributions.map(c => c.section),
+      sections: contributions.map((c) => c.section),
       totalMs: Date.now() - briefStart,
     });
 
@@ -248,7 +285,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
       message: fullSpeech,
       data: {
         type: 'morning_brief',
-        contributions: contributions.map(c => ({ section: c.section, priority: c.priority })),
+        contributions: contributions.map((c) => ({ section: c.section, priority: c.priority })),
       },
     };
   },
@@ -269,8 +306,8 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
 
     // Build the raw sections for the LLM
     const sections = contributions
-      .filter(c => c.content)
-      .map(c => `[${c.section}]\n${c.content}`)
+      .filter((c) => c.content)
+      .map((c) => `[${c.section}]\n${c.content}`)
       .join('\n\n');
 
     // Build style instructions from preferences
@@ -286,7 +323,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
         `You are a radio morning show host delivering a daily briefing. Your style is ${style} -- casual, warm, and organized, like a trusted morning DJ giving listeners their daily rundown.
 
 STYLE RULES:
-- Open with a greeting that includes the time and date (from the Time & Date section).
+- Open with a SINGLE time-of-day greeting (Good morning / Good afternoon / Good evening) based on the "Time of day" field in the Time & Date section. Include the current time and date naturally. Do NOT repeat the greeting.
 - ${nameInstruction}
 - Deliver each topic as its own clear segment with natural spoken transitions.
   Examples: "Now for the weather...", "Looking at your schedule...", "On the email front...", "And for tasks..."
@@ -312,7 +349,7 @@ RAW DATA FROM AGENTS:
 ${sections}
 
 Compose the daily briefing:`,
-        { profile: 'powerful', thinking: true, maxTokens: 16000, feature: 'daily-brief-compose' }
+        { profile: 'standard', maxTokens: 2000, feature: 'daily-brief-compose' }
       );
       if (composedText && composedText.trim().length > 20) {
         return composedText.trim();
@@ -327,8 +364,8 @@ Compose the daily briefing:`,
     const greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
     const greetName = userName ? `, ${userName}` : '';
     const body = contributions
-      .filter(c => c.content)
-      .map(c => c.content)
+      .filter((c) => c.content)
+      .map((c) => c.content)
       .join(' ');
     return `${greeting}${greetName}. ${body}`;
   },
@@ -343,12 +380,12 @@ Compose the daily briefing:`,
       const now = new Date();
       const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-      const sectionList = contributions.map(c => c.section).join(', ');
+      const sectionList = contributions.map((c) => c.section).join(', ');
       const entry = `- [${dateStr} ${timeStr}] Sections: ${sectionList || 'none'} (${contributions.length} contributors)`;
 
       // Read current history
       const currentHistory = this.memory.getSection('Briefing History') || '';
-      const lines = currentHistory.split('\n').filter(l => l.startsWith('- ['));
+      const lines = currentHistory.split('\n').filter((l) => l.startsWith('- ['));
 
       // Add new entry and trim to max
       lines.unshift(entry);

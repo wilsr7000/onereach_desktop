@@ -167,30 +167,36 @@ class AuditLogger {
   getTrail(filters = {}) {
     if (!fs.existsSync(TRAIL_FILE)) return [];
 
-    const lines = fs.readFileSync(TRAIL_FILE, 'utf-8')
+    const lines = fs
+      .readFileSync(TRAIL_FILE, 'utf-8')
       .split('\n')
-      .filter(line => line.trim());
+      .filter((line) => line.trim());
 
-    let entries = lines.map(line => {
-      try { return JSON.parse(line); }
-      catch { return null; }
-    }).filter(Boolean);
+    let entries = lines
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
 
     // Apply filters
     if (filters.since) {
-      entries = entries.filter(e => e.ts >= filters.since);
+      entries = entries.filter((e) => e.ts >= filters.since);
     }
     if (filters.until) {
-      entries = entries.filter(e => e.ts <= filters.until);
+      entries = entries.filter((e) => e.ts <= filters.until);
     }
     if (filters.event) {
-      entries = entries.filter(e => e.event === filters.event);
+      entries = entries.filter((e) => e.event === filters.event);
     }
     if (filters.itemId) {
-      entries = entries.filter(e => e.itemId === filters.itemId);
+      entries = entries.filter((e) => e.itemId === filters.itemId);
     }
     if (filters.sessionId) {
-      entries = entries.filter(e => e.sessionId === filters.sessionId);
+      entries = entries.filter((e) => e.sessionId === filters.sessionId);
     }
     if (filters.limit) {
       entries = entries.slice(-filters.limit);
@@ -214,12 +220,12 @@ class AuditLogger {
     const trail = this.getTrail();
     if (trail.length === 0) return '# Audit Report\n\nNo audit trail entries found.\n';
 
-    const sessions = trail.filter(e => e.event === 'session_start');
-    const passes = trail.filter(e => e.event === 'test_pass');
-    const fails = trail.filter(e => e.event === 'test_fail');
-    const skips = trail.filter(e => e.event === 'test_skip');
-    const blocks = trail.filter(e => e.event === 'test_block');
-    const regressions = trail.filter(e => e.event === 'regression_complete');
+    const sessions = trail.filter((e) => e.event === 'session_start');
+    const passes = trail.filter((e) => e.event === 'test_pass');
+    const fails = trail.filter((e) => e.event === 'test_fail');
+    const skips = trail.filter((e) => e.event === 'test_skip');
+    const blocks = trail.filter((e) => e.event === 'test_block');
+    const regressions = trail.filter((e) => e.event === 'regression_complete');
 
     let report = '# Test Audit Report\n\n';
     report += `Generated: ${new Date().toISOString()}\n\n`;

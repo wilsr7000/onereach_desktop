@@ -1,6 +1,6 @@
 /**
  * Asset Pipeline Service
- * 
+ *
  * Central orchestrator for the full asset lifecycle with verification at each stage:
  * 1. Validation - Content type detection, size limits, format validation
  * 2. Asset Identification - Detect file type, MIME, determine processing path
@@ -10,14 +10,14 @@
  * 6. Metadata Generation - AI title, description, tags
  * 7. Verification - Confirm file exists, readable
  * 8. Final Checksum - Store verification hash
- * 
+ *
  * Each stage emits events to the dashboard for monitoring.
  */
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { app } = require('electron');
+const { _app } = require('electron');
 
 // Stage definitions
 const STAGES = {
@@ -28,7 +28,7 @@ const STAGES = {
   THUMBNAIL: 'thumbnail',
   METADATA: 'metadata',
   VERIFY: 'verify',
-  FINAL_CHECKSUM: 'finalChecksum'
+  FINAL_CHECKSUM: 'finalChecksum',
 };
 
 // Content type categories
@@ -42,20 +42,20 @@ const CONTENT_TYPES = {
   TEXT: 'text',
   HTML: 'html',
   URL: 'url',
-  FILE: 'file'
+  FILE: 'file',
 };
 
 // File size limits (in bytes)
 const SIZE_LIMITS = {
-  image: 100 * 1024 * 1024,    // 100MB
+  image: 100 * 1024 * 1024, // 100MB
   video: 10 * 1024 * 1024 * 1024, // 10GB
-  audio: 500 * 1024 * 1024,   // 500MB
+  audio: 500 * 1024 * 1024, // 500MB
   document: 100 * 1024 * 1024, // 100MB
-  code: 50 * 1024 * 1024,      // 50MB
-  data: 100 * 1024 * 1024,     // 100MB
-  text: 10 * 1024 * 1024,      // 10MB
-  html: 50 * 1024 * 1024,      // 50MB
-  file: 1024 * 1024 * 1024     // 1GB default
+  code: 50 * 1024 * 1024, // 50MB
+  data: 100 * 1024 * 1024, // 100MB
+  text: 10 * 1024 * 1024, // 10MB
+  html: 50 * 1024 * 1024, // 50MB
+  file: 1024 * 1024 * 1024, // 1GB default
 };
 
 class AssetPipeline {
@@ -65,7 +65,7 @@ class AssetPipeline {
     this.metadataGenerator = dependencies.metadataGenerator;
     this.verifier = dependencies.verifier;
     this.dashboardAPI = dependencies.dashboardAPI;
-    
+
     this._operationCounter = 0;
     this._activeOperations = new Map();
   }
@@ -86,22 +86,22 @@ class AssetPipeline {
       stage,
       success,
       timestamp: Date.now(),
-      ...details
+      ...details,
     };
-    
+
     console.log(`[Pipeline:${operationId}] Stage ${stage}: ${success ? 'SUCCESS' : 'FAILED'}`, details);
-    
+
     // Update dashboard if available
     if (this.dashboardAPI) {
       this.dashboardAPI.recordPipelineStage(stage, success, operationId, details);
     }
-    
+
     return event;
   }
 
   /**
    * Process an asset through the full pipeline
-   * 
+   *
    * @param {Object} input - Input data
    * @param {string} input.type - Content type (text, image, file, etc.)
    * @param {*} input.content - The actual content
@@ -112,20 +112,20 @@ class AssetPipeline {
   async process(input, options = {}) {
     const operationId = this._generateOperationId();
     const startTime = Date.now();
-    
+
     console.log(`[Pipeline:${operationId}] Starting pipeline for ${input.type}`);
-    
+
     const result = {
       operationId,
       success: false,
       stages: {},
       itemId: null,
       checksum: null,
-      errors: []
+      errors: [],
     };
-    
+
     this._activeOperations.set(operationId, result);
-    
+
     try {
       // Stage 1: Validation
       const validationResult = await this._stageValidation(operationId, input, options);
@@ -134,7 +134,7 @@ class AssetPipeline {
         result.errors.push(validationResult.error);
         return this._finalizeResult(result, startTime);
       }
-      
+
       // Stage 2: Identification
       const identificationResult = await this._stageIdentification(operationId, input, validationResult.data);
       result.stages.identification = identificationResult;
@@ -142,12 +142,12 @@ class AssetPipeline {
         result.errors.push(identificationResult.error);
         return this._finalizeResult(result, startTime);
       }
-      
+
       // Stage 3: Checksum (pre-storage)
       const checksumResult = await this._stageChecksum(operationId, input, identificationResult.data);
       result.stages.checksum = checksumResult;
       result.checksum = checksumResult.data?.checksum;
-      
+
       // Stage 4: Storage
       const storageResult = await this._stageStorage(operationId, input, identificationResult.data, options);
       result.stages.storage = storageResult;
@@ -156,15 +156,15 @@ class AssetPipeline {
         return this._finalizeResult(result, startTime);
       }
       result.itemId = storageResult.data?.itemId;
-      
+
       // Stage 5: Thumbnail (non-blocking for some types)
       const thumbnailResult = await this._stageThumbnail(operationId, input, storageResult.data, options);
       result.stages.thumbnail = thumbnailResult;
-      
+
       // Stage 6: Metadata (async, can continue without)
       const metadataResult = await this._stageMetadata(operationId, input, storageResult.data, options);
       result.stages.metadata = metadataResult;
-      
+
       // Stage 7: Verification
       const verifyResult = await this._stageVerification(operationId, storageResult.data);
       result.stages.verify = verifyResult;
@@ -172,16 +172,19 @@ class AssetPipeline {
         result.errors.push(verifyResult.error);
         // Don't fail the whole pipeline for verification issues - they can be auto-fixed
       }
-      
+
       // Stage 8: Final Checksum
-      const finalChecksumResult = await this._stageFinalChecksum(operationId, storageResult.data, checksumResult.data?.checksum);
+      const finalChecksumResult = await this._stageFinalChecksum(
+        operationId,
+        storageResult.data,
+        checksumResult.data?.checksum
+      );
       result.stages.finalChecksum = finalChecksumResult;
-      
+
       // Mark success if storage completed
       result.success = storageResult.success;
-      
+
       return this._finalizeResult(result, startTime);
-      
     } catch (error) {
       console.error(`[Pipeline:${operationId}] Fatal error:`, error);
       result.errors.push(error.message);
@@ -197,7 +200,7 @@ class AssetPipeline {
   _finalizeResult(result, startTime) {
     result.duration = Date.now() - startTime;
     result.completedAt = new Date().toISOString();
-    
+
     // Notify dashboard of completion
     if (this.dashboardAPI) {
       if (result.success) {
@@ -207,28 +210,27 @@ class AssetPipeline {
           { operationId: result.operationId }
         );
       } else if (result.errors.length > 0) {
-        this.dashboardAPI.recordError(
-          'pipeline',
-          result.errors[0],
-          { operationId: result.operationId, allErrors: result.errors }
-        );
+        this.dashboardAPI.recordError('pipeline', result.errors[0], {
+          operationId: result.operationId,
+          allErrors: result.errors,
+        });
       }
     }
-    
+
     return result;
   }
 
   // ==================== STAGE 1: VALIDATION ====================
-  
-  async _stageValidation(operationId, input, options) {
+
+  async _stageValidation(operationId, input, _options) {
     const errors = [];
-    
+
     try {
       // Check required fields
       if (!input.type) {
         errors.push('Content type is required');
       }
-      
+
       // Check content exists
       if (input.type === 'file') {
         if (!input.filePath && !input.fileData && !input.content) {
@@ -240,21 +242,21 @@ class AssetPipeline {
       } else if (!input.content && !input.dataUrl && !input.html) {
         errors.push('Content is required');
       }
-      
+
       // Check size limits
       const size = this._getContentSize(input);
       const typeLimit = SIZE_LIMITS[input.type] || SIZE_LIMITS.file;
       if (size > typeLimit) {
         errors.push(`Content exceeds size limit: ${this._formatBytes(size)} > ${this._formatBytes(typeLimit)}`);
       }
-      
+
       const success = errors.length === 0;
       this._emitStageEvent(operationId, STAGES.VALIDATION, success, { errors, size });
-      
+
       return {
         success,
         error: errors[0],
-        data: { validated: success, size, errors }
+        data: { validated: success, size, errors },
       };
     } catch (error) {
       this._emitStageEvent(operationId, STAGES.VALIDATION, false, { error: error.message });
@@ -263,14 +265,14 @@ class AssetPipeline {
   }
 
   // ==================== STAGE 2: IDENTIFICATION ====================
-  
-  async _stageIdentification(operationId, input, validationData) {
+
+  async _stageIdentification(operationId, input, _validationData) {
     try {
       let contentType = input.type;
       let mimeType = input.mimeType;
       let fileExtension = input.fileExt;
       let fileCategory = null;
-      
+
       // Detect from file if available
       if (input.filePath) {
         fileExtension = path.extname(input.filePath).toLowerCase();
@@ -281,7 +283,7 @@ class AssetPipeline {
         mimeType = mimeType || this._getMimeType(fileExtension);
         fileCategory = this._getFileCategory(fileExtension);
       }
-      
+
       // Determine content type from MIME if not specified
       if (contentType === 'file' && mimeType) {
         if (mimeType.startsWith('image/')) contentType = 'image-file';
@@ -289,7 +291,7 @@ class AssetPipeline {
         else if (mimeType.startsWith('audio/')) contentType = 'audio';
         else if (mimeType === 'application/pdf') contentType = 'pdf';
       }
-      
+
       // Check for URL content
       if (contentType === 'text' && input.content) {
         const trimmed = input.content.trim();
@@ -301,18 +303,17 @@ class AssetPipeline {
           }
         }
       }
-      
+
       const data = {
         contentType,
         mimeType,
         fileExtension,
         fileCategory,
-        processingPath: this._determineProcessingPath(contentType)
+        processingPath: this._determineProcessingPath(contentType),
       };
-      
+
       this._emitStageEvent(operationId, STAGES.IDENTIFICATION, true, data);
       return { success: true, data };
-      
     } catch (error) {
       this._emitStageEvent(operationId, STAGES.IDENTIFICATION, false, { error: error.message });
       return { success: false, error: error.message };
@@ -320,11 +321,11 @@ class AssetPipeline {
   }
 
   // ==================== STAGE 3: CHECKSUM ====================
-  
-  async _stageChecksum(operationId, input, identificationData) {
+
+  async _stageChecksum(operationId, input, _identificationData) {
     try {
       const hash = crypto.createHash('sha256');
-      
+
       if (input.filePath && fs.existsSync(input.filePath)) {
         // Hash file content
         const fileBuffer = fs.readFileSync(input.filePath);
@@ -341,12 +342,11 @@ class AssetPipeline {
       } else if (input.html) {
         hash.update(input.html);
       }
-      
+
       const checksum = hash.digest('hex').substring(0, 16); // First 16 chars
-      
+
       this._emitStageEvent(operationId, STAGES.CHECKSUM, true, { checksum });
       return { success: true, data: { checksum } };
-      
     } catch (error) {
       this._emitStageEvent(operationId, STAGES.CHECKSUM, false, { error: error.message });
       // Checksum failure shouldn't block the pipeline
@@ -355,38 +355,37 @@ class AssetPipeline {
   }
 
   // ==================== STAGE 4: STORAGE ====================
-  
+
   async _stageStorage(operationId, input, identificationData, options) {
     try {
       if (!this.clipboardManager) {
         throw new Error('Clipboard manager not initialized');
       }
-      
+
       // Build item for storage
       const item = this._buildStorageItem(input, identificationData, options);
-      
+
       // Add to clipboard manager
       await this.clipboardManager.addToHistory(item);
-      
+
       // Get the stored item ID
       const storedItem = this.clipboardManager.history?.[0];
       const itemId = storedItem?.id || item.id;
-      
-      this._emitStageEvent(operationId, STAGES.STORAGE, true, { 
-        itemId, 
+
+      this._emitStageEvent(operationId, STAGES.STORAGE, true, {
+        itemId,
         spaceId: item.spaceId,
-        type: item.type 
+        type: item.type,
       });
-      
-      return { 
-        success: true, 
-        data: { 
-          itemId, 
+
+      return {
+        success: true,
+        data: {
+          itemId,
           spaceId: item.spaceId,
-          item: storedItem || item
-        } 
+          item: storedItem || item,
+        },
       };
-      
     } catch (error) {
       this._emitStageEvent(operationId, STAGES.STORAGE, false, { error: error.message });
       return { success: false, error: error.message };
@@ -394,26 +393,26 @@ class AssetPipeline {
   }
 
   // ==================== STAGE 5: THUMBNAIL ====================
-  
-  async _stageThumbnail(operationId, input, storageData, options) {
+
+  async _stageThumbnail(operationId, input, storageData, _options) {
     try {
       if (!this.thumbnailPipeline) {
         // Skip if no thumbnail pipeline available
         this._emitStageEvent(operationId, STAGES.THUMBNAIL, true, { skipped: true });
         return { success: true, data: { skipped: true } };
       }
-      
+
       const item = storageData.item;
-      
+
       // Check if thumbnail already exists
       if (item.thumbnail) {
         this._emitStageEvent(operationId, STAGES.THUMBNAIL, true, { exists: true });
         return { success: true, data: { exists: true } };
       }
-      
+
       // Generate thumbnail based on type
       const thumbnail = await this.thumbnailPipeline.generate(item);
-      
+
       if (thumbnail) {
         // Update item with thumbnail
         if (this.clipboardManager?.storage) {
@@ -424,14 +423,13 @@ class AssetPipeline {
             // Re-save would happen through storage layer
           }
         }
-        
+
         this._emitStageEvent(operationId, STAGES.THUMBNAIL, true, { generated: true });
         return { success: true, data: { thumbnail, generated: true } };
       }
-      
+
       this._emitStageEvent(operationId, STAGES.THUMBNAIL, true, { skipped: true, reason: 'No thumbnail generated' });
       return { success: true, data: { skipped: true } };
-      
     } catch (error) {
       this._emitStageEvent(operationId, STAGES.THUMBNAIL, false, { error: error.message });
       // Thumbnail failure shouldn't block pipeline
@@ -440,7 +438,7 @@ class AssetPipeline {
   }
 
   // ==================== STAGE 6: METADATA ====================
-  
+
   async _stageMetadata(operationId, input, storageData, options) {
     try {
       // Skip if auto-metadata disabled or no generator
@@ -448,34 +446,33 @@ class AssetPipeline {
         this._emitStageEvent(operationId, STAGES.METADATA, true, { skipped: true });
         return { success: true, data: { skipped: true } };
       }
-      
+
       // Check if API key is available
       const { getSettingsManager } = require('./settings-manager');
       const settingsManager = getSettingsManager();
       const apiKey = settingsManager.get('llmApiKey');
-      
+
       if (!apiKey) {
         this._emitStageEvent(operationId, STAGES.METADATA, true, { skipped: true, reason: 'No API key' });
         return { success: true, data: { skipped: true, reason: 'No API key' } };
       }
-      
+
       // Queue metadata generation (async)
       const itemId = storageData.itemId;
-      
+
       // Generate metadata
       const result = await this.metadataGenerator.generateMetadataForItem(itemId, apiKey);
-      
+
       if (result.success) {
-        this._emitStageEvent(operationId, STAGES.METADATA, true, { 
+        this._emitStageEvent(operationId, STAGES.METADATA, true, {
           generated: true,
-          title: result.metadata?.title?.substring(0, 50)
+          title: result.metadata?.title?.substring(0, 50),
         });
         return { success: true, data: { metadata: result.metadata } };
       }
-      
+
       this._emitStageEvent(operationId, STAGES.METADATA, false, { error: result.error });
       return { success: false, error: result.error, recoverable: true };
-      
     } catch (error) {
       this._emitStageEvent(operationId, STAGES.METADATA, false, { error: error.message });
       // Metadata failure shouldn't block pipeline
@@ -484,19 +481,18 @@ class AssetPipeline {
   }
 
   // ==================== STAGE 7: VERIFICATION ====================
-  
+
   async _stageVerification(operationId, storageData) {
     try {
       if (!this.verifier) {
         this._emitStageEvent(operationId, STAGES.VERIFY, true, { skipped: true });
         return { success: true, data: { skipped: true } };
       }
-      
+
       const verification = await this.verifier.verifyItem(storageData.itemId);
-      
+
       this._emitStageEvent(operationId, STAGES.VERIFY, verification.valid, verification);
       return { success: verification.valid, data: verification };
-      
     } catch (error) {
       this._emitStageEvent(operationId, STAGES.VERIFY, false, { error: error.message });
       return { success: false, error: error.message, recoverable: true };
@@ -504,32 +500,31 @@ class AssetPipeline {
   }
 
   // ==================== STAGE 8: FINAL CHECKSUM ====================
-  
+
   async _stageFinalChecksum(operationId, storageData, originalChecksum) {
     try {
       if (!this.verifier || !originalChecksum) {
         this._emitStageEvent(operationId, STAGES.FINAL_CHECKSUM, true, { skipped: true });
         return { success: true, data: { skipped: true } };
       }
-      
+
       // Recalculate checksum from stored content
       const verification = await this.verifier.verifyChecksum(storageData.itemId, originalChecksum);
-      
+
       this._emitStageEvent(operationId, STAGES.FINAL_CHECKSUM, verification.match, {
         originalChecksum,
         storedChecksum: verification.checksum,
-        match: verification.match
+        match: verification.match,
       });
-      
-      return { 
-        success: verification.match, 
+
+      return {
+        success: verification.match,
         data: {
           originalChecksum,
           storedChecksum: verification.checksum,
-          match: verification.match
-        }
+          match: verification.match,
+        },
       };
-      
     } catch (error) {
       this._emitStageEvent(operationId, STAGES.FINAL_CHECKSUM, false, { error: error.message });
       return { success: false, error: error.message, recoverable: true };
@@ -544,9 +539,9 @@ class AssetPipeline {
       spaceId: input.spaceId || options.spaceId || 'unclassified',
       timestamp: Date.now(),
       source: input.source || 'pipeline',
-      pinned: false
+      pinned: false,
     };
-    
+
     switch (input.type) {
       case 'text':
         return {
@@ -554,27 +549,27 @@ class AssetPipeline {
           content: input.content,
           text: input.content,
           plainText: input.content,
-          preview: input.content.substring(0, 200)
+          preview: input.content.substring(0, 200),
         };
-        
+
       case 'html':
         return {
           ...baseItem,
           content: input.html || input.content,
           html: input.html || input.content,
           plainText: input.plainText || '',
-          preview: input.plainText?.substring(0, 200) || 'HTML Content'
+          preview: input.plainText?.substring(0, 200) || 'HTML Content',
         };
-        
+
       case 'image':
         return {
           ...baseItem,
           content: input.dataUrl || input.content,
           dataUrl: input.dataUrl || input.content,
           thumbnail: input.thumbnail,
-          preview: 'Image'
+          preview: 'Image',
         };
-        
+
       case 'file':
         return {
           ...baseItem,
@@ -588,14 +583,14 @@ class AssetPipeline {
           mimeType: identificationData.mimeType,
           fileData: input.fileData,
           thumbnail: input.thumbnail,
-          preview: `File: ${input.fileName || 'Unknown'}`
+          preview: `File: ${input.fileName || 'Unknown'}`,
         };
-        
+
       default:
         return {
           ...baseItem,
           content: input.content,
-          preview: String(input.content || '').substring(0, 200)
+          preview: String(input.content || '').substring(0, 200),
         };
     }
   }
@@ -647,7 +642,7 @@ class AssetPipeline {
       '.ts': 'application/typescript',
       '.py': 'text/x-python',
       '.txt': 'text/plain',
-      '.md': 'text/markdown'
+      '.md': 'text/markdown',
     };
     return mimeTypes[ext?.toLowerCase()] || 'application/octet-stream';
   }
@@ -658,12 +653,29 @@ class AssetPipeline {
       video: ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v'],
       audio: ['.mp3', '.wav', '.aac', '.m4a', '.ogg', '.flac'],
       document: ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'],
-      code: ['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt'],
+      code: [
+        '.js',
+        '.ts',
+        '.jsx',
+        '.tsx',
+        '.py',
+        '.java',
+        '.cpp',
+        '.c',
+        '.h',
+        '.cs',
+        '.go',
+        '.rs',
+        '.rb',
+        '.php',
+        '.swift',
+        '.kt',
+      ],
       data: ['.json', '.xml', '.yaml', '.yml', '.csv', '.tsv'],
       text: ['.txt', '.md', '.log', '.rtf'],
-      archive: ['.zip', '.tar', '.gz', '.rar', '.7z']
+      archive: ['.zip', '.tar', '.gz', '.rar', '.7z'],
     };
-    
+
     const lowerExt = ext?.toLowerCase();
     for (const [category, extensions] of Object.entries(categories)) {
       if (extensions.includes(lowerExt)) {
@@ -675,17 +687,17 @@ class AssetPipeline {
 
   _determineProcessingPath(contentType) {
     const paths = {
-      'image': 'visual',
+      image: 'visual',
       'image-file': 'visual',
-      'video': 'media',
-      'audio': 'media',
-      'pdf': 'document',
-      'text': 'text',
-      'html': 'rich',
-      'code': 'text',
-      'data': 'structured',
-      'url': 'link',
-      'youtube': 'youtube'
+      video: 'media',
+      audio: 'media',
+      pdf: 'document',
+      text: 'text',
+      html: 'rich',
+      code: 'text',
+      data: 'structured',
+      url: 'link',
+      youtube: 'youtube',
     };
     return paths[contentType] || 'generic';
   }
@@ -705,7 +717,7 @@ class AssetPipeline {
     return Array.from(this._activeOperations.entries()).map(([id, result]) => ({
       operationId: id,
       stages: Object.keys(result.stages),
-      errors: result.errors.length
+      errors: result.errors.length,
     }));
   }
 }
@@ -733,6 +745,5 @@ module.exports = {
   resetAssetPipeline,
   STAGES,
   CONTENT_TYPES,
-  SIZE_LIMITS
+  SIZE_LIMITS,
 };
-

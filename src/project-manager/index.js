@@ -10,16 +10,5 @@ const VersionTree = require('./VersionTree');
 module.exports = {
   ProjectStorage,
   ProjectManager,
-  VersionTree
+  VersionTree,
 };
-
-
-
-
-
-
-
-
-
-
-

@@ -13,7 +13,8 @@ const mockAI = createMockAIService();
 // Import the agent class (CJS)
 const { HtmlToTextAgent } = require('../../../lib/converters/html-to-text.js');
 
-const sampleHtml = '<html><body><h1>Title</h1><p>Hello <strong>world</strong>, this is a test.</p><ul><li>One</li><li>Two</li></ul></body></html>';
+const sampleHtml =
+  '<html><body><h1>Title</h1><p>Hello <strong>world</strong>, this is a test.</p><ul><li>One</li><li>Two</li></ul></body></html>';
 
 // Run the standard lifecycle test harness
 testConverterAgent(HtmlToTextAgent, {

@@ -25,9 +25,7 @@ const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
 console.log(`\nLoaded index with ${index.items.length} items`);
 
 // Find video files
-const videos = index.items.filter(item => 
-  item.type === 'file' && item.fileType?.startsWith('video/')
-);
+const videos = index.items.filter((item) => item.type === 'file' && item.fileType?.startsWith('video/'));
 
 console.log(`Found ${videos.length} video files:`);
 videos.forEach((v, i) => {
@@ -67,7 +65,7 @@ console.log('EXISTING SCENES:');
 console.log(`${'─'.repeat(60)}`);
 if (metadata.scenes && metadata.scenes.length > 0) {
   console.log(`Found ${metadata.scenes.length} existing scenes:`);
-  metadata.scenes.forEach((scene, i) => {
+  metadata.scenes.forEach((scene, _i) => {
     console.log(`  Scene ${scene.id}: "${scene.name}" (${scene.inTime}s - ${scene.outTime}s)`);
     if (scene.description) console.log(`    Description: ${scene.description}`);
     if (scene.tags?.length) console.log(`    Tags: ${scene.tags.join(', ')}`);
@@ -88,7 +86,7 @@ const testScenes = [
     inTime: 0,
     outTime: 10,
     description: 'Opening sequence of the video',
-    tags: ['intro', 'opening']
+    tags: ['intro', 'opening'],
   },
   {
     id: 2,
@@ -96,7 +94,7 @@ const testScenes = [
     inTime: 10,
     outTime: 30,
     description: 'The main demonstration',
-    tags: ['demo', 'main']
+    tags: ['demo', 'main'],
   },
   {
     id: 3,
@@ -104,12 +102,12 @@ const testScenes = [
     inTime: 30,
     outTime: 45,
     description: 'Wrap up and summary',
-    tags: ['outro', 'summary']
-  }
+    tags: ['outro', 'summary'],
+  },
 ];
 
 console.log('Test scenes to add:');
-testScenes.forEach(scene => {
+testScenes.forEach((scene) => {
   console.log(`  - ${scene.name}: ${scene.inTime}s to ${scene.outTime}s`);
 });
 
@@ -132,8 +130,8 @@ if (verifyMetadata.scenes && verifyMetadata.scenes.length === testScenes.length)
   console.log('✓ Scenes successfully saved!');
   console.log(`  Total scenes: ${verifyMetadata.scenes.length}`);
   console.log(`  Updated at: ${verifyMetadata.scenesUpdatedAt}`);
-  
-  verifyMetadata.scenes.forEach(scene => {
+
+  verifyMetadata.scenes.forEach((scene) => {
     console.log(`  ✓ Scene ${scene.id}: "${scene.name}"`);
   });
 } else {
@@ -150,11 +148,11 @@ console.log(`${'─'.repeat(60)}`);
 if (testVideo.spaceId) {
   const spaceMetaPath = path.join(storageRoot, 'spaces', testVideo.spaceId, 'space-metadata.json');
   console.log(`Space metadata path: ${spaceMetaPath}`);
-  
+
   if (fs.existsSync(spaceMetaPath)) {
     const spaceMeta = JSON.parse(fs.readFileSync(spaceMetaPath, 'utf8'));
     const fileKey = testVideo.fileName || `item-${testVideo.id}`;
-    
+
     if (spaceMeta.files && spaceMeta.files[fileKey]) {
       const fileEntry = spaceMeta.files[fileKey];
       if (fileEntry.scenes) {
@@ -180,47 +178,3 @@ console.log('TEST COMPLETE');
 console.log(`${'='.repeat(60)}`);
 console.log('\nFull metadata contents:');
 console.log(JSON.stringify(verifyMetadata, null, 2));
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

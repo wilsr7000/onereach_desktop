@@ -6,5 +6,5 @@ const { MicrophoneManager, microphoneManager } = require('./MicrophoneManager');
 
 module.exports = {
   MicrophoneManager,
-  microphoneManager
+  microphoneManager,
 };

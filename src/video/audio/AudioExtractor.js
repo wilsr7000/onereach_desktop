@@ -28,11 +28,7 @@ export class AudioExtractor {
    * @returns {Promise<Object>} Result with output path
    */
   async extractAudio(inputPath, options = {}, progressCallback = null) {
-    const {
-      format = 'mp3',
-      audioBitrate = '192k',
-      outputPath = null
-    } = options;
+    const { format = 'mp3', audioBitrate = '192k', outputPath = null } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
     const output = outputPath || path.join(this.outputDir, `${baseName}_audio.${format}`);
@@ -54,7 +50,7 @@ export class AudioExtractor {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -84,7 +80,7 @@ export class AudioExtractor {
       duration = null,
       format = 'mp3',
       audioBitrate = '128k',
-      outputPath = null
+      outputPath = null,
     } = options;
 
     const baseName = path.basename(inputPath, path.extname(inputPath));
@@ -92,8 +88,7 @@ export class AudioExtractor {
     const jobId = `extract_range_${Date.now()}`;
 
     return new Promise((resolve, reject) => {
-      let command = ffmpeg(inputPath)
-        .setStartTime(startTime);
+      let command = ffmpeg(inputPath).setStartTime(startTime);
 
       if (duration) {
         command = command.duration(duration);
@@ -116,7 +111,7 @@ export class AudioExtractor {
             progressCallback({
               jobId,
               percent: progress.percent,
-              timemark: progress.timemark
+              timemark: progress.timemark,
             });
           }
         })
@@ -132,19 +127,3 @@ export class AudioExtractor {
     });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

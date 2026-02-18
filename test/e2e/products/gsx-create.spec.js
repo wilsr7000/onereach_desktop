@@ -10,11 +10,16 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 const {
-  launchApp, closeApp, snapshotErrors, checkNewErrors, filterBenignErrors, sleep
+  launchApp,
+  closeApp,
+  snapshotErrors,
+  checkNewErrors,
+  filterBenignErrors,
+  _sleep,
 } = require('../helpers/electron-app');
 
 const SPACES_API = 'http://127.0.0.1:47291';
-let app, electronApp, mainWindow, errorSnapshot;
+let app, _electronApp, mainWindow, errorSnapshot;
 
 test.describe('GSX Create', () => {
   test.beforeAll(async () => {
@@ -23,7 +28,9 @@ test.describe('GSX Create', () => {
     mainWindow = app.mainWindow;
     errorSnapshot = await snapshotErrors();
   });
-  test.afterAll(async () => { await closeApp(app); });
+  test.afterAll(async () => {
+    await closeApp(app);
+  });
 
   // ── Window / File Existence ──────────────────────────────────────────────
   test('HTML file exists', async () => {
@@ -36,7 +43,9 @@ test.describe('GSX Create', () => {
       try {
         const spaces = await window.spaces?.list?.();
         return { ok: true, count: spaces?.length || 0, isArray: Array.isArray(spaces) };
-      } catch (e) { return { ok: false, e: e.message }; }
+      } catch (e) {
+        return { ok: false, e: e.message };
+      }
     });
     expect(r.ok || r.count >= 0).toBeTruthy();
   });
@@ -47,7 +56,9 @@ test.describe('GSX Create', () => {
       try {
         const spaces = await window.spaces?.list?.();
         return { ok: true, count: spaces?.length || 0 };
-      } catch (e) { return { ok: false, e: e.message }; }
+      } catch (e) {
+        return { ok: false, e: e.message };
+      }
     });
     expect(r).toBeDefined();
   });
@@ -56,7 +67,9 @@ test.describe('GSX Create', () => {
     const r = await mainWindow.evaluate(async () => {
       try {
         return { hasInvoke: typeof window.api?.invoke === 'function' };
-      } catch { return {}; }
+      } catch {
+        return {};
+      }
     });
     expect(r.hasInvoke).toBe(true);
   });
@@ -76,7 +89,9 @@ test.describe('GSX Create', () => {
 
   // ── Content Loading ──────────────────────────────────────────────────────
   test('style guide loads content from selected Space item', async () => {
-    const spaces = await fetch(`${SPACES_API}/api/spaces`).then(r => r.json()).catch(() => null);
+    const spaces = await fetch(`${SPACES_API}/api/spaces`)
+      .then((r) => r.json())
+      .catch(() => null);
     expect(spaces).toBeDefined();
   });
 
@@ -118,7 +133,9 @@ test.describe('GSX Create', () => {
     const r = await mainWindow.evaluate(async () => {
       try {
         return { hasAI: typeof window.ai?.chat === 'function' || typeof window.api?.invoke === 'function' };
-      } catch { return { hasAI: false }; }
+      } catch {
+        return { hasAI: false };
+      }
     });
     expect(r.hasAI).toBe(true);
   });
@@ -128,23 +145,41 @@ test.describe('GSX Create', () => {
     const r = await mainWindow.evaluate(async () => {
       try {
         return { hasBudget: typeof window.budgetAPI !== 'undefined' || typeof window.api?.invoke === 'function' };
-      } catch { return { hasBudget: false }; }
+      } catch {
+        return { hasBudget: false };
+      }
     });
     expect(r.hasBudget).toBe(true);
   });
 
-  test('progress bar reflects cost vs budget ratio', async () => { expect(true).toBe(true); });
-  test('per-branch cost is tracked independently', async () => { expect(true).toBe(true); });
-  test('warning colors change at thresholds', async () => { expect(true).toBe(true); });
+  test('progress bar reflects cost vs budget ratio', async () => {
+    expect(true).toBe(true);
+  });
+  test('per-branch cost is tracked independently', async () => {
+    expect(true).toBe(true);
+  });
+  test('warning colors change at thresholds', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Diff Viewer ──────────────────────────────────────────────────────────
-  test('diff viewer shows files changed, insertions, deletions', async () => { expect(true).toBe(true); });
-  test('side-by-side diff renders correctly', async () => { expect(true).toBe(true); });
+  test('diff viewer shows files changed, insertions, deletions', async () => {
+    expect(true).toBe(true);
+  });
+  test('side-by-side diff renders correctly', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Error Analyzer ───────────────────────────────────────────────────────
-  test('error analyzer modal opens when an error occurs', async () => { expect(true).toBe(true); });
-  test('stack trace and error location are displayed', async () => { expect(true).toBe(true); });
-  test('AI analysis provides suggestions', async () => { expect(true).toBe(true); });
+  test('error analyzer modal opens when an error occurs', async () => {
+    expect(true).toBe(true);
+  });
+  test('stack trace and error location are displayed', async () => {
+    expect(true).toBe(true);
+  });
+  test('AI analysis provides suggestions', async () => {
+    expect(true).toBe(true);
+  });
 
   // ── Error Check ──────────────────────────────────────────────────────────
   test('no unexpected errors', async () => {

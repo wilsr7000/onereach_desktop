@@ -1,9 +1,9 @@
 /**
  * Action Executor - Centralized Action Registry and Execution
- * 
+ *
  * Single source of truth for all app actions that can be triggered
  * by voice commands, agents, or other automation.
- * 
+ *
  * Actions are organized by category:
  * - windows: Open app windows (Spaces, Video Editor, etc.)
  * - search: Search operations
@@ -29,15 +29,15 @@ const ACTION_REGISTRY = {
         return { success: true, message: 'Spaces opened' };
       }
       return { success: false, error: 'Clipboard manager not available' };
-    }
+    },
   },
-  
+
   'open-clipboard': {
     category: 'windows',
     description: 'Open Clipboard (alias for Spaces)',
-    execute: () => ACTION_REGISTRY['open-spaces'].execute()
+    execute: () => ACTION_REGISTRY['open-spaces'].execute(),
   },
-  
+
   'open-video-editor': {
     category: 'windows',
     description: 'Open Video Editor',
@@ -50,14 +50,14 @@ const ACTION_REGISTRY = {
           nodeIntegration: false,
           contextIsolation: true,
           devTools: true,
-          preload: path.join(__dirname, 'preload-video-editor.js')
-        }
+          preload: path.join(__dirname, 'preload-video-editor.js'),
+        },
       });
       videoWindow.loadFile('video-editor.html');
       return { success: true, message: 'Video Editor opened' };
-    }
+    },
   },
-  
+
   'open-gsx-create': {
     category: 'windows',
     description: 'Open GSX Create (AI coding assistant)',
@@ -72,14 +72,14 @@ const ACTION_REGISTRY = {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          preload: path.join(__dirname, 'preload.js')
-        }
+          preload: path.join(__dirname, 'preload.js'),
+        },
       });
       aiderWindow.loadFile('aider-ui.html');
       return { success: true, message: 'GSX Create opened' };
-    }
+    },
   },
-  
+
   'open-settings': {
     category: 'windows',
     description: 'Open Settings',
@@ -91,14 +91,14 @@ const ACTION_REGISTRY = {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          preload: path.join(__dirname, 'preload.js')
-        }
+          preload: path.join(__dirname, 'preload.js'),
+        },
       });
       settingsWindow.loadFile('settings.html');
       return { success: true, message: 'Settings opened' };
-    }
+    },
   },
-  
+
   'open-budget': {
     category: 'windows',
     description: 'Open Budget Dashboard',
@@ -110,14 +110,14 @@ const ACTION_REGISTRY = {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          preload: path.join(__dirname, 'preload.js')
-        }
+          preload: path.join(__dirname, 'preload.js'),
+        },
       });
       budgetWindow.loadFile('budget-dashboard.html');
       return { success: true, message: 'Budget Dashboard opened' };
-    }
+    },
   },
-  
+
   'open-app-health': {
     category: 'windows',
     description: 'Open App Health Dashboard',
@@ -129,14 +129,14 @@ const ACTION_REGISTRY = {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          preload: path.join(__dirname, 'preload.js')
-        }
+          preload: path.join(__dirname, 'preload.js'),
+        },
       });
       healthWindow.loadFile('app-health-dashboard.html');
       return { success: true, message: 'App Health opened' };
-    }
+    },
   },
-  
+
   'open-agent-manager': {
     category: 'windows',
     description: 'Open Agent Manager',
@@ -148,14 +148,14 @@ const ACTION_REGISTRY = {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          preload: path.join(__dirname, 'preload-agent-manager.js')
-        }
+          preload: path.join(__dirname, 'preload-agent-manager.js'),
+        },
       });
       agentWindow.loadFile('agent-manager.html');
       return { success: true, message: 'Agent Manager opened' };
-    }
+    },
   },
-  
+
   'open-log-viewer': {
     category: 'windows',
     description: 'Open Event Log Viewer',
@@ -167,14 +167,14 @@ const ACTION_REGISTRY = {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          preload: path.join(__dirname, 'preload-log-viewer.js')
-        }
+          preload: path.join(__dirname, 'preload-log-viewer.js'),
+        },
       });
       logWindow.loadFile('log-viewer.html');
       return { success: true, message: 'Log Viewer opened' };
-    }
+    },
   },
-  
+
   // ==================== SEARCH OPERATIONS ====================
   'search-spaces': {
     category: 'search',
@@ -185,7 +185,7 @@ const ACTION_REGISTRY = {
         global.clipboardManager.createClipboardWindow();
         // Wait for window to be ready, then trigger search
         setTimeout(() => {
-          BrowserWindow.getAllWindows().forEach(win => {
+          BrowserWindow.getAllWindows().forEach((win) => {
             if (!win.isDestroyed() && win.getTitle().includes('Spaces')) {
               win.webContents.send('search:focus', { query });
             }
@@ -194,40 +194,40 @@ const ACTION_REGISTRY = {
         return { success: true, message: query ? `Searching for "${query}"` : 'Search opened' };
       }
       return { success: false, error: 'Clipboard manager not available' };
-    }
+    },
   },
-  
+
   // ==================== AI SERVICE OPERATIONS ====================
   'open-chatgpt': {
     category: 'ai',
     description: 'Open ChatGPT',
-    execute: () => openAIService('chatgpt')
+    execute: () => openAIService('chatgpt'),
   },
-  
+
   'open-claude': {
     category: 'ai',
     description: 'Open Claude',
-    execute: () => openAIService('claude')
+    execute: () => openAIService('claude'),
   },
-  
+
   'open-gemini': {
     category: 'ai',
     description: 'Open Gemini',
-    execute: () => openAIService('gemini')
+    execute: () => openAIService('gemini'),
   },
-  
+
   'open-grok': {
     category: 'ai',
     description: 'Open Grok',
-    execute: () => openAIService('grok')
+    execute: () => openAIService('grok'),
   },
-  
+
   'open-perplexity': {
     category: 'ai',
     description: 'Open Perplexity',
-    execute: () => openAIService('perplexity')
+    execute: () => openAIService('perplexity'),
   },
-  
+
   // ==================== UTILITY OPERATIONS ====================
   'focus-main-window': {
     category: 'utility',
@@ -239,9 +239,9 @@ const ACTION_REGISTRY = {
         return { success: true, message: 'Main window focused' };
       }
       return { success: false, error: 'Main window not available' };
-    }
+    },
   },
-  
+
   // ==================== TOOLS OPERATIONS ====================
   'open-black-hole': {
     category: 'tools',
@@ -253,15 +253,15 @@ const ACTION_REGISTRY = {
         const { width, height } = primaryDisplay.workAreaSize;
         const position = {
           x: Math.round(width / 2),
-          y: Math.round(height / 2)
+          y: Math.round(height / 2),
         };
         global.clipboardManager.showBlackHole(position, 'voice');
         return { success: true, message: 'Black Hole opened' };
       }
       return { success: false, error: 'Clipboard manager not available' };
-    }
+    },
   },
-  
+
   'open-clipboard-viewer': {
     category: 'tools',
     description: 'Open Clipboard Viewer',
@@ -272,9 +272,9 @@ const ACTION_REGISTRY = {
         return { success: true, message: 'Clipboard Viewer opened' };
       }
       return { success: false, error: 'Clipboard manager not available' };
-    }
+    },
   },
-  
+
   'open-module': {
     category: 'tools',
     description: 'Open a module/tool',
@@ -284,9 +284,9 @@ const ACTION_REGISTRY = {
         return { success: true, message: `Module ${params.moduleId} opened` };
       }
       return { success: false, error: 'Module manager not available or no moduleId provided' };
-    }
+    },
   },
-  
+
   'open-web-tool': {
     category: 'tools',
     description: 'Open a web tool',
@@ -297,8 +297,8 @@ const ACTION_REGISTRY = {
         return { success: true, message: `Opening ${params.name || 'web tool'}` };
       }
       return { success: false, error: 'No URL provided' };
-    }
-  }
+    },
+  },
 };
 
 /**
@@ -320,14 +320,14 @@ function openAIService(serviceName) {
  */
 function executeAction(actionType, params = {}) {
   console.log(`[ActionExecutor] Executing: ${actionType}`, params);
-  
+
   const action = ACTION_REGISTRY[actionType];
-  
+
   if (!action) {
     console.warn(`[ActionExecutor] Unknown action: ${actionType}`);
     return { success: false, error: `Unknown action: ${actionType}` };
   }
-  
+
   try {
     const result = action.execute(params);
     console.log(`[ActionExecutor] Result:`, result);
@@ -344,7 +344,7 @@ function executeAction(actionType, params = {}) {
  */
 function listActions() {
   const byCategory = {};
-  
+
   for (const [type, action] of Object.entries(ACTION_REGISTRY)) {
     const category = action.category || 'other';
     if (!byCategory[category]) {
@@ -352,16 +352,16 @@ function listActions() {
     }
     byCategory[category].push({
       type,
-      description: action.description
+      description: action.description,
     });
   }
-  
+
   return byCategory;
 }
 
 /**
  * Check if an action type exists
- * @param {string} actionType 
+ * @param {string} actionType
  * @returns {boolean}
  */
 function hasAction(actionType) {
@@ -370,17 +370,17 @@ function hasAction(actionType) {
 
 /**
  * Get action info
- * @param {string} actionType 
+ * @param {string} actionType
  * @returns {Object|null}
  */
 function getActionInfo(actionType) {
   const action = ACTION_REGISTRY[actionType];
   if (!action) return null;
-  
+
   return {
     type: actionType,
     category: action.category,
-    description: action.description
+    description: action.description,
   };
 }
 
@@ -393,22 +393,22 @@ function setupActionIPC() {
   ipcMain.handle('action:execute', async (event, actionType, params) => {
     return executeAction(actionType, params);
   });
-  
+
   // List available actions
   ipcMain.handle('action:list', async () => {
     return listActions();
   });
-  
+
   // Check if action exists
   ipcMain.handle('action:has', async (event, actionType) => {
     return hasAction(actionType);
   });
-  
+
   // Get action info
   ipcMain.handle('action:info', async (event, actionType) => {
     return getActionInfo(actionType);
   });
-  
+
   console.log('[ActionExecutor] IPC handlers registered');
 }
 
@@ -418,5 +418,5 @@ module.exports = {
   hasAction,
   getActionInfo,
   setupActionIPC,
-  ACTION_REGISTRY
+  ACTION_REGISTRY,
 };

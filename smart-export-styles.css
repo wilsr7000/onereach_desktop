@@ -3,48 +3,48 @@
 /* CSS Variables for Customization */
 :root {
   /* Primary Colors */
-  --color-primary: #3B82F6;
-  --color-primary-dark: #2563EB;
+  --color-primary: #3b82f6;
+  --color-primary-dark: #2563eb;
   --color-primary-light: rgba(59, 130, 246, 0.1);
-  --color-secondary: #10B981;
-  --color-accent: #F59E0B;
-  
+  --color-secondary: #10b981;
+  --color-accent: #f59e0b;
+
   /* Background Colors */
-  --color-background: #F5F2ED;
-  --color-surface: #FFFFFF;
-  --color-input-bg: #FFFFFF;
-  
+  --color-background: #f5f2ed;
+  --color-surface: #ffffff;
+  --color-input-bg: #ffffff;
+
   /* Text Colors */
-  --color-text: #2C2C2C;
+  --color-text: #2c2c2c;
   --color-text-secondary: #666666;
   --color-text-muted: #999999;
-  
+
   /* Border Colors */
-  --color-border: #E5E7EB;
-  --color-border-light: #F3F4F6;
-  
+  --color-border: #e5e7eb;
+  --color-border-light: #f3f4f6;
+
   /* Status Colors */
-  --color-success: #10B981;
-  --color-success-bg: #F0FDF4;
-  --color-success-border: #BBF7D0;
-  
-  --color-warning: #F59E0B;
-  --color-warning-bg: #FFFBEB;
-  --color-warning-border: #FED7AA;
-  
-  --color-error: #EF4444;
-  --color-error-bg: #FEF2F2;
-  --color-error-border: #FECACA;
-  
-  --color-info: #3B82F6;
-  --color-info-bg: #EFF6FF;
-  --color-info-border: #DBEAFE;
-  
+  --color-success: #10b981;
+  --color-success-bg: #f0fdf4;
+  --color-success-border: #bbf7d0;
+
+  --color-warning: #f59e0b;
+  --color-warning-bg: #fffbeb;
+  --color-warning-border: #fed7aa;
+
+  --color-error: #ef4444;
+  --color-error-bg: #fef2f2;
+  --color-error-border: #fecaca;
+
+  --color-info: #3b82f6;
+  --color-info-bg: #eff6ff;
+  --color-info-border: #dbeafe;
+
   /* Typography */
   --font-heading: 'Crimson Text', Georgia, serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  
+
   /* Font Sizes */
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
@@ -53,7 +53,7 @@
   --font-size-xl: 1.5rem;
   --font-size-2xl: 2rem;
   --font-size-3xl: 3rem;
-  
+
   /* Spacing */
   --spacing-xs: 0.25rem;
   --spacing-sm: 0.5rem;
@@ -61,13 +61,13 @@
   --spacing-lg: 2rem;
   --spacing-xl: 3rem;
   --spacing-xxl: 4rem;
-  
+
   /* Border Radius */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
   --radius-lg: 1rem;
   --radius-full: 9999px;
-  
+
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
@@ -76,7 +76,8 @@
 }
 
 /* Base Document Styles */
-body, .smart-export-document {
+body,
+.smart-export-document {
   font-family: var(--font-body);
   color: var(--color-text);
   background-color: var(--color-background);
@@ -348,21 +349,21 @@ body, .smart-export-document {
   .smart-export-document {
     padding: var(--spacing-lg);
   }
-  
+
   .document-header {
     flex-direction: column;
     align-items: flex-start;
   }
-  
+
   .document-meta {
     text-align: left;
     margin-top: var(--spacing-md);
   }
-  
+
   .document-title {
     font-size: var(--font-size-2xl);
   }
-  
+
   .timeline-stages {
     flex-direction: column;
     gap: var(--spacing-md);
@@ -375,28 +376,50 @@ body, .smart-export-document {
     background-color: white;
     padding: 2cm;
   }
-  
+
   .document-navigation {
     display: none;
   }
-  
+
   .page-break {
     page-break-after: always;
   }
 }
 
 /* Utility Classes */
-.text-center { text-align: center; }
-.text-right { text-align: right; }
-.text-muted { color: var(--color-text-secondary); }
-.mt-sm { margin-top: var(--spacing-sm); }
-.mt-md { margin-top: var(--spacing-md); }
-.mt-lg { margin-top: var(--spacing-lg); }
-.mt-xl { margin-top: var(--spacing-xl); }
-.mb-sm { margin-bottom: var(--spacing-sm); }
-.mb-md { margin-bottom: var(--spacing-md); }
-.mb-lg { margin-bottom: var(--spacing-lg); }
-.mb-xl { margin-bottom: var(--spacing-xl); }
+.text-center {
+  text-align: center;
+}
+.text-right {
+  text-align: right;
+}
+.text-muted {
+  color: var(--color-text-secondary);
+}
+.mt-sm {
+  margin-top: var(--spacing-sm);
+}
+.mt-md {
+  margin-top: var(--spacing-md);
+}
+.mt-lg {
+  margin-top: var(--spacing-lg);
+}
+.mt-xl {
+  margin-top: var(--spacing-xl);
+}
+.mb-sm {
+  margin-bottom: var(--spacing-sm);
+}
+.mb-md {
+  margin-bottom: var(--spacing-md);
+}
+.mb-lg {
+  margin-bottom: var(--spacing-lg);
+}
+.mb-xl {
+  margin-bottom: var(--spacing-xl);
+}
 
 /* Animation Classes */
 .fade-in {
@@ -404,8 +427,12 @@ body, .smart-export-document {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* Custom Elements for Smart Export */
@@ -476,7 +503,7 @@ body, .smart-export-document {
   fill: none;
   stroke: var(--color-text-secondary);
   stroke-width: 2;
-  stroke-dasharray: 4,4;
+  stroke-dasharray: 4, 4;
 }
 
 /* Journey Stages with Markers */
@@ -616,4 +643,4 @@ body, .smart-export-document {
   fill: none;
   stroke: var(--color-border);
   stroke-width: 2;
-} 
+}

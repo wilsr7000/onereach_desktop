@@ -1,6 +1,6 @@
 /**
  * Task Manager - Full CRUD operations for task management
- * 
+ *
  * Features:
  * - Create, read, update, delete tasks
  * - Sort by priority, date, status
@@ -16,23 +16,23 @@ let log;
 try {
   const { getLogQueue } = require('../../../lib/log-event-queue');
   log = getLogQueue();
-} catch (e) {
+} catch (_e) {
   log = {
     info: (cat, msg, data) => console.log(`[${cat}] ${msg}`, data || ''),
     warn: (cat, msg, data) => console.warn(`[${cat}] ${msg}`, data || ''),
-    error: (cat, msg, data) => console.error(`[${cat}] ${msg}`, data || '')
+    error: (cat, msg, data) => console.error(`[${cat}] ${msg}`, data || ''),
   };
 }
 
 class TaskManager {
   constructor(options = {}) {
-    this.storageKey = options.storageKey || 'onereach-tasks'
-    this.syncWithSpaces = options.syncWithSpaces || false
-    this.spacesService = options.spacesService || null
-    this.onTaskChange = options.onTaskChange || (() => {})
-    
+    this.storageKey = options.storageKey || 'onereach-tasks';
+    this.syncWithSpaces = options.syncWithSpaces || false;
+    this.spacesService = options.spacesService || null;
+    this.onTaskChange = options.onTaskChange || (() => {});
+
     // Load tasks from storage
-    this.tasks = this.loadTasks()
+    this.tasks = this.loadTasks();
   }
 
   /**
@@ -40,11 +40,11 @@ class TaskManager {
    */
   loadTasks() {
     try {
-      const stored = localStorage.getItem(this.storageKey)
-      return stored ? JSON.parse(stored) : []
+      const stored = localStorage.getItem(this.storageKey);
+      return stored ? JSON.parse(stored) : [];
     } catch (error) {
-      log.error('voice', '[TaskManager] Failed to load tasks', { error: error })
-      return []
+      log.error('voice', '[TaskManager] Failed to load tasks', { error: error });
+      return [];
     }
   }
 
@@ -53,15 +53,15 @@ class TaskManager {
    */
   saveTasks() {
     try {
-      localStorage.setItem(this.storageKey, JSON.stringify(this.tasks))
-      this.onTaskChange(this.tasks)
-      
+      localStorage.setItem(this.storageKey, JSON.stringify(this.tasks));
+      this.onTaskChange(this.tasks);
+
       // Sync to Spaces if enabled
       if (this.syncWithSpaces && this.spacesService) {
-        this.syncToSpaces()
+        this.syncToSpaces();
       }
     } catch (error) {
-      log.error('voice', '[TaskManager] Failed to save tasks', { error: error })
+      log.error('voice', '[TaskManager] Failed to save tasks', { error: error });
     }
   }
 
@@ -69,7 +69,7 @@ class TaskManager {
    * Generate unique task ID
    */
   generateId() {
-    return `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    return `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
@@ -89,14 +89,14 @@ class TaskManager {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       completedAt: null,
-      ...taskData
-    }
+      ...taskData,
+    };
 
-    this.tasks.push(task)
-    this.saveTasks()
-    
-    log.info('voice', '[TaskManager] Task added', { data: task.id })
-    return task
+    this.tasks.push(task);
+    this.saveTasks();
+
+    log.info('voice', '[TaskManager] Task added', { data: task.id });
+    return task;
   }
 
   /**
@@ -105,7 +105,7 @@ class TaskManager {
    * @returns {Object|null} Task or null
    */
   get(id) {
-    return this.tasks.find(task => task.id === id) || null
+    return this.tasks.find((task) => task.id === id) || null;
   }
 
   /**
@@ -114,48 +114,41 @@ class TaskManager {
    * @returns {Array} Filtered tasks
    */
   getAll(filters = {}) {
-    let filtered = [...this.tasks]
+    let filtered = [...this.tasks];
 
     // Filter by status
     if (filters.status) {
-      filtered = filtered.filter(task => task.status === filters.status)
+      filtered = filtered.filter((task) => task.status === filters.status);
     }
 
     // Filter by priority
     if (filters.priority) {
-      filtered = filtered.filter(task => task.priority === filters.priority)
+      filtered = filtered.filter((task) => task.priority === filters.priority);
     }
 
     // Filter by tags
     if (filters.tags && filters.tags.length > 0) {
-      filtered = filtered.filter(task => 
-        filters.tags.some(tag => task.tags.includes(tag))
-      )
+      filtered = filtered.filter((task) => filters.tags.some((tag) => task.tags.includes(tag)));
     }
 
     // Filter by search query
     if (filters.search) {
-      const query = filters.search.toLowerCase()
-      filtered = filtered.filter(task => 
-        task.title.toLowerCase().includes(query) ||
-        task.description.toLowerCase().includes(query)
-      )
+      const query = filters.search.toLowerCase();
+      filtered = filtered.filter(
+        (task) => task.title.toLowerCase().includes(query) || task.description.toLowerCase().includes(query)
+      );
     }
 
     // Filter by due date range
     if (filters.dueBefore) {
-      filtered = filtered.filter(task => 
-        task.dueDate && new Date(task.dueDate) <= new Date(filters.dueBefore)
-      )
+      filtered = filtered.filter((task) => task.dueDate && new Date(task.dueDate) <= new Date(filters.dueBefore));
     }
 
     if (filters.dueAfter) {
-      filtered = filtered.filter(task => 
-        task.dueDate && new Date(task.dueDate) >= new Date(filters.dueAfter)
-      )
+      filtered = filtered.filter((task) => task.dueDate && new Date(task.dueDate) >= new Date(filters.dueAfter));
     }
 
-    return filtered
+    return filtered;
   }
 
   /**
@@ -165,31 +158,31 @@ class TaskManager {
    * @returns {Object|null} Updated task or null
    */
   update(id, updates) {
-    const task = this.get(id)
+    const task = this.get(id);
     if (!task) {
-      log.warn('voice', '[TaskManager] Task not found', { data: id })
-      return null
+      log.warn('voice', '[TaskManager] Task not found', { data: id });
+      return null;
     }
 
     // Update properties
     Object.assign(task, updates, {
-      updatedAt: new Date().toISOString()
-    })
+      updatedAt: new Date().toISOString(),
+    });
 
     // Set completedAt if status changed to completed
     if (updates.status === 'completed' && !task.completedAt) {
-      task.completedAt = new Date().toISOString()
+      task.completedAt = new Date().toISOString();
     }
 
     // Clear completedAt if status changed from completed
     if (updates.status && updates.status !== 'completed') {
-      task.completedAt = null
+      task.completedAt = null;
     }
 
-    this.saveTasks()
-    
-    log.info('voice', '[TaskManager] Task updated', { data: id })
-    return task
+    this.saveTasks();
+
+    log.info('voice', '[TaskManager] Task updated', { data: id });
+    return task;
   }
 
   /**
@@ -198,17 +191,17 @@ class TaskManager {
    * @returns {boolean} Success
    */
   delete(id) {
-    const index = this.tasks.findIndex(task => task.id === id)
+    const index = this.tasks.findIndex((task) => task.id === id);
     if (index === -1) {
-      log.warn('voice', '[TaskManager] Task not found', { data: id })
-      return false
+      log.warn('voice', '[TaskManager] Task not found', { data: id });
+      return false;
     }
 
-    this.tasks.splice(index, 1)
-    this.saveTasks()
-    
-    log.info('voice', '[TaskManager] Task deleted', { data: id })
-    return true
+    this.tasks.splice(index, 1);
+    this.saveTasks();
+
+    log.info('voice', '[TaskManager] Task deleted', { data: id });
+    return true;
   }
 
   /**
@@ -219,46 +212,46 @@ class TaskManager {
    */
   sort(sortBy = 'createdAt', order = 'desc') {
     const sorted = [...this.tasks].sort((a, b) => {
-      let comparison = 0
+      let comparison = 0;
 
       switch (sortBy) {
         case 'priority':
-          const priorityOrder = { high: 3, medium: 2, low: 1 }
-          comparison = priorityOrder[a.priority] - priorityOrder[b.priority]
-          break
+          const priorityOrder = { high: 3, medium: 2, low: 1 };
+          comparison = priorityOrder[a.priority] - priorityOrder[b.priority];
+          break;
 
         case 'status':
-          const statusOrder = { pending: 1, 'in-progress': 2, completed: 3, cancelled: 4 }
-          comparison = statusOrder[a.status] - statusOrder[b.status]
-          break
+          const statusOrder = { pending: 1, 'in-progress': 2, completed: 3, cancelled: 4 };
+          comparison = statusOrder[a.status] - statusOrder[b.status];
+          break;
 
         case 'dueDate':
-          if (!a.dueDate && !b.dueDate) comparison = 0
-          else if (!a.dueDate) comparison = 1
-          else if (!b.dueDate) comparison = -1
-          else comparison = new Date(a.dueDate) - new Date(b.dueDate)
-          break
+          if (!a.dueDate && !b.dueDate) comparison = 0;
+          else if (!a.dueDate) comparison = 1;
+          else if (!b.dueDate) comparison = -1;
+          else comparison = new Date(a.dueDate) - new Date(b.dueDate);
+          break;
 
         case 'title':
-          comparison = a.title.localeCompare(b.title)
-          break
+          comparison = a.title.localeCompare(b.title);
+          break;
 
         case 'createdAt':
         case 'updatedAt':
         case 'completedAt':
-          const dateA = a[sortBy] ? new Date(a[sortBy]) : new Date(0)
-          const dateB = b[sortBy] ? new Date(b[sortBy]) : new Date(0)
-          comparison = dateA - dateB
-          break
+          const dateA = a[sortBy] ? new Date(a[sortBy]) : new Date(0);
+          const dateB = b[sortBy] ? new Date(b[sortBy]) : new Date(0);
+          comparison = dateA - dateB;
+          break;
 
         default:
-          comparison = 0
+          comparison = 0;
       }
 
-      return order === 'asc' ? comparison : -comparison
-    })
+      return order === 'asc' ? comparison : -comparison;
+    });
 
-    return sorted
+    return sorted;
   }
 
   /**
@@ -268,14 +261,14 @@ class TaskManager {
    * @returns {Array} Updated tasks
    */
   bulkUpdate(ids, updates) {
-    const updated = []
+    const updated = [];
 
-    ids.forEach(id => {
-      const task = this.update(id, updates)
-      if (task) updated.push(task)
-    })
+    ids.forEach((id) => {
+      const task = this.update(id, updates);
+      if (task) updated.push(task);
+    });
 
-    return updated
+    return updated;
   }
 
   /**
@@ -284,71 +277,67 @@ class TaskManager {
    * @returns {number} Number of deleted tasks
    */
   bulkDelete(ids) {
-    let deleted = 0
+    let deleted = 0;
 
-    ids.forEach(id => {
-      if (this.delete(id)) deleted++
-    })
+    ids.forEach((id) => {
+      if (this.delete(id)) deleted++;
+    });
 
-    return deleted
+    return deleted;
   }
 
   /**
    * Get tasks by status
    */
   getPending() {
-    return this.getAll({ status: 'pending' })
+    return this.getAll({ status: 'pending' });
   }
 
   getInProgress() {
-    return this.getAll({ status: 'in-progress' })
+    return this.getAll({ status: 'in-progress' });
   }
 
   getCompleted() {
-    return this.getAll({ status: 'completed' })
+    return this.getAll({ status: 'completed' });
   }
 
   /**
    * Get tasks by priority
    */
   getHighPriority() {
-    return this.getAll({ priority: 'high' })
+    return this.getAll({ priority: 'high' });
   }
 
   getMediumPriority() {
-    return this.getAll({ priority: 'medium' })
+    return this.getAll({ priority: 'medium' });
   }
 
   getLowPriority() {
-    return this.getAll({ priority: 'low' })
+    return this.getAll({ priority: 'low' });
   }
 
   /**
    * Get overdue tasks
    */
   getOverdue() {
-    const now = new Date()
-    return this.tasks.filter(task => 
-      task.status !== 'completed' &&
-      task.dueDate &&
-      new Date(task.dueDate) < now
-    )
+    const now = new Date();
+    return this.tasks.filter((task) => task.status !== 'completed' && task.dueDate && new Date(task.dueDate) < now);
   }
 
   /**
    * Get tasks due today
    */
   getDueToday() {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    return this.tasks.filter(task => {
-      if (!task.dueDate || task.status === 'completed') return false
-      const dueDate = new Date(task.dueDate)
-      return dueDate >= today && dueDate < tomorrow
-    })
+    return this.tasks.filter((task) => {
+      if (!task.dueDate || task.status === 'completed') return false;
+      const dueDate = new Date(task.dueDate);
+      return dueDate >= today && dueDate < tomorrow;
+    });
   }
 
   /**
@@ -362,8 +351,8 @@ class TaskManager {
       completed: this.getCompleted().length,
       overdue: this.getOverdue().length,
       dueToday: this.getDueToday().length,
-      highPriority: this.getHighPriority().length
-    }
+      highPriority: this.getHighPriority().length,
+    };
   }
 
   /**
@@ -372,7 +361,7 @@ class TaskManager {
    * @returns {Array} Matching tasks
    */
   search(query) {
-    return this.getAll({ search: query })
+    return this.getAll({ search: query });
   }
 
   /**
@@ -380,7 +369,7 @@ class TaskManager {
    * @returns {string} JSON string
    */
   export() {
-    return JSON.stringify(this.tasks, null, 2)
+    return JSON.stringify(this.tasks, null, 2);
   }
 
   /**
@@ -390,23 +379,23 @@ class TaskManager {
    */
   import(json) {
     try {
-      const imported = JSON.parse(json)
+      const imported = JSON.parse(json);
       if (!Array.isArray(imported)) {
-        throw new Error('Invalid format: expected array')
+        throw new Error('Invalid format: expected array');
       }
 
       // Merge with existing tasks (avoid duplicates)
-      const existingIds = new Set(this.tasks.map(t => t.id))
-      const newTasks = imported.filter(t => !existingIds.has(t.id))
-      
-      this.tasks.push(...newTasks)
-      this.saveTasks()
+      const existingIds = new Set(this.tasks.map((t) => t.id));
+      const newTasks = imported.filter((t) => !existingIds.has(t.id));
 
-      log.info('voice', '[TaskManager] Imported', newTasks.length, 'tasks')
-      return true
+      this.tasks.push(...newTasks);
+      this.saveTasks();
+
+      log.info('voice', '[TaskManager] Imported', newTasks.length, 'tasks');
+      return true;
     } catch (error) {
-      log.error('voice', '[TaskManager] Import failed', { error: error })
-      return false
+      log.error('voice', '[TaskManager] Import failed', { error: error });
+      return false;
     }
   }
 
@@ -414,31 +403,31 @@ class TaskManager {
    * Clear all tasks
    */
   clear() {
-    this.tasks = []
-    this.saveTasks()
-    log.info('voice', '[TaskManager] All tasks cleared')
+    this.tasks = [];
+    this.saveTasks();
+    log.info('voice', '[TaskManager] All tasks cleared');
   }
 
   /**
    * Sync tasks to Spaces (if enabled)
    */
   async syncToSpaces() {
-    if (!this.spacesService) return
+    if (!this.spacesService) return;
 
     try {
-      const noteTitle = 'Tasks - OneReach.ai'
-      const content = this.export()
+      const noteTitle = 'Tasks - OneReach.ai';
+      const content = this.export();
 
       await this.spacesService.saveNote({
         title: noteTitle,
         content: content,
         tags: ['tasks', 'onereach'],
-        spaceId: 'default'
-      })
+        spaceId: 'default',
+      });
 
-      log.info('voice', '[TaskManager] Synced to Spaces')
+      log.info('voice', '[TaskManager] Synced to Spaces');
     } catch (error) {
-      log.error('voice', '[TaskManager] Spaces sync failed', { error: error })
+      log.error('voice', '[TaskManager] Spaces sync failed', { error: error });
     }
   }
 
@@ -446,20 +435,20 @@ class TaskManager {
    * Load tasks from Spaces
    */
   async loadFromSpaces() {
-    if (!this.spacesService) return
+    if (!this.spacesService) return;
 
     try {
-      const noteTitle = 'Tasks - OneReach.ai'
-      const note = await this.spacesService.getNote(noteTitle)
+      const noteTitle = 'Tasks - OneReach.ai';
+      const note = await this.spacesService.getNote(noteTitle);
 
       if (note && note.content) {
-        this.import(note.content)
-        log.info('voice', '[TaskManager] Loaded from Spaces')
+        this.import(note.content);
+        log.info('voice', '[TaskManager] Loaded from Spaces');
       }
     } catch (error) {
-      log.error('voice', '[TaskManager] Failed to load from Spaces', { error: error })
+      log.error('voice', '[TaskManager] Failed to load from Spaces', { error: error });
     }
   }
 }
 
-module.exports = TaskManager
+module.exports = TaskManager;
