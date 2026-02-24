@@ -46,29 +46,6 @@ class VoiceListener {
    * Connect to OpenAI Realtime API
    */
   async connect() {
-    // #region agent log
-    this._connectSeq = (this._connectSeq || 0) + 1;
-    const _cSeq = this._connectSeq;
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'voice-listener.js:connect',
-        message: 'connect() called',
-        data: {
-          seq: _cSeq,
-          hasWs: !!this.ws,
-          isConnected: this.isConnected,
-          sessionId: this.sessionId,
-          subscriberCount: this.subscribers.size,
-        },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        hypothesisId: 'H-RACE',
-      }),
-    }).catch((err) => console.warn('[voice-listener] connect agent-log:', err.message));
-    // #endregion
-
     if (this.ws && this.isConnected) {
       log.info('voice', 'Already connected');
       return true;
@@ -87,27 +64,6 @@ class VoiceListener {
           },
           onClose: (code, _reason) => {
             log.info('voice', 'Connection closed: ...', { code });
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                location: 'voice-listener.js:ws-close',
-                message: 'WebSocket close event fired',
-                data: {
-                  seq: _cSeq,
-                  code,
-                  currentConnectSeq: this._connectSeq,
-                  wasConnected: this.isConnected,
-                  hadWs: !!this.ws,
-                  subscriberCount: this.subscribers.size,
-                },
-                timestamp: Date.now(),
-                sessionId: 'debug-session',
-                hypothesisId: 'H-RACE',
-              }),
-            }).catch((err) => console.warn('[voice-listener] ws-close agent-log:', err.message));
-            // #endregion
             this.isConnected = false;
             this.ws = null;
             this.session = null;
@@ -158,20 +114,6 @@ class VoiceListener {
           log.info('voice', 'Connected');
           this.isConnected = true;
           this.reconnectAttempts = 0;
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'voice-listener.js:ws-open',
-              message: 'WebSocket opened',
-              data: { seq: _cSeq, wsIdentity: this.ws?._debugId || 'unknown' },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              hypothesisId: 'H-RACE',
-            }),
-          }).catch((err) => console.warn('[voice-listener] ws-open agent-log:', err.message));
-          // #endregion
 
           // Configure session for transcription with function calling
           this.sendEvent({
@@ -228,26 +170,6 @@ ABSOLUTE RULES - NO EXCEPTIONS:
    */
   sendEvent(event) {
     if (!this.ws || !this.isConnected) {
-      // #region agent log
-      if (event.type !== 'input_audio_buffer.append')
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'voice-listener.js:sendEvent-fail',
-            message: 'sendEvent failed - not connected',
-            data: {
-              eventType: event.type,
-              hasWs: !!this.ws,
-              isConnected: this.isConnected,
-              connectSeq: this._connectSeq,
-            },
-            timestamp: Date.now(),
-            sessionId: 'debug-session',
-            hypothesisId: 'H-NOSEND',
-          }),
-        }).catch((err) => console.warn('[voice-listener] sendEvent-fail agent-log:', err.message));
-      // #endregion
       log.warn('voice', 'Not connected');
       return false;
     }
@@ -557,25 +479,6 @@ ABSOLUTE RULES - NO EXCEPTIONS:
    * Disconnect from OpenAI
    */
   disconnect() {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'voice-listener.js:disconnect',
-        message: 'disconnect() called',
-        data: {
-          hasWs: !!this.ws,
-          isConnected: this.isConnected,
-          connectSeq: this._connectSeq,
-          subscriberCount: this.subscribers.size,
-        },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        hypothesisId: 'H-RACE',
-      }),
-    }).catch((err) => console.warn('[voice-listener] disconnect agent-log:', err.message));
-    // #endregion
     if (this.session) {
       log.info('voice', 'Disconnecting...');
       this.session.close();

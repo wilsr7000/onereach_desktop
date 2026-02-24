@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-17T03:54:50.661Z",
+  "timestamp": "2026-02-23T05:04:54.887Z",
   "summary": {
     "total": 63,
     "passed": 38,
@@ -14,7 +14,7 @@
       "user": "What time is it?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 7:54 PM"
+      "response": "It's 9:03 PM"
     },
     {
       "conversation": "Time: basic queries",
@@ -22,7 +22,7 @@
       "user": "And what day is it today?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Monday, February 16, 2026"
+      "response": "It's Sunday, February 22, 2026"
     },
     {
       "conversation": "Time: basic queries",
@@ -30,7 +30,7 @@
       "user": "What is the date?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Monday, February 16, 2026"
+      "response": "It's Sunday, February 22, 2026"
     },
     {
       "conversation": "Time: timezone awareness",
@@ -46,7 +46,7 @@
       "user": "And in London?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 7:54 PM"
+      "response": "It's 9:03 PM"
     },
     {
       "conversation": "Weather: city provided",
@@ -54,7 +54,7 @@
       "user": "What is the weather in Denver?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 51°F and clear in Denver"
+      "response": "It's 38°F and clear in Denver"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -62,7 +62,7 @@
       "user": "What's the weather?",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "It's 52°F and overcast in Berkeley, feels like 47°F. Humidity is 83%"
+      "response": "It's 58°F and partly cloudy in Berkeley. Humidity is 72%"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -70,7 +70,7 @@
       "user": "San Francisco",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 52°F and overcast in Berkeley, feels like 47°F. Humidity is 83%"
+      "response": "It's 58°F and partly cloudy in Berkeley. Humidity is 72%"
     },
     {
       "conversation": "Weather: forecast request",
@@ -78,7 +78,7 @@
       "user": "Will it rain tomorrow in Seattle?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 52°F and overcast in Berkeley, feels like 47°F. Humidity is 83%"
+      "response": "It's 58°F and partly cloudy in Berkeley. Humidity is 72%"
     },
     {
       "conversation": "Spelling: common words",
@@ -126,7 +126,7 @@
       "user": "Hello there",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "How can I assist you?"
+      "response": "What can I do for you?"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -142,7 +142,7 @@
       "user": "Thanks for your help",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "You're welcome!"
+      "response": "Glad I could help!"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -158,7 +158,7 @@
       "user": "Hey",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Hi doing! I'm here to help."
+      "response": "Hey doing! How can I help you?"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -286,7 +286,7 @@
       "user": "Search for quarterly revenue reports",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Here's what I found: Earnings Calendar - Nasdaq. Access detailed earnings reports for companies list"
+      "response": "I couldn't complete the search right now. Please try again."
     },
     {
       "conversation": "Search: document queries",
@@ -294,7 +294,7 @@
       "user": "Find documents about project alpha",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Here's what I found: The Project Alpha Papers. Welcome to The Project Alpha Papers, an archive of ar"
+      "response": "I couldn't complete the search right now. Please try again."
     },
     {
       "conversation": "Email: compose flow",
@@ -398,7 +398,7 @@
       "user": "Give me my morning briefing",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good evening, Isaac. Current time: 7:54 PM. Date: Monday, February 16, 2026. Time of day: evening. I"
+      "response": "Good evening, Isaac. Current time: 9:04 PM. Date: Sunday, February 22, 2026. Time of day: evening. N"
     },
     {
       "conversation": "Memory: store and recall preferences",
@@ -494,7 +494,7 @@
       "user": "asdfghjkl",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Hmm, what's that?"
+      "response": "What was that?"
     },
     {
       "conversation": "Edge: single word",

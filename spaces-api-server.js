@@ -295,6 +295,11 @@ class SpacesAPIServer {
       return;
     }
 
+    // API documentation (Swagger UI)
+    if (pathname === '/api/docs' || pathname.startsWith('/api/docs/')) {
+      return this._serveApiDocs(pathname, req, res);
+    }
+
     // Route handlers with dynamic path matching
     // Static routes first
     if (pathname === '/api/status' && method === 'GET') {
@@ -4651,6 +4656,94 @@ class SpacesAPIServer {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: error.message, code: 'SERVER_ERROR' }));
     }
+  }
+
+  _serveApiDocs(pathname, req, res) {
+    if (pathname === '/api/docs') {
+      res.writeHead(301, { Location: '/api/docs/' });
+      res.end();
+      return;
+    }
+
+    if (pathname === '/api/docs/openapi.json') {
+      try {
+        const buildSpec = require('./docs/openapi-spec');
+        const { version } = require('./package.json');
+        const spec = buildSpec(version);
+        const body = JSON.stringify(spec);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+        res.end(body);
+      } catch (err) {
+        log.error('spaces', 'Failed to build OpenAPI spec', { error: err.message });
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to build spec' }));
+      }
+      return;
+    }
+
+    if (pathname === '/api/docs/' || pathname === '/api/docs/index.html') {
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GSX Power User - API Docs</title>
+  <link rel="stylesheet" href="/api/docs/swagger-ui.css">
+  <style>
+    body { margin: 0; background: #fafafa; }
+    #swagger-ui .topbar { display: none; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="/api/docs/swagger-ui-bundle.js"></script>
+  <script src="/api/docs/swagger-ui-standalone-preset.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: '/api/docs/openapi.json',
+      dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+      layout: 'StandaloneLayout',
+      deepLinking: true,
+      defaultModelsExpandDepth: 1,
+    });
+  </script>
+</body>
+</html>`;
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(html);
+      return;
+    }
+
+    const fileName = pathname.replace('/api/docs/', '');
+    let swaggerDistPath;
+    try {
+      swaggerDistPath = path.dirname(require.resolve('swagger-ui-dist/package.json'));
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'swagger-ui-dist not installed' }));
+      return;
+    }
+
+    const filePath = path.join(swaggerDistPath, fileName);
+    if (!filePath.startsWith(swaggerDistPath)) {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+
+    const ext = path.extname(fileName).toLowerCase();
+    const mimeTypes = { '.js': 'application/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png', '.map': 'application/json' };
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'File not found' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=3600' });
+      res.end(data);
+    });
   }
 }
 

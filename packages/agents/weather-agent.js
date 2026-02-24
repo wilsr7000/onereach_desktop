@@ -793,7 +793,7 @@ ${uniqueLocationStrings.map((l, i) => `${i + 1}. "${l}"`).join('\n')}`,
    * Extract location from the task content
    */
   extractLocation(text) {
-    if (!text) return null;
+    if (!text || typeof text !== 'string') return null;
 
     const patterns = [
       /weather\s+(?:in|for|at)\s+(.+?)(?:\?|$)/i,

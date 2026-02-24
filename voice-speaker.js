@@ -96,28 +96,6 @@ class VoiceSpeaker {
 
     const voice = metadata?.voice || 'alloy';
     log.info('voice', 'Speaking', { arg1: text.slice(0, 80), arg2: '| Voice:', voice });
-    // #region agent log
-    const _stack = new Error().stack
-      .split('\n')
-      .slice(1, 5)
-      .map((s) => s.trim());
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'voice-speaker.js:_doSpeak',
-        message: '_doSpeak called',
-        data: {
-          textPreview: text.slice(0, 80),
-          voice,
-          subscriberCount: this.subscribers?.size || 0,
-          callerStack: _stack,
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'SPEAK-TRACE',
-      }),
-    }).catch((err) => console.warn('[voice-speaker] _doSpeak agent-log:', err.message));
-    // #endregion
 
     try {
       this.isSpeaking = true;

@@ -2248,6 +2248,8 @@
           transcriptEl.style.bottom = '';
           transcriptEl.style.left = '';
           transcriptEl.style.right = '';
+          // Clear stale text so it doesn't flash on next show
+          transcriptInner.textContent = '';
           // Reset inner scroll position
           transcriptInner.scrollTop = 0;
         }, 800);
@@ -2903,34 +2905,6 @@
       // It expands dynamically for tooltip/chat and collapses when done.
       console.log('[Orb] Click-through: using dynamic window resizing');
 
-      // #region agent log
-      setInterval(() => {
-        const chatPanel = document.getElementById('textChatPanel');
-        const transcript = document.getElementById('transcript');
-        const ctxMenu = document.querySelector('.orb-context-menu');
-        const d = {
-          chatPanelVisible: chatPanel?.classList.contains('visible'),
-          chatPanelOpacity: chatPanel ? getComputedStyle(chatPanel).opacity : null,
-          chatPanelPointerEvents: chatPanel ? getComputedStyle(chatPanel).pointerEvents : null,
-          transcriptVisible: transcript?.classList.contains('visible'),
-          transcriptOpacity: transcript ? getComputedStyle(transcript).opacity : null,
-          ctxMenuVisible: ctxMenu?.classList.contains('visible'),
-          bodyPointerEvents: getComputedStyle(document.body).pointerEvents,
-          bodyBackground: getComputedStyle(document.body).background,
-        };
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'orb.html:periodic',
-            message: 'Orb element visibility poll',
-            data: d,
-            timestamp: Date.now(),
-            hypothesisId: 'H3,H4',
-          }),
-        }).catch(() => {});
-      }, 5000);
-      // #endregion
 
       // Log ready state
       console.log('[Orb] Voice Orb initialized with drag support and Agent Composer integration');

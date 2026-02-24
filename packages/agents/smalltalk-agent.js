@@ -190,10 +190,24 @@ The ONLY facts you may state are those present in the conversation history or us
     }
 
     const lower = task.content.toLowerCase().trim();
-    const prefs = this.memory.parseSectionAsKeyValue('Learned Preferences') || {};
-    const userName = prefs['User Name'];
-    const hasName = userName && userName !== '*Not set*';
     const timeContext = getTimeContext();
+
+    // Read user name from the global profile (shared across all agents)
+    let userName = null;
+    let hasName = false;
+    try {
+      const { getUserProfile } = require('../../lib/user-profile-store');
+      const profile = getUserProfile();
+      if (!profile.isLoaded()) await profile.load();
+      const facts = profile.getFacts('Identity');
+      const name = facts['Name'] || facts['First Name'];
+      if (name && !name.includes('not yet learned')) {
+        userName = name;
+        hasName = true;
+      }
+    } catch (_) {
+      // Profile unavailable -- greet without name
+    }
 
     // Handle "what's your name" - asking the assistant's name
     if (/what('?s| is) your name|who are you|what are you called|what should i call you/i.test(lower)) {
@@ -205,24 +219,29 @@ The ONLY facts you may state are those present in the conversation history or us
       ]);
     }
 
-    // Handle name introduction
-    // Note: "i am" alone is too broad (e.g. "I am doing well" would capture "doing")
-    // Only match explicit introductions like "I am called X" or "I am named X"
-    const nameMatch = task.content.match(/(?:my name is|i'm called|call me|i am called|i am named)\s+(\w+)/i);
+    // Handle name introduction -- save to global profile so ALL agents see it
+    // Require at least 2 chars and reject common false positives from STT
+    const nameMatch = task.content.match(
+      /(?:my name is|i'm called|i am called|i am named|you can call me)\s+([A-Z][a-zA-Z]{1,30})/
+    );
     if (nameMatch) {
       const name = nameMatch[1];
-      await learnFromInteraction(
-        this.memory,
-        task,
-        { success: true },
-        {
-          learnedPreferences: { 'User Name': name },
+      const reject = ['Doing', 'Going', 'Getting', 'Being', 'Having', 'Trying', 'Saying', 'Asking'];
+      if (!reject.includes(name)) {
+        try {
+          const { getUserProfile } = require('../../lib/user-profile-store');
+          const profile = getUserProfile();
+          if (!profile.isLoaded()) await profile.load();
+          profile.updateFact('Name', name);
+          await profile.save();
+        } catch (_) {
+          // Profile save failed -- still greet
         }
-      );
-      return {
-        success: true,
-        message: `Nice to meet you, ${name}! I'll remember that.`,
-      };
+        return {
+          success: true,
+          message: `Nice to meet you, ${name}! I'll remember that.`,
+        };
+      }
     }
 
     // Greetings with personalization

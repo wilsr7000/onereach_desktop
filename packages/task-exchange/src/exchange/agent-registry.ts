@@ -26,6 +26,8 @@ export class AgentRegistry extends TypedEventEmitter<AgentRegistryEvents> {
   private agents: Map<string, InternalAgent> = new Map();
   private categoryIndex: CategoryIndex;
   private heartbeatTimeoutMs: number;
+  private lastRegisterTime: Map<string, number> = new Map();
+  private static MIN_REGISTER_INTERVAL_MS = 2000;
 
   constructor(categoryIndex: CategoryIndex, heartbeatTimeoutMs = 60000) {
     super();
@@ -38,6 +40,16 @@ export class AgentRegistry extends TypedEventEmitter<AgentRegistryEvents> {
    */
   register(ws: WebSocket, msg: RegisterMessage): ConnectedAgent {
     const now = Date.now();
+
+    // Throttle: reject rapid re-registration from the same agent
+    const lastTime = this.lastRegisterTime.get(msg.agentId) || 0;
+    if (now - lastTime < AgentRegistry.MIN_REGISTER_INTERVAL_MS) {
+      console.warn(`[AgentRegistry] Throttling ${msg.agentId} -- registered ${now - lastTime}ms ago`);
+      ws.close(4008, 'Too many reconnections');
+      // Return a minimal agent object so callers don't crash
+      return { id: msg.agentId, name: msg.agentId, version: msg.agentVersion, categories: msg.categories, capabilities: msg.capabilities, connectedAt: now, lastHeartbeat: now, healthy: false, currentTasks: 0 } as ConnectedAgent;
+    }
+    this.lastRegisterTime.set(msg.agentId, now);
 
     // Check if agent already exists (reconnection)
     const existing = this.agents.get(msg.agentId);

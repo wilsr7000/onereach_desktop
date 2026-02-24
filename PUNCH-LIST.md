@@ -390,6 +390,12 @@
 - [x] **API documentation** - IPC API not fully documented
   - ✅ Created `TOOL-APP-SPACES-API-GUIDE.md` - Full CRUD HTTP API for external tools
   - Extended `spaces-api-server.js` with complete REST endpoints
+  - ✅ **Swagger UI** (v4.2.0) - Interactive OpenAPI 3.0 docs at `http://127.0.0.1:47291/api/docs/`
+    - 92 REST endpoints documented (Spaces, Logs, Conversion, GSX, Git, Playbooks, Transcripts, etc.)
+    - WebSocket protocols documented (Agent Exchange, Log Server, Spaces)
+    - IPC APIs documented (Browsing, AI Service, Spaces)
+    - 15 reusable schemas, 27 tag groups
+    - Files: `docs/openapi-spec.js`, `spaces-api-server.js` (docs route handler)
 - [ ] **Video tutorials** - None exist
 
 ---
@@ -427,6 +433,71 @@
 ---
 
 ## Recently Completed
+
+- [x] **Agent Robustness: Edge-Case Testing & Fixes** (v4.5.1)
+  - Created comprehensive chaos/edge-case test suite (`test/unit/agent-edge-cases.test.js`): 223 tests throwing random, adversarial, and malformed inputs at 6 agents (weather, DJ, daily brief, time, spelling, smalltalk)
+  - Inputs tested: empty strings, unicode/emoji, XSS/SQL injection, path traversal, very long strings, numbers, gibberish, contradictory commands, profanity, off-topic queries, null-like values, multi-turn state corruption, concurrent execution
+  - **Bug found & fixed**: `weather-agent.js` `extractLocation()` crashed on non-string inputs (number, boolean, object, array) -- added `typeof text !== 'string'` guard
+  - Created `test/unit/weather-agent.test.js` (16 tests): location extraction, agent metadata, briefing interface, pending-state handling
+  - Created `test/unit/dj-agent.test.js` (48 tests): pattern cache matching, mood detection, volume control, history parsing, response formatting, option generation
+  - **Fixed stale test**: `test/unit/daily-brief-fixes.test.js` referenced deleted `calendar-agent.js` -- updated to `calendar-query-agent.js` and rewrote 4 assertions to match refactored `getBriefing()` implementation
+  - All 3045 unit tests passing (151/152 files; 1 pre-existing failure in `ai-service.test.js`)
+
+- [x] **Voice Orb: Stale Context, Wrong Name, TTS/Preload Crashes** (v4.5.2)
+  - **Stale date injection**: `getContextString()` in `lib/user-profile-store.js` was returning stored `Date: February 8, 2026` to the LLM -- NormalizeIntent would then inject the wrong date into every query. Fix: now generates live date/time/day from system clock and filters out stored ephemeral keys.
+  - **Ephemeral fact pollution**: Agents were writing transient facts (Current Time, Date, Day) to the profile, which would go stale immediately. Fix: `updateFact()` now rejects known temporal keys.
+  - **Wrong user name**: Smalltalk agent stored names in its local memory (`User Name: doing`) instead of the global profile, and read from that local source. Fix: now reads/writes `Identity > Name` via `getUserProfile()`. Also tightened the name regex to require capitalized 2+ char names and reject common gerunds (Doing, Going, etc.).
+  - **Stale text flashing in orb**: `hideTranscript()` removed CSS classes but never cleared `textContent`, so old text would flash when the tooltip reappeared. Fix: now clears `transcriptInner.textContent = ''` after fade-out.
+  - **`ttsAudioInitialized` not defined**: `lib/orb/orb-audio.js` line 27 referenced `ttsAudioInitialized` instead of `_ttsAudioInitialized` (missing underscore), throwing ReferenceError in strict mode. Fix: corrected variable name.
+  - **`preload-playbook-sync` crash**: `preload.js` required this module without try/catch, crashing the entire preload in sandboxed contexts. Fix: wrapped in try/catch.
+  - **Daily Brief bid JSON truncation**: Unified bidder used `maxTokens: 200` which was too tight for verbose agents -- LLM output got truncated mid-JSON causing "Unterminated string" parse errors. Fix: bumped to 300 and added `repairTruncatedJSON()` fallback that attempts brace-closing repair and regex extraction.
+  - Cleaned stale Key Facts from user profile (36 stale entries including old meeting data, music state, wrong dates)
+  - Files: `orb.html`, `lib/orb/orb-audio.js`, `lib/user-profile-store.js`, `packages/agents/smalltalk-agent.js`, `packages/agents/unified-bidder.js`, `preload.js`
+
+- [x] **Voice Orb Stability: Debug Telemetry Cleanup** (v4.5.0)
+  - Removed 41 leftover debug telemetry blocks across 14+ files that were POSTing to a non-existent `http://127.0.0.1:7242/ingest/` debug server every 5 seconds
+  - Files cleaned: `orb.html`, `voice-listener.js`, `voice-speaker.js`, `realtime-speech.js`, `exchange-bridge.js`, `main.js`, `recorder.js`, `recorder.html`, `command-hud.html`, `setup-wizard.html`, `menu-data-manager.js`, `openai-adapter.js`, `master-orchestrator.js`, `search-agent.js`, `unified-bidder.js`
+  - Also cleaned stale CSP entries from `detached-video-player.html`, `video-editor.html`
+  - Fixed `preload.js` crashing when `preload-speech.js` fails to load in sandboxed contexts (wrapped in try/catch so other APIs survive)
+  - These telemetry calls were generating constant CSP violation errors in the orb window and fetch errors in the main process, flooding the log server with false positives
+  - 108 orb unit tests + 57 orb E2E tests + 12 corpus tests all passing
+
+- [x] **Browsing API (Comet-class)** (v4.4.0)
+  - Session-based browsing via native Electron BrowserWindow (hidden or HITL modes)
+  - Anti-detection stealth module (`lib/browser-stealth.js`): user agent, plugins, permissions, WebGL fingerprint, Chrome runtime mocking
+  - Error/block detection (`lib/browse-error-detector.js`): CAPTCHA, auth walls, bot blocks, paywalls, consent banners with auto-dismiss
+  - Fast-path search (`lib/browse-fast-path.js`): DuckDuckGo API + parallel HTTP extraction with content caching
+  - Declarative agent template system (`lib/browsing-agent-template.js`): site-specific recipes, LLM fallback, retry/backoff, output schemas
+  - LLM-driven task runner (`lib/browsing-task-runner.js`): observe/think/act loop, checkpoint/resume, model escalation
+  - Core API (`lib/browsing-api.js`): session lifecycle, navigation, content extraction, accessibility snapshots, actions, screenshots, parallel sessions
+  - IPC bridge in `main.js` and `preload.js` (`window.browsing`)
+  - Dedicated preload for HITL windows (`preload-browsing-api.js`)
+  - **Phase 3: Exchange-registered browsing agent** (`packages/agents/browsing-agent.js`): meta-agent with 7 starter templates (weather, web search, page reader, news, GitHub, form filler, page monitor), auto-routed via LLM bidding
+  - **Safety guardrails** (`lib/browse-safety.js`): domain blocklist (localhost, private IPs, cloud consoles), sensitive field detection (passwords, credit cards, SSN), action limits per session, session duration caps, custom blocklist/limits API
+  - **Multi-step orchestration** (`lib/browse-orchestrator.js`): `research()` with source synthesis, `workflow()` with variable interpolation and step chaining, `comparePages()` with parallel extraction and LLM comparison
+  - **Comet-style session inheritance**: `createSession({ inheritSession: 'auto|pool|tab|chrome', targetUrl })` inherits auth from app tabs, shared auth pool, or Chrome profile cookies
+  - **Shared auth pool**: `saveToAuthPool()` persists login cookies to `persist:auth-pool-{domain}` partitions; auto-reused by future sessions targeting the same domain
+  - **Chrome cookie import** (`lib/chrome-cookie-import.js`): reads and decrypts cookies from Chrome's SQLite database (macOS Keychain AES-128-CBC), injects into Electron partitions
+  - **Tab partition discovery**: IPC round-trip (`main.js` <-> `browser-renderer.js`) to find open app tabs by domain for cookie inheritance
+  - **Phase 4: Reliability gap closure** (v4.5.0)
+    - **Vision fallback**: Task runner detects low-element snapshots (<3 refs), takes screenshot and uses `ai.vision()` for visual understanding; configurable via `useVision: 'auto'|'always'|'never'`, capped at 5 vision calls per task
+    - **Dual-backend architecture** (`lib/browser-backend.js`): `ElectronBackend` (default) and `PlaywrightBackend` (real Chrome via Playwright) behind a common interface; `createSession({ backend: 'chrome' })` for sites with aggressive bot detection
+    - **Site-specific stealth profiles** (`lib/stealth-profiles.js`): domain/header/HTML-based detection registry for Cloudflare, DataDome, PerimeterX, reCAPTCHA/hCaptcha/Turnstile; enhanced injection script with canvas noise, audio noise, WebRTC blocking, font enumeration limiting
+    - **Parameterized stealth** (`lib/browser-stealth.js`): `buildEnhancedScript(patches)` and `applyProfile(webContents, patches)` for per-site stealth configuration
+    - **Multi-site E2E validation** (`test/e2e/browsing-sites-validation.spec.js`): parameterized tests against Wikipedia, Hacker News, httpbin, JSONPlaceholder, example.com with snapshot/extract/screenshot assertions
+    - 97 vision/backend/stealth unit tests (all passing), 2712 total unit tests passing
+  - New files: `lib/browsing-api.js`, `lib/browser-stealth.js`, `lib/browse-error-detector.js`, `lib/browse-fast-path.js`, `lib/browsing-agent-template.js`, `lib/browsing-task-runner.js`, `lib/browse-safety.js`, `lib/browse-orchestrator.js`, `lib/chrome-cookie-import.js`, `lib/browser-backend.js`, `lib/stealth-profiles.js`, `preload-browsing-api.js`, `packages/agents/browsing-agent.js`
+
+- [x] **WebMCP Bidirectional Integration** (v4.3.x)
+  - W3C `navigator.modelContext` API support (Chrome 146 / Electron 41 beta)
+  - **Consumer**: Bridge script injected into webview tabs intercepts `registerTool()` calls, discovers tools, creates proxy agents in the exchange
+  - **Provider**: Spaces (list, search, create, add item), Search (web search), Navigation (open URL, current page), Settings (read) exposed as WebMCP tools on app pages
+  - **Exchange integration**: Proxy agents register via WebSocket, participate in LLM-based bidding, route execution back through IPC to webview `executeJavaScript()`
+  - **Lifecycle**: Tools discovered on `did-finish-load`, cleared on `did-navigate`, cleaned up on tab close
+  - **UI**: Purple badge on tabs showing WebMCP tool count
+  - New files: `webmcp-bridge.js`, `lib/webmcp-consumer.js`, `lib/webmcp-provider.js`
+  - Modified: `browser-renderer.js`, `main.js`, `preload.js`, `exchange-bridge.js`, `package.json`, `tabbed-browser.html`, `clipboard-viewer.html`, `settings.html`
+  - Electron upgraded from 39 (Chromium 142) to 41 beta (Chromium 146)
 
 - [x] **Calendar Agent v3 Refactor** (v4.3.0)
   - **Deleted**: Monolithic `calendar-agent.js` (4800 lines) -- inconsistent routing, keyword fallbacks, unvalidated LLM dates

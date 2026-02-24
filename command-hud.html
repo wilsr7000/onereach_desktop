@@ -1424,19 +1424,6 @@
         hudContainer.classList.add('visible');
         clearAutoHide();
         startQueueStatsUpdates();
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'command-hud.html:show',
-            message: 'HUD CSS show (visible class added)',
-            data: {},
-            timestamp: Date.now(),
-            hypothesisId: 'H1',
-          }),
-        }).catch(() => {});
-        // #endregion
       }
 
       // Hide HUD
@@ -1446,19 +1433,6 @@
         clearAutoHide();
         clearErrorFade();
         stopQueueStatsUpdates();
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'command-hud.html:hide',
-            message: 'HUD CSS-only hide (no OS window hide!)',
-            data: { dismissCalled: false },
-            timestamp: Date.now(),
-            hypothesisId: 'H1',
-          }),
-        }).catch(() => {});
-        // #endregion
       }
 
       // Clear auto-hide timer
@@ -1480,19 +1454,6 @@
       // Schedule auto-hide
       function scheduleAutoHide(delay = AUTO_HIDE_DELAY) {
         clearAutoHide();
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'command-hud.html:scheduleAutoHide',
-            message: 'Auto-hide scheduled (CSS only, window stays shown!)',
-            data: { delay },
-            timestamp: Date.now(),
-            hypothesisId: 'H1',
-          }),
-        }).catch(() => {});
-        // #endregion
         autoHideTimer = setTimeout(() => {
           hide();
         }, delay);

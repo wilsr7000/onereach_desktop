@@ -113,27 +113,6 @@ const masterOrchestrator = {
     const sortedBids = [...bids].sort((a, b) => (b.score || b.confidence) - (a.score || a.confidence));
     const topScore = sortedBids[0]?.score || sortedBids[0]?.confidence || 0;
     const secondScore = sortedBids[1]?.score || sortedBids[1]?.confidence || 0;
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'master-orchestrator.js:winner',
-        message: 'Orchestrator evaluating bids',
-        data: {
-          taskContent: (task.content || task.phrase || '').substring(0, 80),
-          topAgent: sortedBids[0]?.agentId,
-          topScore,
-          secondAgent: sortedBids[1]?.agentId,
-          secondScore,
-          gap: (topScore - secondScore).toFixed(2),
-          totalBids: bids.length,
-          allBids: sortedBids.map((b) => ({ id: b.agentId, score: b.score || b.confidence })),
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'WINNER',
-      }),
-    }).catch((err) => console.warn('[master-orchestrator] ingest fetch:', err.message));
     if (topScore - secondScore > 0.3) {
       log.info('agent', `Dominant top bid (gap ${(topScore - secondScore).toFixed(2)}), skipping LLM`);
       return {

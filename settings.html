@@ -2328,6 +2328,28 @@
       document.getElementById('captureEnabled').addEventListener('change', (e) => {
         toggleCaptureSettings(e.target.checked);
       });
+
+      // WebMCP Provider: register settings tools
+      (function() {
+        if (typeof navigator === 'undefined' || !navigator.modelContext) return;
+
+        navigator.modelContext.registerTool({
+          name: 'app_settings_read',
+          description: 'Read current application settings as a JSON object.',
+          inputSchema: { type: 'object', properties: {} },
+          annotations: { readOnlyHint: true },
+          execute: async function() {
+            var s = await window.api.getSettings();
+            var safe = Object.assign({}, s);
+            delete safe.apiKeys;
+            delete safe.credentials;
+            delete safe.tokens;
+            return { content: [{ type: 'text', text: JSON.stringify(safe) }] };
+          }
+        });
+
+        console.log('[WebMCP Provider] Registered settings tools');
+      })();
     </script>
   </body>
 </html>

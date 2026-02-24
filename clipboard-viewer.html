@@ -8767,5 +8767,79 @@ Obtain an API key from the developer portal at...
 
     <script src="src/generative-search-panel.js"></script>
     <script src="clipboard-viewer.js"></script>
+    <script>
+      // WebMCP Provider: register Spaces tools for this page
+      (function() {
+        if (typeof navigator === 'undefined' || !navigator.modelContext) return;
+
+        navigator.modelContext.registerTool({
+          name: 'spaces_list',
+          description: 'List all content spaces with id, name, description, and item count.',
+          inputSchema: { type: 'object', properties: {} },
+          annotations: { readOnlyHint: true },
+          execute: async function() {
+            var spaces = await window.spaces.list();
+            return { content: [{ type: 'text', text: JSON.stringify(spaces.map(function(s) {
+              return { id: s.id, name: s.name, description: s.description, itemCount: s.itemCount || 0 };
+            })) }] };
+          }
+        });
+
+        navigator.modelContext.registerTool({
+          name: 'spaces_search',
+          description: 'Search across all spaces for content matching a query string.',
+          inputSchema: {
+            type: 'object',
+            properties: { query: { type: 'string', description: 'Search query' } },
+            required: ['query']
+          },
+          annotations: { readOnlyHint: true },
+          execute: async function(args) {
+            var results = await window.clipboard.search(args.query);
+            return { content: [{ type: 'text', text: JSON.stringify((results || []).slice(0, 20).map(function(r) {
+              return { id: r.id, type: r.type, title: r.title || r.name, preview: (r.content || '').substring(0, 200) };
+            })) }] };
+          }
+        });
+
+        navigator.modelContext.registerTool({
+          name: 'spaces_create',
+          description: 'Create a new content space with a name.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Name for the new space' },
+              description: { type: 'string', description: 'Optional description' }
+            },
+            required: ['name']
+          },
+          execute: async function(args) {
+            var space = await window.spaces.create(args.name, { description: args.description });
+            return { content: [{ type: 'text', text: 'Created space "' + space.name + '" (id: ' + space.id + ')' }] };
+          }
+        });
+
+        navigator.modelContext.registerTool({
+          name: 'spaces_add_item',
+          description: 'Add a text or URL content item to a space by space ID.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              spaceId: { type: 'string', description: 'Target space ID' },
+              type: { type: 'string', enum: ['text', 'url', 'html', 'code'], description: 'Content type' },
+              content: { type: 'string', description: 'The content to store' },
+              title: { type: 'string', description: 'Optional title' }
+            },
+            required: ['spaceId', 'type', 'content']
+          },
+          execute: async function(args) {
+            var item = await window.spaces.items.add(args.spaceId, { type: args.type, content: args.content, title: args.title });
+            return { content: [{ type: 'text', text: 'Added ' + args.type + ' item (id: ' + (item && item.id || 'ok') + ')' }] };
+          }
+        });
+
+        console.log('[WebMCP Provider] Registered Spaces tools');
+      })();
+    </script>
   </body>
 </html>

@@ -467,5 +467,42 @@
 
     <script src="idw-registry.js"></script>
     <script src="browser-renderer.js"></script>
+    <script>
+      // WebMCP Provider: register navigation tools for this page
+      (function() {
+        if (typeof navigator === 'undefined' || !navigator.modelContext) return;
+
+        navigator.modelContext.registerTool({
+          name: 'browser_open_url',
+          description: 'Open a URL in a new browser tab within the application.',
+          inputSchema: {
+            type: 'object',
+            properties: { url: { type: 'string', description: 'The URL to open' } },
+            required: ['url']
+          },
+          execute: async function(args) {
+            if (typeof createNewTab === 'function') createNewTab(args.url);
+            else if (window.api) window.api.send('open-in-new-tab', { url: args.url });
+            return { content: [{ type: 'text', text: 'Opened ' + args.url + ' in a new tab' }] };
+          }
+        });
+
+        navigator.modelContext.registerTool({
+          name: 'browser_current_page',
+          description: 'Get the title and URL of the currently active browser tab.',
+          inputSchema: { type: 'object', properties: {} },
+          annotations: { readOnlyHint: true },
+          execute: async function() {
+            var wv = document.querySelector('.webview-container.active webview, webview');
+            if (!wv) return { content: [{ type: 'text', text: 'No active tab' }] };
+            var title = 'unknown';
+            try { title = await wv.executeJavaScript('document.title'); } catch(e) {}
+            return { content: [{ type: 'text', text: JSON.stringify({ url: wv.getURL(), title: title }) }] };
+          }
+        });
+
+        console.log('[WebMCP Provider] Registered navigation tools');
+      })();
+    </script>
   </body>
 </html>

@@ -195,6 +195,7 @@ contextBridge.exposeInMainWorld('api', {
       'credentials-captured',
       'credentials-dismiss-save',
       'login-form-detected',
+      'tab-partitions-response',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.send(channel, data);
@@ -245,6 +246,9 @@ contextBridge.exposeInMainWorld('api', {
       'show-save-credential-prompt',
       // LLM usage tracking
       'llm:call-made',
+      // WebMCP tool invocation from main process
+      'webmcp:call-tool',
+      'get-tab-partitions',
     ];
     if (validChannels.includes(channel)) {
       // Deliberately strip event as it includes `sender`
@@ -492,6 +496,14 @@ contextBridge.exposeInMainWorld('api', {
       // TOTP channels
       'totp:scan-qr-screen',
       'totp:get-current-code',
+      // WebMCP channels
+      'webmcp:tool-registered',
+      'webmcp:tool-unregistered',
+      'webmcp:context-cleared',
+      'webmcp:tab-closed',
+      'webmcp:tab-navigated',
+      'webmcp:call-tool-result',
+      'webmcp:get-discovered-tools',
     ];
     if (validChannels.includes(channel)) {
       return ipcRenderer.invoke(channel, ...args);
@@ -707,6 +719,74 @@ contextBridge.exposeInMainWorld('browserAutomation', {
   highlight: (ref, opts) => ipcRenderer.invoke('browser-automation:highlight', ref, opts),
   // PDF
   pdf: (opts) => ipcRenderer.invoke('browser-automation:pdf', opts),
+});
+
+// ---------------------------------------------------------------------------
+// Browsing API Bridge
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('browsing', {
+  // Session lifecycle
+  createSession: (opts) => ipcRenderer.invoke('browsing:createSession', opts),
+  destroySession: (sessionId) => ipcRenderer.invoke('browsing:destroySession', sessionId),
+  listSessions: () => ipcRenderer.invoke('browsing:listSessions'),
+  getSession: (sessionId) => ipcRenderer.invoke('browsing:getSession', sessionId),
+
+  // Navigation and extraction
+  navigate: (sessionId, url, opts) => ipcRenderer.invoke('browsing:navigate', sessionId, url, opts),
+  extract: (sessionId, opts) => ipcRenderer.invoke('browsing:extract', sessionId, opts),
+  snapshot: (sessionId, opts) => ipcRenderer.invoke('browsing:snapshot', sessionId, opts),
+  act: (sessionId, action) => ipcRenderer.invoke('browsing:act', sessionId, action),
+  screenshot: (sessionId, opts) => ipcRenderer.invoke('browsing:screenshot', sessionId, opts),
+
+  // HITL
+  promote: (sessionId, opts) => ipcRenderer.invoke('browsing:promote', sessionId, opts),
+  waitForUser: (sessionId, opts) => ipcRenderer.invoke('browsing:waitForUser', sessionId, opts),
+
+  // Parallel
+  parallel: (tasks, opts) => ipcRenderer.invoke('browsing:parallel', tasks, opts),
+
+  // Fast path (no browser needed)
+  fastQuery: (queryText, opts) => ipcRenderer.invoke('browsing:fast-query', queryText, opts),
+  fastExtract: (url, opts) => ipcRenderer.invoke('browsing:fast-extract', url, opts),
+
+  // Safety
+  checkDomain: (url) => ipcRenderer.invoke('browsing:check-domain', url),
+  getLimits: () => ipcRenderer.invoke('browsing:get-limits'),
+  setLimits: (overrides) => ipcRenderer.invoke('browsing:set-limits', overrides),
+  blockDomain: (domain) => ipcRenderer.invoke('browsing:block-domain', domain),
+  unblockDomain: (domain) => ipcRenderer.invoke('browsing:unblock-domain', domain),
+  getBlockedDomains: () => ipcRenderer.invoke('browsing:get-blocked-domains'),
+
+  // Multi-step orchestration
+  research: (query, opts) => ipcRenderer.invoke('browsing:research', query, opts),
+  workflow: (steps, opts) => ipcRenderer.invoke('browsing:workflow', steps, opts),
+  comparePages: (urls, opts) => ipcRenderer.invoke('browsing:compare-pages', urls, opts),
+
+  // Observation channels
+  getConsoleLogs: (sessionId, opts) => ipcRenderer.invoke('browsing:get-console-logs', sessionId, opts),
+  getNetworkLog: (sessionId, opts) => ipcRenderer.invoke('browsing:get-network-log', sessionId, opts),
+  getDomContext: (sessionId, ref, opts) => ipcRenderer.invoke('browsing:get-dom-context', sessionId, ref, opts),
+
+  // Viewport / device emulation
+  setViewport: (sessionId, viewport) => ipcRenderer.invoke('browsing:set-viewport', sessionId, viewport),
+  getDevicePresets: () => ipcRenderer.invoke('browsing:get-device-presets'),
+
+  // Cookie & Auth management
+  getCookies: (sessionId, opts) => ipcRenderer.invoke('browsing:get-cookies', sessionId, opts),
+  setCookies: (sessionId, cookies) => ipcRenderer.invoke('browsing:set-cookies', sessionId, cookies),
+  exportCookies: (sessionId, opts) => ipcRenderer.invoke('browsing:export-cookies', sessionId, opts),
+  importCookies: (sessionId, cookieExport) => ipcRenderer.invoke('browsing:import-cookies', sessionId, cookieExport),
+  cloneSession: (sourceSessionId, opts) => ipcRenderer.invoke('browsing:clone-session', sourceSessionId, opts),
+  checkAuthState: (sessionId) => ipcRenderer.invoke('browsing:check-auth-state', sessionId),
+  lookupCredentials: (url) => ipcRenderer.invoke('browsing:lookup-credentials', url),
+  autoFillCredentials: (sessionId, url) => ipcRenderer.invoke('browsing:auto-fill-credentials', sessionId, url),
+
+  // Session inheritance & auth pool
+  inheritFromPartition: (sessionId, sourcePartition, opts) => ipcRenderer.invoke('browsing:inherit-from-partition', sessionId, sourcePartition, opts),
+  listTabPartitions: () => ipcRenderer.invoke('browsing:list-tab-partitions'),
+  saveToAuthPool: (sessionId) => ipcRenderer.invoke('browsing:save-to-auth-pool', sessionId),
+  getAuthPoolDomains: () => ipcRenderer.invoke('browsing:get-auth-pool-domains'),
+  importChromeCookies: (domain, sessionId) => ipcRenderer.invoke('browsing:import-chrome-cookies', domain, sessionId),
 });
 
 // Expose electron API for relaunch functionality
@@ -961,18 +1041,20 @@ contextBridge.exposeInMainWorld('resourceManager', {
 
 // Expose Speech Recognition Bridge (Whisper-based) for web apps
 // Speech/Voice APIs (shared module)
-const {
-  getSpeechBridgeMethods,
-  getRealtimeSpeechMethods,
-  getMicManagerMethods,
-  getVoiceTTSMethods,
-} = require('./preload-speech');
-contextBridge.exposeInMainWorld('speechBridge', getSpeechBridgeMethods());
-
-contextBridge.exposeInMainWorld('realtimeSpeech', getRealtimeSpeechMethods());
-
-contextBridge.exposeInMainWorld('micManager', getMicManagerMethods());
-contextBridge.exposeInMainWorld('voiceTTS', getVoiceTTSMethods());
+try {
+  const {
+    getSpeechBridgeMethods,
+    getRealtimeSpeechMethods,
+    getMicManagerMethods,
+    getVoiceTTSMethods,
+  } = require('./preload-speech');
+  contextBridge.exposeInMainWorld('speechBridge', getSpeechBridgeMethods());
+  contextBridge.exposeInMainWorld('realtimeSpeech', getRealtimeSpeechMethods());
+  contextBridge.exposeInMainWorld('micManager', getMicManagerMethods());
+  contextBridge.exposeInMainWorld('voiceTTS', getVoiceTTSMethods());
+} catch (_) {
+  // preload-speech may not be available in sandboxed/webview contexts
+}
 
 // Expose Dependency Management API
 contextBridge.exposeInMainWorld('deps', {
@@ -2325,6 +2407,10 @@ contextBridge.exposeInMainWorld('testAgent', {
 });
 
 // Playbook + Sync APIs (shared module)
-const { getPlaybookMethods, getSyncMethods } = require('./preload-playbook-sync');
-contextBridge.exposeInMainWorld('playbook', getPlaybookMethods('preload'));
-contextBridge.exposeInMainWorld('sync', getSyncMethods());
+try {
+  const { getPlaybookMethods, getSyncMethods } = require('./preload-playbook-sync');
+  contextBridge.exposeInMainWorld('playbook', getPlaybookMethods('preload'));
+  contextBridge.exposeInMainWorld('sync', getSyncMethods());
+} catch (_) {
+  // May fail in sandboxed contexts -- non-fatal
+}

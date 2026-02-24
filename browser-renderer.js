@@ -11,6 +11,181 @@ const idwRegistry = new IDWRegistry();
 let llmBadgeTimeout = null;
 let llmBadgeHideTimeout = null;
 
+// ── WebMCP: per-tab tool tracking ──────────────────────────
+const webmcpTabTools = new Map(); // tabId -> Map<toolName, toolDef>
+
+/**
+ * Inject WebMCP bridge into webview to detect tool registrations.
+ * The bridge script intercepts navigator.modelContext.registerTool()
+ * and posts tool metadata back via console.log JSON messages.
+ */
+function injectWebMCPBridge(webview, tabId) {
+  fetch('webmcp-bridge.js')
+    .then((res) => res.text())
+    .then((script) => {
+      webview
+        .executeJavaScript(script)
+        .then(() => {
+          console.log(`[WebMCP] Bridge injected into tab ${tabId}`);
+        })
+        .catch((err) => {
+          if (!err.message?.includes('Script failed to execute')) {
+            console.warn(`[WebMCP] Bridge injection error in tab ${tabId}:`, err.message);
+          }
+        });
+    })
+    .catch((err) => {
+      console.warn('[WebMCP] Error loading bridge script:', err.message);
+    });
+}
+
+/**
+ * Handle a WebMCP message from a webview's console-message event.
+ * Returns true if the message was a WebMCP message and was handled.
+ */
+function handleWebMCPConsoleMessage(tabId, webview, message) {
+  if (!message || !message.includes('"_webmcp":true')) return false;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(message);
+  } catch {
+    return false;
+  }
+  if (!parsed._webmcp) return false;
+
+  const origin = (() => {
+    try { return webview.getURL(); } catch { return 'unknown'; }
+  })();
+
+  switch (parsed.type) {
+    case 'bridge-ready':
+      console.log(`[WebMCP] Bridge ready on tab ${tabId} (${parsed.toolCount} tools)`);
+      break;
+
+    case 'tool-registered':
+      if (parsed.tool?.name) {
+        if (!webmcpTabTools.has(tabId)) webmcpTabTools.set(tabId, new Map());
+        webmcpTabTools.get(tabId).set(parsed.tool.name, parsed.tool);
+        updateWebMCPBadge(tabId);
+        if (window.api?.invoke) {
+          window.api.invoke('webmcp:tool-registered', { tabId, tool: parsed.tool, origin });
+        }
+      }
+      break;
+
+    case 'tool-unregistered':
+      if (parsed.name) {
+        const tools = webmcpTabTools.get(tabId);
+        if (tools) {
+          tools.delete(parsed.name);
+          updateWebMCPBadge(tabId);
+        }
+        if (window.api?.invoke) {
+          window.api.invoke('webmcp:tool-unregistered', { tabId, name: parsed.name });
+        }
+      }
+      break;
+
+    case 'context-cleared':
+      if (webmcpTabTools.has(tabId)) {
+        webmcpTabTools.get(tabId).clear();
+        updateWebMCPBadge(tabId);
+      }
+      if (window.api?.invoke) {
+        window.api.invoke('webmcp:context-cleared', { tabId });
+      }
+      break;
+  }
+
+  return true;
+}
+
+/**
+ * Show/hide a small tool-count badge on tabs that expose WebMCP tools.
+ */
+function updateWebMCPBadge(tabId) {
+  const tabElement = document.querySelector(`.tab[data-tab-id="${tabId}"]`);
+  if (!tabElement) return;
+
+  let badge = tabElement.querySelector('.webmcp-badge');
+  const tools = webmcpTabTools.get(tabId);
+  const count = tools ? tools.size : 0;
+
+  if (count === 0) {
+    if (badge) badge.remove();
+    return;
+  }
+
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.className = 'webmcp-badge';
+    badge.style.cssText =
+      'position:absolute;top:2px;right:18px;min-width:14px;height:14px;' +
+      'border-radius:7px;background:#6366f1;color:#fff;font-size:9px;' +
+      'font-weight:600;display:flex;align-items:center;justify-content:center;' +
+      'padding:0 3px;pointer-events:none;z-index:2;';
+    tabElement.style.position = 'relative';
+    tabElement.appendChild(badge);
+  }
+  badge.textContent = count > 9 ? '9+' : String(count);
+  badge.title = `${count} WebMCP tool${count !== 1 ? 's' : ''} available`;
+}
+
+/**
+ * Clean up WebMCP state when a tab navigates or closes.
+ */
+function cleanupWebMCPForTab(tabId) {
+  webmcpTabTools.delete(tabId);
+  updateWebMCPBadge(tabId);
+  if (window.api?.invoke) {
+    window.api.invoke('webmcp:tab-closed', { tabId });
+  }
+}
+
+/**
+ * Handle a tool invocation request from the main process.
+ * Finds the correct webview and calls the bridge's stored execute function.
+ */
+function handleWebMCPCallTool({ callId, tabId, toolName, input }) {
+  const tab = tabs.find((t) => t.id === tabId);
+  if (!tab || !tab.webview) {
+    if (window.api?.invoke) {
+      window.api.invoke('webmcp:call-tool-result', {
+        callId,
+        error: `Tab ${tabId} not found`,
+      });
+    }
+    return;
+  }
+
+  const escaped = JSON.stringify(input || {});
+  tab.webview
+    .executeJavaScript(`window.__webmcp__callTool(${JSON.stringify(toolName)}, ${escaped})`)
+    .then((result) => {
+      if (window.api?.invoke) {
+        window.api.invoke('webmcp:call-tool-result', {
+          callId,
+          result: result?.result,
+          error: result?.error,
+        });
+      }
+    })
+    .catch((err) => {
+      if (window.api?.invoke) {
+        window.api.invoke('webmcp:call-tool-result', {
+          callId,
+          error: err.message || 'executeJavaScript failed',
+        });
+      }
+    });
+}
+
+// Listen for tool invocation requests from the main process
+if (window.api?.receive) {
+  window.api.receive('webmcp:call-tool', handleWebMCPCallTool);
+}
+
 /**
  * Inject Spaces upload enhancer into webview
  * Adds "Spaces" buttons next to file inputs
@@ -2566,6 +2741,15 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSavedTabs();
 
   // Handle messages from main process
+  window.api.receive('get-tab-partitions', () => {
+    const tabInfo = tabs.map((tab) => ({
+      partition: tab.partition || (tab.webview && tab.webview.dataset.partition) || null,
+      url: tab.currentUrl || (tab.webview && tab.webview.src) || '',
+      title: tab.element ? (tab.element.querySelector('.tab-title')?.textContent || '') : '',
+    }));
+    window.api.send('tab-partitions-response', tabInfo);
+  });
+
   window.api.receive('open-in-new-tab', (data) => {
     // Extract URL from data
     const url = typeof data === 'string' ? data : data && data.url ? data.url : null;
@@ -3609,6 +3793,9 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     // Inject Spaces upload enhancer (if enabled)
     injectSpacesUploadEnhancer(webview);
 
+    // Inject WebMCP bridge to detect tool registrations on the page
+    injectWebMCPBridge(webview, tabId);
+
     // Update tab title with actual page title
     webview
       .executeJavaScript('document.title')
@@ -3717,6 +3904,15 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
 
   webview.addEventListener('did-navigate', (e) => {
     console.log(`Webview ${tabId} did-navigate to: ${e.url}`);
+
+    // WebMCP: clear tools from previous page, re-inject bridge on new page
+    if (webmcpTabTools.has(tabId) && webmcpTabTools.get(tabId).size > 0) {
+      webmcpTabTools.get(tabId).clear();
+      updateWebMCPBadge(tabId);
+      if (window.api?.invoke) {
+        window.api.invoke('webmcp:tab-navigated', { tabId, origin: e.url });
+      }
+    }
 
     // SSO Diagnostic: Log when auth pages are accessed
     if (e.url.includes('auth.') && e.url.includes('onereach.ai')) {
@@ -3967,8 +4163,10 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     createNewTab(e.url);
   });
 
-  // Set up console message listener for debugging
+  // Set up console message listener for debugging + WebMCP bridge
   webview.addEventListener('console-message', (e) => {
+    // Intercept WebMCP bridge messages before general logging
+    if (handleWebMCPConsoleMessage(tabId, webview, e.message)) return;
     console.log(`[Webview ${tabId}]: ${e.message}`);
   });
 
@@ -4161,6 +4359,9 @@ function closeTab(tabId) {
     // Unregister from IDW Registry
     idwRegistry.unregisterTab(tabId);
     console.log(`[Tab Close] Unregistered tab ${tabId} from IDW Registry`);
+
+    // Clean up WebMCP proxy agents for this tab
+    cleanupWebMCPForTab(tabId);
 
     // Cleanup multi-tenant token tracking
     if (tab.partition && tab.environment) {

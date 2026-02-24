@@ -7828,27 +7828,6 @@
             this._livekitRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
               const pName = participant.name || participant.identity;
               console.log('[LiveKit] Track subscribed:', track.kind, 'from', pName);
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  location: 'recorder.html:TrackSubscribed',
-                  message: 'Track subscribed',
-                  data: {
-                    kind: track.kind,
-                    trackSid: track.sid,
-                    participantName: pName,
-                    participantSid: participant.sid,
-                    isMuted: publication.isMuted,
-                    isSubscribed: publication.isSubscribed,
-                    source: publication.source,
-                  },
-                  timestamp: Date.now(),
-                  hypothesisId: 'H2',
-                }),
-              }).catch(() => {});
-              // #endregion
               const container = this._ensureParticipantContainer(participant.sid, pName);
               const element = track.attach();
               if (track.kind === 'video') {
@@ -7861,75 +7840,12 @@
                 element.dataset.trackSid = track.sid;
                 element.style.display = 'none';
                 container.appendChild(element);
-                // #region agent log
-                const elTag = element.tagName;
-                const elAutoplay = element.autoplay;
-                const elMuted = element.muted;
-                const elVolume = element.volume;
-                const elPaused = element.paused;
-                const elReadyState = element.readyState;
-                fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    location: 'recorder.html:AudioAttach',
-                    message: 'Audio element state after attach',
-                    data: {
-                      elTag,
-                      elAutoplay,
-                      elMuted,
-                      elVolume,
-                      elPaused,
-                      elReadyState,
-                      containerInDOM: document.contains(container),
-                      trackSid: track.sid,
-                      pName,
-                    },
-                    timestamp: Date.now(),
-                    hypothesisId: 'H1',
-                  }),
-                }).catch(() => {});
-                // #endregion
                 // Explicitly play to overcome autoplay policy
                 const playPromise = element.play();
                 if (playPromise) {
                   playPromise
-                    .then(() => {
-                      // #region agent log
-                      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          location: 'recorder.html:AudioPlayOK',
-                          message: 'Audio play() succeeded',
-                          data: {
-                            trackSid: track.sid,
-                            pName,
-                            paused: element.paused,
-                            muted: element.muted,
-                            volume: element.volume,
-                          },
-                          timestamp: Date.now(),
-                          hypothesisId: 'H3',
-                        }),
-                      }).catch(() => {});
-                      // #endregion
-                    })
-                    .catch((err) => {
-                      // #region agent log
-                      fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          location: 'recorder.html:AudioPlayFail',
-                          message: 'Audio play() FAILED',
-                          data: { error: err.message, trackSid: track.sid, pName },
-                          timestamp: Date.now(),
-                          hypothesisId: 'H3',
-                        }),
-                      }).catch(() => {});
-                      // #endregion
-                    });
+                    .then(() => {})
+                    .catch(() => {});
                 }
               }
               this._updateLayout();
@@ -7943,30 +7859,6 @@
             this._livekitRoom.on(RoomEvent.ParticipantConnected, (participant) => {
               const pName = participant.name || participant.identity;
               console.log('[LiveKit] Participant connected:', pName);
-              // #region agent log
-              const trackPubs = [];
-              participant.trackPublications.forEach((pub, sid) => {
-                trackPubs.push({
-                  sid,
-                  kind: pub.kind,
-                  source: pub.source,
-                  isMuted: pub.isMuted,
-                  isSubscribed: pub.isSubscribed,
-                  isEnabled: pub.isEnabled,
-                });
-              });
-              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  location: 'recorder.html:ParticipantConnected',
-                  message: 'Participant connected - tracks',
-                  data: { pName, sid: participant.sid, trackCount: trackPubs.length, tracks: trackPubs },
-                  timestamp: Date.now(),
-                  hypothesisId: 'H5',
-                }),
-              }).catch(() => {});
-              // #endregion
               const activity = document.getElementById('guestActivity');
               const waitingText = document.getElementById('waitingText');
               if (activity) {
@@ -8054,23 +7946,6 @@
             // Connect
             await this._livekitRoom.connect(result.livekitUrl, result.hostToken);
             console.log('[LiveKit] Host connected to room:', result.roomName);
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                location: 'recorder.html:HostConnected',
-                message: 'Host connected to LiveKit',
-                data: {
-                  roomName: result.roomName,
-                  localSid: this._livekitRoom.localParticipant?.sid,
-                  remoteParticipants: this._livekitRoom.numParticipants,
-                },
-                timestamp: Date.now(),
-                hypothesisId: 'H2',
-              }),
-            }).catch(() => {});
-            // #endregion
 
             // Set host display name so guests and transcription can identify us
             if (this._hostDisplayName) {
@@ -9201,50 +9076,11 @@
           }
 
           // Clear meeting tokens from KV so guests can't join after session ends
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'recorder.html:sessionEnd',
-              message: 'Attempting token cleanup',
-              data: { meetingRoomName: this._meetingRoomName, hasValue: !!this._meetingRoomName },
-              timestamp: Date.now(),
-              hypothesisId: 'H2',
-            }),
-          }).catch(() => {});
-          // #endregion
           if (this._meetingRoomName) {
             try {
               const clearResult = await window.recorder.clearMeetingTokens(this._meetingRoomName);
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  location: 'recorder.html:sessionEnd:clearResult',
-                  message: 'Token clear result',
-                  data: { clearResult, roomName: this._meetingRoomName },
-                  timestamp: Date.now(),
-                  hypothesisId: 'H1',
-                }),
-              }).catch(() => {});
-              // #endregion
               console.log('[Session] Meeting tokens cleared for room:', this._meetingRoomName);
             } catch (err) {
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  location: 'recorder.html:sessionEnd:clearError',
-                  message: 'Token clear FAILED',
-                  data: { error: err.message, roomName: this._meetingRoomName },
-                  timestamp: Date.now(),
-                  hypothesisId: 'H1',
-                }),
-              }).catch(() => {});
-              // #endregion
               console.warn('[Session] Failed to clear meeting tokens:', err);
             }
             this._meetingRoomName = null;

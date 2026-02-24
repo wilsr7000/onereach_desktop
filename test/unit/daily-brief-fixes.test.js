@@ -358,46 +358,47 @@ describe('Fix 5: Daily brief uses standard profile (not powerful)', () => {
 // FIX 6: Calendar getBriefing() fetches real events
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('Fix 6: Calendar agent getBriefing() fetches external events', () => {
+describe('Fix 6: Calendar agent getBriefing() uses calendar store', () => {
   const fs = require('fs');
   const path = require('path');
-  const source = fs.readFileSync(path.join(__dirname, '../../packages/agents/calendar-agent.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../../packages/agents/calendar-query-agent.js'), 'utf8');
 
-  it('should call _fetchEvents in getBriefing()', () => {
-    // Find the getBriefing method
+  it('should call generateMorningBrief in getBriefing()', () => {
     const getBriefingStart = source.indexOf('async getBriefing()');
     const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
     const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).toContain('_fetchEvents');
+    expect(getBriefingBody).toContain('generateMorningBrief');
   });
 
-  it('should pass externalEvents to generateMorningBrief', () => {
+  it('should use the calendar store for data', () => {
     const getBriefingStart = source.indexOf('async getBriefing()');
     const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
     const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).toContain('generateMorningBrief(now, externalEvents)');
+    expect(getBriefingBody).toContain('getCalendarStore');
   });
 
-  it('should NOT pass empty array to generateMorningBrief', () => {
+  it('should return section Calendar with priority 3', () => {
     const getBriefingStart = source.indexOf('async getBriefing()');
     const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
     const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).not.toContain('generateMorningBrief(now, [])');
+    expect(getBriefingBody).toContain("section: 'Calendar'");
+    expect(getBriefingBody).toContain('priority: 3');
   });
 
-  it('should use _fetchEvents(false) to skip detail enrichment for speed', () => {
+  it('should handle no meetings gracefully', () => {
     const getBriefingStart = source.indexOf('async getBriefing()');
     const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
     const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).toContain('_fetchEvents(false)');
+    expect(getBriefingBody).toContain('No meetings scheduled today');
   });
 
-  it('should catch _fetchEvents errors gracefully and fallback to empty', () => {
+  it('should catch errors gracefully with try/catch', () => {
     const getBriefingStart = source.indexOf('async getBriefing()');
     const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
     const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    // Should have try/catch around fetchEvents
-    expect(getBriefingBody).toMatch(/try\s*\{[^}]*_fetchEvents/);
+    expect(getBriefingBody).toMatch(/try\s*\{/);
+    expect(getBriefingBody).toContain('catch');
+    expect(getBriefingBody).toContain('Calendar unavailable');
   });
 });
 

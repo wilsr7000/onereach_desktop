@@ -27,6 +27,36 @@ const bidderCircuit = getCircuit('unified-bidder', {
   windowMs: 60000,
 });
 
+/**
+ * Attempt to salvage truncated JSON from LLM output that hit maxTokens.
+ * Extracts confidence/reasoning via regex as a last resort.
+ */
+function repairTruncatedJSON(raw) {
+  try {
+    // Try closing open strings and braces
+    let patched = raw;
+    const openQuotes = (patched.match(/"/g) || []).length;
+    if (openQuotes % 2 !== 0) patched += '"';
+    const opens = (patched.match(/\{/g) || []).length;
+    const closes = (patched.match(/\}/g) || []).length;
+    for (let i = 0; i < opens - closes; i++) patched += '}';
+    const result = JSON.parse(patched);
+    if (typeof result.confidence !== 'undefined') return result;
+  } catch (_) { /* repair failed */ }
+
+  // Regex fallback: extract confidence number
+  const confMatch = raw.match(/"confidence"\s*:\s*([\d.]+)/);
+  if (confMatch) {
+    const reasonMatch = raw.match(/"reasoning"\s*:\s*"([^"]*)/);
+    return {
+      confidence: parseFloat(confMatch[1]) || 0,
+      reasoning: reasonMatch ? reasonMatch[1] : 'Truncated response',
+      plan: '',
+    };
+  }
+  return null;
+}
+
 // Cache for recent evaluations (avoid duplicate API calls)
 // Two-tier: simple queries (no pronouns/context-dependent words) use content-only keys
 // for higher hit rates. Context-dependent queries include conversation hash.
@@ -353,7 +383,7 @@ async function evaluateAgentBid(agent, task) {
         system: prompt,
         messages: [],
         temperature: 0,
-        maxTokens: 200,
+        maxTokens: 300,
         jsonMode: true,
         feature: 'unified-bidder',
       });
@@ -372,7 +402,15 @@ async function evaluateAgentBid(agent, task) {
       .replace(/^```(?:json)?\s*\n?/i, '')
       .replace(/\n?```\s*$/i, '')
       .trim();
-    const evaluation = JSON.parse(raw);
+
+    let evaluation;
+    try {
+      evaluation = JSON.parse(raw);
+    } catch (parseErr) {
+      // LLM may exceed maxTokens and produce truncated JSON -- attempt repair
+      evaluation = repairTruncatedJSON(raw);
+      if (!evaluation) throw parseErr;
+    }
 
     // Validate and normalize
     let confidence = Math.max(0, Math.min(1, parseFloat(evaluation.confidence) || 0));
@@ -432,26 +470,6 @@ async function evaluateAgentBid(agent, task) {
       'agent',
       `${agent.name} bid ${normalized.confidence.toFixed(2)} on "${(task.content || task.phrase || '').substring(0, 30)}..."`
     );
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'unified-bidder.js:bid-result',
-        message: 'Agent bid result',
-        data: {
-          agent: agent.name,
-          agentId: agent.id,
-          confidence: normalized.confidence,
-          reasoning: normalized.reasoning,
-          task: (task.content || task.phrase || '').substring(0, 80),
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'BID',
-      }),
-    }).catch((err) => console.warn('[unified-bidder] ingest fetch:', err.message));
-    // #endregion
 
     // Cache the result
     cacheEvaluation(cacheKey, normalized);

@@ -41,19 +41,19 @@
   PER-CONVERSATION RESULTS
 ----------------------------------------------------------------------
   [PASS] Time: basic queries (time-agent)
-    + "What time is it?" -> "It's 7:54 PM"
-    + "And what day is it today?" -> "It's Monday, February 16, 2026"
-    + "What is the date?" -> "It's Monday, February 16, 2026"
+    + "What time is it?" -> "It's 9:03 PM"
+    + "And what day is it today?" -> "It's Sunday, February 22, 2026"
+    + "What is the date?" -> "It's Sunday, February 22, 2026"
   [PASS] Time: timezone awareness (time-agent)
     + "What time is it in Tokyo?" -> "Which timezone would you like? Your saved timezones are"
-    + "And in London?" -> "It's 7:54 PM"
+    + "And in London?" -> "It's 9:03 PM"
   [PASS] Weather: city provided (weather-agent)
-    + "What is the weather in Denver?" -> "It's 51°F and clear in Denver"
+    + "What is the weather in Denver?" -> "It's 38°F and clear in Denver"
   [FAIL] Weather: no city triggers follow-up (weather-agent)
-    - "What's the weather?" -> "It's 52°F and overcast in Berkeley, feels like 47°F. Hu"
-    + "San Francisco" -> "It's 52°F and overcast in Berkeley, feels like 47°F. Hu"
+    - "What's the weather?" -> "It's 58°F and partly cloudy in Berkeley. Humidity is 72"
+    + "San Francisco" -> "It's 58°F and partly cloudy in Berkeley. Humidity is 72"
   [PASS] Weather: forecast request (weather-agent)
-    + "Will it rain tomorrow in Seattle?" -> "It's 52°F and overcast in Berkeley, feels like 47°F. Hu"
+    + "Will it rain tomorrow in Seattle?" -> "It's 58°F and partly cloudy in Berkeley. Humidity is 72"
   [PARTIAL] Spelling: common words (spelling-agent)
     ~ "How do you spell necessary?" -> "NECESSARY: N - E - C - E - S - S - A - R - Y"
     ~ "And accommodation?" -> "ACCOMMODATION: A - C - C - O - M - M - O - D - A - T - "
@@ -62,12 +62,12 @@
     + "Is recieve spelled correctly?" -> ""recieve" is misspelled. The correct spelling is "recei"
     + "How about definately?" -> "Note: "definately" is commonly misspelled. The correct "
   [PASS] Smalltalk: greeting flow (smalltalk-agent)
-    + "Hello there" -> "How can I assist you?"
+    + "Hello there" -> "What can I do for you?"
     + "How are you doing?" -> "I'm doing well, doing! How can I help you?"
-    + "Thanks for your help" -> "You're welcome!"
+    + "Thanks for your help" -> "Glad I could help!"
     + "Goodbye" -> "See you later, doing!"
   [PASS] Smalltalk: casual greetings (smalltalk-agent)
-    + "Hey" -> "Hi doing! I'm here to help."
+    + "Hey" -> "Hey doing! How can I help you?"
     + "Good morning" -> "Good morning, doing! How can I help you today?"
     + "Good night" -> "Good night, doing! Sleep well."
   [PASS] Help: capabilities inquiry (help-agent)
@@ -91,8 +91,8 @@
   [FAIL] Calendar: cancel event (calendar-delete-agent)
     - "Cancel my meeting tomorrow at noon" -> "Which event would you like to cancel?"
   [PASS] Search: document queries (search-agent)
-    + "Search for quarterly revenue reports" -> "Here's what I found: Earnings Calendar - Nasdaq. Access"
-    + "Find documents about project alpha" -> "Here's what I found: The Project Alpha Papers. Welcome "
+    + "Search for quarterly revenue reports" -> "I couldn't complete the search right now. Please try ag"
+    + "Find documents about project alpha" -> "I couldn't complete the search right now. Please try ag"
   [FAIL] Email: compose flow (email-agent)
     - "Send an email to John about the meeting tomorrow" -> "Your inbox is clear. Email API not fully connected yet "
   [PASS] DJ: music requests (dj-agent)
@@ -113,7 +113,7 @@
     ~ "How do I configure the AI service?" -> "I had trouble searching the documentation. Please try a"
     ~ "What are the keyboard shortcuts?" -> "I had trouble searching the documentation. Please try a"
   [PASS] Daily brief: morning briefing (daily-brief-agent)
-    + "Give me my morning briefing" -> "Good evening, Isaac. Current time: 7:54 PM. Date: Monda"
+    + "Give me my morning briefing" -> "Good evening, Isaac. Current time: 9:04 PM. Date: Sunda"
   [PARTIAL] Memory: store and recall preferences (memory-agent)
     ~ "Remember that I prefer dark mode" -> "Sorry, I had trouble managing your memory. Please try a"
     ~ "My favorite programming language is Rust" -> "Sorry, I had trouble managing your memory. Please try a"
@@ -133,7 +133,7 @@
   [PARTIAL] Orchestrator: composite request (orchestrator-agent)
     ~ "Check the weather and my calendar for today" -> "I'm not sure how to help with that."
   [PASS] Edge: garbled input (smalltalk-agent)
-    + "asdfghjkl" -> "Hmm, what's that?"
+    + "asdfghjkl" -> "What was that?"
   [PASS] Edge: single word (help-agent)
     + "help" -> "What would you like help with? I can help with time, we"
   [PASS] Edge: very long input (help-agent)

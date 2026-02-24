@@ -219,20 +219,6 @@ This agent searches the internet. It does NOT control media playback or access p
    * @returns {Object} - { success, message }
    */
   async execute(task, context = {}) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'search-agent.js:execute',
-        message: 'SearchAgent execute called',
-        data: { taskId: task.id, taskContent: task.content?.slice(0, 80), timestamp: Date.now() },
-        timestamp: Date.now(),
-        sessionId: 'debug-session',
-        hypothesisId: 'C',
-      }),
-    }).catch((err) => console.warn('[search-agent] ingest fetch:', err.message));
-    // #endregion
     // Wrap execution with overall timeout to prevent hanging
     return Promise.race([
       this._executeInternal(task, context),

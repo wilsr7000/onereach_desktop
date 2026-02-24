@@ -90,25 +90,6 @@ class RealtimeSpeech {
     // Acknowledge the function call
     this.listener.respondToFunctionCall(callId, '');
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'realtime-speech.js:respondToFunctionCall',
-        message: 'respondToFunctionCall called',
-        data: {
-          callId,
-          hasResult: !!(result && result.trim()),
-          resultPreview: (result || '').slice(0, 80),
-          voice: options.voice,
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'DOUBLE-A',
-      }),
-    }).catch((err) => console.warn('[realtime-speech] respondToFunctionCall agent-log:', err.message));
-    // #endregion
-
     // Speak the result via voice-speaker
     if (result && result.trim()) {
       this.speaker.speak(result, { voice: options.voice });

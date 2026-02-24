@@ -778,6 +778,7 @@ let isShuttingDown = false; // Prevent reconnection during shutdown
 let currentExchangePort = 3456; // Track port for reconnection
 let localAgentConnections = new Map(); // agentId -> { ws, agent, heartbeatInterval, reconnectAttempts }
 const intentionalCloses = new Set(); // Track agent IDs being intentionally disconnected (don't reconnect)
+const webmcpProxyAgents = new Map(); // agentId -> { tabId, toolName, origin, registeredAt }
 // pendingInputContexts removed -- state now lives in TranscriptService (lib/transcript-service.js)
 let taskExecutionStartTimes = new Map(); // taskId -> startTime (for tracking execution duration)
 let pendingAckTimers = new Map(); // taskId -> setTimeout handle (deferred ack, kept OUT of task.metadata to avoid JSON.stringify crash)
@@ -961,6 +962,7 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
           type: 'register',
           agentId: wrappedAgent.id,
           agentVersion: wrappedAgent.version,
+          protocolVersion: '1.0',
           categories: wrappedAgent.categories,
           capabilities: {
             keywords: wrappedAgent.keywords,
@@ -1235,25 +1237,39 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
       reject(error);
     });
 
-    ws.on('close', (code) => {
+    ws.on('close', (code, reason) => {
+      const reasonStr = reason ? reason.toString() : '';
       log.info('voice', 'Built-in agent disconnected: (code: )', { v0: wrappedAgent.name, v1: code });
-      // Clean up heartbeat interval
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
         heartbeatInterval = null;
       }
       const conn = localAgentConnections.get(wrappedAgent.id);
+
+      // If a newer connection already replaced this one, don't touch the map or reconnect
+      if (conn && conn.ws !== ws) {
+        log.info('voice', 'Skipping reconnect (replaced by newer connection)', { v0: wrappedAgent.name });
+        return;
+      }
       localAgentConnections.delete(wrappedAgent.id);
 
-      // Skip reconnection if this was an intentional close (e.g. disconnectAgent())
       if (intentionalCloses.has(wrappedAgent.id)) {
         intentionalCloses.delete(wrappedAgent.id);
         log.info('voice', 'Skipping reconnect (intentional close)', { v0: wrappedAgent.name });
         return;
       }
 
-      // Always reconnect unless shutting down.
-      // Code 1000 from server-side (exchange restart) should also trigger reconnect.
+      // Server closed us because a newer connection from same agent replaced us
+      if (code === 1000 && reasonStr.includes('Reconnection from same agent')) {
+        log.info('voice', 'Skipping reconnect (server replaced connection)', { v0: wrappedAgent.name });
+        return;
+      }
+      // Server throttled us for reconnecting too fast
+      if (code === 4008) {
+        log.warn('voice', 'Skipping reconnect (throttled by server)', { v0: wrappedAgent.name });
+        return;
+      }
+
       if (!isShuttingDown) {
         const attempts = (conn?.reconnectAttempts || 0) + 1;
         if (attempts <= RECONNECT_CONFIG.maxAttempts) {
@@ -1265,16 +1281,18 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
             v3: RECONNECT_CONFIG.maxAttempts,
           });
           setTimeout(async () => {
+            // Guard: if another connection appeared while we waited, skip
+            const current = localAgentConnections.get(wrappedAgent.id);
+            if (current?.ws?.readyState === WebSocket.OPEN) return;
+
             try {
               await connectBuiltInAgentToExchange(wrappedAgent, currentExchangePort);
-              // Store reconnect attempts for tracking
               const newConn = localAgentConnections.get(wrappedAgent.id);
               if (newConn) {
-                newConn.reconnectAttempts = 0; // Reset on success
+                newConn.reconnectAttempts = 0;
               }
             } catch (e) {
               log.error('voice', 'Agent reconnect failed', { agent: wrappedAgent.name, error: e.message });
-              // Will try again on next disconnect
             }
           }, delay);
         } else {
@@ -1356,6 +1374,7 @@ async function connectLocalAgent(agent, port) {
           type: 'register',
           agentId: agent.id,
           agentVersion: agent.version || '1.0.0',
+          protocolVersion: '1.0',
           categories: agent.categories || ['general'],
           capabilities: {
             keywords: agent.keywords || [],
@@ -1509,25 +1528,39 @@ async function connectLocalAgent(agent, port) {
       reject(error);
     });
 
-    ws.on('close', (code) => {
+    ws.on('close', (code, reason) => {
+      const reasonStr = reason ? reason.toString() : '';
       log.info('voice', 'Local agent disconnected: (code: )', { v0: agent.name, v1: code });
-      // Clean up heartbeat interval
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
         heartbeatInterval = null;
       }
       const conn = localAgentConnections.get(agent.id);
+
+      // If a newer connection already replaced this one, don't touch the map or reconnect
+      if (conn && conn.ws !== ws) {
+        log.info('voice', 'Skipping reconnect (replaced by newer connection)', { v0: agent.name });
+        return;
+      }
       localAgentConnections.delete(agent.id);
 
-      // Skip reconnection if this was an intentional close (e.g. disconnectAgent())
       if (intentionalCloses.has(agent.id)) {
         intentionalCloses.delete(agent.id);
         log.info('voice', 'Skipping reconnect (intentional close)', { v0: agent.name });
         return;
       }
 
-      // Always reconnect unless shutting down or agent disabled.
-      // Code 1000 from server-side (exchange restart) should also trigger reconnect.
+      // Server closed us because a newer connection from same agent replaced us
+      if (code === 1000 && reasonStr.includes('Reconnection from same agent')) {
+        log.info('voice', 'Skipping reconnect (server replaced connection)', { v0: agent.name });
+        return;
+      }
+      // Server throttled us for reconnecting too fast
+      if (code === 4008) {
+        log.warn('voice', 'Skipping reconnect (throttled by server)', { v0: agent.name });
+        return;
+      }
+
       if (!isShuttingDown && agent.enabled !== false) {
         const attempts = (conn?.reconnectAttempts || 0) + 1;
         if (attempts <= RECONNECT_CONFIG.maxAttempts) {
@@ -1539,9 +1572,12 @@ async function connectLocalAgent(agent, port) {
             v3: RECONNECT_CONFIG.maxAttempts,
           });
           setTimeout(async () => {
+            // Guard: if another connection appeared while we waited, skip
+            const current = localAgentConnections.get(agent.id);
+            if (current?.ws?.readyState === WebSocket.OPEN) return;
+
             try {
               await connectLocalAgent(agent, currentExchangePort);
-              // Reset reconnect attempts on success
               const newConn = localAgentConnections.get(agent.id);
               if (newConn) {
                 newConn.reconnectAttempts = 0;
@@ -3116,25 +3152,6 @@ function setupExchangeEvents() {
     // When a graphical panel (HTML) is present, the panel IS the primary result.
     // Speak only the short spoken summary -- the visual does the heavy lifting.
     const hasPanel = !!result.html;
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'exchange-bridge.js:task-settled-TTS',
-        message: 'task:settled direct TTS',
-        data: {
-          taskId: task.id,
-          agentId,
-          messagePreview: (message || '').slice(0, 80),
-          hasPanel,
-          willSpeak: !!(message && message !== 'All done'),
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'DOUBLE-B',
-      }),
-    }).catch((err) => console.warn('[exchange-bridge] ingest fetch:', err.message));
-    // #endregion
     if (message && message !== 'All done') {
       try {
         const { getVoiceSpeaker } = require('../../voice-speaker');
@@ -4287,11 +4304,35 @@ async function processSubmit(transcript, options = {}) {
   }
 }
 
+// ── WebMCP Proxy Agent Tracking ────────────────────────────
+
+function getExchangePort() {
+  return currentExchangePort;
+}
+
+function trackWebMCPAgent(agentId, { tabId, toolName, origin }) {
+  webmcpProxyAgents.set(agentId, {
+    tabId,
+    toolName,
+    origin,
+    registeredAt: Date.now(),
+  });
+}
+
+function untrackWebMCPAgent(agentId) {
+  webmcpProxyAgents.delete(agentId);
+}
+
+function getWebMCPAgents() {
+  return Object.fromEntries(webmcpProxyAgents);
+}
+
 module.exports = {
   initializeExchangeBridge,
   getExchange,
   isRunning,
   getExchangeUrl,
+  getExchangePort,
   shutdown,
   hotConnectAgent,
   disconnectAgent,
@@ -4306,4 +4347,8 @@ module.exports = {
   saveConversationState,
   // Custom agent briefing contributors (for daily-brief-agent)
   getCustomBriefingAgents,
+  // WebMCP proxy agent tracking
+  trackWebMCPAgent,
+  untrackWebMCPAgent,
+  getWebMCPAgents,
 };

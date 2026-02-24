@@ -67,6 +67,7 @@ const BUILT_IN_AGENT_IDS = [
   'memory-agent', // Memory manager - lets users view, correct, update, or delete personal facts/preferences
   'playbook-agent', // Playbook executor - runs playbooks in spaces, relays questions, reports results
   'browser-agent', // Browser automation - autonomous web navigation, form filling, data extraction via Playwright
+  'browsing-agent', // Browsing API - resilient web research, page reading, form filling via native Electron BrowserWindow
 ];
 
 // ==================== VALIDATION ====================

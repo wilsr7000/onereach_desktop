@@ -811,20 +811,6 @@ class Recorder {
         const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
         const key = `wiser-room:${roomName}`;
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'recorder.js:clearMeetingTokens',
-            message: 'KV DELETE attempt',
-            data: { kvUrl, key, roomName, collection: KV_COLLECTION },
-            timestamp: Date.now(),
-            hypothesisId: 'H1',
-          }),
-        }).catch((err) => console.warn('[recorder] clearMeetingTokens KV DELETE attempt:', err.message));
-        // #endregion
-
         const resp = await fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
           method: 'DELETE',
         });
@@ -836,36 +822,9 @@ class Recorder {
           /* no-op */
         }
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'recorder.js:clearMeetingTokens:response',
-            message: 'KV DELETE response',
-            data: { status: respStatus, ok: resp.ok, body: respBody.substring(0, 200), roomName },
-            timestamp: Date.now(),
-            hypothesisId: 'H1',
-          }),
-        }).catch((err) => console.warn('[recorder] clearMeetingTokens KV DELETE response:', err.message));
-        // #endregion
-
         log.info('recorder', 'Meeting tokens cleared from KV', { roomName, status: respStatus });
         return { success: resp.ok };
       } catch (error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'recorder.js:clearMeetingTokens:error',
-            message: 'KV DELETE error',
-            data: { error: error.message, roomName },
-            timestamp: Date.now(),
-            hypothesisId: 'H1',
-          }),
-        }).catch((err) => console.warn('[recorder] clearMeetingTokens KV DELETE error:', err.message));
-        // #endregion
         log.error('recorder', 'Failed to clear meeting tokens', { error: error.message });
         return { success: false, error: error.message };
       }

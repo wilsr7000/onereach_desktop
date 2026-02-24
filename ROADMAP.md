@@ -292,6 +292,15 @@
 - ✅ Multi-agent execution (parallel and series modes)
 - ✅ submitSubtask.andWait() for agent-to-agent subtask coordination
 
+**WebMCP Integration (v4.3.x):**
+- ✅ Bidirectional WebMCP support (W3C navigator.modelContext API)
+- ✅ Consumer: detect and use WebMCP tools from websites visited in tabbed browser
+- ✅ Provider: expose Spaces, Search, Navigation, Settings as WebMCP tools
+- ✅ Bridge script intercepts tool registrations, pipes to agent exchange as proxy agents
+- ✅ Proxy agents participate in LLM-based auction alongside built-in agents
+- ✅ Tab-level lifecycle management (tools discovered on load, cleaned up on navigate/close)
+- ✅ Electron 41 beta (Chromium 146) with native WebMCP flag enabled
+
 ### Roadmap
 
 #### Q1 2026
@@ -307,6 +316,7 @@
 
 #### Q2 2026
 - [x] **Browser Automation Agent** - Autonomous browser control via Playwright. AI agent navigates websites, fills forms, clicks buttons, extracts data, takes screenshots. Ref-based accessibility snapshot interaction. Configurable safety guardrails (max actions, domain blocklist, execution timeout). Settings UI, IPC bridge, web-scraper consolidation.
+- [x] **Browsing API (Comet-class)** - Native Electron BrowserWindow-based browsing service. Session management with hidden/HITL modes. Anti-detection stealth (user agent, plugins, permissions, WebGL, Chrome runtime mocking). Error detection (CAPTCHA, auth walls, bot blocks, paywalls, consent). Fast-path search (DuckDuckGo API + HTTP extraction with caching). Declarative agent template system with site-specific recipes, LLM fallback, retry/backoff. LLM-driven observe/think/act task runner with checkpoint/resume and model escalation. Parallel browsing sessions. IPC bridge exposed as `window.browsing`. Exchange-registered browsing agent with 7 starter templates (weather, web search, page reader, news, GitHub, form filler, page monitor). Safety guardrails (domain blocklist, sensitive field detection, action limits). Multi-step orchestration (research, workflow, compare-pages). 140 unit tests across 9 suites.
 - [ ] **Agent chaining** - Connect agents to work together
 - [ ] **Agent marketplace** - Share/discover community agents (built on Agent Spaces)
 - [x] **Custom agent personalities** - Voice, memory, briefing, multi-turn for generated agents (delivered in First-Class Custom Agents)

@@ -1501,6 +1501,14 @@ app.on('before-quit', (event) => {
         console.error('[App] Error stopping app manager agent:', error);
       }
 
+      // Shutdown WebMCP consumer
+      try {
+        const webmcpConsumer = require('./lib/webmcp-consumer');
+        webmcpConsumer.shutdown();
+      } catch (_error) {
+        // WebMCP may not be initialized
+      }
+
       // Shutdown exchange bridge
       try {
         const { shutdown } = require('./src/voice-task-sdk/exchange-bridge');
@@ -3606,6 +3614,272 @@ function setupSpacesAPI() {
       console.error('[AI IPC] imageGenerate error:', error.message);
       throw error;
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Browsing API IPC Handlers
+  // ---------------------------------------------------------------------------
+  const browsingAPI = require('./lib/browsing-api');
+
+  ipcMain.handle('browsing:createSession', async (_event, opts) => {
+    try { return await browsingAPI.createSession(opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:destroySession', async (_event, sessionId) => {
+    try { return await browsingAPI.destroySession(sessionId); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:listSessions', async () => {
+    return browsingAPI.listSessions();
+  });
+
+  ipcMain.handle('browsing:getSession', async (_event, sessionId) => {
+    return browsingAPI.getSession(sessionId);
+  });
+
+  ipcMain.handle('browsing:navigate', async (_event, sessionId, url, opts) => {
+    try { return await browsingAPI.navigate(sessionId, url, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:extract', async (_event, sessionId, opts) => {
+    try { return await browsingAPI.extract(sessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:snapshot', async (_event, sessionId, opts) => {
+    try { return await browsingAPI.snapshot(sessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:act', async (_event, sessionId, action) => {
+    try { return await browsingAPI.act(sessionId, action); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:screenshot', async (_event, sessionId, opts) => {
+    try { return await browsingAPI.screenshot(sessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:promote', async (_event, sessionId, opts) => {
+    try { return await browsingAPI.promote(sessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:waitForUser', async (_event, sessionId, opts) => {
+    try { return await browsingAPI.waitForUser(sessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:resume-hitl', async (_event, data) => {
+    try {
+      const sessions = browsingAPI.listSessions();
+      const hitlSession = sessions.find(s => s.status === 'hitl');
+      if (hitlSession) browsingAPI.resumeHitl(hitlSession.sessionId, data);
+      return { success: true };
+    } catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:cancel-hitl', async () => {
+    try {
+      const sessions = browsingAPI.listSessions();
+      const hitlSession = sessions.find(s => s.status === 'hitl');
+      if (hitlSession) await browsingAPI.destroySession(hitlSession.sessionId);
+      return { success: true };
+    } catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:hitl-status', async () => {
+    const sessions = browsingAPI.listSessions();
+    const hitlSession = sessions.find(s => s.status === 'hitl');
+    return hitlSession || null;
+  });
+
+  ipcMain.handle('browsing:parallel', async (_event, tasks, opts) => {
+    try { return await browsingAPI.parallel(tasks, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  // Fast-path (search + HTTP extraction without browser)
+  const fastPath = require('./lib/browse-fast-path');
+
+  ipcMain.handle('browsing:fast-query', async (_event, queryText, opts) => {
+    try { return await fastPath.query(queryText, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:fast-extract', async (_event, url, opts) => {
+    try { return await fastPath.extractUrl(url, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  // Safety guardrails
+  const browseSafety = require('./lib/browse-safety');
+
+  ipcMain.handle('browsing:check-domain', async (_event, url) => {
+    return browseSafety.isDomainBlocked(url);
+  });
+
+  ipcMain.handle('browsing:get-limits', async () => {
+    return browseSafety.getLimits();
+  });
+
+  ipcMain.handle('browsing:set-limits', async (_event, overrides) => {
+    browseSafety.setLimits(overrides);
+    return { success: true, limits: browseSafety.getLimits() };
+  });
+
+  ipcMain.handle('browsing:block-domain', async (_event, domain) => {
+    browseSafety.addBlockedDomain(domain);
+    return { success: true, blocked: browseSafety.getBlockedDomains() };
+  });
+
+  ipcMain.handle('browsing:unblock-domain', async (_event, domain) => {
+    browseSafety.removeBlockedDomain(domain);
+    return { success: true, blocked: browseSafety.getBlockedDomains() };
+  });
+
+  ipcMain.handle('browsing:get-blocked-domains', async () => {
+    return browseSafety.getBlockedDomains();
+  });
+
+  // Multi-step orchestration
+  const browseOrchestrator = require('./lib/browse-orchestrator');
+
+  ipcMain.handle('browsing:research', async (_event, query, opts) => {
+    try { return await browseOrchestrator.research(query, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:workflow', async (_event, steps, opts) => {
+    try { return await browseOrchestrator.workflow(steps, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:compare-pages', async (_event, urls, opts) => {
+    try { return await browseOrchestrator.comparePages(urls, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  // Observation channels
+  ipcMain.handle('browsing:get-console-logs', async (_event, sessionId, opts) => {
+    try { return browsingAPI.getConsoleLogs(sessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:get-network-log', async (_event, sessionId, opts) => {
+    try { return browsingAPI.getNetworkLog(sessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:get-dom-context', async (_event, sessionId, ref, opts) => {
+    try { return await browsingAPI.getDomContext(sessionId, ref, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  // Viewport / device emulation
+  ipcMain.handle('browsing:set-viewport', async (_event, sessionId, viewport) => {
+    try { return await browsingAPI.setViewport(sessionId, viewport); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:get-device-presets', async () => {
+    return browsingAPI.getDevicePresets();
+  });
+
+  // Cookie & Auth management
+  ipcMain.handle('browsing:get-cookies', async (_event, sessionId, opts) => {
+    try { return await browsingAPI.getCookies(sessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:set-cookies', async (_event, sessionId, cookies) => {
+    try { return await browsingAPI.setCookies(sessionId, cookies); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:export-cookies', async (_event, sessionId, opts) => {
+    try { return await browsingAPI.exportCookies(sessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:import-cookies', async (_event, sessionId, cookieExport) => {
+    try { return await browsingAPI.importCookies(sessionId, cookieExport); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:clone-session', async (_event, sourceSessionId, opts) => {
+    try { return await browsingAPI.cloneSession(sourceSessionId, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:check-auth-state', async (_event, sessionId) => {
+    try { return await browsingAPI.checkAuthState(sessionId); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:lookup-credentials', async (_event, url) => {
+    try { return await browsingAPI.lookupCredentials(url); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:auto-fill-credentials', async (_event, sessionId, url) => {
+    try { return await browsingAPI.autoFillCredentials(sessionId, url); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:inherit-from-partition', async (_event, sessionId, sourcePartition, opts) => {
+    try { return await browsingAPI.inheritFromPartition(sessionId, sourcePartition, opts); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:list-tab-partitions', async () => {
+    const mainWindow = browserWindow.getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) return [];
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve([]), 3000);
+      ipcMain.once('tab-partitions-response', (_event, tabInfo) => {
+        clearTimeout(timeout);
+        resolve(tabInfo || []);
+      });
+      mainWindow.webContents.send('get-tab-partitions');
+    });
+  });
+
+  ipcMain.handle('browsing:save-to-auth-pool', async (_event, sessionId) => {
+    try { return await browsingAPI.saveToAuthPool(sessionId); }
+    catch (err) { return { error: err.message }; }
+  });
+
+  ipcMain.handle('browsing:get-auth-pool-domains', async () => {
+    try { return await browsingAPI.getAuthPoolDomains(); }
+    catch (err) { return []; }
+  });
+
+  ipcMain.handle('browsing:import-chrome-cookies', async (_event, domain, sessionId) => {
+    try {
+      const chromeImport = require('./lib/chrome-cookie-import');
+      if (!chromeImport.isChromeAvailable()) return { imported: 0, reason: 'chrome-not-found' };
+      const sess = browsingAPI._getSession(sessionId);
+      const targetPartition = sess.persistent ? `persist:${sess.partition}` : sess.partition;
+      return await chromeImport.importChromeCookies(domain, targetPartition);
+    } catch (err) { return { error: err.message }; }
+  });
+
+  browsingAPI.setTabDiscoveryFn(async () => {
+    const mainWindow = browserWindow.getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) return [];
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve([]), 3000);
+      ipcMain.once('tab-partitions-response', (_event, tabInfo) => {
+        clearTimeout(timeout);
+        resolve(tabInfo || []);
+      });
+      mainWindow.webContents.send('get-tab-partitions');
+    });
   });
 
   // Test support - Only available in test mode
@@ -13883,7 +14157,6 @@ function openSetupWizard() {
   } catch (error) {
     console.error('Error reading IDW config file:', error);
   }
-
   // Load the setup wizard HTML file
   console.log('Loading setup-wizard.html file...');
   wizardWindow.loadFile('setup-wizard.html');
@@ -15221,6 +15494,20 @@ async function initializeVoiceOrb() {
       console.error('[VoiceOrb] Full error:', exchangeError.stack);
     }
 
+    // Initialize WebMCP consumer for bidirectional tool discovery
+    try {
+      const webmcpConsumer = require('./lib/webmcp-consumer');
+      webmcpConsumer.init(3456);
+
+      ipcMain.handle('webmcp:get-discovered-tools', () => {
+        return webmcpConsumer.getDiscoveredTools();
+      });
+
+      console.log('[WebMCP] Consumer initialized');
+    } catch (webmcpError) {
+      console.error('[WebMCP] Consumer init error:', webmcpError.message);
+    }
+
     // Only auto-show orb UI at startup if enabled in settings
     const voiceOrbEnabled = global.settingsManager?.get('voiceOrbEnabled');
 
@@ -15600,51 +15887,6 @@ function createOrbWindow() {
   global.orbWindow = orbWindow;
 
   console.log('[VoiceOrb] Orb window created');
-
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'main.js:createOrbWindow',
-      message: 'Orb window created - config',
-      data: { bounds: orbWindow.getBounds(), transparent: true, hasShadow: false, alwaysOnTop: true },
-      timestamp: Date.now(),
-      hypothesisId: 'H3',
-    }),
-  }).catch((_ignored) => {
-    /* optional agent log ingest, service may not be running */
-  });
-  // #endregion
-
-  // #region agent log
-  setInterval(() => {
-    const d = {};
-    if (orbWindow && !orbWindow.isDestroyed()) {
-      d.orbVisible = orbWindow.isVisible();
-      d.orbBounds = orbWindow.getBounds();
-    }
-    if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
-      d.hudVisible = commandHUDWindow.isVisible();
-      d.hudBounds = commandHUDWindow.getBounds();
-    } else {
-      d.hudExists = false;
-    }
-    fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        location: 'main.js:periodic',
-        message: 'Window visibility poll',
-        data: d,
-        timestamp: Date.now(),
-        hypothesisId: 'H1,H2,H3',
-      }),
-    }).catch((_ignored) => {
-      /* optional agent log ingest, service may not be running */
-    });
-  }, 5000);
-  // #endregion
 
   return orbWindow;
 }
@@ -16102,46 +16344,12 @@ function showCommandHUD(task) {
     commandHUDWindow.show();
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'main.js:showCommandHUD',
-      message: 'HUD shown (OS-level)',
-      data: {
-        task: task?.action || task?.transcript?.substring(0, 50),
-        hudVisible: commandHUDWindow?.isVisible?.(),
-        hudBounds: commandHUDWindow?.getBounds?.(),
-      },
-      timestamp: Date.now(),
-      hypothesisId: 'H1',
-    }),
-  }).catch((_ignored) => {
-    /* optional agent log ingest, service may not be running */
-  });
-  // #endregion
 }
 
 /**
  * Hide the Command HUD
  */
 function hideCommandHUD() {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'main.js:hideCommandHUD',
-      message: 'HUD hidden (OS-level)',
-      data: { wasVisible: commandHUDWindow?.isVisible?.() },
-      timestamp: Date.now(),
-      hypothesisId: 'H1',
-    }),
-  }).catch((_ignored) => {
-    /* optional agent log ingest, service may not be running */
-  });
-  // #endregion
   if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
     commandHUDWindow.hide();
   }
