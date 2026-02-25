@@ -62,7 +62,7 @@ LOW CONFIDENCE (below 0.60) -- do NOT bid:
 - Questions about events without deletion intent`,
 
   async execute(task) {
-    const query = (task.text || task.query || '').trim();
+    const query = (task.content || task.text || task.query || '').trim();
     if (!query) return { success: false, message: 'Which event would you like to cancel?' };
 
     const now = new Date();

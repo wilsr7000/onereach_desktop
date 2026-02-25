@@ -21,7 +21,9 @@ const log = getLogQueue();
 
 // Agent configuration
 const CONFIG = {
-  scanIntervalMs: 30000, // 30 seconds
+  scanIntervalMs: 30000, // 30 seconds (base rate)
+  scanBackoffSteps: [30000, 120000, 300000], // 30s -> 2min -> 5min
+  cleanScansBeforeBackoff: 3, // consecutive clean scans before slowing down
   maxErrorsPerScan: 20, // Max errors to process per scan
   escalationThreshold: 3, // Escalate after N failed fix attempts
   diagnosisTimeout: 30000, // 30s timeout for LLM diagnosis
@@ -90,8 +92,11 @@ class AppManagerAgent {
     this.active = false;
     this.paused = false;
     this.scanInterval = null;
+    this.scanTimeout = null;
     this.lastScanTime = null;
     this.startTime = null;
+    this.consecutiveCleanScans = 0;
+    this.currentScanIntervalMs = CONFIG.scanIntervalMs;
 
     // Statistics
     this.stats = {
@@ -300,6 +305,8 @@ class AppManagerAgent {
     this.active = true;
     this.paused = false;
     this.startTime = Date.now();
+    this.consecutiveCleanScans = 0;
+    this.currentScanIntervalMs = CONFIG.scanIntervalMs;
 
     // Check for version update and clear broken items if new version
     this._checkVersionAndClearRegistry();
@@ -307,12 +314,8 @@ class AppManagerAgent {
     // Run initial scan
     this.runScan();
 
-    // Start periodic scanning
-    this.scanInterval = setInterval(() => {
-      if (!this.paused) {
-        this.runScan();
-      }
-    }, CONFIG.scanIntervalMs);
+    // Start adaptive periodic scanning (uses setTimeout chain for variable intervals)
+    this._scheduleNextScan();
 
     // Start external API status reporting if configured
     if (this.externalAPIConfig.enabled) {
@@ -395,6 +398,10 @@ class AppManagerAgent {
       clearInterval(this.scanInterval);
       this.scanInterval = null;
     }
+    if (this.scanTimeout) {
+      clearTimeout(this.scanTimeout);
+      this.scanTimeout = null;
+    }
 
     // Stop external API reporting
     this._stopStatusReporting();
@@ -408,6 +415,50 @@ class AppManagerAgent {
 
     this._saveState();
     log.info('agent', 'Stopped');
+  }
+
+  /**
+   * Schedule the next scan using adaptive backoff.
+   * Uses setTimeout (not setInterval) so the delay adjusts each cycle.
+   */
+  _scheduleNextScan() {
+    if (!this.active) return;
+    if (this.scanTimeout) clearTimeout(this.scanTimeout);
+
+    this.scanTimeout = setTimeout(async () => {
+      if (!this.paused && this.active) {
+        await this.runScan();
+      }
+      this._scheduleNextScan();
+    }, this.currentScanIntervalMs);
+  }
+
+  /**
+   * Adjust scan interval based on whether the last scan found anything new.
+   * @param {boolean} hadNewActivity - true if the scan found new errors or applied fixes
+   */
+  _updateScanInterval(hadNewActivity) {
+    if (hadNewActivity) {
+      this.consecutiveCleanScans = 0;
+      this.currentScanIntervalMs = CONFIG.scanBackoffSteps[0];
+    } else {
+      this.consecutiveCleanScans++;
+    }
+
+    if (this.consecutiveCleanScans >= CONFIG.cleanScansBeforeBackoff) {
+      const stepIndex = Math.min(
+        Math.floor((this.consecutiveCleanScans - CONFIG.cleanScansBeforeBackoff) / CONFIG.cleanScansBeforeBackoff) + 1,
+        CONFIG.scanBackoffSteps.length - 1
+      );
+      const newInterval = CONFIG.scanBackoffSteps[stepIndex];
+      if (newInterval !== this.currentScanIntervalMs) {
+        log.info('agent', 'Scan interval adjusted', {
+          intervalSec: newInterval / 1000,
+          consecutiveClean: this.consecutiveCleanScans,
+        });
+      }
+      this.currentScanIntervalMs = newInterval;
+    }
   }
 
   /**
@@ -464,6 +515,7 @@ class AppManagerAgent {
         log.info('agent', 'No errors found');
         this.stats.scansCompleted++;
         this.lastScanTime = Date.now();
+        this._updateScanInterval(false);
         return result;
       }
 
@@ -577,7 +629,15 @@ class AppManagerAgent {
     result.duration = Date.now() - scanStart;
     this.stats.scansCompleted++;
     this.lastScanTime = Date.now();
-    this._saveState();
+
+    const hadNewActivity = result.fixesApplied > 0 || result.newDiagnoses > 0;
+
+    // Only write state to disk when something actually changed
+    if (hadNewActivity) {
+      this._saveState();
+    }
+
+    this._updateScanInterval(hadNewActivity);
 
     log.info('agent', 'Scan complete. Fixed: ..., Failed: ...', {
       fixesApplied: result.fixesApplied,
@@ -592,8 +652,10 @@ class AppManagerAgent {
       task: `Scanned ${result.errorsFound} errors`,
     });
 
-    // Generate AI summary of activity
-    await this._generateActivitySummary(result);
+    // Only generate LLM summary when fixes were applied or new issues discovered
+    if (hadNewActivity) {
+      await this._generateActivitySummary(result);
+    }
 
     return result;
   }
@@ -1053,7 +1115,7 @@ Summary:`;
       if (brokenItem.diagnosis) {
         existing.diagnosis = brokenItem.diagnosis;
       }
-      log.info('agent', 'Updated broken item: ... (... occurrences)', {
+      log.debug('agent', 'Updated broken item: ... (... occurrences)', {
         normalizedMessage: existing.normalizedMessage,
         occurrences: existing.occurrences,
       });
@@ -1199,7 +1261,7 @@ Summary:`;
       );
 
       if (existingItem && existingItem.diagnosis) {
-        log.info('agent', 'Using cached diagnosis for: ......', { detail: normalizedMsg.substring(0, 50) });
+        log.debug('agent', 'Using cached diagnosis for: ......', { detail: normalizedMsg.substring(0, 50) });
         return {
           ...diagnosis,
           strategy: existingItem.diagnosis.strategy,

@@ -346,9 +346,8 @@ describe('Fix 5: Daily brief uses standard profile (not powerful)', () => {
   });
 
   it('should use maxTokens of 2000 (not 16000)', () => {
-    // The compose function is long (~3000 chars), need a wider window
     const startIdx = source.indexOf('async _composeBriefing');
-    const composeSection = source.substring(startIdx, startIdx + 3500);
+    const composeSection = source.substring(startIdx, startIdx + 5000);
     expect(composeSection).toContain('maxTokens: 2000');
     expect(composeSection).not.toContain('maxTokens: 16000');
   });
@@ -386,14 +385,14 @@ describe('Fix 6: Calendar agent getBriefing() uses calendar store', () => {
   });
 
   it('should handle no meetings gracefully', () => {
-    const getBriefingStart = source.indexOf('async getBriefing()');
+    const getBriefingStart = source.indexOf('async getBriefing(');
     const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
     const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).toContain('No meetings scheduled today');
+    expect(getBriefingBody).toContain('No meetings scheduled');
   });
 
   it('should catch errors gracefully with try/catch', () => {
-    const getBriefingStart = source.indexOf('async getBriefing()');
+    const getBriefingStart = source.indexOf('async getBriefing(');
     const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
     const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
     expect(getBriefingBody).toMatch(/try\s*\{/);

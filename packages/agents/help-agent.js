@@ -89,13 +89,14 @@ The ONLY facts you may state are those present in the conversation history or us
    * Execute the task
    */
   async execute(task, _context) {
+    try {
     // Initialize memory
     if (!this.memory) {
       await this.initialize();
     }
 
-    const lower = task.content.toLowerCase();
-    const prefs = this.memory.parseSectionAsKeyValue('Learned Preferences') || {};
+    const lower = (task.content || '').toLowerCase();
+    const prefs = this.memory?.parseSectionAsKeyValue('Learned Preferences') || {};
     const skillLevel = prefs['Skill Level'] || 'Beginner';
     const isAdvanced = skillLevel.toLowerCase() === 'advanced';
 
@@ -135,6 +136,9 @@ The ONLY facts you may state are those present in the conversation history or us
     }
 
     return result;
+    } catch (err) {
+      return { success: false, message: `I had trouble loading help info: ${err.message}` };
+    }
   },
 
   /**

@@ -184,12 +184,13 @@ The ONLY facts you may state are those present in the conversation history or us
    * Execute the task
    */
   async execute(task, _context) {
+    try {
     // Initialize memory
     if (!this.memory) {
       await this.initialize();
     }
 
-    const lower = task.content.toLowerCase().trim();
+    const lower = (task.content || '').toLowerCase().trim();
     const timeContext = getTimeContext();
 
     // Read user name from the global profile (shared across all agents)
@@ -221,7 +222,7 @@ The ONLY facts you may state are those present in the conversation history or us
 
     // Handle name introduction -- save to global profile so ALL agents see it
     // Require at least 2 chars and reject common false positives from STT
-    const nameMatch = task.content.match(
+    const nameMatch = (task.content || '').match(
       /(?:my name is|i'm called|i am called|i am named|you can call me)\s+([A-Z][a-zA-Z]{1,30})/
     );
     if (nameMatch) {
@@ -391,6 +392,9 @@ The ONLY facts you may state are those present in the conversation history or us
       'How can I assist you?',
       'What can I do for you?',
     ]);
+    } catch (err) {
+      return { success: false, message: `Sorry, I had a small hiccup: ${err.message}` };
+    }
   },
 
   /**

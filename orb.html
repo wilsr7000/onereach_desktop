@@ -2443,11 +2443,13 @@
             return;
           }
 
-          // Async exchange path: events will handle TTS
-          if (result.suppressAIResponse && result.queued) {
-            console.log('[Orb] Async exchange path - events will speak result');
+          // Backend already handled TTS (exchange, cached route, media command, etc.)
+          // Acknowledge function call with empty string to avoid double audio.
+          if (result.suppressAIResponse) {
+            console.log('[Orb] Backend handled TTS, acknowledging function call silently');
             await window.orbAPI.respondToFunction(callId, '');
             S.set('pendingFunctionCallId', null);
+            // needsInput state is set via onResult handler (HUD API event)
             return;
           }
 

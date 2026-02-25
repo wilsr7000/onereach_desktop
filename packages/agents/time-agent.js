@@ -47,24 +47,32 @@ const timeAgent = {
 
   /**
    * Briefing contribution: current time and date.
+   * Accepts optional { targetDate, isToday, dateLabel } from daily-brief-agent.
    * Priority 1 = appears first in the daily brief.
    */
-  async getBriefing() {
+  async getBriefing(context = {}) {
     const now = new Date();
     const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    const dateStr = now.toLocaleDateString('en-US', {
+    const h = now.getHours();
+    const timeOfDay = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
+
+    const isToday = context?.isToday !== false;
+    const target = context?.targetDate || now;
+    const dateStr = target.toLocaleDateString('en-US', {
       weekday: 'long',
       month: 'long',
       day: 'numeric',
       year: 'numeric',
     });
-    const h = now.getHours();
-    const timeOfDay = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
+
+    const content = isToday
+      ? `Current time: ${timeStr}. Date: ${dateStr}. Time of day: ${timeOfDay}.`
+      : `Current time: ${timeStr}. Briefing for: ${dateStr}. (This is a future date, not today.)`;
+
     return {
       section: 'Time & Date',
       priority: 1,
-      // Only provide facts -- the daily-brief composer adds the greeting
-      content: `Current time: ${timeStr}. Date: ${dateStr}. Time of day: ${timeOfDay}.`,
+      content,
     };
   },
 
@@ -203,7 +211,7 @@ The difference: "What's today's date?" = TIME (asking the actual date). "What do
    */
   async _doTask(task, context) {
     const now = new Date();
-    const lower = task.content.toLowerCase();
+    const lower = (task.content || '').toLowerCase();
     const { use24Hour, useDateFormatEU } = context;
 
     // Date questions

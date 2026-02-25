@@ -246,7 +246,7 @@ This agent searches the internet. It does NOT control media playback or access p
       await this.initialize();
     }
 
-    let query = task.content;
+    let query = task.content || '';
     const { onProgress = () => {} } = context;
     const action = task.data?.action || task.action;
 

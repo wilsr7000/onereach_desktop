@@ -1,7 +1,7 @@
 # Onereach.ai Punch List
 
 > Master list of bugs, fixes, and small features to address.
-> Updated: February 2026 | Current Version: 4.2.0
+> Updated: February 2026 | Current Version: 4.4.0
 
 ---
 
@@ -433,6 +433,39 @@
 ---
 
 ## Recently Completed
+
+- [x] **Double Audio Fix** (v4.4.0)
+  - Fixed orb speaking responses twice when backend already handled TTS
+  - Root cause: `orb.html` fallthrough path triggered `speaker.speak()` even when `suppressAIResponse: true`
+  - Added `_currentSource` tracking in `lib/orb/orb-audio.js` to prevent audio overlap
+  - Added duplicate event handler guard in `lib/orb/orb-event-router.js`
+  - Files: `orb.html`, `lib/orb/orb-audio.js`, `lib/orb/orb-event-router.js`
+
+- [x] **Idle Resource Optimization** (v4.4.0)
+  - Adaptive polling: resource-manager.js reduces scan frequency from 30s to 120s when system is idle
+  - Exchange-bridge reconnect: exponential backoff (caps at 60s) instead of fixed 5s intervals
+  - App-context-capture: skips redundant captures when context hasn't changed
+  - App-manager-agent: optimized polling and idle detection
+  - Files: `resource-manager.js`, `src/voice-task-sdk/exchange-bridge.js`, `app-context-capture.js`, `app-manager-agent.js`
+
+- [x] **Agent Structural Hardening** (v4.4.0)
+  - All 15 built-in agents hardened with contract-conformant `execute()` signatures
+  - Agents return `{ success, result }` consistently; never throw unguarded
+  - Added `agent-middleware.js` with timeout, error boundary, input normalization
+  - Added agent conformance test suite (`test/unit/agent-conformance.test.js`)
+  - Added agent import smoke test (`test/unit/agent-import-smoke.test.js`)
+  - Files: `packages/agents/*.js`, `packages/agents/agent-middleware.js`, `src/voice-task-sdk/exchange-bridge.js`
+
+- [x] **Agent Tool Calling Infrastructure** (v4.4.0)
+  - Added native tool/function calling support to Anthropic and OpenAI adapters (tools param, normalized `{toolCalls}` response shape)
+  - New `chatWithTools()` method on AI service with automatic tool-use loop (max 10 rounds, safety cap, progress callback)
+  - Created shared tool registry (`lib/agent-tools.js`): `shell_exec`, `file_read`, `file_write`, `file_list`, `web_search`, `spaces_search`, `spaces_add_item`, `get_current_time`
+  - Shell safety filter blocks dangerous commands (rm -rf, sudo, mkfs, dd, chmod 777 /)
+  - Agent middleware auto-injects tool capabilities when agents declare `tools` property
+  - Exchange bridge routes tool-equipped agents through `chatWithTools` instead of plain `chat`
+  - Registered `terminal:exec` IPC handler in main.js + `window.terminal` preload bridge
+  - 28 new unit tests covering adapters, registry, dispatcher, tool execution, middleware, and `chatWithTools` validation
+  - Files: `lib/agent-tools.js` (new), `lib/ai-service.js`, `lib/ai-providers/anthropic-adapter.js`, `lib/ai-providers/openai-adapter.js`, `packages/agents/agent-middleware.js`, `src/voice-task-sdk/exchange-bridge.js`, `main.js`, `preload.js`
 
 - [x] **Agent Robustness: Edge-Case Testing & Fixes** (v4.5.1)
   - Created comprehensive chaos/edge-case test suite (`test/unit/agent-edge-cases.test.js`): 223 tests throwing random, adversarial, and malformed inputs at 6 agents (weather, DJ, daily brief, time, spelling, smalltalk)

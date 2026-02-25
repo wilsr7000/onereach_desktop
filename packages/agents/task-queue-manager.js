@@ -466,7 +466,7 @@ async function executeLLMAgent(agent, content, onProgress) {
  * Handle system commands (cancel, undo, repeat)
  */
 function handleSystemCommand(task) {
-  const command = task.command || task.content.toLowerCase();
+  const command = task.command || (task.content || '').toLowerCase();
 
   if (command.includes('cancel') || command.includes('nevermind') || command.includes('stop')) {
     return { success: true, message: 'Cancelled', isCancel: true };

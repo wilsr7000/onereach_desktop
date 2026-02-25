@@ -98,7 +98,8 @@ This agent controls the Music app and Spotify directly. For music recommendation
    * @returns {Object} - { success, message, undoFn?, undoDescription? }
    */
   async execute(task) {
-    const lower = task.content.toLowerCase();
+    const lower = (task.content || '').toLowerCase();
+    if (!lower) return { success: false, message: 'What would you like me to play or control?' };
 
     // Determine the media app
     let app = 'Music';

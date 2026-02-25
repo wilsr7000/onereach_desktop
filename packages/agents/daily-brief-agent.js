@@ -170,6 +170,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
    * 5. Log briefing to history
    */
   async execute(_task) {
+    try {
     // Ensure memory is loaded
     if (!this.memory) {
       await this.initialize();
@@ -177,6 +178,14 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
 
     const briefStart = Date.now();
     const { getBriefingAgents } = require('./agent-registry');
+
+    // 0. Determine the target date from the user's request
+    const requestText = (_task?.content || _task?.text || '').toLowerCase();
+    const targetDate = this._resolveTargetDate(requestText);
+    const isToday = !targetDate || this._isSameDay(targetDate, new Date());
+    const dateLabel = isToday ? 'today' : targetDate.toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric',
+    });
 
     // 1. Read preferences from memory
     const prefs = this._getPreferences();
@@ -218,13 +227,14 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     }
 
     // 3. Collect contributions in parallel with per-agent timeouts
+    const briefingContext = { targetDate, isToday, dateLabel };
     const contributionPromises = briefingAgents.map(async (agent) => {
       const agentTimeout = agent.estimatedExecutionMs
         ? Math.min(agent.estimatedExecutionMs * 2, PER_AGENT_TIMEOUT_MS)
         : PER_AGENT_TIMEOUT_MS;
       try {
         const result = await Promise.race([
-          agent.getBriefing(),
+          agent.getBriefing(briefingContext),
           new Promise((_, rej) => {
             setTimeout(() => rej(new Error(`${agent.id} timed out`)), agentTimeout);
           }),
@@ -269,7 +279,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
 
     // 5. Compose into speech via LLM
     const userName = await this._getUserName();
-    const fullSpeech = await this._composeBriefing(contributions, prefs, userName);
+    const fullSpeech = await this._composeBriefing(contributions, prefs, userName, dateLabel);
 
     log.info('agent', '[DailyBrief] Brief generated', {
       contributorCount: contributions.length,
@@ -288,6 +298,10 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
         contributions: contributions.map((c) => ({ section: c.section, priority: c.priority })),
       },
     };
+    } catch (err) {
+      log.error('agent', '[DailyBrief] Execute failed', { error: err.message, stack: err.stack });
+      return { success: false, message: `I had trouble putting together your briefing: ${err.message}` };
+    }
   },
 
   /**
@@ -295,7 +309,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
    * Uses preferences for style and length guidance.
    * Falls back to simple concatenation if the LLM call fails.
    */
-  async _composeBriefing(contributions, prefs = {}, userName = null) {
+  async _composeBriefing(contributions, prefs = {}, userName = null, dateLabel = 'today') {
     if (!contributions || contributions.length === 0) {
       const now = new Date();
       const h = now.getHours();
@@ -321,6 +335,8 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     try {
       const composedText = await ai.complete(
         `You are a radio morning show host delivering a daily briefing. Your style is ${style} -- casual, warm, and organized, like a trusted morning DJ giving listeners their daily rundown.
+
+BRIEFING DATE: The user asked about ${dateLabel}. Frame everything for that day.${dateLabel !== 'today' ? `\n- This is a FORWARD-LOOKING brief. Use future tense ("You have", "There will be") since the events haven't happened yet.` : ''}
 
 STYLE RULES:
 - Open with a SINGLE time-of-day greeting (Good morning / Good afternoon / Good evening) based on the "Time of day" field in the Time & Date section. Include the current time and date naturally. Do NOT repeat the greeting.
@@ -374,6 +390,42 @@ Compose the daily briefing:`,
    * Log a summary of this briefing to memory history.
    * Keeps only the last MAX_BRIEFING_HISTORY entries.
    */
+  _resolveTargetDate(text) {
+    if (!text) return null;
+    const now = new Date();
+    if (/\btomorrow\b/.test(text)) {
+      const d = new Date(now);
+      d.setDate(d.getDate() + 1);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayMatch = text.match(/\b(next\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+    if (dayMatch) {
+      const targetDay = dayNames.indexOf(dayMatch[2]);
+      const currentDay = now.getDay();
+      let daysAhead = targetDay - currentDay;
+      if (daysAhead <= 0 || dayMatch[1]) daysAhead += 7;
+      const d = new Date(now);
+      d.setDate(d.getDate() + daysAhead);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    if (/\bnext week\b/.test(text)) {
+      const d = new Date(now);
+      d.setDate(d.getDate() + (8 - d.getDay()));
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    return null;
+  },
+
+  _isSameDay(a, b) {
+    return a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate();
+  },
+
   _logBriefingToHistory(contributions) {
     if (!this.memory) return;
     try {

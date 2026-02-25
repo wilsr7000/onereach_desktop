@@ -15,8 +15,12 @@ const { app, BrowserWindow, ipcMain, powerMonitor } = require('electron');
 
 // Configuration
 const CONFIG = {
-  // Monitoring
-  MONITOR_INTERVAL: 5000, // Check every 5 seconds
+  // Monitoring -- adaptive polling
+  MONITOR_INTERVAL_ACTIVE: 5000, // 5s when CPU is elevated
+  MONITOR_INTERVAL_IDLE: 30000, // 30s when CPU is consistently low
+  IDLE_CPU_THRESHOLD: 30, // total CPU % below which the app is "idle"
+  CONSECUTIVE_IDLE_BEFORE_SLOWDOWN: 3,
+
   CPU_HIGH_THRESHOLD: 100, // Total CPU % that triggers throttling
   CPU_CRITICAL_THRESHOLD: 200, // CPU % that triggers aggressive throttling
   SINGLE_PROCESS_HIGH: 50, // Single process CPU % considered high
@@ -42,6 +46,10 @@ class ResourceManager {
     // Track CPU history for trend detection
     this.cpuHistory = [];
     this.maxHistorySize = 10;
+
+    // Adaptive polling state
+    this.consecutiveIdleChecks = 0;
+    this.currentInterval = CONFIG.MONITOR_INTERVAL_ACTIVE;
 
     // Callbacks
     this.onHighCPU = null;
@@ -70,8 +78,10 @@ class ResourceManager {
       this.enablePowerSaving();
     });
 
-    // Start monitoring loop
-    this.monitorInterval = setInterval(() => this.checkResources(), CONFIG.MONITOR_INTERVAL);
+    // Start monitoring loop with adaptive interval
+    this.currentInterval = CONFIG.MONITOR_INTERVAL_ACTIVE;
+    this.consecutiveIdleChecks = 0;
+    this.monitorInterval = setInterval(() => this.checkResources(), this.currentInterval);
 
     // Initial check
     this.checkResources();
@@ -153,8 +163,37 @@ class ResourceManager {
       if (highCPUProcesses.length > 0) {
         this.identifyHighCPUWindows(highCPUProcesses);
       }
+
+      // Adaptive polling: slow down when idle, speed up when busy
+      this._adjustMonitorInterval(totalCPU);
     } catch (error) {
       console.error('[ResourceManager] Error checking resources:', error);
+    }
+  }
+
+  /**
+   * Adjust the monitoring interval based on current CPU load.
+   * Switches between fast (5s) and slow (30s) polling.
+   */
+  _adjustMonitorInterval(totalCPU) {
+    let targetInterval;
+
+    if (totalCPU < CONFIG.IDLE_CPU_THRESHOLD) {
+      this.consecutiveIdleChecks++;
+      targetInterval = this.consecutiveIdleChecks >= CONFIG.CONSECUTIVE_IDLE_BEFORE_SLOWDOWN
+        ? CONFIG.MONITOR_INTERVAL_IDLE
+        : CONFIG.MONITOR_INTERVAL_ACTIVE;
+    } else {
+      this.consecutiveIdleChecks = 0;
+      targetInterval = CONFIG.MONITOR_INTERVAL_ACTIVE;
+    }
+
+    if (targetInterval !== this.currentInterval) {
+      this.currentInterval = targetInterval;
+      if (this.monitorInterval) {
+        clearInterval(this.monitorInterval);
+        this.monitorInterval = setInterval(() => this.checkResources(), this.currentInterval);
+      }
     }
   }
 

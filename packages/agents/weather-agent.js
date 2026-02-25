@@ -274,17 +274,18 @@ const weatherAgent = {
   dataSources: ['wttr-in', 'calendar-store', 'user-profile'],
 
   /**
-   * Briefing contribution: current weather + travel weather from calendar.
-   * Priority 2 = appears after time/date in the daily brief.
+   * Briefing contribution. Accepts optional { targetDate, isToday, dateLabel } from daily-brief-agent.
+   * For future dates, requests a forecast instead of current conditions.
    */
-  async getBriefing() {
+  async getBriefing(context = {}) {
+    const label = context?.dateLabel || 'today';
+    const isToday = context?.isToday !== false;
     try {
-      const result = await this.execute({ content: 'current weather', metadata: {} });
+      const query = isToday ? 'current weather' : `weather forecast for ${label}`;
+      const result = await this.execute({ content: query, metadata: {} });
       let content = result?.success ? result.message : null;
 
-      // Check calendar for travel weather (separate from the main execute path
-      // so the briefing always gets travel info even for bare requests)
-      if (!content) {
+      if (!content && isToday) {
         const travelWeather = await this._getCalendarWeather(null, {});
         if (travelWeather) {
           return { section: 'Weather', priority: 2, content: travelWeather };

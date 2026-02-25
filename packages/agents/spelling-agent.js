@@ -175,7 +175,7 @@ function createSpellingAgent(exchangeUrl) {
 
     // Execute spelling tasks
     execute: async (task, context) => {
-      const content = task.content.toLowerCase();
+      const content = (task.content || '').toLowerCase();
 
       // Check for cancellation
       if (context.signal.aborted) {
@@ -183,7 +183,7 @@ function createSpellingAgent(exchangeUrl) {
       }
 
       // Extract the target word
-      const word = extractWord(task.content);
+      const word = extractWord(task.content || '');
 
       if (!word) {
         return {
@@ -282,8 +282,9 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
 - Any request not about spelling a specific word`,
 
   async execute(task) {
-    const content = task.content.toLowerCase();
-    const word = extractWord(task.content);
+    try {
+    const content = (task.content || '').toLowerCase();
+    const word = extractWord(task.content || '');
 
     if (!word) {
       return {
@@ -293,7 +294,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     }
 
     // Handle "is it X or Y" comparisons
-    const orMatch = task.content.match(/is\s+it\s+([a-zA-Z]+)\s+or\s+([a-zA-Z]+)/i);
+    const orMatch = (task.content || '').match(/is\s+it\s+([a-zA-Z]+)\s+or\s+([a-zA-Z]+)/i);
     if (orMatch) {
       const word1 = orMatch[1].toLowerCase();
       const word2 = orMatch[2].toLowerCase();
@@ -350,6 +351,9 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     }
 
     return { success: true, message };
+    } catch (err) {
+      return { success: false, message: `Spelling error: ${err.message}` };
+    }
   },
 };
 

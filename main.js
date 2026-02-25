@@ -692,6 +692,23 @@ app.whenReady().then(() => {
   // Register Claude Terminal IPC handlers
   registerClaudeTerminalHandlers();
 
+  // Register general terminal:exec IPC handler (used by agent tools + renderer)
+  ipcMain.handle('terminal:exec', async (_event, command, cwd) => {
+    const { execFile } = require('child_process');
+    const { promisify } = require('util');
+    const execFileAsync = promisify(execFile);
+    try {
+      const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', command], {
+        cwd: cwd || process.cwd(),
+        timeout: 30000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return { success: true, stdout: stdout.trim(), stderr: stderr.trim() || undefined, exitCode: 0 };
+    } catch (err) {
+      return { success: false, stdout: err.stdout?.trim(), stderr: err.stderr?.trim(), exitCode: err.code ?? 1, error: err.message };
+    }
+  });
+
   // Initialize test audit orchestrator IPC bridge
   try {
     const { registerAuditIPC } = require('./test/audit/ipc-bridge');

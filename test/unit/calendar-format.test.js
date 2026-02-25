@@ -13,6 +13,7 @@ import {
   confirmDelete,
   confirmEdit,
 } from '../../lib/calendar-format.js';
+import { analyzeDay } from '../../lib/calendar-data.js';
 
 // ─── Meeting Link Extraction ────────────────────────────────────────────────
 
@@ -175,19 +176,18 @@ describe('buildEventsUISpec', () => {
 });
 
 describe('buildDayUISpec', () => {
-  it('builds from DayAnalysis object', () => {
+  it('builds from DayAnalysis object (current is single object)', () => {
+    // analyzeDay() returns current as a single enriched event or null, NOT an array
     const dayAnalysis = {
       label: 'Today',
-      current: [
-        {
-          event: {
-            summary: 'Now Meeting',
-            start: { dateTime: '2026-02-16T10:00:00' },
-            end: { dateTime: '2026-02-16T11:00:00' },
-          },
-          status: 'current',
+      current: {
+        event: {
+          summary: 'Now Meeting',
+          start: { dateTime: '2026-02-16T10:00:00' },
+          end: { dateTime: '2026-02-16T11:00:00' },
         },
-      ],
+        status: 'current',
+      },
       remaining: [
         {
           event: {
@@ -205,9 +205,31 @@ describe('buildDayUISpec', () => {
     const spec = buildDayUISpec(dayAnalysis);
     expect(spec.type).toBe('eventList');
     expect(spec.events).toHaveLength(2);
-    // Current events should come first
     expect(spec.events[0].title).toBe('Now Meeting');
     expect(spec.events[0].status).toBe('current');
+  });
+
+  it('builds when current is null (no meeting in progress)', () => {
+    const dayAnalysis = {
+      label: 'Today',
+      current: null,
+      remaining: [
+        {
+          event: {
+            summary: 'Afternoon Meeting',
+            start: { dateTime: '2026-02-16T14:00:00' },
+            end: { dateTime: '2026-02-16T15:00:00' },
+          },
+          status: 'upcoming',
+        },
+      ],
+      past: [],
+      conflicts: [],
+      summary: { total: 1, past: 0, current: 0, upcoming: 1 },
+    };
+    const spec = buildDayUISpec(dayAnalysis);
+    expect(spec.events).toHaveLength(1);
+    expect(spec.events[0].title).toBe('Afternoon Meeting');
   });
 
   it('handles null dayAnalysis', () => {
@@ -260,15 +282,17 @@ describe('spokenDaySummary', () => {
   });
 
   it('handles empty day', () => {
-    const day = { summary: { total: 0 }, current: [], remaining: [], past: [], next: null, conflicts: [] };
+    // current is null when no meeting in progress (matches analyzeDay contract)
+    const day = { summary: { total: 0 }, current: null, remaining: [], past: [], next: null, conflicts: [] };
     const result = spokenDaySummary(day, 'Today');
     expect(result).toContain('clear');
   });
 
-  it('mentions current meeting', () => {
+  it('mentions current meeting (single object)', () => {
+    // analyzeDay returns current as single enriched event, not array
     const day = {
       summary: { total: 1 },
-      current: [{ event: { summary: 'Design Review' }, status: 'current' }],
+      current: { event: { summary: 'Design Review' }, status: 'current' },
       remaining: [],
       past: [],
       next: null,
@@ -279,10 +303,24 @@ describe('spokenDaySummary', () => {
     expect(result).toContain('currently in');
   });
 
+  it('handles null current gracefully', () => {
+    const day = {
+      summary: { total: 2 },
+      current: null,
+      remaining: [{ event: { summary: 'Later' } }],
+      past: [{ event: { summary: 'Earlier' } }],
+      next: { event: { summary: 'Later', start: { dateTime: '2026-02-16T14:00:00' } }, startsInMs: 1800000 },
+      conflicts: [],
+    };
+    const result = spokenDaySummary(day);
+    expect(result).not.toContain('currently in');
+    expect(result).toContain('Later');
+  });
+
   it('mentions conflicts', () => {
     const day = {
       summary: { total: 3 },
-      current: [],
+      current: null,
       remaining: [{ event: { summary: 'A' } }, { event: { summary: 'B' } }],
       past: [],
       next: { event: { summary: 'A', start: { dateTime: '2026-02-16T14:00:00' } }, startsInMs: 3600000 },
@@ -342,5 +380,65 @@ describe('confirmEdit', () => {
   it('warns if not verified', () => {
     const msg = confirmEdit('Meeting', { time: '14:00' }, false);
     expect(msg).toContain('pending');
+  });
+});
+
+// ─── Integration: analyzeDay → formatters ───────────────────────────────────
+// These ensure real analyzeDay() output flows through formatters without error.
+
+describe('analyzeDay → format integration', () => {
+  const makeEvent = (summary, startHour, endHour, date = '2026-02-16') => ({
+    id: summary.toLowerCase().replace(/\s/g, '-'),
+    summary,
+    start: { dateTime: `${date}T${String(startHour).padStart(2, '0')}:00:00` },
+    end: { dateTime: `${date}T${String(endHour).padStart(2, '0')}:00:00` },
+  });
+
+  const FEB_16 = new Date('2026-02-16T00:00:00');
+
+  it('buildDayUISpec works with real analyzeDay output (no current meeting)', () => {
+    const now = new Date('2026-02-16T08:00:00');
+    const events = [makeEvent('Standup', 9, 10), makeEvent('Lunch', 12, 13)];
+    const day = analyzeDay(events, FEB_16, now);
+    const spec = buildDayUISpec(day);
+    expect(spec.type).toBe('eventList');
+    expect(spec.events).toHaveLength(2);
+    expect(spec.events[0].title).toBe('Standup');
+  });
+
+  it('buildDayUISpec works with real analyzeDay output (meeting in progress)', () => {
+    const now = new Date('2026-02-16T09:30:00');
+    const events = [makeEvent('Standup', 9, 10), makeEvent('Lunch', 12, 13)];
+    const day = analyzeDay(events, FEB_16, now);
+    expect(day.current).not.toBeNull();
+    const spec = buildDayUISpec(day);
+    expect(spec.events).toHaveLength(2);
+    expect(spec.events[0].title).toBe('Standup');
+    expect(spec.events[0].status).toBe('current');
+  });
+
+  it('spokenDaySummary works with real analyzeDay output (empty day)', () => {
+    const now = new Date('2026-02-16T08:00:00');
+    const day = analyzeDay([], FEB_16, now);
+    const spoken = spokenDaySummary(day);
+    expect(spoken).toContain('clear');
+  });
+
+  it('spokenDaySummary works with real analyzeDay output (meeting in progress)', () => {
+    const now = new Date('2026-02-16T09:30:00');
+    const events = [makeEvent('Standup', 9, 10), makeEvent('Lunch', 12, 13)];
+    const day = analyzeDay(events, FEB_16, now);
+    const spoken = spokenDaySummary(day);
+    expect(spoken).toContain('currently in');
+    expect(spoken).toContain('Standup');
+  });
+
+  it('spokenDaySummary works with real analyzeDay output (all past)', () => {
+    const now = new Date('2026-02-16T18:00:00');
+    const events = [makeEvent('Standup', 9, 10), makeEvent('Lunch', 12, 13)];
+    const day = analyzeDay(events, FEB_16, now);
+    const spoken = spokenDaySummary(day);
+    expect(typeof spoken).toBe('string');
+    expect(spoken.length).toBeGreaterThan(0);
   });
 });

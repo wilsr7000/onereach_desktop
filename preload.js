@@ -1014,6 +1014,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 });
 
 // Expose Resource Manager API for CPU/GPU throttling
+contextBridge.exposeInMainWorld('terminal', {
+  exec: (command, cwd) => ipcRenderer.invoke('terminal:exec', command, cwd),
+});
+
 contextBridge.exposeInMainWorld('resourceManager', {
   // Get current status
   getStatus: () => ipcRenderer.invoke('resource-manager:get-status'),

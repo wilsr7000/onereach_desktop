@@ -18,7 +18,7 @@ const log = getLogQueue();
 const { getContactStore, isValidEmail } = require('../../lib/contact-store');
 
 const { resolveEventDate, getEventsForDay, editEventVerified, fetchEventDetails } = require('../../lib/calendar-fetch');
-const { confirmEdit, buildDayUISpec, formatEventTime } = require('../../lib/calendar-format');
+const { confirmEdit, buildDayUISpec, formatEventTime, formatDateLabel } = require('../../lib/calendar-format');
 
 const calendarEditAgent = {
   id: 'calendar-edit-agent',
@@ -69,7 +69,7 @@ LOW CONFIDENCE (below 0.60) -- do NOT bid:
 - "Cancel my meeting" / "Delete the standup" → calendar-delete-agent`,
 
   async execute(task) {
-    const query = (task.text || task.query || '').trim();
+    const query = (task.content || task.text || task.query || '').trim();
     if (!query) return { success: false, message: 'What would you like to change about an event?' };
 
     const now = new Date();

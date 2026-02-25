@@ -72,6 +72,8 @@ const {
 
 const exchangeBus = require('../../lib/exchange/event-bus');
 
+const { safeExecuteAgent, validateAgentContract } = require('../../packages/agents/agent-middleware');
+
 const { getTranscriptService } = require('../../lib/transcript-service');
 
 // ==================== BUILT-IN AGENT REGISTRY ====================
@@ -549,7 +551,9 @@ async function routePendingInput(text, metadata) {
       },
     };
 
-    const result = await executeWithInputSchema(agent, followUpTask);
+    const result = await safeExecuteAgent(agent, followUpTask, {
+      executeFn: (a, t, ctx) => executeWithInputSchema(a, t, ctx),
+    });
 
     // Agent needs MORE input (chained multi-turn)
     if (result.needsInput) {
@@ -910,6 +914,9 @@ async function connectBuiltInAgents(port) {
     }
 
     for (const agent of enabledAgents) {
+      // Validate agent contract at registration time (warn only, don't block)
+      validateAgentContract(agent);
+
       // Skip bidExcluded system agents (e.g., error-agent) -- they don't participate in auctions
       if (agent.bidExcluded) {
         log.info('voice', 'Agent is bidExcluded, not connecting to exchange', { v0: agent.id });
@@ -1134,45 +1141,41 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
           }, 10000);
 
           try {
-            let result;
-            if (originalAgent.execute && typeof originalAgent.execute === 'function') {
-              // Create execution context with subtask support
-              const executionContext = {
-                submitSubtask: createSubtaskSubmitter(msg.taskId, wrappedAgent.id),
-                taskId: msg.taskId,
-                agentId: wrappedAgent.id,
-                // Include subtask context if this is a subtask
-                ...(isSubtask(msg.task) ? { subtaskContext: getSubtaskContext(msg.task) } : {}),
-                // Provide heartbeat function so agents can send context-aware progress
-                heartbeat: (progress) => {
-                  try {
-                    ws.send(
-                      JSON.stringify({
-                        type: 'task_heartbeat',
-                        taskId: msg.taskId,
-                        agentId: wrappedAgent.id,
-                        progress,
-                      })
-                    );
-                  } catch (_ignored) {
-                    /* heartbeat best-effort */
-                  }
-                },
+            // Build execution context with subtask support + heartbeat
+            const executionContext = {
+              submitSubtask: createSubtaskSubmitter(msg.taskId, wrappedAgent.id),
+              taskId: msg.taskId,
+              agentId: wrappedAgent.id,
+              ...(isSubtask(msg.task) ? { subtaskContext: getSubtaskContext(msg.task) } : {}),
+              heartbeat: (progress) => {
+                try {
+                  ws.send(
+                    JSON.stringify({
+                      type: 'task_heartbeat',
+                      taskId: msg.taskId,
+                      agentId: wrappedAgent.id,
+                      progress,
+                    })
+                  );
+                } catch (_ignored) {
+                  /* heartbeat best-effort */
+                }
+              },
+            };
+
+            if (isSubtask(msg.task)) {
+              msg.task.context = {
+                ...msg.task.context,
+                ...getSubtaskContext(msg.task),
               };
-
-              // Merge subtask context into task context for easy access
-              if (isSubtask(msg.task)) {
-                msg.task.context = {
-                  ...msg.task.context,
-                  ...getSubtaskContext(msg.task),
-                };
-              }
-
-              // Use input schema processor for declarative input gathering
-              result = await executeWithInputSchema(originalAgent, msg.task, executionContext);
-            } else {
-              result = { success: false, error: 'Agent has no execute method' };
             }
+
+            // Execute through middleware: input normalization + error boundary + output normalization
+            const result = await safeExecuteAgent(originalAgent, msg.task, {
+              timeoutMs: originalAgent.executionTimeoutMs || 60000,
+              executeFn: (agent, safeTask, ctx) => executeWithInputSchema(agent, safeTask, ctx),
+              executionContext,
+            });
 
             clearInterval(heartbeatTimer);
 
@@ -1186,7 +1189,7 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
                   data: result.data,
                   html: result.html,
                   error: result.success ? undefined : result.error,
-                  needsInput: result.needsInput, // Pass through for multi-turn conversations
+                  needsInput: result.needsInput,
                 },
               })
             );
@@ -1361,6 +1364,9 @@ async function connectCustomAgents(port) {
  * Connect a single local agent to the exchange
  */
 async function connectLocalAgent(agent, port) {
+  // Validate agent contract at registration time
+  validateAgentContract(agent);
+
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://localhost:${port}`);
     let heartbeatInterval = null;
@@ -1455,58 +1461,45 @@ async function connectLocalAgent(agent, port) {
           });
 
           const startTime = Date.now();
-          try {
-            // Create execution context with subtask support
-            const executionContext = {
-              submitSubtask: createSubtaskSubmitter(msg.taskId, agent.id),
-              taskId: msg.taskId,
-              agentId: agent.id,
-              // Include subtask context if this is a subtask
-              ...(isSubtask(msg.task) ? { subtaskContext: getSubtaskContext(msg.task) } : {}),
+          const executionContext = {
+            submitSubtask: createSubtaskSubmitter(msg.taskId, agent.id),
+            taskId: msg.taskId,
+            agentId: agent.id,
+            ...(isSubtask(msg.task) ? { subtaskContext: getSubtaskContext(msg.task) } : {}),
+          };
+
+          if (isSubtask(msg.task)) {
+            msg.task.context = {
+              ...msg.task.context,
+              ...getSubtaskContext(msg.task),
             };
-
-            // Merge subtask context into task context for easy access
-            if (isSubtask(msg.task)) {
-              msg.task.context = {
-                ...msg.task.context,
-                ...getSubtaskContext(msg.task),
-              };
-            }
-
-            const result = await executeLocalAgent(agent, msg.task, executionContext);
-            const execTime = Date.now() - startTime;
-
-            log.info('voice', '[Agent:${agent.name}] Execution complete: success=, time=ms', {
-              v0: result.success,
-              v1: execTime,
-            });
-
-            ws.send(
-              JSON.stringify({
-                type: 'task_result',
-                taskId: msg.taskId,
-                result: {
-                  success: result.success,
-                  output: result.result || result.error,
-                  html: result.html,
-                  error: result.success ? undefined : result.error,
-                  needsInput: result.needsInput,
-                },
-              })
-            );
-          } catch (execError) {
-            log.error('voice', 'Agent execution failed', { agent: agent.name, error: execError.message });
-            ws.send(
-              JSON.stringify({
-                type: 'task_result',
-                taskId: msg.taskId,
-                result: {
-                  success: false,
-                  error: execError.message,
-                },
-              })
-            );
           }
+
+          // Execute through middleware: input normalization + error boundary + output normalization
+          const result = await safeExecuteAgent(agent, msg.task, {
+            executeFn: (a, t, ctx) => executeLocalAgent(a, t, ctx),
+            executionContext,
+          });
+          const execTime = Date.now() - startTime;
+
+          log.info('voice', '[Agent:${agent.name}] Execution complete: success=, time=ms', {
+            v0: result.success,
+            v1: execTime,
+          });
+
+          ws.send(
+            JSON.stringify({
+              type: 'task_result',
+              taskId: msg.taskId,
+              result: {
+                success: result.success,
+                output: result.message || result.result || result.error,
+                html: result.html,
+                error: result.success ? undefined : result.error,
+                needsInput: result.needsInput,
+              },
+            })
+          );
         }
         // ==================== PING/PONG ====================
         else if (msg.type === 'ping') {
@@ -1725,8 +1718,43 @@ async function executeLocalAgent(agent, task, _executionContext = {}) {
 
       const { stdout } = await execAsync(command, { timeout: 10000 });
       execResult = { success: true, result: stdout || 'Command executed' };
+    } else if (agent.tools && agent.tools.length > 0) {
+      // LLM with tool calling -- agent declared tool dependencies
+      const { resolveTools, createToolDispatcher } = require('../../lib/agent-tools');
+      const resolved = resolveTools(agent.tools);
+
+      if (resolved.length > 0) {
+        const dispatcher = createToolDispatcher(resolved);
+        const messages = [...historyMessages, { role: 'user', content }];
+
+        const result = await ai.chatWithTools({
+          profile: 'standard',
+          system: systemPrompt,
+          messages,
+          tools: resolved,
+          onToolCall: dispatcher,
+          maxTokens: 2048,
+          temperature: 0.7,
+          feature: featureTag,
+          maxToolRounds: 10,
+          onProgress: ({ toolName }) => {
+            log.info('voice', `[${agent.name}] Tool call: ${toolName}`);
+          },
+        });
+
+        const response = (result.content || '').trim();
+        execResult = { success: true, result: response, toolCallLog: result.toolCallLog };
+      } else {
+        // Tools declared but none resolved -- fall through to plain LLM
+        const messages = [...historyMessages, { role: 'user', content }];
+        const result = await ai.chat({
+          profile: 'standard', system: systemPrompt, messages,
+          maxTokens: 2048, temperature: 0.7, feature: featureTag,
+        });
+        execResult = { success: true, result: (result.content || '').trim() };
+      }
     } else {
-      // LLM / conversational
+      // LLM / conversational (no tools)
       const messages = [...historyMessages, { role: 'user', content }];
 
       const result = await ai.chat({
@@ -4077,7 +4105,9 @@ async function processSubmit(transcript, options = {}) {
         };
 
         try {
-          const result = await executeWithInputSchema(agent, taskObj);
+          const result = await safeExecuteAgent(agent, taskObj, {
+            executeFn: (a, t, ctx) => executeWithInputSchema(a, t, ctx),
+          });
 
           // Record success back into history
           const message = result.message || result.result || '';

@@ -13,27 +13,16 @@ class AppContextCapture {
     this.lastActiveApp = null;
     this.appCache = new Map();
     this.backgroundTrackingInterval = null;
-
-    // Start background tracking of active app
-    this.startBackgroundTracking();
+    this._cacheTTLMs = 5000;
   }
 
   /**
-   * Start background tracking of the active application
+   * Start background tracking of the active application.
+   * Kept for backward compatibility but no longer auto-started.
+   * On-demand capture with TTL cache replaces the polling approach.
    */
   startBackgroundTracking() {
-    // Capture active app every 2 seconds
-    this.backgroundTrackingInterval = setInterval(async () => {
-      try {
-        const appInfo = await this.getActiveApplication();
-        // Only update cache if it's not Electron
-        if (appInfo.name !== 'Electron' && appInfo.name !== 'Unknown') {
-          this.lastActiveApp = appInfo;
-        }
-      } catch (_error) {
-        // Silently ignore errors in background tracking
-      }
-    }, 2000);
+    // No-op: polling replaced by on-demand capture in getActiveApplication()
   }
 
   /**
@@ -51,6 +40,11 @@ class AppContextCapture {
    * @returns {Promise<Object>} Application info
    */
   async getActiveApplication() {
+    // Return cached result if still fresh (avoids spawning osascript on every call)
+    if (this.lastActiveApp && (Date.now() - this.lastActiveApp.timestamp) < this._cacheTTLMs) {
+      return this.lastActiveApp;
+    }
+
     // Windows compatibility: Return generic info for now
     if (process.platform !== 'darwin') {
       console.log('[AppContext] Non-macOS platform detected');

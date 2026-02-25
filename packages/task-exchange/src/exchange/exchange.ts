@@ -756,8 +756,11 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
 
       this.agentRegistry.decrementTaskCount(agentId);
 
-      if (result && result.success) {
-        // Success -- unlock and settle
+      // Settle if (a) success, or (b) agent returned a user-facing message
+      // even with success=false. A message means the agent handled the request
+      // (e.g. "no meetings found") vs a hard crash with no response.
+      const isSoftDecline = result && !result.success && result.message;
+      if (result && (result.success || isSoftDecline)) {
         task.lockedAt = null;
         task.lockedBy = null;
         this.emit('task:unlocked', { task, reason: 'completed' });
@@ -766,13 +769,15 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
         task.result = result;
         task.completedAt = Date.now();
 
-        await this.reputationStore.recordSuccess(agentId, agent.version);
+        if (result.success) {
+          await this.reputationStore.recordSuccess(agentId, agent.version);
+        }
         this.emit('task:settled', { task, result, agentId, attempt: i + 1 });
 
         return;
       }
 
-      // Failure -- unlock so cascading can try next agent
+      // Hard failure (no result or no message) -- unlock so cascading can try next agent
       task.lockedAt = null;
       task.lockedBy = null;
       const error = result?.error ?? 'Execution timeout';

@@ -310,10 +310,10 @@ LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
       await this.initialize();
     }
 
-    const query = task.content;
+    const query = task.content || '';
     const { onProgress = () => {} } = context;
 
-    log.info('agent', `[DocsAgent] Query: "${query.slice(0, 80)}"`);
+    log.info('agent', `[DocsAgent] Query: "${(query || '').slice(0, 80)}"`);
 
     // Track in memory
     try {

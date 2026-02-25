@@ -84,7 +84,8 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, _llmClient) {
 
     // Execute using the matching agent's prompt
     execute: async (task, context) => {
-      const content = task.content.toLowerCase();
+      try {
+      const content = (task.content || '').toLowerCase();
 
       // Check for cancellation
       if (context.signal.aborted) {
@@ -117,7 +118,7 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, _llmClient) {
 
       // Build the prompt based on agent definition
       const systemPrompt = bestMatch.systemPrompt || `You are ${bestMatch.name}. ${bestMatch.description || ''}`;
-      const userPrompt = task.content;
+      const userPrompt = task.content || '';
 
       // Execute based on execution type
       switch (bestMatch.executionType) {
@@ -126,24 +127,18 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, _llmClient) {
           return executeWithAppLLM(userPrompt, systemPrompt, task);
 
         case 'script':
-          // For script type, we'd execute a predefined script
           log.info('agent', 'Script execution not yet implemented');
-          return {
-            success: false,
-            error: 'Script execution not yet implemented',
-          };
+          return { success: false, message: 'Script execution not yet implemented' };
 
         case 'api':
-          // For API type, we'd call an external API
           log.info('agent', 'API execution not yet implemented');
-          return {
-            success: false,
-            error: 'API execution not yet implemented',
-          };
+          return { success: false, message: 'API execution not yet implemented' };
 
         default:
-          // Default to LLM
           return executeWithAppLLM(userPrompt, systemPrompt, task);
+      }
+      } catch (err) {
+        return { success: false, message: `Agent error: ${err.message}` };
       }
     },
   });

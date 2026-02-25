@@ -140,7 +140,8 @@ This agent ONLY bids when a request clearly requires coordination between multip
    * Execute by coordinating multiple agents
    */
   async execute(task, context = {}) {
-    const composite = this._detectComposite(task.content);
+    try {
+    const composite = this._detectComposite(task.content || '');
 
     if (!composite) {
       return { success: false, message: "I'm not sure how to help with that." };
@@ -212,6 +213,9 @@ This agent ONLY bids when a request clearly requires coordination between multip
       agentsUsed: composite.agents,
       results,
     };
+    } catch (err) {
+      return { success: false, message: `I had trouble coordinating that request: ${err.message}` };
+    }
   },
 
   /**

@@ -20,6 +20,7 @@ const ai = require('../../lib/ai-service');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 const { getAgentMemory } = require('../../lib/agent-memory-store');
+const { getTimeContext } = require('../../lib/thinking-agent');
 const { renderAgentUI } = require('../../lib/agent-ui-renderer');
 const { getCalendarStore } = require('../../lib/calendar-store');
 
@@ -97,18 +98,20 @@ LOW CONFIDENCE (below 0.60) -- do NOT bid:
 - Anything about creating, modifying, or deleting events`,
 
   /**
-   * Briefing contribution: today's schedule summary.
+   * Briefing contribution. Accepts optional { targetDate, dateLabel } from daily-brief-agent.
    */
-  async getBriefing() {
+  async getBriefing(context = {}) {
     try {
       const store = getCalendarStore();
-      const brief = await store.generateMorningBrief();
+      const date = context?.targetDate || null;
+      const label = context?.dateLabel || 'today';
+      const brief = await store.generateMorningBrief(date);
       if (!brief || !brief.timeline || brief.timeline.length === 0) {
-        return { section: 'Calendar', priority: 3, content: 'No meetings scheduled today.' };
+        return { section: 'Calendar', priority: 3, content: `No meetings scheduled ${label}.` };
       }
       const count = brief.timeline.length;
       const firstMeeting = brief.timeline[0];
-      let content = `${count} meeting${count !== 1 ? 's' : ''} today.`;
+      let content = `${count} meeting${count !== 1 ? 's' : ''} ${label}.`;
       if (firstMeeting) content += ` First: "${firstMeeting.title}" at ${firstMeeting.start}.`;
       if (brief.conflicts?.length) content += ` ${brief.conflicts.length} conflict(s).`;
       if (brief.backToBack?.length) content += ` ${brief.backToBack.length} back-to-back.`;
@@ -120,7 +123,7 @@ LOW CONFIDENCE (below 0.60) -- do NOT bid:
   },
 
   async execute(task) {
-    const query = (task.text || task.query || '').trim();
+    const query = (task.content || task.text || task.query || '').trim();
     if (!query) return { success: false, message: 'What would you like to know about your calendar?' };
 
     const now = new Date();
@@ -245,9 +248,10 @@ Rules:
       return { success: true, message: 'You have no more meetings today.' };
     }
 
-    const title = next.summary || 'Untitled';
-    const time = formatEventTime(next);
-    const start = new Date(next.start?.dateTime || next.start?.date);
+    const raw = next.event;
+    const title = raw.summary || 'Untitled';
+    const time = formatEventTime(raw);
+    const start = next.startTime || new Date(raw.start?.dateTime || raw.start?.date);
     const diffMs = start - now;
     const mins = Math.round(diffMs / 60000);
 
@@ -262,7 +266,7 @@ Rules:
       msg = `Your next meeting is "${title}" at ${time}.`;
     }
 
-    const meetingLink = extractMeetingLink(next);
+    const meetingLink = extractMeetingLink(raw);
     if (meetingLink.url && diffMs < 600000) {
       msg += ` ${meetingLink.label}: ${meetingLink.url}`;
     }
@@ -424,7 +428,8 @@ Rules:
 
     const conflictList = conflicts
       .slice(0, 5)
-      .map(([a, b]) => {
+      .map((c) => {
+        const [a, b] = c.events;
         return `"${a.summary}" and "${b.summary}" overlap at ${formatEventTime(a)}`;
       })
       .join('; ');

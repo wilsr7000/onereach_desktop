@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-23T05:04:54.887Z",
+  "timestamp": "2026-02-24T23:46:08.892Z",
   "summary": {
     "total": 63,
     "passed": 38,
@@ -14,7 +14,7 @@
       "user": "What time is it?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 9:03 PM"
+      "response": "It's 3:44 PM"
     },
     {
       "conversation": "Time: basic queries",
@@ -22,7 +22,7 @@
       "user": "And what day is it today?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Sunday, February 22, 2026"
+      "response": "It's Tuesday, February 24, 2026"
     },
     {
       "conversation": "Time: basic queries",
@@ -30,7 +30,7 @@
       "user": "What is the date?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Sunday, February 22, 2026"
+      "response": "It's Tuesday, February 24, 2026"
     },
     {
       "conversation": "Time: timezone awareness",
@@ -46,7 +46,7 @@
       "user": "And in London?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 9:03 PM"
+      "response": "It's 3:44 PM"
     },
     {
       "conversation": "Weather: city provided",
@@ -54,7 +54,7 @@
       "user": "What is the weather in Denver?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 38°F and clear in Denver"
+      "response": "It's 67°F and partly cloudy in Denver"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -62,7 +62,7 @@
       "user": "What's the weather?",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "It's 58°F and partly cloudy in Berkeley. Humidity is 72%"
+      "response": "It's 62°F and fog in Berkeley. Humidity is 80%"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -70,7 +70,7 @@
       "user": "San Francisco",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 58°F and partly cloudy in Berkeley. Humidity is 72%"
+      "response": "It's 62°F and fog in Berkeley. Humidity is 80%"
     },
     {
       "conversation": "Weather: forecast request",
@@ -78,7 +78,7 @@
       "user": "Will it rain tomorrow in Seattle?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 58°F and partly cloudy in Berkeley. Humidity is 72%"
+      "response": "It's 62°F and fog in Berkeley. Humidity is 80%"
     },
     {
       "conversation": "Spelling: common words",
@@ -126,7 +126,7 @@
       "user": "Hello there",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "What can I do for you?"
+      "response": "I'm here to help! Just let me know what you need."
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -134,7 +134,7 @@
       "user": "How are you doing?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I'm doing well, doing! How can I help you?"
+      "response": "I'm doing well, thanks for asking! How can I help you?"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -142,7 +142,7 @@
       "user": "Thanks for your help",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Glad I could help!"
+      "response": "No problem!"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -150,7 +150,7 @@
       "user": "Goodbye",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "See you later, doing!"
+      "response": "Take care!"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -158,7 +158,7 @@
       "user": "Hey",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Hey doing! How can I help you?"
+      "response": "Hey there! How can I help you?"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -166,7 +166,7 @@
       "user": "Good morning",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good morning, doing! How can I help you today?"
+      "response": "Good morning! How can I help you today?"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -174,7 +174,7 @@
       "user": "Good night",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good night, doing! Sleep well."
+      "response": "Good night! Sleep well."
     },
     {
       "conversation": "Help: capabilities inquiry",
@@ -213,24 +213,24 @@
       "agentId": "calendar-query-agent",
       "user": "What meetings do I have today?",
       "grade": "partial",
-      "reason": "success: false but has message: \"What would you like to know about your calendar?\"",
-      "response": "What would you like to know about your calendar?"
+      "reason": "success: false but has message: \"I had trouble checking your calendar: Both anthropic and fal\"",
+      "response": "I had trouble checking your calendar: Both anthropic and fallback openai failed"
     },
     {
       "conversation": "Calendar: schedule queries",
       "agentId": "calendar-query-agent",
       "user": "Am I free at 3pm?",
       "grade": "partial",
-      "reason": "success: false but has message: \"What would you like to know about your calendar?\"",
-      "response": "What would you like to know about your calendar?"
+      "reason": "success: false but has message: \"I had trouble checking your calendar: Both anthropic and fal\"",
+      "response": "I had trouble checking your calendar: Both anthropic and fallback openai failed"
     },
     {
       "conversation": "Calendar: schedule queries",
       "agentId": "calendar-query-agent",
       "user": "Show my schedule for this week",
       "grade": "partial",
-      "reason": "success: false but has message: \"What would you like to know about your calendar?\"",
-      "response": "What would you like to know about your calendar?"
+      "reason": "success: false but has message: \"I had trouble checking your calendar: Both anthropic and fal\"",
+      "response": "I had trouble checking your calendar: Both anthropic and fallback openai failed"
     },
     {
       "conversation": "Calendar: create with full details",
@@ -238,15 +238,15 @@
       "user": "Schedule a meeting with Bob at 2pm tomorrow",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "What event would you like to create?"
+      "response": "I couldn't create the event: Both anthropic and fallback openai failed"
     },
     {
       "conversation": "Calendar: create with full details",
       "agentId": "calendar-create-agent",
       "user": "One hour, in the conference room",
       "grade": "partial",
-      "reason": "success: false but has message: \"What event would you like to create?\"",
-      "response": "What event would you like to create?"
+      "reason": "success: false but has message: \"I couldn't create the event: Both anthropic and fallback ope\"",
+      "response": "I couldn't create the event: Both anthropic and fallback openai failed"
     },
     {
       "conversation": "Calendar: create with missing details",
@@ -254,15 +254,15 @@
       "user": "Add a dentist appointment",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "What event would you like to create?"
+      "response": "I couldn't create the event: anthropic circuit is open"
     },
     {
       "conversation": "Calendar: create with missing details",
       "agentId": "calendar-create-agent",
       "user": "Next Monday at 10am",
       "grade": "partial",
-      "reason": "success: false but has message: \"What event would you like to create?\"",
-      "response": "What event would you like to create?"
+      "reason": "success: false but has message: \"I couldn't create the event: anthropic circuit is open\"",
+      "response": "I couldn't create the event: anthropic circuit is open"
     },
     {
       "conversation": "Calendar: reschedule",
@@ -270,7 +270,7 @@
       "user": "Move my 3pm meeting to 4pm",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "What would you like to change about an event?"
+      "response": "I couldn't update the event: anthropic circuit is open"
     },
     {
       "conversation": "Calendar: cancel event",
@@ -278,7 +278,7 @@
       "user": "Cancel my meeting tomorrow at noon",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "Which event would you like to cancel?"
+      "response": "I couldn't delete the event: anthropic circuit is open"
     },
     {
       "conversation": "Search: document queries",
@@ -398,7 +398,7 @@
       "user": "Give me my morning briefing",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good evening, Isaac. Current time: 9:04 PM. Date: Sunday, February 22, 2026. Time of day: evening. N"
+      "response": "Good afternoon. Current time: 3:46 PM. Date: Tuesday, February 24, 2026. Time of day: afternoon. 4 m"
     },
     {
       "conversation": "Memory: store and recall preferences",
@@ -437,8 +437,8 @@
       "agentId": "browser-agent",
       "user": "Go to google.com and search for weather",
       "grade": "partial",
-      "reason": "success: false but has message: \"Could not read the page: Cannot read properties of undefined\"",
-      "response": "Could not read the page: Cannot read properties of undefined (reading 'snapshot')"
+      "reason": "success: false but has message: \"Could not start the browser: browserType.launchPersistentCon\"",
+      "response": "Could not start the browser: browserType.launchPersistentContext: Executable doesn't exist at /var/f"
     },
     {
       "conversation": "App: navigation commands",
@@ -494,7 +494,7 @@
       "user": "asdfghjkl",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "What was that?"
+      "response": "Hmm?"
     },
     {
       "conversation": "Edge: single word",

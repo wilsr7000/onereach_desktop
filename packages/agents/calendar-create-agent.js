@@ -67,7 +67,7 @@ LOW CONFIDENCE (below 0.60) -- do NOT bid:
 - General questions about schedule or availability`,
 
   async execute(task) {
-    const query = (task.text || task.query || '').trim();
+    const query = (task.content || task.text || task.query || '').trim();
     if (!query) return { success: false, message: 'What event would you like to create?' };
 
     const now = new Date();
