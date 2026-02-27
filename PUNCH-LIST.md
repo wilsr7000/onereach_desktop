@@ -1,7 +1,7 @@
 # Onereach.ai Punch List
 
 > Master list of bugs, fixes, and small features to address.
-> Updated: February 2026 | Current Version: 4.4.0
+> Updated: February 2026 | Current Version: 4.4.1
 
 ---
 
@@ -433,6 +433,14 @@
 ---
 
 ## Recently Completed
+
+- [x] **Calendar Micro UI Restored** (v4.4.1)
+  - Calendar agent results now show styled event cards in the Command HUD instead of plain text
+  - Root cause: agents returned declarative `ui` specs but the pipeline never converted them to `html`
+  - Fix: `normalizeResult()` in agent-middleware now auto-converts `ui` specs to rendered HTML via `renderAgentUI()`
+  - Daily-brief-agent now builds a calendar event UI card from calendar contributions
+  - Calendar-query-agent's `getBriefing()` now passes event data through to the daily-brief-agent
+  - Files: `packages/agents/agent-middleware.js`, `packages/agents/daily-brief-agent.js`, `packages/agents/calendar-query-agent.js`
 
 - [x] **Double Audio Fix** (v4.4.0)
   - Fixed orb speaking responses twice when backend already handled TTS

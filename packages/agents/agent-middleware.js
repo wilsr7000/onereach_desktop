@@ -104,6 +104,15 @@ function normalizeResult(raw) {
     result.message = String(result.message);
   }
 
+  // Convert declarative UI spec to HTML if agent returned one
+  if (result.ui && !result.html) {
+    try {
+      const { renderAgentUI } = require('../../lib/agent-ui-renderer');
+      const rendered = renderAgentUI(result.ui);
+      if (rendered) result.html = rendered;
+    } catch (_) { /* non-fatal */ }
+  }
+
   return result;
 }
 

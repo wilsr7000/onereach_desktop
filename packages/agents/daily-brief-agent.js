@@ -28,6 +28,7 @@ const { getUserProfile } = require('../../lib/user-profile-store');
 const ai = require('../../lib/ai-service');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
+const { buildBriefUISpec } = require('../../lib/calendar-format');
 
 // Timeouts for briefing collection
 // Calendar agent fetches from omnical API which can take 2-3s cold, so allow more time
@@ -290,9 +291,17 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
     // 6. Log this briefing to memory history
     this._logBriefingToHistory(contributions);
 
+    // 7. Build UI card from calendar contributions if available
+    let ui;
+    const calContrib = contributions.find((c) => c.briefData && c.briefData.timeline?.length > 0);
+    if (calContrib) {
+      try { ui = buildBriefUISpec(calContrib.briefData); } catch (_) { /* non-fatal */ }
+    }
+
     return {
       success: true,
       message: fullSpeech,
+      ui,
       data: {
         type: 'morning_brief',
         contributions: contributions.map((c) => ({ section: c.section, priority: c.priority })),

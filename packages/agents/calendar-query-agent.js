@@ -115,7 +115,7 @@ LOW CONFIDENCE (below 0.60) -- do NOT bid:
       if (firstMeeting) content += ` First: "${firstMeeting.title}" at ${firstMeeting.start}.`;
       if (brief.conflicts?.length) content += ` ${brief.conflicts.length} conflict(s).`;
       if (brief.backToBack?.length) content += ` ${brief.backToBack.length} back-to-back.`;
-      return { section: 'Calendar', priority: 3, content };
+      return { section: 'Calendar', priority: 3, content, briefData: brief };
     } catch (err) {
       log.error('calendar-query', 'getBriefing failed', { error: err.message });
       return { section: 'Calendar', priority: 3, content: 'Calendar unavailable.' };
