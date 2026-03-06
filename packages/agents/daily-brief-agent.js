@@ -302,6 +302,7 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
       success: true,
       message: fullSpeech,
       ui,
+      soundCue: { type: 'one-shot', name: 'morning-motif', volume: 0.4 },
       data: {
         type: 'morning_brief',
         contributions: contributions.map((c) => ({ section: c.section, priority: c.priority })),

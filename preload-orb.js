@@ -9,6 +9,15 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+function ipcWithTimeout(channel, args = [], ms = 15000) {
+  return Promise.race([
+    ipcRenderer.invoke(channel, ...args),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`IPC timeout: ${channel} (${ms}ms)`)), ms)
+    ),
+  ]);
+}
+
 // Expose Orb API to renderer
 contextBridge.exposeInMainWorld('orbAPI', {
   // ==========================================================================
@@ -19,7 +28,7 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * Connect to OpenAI Realtime API
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  connect: () => ipcRenderer.invoke('realtime-speech:connect'),
+  connect: () => ipcWithTimeout('realtime-speech:connect', [], 20000),
 
   /**
    * Disconnect from the API
@@ -75,7 +84,7 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * Request microphone permission
    * @returns {Promise<boolean>}
    */
-  requestMicPermission: () => ipcRenderer.invoke('speech:request-mic-permission'),
+  requestMicPermission: () => ipcWithTimeout('speech:request-mic-permission', [], 10000),
 
   // ==========================================================================
   // VOICE TASK SDK (classification, queuing, task management)
@@ -281,7 +290,7 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * @param {string} text - Text to speak
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  speak: (text) => ipcRenderer.invoke('realtime-speech:speak', text),
+  speak: (text) => ipcWithTimeout('realtime-speech:speak', [text], 15000),
 
   /**
    * Respond to a function call with our agent's result
@@ -289,7 +298,7 @@ contextBridge.exposeInMainWorld('orbAPI', {
    * @param {string} result - The result text for AI to speak
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  respondToFunction: (callId, result) => ipcRenderer.invoke('realtime-speech:respond-to-function', callId, result),
+  respondToFunction: (callId, result) => ipcWithTimeout('realtime-speech:respond-to-function', [callId, result], 15000),
 
   /**
    * Speak text using ElevenLabs TTS (fallback)
@@ -371,6 +380,43 @@ contextBridge.exposeInMainWorld('orbAPI', {
     const handler = (event, data) => callback(data);
     ipcRenderer.on('agent-composer:plan-summary', handler);
     return () => ipcRenderer.removeListener('agent-composer:plan-summary', handler);
+  },
+
+  // ==========================================================================
+  // SOUND ENGINE (ambient, SFX, tones)
+  // ==========================================================================
+
+  /**
+   * Listen for sound cue events from main process (agent results with soundCue).
+   * @param {Function} callback - Called with soundCue object
+   * @returns {Function} Unsubscribe function
+   */
+  onSoundCue: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('orb:sound-cue', handler);
+    return () => ipcRenderer.removeListener('orb:sound-cue', handler);
+  },
+
+  /**
+   * Listen for ambient scene change requests from main process.
+   * @param {Function} callback - Called with { scene } or { action: 'stop' }
+   * @returns {Function} Unsubscribe function
+   */
+  onAmbientCommand: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('orb:ambient-command', handler);
+    return () => ipcRenderer.removeListener('orb:ambient-command', handler);
+  },
+
+  /**
+   * Listen for ambient attention notifications from main process.
+   * @param {Function} callback - Called with { label, detail, source }
+   * @returns {Function} Unsubscribe function
+   */
+  onAmbientAttention: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('orb:ambient-attention', handler);
+    return () => ipcRenderer.removeListener('orb:ambient-attention', handler);
   },
 
   /**

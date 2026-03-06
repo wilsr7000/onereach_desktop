@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' blob: mediastream:; img-src 'self' blob: data:; connect-src 'self' blob: https://*.onereach.ai wss://*.onereach.ai https://*.livekit.cloud wss://*.livekit.cloud; worker-src 'self' blob:;"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' blob: mediastream:; img-src 'self' blob: data:; connect-src 'self' blob: https://*.onereach.ai wss://*.onereach.ai https://*.livekit.cloud wss://*.livekit.cloud wss://api.openai.com https://api.openai.com; worker-src 'self' blob:;"
     />
     <title>WISER Meeting</title>
     <link
@@ -512,6 +512,309 @@
 
       .audio-meter-bar.peak {
         background: var(--accent-red);
+      }
+
+      /* ============================================
+       MEETING HUB (Riverside-style landing page)
+       ============================================ */
+      .meeting-hub {
+        position: absolute;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg-base);
+        padding: 32px 24px;
+        gap: 8px;
+        overflow-y: auto;
+      }
+
+      .meeting-hub.hidden { display: none; }
+
+      .hub-brand {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--text-primary);
+        letter-spacing: -0.02em;
+      }
+
+      .hub-subtitle {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 20px;
+      }
+
+      .hub-identity {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+        max-width: 360px;
+        margin-bottom: 20px;
+      }
+
+      .hub-identity input,
+      .hub-identity select {
+        width: 100%;
+        padding: 11px 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-size: 14px;
+        font-family: inherit;
+        transition: border-color var(--transition-fast);
+      }
+
+      .hub-identity input:focus,
+      .hub-identity select:focus {
+        outline: none;
+        border-color: var(--accent-blue);
+      }
+
+      .hub-identity select.unset {
+        border-color: rgba(255, 59, 78, 0.5);
+        animation: hubPulse 1.5s ease-in-out 2;
+      }
+
+      @keyframes hubPulse {
+        0%, 100% { border-color: rgba(255, 59, 78, 0.3); }
+        50% { border-color: rgba(255, 59, 78, 0.7); }
+      }
+
+      .hub-space-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-align: center;
+        line-height: 1.4;
+      }
+
+      .hub-actions {
+        display: flex;
+        gap: 16px;
+        width: 100%;
+        max-width: 360px;
+      }
+
+      .hub-card {
+        flex: 1;
+        padding: 28px 16px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        text-align: center;
+      }
+
+      .hub-card:hover {
+        background: var(--bg-elevated);
+        border-color: var(--border-light);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      }
+
+      .hub-card svg {
+        width: 28px;
+        height: 28px;
+        color: var(--accent-blue);
+      }
+
+      .hub-card-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .hub-card-desc {
+        font-size: 11px;
+        color: var(--text-muted);
+        line-height: 1.4;
+      }
+
+      /* Hub sub-panels (New Meeting options, Join form) */
+      .hub-sub-panel {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        max-width: 400px;
+        animation: hubSlideIn 0.2s ease;
+      }
+
+      .hub-sub-panel.visible { display: flex; }
+
+      @keyframes hubSlideIn {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      .hub-sub-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .hub-sub-desc {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+      }
+
+      .hub-option-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+      }
+
+      .hub-option-card {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+      }
+
+      .hub-option-card:hover {
+        background: var(--bg-elevated);
+        border-color: var(--border-light);
+        transform: translateX(2px);
+      }
+
+      .hub-option-card svg {
+        width: 22px;
+        height: 22px;
+        flex-shrink: 0;
+        color: var(--accent-blue);
+      }
+
+      .hub-option-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .hub-option-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .hub-option-desc {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      /* Join meeting input row */
+      .hub-join-row {
+        display: flex;
+        gap: 8px;
+        width: 100%;
+      }
+
+      .hub-join-row input {
+        flex: 1;
+        padding: 12px 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-size: 14px;
+        font-family: inherit;
+      }
+
+      .hub-join-row input:focus {
+        outline: none;
+        border-color: var(--accent-blue);
+      }
+
+      .hub-join-btn {
+        padding: 12px 24px;
+        background: var(--accent-blue);
+        color: #fff;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        white-space: nowrap;
+      }
+
+      .hub-join-btn:hover {
+        filter: brightness(1.15);
+        transform: translateY(-1px);
+      }
+
+      .hub-join-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .hub-back-link {
+        font-size: 12px;
+        color: var(--text-muted);
+        cursor: pointer;
+        margin-top: 8px;
+        transition: color var(--transition-fast);
+      }
+
+      .hub-back-link:hover { color: var(--text-secondary); }
+
+      .hub-status {
+        font-size: 12px;
+        min-height: 18px;
+        text-align: center;
+      }
+
+      .hub-status.error { color: var(--accent-red); }
+      .hub-status.success { color: var(--accent-green); }
+      .hub-status.info { color: var(--accent-blue); }
+
+      /* Schedule result (shareable link) */
+      .hub-schedule-result {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 16px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+      }
+
+      .hub-schedule-result.visible { display: flex; }
+
+      .hub-link-box {
+        width: 100%;
+        padding: 10px 12px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        color: var(--text-secondary);
+        word-break: break-all;
+        cursor: pointer;
+        text-align: center;
+      }
+
+      .hub-link-box:hover {
+        border-color: var(--accent-blue);
       }
 
       /* ============================================
@@ -2025,6 +2328,11 @@
       .status-message.error {
         border-color: rgba(255, 59, 78, 0.3);
         color: var(--accent-red);
+      }
+
+      .status-message.warning {
+        border-color: rgba(255, 180, 50, 0.3);
+        color: #ffb432;
       }
 
       .status-dot {
@@ -3817,6 +4125,12 @@
         WISER Meeting
       </div>
       <div class="header-actions">
+        <button class="header-btn" id="hubHomeBtn" onclick="app.hubShow()" title="Back to meeting hub" style="font-size: 11px; padding: 4px 10px; border-radius: 6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+        </button>
         <button class="header-btn" onclick="app.minimize()" title="Minimize">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M5 12h14" />
@@ -3832,6 +4146,103 @@
 
     <!-- Main Layout -->
     <div class="main-layout">
+      <!-- Meeting Hub Landing Page (shown on first open) -->
+      <div class="meeting-hub" id="meetingHub">
+        <div class="hub-brand">WISER Meeting</div>
+        <div class="hub-subtitle">Record, meet, and transcribe</div>
+
+        <div class="hub-identity">
+          <input type="text" id="hubNameInput" placeholder="Your name" autocomplete="name" autocapitalize="words" spellcheck="false" />
+          <select id="hubSpaceSelect" onchange="app.onHubSpaceChange()">
+            <option value="">Select a space for this meeting...</option>
+          </select>
+          <div class="hub-space-hint">Recordings, transcripts, and notes will be saved here</div>
+        </div>
+
+        <div class="hub-actions" id="hubMainActions">
+          <div class="hub-card" onclick="app.hubNewMeeting()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <polygon points="23 7 16 12 23 17 23 7" />
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+            </svg>
+            <span class="hub-card-title">New Meeting</span>
+            <span class="hub-card-desc">Start recording or host a live session</span>
+          </div>
+          <div class="hub-card" onclick="app.hubJoinMeeting()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              <polyline points="10 17 15 12 10 7" />
+              <line x1="15" y1="12" x2="3" y2="12" />
+            </svg>
+            <span class="hub-card-title">Join Meeting</span>
+            <span class="hub-card-desc">Enter a meeting ID to connect</span>
+          </div>
+        </div>
+
+        <!-- New Meeting sub-panel -->
+        <div class="hub-sub-panel" id="hubNewMeetingPanel">
+          <div class="hub-sub-title">New Meeting</div>
+          <div class="hub-sub-desc">Choose how you want to meet</div>
+          <div class="hub-option-cards">
+            <div class="hub-option-card" onclick="app.hubStartLiveMeeting()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <div class="hub-option-info">
+                <span class="hub-option-title">Live Meeting</span>
+                <span class="hub-option-desc">Host a session and invite participants</span>
+              </div>
+            </div>
+            <div class="hub-option-card" onclick="app.hubStartQuickRecord('camera')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+              <div class="hub-option-info">
+                <span class="hub-option-title">Quick Record</span>
+                <span class="hub-option-desc">Camera, screen, or both -- solo async recording</span>
+              </div>
+            </div>
+            <div class="hub-option-card" onclick="app.hubScheduleMeeting()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+              <div class="hub-option-info">
+                <span class="hub-option-title">Schedule</span>
+                <span class="hub-option-desc">Create a room link to share for later</span>
+              </div>
+            </div>
+          </div>
+          <div class="hub-status" id="hubNewMeetingStatus"></div>
+          <!-- Schedule result (shown after generating link) -->
+          <div class="hub-schedule-result" id="hubScheduleResult">
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">Meeting room created</div>
+            <div class="hub-link-box" id="hubScheduleLink" onclick="app.hubCopyScheduleLink()" title="Click to copy">---</div>
+            <div style="font-size: 11px; color: var(--text-muted);">Click to copy. Share this link with participants.</div>
+          </div>
+          <div class="hub-back-link" onclick="app.hubBack()">Back</div>
+        </div>
+
+        <!-- Join Meeting sub-panel -->
+        <div class="hub-sub-panel" id="hubJoinMeetingPanel">
+          <div class="hub-sub-title">Join Meeting</div>
+          <div class="hub-sub-desc">Enter the meeting room name to connect</div>
+          <div class="hub-join-row">
+            <input type="text" id="hubJoinInput" placeholder="e.g. team-standup" spellcheck="false" autocomplete="off"
+              onkeydown="if (event.key === 'Enter') app.hubJoinByRoomName()" />
+            <button class="hub-join-btn" id="hubJoinBtn" onclick="app.hubJoinByRoomName()">Join</button>
+          </div>
+          <div class="hub-status" id="hubJoinStatus"></div>
+          <div class="hub-back-link" onclick="app.hubBack()">Back</div>
+        </div>
+      </div>
+
       <!-- Preview Area -->
       <div class="preview-wrapper">
         <div class="preview-container" id="previewContainer">
@@ -3855,6 +4266,11 @@
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
             <p>Camera and microphone access required</p>
+            <p style="font-size:12px;color:var(--text-muted);max-width:380px;line-height:1.5">
+              If prompted, click Allow. If denied previously, open
+              <strong>System Settings &gt; Privacy &amp; Security</strong> and enable
+              Camera, Microphone, and Screen Recording for this app, then restart.
+            </p>
             <button class="permission-btn" onclick="app.requestPermissions()">Grant Access</button>
           </div>
 
@@ -4449,29 +4865,18 @@
           <!-- Session: Join Panel -->
           <div class="session-join-panel" id="sessionJoinPanel">
             <div class="session-setup-title">Join a Session</div>
-            <div class="session-setup-subtitle">Enter the host's address and code word</div>
+            <div class="session-setup-subtitle">Paste the share link you received from the host</div>
             <div class="join-input-row" style="flex-direction: column; gap: 8px">
               <input
                 type="text"
                 class="join-code-input"
-                id="joinHostInput"
-                placeholder="Host address (e.g. 192.168.1.5:48150)"
+                id="joinCodeInput"
+                placeholder="Paste share link here"
                 autocomplete="off"
                 spellcheck="false"
                 style="font-size: 13px; font-family: var(--font-mono, monospace)"
               />
-              <div style="display: flex; gap: 8px">
-                <input
-                  type="text"
-                  class="join-code-input"
-                  id="joinCodeInput"
-                  placeholder="Code word (e.g. falcon)"
-                  autocomplete="off"
-                  spellcheck="false"
-                  style="flex: 1"
-                />
-                <button class="join-connect-btn" id="joinConnectBtn" onclick="app.sessionJoin()">Connect</button>
-              </div>
+              <button class="join-connect-btn" id="joinConnectBtn" onclick="app.sessionJoin()" style="width:100%">Join</button>
             </div>
             <div class="session-status" id="joinSessionStatus"></div>
             <button class="session-back-btn" onclick="app.sessionShowSetup()">Back</button>
@@ -4891,8 +5296,10 @@
         <!-- Keyboard Shortcuts Bar -->
         <div class="shortcuts-bar">
           <div class="shortcut-item"><kbd>Space</kbd> Record</div>
+          <div class="shortcut-item"><kbd>P</kbd> Pause</div>
           <div class="shortcut-item"><kbd>Esc</kbd> Stop</div>
           <div class="shortcut-item"><kbd>S</kbd> Save</div>
+          <div class="shortcut-item"><kbd>C</kbd> Captions</div>
           <div class="shortcut-item"><kbd>,</kbd> Settings</div>
         </div>
       </div>
@@ -5063,9 +5470,12 @@
 
         // Meeting HUD state
         hudVisible: false,
-        hudItems: [], // Array of { id, type, text, tags, deadline, addedBy, timestamp, agentId }
-        hudAgentStates: {}, // agentId -> enabled
-        hudNameRoster: [], // Auto-built list of known names for @mention
+        hudItems: [],
+        hudAgentStates: {},
+        hudNameRoster: [],
+
+        // Hub state
+        hubActive: true,
 
         // DOM Elements
         elements: {},
@@ -5080,15 +5490,29 @@
           this.setupEventListeners();
           this.setupKeyboardShortcuts();
 
-          // Check for instructions from editor
+          // Restore host name from localStorage into hub name input
+          const savedHostName = localStorage.getItem('wiser-host-name');
+          const hubNameEl = document.getElementById('hubNameInput');
+          if (savedHostName && hubNameEl) {
+            hubNameEl.value = savedHostName;
+          }
+          // Also restore into old hostNameInput for session flow compatibility
+          const hostNameInput = document.getElementById('hostNameInput');
+          if (savedHostName && hostNameInput) {
+            hostNameInput.value = savedHostName;
+          }
+
+          // Check for instructions from editor (skip hub if launched with instructions)
           if (window.recorder) {
             const instructions = await window.recorder.getInstructions();
             if (instructions) {
               this.setInstructions(instructions);
+              this.hubDismiss();
             }
 
             window.recorder.onInstructionsReceived((instructions) => {
               this.setInstructions(instructions);
+              this.hubDismiss();
             });
 
             // Listen for meeting monitor alerts
@@ -5102,20 +5526,22 @@
           // Initialize Meeting HUD
           this.initMeetingHUD();
 
-          // Restore host name from localStorage
-          const savedHostName = localStorage.getItem('wiser-host-name');
-          const hostNameInput = document.getElementById('hostNameInput');
-          if (savedHostName && hostNameInput) {
-            hostNameInput.value = savedHostName;
+          // Set captions toggle to match default captionsEnabled state
+          if (this.captionsEnabled) {
+            if (this.elements.captionToggle) this.elements.captionToggle.classList.add('active');
+            if (this.elements.captionOverlay) this.elements.captionOverlay.classList.add('visible');
           }
 
           // Clean up meeting tokens when window is closed without clicking End Session
           window.addEventListener('beforeunload', () => {
             if (this._meetingRoomName && window.recorder) {
-              // Use sendBeacon for reliability during page unload
               const roomName = this._meetingRoomName;
               console.log('[Recorder] Window closing — clearing meeting tokens for:', roomName);
               window.recorder.clearMeetingTokens(roomName).catch(() => {});
+            }
+            if (this._scheduledRoomName && window.recorder) {
+              console.log('[Recorder] Window closing — clearing scheduled meeting tokens for:', this._scheduledRoomName);
+              window.recorder.clearMeetingTokens(this._scheduledRoomName).catch(() => {});
             }
             // Disconnect from LiveKit if still connected
             if (this._livekitRoom) {
@@ -5680,15 +6106,18 @@
           try {
             const spaces = await window.recorder.getSpaces();
 
-            // All three selectors to populate
             const selectors = [
               this.elements.targetSpace,
               this.elements.saveSpace,
               document.getElementById('sessionSpaceSelect'),
+              document.getElementById('hubSpaceSelect'),
             ].filter(Boolean);
 
             selectors.forEach((sel) => {
-              sel.innerHTML = '<option value="">Select a space...</option>';
+              const isHub = sel.id === 'hubSpaceSelect';
+              sel.innerHTML = isHub
+                ? '<option value="">Select a space for this meeting...</option>'
+                : '<option value="">Select a space...</option>';
             });
 
             if (spaces && spaces.length > 0) {
@@ -6449,7 +6878,7 @@
         // LIVE TRANSCRIPTION (OpenAI Realtime API)
         // ==========================================
 
-        captionsEnabled: false,
+        captionsEnabled: true,
         transcriptionWs: null,
         transcriptionAudioCtx: null,
         transcriptionProcessor: null,
@@ -6460,7 +6889,19 @@
         transcriptSessionId: null,
         transcriptRecordingStartedAt: null,
 
-        toggleCaptions() {
+        async toggleCaptions() {
+          if (!this.captionsEnabled) {
+            try {
+              const keyResult = await window.recorder.getOpenAIKey();
+              if (!keyResult.success || !keyResult.key) {
+                this.showStatus('Live captions require an OpenAI API key. Add one in Settings.', 'error');
+                return;
+              }
+            } catch (e) {
+              this.showStatus('Could not verify API key for captions.', 'error');
+              return;
+            }
+          }
           this.captionsEnabled = !this.captionsEnabled;
           this.elements.captionToggle.classList.toggle('active', this.captionsEnabled);
           this.elements.captionOverlay.classList.toggle('visible', this.captionsEnabled);
@@ -7235,6 +7676,14 @@
           // Start live transcription (async, non-blocking)
           this.startLiveTranscription();
 
+          // Check transcription availability after giving WebSocket time to connect
+          setTimeout(() => {
+            const wsConnected = this.transcriptionWs && this.transcriptionWs.readyState === WebSocket.OPEN;
+            if (!wsConnected) {
+              this.showStatus('Live transcription unavailable -- add OpenAI API key in Settings', 'warning');
+            }
+          }, 2500);
+
           // Start meeting monitor agent
           const monitorSpaceId = this.elements.targetSpace?.value || 'gsx-agent';
           if (window.recorder?.startMonitor) {
@@ -7722,6 +8171,301 @@
             };
           }
           return this._sessionEls;
+        },
+
+        // ==========================================
+        // MEETING HUB (Riverside-style landing page)
+        // ==========================================
+
+        onHubSpaceChange() {
+          const hubSel = document.getElementById('hubSpaceSelect');
+          if (hubSel) {
+            hubSel.classList.toggle('unset', !hubSel.value);
+          }
+        },
+
+        hubValidate() {
+          const hubName = document.getElementById('hubNameInput');
+          const hubSpace = document.getElementById('hubSpaceSelect');
+          const name = (hubName?.value || '').trim();
+          const activeStatus = document.getElementById('hubNewMeetingPanel')?.classList.contains('visible')
+            ? 'hubNewMeetingStatus'
+            : document.getElementById('hubJoinMeetingPanel')?.classList.contains('visible')
+              ? 'hubJoinStatus'
+              : null;
+
+          if (!name) {
+            hubName?.focus();
+            if (activeStatus) this.hubShowStatus(activeStatus, 'Please enter your name', 'error');
+            else this.showStatus('Please enter your name', 'error');
+            return false;
+          }
+          if (!hubSpace?.value) {
+            hubSpace?.classList.add('unset');
+            hubSpace?.focus();
+            if (activeStatus) this.hubShowStatus(activeStatus, 'Please select a space for this meeting', 'error');
+            else this.showStatus('Please select a space', 'error');
+            return false;
+          }
+          return true;
+        },
+
+        hubSyncToSelectors() {
+          const hubName = (document.getElementById('hubNameInput')?.value || '').trim();
+          const hubSpaceId = document.getElementById('hubSpaceSelect')?.value || '';
+
+          // Save name
+          if (hubName) {
+            try { localStorage.setItem('wiser-host-name', hubName); } catch {}
+            this._hostDisplayName = hubName;
+            const hostNameInput = document.getElementById('hostNameInput');
+            if (hostNameInput) hostNameInput.value = hubName;
+          }
+
+          // Sync space to all selectors
+          if (hubSpaceId) {
+            if (this.elements.targetSpace) this.elements.targetSpace.value = hubSpaceId;
+            if (this.elements.saveSpace) this.elements.saveSpace.value = hubSpaceId;
+            const sessionSel = document.getElementById('sessionSpaceSelect');
+            if (sessionSel) sessionSel.value = hubSpaceId;
+            this.updateTargetSpaceHighlight();
+          }
+        },
+
+        hubShowStatus(elId, msg, level) {
+          const el = document.getElementById(elId);
+          if (!el) return;
+          el.textContent = msg;
+          el.className = 'hub-status ' + (level || '');
+          if (level === 'error') {
+            setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000);
+          }
+        },
+
+        hubNewMeeting() {
+          if (!this.hubValidate()) return;
+          document.getElementById('hubMainActions').style.display = 'none';
+          document.getElementById('hubNewMeetingPanel').classList.add('visible');
+          document.getElementById('hubJoinMeetingPanel').classList.remove('visible');
+          document.getElementById('hubScheduleResult').classList.remove('visible');
+          document.getElementById('hubNewMeetingStatus').textContent = '';
+        },
+
+        hubJoinMeeting() {
+          if (!this.hubValidate()) return;
+          document.getElementById('hubMainActions').style.display = 'none';
+          document.getElementById('hubJoinMeetingPanel').classList.add('visible');
+          document.getElementById('hubNewMeetingPanel').classList.remove('visible');
+          document.getElementById('hubJoinStatus').textContent = '';
+          document.getElementById('hubJoinInput')?.focus();
+        },
+
+        hubBack() {
+          document.getElementById('hubMainActions').style.display = '';
+          document.getElementById('hubNewMeetingPanel').classList.remove('visible');
+          document.getElementById('hubJoinMeetingPanel').classList.remove('visible');
+          document.getElementById('hubScheduleResult').classList.remove('visible');
+        },
+
+        hubDismiss() {
+          this.hubActive = false;
+          const hub = document.getElementById('meetingHub');
+          if (hub) hub.classList.add('hidden');
+        },
+
+        hubShow() {
+          if (this.isRecording || this.sessionConnected) return;
+          this.hubActive = true;
+          const hub = document.getElementById('meetingHub');
+          if (hub) hub.classList.remove('hidden');
+          this.hubBack();
+        },
+
+        hubStartLiveMeeting() {
+          if (!this.hubValidate()) return;
+          this.hubSyncToSelectors();
+          this.hubDismiss();
+          this.switchMode('session');
+          setTimeout(() => this.sessionHost(), 100);
+        },
+
+        hubStartQuickRecord(mode) {
+          if (!this.hubValidate()) return;
+          this.hubSyncToSelectors();
+          this.hubDismiss();
+          this.switchMode(mode || 'camera');
+        },
+
+        async hubScheduleMeeting() {
+          if (!this.hubValidate()) return;
+          this.hubSyncToSelectors();
+
+          const statusEl = 'hubNewMeetingStatus';
+          this.hubShowStatus(statusEl, 'Creating meeting room...', 'info');
+
+          try {
+            const hubSpaceId = document.getElementById('hubSpaceSelect')?.value || '';
+            const spaceSel = document.getElementById('hubSpaceSelect');
+            const spaceName = spaceSel?.options[spaceSel.selectedIndex]?.textContent || '';
+            const roomName = spaceName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'wiser-meeting';
+
+            const result = await window.recorder.createRoom(roomName);
+            if (!result.success) throw new Error(result.error || 'Failed to create room');
+
+            // Store tokens in GSX KV for future guests
+            await window.recorder.storeMeetingTokens({
+              roomName,
+              guestTokens: result.guestTokens,
+              livekitUrl: result.livekitUrl,
+            });
+
+            // Get or publish guest page URL
+            let guestPageUrl = '';
+            const urlResult = await window.recorder.getGuestPageUrl();
+            if (urlResult.success && urlResult.url) {
+              guestPageUrl = urlResult.url;
+            } else {
+              const pubResult = await window.recorder.publishGuestPage();
+              if (pubResult.success) guestPageUrl = pubResult.url;
+            }
+
+            const joinLink = guestPageUrl ? `${guestPageUrl}?room=${encodeURIComponent(roomName)}` : roomName;
+
+            // Show the result
+            const linkEl = document.getElementById('hubScheduleLink');
+            if (linkEl) linkEl.textContent = joinLink;
+            document.getElementById('hubScheduleResult').classList.add('visible');
+            this.hubShowStatus(statusEl, 'Room ready -- share the link with participants', 'success');
+
+            // Store room name for cleanup on window close
+            this._scheduledRoomName = roomName;
+
+            console.log('[Hub] Meeting scheduled:', { roomName, joinLink });
+          } catch (error) {
+            console.error('[Hub] Schedule error:', error);
+            this.hubShowStatus(statusEl, 'Failed: ' + error.message, 'error');
+          }
+        },
+
+        hubCopyScheduleLink() {
+          const linkEl = document.getElementById('hubScheduleLink');
+          const link = linkEl?.textContent || '';
+          if (!link || link === '---') return;
+          if (window.electronClipboard?.writeText) {
+            window.electronClipboard.writeText(link);
+          } else {
+            navigator.clipboard.writeText(link).catch(() => {});
+          }
+          this.hubShowStatus('hubNewMeetingStatus', 'Link copied', 'success');
+        },
+
+        async hubJoinByRoomName() {
+          if (!this.hubValidate()) return;
+
+          const input = document.getElementById('hubJoinInput');
+          const rawValue = (input?.value || '').trim();
+          if (!rawValue) {
+            input?.focus();
+            this.hubShowStatus('hubJoinStatus', 'Please enter a meeting ID or room name', 'error');
+            return;
+          }
+
+          // Extract room name from full URL or plain text
+          let roomName = rawValue;
+          try {
+            const url = new URL(rawValue);
+            const roomParam = url.searchParams.get('room');
+            if (roomParam) roomName = roomParam;
+          } catch {
+            // Not a URL, use as-is
+          }
+          roomName = roomName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+
+          if (!roomName) {
+            this.hubShowStatus('hubJoinStatus', 'Invalid meeting ID', 'error');
+            return;
+          }
+
+          const joinBtn = document.getElementById('hubJoinBtn');
+          if (joinBtn) joinBtn.disabled = true;
+          this.hubShowStatus('hubJoinStatus', 'Connecting to ' + roomName + '...', 'info');
+
+          try {
+            this.hubSyncToSelectors();
+
+            // Fetch tokens from GSX KV
+            const settings = {};
+            const FALLBACK_ACCOUNT = '35254342-4a2e-475b-aec1-18547e517e29';
+            const FALLBACK_REFRESH = `https://em.edison.api.onereach.ai/http/${FALLBACK_ACCOUNT}/refresh_token`;
+            const kvUrl = FALLBACK_REFRESH.replace('/refresh_token', '/keyvalue');
+            const KV_COLLECTION = 'wiser:meeting:tokens';
+            const kvKey = `wiser-room:${roomName}`;
+
+            const kvResp = await fetch(
+              `${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(kvKey)}`
+            );
+
+            if (!kvResp.ok) throw new Error('No active meeting found for "' + roomName + '"');
+
+            const kvData = await kvResp.json();
+            const meetingData = typeof kvData.value === 'string' ? JSON.parse(kvData.value) : kvData.value;
+
+            if (!meetingData?.tokens || !meetingData?.livekitUrl) {
+              throw new Error('No active meeting found for "' + roomName + '"');
+            }
+
+            // Take a guest token from the pool
+            const guestToken = meetingData.tokens.shift();
+            if (!guestToken) throw new Error('Meeting is full -- no available slots');
+
+            this.hubShowStatus('hubJoinStatus', 'Joining...', 'info');
+
+            // Dismiss hub and enter session mode
+            this.hubDismiss();
+            this.switchMode('session');
+
+            // Connect to LiveKit as guest
+            this.sessionRole = 'guest';
+            this._meetingRoomName = roomName;
+
+            const { Room, RoomEvent, Track } = LivekitClient;
+
+            this._livekitRoom = new Room();
+            await this._livekitRoom.connect(meetingData.livekitUrl, guestToken);
+
+            this.sessionConnected = true;
+            console.log('[Hub] Joined meeting as guest:', roomName);
+
+            // Request camera/mic and publish
+            try {
+              await this._livekitRoom.localParticipant.enableCameraAndMicrophone();
+            } catch (mediaErr) {
+              console.warn('[Hub] Media publish failed:', mediaErr.message);
+            }
+
+            // Set up remote track handling (same as host flow)
+            this._livekitRoom.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
+              if (track.kind === Track.Kind.Video) {
+                const el = track.attach();
+                el.style.width = '100%';
+                el.style.height = '100%';
+                el.style.objectFit = 'cover';
+                const container = document.getElementById('previewContainer');
+                if (container) container.appendChild(el);
+              }
+              if (track.kind === Track.Kind.Audio) {
+                const el = track.attach();
+                document.body.appendChild(el);
+              }
+            });
+
+            this.showStatus('Connected to meeting: ' + roomName, 'success');
+          } catch (error) {
+            console.error('[Hub] Join error:', error);
+            this.hubShowStatus('hubJoinStatus', error.message || 'Failed to join', 'error');
+          } finally {
+            if (joinBtn) joinBtn.disabled = false;
+          }
         },
 
         // Show setup (choose host or join)

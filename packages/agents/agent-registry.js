@@ -68,6 +68,7 @@ const BUILT_IN_AGENT_IDS = [
   'playbook-agent', // Playbook executor - runs playbooks in spaces, relays questions, reports results
   'browser-agent', // Browser automation - autonomous web navigation, form filling, data extraction via Playwright
   'browsing-agent', // Browsing API - resilient web research, page reading, form filling via native Electron BrowserWindow
+  'sound-effects-agent', // Sound Designer - plays SFX, manages ambient soundscapes, generates custom sounds
 ];
 
 // ==================== VALIDATION ====================

@@ -216,16 +216,38 @@ function classifyTranscript(transcript) {
       params.target = target;
       confidence = 0.75;
     }
-  } else if (text.includes('create') || text.includes('make') || text.includes('new')) {
-    // Check specifically for "create agent" voice command
-    if (text.includes('agent') || text.includes('assistant') || text.includes('bot')) {
+  } else if (text.includes('create') || text.includes('make') || text.includes('new') || text.includes('build')) {
+    if (text.includes('playbook')) {
+      action = 'create-playbook';
+      const match = text.match(
+        /(?:create|make|build|generate)\s+(?:a\s+|the\s+)?(?:build\s+)?playbook\s*(?:for\s+)?(.+)?/i
+      );
+      let desc = match && match[1] ? match[1].trim() : '';
+      if (!desc || /^(this|that|it)$/i.test(desc)) {
+        const recentUser = recentHistory.filter((h) => h.role === 'user').slice(-2);
+        const lastRequest = recentUser.find((h) => h !== recentHistory[recentHistory.length - 1]);
+        if (lastRequest) {
+          desc = lastRequest.content;
+        }
+      }
+      params.description = desc;
+      confidence = 0.9;
+    } else if (text.includes('agent') || text.includes('assistant') || text.includes('bot')) {
       action = 'create-agent';
       const match = text.match(
-        /(?:create|make|new)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:agent|assistant|bot)\s*(?:that\s+|to\s+|for\s+)?(.+)?/i
+        /(?:create|make|new|build)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:agent|assistant|bot)\s*(?:that\s+|to\s+|for\s+)?(.+)?/i
       );
-      if (match && match[1]) {
-        params.description = match[1].trim();
+      let desc = match && match[1] ? match[1].trim() : '';
+
+      // If description is a pronoun ("this", "that", "it"), pull from recent conversation
+      if (!desc || /^(this|that|it)$/i.test(desc)) {
+        const recentUser = recentHistory.filter((h) => h.role === 'user').slice(-2);
+        const lastRequest = recentUser.find((h) => h !== recentHistory[recentHistory.length - 1]);
+        if (lastRequest) {
+          desc = lastRequest.content;
+        }
       }
+      params.description = desc;
       confidence = 0.9;
     } else {
       action = 'create';
@@ -506,6 +528,31 @@ function setupSDKIPC() {
     }
 
     // Handle special actions that open windows directly
+    if (classification.action === 'create-playbook') {
+      log.info('voice', '[VoiceTaskSDK] Generating build playbook');
+      const description = classification.params?.description || '';
+
+      if (description) {
+        addAssistantMessage(`Generating a build playbook for: "${description}"`);
+      } else {
+        addAssistantMessage('I need to know what to build the playbook for. Could you describe the capability?');
+        return { ...classification, queued: false, handled: true, message: 'What should the playbook cover?' };
+      }
+
+      try {
+        const { _generateAndSavePlaybook } = require('../../lib/hud-api');
+        if (_generateAndSavePlaybook) {
+          const result = await _generateAndSavePlaybook(description, null);
+          addAssistantMessage(result.message);
+          return { ...classification, queued: false, handled: true, message: result.message };
+        }
+      } catch (e) {
+        log.error('voice', '[VoiceTaskSDK] Could not generate playbook', { error: e.message });
+      }
+
+      return { ...classification, queued: false, handled: true, message: `Generating a playbook for: ${description}` };
+    }
+
     if (classification.action === 'create-agent' || classification.action === 'open-agent-composer') {
       log.info('voice', '[VoiceTaskSDK] Opening Agent Composer');
 
@@ -601,6 +648,25 @@ function setupSDKIPC() {
     }
 
     // Handle special actions that open windows directly
+    if (action === 'create-playbook') {
+      log.info('voice', '[VoiceTaskSDK] Generating build playbook (normalized)');
+      const description = params?.description || '';
+      if (description) {
+        addAssistantMessage(`Generating a build playbook for: "${description}"`);
+        try {
+          const { _generateAndSavePlaybook } = require('../../lib/hud-api');
+          if (_generateAndSavePlaybook) {
+            const result = await _generateAndSavePlaybook(description, null);
+            addAssistantMessage(result.message);
+            return { action, queued: false, handled: true, message: result.message };
+          }
+        } catch (e) {
+          log.error('voice', '[VoiceTaskSDK] Could not generate playbook', { error: e.message });
+        }
+      }
+      return { action, queued: false, handled: true, message: `Generating a playbook for: ${description || 'unknown capability'}` };
+    }
+
     if (action === 'create-agent' || action === 'open-agent-composer') {
       log.info('voice', '[VoiceTaskSDK] Opening Agent Composer');
 

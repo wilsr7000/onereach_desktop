@@ -2319,10 +2319,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     text-align: center;
                     font-size: 12px;
                 `;
-        noEnvItem.textContent = 'No IDW environments configured';
+        noEnvItem.innerHTML = 'No IDW environments yet.<br><span style="font-size:11px;opacity:0.7">Add OneReach IDW URLs to load services here.</span>';
         menu.appendChild(noEnvItem);
 
-        // Add link to settings/setup
         const setupLink = document.createElement('div');
         setupLink.className = 'idw-menu-item';
         setupLink.style.cssText = `
@@ -2334,7 +2333,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     font-size: 12px;
                     border-top: 1px solid rgba(255,255,255,0.1);
                 `;
-        setupLink.textContent = 'Configure IDW Environments';
+        setupLink.textContent = 'Set Up IDW Environments';
         setupLink.addEventListener('click', () => {
           console.log('Opening IDW setup');
           window.api.send('open-setup-wizard');
@@ -2820,6 +2819,13 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('beforeunload', () => {
     console.log('Window beforeunload - saving tab state');
     saveTabState();
+  });
+
+  // Listen for welcome overlay trigger from main (after intro wizard closes on first run)
+  window.api.receive('show-welcome-overlay', () => {
+    if (typeof showWelcomeOverlay === 'function') {
+      showWelcomeOverlay();
+    }
   });
 
   // Listen for auth URL handling
@@ -3524,7 +3530,7 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
       },
       { label: '─────────', action: null }, // Separator
       {
-        label: (openChatLinksInNewTab ? '✓ ' : '') + 'Chat Links Open in New Tab',
+        label: (openChatLinksInNewTab ? '• ' : '  ') + 'Chat Links Open in New Tab',
         action: () => {
           openChatLinksInNewTab = !openChatLinksInNewTab;
           console.log('Chat links will now open in', openChatLinksInNewTab ? 'new tabs' : 'current tab');
@@ -3557,7 +3563,7 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
         menuItem.onmouseout = () => (menuItem.style.background = 'transparent');
         menuItem.onclick = () => {
           item.action();
-          if (item.label !== (openChatLinksInNewTab ? '✓ ' : '') + 'Chat Links Open in New Tab') {
+          if (item.label !== (openChatLinksInNewTab ? '• ' : '  ') + 'Chat Links Open in New Tab') {
             menu.remove();
           }
         };
@@ -3751,21 +3757,33 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     saveTabState();
   });
 
-  // Add error handling for failed loads
   webview.addEventListener('did-fail-load', (e) => {
+    if (e.errorCode === -3) return; // -3 is ERR_ABORTED (navigation cancelled), not a real failure
     console.error(`Webview ${tabId} failed to load:`, e.errorCode, e.errorDescription);
     webviewReady = false;
     clearTimeout(loadingTimeout);
     isInitialLoad = false;
 
-    // Update the tab title to show error
     const tabElement = document.querySelector(`.tab[data-tab-id="${tabId}"]`);
     if (tabElement) {
       const titleElement = tabElement.querySelector('.tab-title');
       if (titleElement) {
-        titleElement.textContent = 'Failed to load page';
+        titleElement.textContent = 'Failed to load';
       }
     }
+
+    const failedUrl = e.validatedURL || '';
+    const desc = e.errorDescription || 'Unknown error';
+    try {
+      webview.executeJavaScript(`
+        document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,system-ui,sans-serif;background:#1a1a2e;color:#ccc;text-align:center;padding:24px">' +
+          '<div style="font-size:48px;margin-bottom:16px;opacity:0.4">!</div>' +
+          '<h2 style="margin:0 0 8px;color:#e0e0e0">Could not load page</h2>' +
+          '<p style="margin:0 0 24px;font-size:13px;opacity:0.6">${desc.replace(/'/g, "\\'")}</p>' +
+          '<button onclick="location.reload()" style="padding:8px 24px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#fff;cursor:pointer;font-size:13px">Retry</button>' +
+        '</div>';
+      `);
+    } catch (_injectErr) { /* webview may not be ready */ }
   });
 
   // Add loading state management

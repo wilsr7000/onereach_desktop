@@ -178,6 +178,7 @@ contextBridge.exposeInMainWorld('api', {
       'show-context-menu',
       'show-notification',
       'open-clipboard-viewer',
+      'show-voice-orb',
       'open-black-hole-widget',
       'close-black-hole-widget',
       'black-hole:toggle-always-on-top',
@@ -249,6 +250,7 @@ contextBridge.exposeInMainWorld('api', {
       // WebMCP tool invocation from main process
       'webmcp:call-tool',
       'get-tab-partitions',
+      'show-welcome-overlay',
     ];
     if (validChannels.includes(channel)) {
       // Deliberately strip event as it includes `sender`
@@ -1405,6 +1407,7 @@ contextBridge.exposeInMainWorld('clipboard', {
   setCurrentSpace: (spaceId) => ipcRenderer.invoke('clipboard:set-current-space', spaceId),
   moveToSpace: (itemId, spaceId) => ipcRenderer.invoke('clipboard:move-to-space', itemId, spaceId),
   getSpaceItems: (spaceId) => ipcRenderer.invoke('clipboard:get-space-items', spaceId),
+  loadItemContent: (itemId) => ipcRenderer.invoke('clipboard:load-item-content', itemId),
 
   // Spaces toggle
   getSpacesEnabled: () => ipcRenderer.invoke('clipboard:get-spaces-enabled'),

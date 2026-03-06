@@ -271,7 +271,10 @@ Rules:
       msg += ` ${meetingLink.label}: ${meetingLink.url}`;
     }
 
-    return { success: true, message: msg };
+    const soundCue = mins <= 5 && mins > 0
+      ? { type: 'one-shot', name: 'meeting-chime', volume: 0.4 }
+      : null;
+    return { success: true, message: msg, soundCue };
   },
 
   async _handleAvailability(intent, now, _task) {

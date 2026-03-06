@@ -760,7 +760,7 @@ function setupSpaceDragAndDrop() {
                     gap: 8px;
                     color: rgba(255, 255, 255, 0.9);
                 ">
-                    <span>📎</span>
+                    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;vertical-align:middle"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></span>
                     <span>Paste File into ${spaceName}</span>
                 </div>
             `;
@@ -1446,7 +1446,7 @@ function renderHistoryItemToHtml(item) {
       let badgesHtml = '';
       if (hasCode) badgesHtml += '<span class="ai-conv-badge code" title="Has code blocks">{ }</span>';
       if (hasArtifacts) badgesHtml += '<span class="ai-conv-badge artifact" title="Has artifacts">★</span>';
-      if (hasFiles) badgesHtml += '<span class="ai-conv-badge files" title="Has files">📎</span>';
+      if (hasFiles) badgesHtml += '<span class="ai-conv-badge files" title="Has files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:12px;height:12px;vertical-align:middle"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></span>';
 
       contentHtml = `
                     <div class="ai-conversation-tile redesigned">
@@ -1812,12 +1812,15 @@ function renderHistory(items = history) {
   }
 
   if (!items || items.length === 0) {
-    console.log('No items to render, showing empty state');
+    const searchInput = document.getElementById('searchInput');
+    const hasSearch = searchInput && searchInput.value.trim().length > 0;
+    const emptyText = hasSearch ? 'No results found' : 'No items in this space';
+    const emptyHint = hasSearch ? 'Try a different search term or clear the filter' : 'Copy something to add it here';
     historyList.innerHTML = `
             <div class="empty-state">
                 <img src="${getAssetPath('or-logo.png')}" class="empty-logo" alt="OneReach Logo">
-                <div class="empty-text">No items in this space</div>
-                <div class="empty-hint">Copy something to add it here</div>
+                <div class="empty-text">${emptyText}</div>
+                <div class="empty-hint">${emptyHint}</div>
             </div>
         `;
     if (itemCount) itemCount.textContent = '0 items';
@@ -2031,11 +2034,15 @@ function renderGroupedView(items = history) {
   }
 
   if (!items || items.length === 0) {
+    const searchInput = document.getElementById('searchInput');
+    const hasSearch = searchInput && searchInput.value.trim().length > 0;
+    const emptyText = hasSearch ? 'No results found' : 'No items in this space';
+    const emptyHint = hasSearch ? 'Try a different search term or clear the filter' : 'Copy something to add it here';
     historyList.innerHTML = `
             <div class="empty-state">
                 <img src="${getAssetPath('or-logo.png')}" class="empty-logo" alt="OneReach Logo">
-                <div class="empty-text">No items in this space</div>
-                <div class="empty-hint">Copy something to add it here</div>
+                <div class="empty-text">${emptyText}</div>
+                <div class="empty-hint">${emptyHint}</div>
             </div>
         `;
     if (itemCount) itemCount.textContent = '0 items';
@@ -2362,16 +2369,16 @@ async function openFileInSystem(filePath) {
       const result = await window.clipboard.openInSystem(filePath);
       if (!result.success) {
         console.error('Failed to open file:', result.error);
-        alert('Failed to open file: ' + (result.error || 'Unknown error'));
+        showToast('Failed to open file: ' + (result.error || 'Unknown error'), 'error');
       }
     } else {
       // Fallback: try using shell.openPath via IPC
       console.error('openInSystem not available');
-      alert('Unable to open file - feature not available');
+      showToast('Unable to open file - feature not available', 'error');
     }
   } catch (error) {
     console.error('Error opening file:', error);
-    alert('Error opening file: ' + error.message);
+    showToast('Error opening file: ' + error.message, 'error');
   }
 }
 
@@ -3119,6 +3126,11 @@ async function searchItems(query) {
     await loadHistory();
     filterItems();
     return;
+  }
+
+  const historyList = document.getElementById('historyList');
+  if (historyList) {
+    historyList.innerHTML = `<div class="empty-state"><div class="empty-text" style="opacity:0.5">Searching...</div></div>`;
   }
 
   const results = await window.clipboard.search(query);
@@ -4286,7 +4298,7 @@ async function showMetadataModal(itemId) {
   const result = await window.clipboard.getMetadata(itemId);
 
   if (!result.success) {
-    alert('Could not load metadata');
+    showToast('Could not load metadata', 'error');
     return;
   }
 
@@ -4294,7 +4306,7 @@ async function showMetadataModal(itemId) {
   const item = history.find((h) => h.id === itemId);
 
   if (!item) {
-    alert('Item not found');
+    showToast('Item not found', 'error');
     return;
   }
 
@@ -4559,7 +4571,7 @@ async function showMetadataModal(itemId) {
           if (window.electron?.shell?.showItemInFolder) {
             window.electron.shell.showItemInFolder(metadata.audioPath);
           } else {
-            alert('Audio file saved at: ' + metadata.audioPath);
+            showToast('Audio file saved: ' + metadata.audioPath);
           }
         };
       } else {
@@ -4600,13 +4612,13 @@ async function showMetadataModal(itemId) {
                   if (window.electron?.shell?.showItemInFolder) {
                     window.electron.shell.showItemInFolder(result.audioPath);
                   } else {
-                    alert('Audio file saved at: ' + result.audioPath);
+                    showToast('Audio file saved: ' + result.audioPath);
                   }
                 };
               }, 2000);
             } else {
-              extractAudioBtn.textContent = '❌ Failed';
-              alert('Error: ' + result.error);
+              extractAudioBtn.textContent = 'Failed';
+              showToast('Error: ' + result.error, 'error');
               setTimeout(() => {
                 extractAudioBtn.innerHTML =
                   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Extract Audio';
@@ -4617,8 +4629,8 @@ async function showMetadataModal(itemId) {
             // Clean up listener
             if (removeProgressListener) removeProgressListener();
 
-            extractAudioBtn.textContent = '❌ Error';
-            alert('Error: ' + e.message);
+            extractAudioBtn.textContent = 'Error';
+            showToast('Error: ' + e.message, 'error');
             setTimeout(() => {
               extractAudioBtn.innerHTML =
                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Extract Audio';
@@ -4905,7 +4917,7 @@ async function showMetadataModal(itemId) {
                         <div class="${dotClass}"></div>
                         <div class="timeline-content">
                             <div class="timeline-time">${new Date(change.timestamp).toLocaleString()}</div>
-                            <div class="timeline-summary">${isBaseline ? '📸 ' : ''}${escapeHtml(summary)}</div>
+                            <div class="timeline-summary">${isBaseline ? 'Baseline: ' : ''}${escapeHtml(summary)}</div>
                         </div>
                     </div>
                 `;
@@ -6034,10 +6046,10 @@ async function saveMetadata() {
       await loadHistory();
       showNotification('Metadata saved');
     } else {
-      alert('Failed to save metadata: ' + (result.error || 'Unknown error'));
+      showToast('Failed to save metadata: ' + (result.error || 'Unknown error'), 'error');
     }
   } catch (saveError) {
-    alert('Error saving metadata: ' + saveError.message);
+    showToast('Error saving metadata: ' + saveError.message, 'error');
   }
 }
 
@@ -6077,7 +6089,7 @@ async function generateMetadataWithAI() {
     statusEl.style.color = '#ff6464';
 
     // Optionally open settings
-    if (confirm('No AI method available. Open settings now?')) {
+    if (await showConfirmModal('No AI method available. Open settings now?', { confirmLabel: 'Open Settings' })) {
       await window.api.send('open-settings');
     }
     return;
@@ -6344,9 +6356,11 @@ function setupEventListeners() {
     }
   });
 
-  // Search input
+  // Search input (debounced to avoid re-rendering on every keystroke)
+  let _searchDebounce = null;
   document.getElementById('searchInput').addEventListener('input', (e) => {
-    searchItems(e.target.value);
+    clearTimeout(_searchDebounce);
+    _searchDebounce = setTimeout(() => searchItems(e.target.value), 250);
   });
 
   // Filter buttons
@@ -6381,7 +6395,7 @@ function setupEventListeners() {
         const space = spacesData.find((s) => s.id === spaceId);
         if (space) showSpaceModal(space);
       } else if (action.dataset.action === 'delete') {
-        if (confirm('Are you sure you want to delete this space? Items will be moved to "All Items".')) {
+        if (await showConfirmModal('Delete this space? Items will be moved to "All Items".', { confirmLabel: 'Delete', destructive: true })) {
           try {
             await window.clipboard.deleteSpace(spaceId);
             await loadSpaces();
@@ -6697,7 +6711,7 @@ function setupEventListeners() {
         }
       } else if (actionType === 'delete') {
         // Direct delete action (used for error items)
-        if (confirm('Delete this item?')) {
+        if (await showConfirmModal('Delete this item?', { confirmLabel: 'Delete', destructive: true })) {
           await window.clipboard.deleteItem(itemId);
           await loadHistory();
           await loadSpaces();
@@ -9337,7 +9351,7 @@ function resetTranscriptionState() {
   document.getElementById('transcriptionResult').style.display = 'none';
   document.getElementById('transcriptionStatus').style.display = 'none';
   document.getElementById('transcriptionText').textContent = '';
-  document.getElementById('transcribeButtonIcon').textContent = '🎤';
+  document.getElementById('transcribeButtonIcon').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;vertical-align:middle"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
   document.getElementById('transcribeButtonText').textContent = 'Transcribe';
   document.getElementById('transcribeBtn').disabled = false;
 
@@ -9510,7 +9524,7 @@ async function transcribeMedia() {
   } finally {
     btn.disabled = false;
     if (!window.transcriptionAttached) {
-      btnIcon.textContent = '🎤';
+      btnIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;vertical-align:middle"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
       btnText.textContent = 'Transcribe';
     }
   }
@@ -10351,11 +10365,11 @@ function setupPreviewEventListeners() {
   });
 
   // Click outside to close
-  document.getElementById('previewModal').addEventListener('click', (e) => {
+  document.getElementById('previewModal').addEventListener('click', async (e) => {
     if (e.target.id === 'previewModal') {
       if (isEditMode) {
         // Ask to confirm if in edit mode
-        if (confirm('Discard unsaved changes?')) {
+        if (await showConfirmModal('Discard unsaved changes?', { confirmLabel: 'Discard', destructive: true })) {
           hidePreviewModal();
         }
       } else {
@@ -10700,7 +10714,7 @@ async function showVideoPreviewModal(itemId) {
   const identifySpeakersBtn = document.getElementById('videoIdentifySpeakers');
   if (identifySpeakersBtn) {
     if (metadata.speakersIdentified) {
-      identifySpeakersBtn.innerHTML = '<span>🔄</span> Re-identify Speakers';
+      identifySpeakersBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Re-identify Speakers';
       identifySpeakersBtn.title = `Last identified: ${new Date(metadata.speakersIdentifiedAt).toLocaleString()} (Model: ${metadata.speakersIdentifiedModel})`;
     } else {
       identifySpeakersBtn.innerHTML = 'Identify Speakers';
@@ -10741,7 +10755,7 @@ async function showVideoPreviewModal(itemId) {
   // Update audio button state
   const audioBtn = document.getElementById('videoDownloadAudio');
   if (metadata.audioPath) {
-    audioBtn.innerHTML = '<span>🎵</span> Download Audio';
+    audioBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Download Audio';
     audioBtn.disabled = false;
   } else {
     audioBtn.innerHTML =
@@ -10886,11 +10900,11 @@ function setupVideoModalListeners() {
       } else {
         const errorMsg = result.error || 'Failed to identify speakers';
         console.error('[VideoModal-SpeakerID] Error:', errorMsg);
-        status.textContent = '❌ Error: ' + errorMsg;
+        status.textContent = 'Error: ' + errorMsg;
         status.style.color = 'rgba(255, 100, 100, 0.9)';
 
         // Show alert with full error
-        alert('Speaker Identification Failed\n\n' + errorMsg + '\n\nPlease check your API key and model settings.');
+        showToast('Speaker ID failed: ' + errorMsg, 'error');
       }
     } catch (err) {
       clearTimeout(timeoutWarning);
@@ -10901,7 +10915,7 @@ function setupVideoModalListeners() {
       status.style.color = 'rgba(255, 100, 100, 0.9)';
 
       // Show alert with full error
-      alert('Speaker Identification Failed\n\n' + errorMsg + '\n\nCheck the console for more details.');
+      showToast('Speaker ID failed: ' + errorMsg, 'error');
 
       // Clean up progress listener on error
       if (removeProgressListener) {
@@ -10926,7 +10940,7 @@ function setupVideoModalListeners() {
       if (window.electron?.shell?.showItemInFolder) {
         window.electron.shell.showItemInFolder(metadata.audioPath);
       } else {
-        alert('Audio file: ' + metadata.audioPath);
+        showToast('Audio file: ' + metadata.audioPath);
       }
     } else {
       // Extract audio
@@ -10952,20 +10966,20 @@ function setupVideoModalListeners() {
         if (result.success) {
           btn.innerHTML = 'Audio Ready!';
           setTimeout(() => {
-            btn.innerHTML = '<span>🎵</span> Download Audio';
+            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Download Audio';
             btn.disabled = false;
             showVideoPreviewModal(currentVideoItem.id);
           }, 1500);
         } else {
-          alert('Failed to extract audio: ' + (result.error || 'Unknown error'));
-          btn.innerHTML = '<span>🎵</span> Extract Audio';
+          showToast('Failed to extract audio: ' + (result.error || 'Unknown error'), 'error');
+          btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;vertical-align:middle;margin-right:4px"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Extract Audio';
           btn.disabled = false;
         }
       } catch (err) {
         // Clean up listener
         if (removeProgressListener) removeProgressListener();
 
-        alert('Error: ' + err.message);
+        showToast('Error: ' + err.message, 'error');
         btn.innerHTML = '<span>🎵</span> Extract Audio';
         btn.disabled = false;
       }
@@ -11220,7 +11234,7 @@ async function bulkDeleteItems() {
   const count = selectedItems.size;
   const confirmMsg = `Are you sure you want to delete ${count} item${count > 1 ? 's' : ''}? This cannot be undone.`;
 
-  if (!confirm(confirmMsg)) {
+  if (!(await showConfirmModal(confirmMsg, { confirmLabel: 'Delete', destructive: true }))) {
     return;
   }
 
@@ -11241,9 +11255,7 @@ async function bulkDeleteItems() {
       console.log(`[Bulk Delete] Successfully deleted ${result.deleted} items`);
 
       if (result.failed > 0) {
-        alert(
-          `Deleted ${result.deleted} items. Failed to delete ${result.failed} items.\n\nErrors:\n${result.errors.join('\n')}`
-        );
+        showToast(`Deleted ${result.deleted} items. ${result.failed} failed.`, 'error');
       }
 
       // Clear selection
@@ -11254,7 +11266,7 @@ async function bulkDeleteItems() {
       await loadHistory();
     } else {
       console.error('[Bulk Delete] Failed:', result.error);
-      alert(`Failed to delete items: ${result.error}`);
+      showToast(`Failed to delete items: ${result.error}`, 'error');
     }
 
     // Restore button
@@ -11262,7 +11274,7 @@ async function bulkDeleteItems() {
     deleteBtn.disabled = false;
   } catch (error) {
     console.error('[Bulk Delete] Error:', error);
-    alert(`Error deleting items: ${error.message}`);
+    showToast(`Error deleting items: ${error.message}`, 'error');
 
     // Restore button
     const deleteBtn = document.getElementById('bulkDeleteBtn');
@@ -11375,9 +11387,7 @@ async function bulkMoveItems(targetSpaceId) {
       console.log(`[Bulk Move] Successfully moved ${result.moved} items to ${targetSpaceName}`);
 
       if (result.failed > 0) {
-        alert(
-          `Moved ${result.moved} items to "${targetSpaceName}". Failed to move ${result.failed} items.\n\nErrors:\n${result.errors.join('\n')}`
-        );
+        showToast(`Moved ${result.moved} items. ${result.failed} failed.`, 'error');
       }
 
       // Clear selection
@@ -11391,7 +11401,7 @@ async function bulkMoveItems(targetSpaceId) {
       await loadSpaces();
     } else {
       console.error('[Bulk Move] Failed:', result.error);
-      alert(`Failed to move items: ${result.error}`);
+      showToast(`Failed to move items: ${result.error}`, 'error');
     }
 
     // Restore button
@@ -11399,7 +11409,7 @@ async function bulkMoveItems(targetSpaceId) {
     moveBtn.disabled = false;
   } catch (error) {
     console.error('[Bulk Move] Error:', error);
-    alert(`Error moving items: ${error.message}`);
+    showToast(`Error moving items: ${error.message}`, 'error');
 
     // Restore button
     const moveBtn = document.getElementById('bulkMoveBtn');
@@ -11548,7 +11558,7 @@ function populateGsxTab(gsxStatus, itemId) {
 
   if (unpushBtn) {
     unpushBtn.onclick = async () => {
-      if (confirm('Unpush this item from GSX? The file will remain but will be marked as inactive.')) {
+      if (await showConfirmModal('Unpush this item from GSX? The file will remain but will be marked as inactive.', { confirmLabel: 'Unpush' })) {
         try {
           const result = await window.spaces.gsx.unpushAsset(itemId);
           if (result.success) {
@@ -11892,7 +11902,7 @@ async function handleGsxContextAction(action, itemId) {
         break;
 
       case 'gsx-unpush':
-        if (confirm('Unpush this item from GSX? The file will remain but will be marked as inactive.')) {
+        if (await showConfirmModal('Unpush this item from GSX? The file will remain but will be marked as inactive.', { confirmLabel: 'Unpush' })) {
           const unpushResult = await window.spaces.gsx.unpushAsset(itemId);
           if (unpushResult.success) {
             showToast('Item unpushed from GSX');
@@ -11942,6 +11952,49 @@ function showToast(message, type = 'success') {
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(-50%) translateY(10px)';
   }, 3000);
+}
+
+/**
+ * Promise-based confirm modal replacing native confirm().
+ * Returns true if user clicks Confirm, false for Cancel.
+ */
+function showConfirmModal(message, { confirmLabel = 'Confirm', cancelLabel = 'Cancel', destructive = false } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)`;
+
+    const box = document.createElement('div');
+    box.style.cssText = `background:#1e1e2e;border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:24px;max-width:380px;width:90%;color:#e0e0e0;font-size:14px;line-height:1.5`;
+
+    const msg = document.createElement('div');
+    msg.textContent = message;
+    msg.style.marginBottom = '20px';
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = cancelLabel;
+    cancelBtn.style.cssText = 'padding:8px 16px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:#ccc;cursor:pointer;font-size:13px';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = confirmLabel;
+    const btnBg = destructive ? 'rgba(239,68,68,0.8)' : 'rgba(99,102,241,0.8)';
+    confirmBtn.style.cssText = `padding:8px 16px;border-radius:6px;border:none;background:${btnBg};color:#fff;cursor:pointer;font-size:13px;font-weight:500`;
+
+    const cleanup = (val) => { overlay.remove(); resolve(val); };
+    cancelBtn.addEventListener('click', () => cleanup(false));
+    confirmBtn.addEventListener('click', () => cleanup(true));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
+
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(confirmBtn);
+    box.appendChild(msg);
+    box.appendChild(btnRow);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    confirmBtn.focus();
+  });
 }
 
 // ============================================

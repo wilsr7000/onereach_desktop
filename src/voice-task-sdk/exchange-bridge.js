@@ -296,7 +296,7 @@ setInterval(() => {
 // we fall back to full auction (safe degradation).
 // ==================================================================
 const PRE_SCREEN_AGENT_THRESHOLD = 6; // Only pre-screen if > 6 agents registered
-const PRE_SCREEN_MAX_CANDIDATES = 4; // Narrow to this many
+const PRE_SCREEN_MAX_CANDIDATES = 6; // Narrow to this many
 
 /**
  * One fast LLM call to narrow the agent field.
@@ -322,13 +322,14 @@ ${conversationText ? `RECENT CONVERSATION:\n${conversationText.slice(-500)}\n` :
 AVAILABLE AGENTS:
 ${agentSummaries}
 
+IMPORTANT: Consider ALL domains -- music, sound effects, ambient audio, weather, calendar, browsing, files, etc. Don't bias toward generic/orchestrator agents when a specialist clearly matches.
+
 Return a JSON object: { "agents": ["agent-id-1", "agent-id-2", ...] }
-Include ${PRE_SCREEN_MAX_CANDIDATES} agent IDs, ordered by likelihood. Only include agents that have a reasonable chance of handling this query.`,
-      { profile: 'fast', temperature: 0, maxTokens: 150, feature: 'agent-prescreen' }
+Include up to ${PRE_SCREEN_MAX_CANDIDATES} agent IDs, ordered by likelihood. Only include agents that have a reasonable chance of handling this query.`,
+      { profile: 'fast', temperature: 0, maxTokens: 200, feature: 'agent-prescreen' }
     );
 
     if (result && Array.isArray(result.agents) && result.agents.length > 0) {
-      // Validate that returned IDs are real
       const validIds = new Set(allAgents.map((a) => a.id));
       const filtered = result.agents.filter((id) => validIds.has(id)).slice(0, PRE_SCREEN_MAX_CANDIDATES);
       if (filtered.length > 0) {
@@ -911,6 +912,13 @@ async function connectBuiltInAgents(port) {
     } catch (error) {
       log.warn('voice', 'Could not initialize agent memories', { data: error.message });
       // Non-fatal - continue without memories
+    }
+
+    // Inject dependencies for agents that support it
+    for (const agent of enabledAgents) {
+      if (agent.id === 'help-agent' && typeof agent._setDeps === 'function') {
+        agent._setDeps({ getAgentList: () => getRegistryAgents() });
+      }
     }
 
     for (const agent of enabledAgents) {
@@ -1661,6 +1669,15 @@ async function executeLocalAgent(agent, task, _executionContext = {}) {
 
     // ── 3. Build system prompt with preferences context ─────────────
     let systemPrompt = agent.prompt || '';
+
+    // Voice orb requests get compressed-speech instructions
+    if (task.metadata?.source === 'orb') {
+      systemPrompt += '\n\nResponse style: compressed speech. No greetings, no filler, no hedging. Data first. '
+        + 'Never start with "Sure", "Of course", "I\'d be happy to". '
+        + 'Never end with "Let me know if you need anything else". '
+        + 'Example good response: "3 emails, 1 urgent from Sarah re: deadline. Calendar clear until 2."';
+    }
+
     if (memoryEnabled && Object.keys(preferences).length > 0) {
       const prefLines = Object.entries(preferences)
         .map(([k, v]) => `- ${k}: ${v}`)
@@ -1901,45 +1918,298 @@ function isLikelyGarbledTranscription(content) {
 /**
  * Generate clarification options using LLM.
  * Called when no agent bids or all bids are too low.
- * Returns an array of { label, description } options for the user.
+ * Phase 1: Classify as rephrase or capability_gap.
+ * Phase 2 (gap only): Generate a build proposal with effort, cost, and integrations.
  */
 async function generateClarificationOptions(content, agentDescriptions) {
   if (!content) return [];
 
   try {
+    const agentList = agentDescriptions.map((a) => `- ${a.name}: ${a.description}`).join('\n');
     const prompt = `The user said: "${content}"
 
 No agent was confident enough to handle this request. The available agents are:
-${agentDescriptions.map((a) => `- ${a.name}: ${a.description}`).join('\n')}
+${agentList}
 
-Generate 2-4 clarification options to help the user. Each option should be a rephrased version of what the user might have meant, matched to an available agent's capability.
+Classify this situation as one of:
+- "rephrase": The request IS handleable by an existing agent but was ambiguous.
+- "capability_gap": No existing agent can do this at all.
 
-Respond with JSON only:
+Respond with JSON:
 {
-  "question": "Brief question asking what they meant",
-  "options": [
-    { "label": "Short label", "description": "Brief clarification" }
-  ]
-}`;
+  "classification": "rephrase" | "capability_gap",
+  "gapSummary": "If capability_gap: one-sentence description of what capability is missing"
+}
+
+Be honest. If no agent covers this domain, say capability_gap.`;
 
     const parsed = await ai.json(prompt, {
       profile: 'fast',
-      temperature: 0.3,
-      maxTokens: 300,
+      temperature: 0,
+      maxTokens: 150,
       feature: 'exchange-bridge',
     });
 
-    return {
-      question: parsed.question || 'What did you mean?',
-      options: (parsed.options || []).slice(0, 4),
-    };
+    const classification = parsed.classification || 'rephrase';
+    const gapSummary = parsed.gapSummary || null;
+
+    if (classification === 'capability_gap' && gapSummary) {
+      return _buildCapabilityGapResponse(content, gapSummary, agentList);
+    }
+
+    // Rephrase path -- generate rephrased options
+    return _buildRephraseResponse(content, agentList);
   } catch (err) {
     log.warn('voice', 'LLM disambiguation failed', { data: err.message });
     return {
+      classification: 'rephrase',
       question: "I'm not sure what you meant. Could you rephrase that?",
       options: [],
+      gapSummary: null,
+      buildProposal: null,
     };
   }
+}
+
+/**
+ * Rephrase path: suggest how to reword the request to match existing agents.
+ */
+async function _buildRephraseResponse(content, agentList) {
+  try {
+    const result = await ai.json(
+      `The user said: "${content}"
+This request might be handleable by an existing agent but was ambiguous.
+
+Available agents:
+${agentList}
+
+Generate 2-4 rephrased options that map to existing agent capabilities.
+Respond with JSON:
+{
+  "question": "Brief question asking what they meant",
+  "options": [{ "label": "Short label", "description": "Brief clarification" }]
+}`,
+      { profile: 'fast', temperature: 0.3, maxTokens: 250, feature: 'exchange-bridge' }
+    );
+    return {
+      classification: 'rephrase',
+      question: result.question || 'What did you mean?',
+      options: (result.options || []).slice(0, 4),
+      gapSummary: null,
+      buildProposal: null,
+    };
+  } catch {
+    return {
+      classification: 'rephrase',
+      question: "I'm not sure what you meant. Could you rephrase that?",
+      options: [],
+      gapSummary: null,
+      buildProposal: null,
+    };
+  }
+}
+
+/**
+ * Capability gap path: generate a build proposal with effort, cost, integration, and playbook offer.
+ */
+async function _buildCapabilityGapResponse(content, gapSummary, agentList) {
+  const TOOL_LIST = [
+    'shell_exec -- run system commands',
+    'file_read / file_write -- local file access',
+    'web_search -- real-time web search',
+    'spaces_search / spaces_add_item -- content storage (Spaces API)',
+    'get_current_time -- system clock',
+  ].join('\n    ');
+
+  const AI_PROFILES = [
+    'fast (Haiku ~$0.0002/call) -- quick classification, routing',
+    'standard (Sonnet ~$0.003/call) -- general reasoning, composition',
+    'powerful (Opus ~$0.02/call) -- deep multi-step reasoning',
+    'vision (Sonnet) -- image analysis',
+    'embedding (text-embedding-3-small ~$0.00002/call) -- semantic search',
+    'transcription (whisper-1 ~$0.006/min) -- audio-to-text',
+  ].join('\n    ');
+
+  const INTEGRATIONS = [
+    'Calendar (Google Calendar API via calendar-data.js)',
+    'Email (mailto: via shell open)',
+    'Browser automation (Playwright via browser-agent)',
+    'Web browsing (native Electron BrowserWindow via browsing-agent)',
+    'ElevenLabs (TTS + sound generation)',
+    'Spaces storage (clipboard-storage-v2)',
+    'Voice pipeline (speech recognition, TTS, voice orb)',
+    'File conversion (lib/convert-service.js)',
+    'Screen capture (lib/screen-service.js)',
+  ].join('\n    ');
+
+  try {
+    const result = await ai.json(
+      `A user asked: "${content}"
+No existing agent can handle this. The missing capability is: "${gapSummary}"
+
+Here is the system this agent would be built in:
+
+EXISTING AGENTS:
+${agentList}
+
+AVAILABLE TOOLS:
+    ${TOOL_LIST}
+
+AI PROFILES (with approximate per-call cost):
+    ${AI_PROFILES}
+
+AVAILABLE INTEGRATIONS:
+    ${INTEGRATIONS}
+
+Generate a build proposal. Respond with JSON:
+{
+  "effort": "small" | "medium" | "large",
+  "effortDescription": "1-sentence justification of effort level",
+  "estimatedCalls": {
+    "fast": 0,
+    "standard": 0,
+    "powerful": 0
+  },
+  "estimatedCostPerUse": "$X.XX",
+  "integration": "Name of the primary existing integration or system this agent would connect to",
+  "integrationDetail": "1-sentence on how it would integrate",
+  "tools": ["tool names from the list above that the agent would need"],
+  "spokenSummary": "2-3 sentence spoken response to the user. Acknowledge the gap, state the effort and cost, name the integration, and offer to create a build playbook. Be conversational, not robotic."
+}
+
+Effort guide:
+- small: Single LLM call, no external API, <50 lines. Example: a formatting agent.
+- medium: 1-3 LLM calls, one external API or tool, 50-200 lines. Example: a weather agent.
+- large: Multiple LLM calls, orchestration, external APIs, >200 lines. Example: a browser automation agent.
+
+Cost guide: estimate calls PER INVOCATION (not build cost). fast=$0.0002, standard=$0.003, powerful=$0.02.`,
+      { profile: 'fast', temperature: 0.3, maxTokens: 500, feature: 'exchange-bridge-proposal' }
+    );
+
+    const proposal = {
+      effort: result.effort || 'medium',
+      effortDescription: result.effortDescription || '',
+      estimatedCalls: result.estimatedCalls || { fast: 1, standard: 1, powerful: 0 },
+      estimatedCostPerUse: result.estimatedCostPerUse || '~$0.01',
+      integration: result.integration || 'None',
+      integrationDetail: result.integrationDetail || '',
+      tools: result.tools || [],
+      spokenSummary: result.spokenSummary || '',
+    };
+
+    const question =
+      proposal.spokenSummary ||
+      `I don't have that ability yet. Building it would be a ${proposal.effort} effort at about ${proposal.estimatedCostPerUse} per use, integrating with ${proposal.integration}. Want me to create a build playbook?`;
+
+    return {
+      classification: 'capability_gap',
+      question,
+      options: [
+        { label: 'Create a build playbook', description: `Generate a step-by-step playbook to build an agent for: ${gapSummary}` },
+        { label: 'Build it now', description: `Open Agent Composer to build: ${gapSummary}` },
+        { label: 'Add to wishlist', description: 'Note this for later and move on' },
+      ],
+      gapSummary,
+      buildProposal: proposal,
+    };
+  } catch (proposalErr) {
+    log.warn('voice', 'Build proposal generation failed, using minimal gap response', { error: proposalErr.message });
+    return {
+      classification: 'capability_gap',
+      question: `I don't have that ability yet, but I could build it. Want me to create a playbook or build the agent now?`,
+      options: [
+        { label: 'Create a build playbook', description: `Generate a playbook for: ${gapSummary}` },
+        { label: 'Build it now', description: `Open Agent Composer to build: ${gapSummary}` },
+        { label: 'Add to wishlist', description: 'Note this for later' },
+      ],
+      gapSummary,
+      buildProposal: null,
+    };
+  }
+}
+
+// ==================== CAPABILITY GAP PERSISTENCE ====================
+const WISHLIST_SPACE_ID = 'capability-wishlist';
+const WISHLIST_SPACE_NAME = 'Capability Wishlist';
+
+/**
+ * Log a capability gap to the Capability Wishlist space.
+ * Creates the space if it doesn't exist.
+ */
+async function _logCapabilityGap(spacesApi, userRequest, gapSummary, buildProposal) {
+  if (!spacesApi) return;
+
+  const storage = spacesApi.storage || spacesApi._storage;
+  if (!storage) return;
+
+  // Find or create the wishlist space
+  const spaces = storage.index?.spaces || [];
+  let space = spaces.find((s) => s.id === WISHLIST_SPACE_ID);
+  if (!space) {
+    space = storage.createSpace({
+      id: WISHLIST_SPACE_ID,
+      name: WISHLIST_SPACE_NAME,
+      icon: '●',
+      color: '#f59e0b',
+      isSystem: true,
+    });
+    log.info('voice', 'Created Capability Wishlist space');
+  }
+
+  // Check for duplicate requests (same gap summary in last 50 items)
+  const existingItems = (storage.index?.items || [])
+    .filter((i) => i.spaceId === WISHLIST_SPACE_ID)
+    .slice(-50);
+  const isDuplicate = existingItems.some(
+    (i) => i.content && i.content.includes(gapSummary)
+  );
+  if (isDuplicate) {
+    log.info('voice', 'Capability gap already on wishlist, skipping duplicate');
+    return;
+  }
+
+  const lines = [
+    `**Request:** "${userRequest}"`,
+    `**Gap:** ${gapSummary}`,
+    `**Date:** ${new Date().toLocaleDateString()}`,
+    `**Status:** New`,
+  ];
+
+  if (buildProposal) {
+    lines.push('');
+    lines.push(`**Effort:** ${buildProposal.effort} -- ${buildProposal.effortDescription || ''}`);
+    lines.push(`**Est. cost/use:** ${buildProposal.estimatedCostPerUse || '~$0.01'}`);
+    lines.push(`**Integration:** ${buildProposal.integration || 'None'} -- ${buildProposal.integrationDetail || ''}`);
+    if (buildProposal.tools?.length) {
+      lines.push(`**Tools:** ${buildProposal.tools.join(', ')}`);
+    }
+    if (buildProposal.estimatedCalls) {
+      const calls = buildProposal.estimatedCalls;
+      const parts = [];
+      if (calls.fast) parts.push(`${calls.fast} fast`);
+      if (calls.standard) parts.push(`${calls.standard} standard`);
+      if (calls.powerful) parts.push(`${calls.powerful} powerful`);
+      if (parts.length) lines.push(`**LLM calls/use:** ${parts.join(', ')}`);
+    }
+  }
+
+  const entry = lines.join('\n');
+
+  storage.addItem({
+    type: 'text',
+    content: entry,
+    spaceId: WISHLIST_SPACE_ID,
+    timestamp: Date.now(),
+    metadata: {
+      title: gapSummary,
+      userRequest,
+      gapSummary,
+      status: 'new',
+      buildProposal: buildProposal || null,
+    },
+  });
+
+  log.info('voice', 'Logged capability gap to wishlist', { gap: gapSummary });
 }
 
 /**
@@ -2556,7 +2826,7 @@ function setupExchangeEvents() {
       hudApi.emitResult({
         taskId: task.id,
         success: false,
-        message: "I couldn't find an agent to handle that. Could you rephrase?",
+        message: "I don't have an agent for that yet. You can say \"build an agent\" to create one, or I've added it to the wishlist.",
         agentId: 'system',
         needsClarification: true,
       });
@@ -2617,34 +2887,56 @@ function setupExchangeEvents() {
           /* non-fatal */
         }
       } else {
-        // Task was clear but no agent can handle it -- use LLM disambiguation
-        log.info('voice', 'No agents for task, generating LLM disambiguation');
+        // Task was clear but no agent can handle it
+        log.info('voice', 'No agents for task, analyzing capability gap');
 
-        // Guard against infinite rephrase loops: max 1 auto-rephrase attempt
         const rephraseAttempts = task.metadata?.rephraseAttempts || 0;
 
-        // Get agent descriptions for the LLM
         const { getAllAgents } = require('../../packages/agents/agent-registry');
         const agents = getAllAgents().filter((a) => !a.bidExcluded);
         const agentDescriptions = agents.map((a) => ({ name: a.name, description: a.description }));
 
-        let disambiguation = { options: [] };
+        let disambiguation = { classification: 'rephrase', options: [], gapSummary: null, buildProposal: null };
         try {
           disambiguation = await Promise.race([
             generateClarificationOptions(content, agentDescriptions),
             new Promise((_, reject) => {
-              setTimeout(() => reject(new Error('Disambiguation timeout')), 6000);
+              setTimeout(() => reject(new Error('Disambiguation timeout')), 10000);
             }),
           ]);
         } catch (disErr) {
           log.warn('voice', 'Disambiguation LLM failed, using generic response', { error: disErr.message });
         }
 
+        const isCapabilityGap = disambiguation.classification === 'capability_gap';
+        const buildProposal = disambiguation.buildProposal || null;
+
+        if (isCapabilityGap) {
+          log.info('voice', 'Capability gap detected', {
+            request: content.slice(0, 80),
+            gap: disambiguation.gapSummary,
+            effort: buildProposal?.effort,
+            cost: buildProposal?.estimatedCostPerUse,
+            integration: buildProposal?.integration,
+          });
+
+          // Persist the capability gap (with build proposal) to the Wishlist space
+          try {
+            const { getSpacesAPI } = require('../../spaces-api');
+            const spacesApi = getSpacesAPI();
+            await _logCapabilityGap(spacesApi, content, disambiguation.gapSummary, buildProposal);
+          } catch (gapErr) {
+            log.warn('voice', 'Could not persist capability gap', { error: gapErr.message });
+          }
+        }
+
         let clarificationMessage;
-        if (disambiguation.options.length > 0) {
+        if (isCapabilityGap && disambiguation.question) {
+          clarificationMessage = disambiguation.question;
+        } else if (disambiguation.options.length > 0) {
           clarificationMessage = disambiguation.question;
         } else {
-          clarificationMessage = `I'm not sure how to help with "${content}". Could you rephrase that, or ask "what can you do" to see my capabilities?`;
+          clarificationMessage = `I don't have an agent that can handle "${content}" yet. I can build one for you, or I've noted it on the wishlist. Just say "build an agent for this" if you'd like.`;
         }
 
         addToHistory('assistant', clarificationMessage, 'system');
@@ -2655,34 +2947,54 @@ function setupExchangeEvents() {
             needsClarification: true,
             suggestions: disambiguation.options.map((o) => o.label),
             message: clarificationMessage,
+            capabilityGap: isCapabilityGap ? disambiguation.gapSummary : null,
+            buildProposal,
           });
         }
 
-        // If options exist, show disambiguation UI on HUD
         if (disambiguation.options.length > 0) {
+          const enrichedOptions = isCapabilityGap
+            ? disambiguation.options.map((o) => {
+                const lbl = o.label.toLowerCase();
+                if (lbl.includes('build it') || lbl.includes('build now')) {
+                  return { ...o, action: 'create-agent', gapDescription: disambiguation.gapSummary };
+                }
+                if (lbl.includes('playbook')) {
+                  return { ...o, action: 'create-playbook', gapDescription: disambiguation.gapSummary, buildProposal };
+                }
+                if (lbl.includes('wishlist')) {
+                  return { ...o, action: 'wishlist-ack' };
+                }
+                return o;
+              })
+            : disambiguation.options;
+
           broadcastToWindows('voice-task:disambiguation', {
             taskId: task.id,
             question: disambiguation.question,
-            options: disambiguation.options,
+            options: enrichedOptions,
             rephraseAttempts,
+            capabilityGap: isCapabilityGap,
+            buildProposal,
           });
 
-          // Also emit through centralized HUD API
           hudApi.emitDisambiguation({
             taskId: task.id,
             question: disambiguation.question,
-            options: disambiguation.options,
+            options: enrichedOptions,
+            capabilityGap: isCapabilityGap,
+            buildProposal,
           });
         }
 
-        // ALWAYS emit result so onResult listeners get notified
-        // (disambiguation alone doesn't trigger onResult)
         hudApi.emitResult({
           taskId: task.id,
           success: false,
           message: clarificationMessage,
           agentId: 'system',
           needsClarification: true,
+          capabilityGap: isCapabilityGap ? disambiguation.gapSummary : null,
+          buildProposal,
         });
 
         // Speak the clarification
@@ -2719,6 +3031,18 @@ function setupExchangeEvents() {
       task.metadata.masterEvaluation = masterEvaluation;
       log.info('voice', 'Master evaluation stored', { reasoning: masterEvaluation.reasoning });
     }
+
+    // Store assigned agent details for diagnostic use if the task later fails
+    try {
+      const { getAgent } = require('../../packages/agents/agent-registry');
+      const assignedAgent = getAgent(winner.agentId);
+      task.metadata = task.metadata || {};
+      task.metadata.agentName = assignedAgent?.name || winner.agentName || winner.agentId;
+      task.metadata.agentExecutionType = assignedAgent?.executionType || 'action';
+      if (assignedAgent?.prompt) {
+        task.metadata.agentPrompt = assignedAgent.prompt.substring(0, 500);
+      }
+    } catch (_ignored) { /* best-effort */ }
 
     // Track execution start time for duration calculation
     taskExecutionStartTimes.set(task.id, Date.now());
@@ -3303,6 +3627,58 @@ function setupExchangeEvents() {
           data: result?.data,
         });
 
+        // If diagnosis is available for a non-system agent, offer fix options
+        if (result?.data?.diagnosticAvailable && result.data.failedAgentId) {
+          const diagData = result.data;
+          const options = [];
+
+          if (diagData.fix?.canFix) {
+            options.push({
+              label: 'Fix it now',
+              description: `Open Agent Composer with the diagnosis to fix "${diagData.failedAgentId}"`,
+              action: 'diagnose-fix',
+              failedAgentId: diagData.failedAgentId,
+              diagnosis: diagData.diagnosis,
+              fix: diagData.fix,
+              originalTask: diagData.originalTask,
+            });
+          }
+
+          options.push({
+            label: 'Open in Agent Composer',
+            description: `Inspect and edit "${diagData.failedAgentId}" in the Agent Composer`,
+            action: 'diagnose-open-composer',
+            failedAgentId: diagData.failedAgentId,
+            diagnosis: diagData.diagnosis,
+            originalTask: diagData.originalTask,
+          });
+
+          options.push({
+            label: 'Try again',
+            description: 'Resubmit the original request',
+            action: 'diagnose-retry',
+            originalTask: diagData.originalTask,
+          });
+
+          options.push({
+            label: 'Skip',
+            description: 'Dismiss this error',
+            action: 'diagnose-skip',
+          });
+
+          hudApi.emitDisambiguation({
+            taskId: task.id,
+            question: message,
+            options,
+          });
+
+          broadcastToWindows('voice-task:disambiguation', {
+            taskId: task.id,
+            question: message,
+            options: options.map((o, i) => ({ index: i, label: o.label, description: o.description })),
+          });
+        }
+
         // Speak the error message
         try {
           const { getVoiceSpeaker } = require('../../voice-speaker');
@@ -3338,6 +3714,10 @@ function setupExchangeEvents() {
   // Task failed, trying backup
   exchangeInstance.on('task:busted', ({ task, agentId, error, backupsRemaining }) => {
     log.info('voice', 'Task busted, backups remaining', { backupsRemaining: backupsRemaining });
+
+    // Track the last agent that attempted execution (assignedAgent is cleared on re-auction)
+    task.metadata = task.metadata || {};
+    task.metadata.lastAgentId = agentId;
 
     if (global.showCommandHUD) {
       global.showCommandHUD({

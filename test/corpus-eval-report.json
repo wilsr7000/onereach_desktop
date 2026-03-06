@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-24T23:46:08.892Z",
+  "timestamp": "2026-03-04T04:37:26.155Z",
   "summary": {
     "total": 63,
     "passed": 38,
@@ -14,7 +14,7 @@
       "user": "What time is it?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 3:44 PM"
+      "response": "It's 10:36 PM"
     },
     {
       "conversation": "Time: basic queries",
@@ -22,7 +22,7 @@
       "user": "And what day is it today?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Tuesday, February 24, 2026"
+      "response": "It's Tuesday, March 3, 2026"
     },
     {
       "conversation": "Time: basic queries",
@@ -30,7 +30,7 @@
       "user": "What is the date?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Tuesday, February 24, 2026"
+      "response": "It's Tuesday, March 3, 2026"
     },
     {
       "conversation": "Time: timezone awareness",
@@ -46,7 +46,7 @@
       "user": "And in London?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 3:44 PM"
+      "response": "It's 10:36 PM"
     },
     {
       "conversation": "Weather: city provided",
@@ -54,7 +54,7 @@
       "user": "What is the weather in Denver?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 67°F and partly cloudy in Denver"
+      "response": "It's 38°F and partly cloudy in Denver. Humidity is 81%"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -62,7 +62,7 @@
       "user": "What's the weather?",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "It's 62°F and fog in Berkeley. Humidity is 80%"
+      "response": "It's 55°F and partly cloudy in Berkeley. Humidity is 83%"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -70,7 +70,7 @@
       "user": "San Francisco",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 62°F and fog in Berkeley. Humidity is 80%"
+      "response": "It's 55°F and partly cloudy in Berkeley. Humidity is 83%"
     },
     {
       "conversation": "Weather: forecast request",
@@ -78,7 +78,7 @@
       "user": "Will it rain tomorrow in Seattle?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 62°F and fog in Berkeley. Humidity is 80%"
+      "response": "It's 55°F and partly cloudy in Berkeley. Humidity is 83%"
     },
     {
       "conversation": "Spelling: common words",
@@ -126,7 +126,7 @@
       "user": "Hello there",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I'm here to help! Just let me know what you need."
+      "response": "How can I assist you?"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -134,7 +134,7 @@
       "user": "How are you doing?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I'm doing well, thanks for asking! How can I help you?"
+      "response": "I'm doing well, Robb! How can I help you?"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -142,7 +142,7 @@
       "user": "Thanks for your help",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "No problem!"
+      "response": "Happy to help!"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -150,7 +150,7 @@
       "user": "Goodbye",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Take care!"
+      "response": "See you later, Robb!"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -158,7 +158,7 @@
       "user": "Hey",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Hey there! How can I help you?"
+      "response": "Hello Robb! What can I do for you?"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -166,7 +166,7 @@
       "user": "Good morning",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good morning! How can I help you today?"
+      "response": "Good morning, Robb! How can I help you today?"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -174,7 +174,7 @@
       "user": "Good night",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good night! Sleep well."
+      "response": "Good night, Robb! Sleep well."
     },
     {
       "conversation": "Help: capabilities inquiry",
@@ -182,7 +182,7 @@
       "user": "What can you do?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I can help you with several things. Ask me the time or date. Check the weather in any city. Control "
+      "response": "I have 26 capabilities across several areas. I can help with calendar management and daily briefings"
     },
     {
       "conversation": "Help: capabilities inquiry",
@@ -190,7 +190,7 @@
       "user": "Tell me more about the agents",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I can help you with several things. Ask me the time or date. Check the weather in any city. Control "
+      "response": "I have 26 capabilities across several areas. I can help with calendar management and daily briefings"
     },
     {
       "conversation": "Help: feature questions",
@@ -198,7 +198,7 @@
       "user": "Help",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "What would you like help with? I can help with time, weather, music, or just tell you what I can do."
+      "response": "What would you like help with? I can tell you about scheduling, weather, music, web search, recordin"
     },
     {
       "conversation": "Help: feature questions",
@@ -206,7 +206,7 @@
       "user": "How do I use voice commands?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Say 'cancel' to stop what I'm doing, 'repeat' to hear my last response again, or 'undo' within 60 se"
+      "response": "Say 'cancel' to stop, 'repeat' to hear my last response, or use Cmd+K to open the command palette."
     },
     {
       "conversation": "Calendar: schedule queries",
@@ -398,7 +398,7 @@
       "user": "Give me my morning briefing",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good afternoon. Current time: 3:46 PM. Date: Tuesday, February 24, 2026. Time of day: afternoon. 4 m"
+      "response": "Good evening, Robb. Current time: 10:37 PM. Date: Tuesday, March 3, 2026. Time of day: evening. It's"
     },
     {
       "conversation": "Memory: store and recall preferences",
@@ -437,8 +437,8 @@
       "agentId": "browser-agent",
       "user": "Go to google.com and search for weather",
       "grade": "partial",
-      "reason": "success: false but has message: \"Could not start the browser: browserType.launchPersistentCon\"",
-      "response": "Could not start the browser: browserType.launchPersistentContext: Executable doesn't exist at /var/f"
+      "reason": "success: false but has message: \"Could not read the page: Cannot read properties of undefined\"",
+      "response": "Could not read the page: Cannot read properties of undefined (reading 'snapshot')"
     },
     {
       "conversation": "App: navigation commands",
@@ -494,7 +494,7 @@
       "user": "asdfghjkl",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Hmm?"
+      "response": "Come again?"
     },
     {
       "conversation": "Edge: single word",
@@ -502,7 +502,7 @@
       "user": "help",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "What would you like help with? I can help with time, weather, music, or just tell you what I can do."
+      "response": "What would you like help with? I can tell you about scheduling, weather, music, web search, recordin"
     },
     {
       "conversation": "Edge: very long input",
@@ -510,7 +510,7 @@
       "user": "I need help understanding how to use all the different features of this application including the video editor the spaces manager the voice orb the agent system the calendar integration and everything else you offer",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I can help you with several things. Ask me the time or date. Check the weather in any city. Control "
+      "response": "I can manage your calendar. Ask 'what's on my schedule', 'add a meeting', 'cancel the standup', or '"
     }
   ]
 }

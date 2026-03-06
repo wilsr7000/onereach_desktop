@@ -41,8 +41,14 @@ let orbWindow = null;
 // Global Command HUD window instance
 let commandHUDWindow = null;
 
+// Global Command Palette window instance
+let commandPaletteWindow = null;
+
 // Global Intro Wizard window instance
 let introWizardWindow = null;
+
+// Global Splash Screen window instance
+let splashWindow = null;
 
 // Expose window registry globally for cross-module access
 global.windowRegistry = windowRegistry;
@@ -502,7 +508,7 @@ function createTray() {
     },
   ]);
 
-  tray.setToolTip('GSX Power User');
+  tray.setToolTip('Onereach.ai \u2014 Agentic AI Workstation');
   tray.setContextMenu(contextMenu);
 
   // Show window when tray icon is clicked
@@ -869,6 +875,9 @@ app.whenReady().then(() => {
     console.error('[Startup] TabPicker IPC error:', e.message);
   }
 
+  // Set up Splash Screen IPC handlers
+  setupSplashIPC();
+
   // Set up Intro Wizard IPC handlers
   try {
     setupIntroWizardIPC();
@@ -907,6 +916,11 @@ app.whenReady().then(() => {
   globalShortcut.register('CommandOrControl+Shift+I', openDevTools);
   globalShortcut.register('F12', openDevTools);
   console.log('Registered Cmd+Shift+I and F12 shortcuts for Developer Tools');
+
+  globalShortcut.register('CommandOrControl+K', () => {
+    toggleCommandPalette();
+  });
+  console.log('[CommandPalette] Registered Cmd+K shortcut');
 
   // PERFORMANCE: Defer heavyweight manager initializations until after window shows
   // Uses setTimeout(0) instead of setImmediate because Electron's event loop
@@ -1092,8 +1106,11 @@ app.whenReady().then(() => {
 
     console.log('[Startup] Deferred managers initialized');
 
-    // Check if intro wizard should be shown (first run or update)
-    checkAndShowIntroWizard();
+    // Show branded splash on every launch, then check intro wizard after splash closes
+    createSplashWindow();
+    setTimeout(() => {
+      checkAndShowIntroWizard();
+    }, 2800);
   });
 
   // MIGRATION: Migrate idw-entries.json to settings manager if needed
@@ -9255,6 +9272,13 @@ function setupIPC() {
     }
   });
 
+  // Handle showing Voice Orb from renderer
+  ipcMain.on('show-voice-orb', () => {
+    if (typeof global.showOrbWindow === 'function') {
+      global.showOrbWindow();
+    }
+  });
+
   // Handle opening external URLs from renderer
   ipcMain.on('open-external-url', (event, url) => {
     console.log('Opening external URL:', url);
@@ -13686,9 +13710,9 @@ function setupIPC() {
         return { message: 'Update check not available in development mode' };
       }
 
-      // In production, this would check for actual updates
-      // autoUpdater loaded lazily in app.whenReady()
-      let autoUpdater = null;
+      if (!autoUpdater) {
+        return { message: 'Auto-updater not initialized' };
+      }
       const result = await autoUpdater.checkForUpdates();
       return {
         message: result.updateInfo ? `Update available: ${result.updateInfo.version}` : 'Up to date',
@@ -15597,7 +15621,7 @@ function setupOrbIPC() {
 
     // The orb is 80px with 20px margin from the edge.
     // When flipping, the window needs to shift so the orb stays in the same screen position.
-    // Offset = windowWidth - orbSize - (2 * margin) = 400 - 80 - 40 = 280
+    // Offset = windowWidth - orbSize - (2 * margin)  e.g. 170 - 80 - 40 = 50 (collapsed)
     const orbSize = 80;
     const orbMargin = 20;
     const offset = winWidth - orbSize - 2 * orbMargin;
@@ -15744,8 +15768,8 @@ function createOrbWindow() {
 
   // Window dimensions - collapsed to just the orb to avoid blocking clicks.
   // Expands dynamically when tooltip or chat panel needs to be visible.
-  const windowWidth = screenService.ORB_COLLAPSED_WIDTH; // 130
-  const windowHeight = screenService.ORB_COLLAPSED_HEIGHT; // 130
+  const windowWidth = screenService.ORB_COLLAPSED_WIDTH; // 170
+  const windowHeight = screenService.ORB_COLLAPSED_HEIGHT; // 110
 
   // Try to restore saved position and side, otherwise default to bottom-right
   let x, y;
@@ -16339,6 +16363,221 @@ function createCommandHUDWindow() {
   console.log('[CommandHUD] HUD window created');
   return commandHUDWindow;
 }
+
+// ==================== COMMAND PALETTE ====================
+
+function createCommandPaletteWindow() {
+  if (commandPaletteWindow && !commandPaletteWindow.isDestroyed()) {
+    return commandPaletteWindow;
+  }
+
+  const windowWidth = 560;
+  const windowHeight = 420;
+
+  const focusedWin = BrowserWindow.getFocusedWindow();
+  const display = focusedWin
+    ? screen.getDisplayMatching(focusedWin.getBounds())
+    : screen.getPrimaryDisplay();
+  const { x: wx, y: wy, width: sw, height: sh } = display.workArea;
+  const x = Math.round(wx + (sw - windowWidth) / 2);
+  const y = Math.round(wy + sh * 0.22);
+
+  commandPaletteWindow = new BrowserWindow({
+    width: windowWidth,
+    height: windowHeight,
+    x, y,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-command-palette.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  commandPaletteWindow.setAlwaysOnTop(true, 'floating');
+  commandPaletteWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  commandPaletteWindow.loadFile(path.join(__dirname, 'command-palette.html'));
+
+  commandPaletteWindow.on('blur', () => {
+    if (commandPaletteWindow && !commandPaletteWindow.isDestroyed()) {
+      commandPaletteWindow.hide();
+      commandPaletteWindow.webContents.send('palette:hide');
+    }
+  });
+
+  commandPaletteWindow.on('closed', () => {
+    commandPaletteWindow = null;
+  });
+
+  console.log('[CommandPalette] Window created');
+  return commandPaletteWindow;
+}
+
+function toggleCommandPalette() {
+  if (commandPaletteWindow && !commandPaletteWindow.isDestroyed() && commandPaletteWindow.isVisible()) {
+    commandPaletteWindow.hide();
+    commandPaletteWindow.webContents.send('palette:hide');
+    return;
+  }
+
+  const win = createCommandPaletteWindow();
+
+  const focusedWin = BrowserWindow.getFocusedWindow();
+  const display = focusedWin
+    ? screen.getDisplayMatching(focusedWin.getBounds())
+    : screen.getPrimaryDisplay();
+  const { x: wx, y: wy, width: sw, height: sh } = display.workArea;
+  const x = Math.round(wx + (sw - 560) / 2);
+  const y = Math.round(wy + sh * 0.22);
+  win.setPosition(x, y);
+
+  win.show();
+  win.focus();
+  win.webContents.send('palette:show');
+}
+
+async function getPaletteItems() {
+  const items = [];
+
+  try {
+    const { getOpenableItems } = require('./menu');
+    const menuItems = getOpenableItems();
+    for (const mi of menuItems) {
+      items.push({
+        id: mi.action || mi.url || mi.name,
+        name: mi.name,
+        type: mi.type,
+        description: mi.description || '',
+        keywords: mi.keywords || [],
+        action: mi.action || null,
+        url: mi.url || null,
+        moduleId: mi.moduleId || null,
+      });
+    }
+  } catch (e) {
+    console.warn('[CommandPalette] Failed to load menu items:', e.message);
+  }
+
+  try {
+    const { getAllAgents } = require('./packages/agents/agent-registry');
+    const agents = getAllAgents();
+    const skipIds = new Set(['error-agent', 'orchestrator-agent']);
+    for (const agent of agents) {
+      if (skipIds.has(agent.id)) continue;
+      items.push({
+        id: agent.id,
+        name: agent.name,
+        type: 'agent',
+        description: agent.description || '',
+        keywords: agent.keywords || [],
+        icon: 'bot',
+      });
+    }
+  } catch (e) {
+    console.warn('[CommandPalette] Failed to load agents:', e.message);
+  }
+
+  try {
+    const { getSpacesAPI } = require('./spaces-api');
+    const spacesAPI = getSpacesAPI();
+    const spaces = await spacesAPI.list();
+    for (const sp of spaces) {
+      items.push({
+        id: `space:${sp.id}`,
+        name: sp.name || sp.id,
+        type: 'space',
+        description: `${sp.itemCount || 0} items`,
+        keywords: ['space', sp.name?.toLowerCase() || ''],
+        spaceId: sp.id,
+      });
+    }
+  } catch (e) {
+    console.warn('[CommandPalette] Failed to load spaces:', e.message);
+  }
+
+  items.push(
+    { id: 'vc:time', name: 'What time is it?', type: 'voice-command', description: 'Ask the time agent', keywords: ['time', 'date', 'clock'] },
+    { id: 'vc:weather', name: "What's the weather?", type: 'voice-command', description: 'Ask the weather agent', keywords: ['weather', 'forecast', 'temperature'] },
+    { id: 'vc:brief', name: 'Give me my daily brief', type: 'voice-command', description: 'Morning briefing', keywords: ['brief', 'morning', 'daily', 'briefing'] },
+    { id: 'vc:help', name: 'What can you do?', type: 'voice-command', description: 'Show all capabilities', keywords: ['help', 'capabilities', 'what can'] },
+    { id: 'vc:music', name: 'Play some music', type: 'voice-command', description: 'DJ agent', keywords: ['music', 'play', 'dj', 'song'] },
+    { id: 'vc:record', name: 'Record a video', type: 'voice-command', description: 'Start WISER Meeting recorder', keywords: ['record', 'capture', 'screen', 'video'] },
+  );
+
+  return items;
+}
+
+ipcMain.handle('palette:get-items', async () => {
+  return getPaletteItems();
+});
+
+ipcMain.handle('palette:execute', async (_event, item) => {
+  if (!item) return { success: false, error: 'No item' };
+
+  if (item.action) {
+    const { executeAction } = require('./action-executor');
+    return executeAction(item.action, { moduleId: item.moduleId, name: item.name });
+  }
+
+  if (item.url) {
+    const { shell } = require('electron');
+    shell.openExternal(item.url);
+    return { success: true, message: `Opening ${item.name}` };
+  }
+
+  if (item.type === 'space' && item.spaceId) {
+    if (global.clipboardManager) {
+      global.clipboardManager.createClipboardWindow();
+      setTimeout(() => {
+        BrowserWindow.getAllWindows().forEach((win) => {
+          if (!win.isDestroyed() && win.getTitle().includes('Spaces')) {
+            win.webContents.send('spaces:navigate', { spaceId: item.spaceId });
+          }
+        });
+      }, 400);
+      return { success: true, message: `Opening space: ${item.name}` };
+    }
+  }
+
+  if (item.type === 'voice-command') {
+    const hudAPI = require('./lib/hud-api');
+    const text = item.name;
+    try {
+      await hudAPI.submitTask(text, { source: 'palette', toolId: 'palette' });
+      return { success: true, message: `Submitted: ${text}` };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  return { success: false, error: `Unknown item type: ${item.type}` };
+});
+
+ipcMain.handle('palette:submit-to-agent', async (_event, agentId, text) => {
+  const hudAPI = require('./lib/hud-api');
+  const prompt = text || `Talk to ${agentId}`;
+  try {
+    await hudAPI.submitTask(prompt, { source: 'palette', toolId: 'palette', targetAgentId: agentId });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('palette:dismiss', async () => {
+  if (commandPaletteWindow && !commandPaletteWindow.isDestroyed()) {
+    commandPaletteWindow.hide();
+    commandPaletteWindow.webContents.send('palette:hide');
+  }
+  return { success: true };
+});
 
 /**
  * Show the Command HUD with a task
@@ -18584,13 +18823,70 @@ Keep responses brief. Focus on building the agent.`;
   console.log('[AgentComposer] IPC handlers registered');
 }
 
+// ==================== SPLASH SCREEN ====================
+
+/**
+ * Create and show the branded splash screen on every launch.
+ * Fades in, holds, fades out over 2.5s, then auto-closes.
+ */
+function createSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    return splashWindow;
+  }
+
+  splashWindow = new BrowserWindow({
+    width: 480,
+    height: 320,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    center: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-splash.js'),
+      webSecurity: true,
+      sandbox: false,
+    },
+  });
+
+  splashWindow.on('closed', () => {
+    splashWindow = null;
+  });
+
+  splashWindow.loadFile('splash.html').catch((err) => {
+    console.error('[Splash] Error loading splash.html:', err);
+  });
+
+  return splashWindow;
+}
+
+/**
+ * Setup Splash Screen IPC handlers
+ */
+function setupSplashIPC() {
+  ipcMain.handle('splash:close', async () => {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      splashWindow.close();
+    }
+    return true;
+  });
+}
+
 // ==================== INTRO WIZARD ====================
 
 /**
  * Create and show the intro wizard window
  * Shows intro for first-time users, or updates for returning users
  */
-function createIntroWizardWindow() {
+function createIntroWizardWindow(isFirstRun) {
   if (introWizardWindow && !introWizardWindow.isDestroyed()) {
     introWizardWindow.focus();
     return introWizardWindow;
@@ -18603,7 +18899,7 @@ function createIntroWizardWindow() {
     height: 600,
     minWidth: 600,
     minHeight: 500,
-    title: 'Welcome to GSX Power User',
+    title: 'Welcome to Onereach.ai',
     frame: false,
     transparent: false,
     backgroundColor: '#141414',
@@ -18618,10 +18914,16 @@ function createIntroWizardWindow() {
     },
   });
 
-  // Clear the reference when closed
   introWizardWindow.on('closed', () => {
     console.log('[IntroWizard] Window closed');
     introWizardWindow = null;
+
+    if (isFirstRun) {
+      const mw = browserWindow.getMainWindow();
+      if (mw && !mw.isDestroyed() && mw.webContents) {
+        mw.webContents.send('show-welcome-overlay');
+      }
+    }
   });
   windowRegistry.register('intro-wizard', introWizardWindow);
 
@@ -18670,6 +18972,14 @@ function setupIntroWizardIPC() {
     return true;
   });
 
+  // Open Settings from wizard
+  ipcMain.handle('intro-wizard:open-settings', async () => {
+    if (typeof global.openSettingsWindowGlobal === 'function') {
+      global.openSettingsWindowGlobal();
+    }
+    return true;
+  });
+
   console.log('[IntroWizard] IPC handlers registered');
 }
 
@@ -18692,7 +19002,7 @@ function checkAndShowIntroWizard() {
 
     // Delay slightly to let main window finish loading
     setTimeout(() => {
-      createIntroWizardWindow();
+      createIntroWizardWindow(isFirstRun);
     }, 500);
   } else {
     console.log('[IntroWizard] Not showing - already seen version', currentVersion);

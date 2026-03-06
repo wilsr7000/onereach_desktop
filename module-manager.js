@@ -256,9 +256,9 @@ class ModuleManager {
       height: 800,
       title: module.name,
       webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false,
-        webSecurity: false,
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: require('path').join(__dirname, 'preload.js'),
       },
       ...module.windowOptions,
     };

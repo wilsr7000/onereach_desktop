@@ -1,256 +1,107 @@
 # Onereach.ai
 
-A cross-platform desktop application built with Electron for Mac and Windows.
+An AI-powered creative workstation that unifies digital workers, content management, voice agents, and intelligent automation into a single desktop experience. Built with Electron for macOS (Windows coming soon).
 
 ## Features
 
-- Modern and responsive UI
-- Cross-platform compatibility (macOS and Windows)
-- Secure IPC communication between main and renderer processes
-- **Centralized AI Service**: Unified `lib/ai-service.js` for all LLM calls (OpenAI, Anthropic) with model profiles, auto-retry, provider fallback, circuit breakers, and cost monitoring
-- **AI Run Times RSS Reader**: Advanced RSS reader with intelligent reading time estimation
-- IDW (Intelligent Digital Worker) environment management
-- GSX (Global Service Exchange) integration
-- Reading progress tracking and analytics
+- **Voice Orb** -- Talk to AI agents hands-free. 18+ built-in agents for calendar, weather, search, music, meeting notes, and more. Create your own custom agents with voice, memory, and daily briefing support.
+- **Spaces** -- Organize files, notes, clips, URLs, and data sources. Drag-and-drop content, bulk operations, GSX sync, and full-text search. REST API at port 47291.
+- **WISER Meeting** -- Record camera, screen, or both with P2P dual recording (Riverside-style). Live captions, diarized transcripts, and post-processing with layout options.
+- **Video Editor** -- Timeline-based editing with AI audio replacement (9 ElevenLabs voices), smart transcription, scene detection, and waveform visualization.
+- **GSX Create** -- AI-powered development assistant with 7-phase task workflow, real-time progress, and budget tracking.
+- **IDW Hub** -- Manage OneReach.ai Intelligent Digital Workers with GSX link configuration and OmniGraph-backed store.
+- **AI Agents** -- External AI integrations (ChatGPT, Claude, Gemini, Grok, Perplexity) with automatic conversation capture to Spaces. AI creators for image, video, audio, and design.
+- **Smart Export** -- 59 agentic converter agents for format transformation across 12 categories.
+- **Budget Manager** -- Track LLM costs per operation with per-feature breakdowns.
+- **Browsing API** -- Session-based web automation with anti-detection stealth, LLM-driven task runner, and safety guardrails.
 
-## Development
+## Prerequisites
 
-Want to contribute? Check out our **[Contributing Guide](CONTRIBUTING.md)** for detailed instructions!
+- **Node.js** v20 or higher
+- **npm** v9 or higher
+- **macOS** 12+ (Apple Silicon or Intel)
+- **API Keys** (configured in Settings > API Keys):
+  - OpenAI (required for voice, transcription, embeddings)
+  - Anthropic (required for AI agents, chat, analysis)
+  - ElevenLabs (optional, for voice synthesis in Video Editor)
 
-### Prerequisites
-
-- Node.js (v14 or higher)
-- npm (v6 or higher)
-
-### Installation
+## Getting Started
 
 ```bash
 # Clone the repository
-git clone https://github.com/wilsr7000/onereach_desktop.git
-cd onereach_desktop
+git clone https://github.com/wilsr7000/Onereach_Desktop_App.git
+cd Onereach_Desktop_App
 
 # Install dependencies
 npm install
-```
 
-### Development Commands
+# Start the application
+npm start
 
-```bash
-# Start the application in development mode
+# Development mode (with extra logging)
 npm run dev
-
-# Package the application for both Mac and Windows
-npm run package
-
-# Package for Mac only
-
-
-
-# Package for Windows only
-npm run package:win
 ```
 
-## AI Run Times RSS Reader
+On first launch, the intro wizard will guide you through setup including API key configuration.
 
-The AI Run Times feature provides an advanced RSS reader specifically designed for UX Magazine and other design-focused content.
-
-### Key Features
-
-- **Intelligent Reading Time Estimation**: Calculates accurate reading times based on actual article content (7-35 minutes)
-- **Real-time Content Fetching**: Uses Electron's native networking to bypass CORS limitations
-- **Progress Tracking**: Visual progress bars show reading completion status
-- **Article Analytics**: Tracks reading time and engagement metrics
-- **Responsive Grid Layout**: Modern tile-based interface with article previews
-- **External Link Handling**: Seamlessly opens related links in your default browser
-
-### How It Works
-
-1. **Content Analysis**: The app fetches full article content and analyzes word count
-2. **Smart Estimation**: Calculates reading time using 200 words per minute average
-3. **Dynamic Updates**: Reading times update from "Loading..." to accurate estimates
-4. **Visual Feedback**: Green highlights indicate when reading times are updated
-5. **Progress Tracking**: Blue progress bars show reading completion (e.g., "2:30 / 14:00")
-
-### Accessing AI Run Times
-
-1. Open the Onereach.ai application
-2. Navigate to **View → AI Run Times** in the menu bar
-3. The RSS reader will automatically load UX Magazine articles
-4. Click on any article tile to read the full content
-
-### Technical Implementation
-
-- **Server-side Processing**: Reading time calculations happen in the main Electron process
-- **IPC Communication**: Real-time updates sent to the renderer via Inter-Process Communication
-- **HTML Content Parsing**: Extracts plain text from article HTML for accurate word counting
-- **Caching Prevention**: Dynamic cache-busting ensures fresh content loading
-- **Error Handling**: Graceful fallbacks for network issues or parsing errors
-
-## Integrated Test Runner
-
-The application includes a comprehensive test runner for automated testing and manual test checklists.
-
-### Key Features
-
-- **Hidden Access**: Activated with keyboard shortcut for security
-- **Automated Tests**: Pre-configured tests for core functionality
-- **Manual Checklists**: Track UI/UX testing with notes
-- **Test History**: View previous test runs and statistics
-- **Report Export**: Generate Markdown reports for documentation
-
-### Accessing the Test Runner
-
-1. Press `Cmd+Alt+H` (Mac) or `Ctrl+Alt+H` (Windows) to activate the test menu
-2. Navigate to **Help → 🧬 Integrated Test Runner**
-3. Or use the shortcut: `Cmd+Shift+T` (Mac) or `Ctrl+Shift+T` (Windows)
-
-### Test Categories
-
-#### Automated Tests
-- **Core Functionality**: Clipboard monitoring, source detection, search
-- **Spaces Management**: Space creation, item movement, deletion
-- **Settings & Storage**: Settings persistence, API encryption
-- **Performance**: Search speed, memory usage
-
-#### Manual Tests
-- **Visual & UX**: UI appearance, animations, window resizing
-- **OS Integration**: Drag & drop, system tray, notifications
-
-### Running Tests
-
-**Automated Tests:**
-1. Select tests by checking boxes (Ctrl+A to select all)
-2. Click "Run Selected Tests" or "Run All Tests"
-3. View real-time progress and logs
-4. Export results as Markdown reports
-
-**Manual Tests:**
-1. Check off tests as completed
-2. Add notes for each test
-3. Progress is automatically saved
-
-### Test Data Storage
-
-Test data is stored in the app's user data directory:
-- `test-results.json` - Automated test results
-- `test-history.json` - Historical test runs
-- `manual-test-notes.json` - Notes for manual tests
-- `manual-test-status.json` - Manual test completion status
-
-## Project Structure
-
-```
-onereach-ai/
-├── assets/                    # Static assets like images and icons
-├── Flipboard-IDW-Feed/       # AI Run Times RSS Reader
-│   ├── uxmag.html           # RSS reader interface
-│   ├── uxmag-script.js      # Reader functionality and logic
-│   ├── uxmag-styles.css     # Reader styling
-│   └── preload.js           # RSS reader IPC bridge
-├── test-runner.html          # Integrated test runner interface
-├── test-runner.js            # Test runner implementation
-├── TEST-RUNNER-GUIDE.md      # Test runner documentation
-├── main.js                   # Main process file
-├── preload.js               # Main preload script for secure IPC
-├── renderer.js              # Renderer process script
-├── index.html               # Main application window
-├── styles.css               # Application styles
-├── menu.js                  # Application menu configuration
-├── browserWindow.js         # Window management utilities
-└── package.json             # Project configuration
-```
-
-## Building and Distribution
-
-The application uses electron-builder for packaging and distribution. Configuration is in the `build` section of package.json.
-
-### Icon Generation
-
-Before packaging the application, you'll need to convert the SVG icon to platform-specific formats:
-
-1. For macOS (.icns):
-   - Convert SVG to a 1024x1024 PNG
-   - Use a tool like `iconutil` (macOS) or online converters to create an .icns file
-   - Place it in `assets/icons/icon.icns`
-
-2. For Windows (.ico):
-   - Convert SVG to multiple PNG sizes (16x16, 32x32, 48x48, 64x64, 128x128, 256x256)
-   - Use a tool like `ImageMagick` or online converters to create an .ico file
-   - Place it in `assets/icons/icon.ico`
-
-3. For Linux:
-   - Create PNG files in multiple sizes (16x16, 32x32, 48x48, 64x64, 128x128, 256x256, 512x512)
-   - Name them according to their size (e.g., `16x16.png`, `32x32.png`, etc.)
-   - Place them in the `assets/icons` directory
-
-#### Example conversion commands:
+## Development
 
 ```bash
-# Using ImageMagick to convert SVG to PNG
-convert -background none -size 1024x1024 assets/icons/icon.svg assets/icons/icon.png
+# Run unit tests
+npm test
 
-# For Windows, create an .ico file
-convert assets/icons/icon.png -define icon:auto-resize=256,128,64,48,32,16 assets/icons/icon.ico
+# Run E2E tests (requires app to be running)
+npm run test:e2e
+
+# Full test journey (smoke + API + spaces + settings)
+npm run test:journey
+
+# Lint and format
+npm run lint
+npm run format
 ```
 
-## Troubleshooting
+## Building
 
-### AI Run Times RSS Reader
+```bash
+# Package for macOS (universal)
+npm run package:mac
 
-**Reading times show "Loading..." indefinitely:**
-- Check your internet connection
-- Restart the application
-- Check the console for network errors (View → Toggle Developer Tools)
+# Package for macOS (ARM64 only)
+npm run package:mac:arm64
 
-**Articles not loading or showing wrong content:**
-- Clear the application cache by restarting
-- Verify the RSS feed is accessible: https://uxmag.com/feed
-- Check for JavaScript errors in the developer console
+# Full release (version bump, build, publish)
+npm run release
+```
 
-**Progress bars showing "0:00 / Loading...":**
-- This indicates the reading time calculation is in progress
-- Wait a few seconds for the background processing to complete
-- If it persists, check the main process logs for errors
+## Architecture
 
-**Performance Issues:**
-- The app fetches article content in the background for accurate reading times
-- Initial load may take 10-30 seconds depending on network speed
-- Subsequent loads use cached data for better performance
+- **Main process**: `main.js` -- app lifecycle, IPC handlers, window management
+- **AI service**: `lib/ai-service.js` -- centralized LLM calls (OpenAI, Anthropic) with model profiles, retry, and fallback
+- **Agent exchange**: `packages/task-exchange/` -- LLM-based agent routing and bidding
+- **Spaces storage**: `clipboard-storage-v2.js` -- DuckDB-backed content storage with JSON index
+- **Voice pipeline**: `src/voice-task-sdk/` -- real-time speech, agent coordination, conversation history
+- **REST APIs**: Spaces (port 47291), Logs (port 47292), Agent Exchange (WebSocket port 3456)
 
-### General Troubleshooting
+## Key Directories
 
-**Application won't start:**
-- Ensure Node.js v14+ is installed
-- Run `npm install` to update dependencies
-- Check for port conflicts if running in development mode
+```
+lib/                  AI service, agents tools, screen service, converters
+packages/agents/      18+ built-in voice agents
+packages/task-exchange/  Agent routing and bidding engine
+src/voice-task-sdk/   Voice pipeline and exchange bridge
+test/                 Unit tests (Vitest) and E2E tests (Playwright)
+scripts/              Build, release, and notarization scripts
+```
 
-**Menu items not appearing:**
-- Restart the application
-- Check IDW configuration files in user data directory
-- Verify GSX links configuration
+## Documentation
 
-## Development Notes
-
-### AI Run Times Implementation Details
-
-The AI Run Times RSS reader uses several advanced techniques:
-
-1. **Electron Native Networking**: Bypasses browser CORS limitations using `net.request()`
-2. **HTML Content Parsing**: Strips HTML tags and extracts plain text for word counting
-3. **Dynamic IPC Updates**: Real-time communication between main and renderer processes
-4. **Cache Management**: Prevents stale JavaScript from interfering with updates
-5. **Error Recovery**: Graceful fallbacks when network requests fail
-
-### Key Files for AI Run Times
-
-- `main.js`: Contains `calculateReadingTimeFromHTML()` and article fetching logic
-- `Flipboard-IDW-Feed/preload.js`: IPC bridge for RSS reader
-- `Flipboard-IDW-Feed/uxmag-script.js`: Main reader logic and UI updates
-- `Flipboard-IDW-Feed/uxmag.html`: Reader interface with cache-busting
+- `PUNCH-LIST.md` -- Bug tracker and feature status
+- `ROADMAP.md` -- Product roadmap
+- `LOGGING-API.md` -- Structured logging API reference
+- `TOOL-APP-SPACES-API-GUIDE.md` -- Spaces REST API guide
+- Swagger UI at `http://127.0.0.1:47291/api/docs/` (when app is running)
 
 ## License
 
-This project is licensed under the ISC License. 
-
-
-
+ISC

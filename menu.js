@@ -693,6 +693,27 @@ function _buildToolsMenu(_showTestMenu) {
           }
         },
       },
+      {
+        label: 'WISER Meeting',
+        accelerator: 'CommandOrControl+Shift+M',
+        click: () => {
+          if (global.recorder) {
+            global.recorder.open();
+          } else {
+            const recorderWindow = new BrowserWindow({
+              width: 800,
+              height: 700,
+              title: 'WISER Meeting',
+              webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                preload: path.join(__dirname, 'preload-recorder.js'),
+              },
+            });
+            recorderWindow.loadFile('recorder.html');
+          }
+        },
+      },
       { type: 'separator' },
       {
         label: 'Manage Tools...',
@@ -701,9 +722,9 @@ function _buildToolsMenu(_showTestMenu) {
             width: 800,
             height: 600,
             webPreferences: {
-              nodeIntegration: true,
-              contextIsolation: false,
-              enableRemoteModule: true,
+              nodeIntegration: false,
+              contextIsolation: true,
+              preload: path.join(__dirname, 'preload.js'),
             },
             title: 'Module Manager',
           });
@@ -1759,6 +1780,12 @@ function getOpenableItems() {
       type: 'app-feature',
       action: 'open-agent-manager',
       keywords: ['agents', 'manage agents', 'custom agents'],
+    },
+    {
+      name: 'WISER Meeting',
+      type: 'app-feature',
+      action: 'open-recorder',
+      keywords: ['recorder', 'record', 'wiser', 'meeting', 'capture', 'screen recording'],
     },
   ];
 

@@ -1029,9 +1029,12 @@ class ClipboardManagerV2 {
   }
 
   searchHistory(query) {
-    const results = this.storage.search(query);
+    const log = require('./lib/logger');
+    log.debug('clipboard', 'Search query received', { query, historySize: this.history.length, indexSize: this.storage?.index?.items?.length });
 
-    // Convert to old format
+    const results = this.storage.search(query);
+    log.info('clipboard', 'Search completed', { query, resultCount: results.length });
+
     return results.map((item) => ({
       ...item,
       content: null,
@@ -1199,7 +1202,6 @@ class ClipboardManagerV2 {
 
     log.info('clipboard', 'Found ... items for spaceId "..."', { filteredItemsCount: filteredItems.length, spaceId });
 
-    // Load content and thumbnails on demand
     return filteredItems.map((item) => {
       const historyItem = {
         id: item.id,
@@ -1218,7 +1220,6 @@ class ClipboardManagerV2 {
         isScreenshot: item.isScreenshot,
         filePath: item.filePath,
         jsonSubtype: item.jsonSubtype,
-        // Web monitor fields (from index)
         url: item.url,
         name: item.name,
         monitorId: item.monitorId,
@@ -1227,39 +1228,27 @@ class ClipboardManagerV2 {
         changeCount: item.changeCount,
         timeline: item.timeline,
         settings: item.settings,
+        metadata: item.metadata || {},
         _needsContent: true,
       };
 
-      // Load full content
-      try {
-        const fullItem = this.storage.loadItem(item.id);
-        historyItem.content = fullItem.content;
-        historyItem.thumbnail = fullItem.thumbnail;
-        historyItem._needsContent = false;
-
-        // Merge metadata from storage
-        if (fullItem.metadata) {
-          historyItem.metadata = { ...historyItem.metadata, ...fullItem.metadata };
-
-          // Update fileSize from metadata if not set
-          if (!historyItem.fileSize && fullItem.metadata.fileSize) {
-            historyItem.fileSize = fullItem.metadata.fileSize;
-          }
-
-          // For web-monitor items, also check metadata for updated values
-          if (item.type === 'web-monitor') {
-            if (fullItem.metadata.lastChecked) historyItem.lastChecked = fullItem.metadata.lastChecked;
-            if (fullItem.metadata.status) historyItem.status = fullItem.metadata.status;
-            if (fullItem.metadata.changeCount !== undefined) historyItem.changeCount = fullItem.metadata.changeCount;
-            if (fullItem.metadata.timeline) historyItem.timeline = fullItem.metadata.timeline;
-          }
-        }
-      } catch (error) {
-        log.warn('clipboard', 'Failed to load content for item', { itemId: item.id, error: error.message });
-      }
-
       return historyItem;
     });
+  }
+
+  loadItemContent(itemId) {
+    try {
+      const fullItem = this.storage.loadItem(itemId);
+      if (!fullItem) return null;
+      return {
+        content: fullItem.content,
+        thumbnail: fullItem.thumbnail,
+        metadata: fullItem.metadata,
+      };
+    } catch (error) {
+      log.warn('clipboard', 'Failed to load content for item', { itemId, error: error.message });
+      return null;
+    }
   }
 
   updateSpaceCounts() {
@@ -2966,6 +2955,10 @@ Respond ONLY with valid JSON, no other text.`;
     safeHandle('clipboard:get-space-items', (event, spaceId) => {
       const items = this.getSpaceItems(spaceId);
       return { success: true, items: items || [] };
+    });
+
+    safeHandle('clipboard:load-item-content', (event, itemId) => {
+      return this.loadItemContent(itemId);
     });
 
     safeHandle('clipboard:get-spaces-enabled', () => {

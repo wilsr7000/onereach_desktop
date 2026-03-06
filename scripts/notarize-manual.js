@@ -12,12 +12,15 @@ async function notarizeApp() {
     process.exit(1);
   }
 
-  const appPath = path.join(__dirname, '../dist/mac-arm64/Onereach.ai.app');
+  const distDir = path.join(__dirname, '../dist');
+  const candidates = ['mac-universal', 'mac-arm64', 'mac-x64', 'mac'].map(
+    (d) => path.join(distDir, d, 'Onereach.ai.app')
+  );
+  const appPath = candidates.find((p) => fs.existsSync(p));
 
-  // Check if app exists
-  if (!fs.existsSync(appPath)) {
-    console.error('❌ App not found at:', appPath);
-    console.error('   Please run "npm run package:mac" first');
+  if (!appPath) {
+    console.error('App not found. Checked:', candidates.join(', '));
+    console.error('Please run "npm run package:mac" first');
     process.exit(1);
   }
 

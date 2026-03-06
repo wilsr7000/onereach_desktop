@@ -21,4 +21,9 @@ contextBridge.exposeInMainWorld('introWizard', {
    * Close the wizard window
    */
   close: () => ipcRenderer.invoke('intro-wizard:close'),
+
+  /**
+   * Open the Settings window to the API Keys tab
+   */
+  openSettings: () => ipcRenderer.invoke('intro-wizard:open-settings'),
 });

@@ -41,9 +41,9 @@
 - [ ] **Agent summaries** - Improve quality/relevance
 
 ### Video Editor
-- [ ] **Voice selector UI** - Currently hardcoded to 'Rachel' voice
-  - Location: `video-editor-app.js:2146`
-  - Need UI to choose from 9 ElevenLabs voices
+- [x] **Voice selector UI** - Was hardcoded to 'Rachel' voice
+  - Fixed: All voice generation functions now read from the existing `elevenLabsVoiceSelect` dropdown (9 voices)
+  - Files: `video-editor-app.js`
 - [ ] **Preview AI audio** - Allow preview before applying
 - [ ] **Batch processing** - Process multiple ranges at once
 - [ ] **Undo/revert** - No undo for audio replacement
@@ -139,8 +139,8 @@
   - Lifecycle events: `agentHUD.onLifecycle()` / `onResult()` replace `orbAPI.onTaskEvent()`
   - Low-level stays on `orbAPI`: Realtime WebSocket, raw audio, function calls, window controls
   - Files: `orb.html`, `preload-hud-api.js`, `lib/hud-api.js`
-- [ ] **MasterOrchestrator missing module** - `Cannot find module '../../packages/task-exchange/src/reputation/store'`
-  - Location: `packages/agents/master-orchestrator.js`
+- [x] **MasterOrchestrator missing module** - `Cannot find module '../../packages/task-exchange/src/reputation/store'`
+  - Fixed: Removed broken reputation store imports, replaced with logging
 - [x] **Orb Control API for external apps** - Web apps in webviews can programmatically control the Voice Orb
   - API: `window.orbControl` with hide, show, toggle, isVisible, getStatus
   - HUD items: addHUDItem, removeHUDItem, getHUDItems, clearHUDItems (scoped to toolId 'external-app')
@@ -188,11 +188,28 @@
   - Auto-polling (60s interval with exponential backoff on failure) + manual "Discover Spaces" button
   - Discovery banner UI in Spaces Manager with per-space checkboxes and import controls
   - Files: `omnigraph-client.js`, `spaces-api.js`, `spaces-api-server.js`, `main.js`, `preload-spaces.js`, `lib/spaces-sync.js`, `clipboard-viewer.js`, `clipboard-viewer.html`
-- [ ] **Large space performance** - Slow with 500+ items
+- [x] **Large space performance (Phase 1)** - Debounced search input + deferred content loading
+  - Search input now debounced at 250ms (was firing on every keystroke)
+  - `getSpaceItems()` no longer loads full content for every item (500 disk reads eliminated)
+  - Added `loadItemContent()` for on-demand content loading
+  - Files: `clipboard-viewer.js`, `clipboard-manager-v2-adapter.js`, `preload.js`
+- [ ] **Large space performance (Phase 2)** - Virtual scrolling for 1000+ items
 - [ ] **Search indexing** - Full-text search could be faster
 - [ ] **Sync conflicts** - Better handling when GSX sync conflicts
 
 ### WISER Meeting
+- [ ] **Meeting Hub Landing Page** - Riverside-style hub shown when WISER Meeting opens
+  - New Meeting: Live Meeting (host via LiveKit), Quick Record (solo camera/screen/both), Schedule (generate room link)
+  - Join Meeting: enter meeting ID/room name, validate against GSX KV, connect as guest via LiveKit
+  - Space selector is required before any flow -- all recordings, transcripts, and notes save there
+  - Hub syncs name and space to all downstream selectors (targetSpace, saveSpace, sessionSpaceSelect)
+  - Home button in title bar to return to hub when not recording
+  - Files: recorder.html
+- [ ] **Default transcription ON** - Live captions enabled by default for every recording
+  - captionsEnabled defaults to true; CC toggle and overlay set to active on init
+  - Warning shown if OpenAI API key missing ("Live transcription unavailable")
+  - CSP updated to allow wss://api.openai.com for live transcription WebSocket
+  - Files: recorder.html
 - [x] **Space selector in session setup** - Added space dropdown to "Start a WISER Meeting" page so users can select a space directly from the setup panel instead of scrolling to the bottom panel
   - Session space selector syncs bidirectionally with main targetSpace and save dialog
   - Highlights with red border when no space selected and user tries to host
@@ -433,6 +450,82 @@
 ---
 
 ## Recently Completed
+
+- [x] **AI Error Diagnosis for Custom Agents** (v4.5.x)
+  - When a non-system (user-created) agent fails execution, the error-agent now runs AI-powered diagnosis via `ai.diagnoseAgentFailure()` and `ai.generateAgentFix()`
+  - Built-in (system) agents continue to get the original canned error messages -- no AI cost for known agent failures
+  - Diagnosis produces root cause, category, confidence, and suggested fix
+  - User is offered disambiguation options: "Fix it now" (opens Agent Composer with diagnosis), "Open in Agent Composer" (inspect the agent), "Try again" (resubmit), or "Skip"
+  - Failed agent ID tracked through `task:busted` events via `task.metadata.lastAgentId` (since `assignedAgent` is cleared on re-auction)
+  - Agent name, execution type, and prompt stored on task metadata at assignment time for diagnostic context
+  - Files: `packages/agents/error-agent.js`, `src/voice-task-sdk/exchange-bridge.js`, `lib/hud-api.js`
+
+- [x] **Graceful Capability Gap Handling** (v4.5.x)
+  - When no agent can handle a request, the system now distinguishes between "ambiguous request" (rephrase) and "capability gap" (no agent exists for this)
+  - Capability gaps get a **build proposal**: effort level (small/medium/large), estimated token cost per use, LLM call breakdown, named integration point, and required tools
+  - Three actionable options: "Create a build playbook" (generates full playbook to Spaces), "Build it now" (opens Agent Composer with description), "Add to wishlist" (silent ack)
+  - **Playbook generation**: Standard-profile LLM generates a structured Markdown playbook (goal, architecture, implementation steps, LLM prompt draft, cost estimate, testing plan) and saves it to the Capability Wishlist space
+  - Persists capability gaps with full build proposal metadata to a "Capability Wishlist" space -- deduplicated
+  - Voice commands "build a playbook for this/that" and "build an agent for this/that" resolve pronouns from conversation history
+  - Pre-screen filter widened from 4 to 6 candidates with improved specialist-aware prompt
+  - Removed 4 leftover debug fetch calls to port 7242 in orb.html (CSP violations)
+  - Files: `src/voice-task-sdk/exchange-bridge.js`, `src/voice-task-sdk/integration.js`, `lib/hud-api.js`, `orb.html`
+
+- [x] **Keychain Prompt Reduction** (v4.5.x)
+  - Lazy-load `keytar` module (deferred from module-load to first actual credential access)
+  - Session-level cache with 5-minute TTL for all `getPassword` and `findCredentials` calls
+  - Cache invalidation on writes ensures freshness
+  - Reduces macOS Keychain prompts from 4 (one per service name) to 0 for repeat reads within a session
+  - Modified: `credential-manager.js`
+
+- [x] **Command Palette + Discoverability** (v4.5.x)
+  - Cmd+K opens a Spotlight-style overlay to search all features, agents, spaces, AI services, and voice commands
+  - Glassmorphism UI with fuzzy search, keyboard navigation (arrows + enter), category grouping
+  - Aggregates data from: `getOpenableItems()` (menu features), `agent-registry` (28 agents), Spaces API, hardcoded voice commands
+  - Execute actions: open windows (via `action-executor.js`), open URLs, navigate to spaces, submit voice commands (via HUD API)
+  - BrowserWindow: frameless, transparent, always-on-top, centered on active display, hides on blur/escape
+  - Help Agent upgraded from hardcoded 4-item response to dynamic categorized overview of all registered agents
+  - "What can you do?" now returns a spoken summary + HTML panel grouping agents by: Productivity, Information, Media, Communication, Utility, System
+  - Dependency injection (`_setDeps`) from exchange-bridge for testability
+  - Files: `command-palette.html` (new), `preload-command-palette.js` (new), `main.js`, `packages/agents/help-agent.js`, `src/voice-task-sdk/exchange-bridge.js`
+
+- [x] **Voice Orb Hardening** (v4.4.2)
+  - `_onSpeakingEnd` now called on all `playTTSAudio` error/early-return paths (prevents stuck speaking state)
+  - `processVoiceCommand` guard prevents overlapping concurrent submissions
+  - `reconnected` handler transitions state machine back to `listening`
+  - `resolveDisambiguation` error calls `endSession` instead of silently failing
+  - Session generation counter prevents stale async mic setup from leaking media streams
+  - Preflight guard: if `window.orbAPI` missing, orb shows failure message instead of crashing
+  - Click/dblclick debounce (250ms) prevents accidental text-chat open on single click
+  - Mic capture pre-acquired in parallel with WebSocket connect (eliminates ~1.2s speech clipping)
+  - Early audio ring buffer streams captured PCM to WebSocket once connection ready
+  - Listening UI (blue glow + chime) deferred until mic capture is confirmed live
+  - "Your turn" cue + amber dwell (1500ms) + ready chime on agent follow-up questions
+  - WebSocket reconnect timer stored and cleared on disconnect (prevents timer stacking)
+  - `isConnecting` guard prevents duplicate connect attempts
+  - IPC timeout wrapper (15-20s) on critical calls: connect, speak, respondToFunction, mic permission
+  - Files: orb.html, lib/orb/orb-audio.js, voice-listener.js, preload-orb.js
+
+- [x] **Alpha UX Polish Pass** (v4.4.1)
+  - Fixed `ttsAudioInitialized` typo in orb-audio.js (ReferenceError on AudioContext resume failure)
+  - HUD result message now scrollable (max-height + overflow)
+  - Back/forward nav buttons visually disabled when no history
+  - LLM badge emoji replaced with SVG icon
+  - Black Hole tooltip explains its purpose
+  - Orb shows specific mic-denied message with System Settings guidance
+  - Orb shows fallback text when TTS speak fails
+  - Orb now has visible type-a-message button and one-time first-use hint
+  - Recorder shortcuts bar shows Pause (P) and Captions (C)
+  - Recorder captions toggle checks for OpenAI API key, shows status message if missing
+  - Recorder join panel updated from Host/Code fields to share-link UI
+  - Recorder permission overlay includes macOS Settings recovery instructions
+  - Spaces search differentiates "no results" from "empty space"
+  - Spaces search shows loading indicator during async search
+  - IDW container empty state explains what to do and links to setup
+  - Browser webview `did-fail-load` injects styled error page with Retry button
+  - Replaced ~25 alert()/confirm() calls in Spaces with styled toast and confirm modal
+  - Replaced ~15 emoji instances (📎 🎤 🎵 🔄 📸 ❌ 🤖) with inline SVG icons
+  - Files: orb.html, orb-audio.js, command-hud.html, tabbed-browser.html, browser-renderer.js, recorder.html, clipboard-viewer.js
 
 - [x] **Calendar Micro UI Restored** (v4.4.1)
   - Calendar agent results now show styled event cards in the Command HUD instead of plain text

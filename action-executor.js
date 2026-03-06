@@ -156,6 +156,26 @@ const ACTION_REGISTRY = {
     },
   },
 
+  'open-recorder': {
+    category: 'windows',
+    description: 'Open WISER Meeting Recorder',
+    execute: () => {
+      const recorderWindow = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        title: 'WISER Meeting',
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          preload: path.join(__dirname, 'preload-recorder.js'),
+          sandbox: false,
+        },
+      });
+      recorderWindow.loadFile('recorder.html');
+      return { success: true, message: 'Recorder opened' };
+    },
+  },
+
   'open-log-viewer': {
     category: 'windows',
     description: 'Open Event Log Viewer',

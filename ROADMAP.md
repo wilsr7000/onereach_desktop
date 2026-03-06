@@ -1,7 +1,7 @@
 # Onereach.ai Product Roadmap
 
 > Strategic roadmap for all products within the Onereach.ai desktop application.
-> Updated: January 2026 | Current Version: 3.10.0
+> Updated: February 2026 | Current Version: 4.4.1
 
 ---
 
@@ -32,7 +32,7 @@
 
 *AI-powered development assistant for building apps and agents*
 
-### Current State (v3.10.0)
+### Current State (v4.4.1)
 - ✅ Task queue with 7-phase workflow
 - ✅ Real-time progress display
 - ✅ LLM summarization of activities
@@ -65,7 +65,7 @@
 
 *Screen and camera recording with P2P dual recording sessions*
 
-### Current State (v3.10.x)
+### Current State (v4.4.1)
 - Modern UI with glassmorphism design, mode tabs, countdown, audio meters
 - Camera, screen, and screen+camera (PiP) recording modes
 - Audio mixing for multi-source recording
@@ -97,7 +97,7 @@
 
 *Professional video editing with AI-powered features*
 
-### Current State (v3.10.0)
+### Current State (v4.4.1)
 - ✅ Timeline-based editing
 - ✅ Range markers with metadata
 - ✅ ElevenLabs audio replacement (9 voices)
@@ -139,7 +139,7 @@
 
 *Content organization, storage, and synchronization*
 
-### Current State (v3.10.0)
+### Current State (v4.4.1)
 - ✅ Hierarchical space organization
 - ✅ Drag & drop content
 - ✅ GSX synchronization
@@ -259,7 +259,7 @@
 
 *Access external AI services and capture your creations*
 
-### Current State (v3.10.0)
+### Current State (v4.4.1)
 
 **Conversation Capture:**
 - ✅ ChatGPT - Auto-saves to "ChatGPT Conversations" Space
@@ -287,6 +287,7 @@
 - ✅ Fast-path: informational agents answer in bid (skip execution)
 - ✅ Task locking with HUD countdown timer
 - ✅ Error agent for graceful failure handling
+- ✅ AI-powered error diagnosis for non-system agents (diagnose + offer fix via Agent Composer)
 - ✅ LLM-based disambiguation for no-bid scenarios
 - ✅ Task decomposition for composite requests
 - ✅ Multi-agent execution (parallel and series modes)
@@ -310,6 +311,8 @@
 - [x] **Documentation Agent** - RAG-grounded agent that answers app questions from official docs without hallucination, with eval tests for answer quality and hallucination detection
 - [x] **Calendar Agent v2** - Full calendar engine with local persistent storage, recurring events (daily/weekdays/weekly/biweekly/monthly/yearly), morning brief with conflict detection and back-to-back warnings, free-slot finder with alternative time suggestions, week summary, exception handling for recurring events
 - [x] **Calendar Agent v3 (Refactor)** - Monolithic calendar-agent.js (4800 lines) replaced with specialized agents: calendar-query-agent (read schedule, join meeting), calendar-create-agent (verified create with guest resolution), calendar-edit-agent (delete+recreate), calendar-delete-agent (verified delete with disambiguation). Three-layer architecture: calendar-data.js (pure analysis, 65 tests), calendar-fetch.js (async API + verified mutations), calendar-format.js (UI rendering + TTS). All date resolution in JavaScript (no LLM date guessing).
+- [x] **Command Palette (Cmd+K)** - Spotlight-style overlay to search all features, agents, spaces, AI services, and voice commands. Fuzzy search, keyboard navigation, category grouping.
+- [x] **Dynamic Help Agent** - "What can you do?" now returns categorized overview of all 28 registered agents with spoken summary + HTML panel
 - [ ] **Multi-window** - Same agent in multiple windows
 - [ ] **Keyboard shortcuts** - Quick agent switching
 - [ ] **Context sharing** - Share Spaces content with AI agents
@@ -382,6 +385,7 @@
 - [ ] **Network monitoring** - API latency, failures
 - [ ] **Crash reporting** - Automatic crash reports
 - [ ] **Self-healing** - Auto-fix common issues
+- [x] **AI error diagnosis for custom agents** - Non-system agent failures are diagnosed via AI, with options to fix in Agent Composer, retry, or skip (v4.5.x)
 
 #### Q2 2026
 - [ ] **Predictive alerts** - Warn before problems
@@ -396,6 +400,7 @@
 ### Q1 2026 - Foundation
 - [x] **Full API Migration** - Unified LLM (ai-service.js), HUD API completion, Spaces v3 Git versioning
 - [x] **App Menu API Refactor** - Modularized menu.js (4,900 -> 1,700 lines), promoted MenuDataManager as single Menu API
+- [x] **Command Palette** - Cmd+K Spotlight-style launcher with fuzzy search across features, agents, spaces, AI services
 - [ ] **Notarization** - Apple notarized builds
 - [ ] **Windows signing** - SmartScreen trusted
 - [ ] **Auto-update improvements** - Delta updates
@@ -425,11 +430,10 @@
 
 | Version | Target | Focus |
 |---------|--------|-------|
-| 3.10.0 | Jan 2026 | **Released** - Custom agent improvements |
-| 3.11.0 | Feb 2026 | Voice selector for Video Editor |
-| 3.12.0 | Mar 2026 | Mac App Store ready |
-| 4.0.0 | Q2 2026 | Plugin system, multi-project support |
-| 5.0.0 | Q3 2026 | Cloud sync, Team features |
+| 4.4.1 | Feb 2026 | **Current** - Agent hardening, tool calling, browsing API |
+| 4.5.x | Mar 2026 | Release readiness, notarization, performance |
+| 5.0.0 | Q2 2026 | Plugin system, multi-project support |
+| 6.0.0 | Q3 2026 | Cloud sync, Team features |
 
 ---
 

@@ -35,6 +35,196 @@
         border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       }
 
+      .app-tagline {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.25);
+        white-space: nowrap;
+        padding: 0 10px 0 4px;
+        -webkit-app-region: drag;
+        transition: color 0.2s ease;
+        letter-spacing: -0.01em;
+        flex-shrink: 0;
+      }
+
+      .app-tagline:hover {
+        color: rgba(255, 255, 255, 0.45);
+      }
+
+      /* Welcome Overlay */
+      #welcome-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(8px);
+        align-items: center;
+        justify-content: center;
+        animation: welcomeFadeIn 0.3s ease;
+      }
+
+      #welcome-overlay.visible { display: flex; }
+
+      @keyframes welcomeFadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      .welcome-panel {
+        width: 500px;
+        max-height: 90vh;
+        background: #0f0f0f;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 16px;
+        padding: 36px 32px 28px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+        overflow-y: auto;
+      }
+
+      .welcome-brand {
+        text-align: center;
+        margin-bottom: 28px;
+      }
+
+      .welcome-brand-name {
+        font-size: 20px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.9);
+        margin-bottom: 4px;
+      }
+
+      .welcome-brand-tagline {
+        font-size: 11px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.35);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .welcome-heading {
+        font-size: 15px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.5);
+        text-align: center;
+        margin-bottom: 20px;
+      }
+
+      .welcome-step {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        padding: 16px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        border-radius: 10px;
+        margin-bottom: 10px;
+        transition: border-color 0.2s ease;
+      }
+
+      .welcome-step.completed {
+        border-color: rgba(0, 153, 255, 0.2);
+        background: rgba(0, 153, 255, 0.03);
+      }
+
+      .welcome-step-num {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.06);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.5);
+        flex-shrink: 0;
+        margin-top: 2px;
+        transition: all 0.2s ease;
+      }
+
+      .welcome-step.completed .welcome-step-num {
+        background: #0099ff;
+        color: white;
+      }
+
+      .welcome-step-body { flex: 1; min-width: 0; }
+
+      .welcome-step-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.9);
+        margin-bottom: 3px;
+      }
+
+      .welcome-step-desc {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.4);
+        line-height: 1.4;
+        margin-bottom: 10px;
+      }
+
+      .welcome-step-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .welcome-try-btn {
+        padding: 6px 16px;
+        background: #0099ff;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+
+      .welcome-try-btn:hover { background: #0080dd; }
+
+      .welcome-step.completed .welcome-try-btn {
+        background: rgba(0, 153, 255, 0.15);
+        color: #0099ff;
+        pointer-events: none;
+      }
+
+      .welcome-shortcut {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.25);
+      }
+
+      .welcome-shortcut kbd {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 3px;
+        padding: 1px 5px;
+        font-family: inherit;
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.4);
+      }
+
+      .welcome-dismiss {
+        display: block;
+        width: 100%;
+        margin-top: 20px;
+        padding: 11px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        text-align: center;
+      }
+
+      .welcome-dismiss:hover {
+        background: rgba(255, 255, 255, 0.07);
+        color: white;
+      }
+
       .tab {
         display: flex;
         align-items: center;
@@ -215,6 +405,12 @@
         color: #0099ff;
         background: linear-gradient(to bottom, #383838, #2f2f2f);
         border-color: rgba(0, 153, 255, 0.2);
+      }
+
+      .control-button:not(.active)#back-button,
+      .control-button:not(.active)#forward-button {
+        opacity: 0.35;
+        pointer-events: none;
       }
 
       .loading-indicator {
@@ -441,10 +637,11 @@
     </div>
     <div class="container">
       <div class="tab-bar">
+        <span class="app-tagline">Onereach.ai</span>
         <!-- Tabs will be dynamically added here -->
         <!-- LLM Badge Indicator -->
         <div id="llm-badge" title="LLM API Calls">
-          <span class="badge-icon">🤖</span>
+          <span class="badge-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:middle"><circle cx="12" cy="12" r="10"/><circle cx="9" cy="10" r="1.5"/><circle cx="15" cy="10" r="1.5"/><path d="M8 15c1 1 3 2 4 2s3-1 4-2"/></svg></span>
           <span class="badge-text" id="llm-badge-text">LLM</span>
           <span class="badge-cost" id="llm-badge-cost"></span>
         </div>
@@ -454,7 +651,7 @@
           <div class="control-button" id="refresh-button">↻</div>
           <!-- Debug button hidden for production build -->
           <!-- <div class="control-button" id="debug-button" title="Debug Session Isolation (Cmd+Shift+D)" style="font-size: 12px;">🐛</div> -->
-          <div class="control-button" id="black-hole-button" title="Black Hole Widget"></div>
+          <div class="control-button" id="black-hole-button" title="Quick Capture - Drag items here to save"></div>
         </div>
         <div class="new-tab" id="new-tab-button">+</div>
       </div>
@@ -465,8 +662,95 @@
       </div>
     </div>
 
+    <!-- Welcome Overlay (first run only) -->
+    <div id="welcome-overlay">
+      <div class="welcome-panel">
+        <div class="welcome-brand">
+          <div class="welcome-brand-name">Onereach.ai</div>
+          <div class="welcome-brand-tagline">Agentic AI Workstation</div>
+        </div>
+        <div class="welcome-heading">Get started in three steps</div>
+
+        <div class="welcome-step" id="welcome-step-1">
+          <div class="welcome-step-num">1</div>
+          <div class="welcome-step-body">
+            <div class="welcome-step-title">Open Spaces</div>
+            <div class="welcome-step-desc">Your content library. Files, clips, notes, data -- all organized.</div>
+            <div class="welcome-step-row">
+              <button class="welcome-try-btn" onclick="welcomeTryStep(1)">Try it</button>
+              <span class="welcome-shortcut"><kbd>Cmd+Shift+V</kbd></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="welcome-step" id="welcome-step-2">
+          <div class="welcome-step-num">2</div>
+          <div class="welcome-step-body">
+            <div class="welcome-step-title">Summon the Voice Orb</div>
+            <div class="welcome-step-desc">Your AI command center. 18+ agents compete to help. Just speak.</div>
+            <div class="welcome-step-row">
+              <button class="welcome-try-btn" onclick="welcomeTryStep(2)">Try it</button>
+              <span class="welcome-shortcut"><kbd>Cmd+Shift+O</kbd></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="welcome-step" id="welcome-step-3">
+          <div class="welcome-step-num">3</div>
+          <div class="welcome-step-body">
+            <div class="welcome-step-title">Add API Keys</div>
+            <div class="welcome-step-desc">Unlock AI features by adding your OpenAI and Anthropic keys in Settings.</div>
+            <div class="welcome-step-row">
+              <button class="welcome-try-btn" onclick="welcomeTryStep(3)">Open Settings</button>
+              <span class="welcome-shortcut"><kbd>Cmd+,</kbd></span>
+            </div>
+          </div>
+        </div>
+
+        <button class="welcome-dismiss" onclick="dismissWelcome()">Start Exploring</button>
+      </div>
+    </div>
+
     <script src="idw-registry.js"></script>
     <script src="browser-renderer.js"></script>
+    <script>
+      // Welcome Overlay logic (first run guided tour)
+      function showWelcomeOverlay() {
+        if (localStorage.getItem('welcome-completed')) return;
+        var overlay = document.getElementById('welcome-overlay');
+        if (overlay) overlay.classList.add('visible');
+      }
+
+      function welcomeTryStep(step) {
+        var el = document.getElementById('welcome-step-' + step);
+        if (step === 1 && window.api) {
+          window.api.send('open-clipboard-viewer');
+        } else if (step === 2 && window.api) {
+          window.api.send('show-voice-orb');
+        } else if (step === 3 && window.electronAPI) {
+          window.electronAPI.openSettings();
+        }
+        if (el) {
+          el.classList.add('completed');
+          var btn = el.querySelector('.welcome-try-btn');
+          if (btn) btn.textContent = 'Done';
+        }
+      }
+
+      function dismissWelcome() {
+        var overlay = document.getElementById('welcome-overlay');
+        if (overlay) {
+          overlay.style.opacity = '0';
+          overlay.style.transition = 'opacity 0.25s ease';
+          setTimeout(function() {
+            overlay.classList.remove('visible');
+            overlay.style.opacity = '';
+            overlay.style.transition = '';
+          }, 250);
+        }
+        localStorage.setItem('welcome-completed', '1');
+      }
+    </script>
     <script>
       // WebMCP Provider: register navigation tools for this page
       (function() {

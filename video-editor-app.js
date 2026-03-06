@@ -2216,9 +2216,11 @@ const app = {
       this.showProgress('AI Voice Generation', 'Calling ElevenLabs API...');
 
       // Generate audio only (non-destructive) - no video re-encoding!
+      const voiceSelect = document.getElementById('elevenLabsVoiceSelect');
+      const selectedVoice = voiceSelect ? voiceSelect.value : 'Rachel';
       const result = await window.videoEditor.generateElevenLabsAudio({
         text: transcription,
-        voice: 'Rachel', // TODO: add voice selector
+        voice: selectedVoice,
       });
 
       this.hideProgress();
@@ -2436,10 +2438,11 @@ const app = {
       this.showToast('info', 'Generating AI voice...', 3000);
       this.showProgress('AI Voice Generation', 'Calling ElevenLabs API...');
 
-      // Generate audio only (non-destructive) - no video re-encoding!
+      const voiceEl = document.getElementById('elevenLabsVoiceSelect');
+      const selectedVoice = voiceEl ? voiceEl.value : 'Rachel';
       const result = await window.videoEditor.generateElevenLabsAudio({
         text: marker.transcription,
-        voice: 'Rachel',
+        voice: selectedVoice,
       });
 
       this.hideProgress();

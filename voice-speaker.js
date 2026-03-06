@@ -272,9 +272,24 @@ class VoiceSpeaker {
       }
     });
 
-    // Removed: broadcast-to-all-windows fallback. This caused phantom audio
-    // on the idle orb when no explicit subscribers existed. Audio should only
-    // go to windows that have an active voice session (explicit subscriber).
+    // When no subscribers exist but we have audio to deliver, send directly
+    // to the orb window. This covers the case where a task was triggered
+    // from the UI (e.g. calendar click) after the voice session ended.
+    // We don't re-subscribe -- just a one-shot delivery so the orb can
+    // decide whether to play it (it checks for an active task).
+    if (this.subscribers.size === 0 && (event.type === 'audio_wav' || event.type === 'audio_done' || event.type === 'speech_text' || event.type === 'clear_audio_buffer')) {
+      try {
+        const windows = BrowserWindow.getAllWindows();
+        const orbWindow = windows.find((w) => {
+          try {
+            return (w.webContents?.getURL() || '').includes('orb.html');
+          } catch { return false; }
+        });
+        if (orbWindow && !orbWindow.isDestroyed()) {
+          orbWindow.webContents.send('realtime-speech:event', event);
+        }
+      } catch (_) { /* non-fatal */ }
+    }
   }
 }
 

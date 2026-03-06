@@ -62,6 +62,27 @@ function attachLogForwarder(win, category = 'window') {
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error(category, 'Renderer process crashed', { reason: details.reason, exitCode: details.exitCode });
+    if (details.reason !== 'clean-exit') {
+      const { dialog } = require('electron');
+      dialog
+        .showMessageBox(win, {
+          type: 'error',
+          title: 'Window Crashed',
+          message: 'This window has stopped responding.',
+          detail: `Reason: ${details.reason}`,
+          buttons: ['Reload', 'Close Window'],
+          defaultId: 0,
+        })
+        .then(({ response }) => {
+          if (win.isDestroyed()) return;
+          if (response === 0) {
+            win.webContents.reload();
+          } else {
+            win.close();
+          }
+        })
+        .catch(() => {});
+    }
   });
 
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
@@ -1161,7 +1182,7 @@ function createMainWindow(app) {
         mainWindow.destroy();
       }
       shutdownTimeout = null;
-    }, 500); // 500ms is enough for localStorage saves
+    }, 1500); // 1.5s for localStorage saves, editor autosave, and tab state
   });
 
   // Register IPC handlers only once (for future extension if needed)

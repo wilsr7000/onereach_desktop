@@ -374,9 +374,9 @@ describe('computeHUDPosition', () => {
     const win = makeMockWindow(0, 330, 400, 550);
     const { x, y } = screenService.computeHUDPosition(win, 'left', 340, 420);
 
-    // Orb center X = 0 + 20 + 40 = 60
-    // HUD x = 60 - 170 = -110 -> clamped to 10
-    expect(x).toBe(10);
+    // Orb center X = 0 + 20 + 40 = 60 (left half of 1440 screen)
+    // HUD placed to the right of orb: x = 60 + 40 + 20 = 120
+    expect(x).toBe(120);
     expect(y).toBeLessThan(330 + 550 - 20 - 80);
   });
 

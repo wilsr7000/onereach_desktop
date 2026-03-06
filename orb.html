@@ -134,6 +134,40 @@
         animation: orb-shake 0.5s ease-in-out;
       }
 
+      /* Result-type color flashes (played by response router) */
+      .orb.flash-success {
+        animation: orb-flash-success 0.6s ease-out forwards;
+      }
+      .orb.flash-info {
+        animation: orb-flash-info 0.6s ease-out forwards;
+      }
+      .orb.flash-warn {
+        animation: orb-flash-warn 0.6s ease-out forwards;
+      }
+      @keyframes orb-flash-success {
+        0% { box-shadow: 0 0 18px rgba(34, 197, 94, 0.6); }
+        100% { box-shadow: 0 0 4px rgba(34, 197, 94, 0); }
+      }
+      @keyframes orb-flash-info {
+        0% { box-shadow: 0 0 18px rgba(59, 130, 246, 0.6); }
+        100% { box-shadow: 0 0 4px rgba(59, 130, 246, 0); }
+      }
+      @keyframes orb-flash-warn {
+        0% { box-shadow: 0 0 18px rgba(245, 158, 11, 0.6); }
+        100% { box-shadow: 0 0 4px rgba(245, 158, 11, 0); }
+      }
+
+      /* Ambient attention state -- very slow, subtle breathe */
+      .orb.ambient {
+        animation:
+          orb-float 4s ease-in-out infinite,
+          orb-ambient-breathe 4s ease-in-out infinite;
+      }
+      @keyframes orb-ambient-breathe {
+        0%, 100% { box-shadow: 0 0 4px rgba(168, 162, 158, 0.15); }
+        50% { box-shadow: 0 0 10px rgba(168, 162, 158, 0.35); }
+      }
+
       /* Gentle floating motion */
       @keyframes orb-float {
         0%,
@@ -471,6 +505,60 @@
         transition:
           opacity 0.8s ease-out,
           transform 0.8s ease-out;
+      }
+
+      /* ==================== TYPE BUTTON (next to orb) ==================== */
+      .orb-type-btn {
+        position: absolute;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: rgba(30, 30, 45, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: rgba(255, 255, 255, 0.6);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        bottom: 28px;
+        left: -36px;
+        transition: all 0.2s ease;
+        -webkit-app-region: no-drag;
+        z-index: 5;
+      }
+      .orb-container.orb-bottom-left .orb-type-btn {
+        left: auto;
+        right: -36px;
+      }
+      .orb-type-btn:hover {
+        background: rgba(50, 50, 70, 0.95);
+        color: rgba(255, 255, 255, 0.9);
+        transform: scale(1.1);
+      }
+      .orb-type-btn svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      /* ==================== FIRST-USE HINT ==================== */
+      .orb-first-hint {
+        position: absolute;
+        bottom: -28px;
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.5);
+        pointer-events: none;
+        animation: hintFade 6s ease forwards;
+        -webkit-app-region: no-drag;
+      }
+      @keyframes hintFade {
+        0% { opacity: 0; }
+        15% { opacity: 1; }
+        75% { opacity: 1; }
+        100% { opacity: 0; display: none; }
       }
 
       /* ==================== CONTEXT MENU ==================== */
@@ -850,6 +938,12 @@
         <span>Voice Mode</span>
       </div>
       <div class="context-menu-divider"></div>
+      <div class="context-menu-item" id="menuSoundSettings">
+        <svg viewBox="0 0 24 24">
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+        </svg>
+        <span>Sound</span>
+      </div>
       <div class="context-menu-item" id="menuSettings">
         <svg viewBox="0 0 24 24">
           <path
@@ -857,6 +951,56 @@
           />
         </svg>
         <span>Settings</span>
+      </div>
+    </div>
+
+    <!-- Sound Settings Panel -->
+    <div id="soundSettingsPanel" style="
+      display: none;
+      position: fixed;
+      bottom: 120px;
+      right: 20px;
+      width: 260px;
+      background: linear-gradient(135deg, rgba(20, 20, 30, 0.98) 0%, rgba(30, 30, 45, 0.95) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 16px;
+      color: rgba(255, 255, 255, 0.9);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 12px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      z-index: 10001;
+      pointer-events: auto;
+    ">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span style="font-weight:600;font-size:13px">Sound</span>
+        <button id="soundSettingsClose" style="background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;font-size:16px;padding:0;line-height:1">&times;</button>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span>Agent sound cues</span>
+          <input type="checkbox" id="soundAgentCues" checked style="accent-color:#5b8def">
+        </label>
+        <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span>Ambient mode</span>
+          <select id="soundAmbientMode" style="background:rgba(255,255,255,0.1);color:white;border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:2px 6px;font-size:11px">
+            <option value="off">Off</option>
+            <option value="auto">Auto</option>
+            <option value="manual">Manual</option>
+          </select>
+        </label>
+      </div>
+      <div id="soundAmbientScenes" style="display:none;margin-bottom:10px">
+        <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">Scene</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px" id="soundSceneButtons"></div>
+      </div>
+      <div style="margin-bottom:6px">
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          <span>Volume</span>
+          <input type="range" id="soundMasterVolume" min="0" max="100" value="70" style="width:100px;accent-color:#5b8def">
+        </label>
       </div>
     </div>
 
@@ -874,6 +1018,12 @@
       </div>
       <div class="ring"></div>
       <div class="ring-secondary"></div>
+      <button class="orb-type-btn" id="orbTypeBtn" title="Type a message">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+        </svg>
+      </button>
+      <div class="orb-first-hint" id="orbFirstHint">Click to talk, or type a message</div>
       <div class="transcript-tooltip" id="transcript">
         <div class="transcript-scroll-inner" id="transcript-inner"></div>
       </div>
@@ -920,9 +1070,20 @@
     <!-- Extracted modules -->
     <script src="./lib/orb/orb-state.js"></script>
     <script src="./lib/orb/orb-audio.js"></script>
+    <script src="./lib/orb/orb-sound-engine.js"></script>
+    <script src="./lib/orb/orb-ambient.js"></script>
+    <script src="./lib/orb/orb-sound-library.js"></script>
     <script src="./lib/orb/orb-event-router.js"></script>
+    <script src="./lib/orb/orb-response-router.js"></script>
+    <script src="./lib/orb/orb-speech-compressor.js"></script>
 
     <script>
+      // ==================== PREFLIGHT CHECK ====================
+      if (!window.orbAPI) {
+        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#888;font-size:13px;font-family:system-ui;text-align:center;padding:20px">Orb failed to initialize.<br>Try restarting the app.</div>';
+        throw new Error('[Orb] window.orbAPI not available -- preload failed');
+      }
+
       // ==================== STATE (managed by OrbState v2) ====================
       const S = window.OrbState;
 
@@ -931,8 +1092,47 @@
       let mediaStream = null;
       let processor = null;
 
+      // Session generation counter -- prevents stale async mic setup from leaking
+      let _sessionGeneration = 0;
+      // Early audio buffer -- stores PCM chunks captured before WebSocket is ready
+      let _earlyAudioBuffer = [];
+      let _micCaptureReady = false;
+
       // Generation counter for stale-event detection (kept for debug logging)
       let _listenerGeneration = 0;
+
+      // Initialize the Sound Engine (lazy -- full init on first user interaction)
+      if (window.OrbSoundEngine) {
+        document.addEventListener('click', () => {
+          window.OrbSoundEngine.init();
+          const settings = window.OrbSoundEngine.getSettings();
+          if (settings.ambientMode === 'auto' && window.OrbAmbient) {
+            window.OrbAmbient.autoFromTimeOfDay();
+          }
+        }, { once: true });
+      }
+
+      // Listen for sound cue IPC from agents (via main process)
+      if (window.orbAPI?.onSoundCue) {
+        window.orbAPI.onSoundCue((cue) => {
+          if (window.OrbSoundEngine) {
+            window.OrbSoundEngine.init();
+            window.OrbSoundEngine.dispatchCue(cue);
+          }
+        });
+      }
+
+      if (window.orbAPI?.onAmbientCommand) {
+        window.orbAPI.onAmbientCommand((cmd) => {
+          if (!window.OrbAmbient) return;
+          if (cmd.action === 'stop') {
+            window.OrbAmbient.stop();
+          } else if (cmd.scene) {
+            if (window.OrbSoundEngine) window.OrbSoundEngine.init();
+            window.OrbAmbient.setScene(cmd.scene);
+          }
+        });
+      }
 
       // Wire OrbAudio speaking-end callback to transition state
       if (window.OrbAudio) {
@@ -943,14 +1143,15 @@
           if (S.isAwaitingInput) {
             S.transition('listening', 'tts-complete-followup');
           } else if (_pendingNeedsInput && S.isSpeaking) {
-            // Clarification or multi-turn follow-up: wait for user response
             _pendingNeedsInput = false;
             S.transition('awaitingInput', 'needs-input');
+            showTranscript('Your turn \u2014 speak or click the orb', false);
             setTimeout(() => {
               if (S.isAwaitingInput) {
+                playReadyChime();
                 S.transition('listening', 'followup-listen');
               }
-            }, 500);
+            }, 1500);
           } else if (S.isSpeaking && hasActiveWork) {
             // Task still executing or function call still processing
             // Go back to processing, don't disconnect
@@ -1291,7 +1492,7 @@
             // Backend speaks result via exchange-bridge.js
           } catch (err) {
             console.error('[Orb] Error submitting disambiguation action:', err);
-            // NOTE: Backend handles error feedback
+            S.endSession('disambiguation-error');
           }
         } else if (selection.mergedTranscript) {
           // Re-classify with merged transcript
@@ -1341,7 +1542,13 @@
       // ==================== VOICE COMMAND PROCESSING (via HUD API) ====================
 
       let _processCallCount = 0;
+      let _isProcessing = false;
       async function processVoiceCommand(transcript) {
+        if (_isProcessing) {
+          console.warn('[Orb] Skipping overlapping processVoiceCommand call');
+          return;
+        }
+        _isProcessing = true;
         _processCallCount++;
         console.log('[Orb] Processing command:', transcript);
 
@@ -1496,12 +1703,15 @@
         } catch (err) {
           console.error('[Orb] Submit error:', err?.message || err);
 
-          // Speak error via backend TTS
           try {
             await window.orbAPI.speak('Sorry, something went wrong. ' + (err?.message || ''));
           } catch (speakErr) {
             console.warn('[Orb] Could not speak error:', speakErr);
+            showTranscript('Something went wrong. ' + (err?.message || 'Try again.'), false);
+            setTimeout(hideTranscript, 4000);
           }
+        } finally {
+          _isProcessing = false;
         }
       }
 
@@ -1573,21 +1783,25 @@
         window.agentHUD.onResult((result) => {
           console.log('[Orb] HUD API result:', result.taskId, result.success, result.html ? '(has panel)' : '');
 
-          // Clear active task when result arrives (task:settled may not reach renderer)
           if (result.taskId && result.taskId === _activeTaskId) {
             console.log('[Orb] Result received for active task, clearing:', _activeTaskId);
             _activeTaskId = null;
           }
 
-          if (result.html) {
-            S.set('hasActivePanel', true);
-          } else {
-            S.set('hasActivePanel', false);
-          }
+          S.set('hasActivePanel', !!result.html);
 
-          // If the result has needsInput, flag for multi-turn
           if (result.needsInput) {
             _pendingNeedsInput = true;
+          }
+
+          // Route through the response router for tone + color flash
+          const route = routeResult(result);
+          if (route) {
+            const Audio = window.OrbAudio;
+            if (Audio) window.OrbResponseRouter.dispatch(route, Audio, {
+              showTooltip: (text) => { showTranscript(text, false); setTimeout(hideTranscript, 3000); },
+            });
+            S.set('_lastRouteMode', route.mode);
           }
         });
 
@@ -1737,6 +1951,21 @@
         contextMenu.classList.remove('visible');
       }
 
+      // Type button next to orb
+      document.getElementById('orbTypeBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        openTextChat();
+      });
+
+      // First-use hint (show only once)
+      const hintEl = document.getElementById('orbFirstHint');
+      if (localStorage.getItem('orb-hint-shown')) {
+        hintEl.style.display = 'none';
+      } else {
+        localStorage.setItem('orb-hint-shown', '1');
+        hintEl.addEventListener('animationend', () => { hintEl.style.display = 'none'; });
+      }
+
       // Context menu handlers
       document.getElementById('menuTextChat').addEventListener('click', () => {
         hideContextMenu();
@@ -1753,10 +1982,71 @@
 
       document.getElementById('menuSettings').addEventListener('click', () => {
         hideContextMenu();
-        // Open settings via IPC
         if (window.orbAPI?.openSettings) {
           window.orbAPI.openSettings();
         }
+      });
+
+      // ==================== SOUND SETTINGS PANEL ====================
+      const soundPanel = document.getElementById('soundSettingsPanel');
+      const soundClose = document.getElementById('soundSettingsClose');
+      const soundAgentCues = document.getElementById('soundAgentCues');
+      const soundAmbientMode = document.getElementById('soundAmbientMode');
+      const soundMasterVolume = document.getElementById('soundMasterVolume');
+      const soundSceneButtons = document.getElementById('soundSceneButtons');
+      const soundAmbientScenes = document.getElementById('soundAmbientScenes');
+
+      function _syncSoundUI() {
+        const engine = window.OrbSoundEngine;
+        if (!engine) return;
+        const s = engine.getSettings();
+        soundAgentCues.checked = s.agentCuesEnabled;
+        soundAmbientMode.value = s.ambientMode || 'off';
+        soundMasterVolume.value = Math.round(s.masterVolume * 100);
+        soundAmbientScenes.style.display = s.ambientMode === 'manual' ? 'block' : 'none';
+      }
+
+      function _buildSceneButtons() {
+        const ambient = window.OrbAmbient;
+        if (!ambient || !soundSceneButtons) return;
+        soundSceneButtons.innerHTML = '';
+        for (const scene of ambient.getAvailableScenes()) {
+          const btn = document.createElement('button');
+          btn.textContent = scene;
+          btn.style.cssText = 'background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.8);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer';
+          btn.addEventListener('click', () => {
+            ambient.setScene(scene);
+            for (const b of soundSceneButtons.children) b.style.borderColor = 'rgba(255,255,255,0.15)';
+            btn.style.borderColor = '#5b8def';
+          });
+          soundSceneButtons.appendChild(btn);
+        }
+      }
+
+      document.getElementById('menuSoundSettings').addEventListener('click', () => {
+        hideContextMenu();
+        if (window.OrbSoundEngine) window.OrbSoundEngine.init();
+        _syncSoundUI();
+        _buildSceneButtons();
+        soundPanel.style.display = soundPanel.style.display === 'none' ? 'block' : 'none';
+      });
+
+      soundClose.addEventListener('click', () => { soundPanel.style.display = 'none'; });
+
+      soundAgentCues.addEventListener('change', () => {
+        if (window.OrbSoundEngine) window.OrbSoundEngine.updateSettings({ agentCuesEnabled: soundAgentCues.checked });
+      });
+
+      soundAmbientMode.addEventListener('change', () => {
+        const mode = soundAmbientMode.value;
+        if (window.OrbSoundEngine) window.OrbSoundEngine.updateSettings({ ambientMode: mode });
+        soundAmbientScenes.style.display = mode === 'manual' ? 'block' : 'none';
+        if (mode === 'auto' && window.OrbAmbient) window.OrbAmbient.autoFromTimeOfDay();
+        if (mode === 'off' && window.OrbAmbient) window.OrbAmbient.stop();
+      });
+
+      soundMasterVolume.addEventListener('input', () => {
+        if (window.OrbSoundEngine) window.OrbSoundEngine.setMasterVolume(parseInt(soundMasterVolume.value) / 100);
       });
 
       // Close menu on click outside
@@ -1996,7 +2286,7 @@
 
       // Update UI based on state
       function updateUI(uiState, text = '') {
-        orb.classList.remove('listening', 'processing', 'connecting', 'speaking', 'awaiting', 'error');
+        orb.classList.remove('listening', 'processing', 'connecting', 'speaking', 'awaiting', 'error', 'ambient');
         // Note: transitions drive updateUI(), not the other way around.
         // No S.transition() call here -- that would cause infinite loops.
 
@@ -2029,9 +2319,52 @@
               hideTranscript();
             }, 3000);
             break;
-          default: // idle
+          case 'ambient':
+            orb.classList.add('ambient');
+            orb.title = text || 'Something needs attention';
+            break;
+          default:
             orb.title = 'Click to start listening';
         }
+      }
+
+      /**
+       * Flash the orb with a result-type color (success/info/warn).
+       * The flash is a one-shot CSS animation layered on top of any active state.
+       */
+      function flashOrbColor(type) {
+        const cls = type === 'success' ? 'flash-success' : type === 'warn' ? 'flash-warn' : 'flash-info';
+        orb.classList.remove('flash-success', 'flash-info', 'flash-warn');
+        void orb.offsetWidth; // force reflow to restart animation
+        orb.classList.add(cls);
+        setTimeout(() => orb.classList.remove(cls), 700);
+      }
+
+      /**
+       * Route an agent result through the response router.
+       * Returns the route decision and plays the tone + flash immediately.
+       * Caller decides whether to suppress TTS based on route.mode.
+       */
+      function routeResult(result, context = {}) {
+        const Router = window.OrbResponseRouter;
+        const Compressor = window.OrbSpeechCompressor;
+        if (!Router) return null;
+
+        const route = Router.classify(result, context);
+
+        // Flash orb color for result type
+        if (!result.success) flashOrbColor('warn');
+        else if (result.html) flashOrbColor('info');
+        else flashOrbColor('success');
+
+        // Compress speech if in brief mode
+        if (route.speech && route.mode === 'brief' && Compressor) {
+          route.speech = Compressor.headline(route.speech);
+        } else if (route.speech && route.mode === 'full' && Compressor) {
+          route.speech = Compressor.compress(route.speech);
+        }
+
+        return route;
       }
 
       let hideTranscriptTimeout = null;
@@ -2099,8 +2432,8 @@
       let _collapseTimeout = null;
       const TOOLTIP_WINDOW_WIDTH = 400;
       const TOOLTIP_WINDOW_HEIGHT = 200;
-      const COLLAPSED_WIDTH = 130;
-      const COLLAPSED_HEIGHT = 130;
+      const COLLAPSED_WIDTH = 170;
+      const COLLAPSED_HEIGHT = 110;
 
       function _getAnchor() {
         return currentOrbSide === 'left' ? 'bottom-left' : 'bottom-right';
@@ -2272,62 +2605,99 @@
       // ==================== TRANSITION SIDE-EFFECT HANDLER ====================
       // One centralized place where state transitions trigger real-world effects.
       S.on('transition', ({ from, to, reason }) => {
-        // --- Entering connecting: open WebSocket ---
+        // --- Entering connecting: open WebSocket + pre-acquire mic in parallel ---
         if (to === 'connecting') {
-          (async () => {
-            try {
-              await window.orbAPI.requestMicPermission();
-              const result = await window.orbAPI.connect();
-              if (!result.success) throw new Error(result.error || 'Failed to connect');
-              // session_updated event will trigger S.transition('listening')
-            } catch (e) {
-              console.error('[Orb] Connect failed:', e);
-              S.endSession('connect-failed');
-            }
-          })();
+          const gen = ++_sessionGeneration;
+          _earlyAudioBuffer = [];
+          _micCaptureReady = false;
           updateUI('connecting');
-        }
 
-        // --- Entering listening: start mic capture ---
-        if (to === 'listening') {
-          // Set up audio capture if not already active
+          // Start mic capture in parallel with WebSocket connect
           if (!processor || !audioContext) {
             (async () => {
               try {
+                await window.orbAPI.requestMicPermission();
+                if (_sessionGeneration !== gen) return; // session ended during setup
                 mediaStream = await navigator.mediaDevices.getUserMedia({
-                  audio: {
-                    channelCount: 1,
-                    sampleRate: 24000,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                  },
+                  audio: { channelCount: 1, sampleRate: 24000, echoCancellation: true, noiseSuppression: true },
                 });
+                if (_sessionGeneration !== gen) {
+                  mediaStream.getTracks().forEach((t) => t.stop());
+                  mediaStream = null;
+                  return;
+                }
                 audioContext = new AudioContext({ sampleRate: 24000 });
                 const source = audioContext.createMediaStreamSource(mediaStream);
                 processor = audioContext.createScriptProcessor(4096, 1, 1);
                 processor.onaudioprocess = (e) => {
-                  if (!S.isListening) return;
+                  if (_sessionGeneration !== gen) return;
                   const inputData = e.inputBuffer.getChannelData(0);
                   const base64Audio = floatTo16BitPCM(inputData);
-                  window.orbAPI.sendAudio(base64Audio);
+                  if (S.isListening && S.get('isSessionReady')) {
+                    window.orbAPI.sendAudio(base64Audio);
+                  } else if (S.phase === 'connecting') {
+                    _earlyAudioBuffer.push(base64Audio);
+                    if (_earlyAudioBuffer.length > 12) _earlyAudioBuffer.shift(); // ~2s ring buffer
+                  }
                 };
                 source.connect(processor);
                 processor.connect(audioContext.destination);
-                console.log('[Orb] Audio capture started');
+                _micCaptureReady = true;
+                console.log('[Orb] Mic capture started (during connect)');
+                // If already transitioned to listening, show the UI now
+                if (S.isListening) {
+                  updateUI('listening');
+                  playReadyChime();
+                }
               } catch (e) {
+                if (_sessionGeneration !== gen) return;
                 console.error('[Orb] Audio capture failed:', e);
+                const isDenied = e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError';
+                if (isDenied) {
+                  showTranscript('Microphone access denied. Check System Settings > Privacy & Security > Microphone.', false);
+                  setTimeout(hideTranscript, 5000);
+                }
                 S.endSession('mic-failed');
               }
             })();
+          } else {
+            _micCaptureReady = true;
+          }
+
+          // WebSocket connect (parallel with mic setup above)
+          (async () => {
+            try {
+              const result = await window.orbAPI.connect();
+              if (_sessionGeneration !== gen) return;
+              if (!result.success) throw new Error(result.error || 'Failed to connect');
+            } catch (e) {
+              if (_sessionGeneration !== gen) return;
+              console.error('[Orb] Connect failed:', e);
+              S.endSession('connect-failed');
+            }
+          })();
+        }
+
+        // --- Entering listening: flush early buffer, show UI only when mic is live ---
+        if (to === 'listening') {
+          // Flush any early audio captured during connect phase
+          if (_earlyAudioBuffer.length > 0 && S.get('isSessionReady')) {
+            console.log('[Orb] Flushing', _earlyAudioBuffer.length, 'early audio chunks');
+            for (const chunk of _earlyAudioBuffer) {
+              window.orbAPI.sendAudio(chunk);
+            }
+            _earlyAudioBuffer = [];
           }
           startNoSpeechTimeout();
-          if (from === 'connecting' || from === 'awaitingInput') {
-            playReadyChime();
+          if (_micCaptureReady) {
+            updateUI('listening');
+            if (from === 'connecting' || from === 'awaitingInput') {
+              playReadyChime();
+            }
           }
           // Reset speech tracking for this listen cycle
           S.set('lastSpeechTime', 0);
           S.set('hasSpokenThisSession', false);
-          updateUI('listening');
         }
 
         // --- Leaving listening: stop mic + timers ---
@@ -2346,6 +2716,12 @@
         // --- Entering speaking ---
         if (to === 'speaking') {
           updateUI('speaking');
+          if (window.OrbSoundEngine) window.OrbSoundEngine.duckAmbient(10000);
+        }
+
+        // --- Leaving speaking: unduck ---
+        if (from === 'speaking' && to !== 'speaking') {
+          if (window.OrbSoundEngine) window.OrbSoundEngine.unduckAmbient();
         }
 
         // --- Entering awaitingInput ---
@@ -2353,10 +2729,43 @@
           updateUI('awaiting');
         }
 
+        // --- Entering ambient: subtle attention signal ---
+        if (to === 'ambient') {
+          const items = S.get('ambientItems') || [];
+          const label = items.length > 0 ? items[items.length - 1].label : '';
+          updateUI('ambient', label);
+          if (window.OrbAudio) window.OrbAudio.playAttentionTone();
+          if (label) {
+            showTranscript(label, false);
+            setTimeout(hideTranscript, 4000);
+          }
+        }
+
+        // --- Leaving ambient: user engaged or auto-dismiss ---
+        if (from === 'ambient') {
+          hideTranscript();
+          if (to === 'connecting') {
+            // User clicked to engage -- voice the first queued item
+            const items = S.get('ambientItems') || [];
+            if (items.length > 0) {
+              const item = items.shift();
+              S.set('ambientItems', items);
+              // The item's detail will be spoken after connect completes
+              S.set('_ambientPendingDetail', item.detail || item.label);
+            }
+          } else {
+            // Auto-dismissed or clicked away
+            S.set('ambientItems', []);
+          }
+          updateUI('idle');
+        }
+
         // --- Entering idle: full cleanup ---
         if (to === 'idle') {
+          _sessionGeneration++;
+          _earlyAudioBuffer = [];
+          _micCaptureReady = false;
           stopAudioCapture();
-          // All timeouts cleared by OrbState automatically
           window.orbAPI.disconnect();
 
           const isError =
@@ -2481,8 +2890,25 @@
             // Note: We don't transition to awaitingInput here because TTS
             // hasn't started yet. The audio_done handler checks _pendingNeedsInput.
           } else {
-            // Standard response
+            // Standard response -- route through response router
             let responseText = result.message || "I'm not sure how to help with that.";
+            const route = routeResult(result);
+            if (route && (route.mode === 'tone' || route.mode === 'tone+visual')) {
+              // Tone-only: play tone (already done in routeResult), suppress TTS
+              const Audio = window.OrbAudio;
+              if (Audio) window.OrbResponseRouter.dispatch(route, Audio, {
+                showTooltip: (text) => { showTranscript(text, false); setTimeout(hideTranscript, 3000); },
+              });
+              await window.orbAPI.respondToFunction(callId, '');
+              S.set('pendingFunctionCallId', null);
+              if (!_activeTaskId && !(S.get('pendingSubmitCount') || 0)) {
+                S.transition('idle', 'tone-only-complete');
+              }
+              return;
+            }
+            if (route && route.speech) {
+              responseText = route.speech;
+            }
             await window.orbAPI.respondToFunction(callId, responseText);
             S.set('pendingFunctionCallId', null);
           }
@@ -2524,7 +2950,7 @@
               }
             },
             audio_wav: (e) => {
-              if (S.phase === 'idle') {
+              if (S.phase === 'idle' && !_activeTaskId) {
                 console.log('[Orb] Ignoring audio_wav while idle (phantom audio blocked)');
                 return;
               }
@@ -2537,7 +2963,7 @@
               }
             },
             audio_done: (e) => {
-              if (S.phase === 'idle') {
+              if (S.phase === 'idle' && !_activeTaskId) {
                 console.log('[Orb] Ignoring audio_done while idle (phantom audio blocked)');
                 return;
               }
@@ -2550,18 +2976,19 @@
               }
 
               // Check if this was a follow-up question (agent needs more input)
-              // If so, transition speaking -> awaitingInput -> listening
               if (_pendingNeedsInput) {
                 _pendingNeedsInput = false;
                 if (S.isSpeaking) {
                   S.transition('awaitingInput', 'needs-input');
-                  // awaitingInput -> listening happens after a brief delay
-                  // to let the user hear the question
+                  // Show a persistent "your turn" cue so the user knows to respond
+                  showTranscript('Your turn \u2014 speak or click the orb', false);
+                  // Longer dwell in awaitingInput so user sees the amber state
                   setTimeout(() => {
                     if (S.isAwaitingInput) {
+                      playReadyChime();
                       S.transition('listening', 'followup-listen');
                     }
-                  }, 500);
+                  }, 1500);
                 }
               } else if (S.isSpeaking && (_activeTaskId || (S.get('pendingSubmitCount') || 0) > 0)) {
                 // Task still executing or function call processing -- interim speech
@@ -2610,6 +3037,14 @@
             // --- INPUT (gated on phase + noise-filtered, from voice-listener) ---
             session_updated: (e) => {
               S.set('isSessionReady', true);
+              // If we came from ambient, speak the queued detail
+              const ambientDetail = S.get('_ambientPendingDetail');
+              if (ambientDetail) {
+                S.set('_ambientPendingDetail', null);
+                S.transition('listening', 'session-ready');
+                processVoiceCommand(ambientDetail);
+                return;
+              }
               S.transition('listening', 'session-ready');
             },
             transcript_delta: (e) => {
@@ -2653,7 +3088,9 @@
               console.log('[Orb] Reconnected');
               S.set('isSessionReady', true);
               hideTranscript();
-              updateUI('listening');
+              if (S.phase !== 'listening' && S.phase !== 'idle') {
+                S.transition('listening', 'reconnected');
+              }
               S.set('hasSpokenThisSession', false);
               startNoSpeechTimeout();
             },
@@ -2682,6 +3119,9 @@
       // ==================== LIFECYCLE FUNCTIONS ====================
 
       function startListening() {
+        if (S.phase === 'ambient') {
+          S.transition('idle', 'ambient-engage');
+        }
         if (S.phase !== 'idle') return;
         _listenerGeneration++;
         S.startSession();
@@ -2820,34 +3260,41 @@
         }
       }
 
-      // Toggle listening on click (only if we didn't drag)
+      // Click/dblclick: defer click by 250ms so dblclick can cancel it
+      let _clickTimer = null;
       orb.addEventListener('click', () => {
         if (hasMoved) {
           hasMoved = false;
           return;
         }
-
-        // If text chat is open, close it and start voice
-        if (isTextChatOpen) {
-          closeTextChat();
-        }
-
-        if (S.phase === 'idle') {
-          startListening();
-        } else if (S.phase === 'speaking') {
-          // Barge-in: cancel TTS and go back to listening
-          console.log('[Orb] Barge-in: cancelling speech');
-          if (window.orbAPI && window.orbAPI.cancelResponse) {
-            window.orbAPI.cancelResponse();
+        clearTimeout(_clickTimer);
+        _clickTimer = setTimeout(() => {
+          if (isTextChatOpen) {
+            closeTextChat();
           }
-          if (window.OrbAudio) window.OrbAudio.clearChunks();
-          S.transition('listening', 'barge-in');
-        } else {
-          stopListening();
-        }
+          if (S.phase === 'idle' || S.phase === 'ambient') {
+            startListening();
+          } else if (S.phase === 'speaking') {
+            console.log('[Orb] Barge-in: cancelling speech');
+            if (window.orbAPI.cancelResponse) {
+              window.orbAPI.cancelResponse();
+            }
+            if (window.OrbAudio) window.OrbAudio.clearChunks();
+            S.transition('listening', 'barge-in');
+          } else {
+            stopListening();
+          }
+        }, 250);
       });
 
-      // Right-click to show context menu (only on the orb or its container)
+      orb.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        clearTimeout(_clickTimer);
+        _clickTimer = null;
+        console.log('[Orb] Double-click detected');
+        openTextChat();
+      });
+
       const orbContainer = document.querySelector('.orb-container');
       orbContainer.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -2855,22 +3302,30 @@
         showContextMenu(e.clientX, e.clientY);
       });
 
-      // Prevent default context menu on the rest of the document (but don't show our menu)
       document.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-      });
-
-      // Double-click as alternative to open text chat directly
-      orb.addEventListener('dblclick', (e) => {
-        console.log('[Orb] Double-click detected');
-        e.preventDefault();
-        openTextChat();
       });
 
       // Handle window close
       window.addEventListener('beforeunload', () => {
         stopListening();
       });
+
+      // Listen for ambient attention notifications from main process
+      if (window.orbAPI?.onEvent) {
+        window.orbAPI.onEvent((event) => {
+          if (event.type !== 'ambient_attention') return;
+          const items = S.get('ambientItems') || [];
+          items.push({ label: event.label || '', detail: event.detail || '', ts: Date.now() });
+          S.set('ambientItems', items);
+          if (S.phase === 'idle') {
+            S.transition('ambient', 'attention-' + (event.source || 'system'));
+          } else if (S.isAmbient) {
+            // Already ambient -- update tooltip with latest item
+            updateUI('ambient', event.label || '');
+          }
+        });
+      }
 
       // Listen for plan summary from Agent Composer
       if (window.orbAPI?.onPlanSummary) {
@@ -2903,7 +3358,7 @@
       // at window creation. Here we toggle it off when the cursor enters any
       // interactive element so clicks register, then back on when it leaves.
       // =====================================================================
-      // Click-through: window starts collapsed (130x130, just the orb).
+      // Click-through: window starts collapsed (170x110, orb + type button).
       // It expands dynamically for tooltip/chat and collapses when done.
       console.log('[Orb] Click-through: using dynamic window resizing');
 

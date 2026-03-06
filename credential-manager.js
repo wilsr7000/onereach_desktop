@@ -4,28 +4,73 @@
  * - macOS: Keychain
  * - Windows: Credential Vault
  * - Linux: Secret Service (libsecret)
+ *
+ * Keytar access is lazy-loaded and cached so that macOS Keychain prompts
+ * only appear once per service name per app session (not on every read).
  */
 
-const keytar = require('keytar');
+let _keytar = null;
+function getKeytar() {
+  if (!_keytar) _keytar = require('keytar');
+  return _keytar;
+}
 
-// Service name for keytar - all credentials stored under this service
 const SERVICE_NAME = 'OneReach.ai-IDW';
-
-// Separate service for TOTP secrets (2FA)
 const TOTP_SERVICE_NAME = 'OneReach.ai-TOTP';
-
-// Key for the unified OneReach login credentials
 const ONEREACH_ACCOUNT_KEY = 'onereach-unified-login';
+
+// Session-level cache: avoids repeated Keychain prompts for the same data.
+// Invalidated on writes so subsequent reads always reflect current state.
+const _cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function cacheKey(service, account) {
+  return `${service}::${account}`;
+}
+
+function cacheGet(service, account) {
+  const key = cacheKey(service, account);
+  const entry = _cache.get(key);
+  if (entry && Date.now() - entry.ts < CACHE_TTL) return entry.value;
+  _cache.delete(key);
+  return undefined;
+}
+
+function cacheSet(service, account, value) {
+  _cache.set(cacheKey(service, account), { value, ts: Date.now() });
+}
+
+function cacheInvalidate(service, account) {
+  _cache.delete(cacheKey(service, account));
+}
+
+function cacheInvalidateService(service) {
+  for (const key of _cache.keys()) {
+    if (key.startsWith(`${service}::`)) _cache.delete(key);
+  }
+}
+
+async function cachedGetPassword(service, account) {
+  const cached = cacheGet(service, account);
+  if (cached !== undefined) return cached;
+  const value = await getKeytar().getPassword(service, account);
+  cacheSet(service, account, value);
+  return value;
+}
+
+async function cachedFindCredentials(service) {
+  const sentinel = `__find__::${service}`;
+  const cached = _cache.get(sentinel);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.value;
+  const value = await getKeytar().findCredentials(service);
+  _cache.set(sentinel, { value, ts: Date.now() });
+  return value;
+}
 
 class CredentialManager {
   constructor() {
-    // Temporary storage for credentials captured during login
-    // Cleared after save prompt is dismissed or after timeout
     this.pendingCredentials = new Map();
-
-    // Timeout for pending credentials (5 minutes)
     this.PENDING_TIMEOUT = 5 * 60 * 1000;
-
     console.log('[CredentialManager] Initialized');
   }
 
@@ -144,16 +189,19 @@ class CredentialManager {
       const domain = this.extractDomain(url);
       const accountKey = this.createAccountKey(domain, username);
 
-      // Store password in keychain
-      await keytar.setPassword(SERVICE_NAME, accountKey, password);
+      await getKeytar().setPassword(SERVICE_NAME, accountKey, password);
 
-      // Store metadata (IDW name, URL) as a separate entry
       const metadata = JSON.stringify({
         idwName: idwName || domain,
         url,
         savedAt: Date.now(),
       });
-      await keytar.setPassword(`${SERVICE_NAME}-meta`, accountKey, metadata);
+      await getKeytar().setPassword(`${SERVICE_NAME}-meta`, accountKey, metadata);
+
+      // Invalidate caches for affected services
+      cacheInvalidate(SERVICE_NAME, accountKey);
+      cacheInvalidate(`${SERVICE_NAME}-meta`, accountKey);
+      cacheInvalidateService(SERVICE_NAME);
 
       console.log('[CredentialManager] Saved credentials for:', domain, 'user:', username);
 
@@ -184,8 +232,7 @@ class CredentialManager {
         return null;
       }
 
-      // Get the actual password
-      const password = await keytar.getPassword(SERVICE_NAME, match.accountKey);
+      const password = await cachedGetPassword(SERVICE_NAME, match.accountKey);
       if (!password) {
         return null;
       }
@@ -219,7 +266,7 @@ class CredentialManager {
       // Get passwords for each
       const results = await Promise.all(
         matches.map(async (match) => {
-          const password = await keytar.getPassword(SERVICE_NAME, match.accountKey);
+          const password = await cachedGetPassword(SERVICE_NAME, match.accountKey);
           return {
             username: match.username,
             password,
@@ -243,8 +290,7 @@ class CredentialManager {
    */
   async listCredentials() {
     try {
-      // Get all credentials from keytar
-      const credentials = await keytar.findCredentials(SERVICE_NAME);
+      const credentials = await cachedFindCredentials(SERVICE_NAME);
 
       const results = await Promise.all(
         credentials.map(async (cred) => {
@@ -253,7 +299,7 @@ class CredentialManager {
           // Try to get metadata
           let idwName = domain;
           try {
-            const metaStr = await keytar.getPassword(`${SERVICE_NAME}-meta`, cred.account);
+            const metaStr = await cachedGetPassword(`${SERVICE_NAME}-meta`, cred.account);
             if (metaStr) {
               const meta = JSON.parse(metaStr);
               idwName = meta.idwName || domain;
@@ -285,15 +331,16 @@ class CredentialManager {
    */
   async deleteCredential(accountKey) {
     try {
-      // Delete password
-      const deleted = await keytar.deletePassword(SERVICE_NAME, accountKey);
+      const deleted = await getKeytar().deletePassword(SERVICE_NAME, accountKey);
 
-      // Also try to delete metadata
       try {
-        await keytar.deletePassword(`${SERVICE_NAME}-meta`, accountKey);
+        await getKeytar().deletePassword(`${SERVICE_NAME}-meta`, accountKey);
       } catch (_e) {
-        // Metadata might not exist
       }
+
+      cacheInvalidate(SERVICE_NAME, accountKey);
+      cacheInvalidate(`${SERVICE_NAME}-meta`, accountKey);
+      cacheInvalidateService(SERVICE_NAME);
 
       console.log('[CredentialManager] Deleted credential:', accountKey);
       return deleted;
@@ -344,7 +391,8 @@ class CredentialManager {
    */
   async updatePassword(accountKey, newPassword) {
     try {
-      await keytar.setPassword(SERVICE_NAME, accountKey, newPassword);
+      await getKeytar().setPassword(SERVICE_NAME, accountKey, newPassword);
+      cacheInvalidate(SERVICE_NAME, accountKey);
       console.log('[CredentialManager] Updated password for:', accountKey);
       return true;
     } catch (error) {
@@ -367,24 +415,26 @@ class CredentialManager {
    */
   async saveOneReachCredentials(email, password, totpSecret = null) {
     try {
-      // Save email as metadata
       const metadata = JSON.stringify({
         email,
         savedAt: Date.now(),
         has2FA: !!totpSecret,
       });
-      await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, metadata);
+      await getKeytar().setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, metadata);
+      await getKeytar().setPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY, password);
 
-      // Save password
-      await keytar.setPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY, password);
-
-      // Save TOTP secret if provided
       if (totpSecret) {
-        await keytar.setPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY, totpSecret);
+        await getKeytar().setPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY, totpSecret);
         console.log('[CredentialManager] Saved OneReach credentials with 2FA for:', email);
       } else {
         console.log('[CredentialManager] Saved OneReach credentials (no 2FA) for:', email);
       }
+
+      // Invalidate all related caches
+      cacheInvalidate(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      cacheInvalidate(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      cacheInvalidate(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      cacheInvalidateService(SERVICE_NAME);
 
       return true;
     } catch (error) {
@@ -399,26 +449,22 @@ class CredentialManager {
    */
   async getOneReachCredentials() {
     try {
-      // Get metadata (contains email)
-      const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      const metaStr = await cachedGetPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
       if (!metaStr) {
         return null;
       }
 
       const meta = JSON.parse(metaStr);
 
-      // Get password
-      const password = await keytar.getPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      const password = await cachedGetPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
       if (!password) {
         return null;
       }
 
-      // Try to get TOTP secret
       let totpSecret = null;
       try {
-        totpSecret = await keytar.getPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+        totpSecret = await cachedGetPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
       } catch (_e) {
-        // TOTP might not be configured
       }
 
       return {
@@ -457,16 +503,18 @@ class CredentialManager {
    */
   async saveTOTPSecret(totpSecret) {
     try {
-      await keytar.setPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY, totpSecret);
+      await getKeytar().setPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY, totpSecret);
 
-      // Update metadata to reflect 2FA is now enabled
-      const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      const metaStr = await cachedGetPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
       if (metaStr) {
         const meta = JSON.parse(metaStr);
         meta.has2FA = true;
         meta.totpAddedAt = Date.now();
-        await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
+        await getKeytar().setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
+        cacheInvalidate(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
       }
+
+      cacheInvalidate(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
 
       console.log('[CredentialManager] Saved TOTP secret');
       return true;
@@ -482,7 +530,7 @@ class CredentialManager {
    */
   async getTOTPSecret() {
     try {
-      return await keytar.getPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      return await cachedGetPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
     } catch (error) {
       console.error('[CredentialManager] Failed to get TOTP secret:', error);
       return null;
@@ -495,15 +543,16 @@ class CredentialManager {
    */
   async deleteTOTPSecret() {
     try {
-      await keytar.deletePassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      await getKeytar().deletePassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      cacheInvalidate(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
 
-      // Update metadata
-      const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      const metaStr = await cachedGetPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
       if (metaStr) {
         const meta = JSON.parse(metaStr);
         meta.has2FA = false;
         delete meta.totpAddedAt;
-        await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
+        await getKeytar().setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
+        cacheInvalidate(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
       }
 
       console.log('[CredentialManager] Deleted TOTP secret');
@@ -520,14 +569,18 @@ class CredentialManager {
    */
   async deleteOneReachCredentials() {
     try {
-      await keytar.deletePassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
-      await keytar.deletePassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      await getKeytar().deletePassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      await getKeytar().deletePassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
 
       try {
-        await keytar.deletePassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+        await getKeytar().deletePassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
       } catch (_e) {
-        // TOTP might not exist
       }
+
+      cacheInvalidate(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      cacheInvalidate(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      cacheInvalidate(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
+      cacheInvalidateService(SERVICE_NAME);
 
       console.log('[CredentialManager] Deleted OneReach credentials');
       return true;
@@ -544,12 +597,13 @@ class CredentialManager {
    */
   async updateOneReachEmail(newEmail) {
     try {
-      const metaStr = await keytar.getPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
+      const metaStr = await cachedGetPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
       if (metaStr) {
         const meta = JSON.parse(metaStr);
         meta.email = newEmail;
         meta.updatedAt = Date.now();
-        await keytar.setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
+        await getKeytar().setPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY, JSON.stringify(meta));
+        cacheInvalidate(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
         console.log('[CredentialManager] Updated OneReach email');
         return true;
       }
@@ -567,7 +621,8 @@ class CredentialManager {
    */
   async updateOneReachPassword(newPassword) {
     try {
-      await keytar.setPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY, newPassword);
+      await getKeytar().setPassword(SERVICE_NAME, ONEREACH_ACCOUNT_KEY, newPassword);
+      cacheInvalidate(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
       console.log('[CredentialManager] Updated OneReach password');
       return true;
     } catch (error) {

@@ -220,19 +220,7 @@ const masterOrchestrator = {
   async provideFeedback(task, result, winner, evaluation) {
     log.info('agent', `Providing feedback for ${winner.agentId}`);
 
-    // Update reputation based on success/failure
-    try {
-      const { getReputationStore } = require('../../packages/task-exchange/src/reputation/store');
-      const repStore = getReputationStore();
-
-      if (result.success) {
-        await repStore.recordSuccess(winner.agentId, winner.agentVersion || '1.0.0');
-      } else {
-        await repStore.recordFailure(winner.agentId, winner.agentVersion || '1.0.0');
-      }
-    } catch (e) {
-      log.warn('agent', 'Could not update reputation', { error: e.message });
-    }
+    log.info('agent', `Feedback for ${winner.agentId}: ${result.success ? 'success' : 'failure'}`);
 
     // Apply agent feedback from evaluation
     if (evaluation?.agentFeedback?.length > 0) {
@@ -293,14 +281,7 @@ const masterOrchestrator = {
       // Add to agent's learning notes
       await this.updateAgentMemory(rejected.agentId, `Bid rejected by Master Orchestrator: ${rejected.reason}`);
 
-      // Apply reputation penalty
-      try {
-        const { getReputationStore } = require('../../packages/task-exchange/src/reputation/store');
-        const repStore = getReputationStore();
-        await repStore.recordFailure(rejected.agentId, '1.0.0');
-      } catch (e) {
-        log.warn('agent', 'Could not apply reputation penalty', { error: e.message });
-      }
+      log.info('agent', `Reputation note: ${rejected.agentId} bid rejected`);
     }
   },
 };

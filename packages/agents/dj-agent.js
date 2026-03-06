@@ -1666,6 +1666,7 @@ Return ONLY the AppleScript code, no explanation. The code should be directly ex
             return {
               success: true,
               message: message || `Playing ${trackInfo}${speakerMsg}`,
+              soundCue: { type: 'one-shot', name: 'transition', volume: 0.3 },
             };
           }
 

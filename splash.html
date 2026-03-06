@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self';"
+    />
+    <title>Onereach.ai</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: transparent;
+        color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-app-region: drag;
+        user-select: none;
+      }
+
+      .splash {
+        text-align: center;
+        position: relative;
+        z-index: 1;
+        animation: splashSequence 2.5s ease-in-out forwards;
+      }
+
+      @keyframes splashSequence {
+        0% { opacity: 0; transform: scale(0.96); }
+        12% { opacity: 1; transform: scale(1); }
+        75% { opacity: 1; transform: scale(1); }
+        100% { opacity: 0; transform: scale(1.01); }
+      }
+
+      .glow {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 300px;
+        height: 300px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(0, 153, 255, 0.12) 0%, transparent 70%);
+        animation: pulseGlow 2.5s ease-in-out forwards;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      @keyframes pulseGlow {
+        0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+        20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        70% { opacity: 0.8; transform: translate(-50%, -50%) scale(1.1); }
+        100% { opacity: 0; transform: translate(-50%, -50%) scale(1.2); }
+      }
+
+      .orb-logo {
+        width: 88px;
+        height: 88px;
+        margin: 0 auto 20px;
+        border-radius: 50%;
+        object-fit: cover;
+        filter: drop-shadow(0 4px 24px rgba(0, 153, 255, 0.3));
+      }
+
+      .brand-name {
+        font-size: 28px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin-bottom: 6px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.7) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .tagline {
+        font-size: 14px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.6);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        margin-bottom: 16px;
+      }
+
+      .runtime {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.3);
+        letter-spacing: 0.02em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="glow"></div>
+    <div class="splash">
+      <img class="orb-logo" src="voice-sdk-package/assets/orb-graphic.png" alt="Onereach.ai" />
+      <div class="brand-name">Onereach.ai</div>
+      <div class="tagline">Agentic AI Workstation</div>
+      <div class="runtime">Powered by GSX</div>
+    </div>
+
+    <script>
+      setTimeout(() => {
+        if (window.splash) {
+          window.splash.close();
+        }
+      }, 2600);
+    </script>
+  </body>
+</html>

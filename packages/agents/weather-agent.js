@@ -122,6 +122,22 @@ function wmoCodeToDescription(code) {
   return map[code] || 'unknown conditions';
 }
 
+/**
+ * Pick an atmospheric soundCue based on weather description.
+ * Returns null if no relevant sound -- keeps responses clean.
+ */
+function _weatherSoundCue(desc) {
+  if (!desc) return null;
+  const d = desc.toLowerCase();
+  if (d.includes('thunder') || d.includes('storm')) {
+    return { type: 'ambient-blend', name: 'rain-heavy', duration: 6000, volume: 0.2 };
+  }
+  if (d.includes('rain') || d.includes('drizzle') || d.includes('shower')) {
+    return { type: 'ambient-blend', name: 'rain-light', duration: 5000, volume: 0.2 };
+  }
+  return null;
+}
+
 // Lazy-loaded calendar store for event-aware weather
 let _calendarStore = null;
 function getCalStore() {
@@ -574,7 +590,8 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
         }
       }
 
-      return { success: true, message };
+      const soundCue = _weatherSoundCue(desc);
+      return { success: true, message, soundCue };
     } catch (error) {
       log.info('agent', 'wttr.in failed, trying Open-Meteo fallback', {
         location,
@@ -604,7 +621,8 @@ LOW CONFIDENCE (0.00) -- do NOT bid on:
             }
           }
 
-          return { success: true, message };
+          const soundCue = _weatherSoundCue(om.desc);
+          return { success: true, message, soundCue };
         }
       } catch (_fallbackErr) {
         // Both sources failed

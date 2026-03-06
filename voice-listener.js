@@ -28,6 +28,8 @@ class VoiceListener {
     this.audioBuffer = [];
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 3;
+    this._reconnectTimer = null;
+    this._isConnecting = false;
 
     // Track responses to prevent unwanted AI speech
     this.sanctionedResponseIds = new Set();
@@ -50,6 +52,11 @@ class VoiceListener {
       log.info('voice', 'Already connected');
       return true;
     }
+    if (this._isConnecting) {
+      log.info('voice', 'Connection already in progress');
+      return true;
+    }
+    this._isConnecting = true;
 
     return new Promise((resolve, reject) => {
       try {
@@ -60,6 +67,7 @@ class VoiceListener {
           onError: (error) => {
             log.error('voice', 'WebSocket error', { error: error.message });
             this.isConnected = false;
+            this._isConnecting = false;
             reject(error);
           },
           onClose: (code, _reason) => {
@@ -82,7 +90,9 @@ class VoiceListener {
               );
               this.broadcast({ type: 'reconnecting', attempt: this.reconnectAttempts, delay });
 
-              setTimeout(async () => {
+              if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+              this._reconnectTimer = setTimeout(async () => {
+                this._reconnectTimer = null;
                 if (this.subscribers.size === 0) {
                   log.info('voice', 'Reconnect cancelled - no subscribers');
                   return;
@@ -113,6 +123,7 @@ class VoiceListener {
         this.ws.on('open', () => {
           log.info('voice', 'Connected');
           this.isConnected = true;
+          this._isConnecting = false;
           this.reconnectAttempts = 0;
 
           // Configure session for transcription with function calling
@@ -488,10 +499,15 @@ ABSOLUTE RULES - NO EXCEPTIONS:
       this.ws = null;
     }
     this.isConnected = false;
+    this._isConnecting = false;
     this.sessionId = null;
     this.audioBuffer = [];
     this.sanctionedResponseIds.clear();
-    this.reconnectAttempts = 0; // Reset for next connection
+    this.reconnectAttempts = 0;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
 
     // Clear pending function call state
     this.pendingFunctionCallId = null;

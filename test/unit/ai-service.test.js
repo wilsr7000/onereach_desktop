@@ -389,36 +389,12 @@ describe('AI Service', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Deprecated Wrappers', () => {
-    it('claude-api.js emits deprecation warning on load', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      try {
-        require('../../claude-api');
-        const warnings = warnSpy.mock.calls.map((c) => c.join(' '));
-        const hasDeprecation = warnings.some((w) => /deprecat|ai-service|use.*instead/i.test(w));
-        expect(hasDeprecation).toBe(true);
-      } catch {
-        // Module may fail to load -- check if the warning was emitted before failure
-        const warnings = warnSpy.mock.calls.map((c) => c.join(' '));
-        const _hasDeprecation = warnings.some((w) => /deprecat|ai-service|use.*instead/i.test(w));
-        // Either it warned or it failed -- both acceptable
-        expect(true).toBe(true);
-      } finally {
-        warnSpy.mockRestore();
-      }
-    });
-
-    it('openai-api.js emits deprecation warning on load', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      try {
-        require('../../openai-api');
-        const warnings = warnSpy.mock.calls.map((c) => c.join(' '));
-        const hasDeprecation = warnings.some((w) => /deprecat|ai-service|use.*instead/i.test(w));
-        expect(hasDeprecation).toBe(true);
-      } catch {
-        expect(true).toBe(true);
-      } finally {
-        warnSpy.mockRestore();
-      }
+    it('deprecated wrappers have been removed', () => {
+      const fs = require('fs');
+      const path = require('path');
+      expect(fs.existsSync(path.join(__dirname, '../../claude-api.js'))).toBe(false);
+      expect(fs.existsSync(path.join(__dirname, '../../openai-api.js'))).toBe(false);
+      expect(fs.existsSync(path.join(__dirname, '../../unified-claude.js'))).toBe(false);
     });
   });
 

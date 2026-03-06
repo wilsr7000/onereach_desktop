@@ -3122,24 +3122,33 @@ proactive_suggestions: true
     const lowerQuery = query.toLowerCase().trim();
     if (lowerQuery.length === 0) return [];
 
-    const queryWords = lowerQuery.split(/\s+/).filter((w) => w.length > 0);
+    const STOP_WORDS = new Set([
+      'a','an','the','is','it','in','on','at','to','for','of','and','or','but',
+      'be','am','are','was','were','been','has','have','had','do','does','did',
+      'i','me','my','we','our','you','your','he','she','they','them','this',
+      'that','with','from','by','as','not','no','so','if','can','will','just',
+    ]);
+    const queryWords = lowerQuery.split(/\s+/).filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 
     return this.index.items.filter((item) => {
-      // Search in preview
+      // Search in preview (exact phrase)
       if (item.preview && item.preview.toLowerCase().includes(lowerQuery)) {
         return true;
       }
 
-      // Search in fileName
+      // Search in fileName (exact phrase)
       if (item.fileName && item.fileName.toLowerCase().includes(lowerQuery)) {
         return true;
       }
 
-      // Check each query word in preview/fileName
-      const previewLower = (item.preview || '').toLowerCase();
-      const fileNameLower = (item.fileName || '').toLowerCase();
-      if (queryWords.some((word) => previewLower.includes(word) || fileNameLower.includes(word))) {
-        return true;
+      // Check that ALL meaningful query words appear in preview or fileName
+      if (queryWords.length > 0) {
+        const previewLower = (item.preview || '').toLowerCase();
+        const fileNameLower = (item.fileName || '').toLowerCase();
+        const combinedText = previewLower + ' ' + fileNameLower;
+        if (queryWords.every((word) => combinedText.includes(word))) {
+          return true;
+        }
       }
 
       // Load and search in metadata
@@ -3186,7 +3195,7 @@ proactive_suggestions: true
             return true;
           }
 
-          // Check individual query words against all metadata
+          // Check individual query words against all metadata (ALL must match)
           const metadataText = [
             metadata.title,
             metadata.description,
@@ -3200,7 +3209,7 @@ proactive_suggestions: true
             .join(' ')
             .toLowerCase();
 
-          if (queryWords.some((word) => metadataText.includes(word))) {
+          if (queryWords.length > 0 && queryWords.every((word) => metadataText.includes(word))) {
             return true;
           }
         }

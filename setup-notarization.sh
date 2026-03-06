@@ -1,26 +1,23 @@
 #!/bin/bash
-
 # Notarization Setup Script
-# Replace YOUR_APPLE_ID with your actual Apple Developer email
+# Configures environment variables for Apple notarization.
+# Run: source setup-notarization.sh
 
 echo "Setting up notarization environment variables..."
-
-# Set environment variables
-export APPLE_ID="robb@onereach.com"
-export APPLE_APP_SPECIFIC_PASSWORD="tozd-zoeq-llgi-tste"
-export APPLE_TEAM_ID="6KTEPA3LSD"
-
-echo "✅ Environment variables set:"
-echo "   APPLE_ID: $APPLE_ID"
-echo "   APPLE_TEAM_ID: $APPLE_TEAM_ID"
-echo "   APPLE_APP_SPECIFIC_PASSWORD: [hidden]"
-
 echo ""
-echo "To make these permanent, add them to your ~/.zshrc file:"
-echo "  echo 'export APPLE_ID=\"$APPLE_ID\"' >> ~/.zshrc"
-echo "  echo 'export APPLE_APP_SPECIFIC_PASSWORD=\"$APPLE_APP_SPECIFIC_PASSWORD\"' >> ~/.zshrc"
-echo "  echo 'export APPLE_TEAM_ID=\"$APPLE_TEAM_ID\"' >> ~/.zshrc"
+echo "Add these to your ~/.zshrc (replace with your actual values):"
 echo ""
-echo "Then reload your shell: source ~/.zshrc"
+echo '  export APPLE_ID="your-apple-id@email.com"'
+echo '  export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"'
+echo '  export APPLE_TEAM_ID="YOUR_TEAM_ID"'
 echo ""
-echo "Ready to build? Run: ./scripts/build-signed.sh" 
+echo "Then run: source ~/.zshrc"
+echo ""
+
+if [ -z "$APPLE_ID" ]; then
+  echo "WARNING: APPLE_ID is not set. Notarization will not work."
+else
+  echo "APPLE_ID: $APPLE_ID"
+  echo "APPLE_TEAM_ID: ${APPLE_TEAM_ID:-NOT SET}"
+  echo "APPLE_APP_SPECIFIC_PASSWORD: ${APPLE_APP_SPECIFIC_PASSWORD:+[set]}"
+fi
