@@ -32,10 +32,9 @@ describe('BrowsingAgent', () => {
       expect(typeof browsingAgent.execute).toBe('function');
     });
 
-    it('should have a prompt for LLM bidding', () => {
+    it('should have a prompt describing capabilities for LLM bidding', () => {
       expect(browsingAgent.prompt).toBeTruthy();
-      expect(browsingAgent.prompt).toContain('HIGH CONFIDENCE');
-      expect(browsingAgent.prompt).toContain('LOW CONFIDENCE');
+      expect(browsingAgent.prompt).toContain('Capabilities');
     });
 
     it('should not have a bid method (LLM-only routing)', () => {

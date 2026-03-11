@@ -292,6 +292,7 @@
 - ✅ Task decomposition for composite requests
 - ✅ Multi-agent execution (parallel and series modes)
 - ✅ submitSubtask.andWait() for agent-to-agent subtask coordination
+- ✅ Memory Editor: dedicated window for viewing/editing agent memories with markdown editor, live preview, diff view, AI chat editing, and review-before-apply flow
 
 **WebMCP Integration (v4.3.x):**
 - ✅ Bidirectional WebMCP support (W3C navigator.modelContext API)

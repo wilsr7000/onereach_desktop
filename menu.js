@@ -580,6 +580,17 @@ function _buildToolsMenu(_showTestMenu) {
         },
       },
       {
+        label: 'Edit Agent Memory...',
+        click: () => {
+          try {
+            const main = require('./main');
+            if (main.createMemoryEditorWindow) main.createMemoryEditorWindow();
+          } catch (error) {
+            console.error('[Menu] Memory Editor error:', error);
+          }
+        },
+      },
+      {
         label: 'Create Agent with AI...',
         accelerator: 'CmdOrCtrl+Shift+G',
         click: () => {

@@ -66,29 +66,13 @@ const recorderAgent = {
   // Prompt for LLM evaluation
   prompt: `Video Recorder Agent launches WISER Meeting to record meetings, video, and screen.
 
-HIGH CONFIDENCE (0.85+) for:
-- Starting a meeting: "Start a meeting", "Let's start a meeting", "Begin a meeting", "Start the meeting"
-- Starting a call: "Start a call", "Hop on a call", "Begin a call"
-- Direct recording: "Record a video", "Start recording", "Record myself", "Begin recording"
-- Screen capture: "Capture my screen", "Screen recording", "Record my desktop"
-- Camera recording: "Take a video", "Film something", "Record with webcam"
-- Recording for a space: "Record a video for my Work space"
+Capabilities:
+- Start a meeting or call session (live recording)
+- Record video from webcam
+- Capture screen recordings
+- Record to a specific Space for organization
 
-CRITICAL: "Start a meeting" means "begin a meeting session NOW" -- this is a recording/capture action, NOT a calendar scheduling action. This agent handles all "start/begin/launch" + meeting/call/session commands.
-
-MEDIUM CONFIDENCE (0.50-0.70) for:
-- Ambiguous "capture" requests that might be screenshots instead of video
-- General media requests without clear video intent
-
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
-- Playback: "Play a video", "Watch video" (that's for video player)
-- Editing: "Edit my video" (that's for video editor)
-- Screenshots: "Take a screenshot" (not video)
-- Music/audio only: "Record audio" (might want different tool)
-- Photos: "Take a photo", "Capture image"
-- SCHEDULING a meeting: "Schedule a meeting", "Add a meeting to calendar", "Book a meeting" (that's calendar agent)
-
-This agent opens the recorder window. For scheduling/creating calendar events, the calendar agent is appropriate.`,
+This agent opens the recorder window and starts capture sessions. It handles "start a meeting" as a recording action. It does not schedule calendar events, play back videos, or edit recordings.`,
 
   // Memory for tracking user patterns
   memory: null,

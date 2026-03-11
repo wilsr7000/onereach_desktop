@@ -695,6 +695,10 @@ app.whenReady().then(() => {
   registerIPCHandlers();
   console.log('[Spaces Upload] IPC handlers registered');
 
+  // Register Memory Editor IPC handlers
+  const memoryEditorApi = require('./lib/memory-editor-api');
+  memoryEditorApi.registerIPC();
+
   // Register Claude Terminal IPC handlers
   registerClaudeTerminalHandlers();
 
@@ -7420,7 +7424,8 @@ function setupIPC() {
   ipcMain.on('clear-cache-and-reload', async (event, options = {}) => {
     try {
       const win = BrowserWindow.fromWebContents(event.sender);
-      if (win) {
+      if (!win || win.isDestroyed()) return;
+
         const clearStorage = !!options.clearStorage;
         if (clearStorage) {
           // PROTECTION: Backup important JSON files before clearing storage
@@ -7492,13 +7497,21 @@ function setupIPC() {
           }
         }
 
-        // Clear the cache for this session
-        await win.webContents.session.clearCache();
-        console.log('[IPC] Cache cleared for window');
-        // Reload ignoring cache
-        win.webContents.reloadIgnoringCache();
-        console.log('[IPC] Page reloaded ignoring cache');
-      }
+        // Clear cache with timeout so reload always proceeds
+        try {
+          await Promise.race([
+            win.webContents.session.clearCache(),
+            new Promise(resolve => setTimeout(resolve, 3000)),
+          ]);
+          console.log('[IPC] Cache cleared for window');
+        } catch (_) {
+          console.warn('[IPC] Cache clear failed or timed out, reloading anyway');
+        }
+
+        if (!win.isDestroyed()) {
+          win.webContents.reloadIgnoringCache();
+          console.log('[IPC] Page reloaded ignoring cache');
+        }
     } catch (error) {
       console.error('[IPC] Error clearing cache and reloading:', error);
     }
@@ -16885,6 +16898,71 @@ function setupVoiceTTS() {
   console.log('[VoiceTTS] Voice TTS handlers registered');
 }
 
+// ==================== MEMORY EDITOR ====================
+
+let memoryEditorWindow = null;
+
+/**
+ * Create and show the Memory Editor window
+ * @param {{ agentId?: string }} options - Optional: open with a specific agent pre-selected
+ */
+function createMemoryEditorWindow(options = {}) {
+  const memoryEditorApi = require('./lib/memory-editor-api');
+
+  if (memoryEditorWindow && !memoryEditorWindow.isDestroyed()) {
+    memoryEditorWindow.focus();
+    if (options.agentId) {
+      memoryEditorWindow.webContents.send('memory-editor:open-agent', options.agentId);
+    }
+    return memoryEditorWindow;
+  }
+
+  console.log('[MemoryEditor] Creating memory editor window...');
+
+  memoryEditorWindow = new BrowserWindow({
+    width: 1100,
+    height: 750,
+    minWidth: 700,
+    minHeight: 500,
+    title: 'Memory Editor',
+    frame: false,
+    transparent: false,
+    backgroundColor: '#121218',
+    center: true,
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-memory-editor.js'),
+      webSecurity: true,
+      sandbox: false,
+    },
+  });
+
+  browserWindow.attachLogForwarder(memoryEditorWindow, 'agent');
+
+  memoryEditorWindow.on('closed', () => {
+    console.log('[MemoryEditor] Window closed');
+    memoryEditorWindow = null;
+    memoryEditorApi.setEditorWindow(null);
+  });
+
+  memoryEditorWindow.loadFile('memory-editor.html').catch((err) => {
+    console.error('[MemoryEditor] Error loading memory-editor.html:', err);
+  });
+  windowRegistry.register('memory-editor', memoryEditorWindow);
+
+  memoryEditorWindow.webContents.on('did-finish-load', () => {
+    console.log('[MemoryEditor] Window loaded successfully');
+    if (options.agentId) {
+      memoryEditorWindow.webContents.send('memory-editor:open-agent', options.agentId);
+    }
+  });
+
+  memoryEditorApi.setEditorWindow(memoryEditorWindow);
+  return memoryEditorWindow;
+}
+
 // ==================== AGENT MANAGER ====================
 
 let agentManagerWindow = null;
@@ -19026,6 +19104,8 @@ module.exports = {
   checkAndShowIntroWizard,
   // Agent Manager
   createAgentManagerWindow,
+  // Memory Editor
+  createMemoryEditorWindow,
   // Claude Code UI
   createClaudeCodeWindow,
   createClaudeTerminalWindow,

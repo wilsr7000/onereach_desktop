@@ -57,21 +57,18 @@ function repairTruncatedJSON(raw) {
   return null;
 }
 
-// Cache for recent evaluations (avoid duplicate API calls)
-// Two-tier: simple queries (no pronouns/context-dependent words) use content-only keys
-// for higher hit rates. Context-dependent queries include conversation hash.
+// Cache for recent evaluations (avoid duplicate API calls for identical requests)
 const evaluationCache = new Map();
-const CACHE_TTL_MS = 60000; // 60 seconds (extended from 30s for better hit rate)
+const CACHE_TTL_MS = 60000; // 60 seconds
 
 /**
- * Check if the bidding system is ready (has API key)
- * @returns {{ ready: boolean, error?: string }}
+ * Generate cache key: exact agent ID + exact task content.
+ * No fuzzy matching, no truncation, no tier system.
  */
-function checkBidderReady() {
-  // ai-service handles API key resolution internally
-  // We can't check without making a call, so assume ready
-  // Errors will surface when ai.chat() is called
-  return { ready: true };
+function getCacheKey(agent, task) {
+  const agentId = agent.id || agent.name;
+  const taskContent = (task.content || task.phrase || String(task)).toLowerCase().trim();
+  return `${agentId}:${taskContent}`;
 }
 
 /**
@@ -84,21 +81,15 @@ function buildEvaluationPrompt(agent, task) {
   const agentInfo = `
 AGENT: ${agent.name}
 TYPE: ${agent.executionType || agent.type || 'general'}
-KEYWORDS: ${(agent.keywords || []).join(', ')}
 CAPABILITIES: ${(agent.capabilities || []).join(', ')}
 
-AGENT DESCRIPTION/PROMPT:
+WHAT THIS AGENT DOES:
 ${agent.prompt || agent.description || 'No description provided'}
 `.trim();
 
   const userRequest = task.content || task.phrase || task;
 
-  // Conversation history: prefer metadata passed through exchange (fixes the
-  // TODO in exchange.ts where history was previously hardcoded to []).
-  // Fall back to file read for backward compatibility.
   let conversationText = '';
-
-  // 1. Try task metadata (primary path -- set by exchange-bridge, forwarded by exchange)
   if (typeof task === 'object' && task.metadata?.conversationText) {
     conversationText = task.metadata.conversationText;
   } else if (
@@ -111,7 +102,6 @@ ${agent.prompt || agent.description || 'No description provided'}
       .join('\n');
   }
 
-  // 2. Fallback: read from file in GSX Agent space
   if (!conversationText) {
     try {
       const api = getSpacesAPI();
@@ -122,12 +112,10 @@ ${agent.prompt || agent.description || 'No description provided'}
         conversationText = conversationLines.join('\n');
       }
     } catch (_err) {
-      // No history file yet, that's okay
+      // No history file yet
     }
   }
 
-  // Read user profile for personalized routing
-  // Profile is pre-loaded by exchange-bridge on startup; access synchronously here
   let userProfileText = '';
   try {
     const { getUserProfile } = require('../../lib/user-profile-store');
@@ -136,152 +124,65 @@ ${agent.prompt || agent.description || 'No description provided'}
       userProfileText = profile.getContextString();
     }
   } catch (_err) {
-    // User profile not available yet, that's okay
+    // User profile not available yet
   }
 
-  // Read session summaries for multi-session continuity
   let sessionSummaryText = '';
   try {
     const api = getSpacesAPI();
     const summariesContent = api.files.read('gsx-agent', 'session-summaries.md');
     if (summariesContent) {
       const lines = summariesContent.split('\n').filter((l) => l.startsWith('- '));
-      sessionSummaryText = lines.slice(0, 5).join('\n'); // Last 5 summaries
+      sessionSummaryText = lines.slice(0, 5).join('\n');
     }
   } catch (_err) {
     // No summaries yet
   }
 
   const conversationSection = conversationText
-    ? `\n\nRECENT CONVERSATION (for context - helps resolve pronouns like "it", "that", "this"):\n${conversationText}\n`
+    ? `\nRECENT CONVERSATION:\n${conversationText}\n`
     : '';
 
   const userProfileSection = userProfileText
-    ? `\n\nUSER PROFILE (known facts about this user):\n${userProfileText}\n`
+    ? `\nUSER PROFILE:\n${userProfileText}\n`
     : '';
 
   const sessionSummarySection = sessionSummaryText
-    ? `\n\nPREVIOUS SESSIONS (for continuity):\n${sessionSummaryText}\n`
+    ? `\nPREVIOUS SESSIONS:\n${sessionSummaryText}\n`
     : '';
 
-  return `You are an intelligent task router evaluating if an agent can handle a voice command.
+  return `You are evaluating whether a specific agent can handle a user's request.
+
+Read the agent's description and capabilities below. Then read the user's request.
+Can this agent fulfill what the user is asking for? Rate your confidence based on
+how well the request falls within the agent's capabilities.
 
 ${agentInfo}
 ${userProfileSection}${sessionSummarySection}${conversationSection}
-USER'S CURRENT REQUEST: "${userRequest}"
+USER REQUEST: "${userRequest}"
 
-## Evaluation Strategy
+Use conversation history to resolve pronouns ("it", "that", "this", etc.).
 
-Think step-by-step about USER INTENT, not just keywords:
+Rate confidence 0.0-1.0 based on whether this agent can complete the request:
+- 0.85-1.0: The request clearly falls within this agent's capabilities
+- 0.50-0.84: The request likely falls within this agent's capabilities
+- 0.00-0.49: The request is outside this agent's capabilities
 
-1. **What is the user actually trying to accomplish?**
-   - Strip away filler words and focus on the core intent
-   - "What's happening Monday" = user wants to know their schedule for Monday
-   - "Play something" = user wants music to play
-   
-2. **Use CONVERSATION CONTEXT to resolve pronouns and references:**
-   - If user says "Play it" after asking about a podcast → they want to play THAT podcast
-   - If user says "Tell me more" after a search result → they want more info on THAT topic
-   - "it", "that", "this", "the same" often refer to something in recent conversation
-   - ALWAYS check the conversation history when the request contains pronouns
-   
-3. **Does this agent's domain cover that intent?**
-   - Calendar agent handles: schedules, meetings, events, availability, what's happening when
-   - Music/DJ agent handles: playing, controlling, discovering music AND podcasts
-   - Search agent handles: information lookup, research, learning about things
-   - Weather agent handles: conditions, forecasts, temperature
-   
-4. **Semantic matching - go beyond keywords:**
-   - "What's happening Monday?" → Calendar (asking about schedule on a specific day)
-   - "What's going on tomorrow?" → Calendar (schedule inquiry)
-   - "Am I free at 3?" → Calendar (availability check)
-   - "Put on some tunes" → Music (even though "tunes" might not be a keyword)
-   - "What's the deal outside?" → Weather (asking about conditions)
+You MAY include a "result" field with a direct answer ONLY if:
+- The answer comes entirely from information already in this prompt (conversation, profile, agent description)
+- The agent type is NOT "action" or "system"
+- The request does NOT require any side effect (playing music, sending email, etc.)
+- The request does NOT need live data (time, weather, calendar, search results)
+If any of those conditions fail, set result to null.
 
-5. **Look for IMPLICIT signals:**
-   - Day names (Monday-Sunday) + "what's happening/what do I have" = calendar (schedule on that day)
-   - "What's today's date?" or "What day is it?" = TIME query (asking the actual date/day of week)
-   - "What do I have today/tomorrow?" = CALENDAR query (asking about events)
-   - The difference: asking for the DATE ITSELF = time agent; asking for EVENTS on a date = calendar agent
-   - Mood words (relaxing, energetic) often signal music requests
-   - Location words might signal weather queries
-
-## Confidence Guidelines
-
-- **0.85-1.0**: Clear match - user explicitly mentions this agent's domain OR the intent obviously maps to it
-- **0.70-0.84**: Strong match - intent aligns well even if keywords don't match exactly
-- **0.50-0.69**: Possible match - could handle it but another agent might be better
-- **0.20-0.49**: Weak match - tangentially related at best
-- **0.00-0.19**: No match - completely different domain
-
-## CRITICAL: Match Confidence to Your Analysis
-
-**THIS IS EXTREMELY IMPORTANT:**
-- If you determine the request is for a DIFFERENT agent's domain, you MUST return LOW confidence (0.00-0.20)
-- Do NOT say "this is a calendar query" and then return 0.85 - that's contradictory
-- Your confidence score MUST align with whether THIS agent can handle the request
-
-**Example of WRONG output:**
-"reasoning": "This is a calendar inquiry, not music related"
-"confidence": 0.95  <- WRONG! Should be 0.00
-
-**Example of CORRECT output:**
-"reasoning": "This is a calendar inquiry, not music related"  
-"confidence": 0.00  <- CORRECT! Matches the reasoning
-
-## Critical Rules
-
-1. **Day names + "what's happening/what do I have" = calendar** (e.g., "What's happening Monday?" = 0.85+ for calendar, 0.00 for music/weather/etc.)
-2. **"What's the date?" / "What day is it?" = TIME** (asking the actual date/day of week from the system clock, NOT calendar)
-3. **Don't be too literal** - "What's going on" about a day = schedule query, not small talk
-4. **Context matters** - asking about EVENTS on a day = calendar; asking the actual DATE = time
-5. **When in doubt, consider what data the agent has access to**
-6. **If the request doesn't match this agent's domain, return confidence 0.00-0.15**
-
-## Fast-Path Response (Context-Grounded Only)
-
-You MAY include a "result" field with a direct answer to SKIP full agent execution.
-But ONLY if the answer comes ENTIRELY from information ALREADY IN THIS PROMPT.
-
-BEFORE generating a result, ask yourself:
-"Am I writing this answer from text I can see in this prompt (conversation history,
-user profile, agent description), or am I pulling it from my training data?"
-If the answer is training data, you MUST set result to null.
-
-SAFE to answer (information is visible in this prompt):
-- Greetings, farewells, thanks, casual chat (no facts needed)
-- Questions about the agent's own capabilities (described in the agent prompt above)
-- References to what the user just said (conversation history above)
-- The user's name or preferences (from user profile above)
-
-NEVER answer -- you WILL hallucinate (set result to null):
-- Current time, date, or day of week (you do NOT have a clock)
-- Weather, temperature, or conditions (you do NOT have a weather API)
-- Calendar events, meetings, schedules (you do NOT have calendar access)
-- Email contents or counts (you do NOT have email access)
-- Search results or factual knowledge (you do NOT have web access)
-- Any "daily brief", "morning brief", "rundown" (requires multiple live data sources)
-- Anything that could be different right now than when you were trained
-
-ALSO set result to null if:
-- The agent type is "action" or "system" (these MUST execute to fetch real data)
-- The request requires any side effect (playing music, sending email, recording, etc.)
-
-If in doubt, set result to null. A wrong fast-path answer destroys user trust.
-
-Respond with JSON only:
+Respond with JSON:
 {
   "confidence": 0.0-1.0,
   "plan": "Brief execution plan if confidence > 0.3",
-  "reasoning": "1-2 sentences: What is the user's intent? Why does/doesn't this agent match?",
+  "reasoning": "Why does/doesn't this agent match?",
   "hallucinationRisk": "none | low | high",
-  "result": "Direct answer ONLY if hallucinationRisk is 'none' or 'low' AND answer is from this prompt's context. Otherwise null."
-}
-
-hallucinationRisk guide:
-- "none": Pure conversation (greeting, thanks, joke) -- no facts involved
-- "low": Answer references only data visible in this prompt (history, profile, capabilities)
-- "high": Answer would require external/live data (time, weather, calendar, email, search) -- MUST set result to null`;
+  "result": "Direct answer from prompt context only, or null"
+}`;
 }
 
 /**
@@ -289,41 +190,11 @@ hallucinationRisk guide:
  * Includes conversation context hash to handle pronouns correctly
  */
 /**
- * Two-tier cache key strategy:
- * - Tier 1 (content-only): For queries that don't depend on conversation context
- *   (e.g., "what time is it", "give me my morning brief", "tell me a joke").
- *   These get much higher cache hit rates because the context hash doesn't change.
- * - Tier 2 (context-aware): For queries with pronouns or references that depend
- *   on conversation history (e.g., "play it", "tell me more", "do that again").
+ * Check if the bidding system is ready (has API key)
+ * @returns {{ ready: boolean, error?: string }}
  */
-const CONTEXT_DEPENDENT_WORDS = /\b(it|that|this|them|those|these|the same|more|again|too|also|instead)\b/i;
-
-function getCacheKey(agent, task) {
-  const agentId = agent.id || agent.name;
-  const taskContent = (task.content || task.phrase || String(task)).toLowerCase().trim();
-
-  // Tier 1: simple queries with no pronoun/reference dependencies → content-only key
-  if (!CONTEXT_DEPENDENT_WORDS.test(taskContent)) {
-    return `${agentId}:${taskContent}`;
-  }
-
-  // Tier 2: context-dependent queries → include conversation hash
-  let contextHash = '';
-  try {
-    // Prefer metadata (set by exchange-bridge) over file read
-    if (typeof task === 'object' && task.metadata?.conversationText) {
-      contextHash = task.metadata.conversationText.slice(-100).replace(/\s+/g, ' ').trim();
-    } else {
-      const api = getSpacesAPI();
-      const historyContent = api.files.read('gsx-agent', 'conversation-history.md');
-      if (historyContent) {
-        contextHash = historyContent.slice(-100).replace(/\s+/g, ' ').trim();
-      }
-    }
-  } catch (_err) {
-    // No history file
-  }
-  return `${agentId}:${taskContent}:${contextHash}`;
+function checkBidderReady() {
+  return { ready: true };
 }
 
 /**
@@ -332,7 +203,6 @@ function getCacheKey(agent, task) {
 function getCachedEvaluation(cacheKey) {
   const cached = evaluationCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    log.info('agent', 'Cache hit', { key: cacheKey.substring(0, 50) });
     return cached.result;
   }
   return null;
@@ -415,31 +285,6 @@ async function evaluateAgentBid(agent, task) {
     // Validate and normalize
     let confidence = Math.max(0, Math.min(1, parseFloat(evaluation.confidence) || 0));
     const reasoning = evaluation.reasoning || '';
-
-    // SANITY CHECK: Detect contradictory responses where reasoning says "doesn't match"
-    // but confidence is high. This is a common LLM failure mode.
-    // Only trigger on CLEAR negative signals -- never on phrases that could be affirmative
-    // for the agent being evaluated (e.g. "this is a time query" is CORRECT for time-agent).
-    const reasoningLower = reasoning.toLowerCase();
-    const indicatesNoMatch =
-      reasoningLower.includes('does not align') ||
-      reasoningLower.includes("doesn't align") ||
-      reasoningLower.includes('not related') ||
-      reasoningLower.includes('not match') ||
-      reasoningLower.includes("doesn't match") ||
-      reasoningLower.includes('different domain') ||
-      reasoningLower.includes('outside the') ||
-      reasoningLower.includes('unsuitable') ||
-      reasoningLower.includes('falls under the domain of');
-
-    // If reasoning indicates no match but confidence is high, fix it
-    if (indicatesNoMatch && confidence > 0.3) {
-      log.info(
-        'agent',
-        `Correcting contradictory response for ${agent.name}: "${reasoning.substring(0, 50)}..." had confidence ${confidence}, setting to 0.05`
-      );
-      confidence = 0.05;
-    }
 
     // Hallucination guard: strip fast-path result if risk is high
     const hallucinationRisk = evaluation.hallucinationRisk || 'high'; // Default to high if not specified
@@ -678,6 +523,7 @@ Return ONLY valid JSON, no markdown fences.`;
     for (const entry of parsed) {
       if (!entry || !entry.id) continue;
       const confidence = Math.max(0, Math.min(1, parseFloat(entry.confidence) || 0));
+
       results.set(entry.id, {
         confidence,
         plan: entry.plan || '',

@@ -52,29 +52,18 @@ const memoryAgent = {
 
   categories: ['system', 'settings', 'profile', 'memory', 'preferences'],
 
-  prompt: `Memory Manager is the central authority for ALL stored memory in the app. It manages the global user profile AND per-agent memories across every agent in the system.
+  prompt: `Memory Manager is the central authority for all stored memory in the app. It manages the global user profile and per-agent memories.
 
-HIGH CONFIDENCE (0.85+) for:
-- Viewing profile: "What do you know about me?", "Show my profile", "What's my name?"
-- Corrections: "My name is Robb", "That's wrong", "My name is not Isaac"
-- Updates: "I moved to San Francisco", "Change my timezone", "I prefer Celsius"
-- Deletions: "Forget my address", "Remove my work location", "Clear my profile"
-- General memory: "What have you learned about me?", "Show my preferences"
-- Agent-specific preferences: "Make my daily brief shorter", "Always use Berkeley for weather"
-- Cross-agent corrections: "Stop calling me Isaac everywhere", "Update my city in all agents"
+Capabilities:
+- View and display the user's stored profile (name, location, preferences, etc.)
+- Update profile facts when the user provides new information about themselves
+- Correct wrong information across the user profile and all agent memories
+- Delete specific facts or clear sections of memory
+- Show what the system has learned about the user
+- Manage per-agent preferences (e.g., briefing style, weather location, music taste)
+- Handle cross-agent corrections that affect multiple agents
 
-MEDIUM CONFIDENCE (0.50-0.70) for:
-- Ambiguous identity statements: "I'm Richard" (could be greeting or correction)
-- Preference statements without explicit "remember": "I like dark mode"
-
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
-- Greetings: "Hi", "Hello" (smalltalk-agent)
-- Calendar/weather/time queries
-- App features or settings (app-agent)
-- Playing music, sending emails, or any action unrelated to personal memory
-
-This agent is the ONLY agent that should modify the user profile store or any agent's memory.
-If the user says something is wrong about their profile or any agent's behavior, this agent handles it.`,
+This agent is the only agent that modifies the user profile store or agent memories.`,
 
   keywords: [
     'my name is',
@@ -413,6 +402,10 @@ Rules:
 
           // Apply per-agent memory changes
           if (Array.isArray(agentChanges)) {
+            let memoryEditorApi;
+            try { memoryEditorApi = require('../../lib/memory-editor-api'); } catch (_) { /* not available */ }
+            const editorOpen = memoryEditorApi && memoryEditorApi.getEditorWindow();
+
             for (const change of agentChanges) {
               const agentData = agentMemories.get(change.agentId);
               if (!agentData) {
@@ -422,16 +415,35 @@ Rules:
               const mem = agentData.memory;
               if (change.sectionUpdates && typeof change.sectionUpdates === 'object') {
                 for (const [section, newContent] of Object.entries(change.sectionUpdates)) {
-                  const _oldContent = mem.getSection(section) || '(empty)';
-                  mem.updateSection(section, String(newContent));
-                  allChanges.push(`[${change.agentId}] ${section}: updated (${change.reason || 'user request'})`);
-                  log.info('agent', '[MemoryAgent] Updated agent memory', {
-                    agentId: change.agentId,
-                    section,
-                    reason: change.reason,
-                  });
+                  const oldContent = mem.getSection(section) || '(empty)';
+
+                  if (editorOpen) {
+                    memoryEditorApi.proposeEdit({
+                      agentId: change.agentId,
+                      section,
+                      oldContent,
+                      newContent: String(newContent),
+                      reason: change.reason || 'user request',
+                    });
+                    allChanges.push(`[${change.agentId}] ${section}: proposed (${change.reason || 'user request'})`);
+                    log.info('agent', '[MemoryAgent] Proposed edit via Memory Editor', {
+                      agentId: change.agentId,
+                      section,
+                      reason: change.reason,
+                    });
+                  } else {
+                    mem.updateSection(section, String(newContent));
+                    allChanges.push(`[${change.agentId}] ${section}: updated (${change.reason || 'user request'})`);
+                    log.info('agent', '[MemoryAgent] Updated agent memory', {
+                      agentId: change.agentId,
+                      section,
+                      reason: change.reason,
+                    });
+                  }
                 }
-                mem.save();
+                if (!editorOpen) {
+                  mem.save();
+                }
               }
             }
           }
@@ -470,16 +482,34 @@ Rules:
 
           // Delete from agent memories
           if (Array.isArray(agentChanges)) {
+            let memoryEditorApi;
+            try { memoryEditorApi = require('../../lib/memory-editor-api'); } catch (_) { /* not available */ }
+            const editorOpen = memoryEditorApi && memoryEditorApi.getEditorWindow();
+
             for (const change of agentChanges) {
               const agentData = agentMemories.get(change.agentId);
               if (!agentData) continue;
               const mem = agentData.memory;
               if (change.sectionUpdates && typeof change.sectionUpdates === 'object') {
                 for (const [section, newContent] of Object.entries(change.sectionUpdates)) {
-                  mem.updateSection(section, String(newContent));
-                  allChanges.push(`[${change.agentId}] ${section}: cleaned (${change.reason || 'deletion'})`);
+                  if (editorOpen) {
+                    const oldContent = mem.getSection(section) || '(empty)';
+                    memoryEditorApi.proposeEdit({
+                      agentId: change.agentId,
+                      section,
+                      oldContent,
+                      newContent: String(newContent),
+                      reason: change.reason || 'deletion',
+                    });
+                    allChanges.push(`[${change.agentId}] ${section}: proposed deletion (${change.reason || 'deletion'})`);
+                  } else {
+                    mem.updateSection(section, String(newContent));
+                    allChanges.push(`[${change.agentId}] ${section}: cleaned (${change.reason || 'deletion'})`);
+                  }
                 }
-                mem.save();
+                if (!editorOpen) {
+                  mem.save();
+                }
               }
             }
           }

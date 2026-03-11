@@ -2335,7 +2335,7 @@
                     <span class="option-number">${index + 1}</span>
                     <div class="option-content">
                         <div class="option-label">${escapeHtml(opt.label)}</div>
-                        <div class="option-action">${escapeHtml(opt.action.replace(/_/g, ' '))}</div>
+                        <div class="option-action">${escapeHtml((opt.description || opt.action || '').replace(/_/g, ' '))}</div>
                     </div>
                 </div>
             `

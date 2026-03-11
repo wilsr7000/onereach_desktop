@@ -31,7 +31,7 @@
     [PARTIAL] Memory: store and recall preferences / "Remember that I prefer dark mode" -> success: false but has message: "Sorry, I had trouble managing your memory. Please try again."
     [PARTIAL] Memory: store and recall preferences / "My favorite programming language is Rust" -> success: false but has message: "Sorry, I had trouble managing your memory. Please try again."
     [PARTIAL] Memory: store and recall preferences / "What do you know about me?" -> success: false but has message: "Sorry, I had trouble managing your memory. Please try again."
-    [PARTIAL] Playbook: execute a playbook / "Run the onboarding playbook" -> success: false but has message: "No spaces found. Create a space with a playbook first."
+    [PARTIAL] Playbook: execute a playbook / "Run the onboarding playbook" -> success: false but has message: "Playbook execution failed: spaces.find is not a function"
     [PARTIAL] Browser: web navigation / "Go to google.com and search for weather" -> success: false but has message: "Could not read the page: Cannot read properties of undefined"
     [PARTIAL] Spaces: content management / "What spaces do I have?" -> success: false but has message: "Spaces is not available right now."
     [PARTIAL] Spaces: content management / "Create a new space called project notes" -> success: false but has message: "Spaces is not available right now."
@@ -41,19 +41,19 @@
   PER-CONVERSATION RESULTS
 ----------------------------------------------------------------------
   [PASS] Time: basic queries (time-agent)
-    + "What time is it?" -> "It's 10:36 PM"
-    + "And what day is it today?" -> "It's Tuesday, March 3, 2026"
-    + "What is the date?" -> "It's Tuesday, March 3, 2026"
+    + "What time is it?" -> "It's 8:43 AM"
+    + "And what day is it today?" -> "It's Wednesday, March 11, 2026"
+    + "What is the date?" -> "It's Wednesday, March 11, 2026"
   [PASS] Time: timezone awareness (time-agent)
     + "What time is it in Tokyo?" -> "Which timezone would you like? Your saved timezones are"
-    + "And in London?" -> "It's 10:36 PM"
+    + "And in London?" -> "It's 8:43 AM"
   [PASS] Weather: city provided (weather-agent)
-    + "What is the weather in Denver?" -> "It's 38°F and partly cloudy in Denver. Humidity is 81%"
+    + "What is the weather in Denver?" -> "It's 24°F and partly cloudy in Denver, feels like 13°F."
   [FAIL] Weather: no city triggers follow-up (weather-agent)
-    - "What's the weather?" -> "It's 55°F and partly cloudy in Berkeley. Humidity is 83"
-    + "San Francisco" -> "It's 55°F and partly cloudy in Berkeley. Humidity is 83"
+    - "What's the weather?" -> "It's 45°F and clear in Berkeley. Humidity is 97%"
+    + "San Francisco" -> "It's 45°F and clear in Berkeley. Humidity is 97%"
   [PASS] Weather: forecast request (weather-agent)
-    + "Will it rain tomorrow in Seattle?" -> "It's 55°F and partly cloudy in Berkeley. Humidity is 83"
+    + "Will it rain tomorrow in Seattle?" -> "It's 45°F and clear in Berkeley. Humidity is 97%"
   [PARTIAL] Spelling: common words (spelling-agent)
     ~ "How do you spell necessary?" -> "NECESSARY: N - E - C - E - S - S - A - R - Y"
     ~ "And accommodation?" -> "ACCOMMODATION: A - C - C - O - M - M - O - D - A - T - "
@@ -62,12 +62,12 @@
     + "Is recieve spelled correctly?" -> ""recieve" is misspelled. The correct spelling is "recei"
     + "How about definately?" -> "Note: "definately" is commonly misspelled. The correct "
   [PASS] Smalltalk: greeting flow (smalltalk-agent)
-    + "Hello there" -> "How can I assist you?"
+    + "Hello there" -> "I'm here to help! Just let me know what you need."
     + "How are you doing?" -> "I'm doing well, Robb! How can I help you?"
-    + "Thanks for your help" -> "Happy to help!"
-    + "Goodbye" -> "See you later, Robb!"
+    + "Thanks for your help" -> "Anytime!"
+    + "Goodbye" -> "Take care, Robb!"
   [PASS] Smalltalk: casual greetings (smalltalk-agent)
-    + "Hey" -> "Hello Robb! What can I do for you?"
+    + "Hey" -> "Hey Robb! How can I help you?"
     + "Good morning" -> "Good morning, Robb! How can I help you today?"
     + "Good night" -> "Good night, Robb! Sleep well."
   [PASS] Help: capabilities inquiry (help-agent)
@@ -113,13 +113,13 @@
     ~ "How do I configure the AI service?" -> "I had trouble searching the documentation. Please try a"
     ~ "What are the keyboard shortcuts?" -> "I had trouble searching the documentation. Please try a"
   [PASS] Daily brief: morning briefing (daily-brief-agent)
-    + "Give me my morning briefing" -> "Good evening, Robb. Current time: 10:37 PM. Date: Tuesd"
+    + "Give me my morning briefing" -> "Good morning, Robb. Current time: 8:45 AM. Date: Wednes"
   [PARTIAL] Memory: store and recall preferences (memory-agent)
     ~ "Remember that I prefer dark mode" -> "Sorry, I had trouble managing your memory. Please try a"
     ~ "My favorite programming language is Rust" -> "Sorry, I had trouble managing your memory. Please try a"
     ~ "What do you know about me?" -> "Sorry, I had trouble managing your memory. Please try a"
   [PARTIAL] Playbook: execute a playbook (playbook-agent)
-    ~ "Run the onboarding playbook" -> "No spaces found. Create a space with a playbook first."
+    ~ "Run the onboarding playbook" -> "Playbook execution failed: spaces.find is not a functio"
   [PARTIAL] Browser: web navigation (browser-agent)
     ~ "Go to google.com and search for weather" -> "Could not read the page: Cannot read properties of unde"
   [PASS] App: navigation commands (app-agent)
@@ -133,7 +133,7 @@
   [PARTIAL] Orchestrator: composite request (orchestrator-agent)
     ~ "Check the weather and my calendar for today" -> "I'm not sure how to help with that."
   [PASS] Edge: garbled input (smalltalk-agent)
-    + "asdfghjkl" -> "Come again?"
+    + "asdfghjkl" -> "What was that?"
   [PASS] Edge: single word (help-agent)
     + "help" -> "What would you like help with? I can tell you about sch"
   [PASS] Edge: very long input (help-agent)

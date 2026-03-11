@@ -145,28 +145,15 @@ const docsAgent = {
 
   prompt: `Documentation Agent answers questions about the GSX Power User app using official documentation.
 
-HIGH CONFIDENCE (0.85+) - BID when the user:
-- Asks HOW TO do something in the app: "How do I export a video?", "How do I create a space?"
-- Asks about a FEATURE: "What is Smart Export?", "Tell me about the Video Editor"
-- Asks for SETUP HELP: "How do I set up ElevenLabs?", "Getting started guide"
-- Asks about KEYBOARD SHORTCUTS: "What shortcut opens settings?"
-- Asks about APP CAPABILITIES: "What can this app do?", "What formats can I export to?"
-- Needs a GUIDE or WALKTHROUGH: "Walk me through recording a video"
-- Asks about API DOCUMENTATION: "How does the Spaces API work?", "What endpoints are available?"
+Capabilities:
+- Answer how-to questions about app features
+- Explain specific features and what they do
+- Provide setup and configuration help
+- List keyboard shortcuts
+- Describe API endpoints and integrations
+- Walk through feature workflows step by step
 
-This agent ONLY answers from official app documentation. It does NOT search the web, access external information, or make up answers.
-
-MEDIUM CONFIDENCE (0.50-0.70) -- defer to more specific agents:
-- Generic "What can you do?" or "What features does this app have?" → Help Agent handles general capability listings
-- Only bid 0.85+ on docs when the user asks about a SPECIFIC feature by name
-
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
-- Current time/weather: "What time is it?" (time agent)
-- General help: "Help me" / "What can you do?" (help agent)  
-- Web search: "Tell me about quantum computing" (search agent)
-- Greetings: "Hello" (smalltalk agent)
-- Media control: "Play music" (DJ agent)
-- Calendar queries: "What do I have today?" (calendar agent)`,
+This agent answers only from official app documentation. It does not search the web or access external information.`,
 
   // ==================== STATE ====================
   memory: null,

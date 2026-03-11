@@ -137,36 +137,16 @@ const searchAgent = {
   categories: ['search', 'information', 'knowledge'],
 
   // Prompt for LLM evaluation
-  prompt: `Search Agent handles ANY query that requires external or current information from the internet.
+  prompt: `Search Agent finds information from the internet for any query requiring external or current knowledge.
 
-HIGH CONFIDENCE (0.85+) - BID when the user:
-- Wants to LEARN about something: "Tell me about X", "What is X", "Who is X"
-- Mentions a SPECIFIC ENTITY: person, company, product, podcast, show, movie, book, band, place
-- Needs CURRENT information: news, prices, events, updates, scores
-- Asks for FACTS that require lookup or verification
-- Explicitly requests search: "search for", "look up", "find out about", "google"
+Capabilities:
+- Look up information about people, companies, products, places, concepts
+- Find current news, prices, scores, and events
+- Answer factual questions that require web search
+- Research topics the user wants to learn about
+- Verify facts and provide source-backed answers
 
-Examples that REQUIRE search (bid 0.85+):
-- "Tell me about the future of work podcast" → Info about a specific podcast
-- "Who is Elon Musk?" → Info about a specific person  
-- "What is the Joe Rogan Experience?" → Info about a specific show
-- "What's happening with Tesla?" → Current info about a company
-- "Tell me about quantum computing" → Knowledge lookup
-- "What is photosynthesis?" → Definition/explanation
-- "How tall is Mount Everest?" → Factual lookup
-
-KEY INSIGHT: If the user wants to KNOW about something external/specific, this agent handles it.
-
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
-- Weather queries: "What's the weather?" (weather agent has live API)
-- Current time: "What time is it?" (time agent)
-- User's calendar: "What do I have Tuesday?" (calendar agent)  
-- Play media: "Play music", "Play the podcast" (DJ agent plays, Search Agent explains)
-- Greetings/chitchat: "Hello", "How are you?", "Tell me a joke" (smalltalk agent)
-- App commands: "Open spaces" (spaces agent)
-- Spelling: "How do you spell X?" (spelling agent)
-
-This agent searches the internet. It does NOT control media playback or access personal data.`,
+This agent searches the internet. It provides information but does not control apps or access personal data.`,
   keywords: SEARCH_KEYWORDS,
   executionType: 'action', // Needs web search API for data
 

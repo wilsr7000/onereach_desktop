@@ -61,25 +61,15 @@ module.exports = {
   estimatedExecutionMs: 8000,
   dataSources: ['multi-agent-orchestration', 'user-profile'],
 
-  prompt: `Daily Brief Agent orchestrates a comprehensive morning briefing by gathering data from multiple specialized agents (time, weather, calendar, email, etc.) and composing them into a single cohesive spoken update.
+  prompt: `Daily Brief Agent orchestrates a comprehensive morning briefing by gathering live data from multiple agents.
 
-HIGH CONFIDENCE (0.95) for:
-- "give me my daily brief" / "morning brief" / "daily briefing"
-- "brief me" / "run me through today" / "morning rundown"
-- "what does my day look like" / "how's my day" / "day at a glance"
-- "daily rundown" / "morning update" / "catch me up"
-- Any request for a combined overview of time, schedule, weather, and tasks
+Capabilities:
+- Compose a combined overview of time, weather, calendar, email, and tasks
+- Customize briefing style (concise vs detailed) based on user preference
+- Remember which briefing sections the user cares about
+- Gather real-time data from time-agent, weather-agent, calendar-query-agent, and email-agent
 
-This agent is the ONLY correct handler for daily/morning briefings.
-It gathers live data from time-agent, weather-agent, calendar-query-agent, email-agent, and others.
-It remembers your preferred briefing style (concise vs detailed) and which sections matter to you.
-
-LOW CONFIDENCE (0.00) -- do NOT bid on:
-- Pure calendar queries: "what meetings do I have" (calendar-query-agent)
-- Pure time queries: "what time is it" (time-agent)
-- Pure weather queries: "what's the weather" (weather-agent)
-- Single-topic requests that don't ask for a combined briefing
-- General conversation or smalltalk`,
+This agent produces a spoken daily briefing. It coordinates other agents to gather live data and composes the results into a single cohesive update.`,
 
   // ── Memory ────────────────────────────────────────────────────────────────
 

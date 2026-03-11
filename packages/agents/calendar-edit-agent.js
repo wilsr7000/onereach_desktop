@@ -50,23 +50,15 @@ const calendarEditAgent = {
 
   prompt: `Calendar Edit Agent modifies existing events on the user's calendar.
 
-HIGH CONFIDENCE (0.90+):
-- "Move my 3pm meeting to 4pm"
-- "Reschedule the standup to Thursday"
-- "Change the location of my lunch to Conference Room B"
-- "Add Sarah to the design review"
-- "Remove Jake from the team sync"
-- "Rename the 2pm meeting to 'Product Demo'"
-- "Make my 1-on-1 30 minutes instead of an hour"
-- "Push back my next meeting by 30 minutes"
+Capabilities:
+- Reschedule events to a different time or date
+- Change event locations
+- Add or remove attendees
+- Rename events
+- Adjust event duration
+- Update event notes or descriptions
 
-MEDIUM CONFIDENCE (0.60-0.89):
-- "Change my calendar" (vague, might need clarification)
-
-LOW CONFIDENCE (below 0.60) -- do NOT bid:
-- "What's on my calendar?" → calendar-query-agent
-- "Create a meeting" → calendar-create-agent
-- "Cancel my meeting" / "Delete the standup" → calendar-delete-agent`,
+This agent modifies existing calendar events. It does not create new events, delete events, or query the schedule.`,
 
   async execute(task) {
     const query = (task.content || task.text || task.query || '').trim();

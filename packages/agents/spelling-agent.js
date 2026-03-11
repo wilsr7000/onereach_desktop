@@ -265,21 +265,15 @@ const spellingAgent = {
   keywords: ['spell', 'spelling', 'spelled', 'spelt', 'letters', 'how do you write', 'correct spelling'],
   executionType: 'informational',
 
-  prompt: `Spelling Agent handles spelling requests: spelling out words, checking spelling, and correcting misspellings.
+  prompt: `Spelling Agent handles spelling-related requests.
 
-HIGH CONFIDENCE (0.85+) for:
-- "How do you spell necessary?" → spell out the word
-- "Spell accommodation" → spell out the word
-- "Is it receive or recieve?" → spelling check / correction
-- "What is the correct spelling of rhythm?" → spelling correction
-- "Check the spelling of occurrence" → spelling check
-- Any request about how to spell a word, or whether a word is spelled correctly
+Capabilities:
+- Spell out any word letter by letter
+- Check if a word is spelled correctly
+- Correct misspelled words
+- Clarify between commonly confused spellings
 
-LOW CONFIDENCE (0.00) -- do NOT bid on:
-- Definitions: "What does 'necessary' mean?" (search agent)
-- Grammar: "Should I use who or whom?" (not spelling)
-- General knowledge: "Who invented the alphabet?" (search agent)
-- Any request not about spelling a specific word`,
+This agent handles spelling questions only. It does not define words or answer grammar questions.`,
 
   async execute(task) {
     try {

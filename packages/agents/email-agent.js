@@ -150,21 +150,17 @@ const emailAgent = {
   },
 
   // Prompt for LLM evaluation (semantic, no keywords/regex)
-  prompt: `Email Assistant handles ALL email communications with data-aware context.
+  prompt: `Email Assistant handles all email-related tasks.
 
-HIGH CONFIDENCE (0.85+) for:
-- Checking email: "check my email", "any new messages", "what emails do I have"
-- Urgent/important: "anything urgent", "important emails", "priority messages"
-- Composing: "email John", "send an email to", "write to"
-- Reading: "read my emails", "show unread", "inbox"
-- Searching: "find emails from", "search for emails about"
-- Replying: "reply to", "respond to that email"
-- Drafts: "save as draft", "create draft"
+Capabilities:
+- Check for new, unread, urgent, or important emails
+- Read and summarize email contents
+- Compose and send emails
+- Reply to and forward emails
+- Search emails by sender, subject, or content
+- Create and manage drafts
 
-DATA-AWARE BIDDING:
-This agent checks its email cache before bidding. If user asks "anything urgent?" and there ARE urgent emails in cache, confidence is HIGH. If no urgent emails, confidence is LOW (defer to other agents).
-
-CRITICAL: Any request about email, inbox, messages, compose, send, or reply belongs to this agent.`,
+This agent manages email communications. It can read, compose, search, and send emails.`,
 
   // Agent capabilities for display
   capabilities: [

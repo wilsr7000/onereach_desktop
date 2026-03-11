@@ -31,24 +31,14 @@ module.exports = BaseAgent.create({
 
   prompt: `Sound Designer plays sound effects and manages ambient atmosphere for the voice orb.
 
-HIGH CONFIDENCE (0.85+):
-- Explicit SFX: "play a drumroll", "sound effect: tada", "fanfare", "play a whoosh"
-- Ambient scenes: "make it sound like a cafe", "rain sounds", "set the mood for focus"
-- Atmosphere: "ambient sounds on", "set the atmosphere", "background sounds"
-- Stop: "stop the ambient", "turn off background sounds", "silence"
-- Custom SFX: "play the sound of a spaceship", "make the sound of thunder"
+Capabilities:
+- Play one-shot sound effects (drumroll, fanfare, whoosh, chime, etc.)
+- Set ambient soundscapes (rain, cafe, nature, ocean, fireplace, focus, night, morning)
+- Generate custom sound effects using ElevenLabs for non-built-in sounds
+- Control ambient layers (start, stop, adjust volume)
+- Create atmospheric moods using synthesized tones and textures
 
-MEDIUM CONFIDENCE (0.5-0.7):
-- Mood setting (overlaps with DJ): "set the mood" (Sound Designer handles atmosphere, DJ handles music)
-- "I need to focus" (might want focus ambient OR focus music)
-
-LOW CONFIDENCE (0.0-0.2):
-- Music requests (DJ Agent handles those)
-- Voice/TTS requests
-- Informational queries about sounds
-- Recording requests (Recorder Agent)
-
-This agent controls the orb's sound layers: synthesized tones, ambient textures (rain, cafe, focus, nature, night, morning), and one-shot sound effects. It can also generate custom sound effects using ElevenLabs when the user asks for something not in the built-in library.`,
+This agent controls the orb's sound layers: ambient textures and one-shot effects. It does not play music or control Apple Music.`,
 
   capabilities: [
     'Play synthesized sound effects (whoosh, chime, fanfare, etc.)',

@@ -1928,20 +1928,20 @@ async function generateClarificationOptions(content, agentDescriptions) {
     const agentList = agentDescriptions.map((a) => `- ${a.name}: ${a.description}`).join('\n');
     const prompt = `The user said: "${content}"
 
-No agent was confident enough to handle this request. The available agents are:
+No agent was confident enough to handle this request. Every agent either declined or bid with very low confidence. The available agents are:
 ${agentList}
 
-Classify this situation as one of:
-- "rephrase": The request IS handleable by an existing agent but was ambiguous.
-- "capability_gap": No existing agent can do this at all.
+Classify this situation:
+- "rephrase": The request is genuinely ambiguous and rephrasing would help an existing agent handle it.
+- "capability_gap": No existing agent covers this domain, OR an agent SHOULD handle it but consistently fails to. If the right agent exists but still could not handle this simple request, classify as capability_gap.
 
 Respond with JSON:
 {
   "classification": "rephrase" | "capability_gap",
-  "gapSummary": "If capability_gap: one-sentence description of what capability is missing"
+  "gapSummary": "If capability_gap: one-sentence description of what capability is missing or broken"
 }
 
-Be honest. If no agent covers this domain, say capability_gap.`;
+Be honest. If the request is clear and straightforward but no agent picked it up, that is a capability_gap, not a rephrase.`;
 
     const parsed = await ai.json(prompt, {
       profile: 'fast',
@@ -1994,7 +1994,10 @@ Respond with JSON:
     return {
       classification: 'rephrase',
       question: result.question || 'What did you mean?',
-      options: (result.options || []).slice(0, 4),
+      options: [
+        ...(result.options || []).slice(0, 3),
+        { label: 'Build an agent for this', description: `Create a new agent to handle "${content.slice(0, 60)}"`, action: 'create-agent', gapDescription: content },
+      ],
       gapSummary: null,
       buildProposal: null,
     };
@@ -2002,7 +2005,9 @@ Respond with JSON:
     return {
       classification: 'rephrase',
       question: "I'm not sure what you meant. Could you rephrase that?",
-      options: [],
+      options: [
+        { label: 'Build an agent for this', description: `Create a new agent to handle this request`, action: 'create-agent', gapDescription: content },
+      ],
       gapSummary: null,
       buildProposal: null,
     };

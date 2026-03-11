@@ -193,29 +193,18 @@ module.exports = BaseAgent.create({
   executionType: 'action',
   estimatedExecutionMs: 10000,
 
-  prompt: `Browsing Agent handles any task that requires visiting or interacting with websites.
+  prompt: `Browsing Agent performs web research and content extraction by visiting websites.
 
-HIGH CONFIDENCE (0.85+) for:
-- "Go to [URL] and extract the content"
-- "Search the web for [topic]"
-- "Read this page: [URL]"
-- "Get the latest news about [topic]"
-- "Fill out the form at [URL]"
-- "Check if [URL] has been updated"
-- "Browse GitHub repo [URL]"
-- "What does [website] say about [topic]?"
-- Any request involving a URL or web browsing
+Capabilities:
+- Visit URLs and extract page content
+- Search the web for information on any topic
+- Read and summarize web pages
+- Monitor websites for changes
+- Get latest news and headlines
+- Browse GitHub repositories and pull requests
+- Extract structured data from web pages
 
-MEDIUM CONFIDENCE (0.5-0.8) for:
-- General research questions that might need web data
-- "Look up [fact] online"
-- "Find information about [topic]"
-
-LOW CONFIDENCE (0.0) for:
-- Local app operations (use app-agent)
-- File editing (use browser-agent for Playwright)
-- Calendar/email/weather (dedicated agents handle those)
-- General knowledge the LLM already knows`,
+This agent visits and reads websites. It provides information from web sources.`,
 
   async onExecute(task) {
     const input = task.input || task.content || '';

@@ -47,24 +47,16 @@ const calendarCreateAgent = {
   estimatedExecutionMs: 5000,
   dataSources: ['calendar-api', 'contact-store'],
 
-  prompt: `Calendar Create Agent creates new events on the user's calendar.
+  prompt: `Calendar Create Agent adds new events to the user's calendar.
 
-HIGH CONFIDENCE (0.90+):
-- "Create a meeting with John at 3pm tomorrow"
-- "Add a standup to my calendar for Monday at 9am"
-- "Schedule a call with Sarah for next Friday at 2"
-- "Put a lunch on my calendar tomorrow at noon"
-- "Set up a weekly team sync on Tuesdays at 10am"
-- "Book a meeting room for 2pm"
+Capabilities:
+- Create meetings, appointments, and events with specified time, date, and attendees
+- Schedule recurring events (daily, weekly, monthly)
+- Set event locations (physical or virtual meeting links)
+- Add reminders and notes to new events
+- Book time blocks for focus time or personal tasks
 
-MEDIUM CONFIDENCE (0.60-0.89):
-- "Remind me about the dentist at 4pm" (might be a reminder, not calendar)
-
-LOW CONFIDENCE (below 0.60) -- do NOT bid:
-- "What's on my calendar?" → calendar-query-agent
-- "Delete the standup" → calendar-delete-agent
-- "Move my meeting to 3pm" → calendar-edit-agent
-- General questions about schedule or availability`,
+This agent creates new calendar events. It does not query, modify, or delete existing events.`,
 
   async execute(task) {
     const query = (task.content || task.text || task.query || '').trim();

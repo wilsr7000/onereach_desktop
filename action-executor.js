@@ -195,6 +195,21 @@ const ACTION_REGISTRY = {
     },
   },
 
+  'open-memory-editor': {
+    category: 'windows',
+    description: 'Open Memory Editor',
+    execute: (params = {}) => {
+      try {
+        const main = require('./main');
+        if (main.createMemoryEditorWindow) {
+          main.createMemoryEditorWindow(params);
+          return { success: true, message: 'Memory Editor opened' };
+        }
+      } catch (_) { /* fallback */ }
+      return { success: false, error: 'Memory Editor not available' };
+    },
+  },
+
   // ==================== SEARCH OPERATIONS ====================
   'search-spaces': {
     category: 'search',

@@ -351,6 +351,33 @@ const APP_PRODUCTS = {
     ],
     keywords: ['settings', 'preferences', 'config', 'api key', 'setup', 'configure'],
   },
+
+  'memory-editor': {
+    name: 'Memory Editor',
+    description: 'View and edit agent memories, review proposed changes, edit via chat',
+    access: 'Tools menu → Edit Agent Memory',
+    icon: 'edit',
+    features: [
+      'Browse all agent memories in one place',
+      'Live markdown preview while editing',
+      'Diff view showing before/after changes',
+      'AI-powered chat editing for natural language edits',
+      'Review and approve memory changes before they apply',
+    ],
+    actions: [
+      { name: 'Open Memory Editor', command: 'Tools → Edit Agent Memory' },
+      { name: 'Edit via chat', command: 'Type an instruction in the bottom bar, e.g. "remove the blues preference"' },
+      { name: 'Review changes', command: 'Click the Diff tab to see proposed changes' },
+      { name: 'Save edits', command: 'Cmd+S or click Save' },
+      { name: 'Revert edits', command: 'Click Revert to discard unsaved changes' },
+    ],
+    tips: [
+      'Use chat editing for quick changes without manually editing markdown',
+      'Always review the diff before saving',
+      'The Memory Editor opens automatically when memory-agent proposes changes',
+    ],
+    keywords: ['memory', 'edit memory', 'agent memory', 'preferences', 'remember', 'forget', 'memory editor'],
+  },
 };
 
 // ==================== PLAYBOOKS ====================
@@ -785,25 +812,16 @@ const appAgent = {
   ],
   executionType: 'action', // Opens windows, navigates menus
 
-  prompt: `App Guide opens app windows, navigates to features, and gives tours.
+  prompt: `App Guide opens app windows, navigates to features, runs tours, and executes step-by-step playbooks.
 
-HIGH CONFIDENCE (0.85+) for:
-- "Open settings" / "Open the settings" → opens the Settings window
-- "Show me the video editor" → opens Video Editor
-- "Open spaces" / "Show clipboard" → opens Spaces/Clipboard
-- "Launch GSX Create" → opens the coding assistant
-- "Open ChatGPT" / "Open Claude" → opens AI service tabs
-- "Give me a tour" / "Show me around" → interactive feature tour
-- Any request to OPEN, LAUNCH, SHOW, or NAVIGATE TO a specific app feature
+Capabilities:
+- Open any app window: Settings, Video Editor, Spaces, GSX Create, Agent Manager, Health Dashboard, etc.
+- Navigate to specific features within the app
+- Run interactive feature tours
+- Execute step-by-step playbooks (getting started, recording, exporting, etc.)
+- Answer questions about where to find features in the app
 
-This agent can OPEN and NAVIGATE to any part of the app. It knows all features.
-
-LOW CONFIDENCE (0.00) -- do NOT bid on:
-- Actual tasks: "What time is it?" (time agent does that)
-- Weather queries: "What's the weather?" (weather agent)
-- Greetings: "Hello" (smalltalk agent)
-- General questions about capabilities: "What can you do?" (help agent)
-- Playing music: "Play jazz" (DJ agent)`,
+This agent opens and navigates to parts of the app. It does not perform the actual tasks those features provide.`,
 
   // Memory for tracking user's learning progress
   memory: null,
@@ -1511,6 +1529,7 @@ Respond with JSON only:
     'app-health': { type: 'open-app-health' },
     'voice-assistant': null, // Orb is always visible
     settings: { type: 'open-settings' },
+    'memory-editor': { type: 'open-memory-editor' },
     // AI Services - direct open
     chatgpt: { type: 'open-chatgpt' },
     claude: { type: 'open-claude' },

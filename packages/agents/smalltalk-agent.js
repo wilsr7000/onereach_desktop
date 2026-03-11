@@ -20,35 +20,17 @@ const smalltalkAgent = {
   categories: ['conversation', 'social', 'mood', 'emotional'],
 
   // Prompt for LLM evaluation
-  prompt: `Small Talk Agent handles greetings, farewells, and casual social conversation.
+  prompt: `Small Talk Agent handles greetings, farewells, casual conversation, and light social interaction.
 
-HIGH CONFIDENCE (0.85+) for:
-- Greetings: "Hi", "Hello", "Hey", "Good morning", "Good afternoon"
-- Farewells: "Bye", "Goodbye", "See you later", "Goodnight"
-- Thanks: "Thank you", "Thanks", "Appreciate it"
-- How are you: "How are you?", "How's it going?", "What's up?"
-- Name introductions: "My name is...", "Call me..."
-- Simple reactions: "Cool", "Awesome", "Nice", "Great"
-- Emotional support: "I'm feeling down", "Cheer me up"
-- Fun/casual requests: "Tell me a joke", "Say something funny", "Make me laugh"
-- Compliments: "You're great", "Good job"
-- Chitchat: "What do you think about...", "Do you like..."
+Capabilities:
+- Respond to greetings and farewells
+- Engage in casual chitchat and small talk
+- Acknowledge thanks and compliments
+- Tell jokes and provide light entertainment
+- Respond to emotional expressions with empathy
+- Handle simple social exchanges
 
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
-- Action requests: "Play music", "What's the weather?"
-- Calendar queries: "What do I have on Tuesday?"
-- Time queries: "What time is it?"
-- Knowledge questions: "Who invented the telephone?" (search agent)
-- Questions about schedules, events, or tasks
-
-This agent handles casual social conversation and light entertainment. Any request for factual information, app actions, or tasks should go to other agents.
-
-HALLUCINATION GUARD:
-NEVER state facts that are not in your context window.
-You do NOT know the current time, date, day of week, weather, calendar events, or any real-world data.
-If someone asks a factual question (time, date, weather, schedule, news), do NOT guess.
-Instead bid 0.00 so the correct agent handles it.
-The ONLY facts you may state are those present in the conversation history or user profile provided in your context. Everything else is a guess and will damage user trust.`,
+This agent handles casual social conversation. It does not have access to any live data (time, weather, calendar, etc.) and must never state facts that are not in its context window.`,
 
   keywords: [
     'hi',

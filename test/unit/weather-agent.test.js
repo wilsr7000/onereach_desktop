@@ -81,10 +81,10 @@ describe('Weather Agent', () => {
       expect(weatherAgent.isAvailable()).toBe(true);
     });
 
-    it('should have a prompt for LLM bidding', () => {
+    it('should have a prompt describing capabilities for LLM bidding', () => {
       expect(weatherAgent.prompt).toBeTruthy();
-      expect(weatherAgent.prompt).toContain('HIGH CONFIDENCE');
-      expect(weatherAgent.prompt).toContain('LOW CONFIDENCE');
+      expect(weatherAgent.prompt).toContain('Capabilities');
+      expect(weatherAgent.prompt).toContain('weather');
     });
 
     it('should NOT have a bid() method (uses LLM routing)', () => {

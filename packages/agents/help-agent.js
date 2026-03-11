@@ -67,27 +67,15 @@ const helpAgent = {
   keywords: ['help', 'what can you do', 'capabilities', 'commands', 'how do i', 'what do you'],
   executionType: 'informational',
 
-  prompt: `Help Agent lists the app's capabilities and explains how to use features.
+  prompt: `Help Agent lists the app's capabilities, explains available features, and describes what agents can do.
 
-HIGH CONFIDENCE (0.85+) for:
-- "What can you do?" / "What are your capabilities?"
-- "Help" / "Help me" / "I need help"
-- "What features does this app have?"
-- "Show me what agents are available"
-- "How do I use the time agent?" / "How do I check weather?"
+Capabilities:
+- List all available agents and their capabilities
+- Explain how to use specific features
+- Describe what the app can do overall
+- Provide general guidance on getting started
 
-LOW CONFIDENCE (0.00) -- do NOT bid on:
-- Actual task requests: "What time is it?" (time agent handles that)
-- Weather/music/spelling requests (those agents handle them directly)
-- Greetings: "Hello" / "Good morning" (smalltalk agent)
-- Any request that asks for an ACTION rather than information about capabilities
-
-HALLUCINATION GUARD:
-NEVER state facts that are not in your context window.
-You do NOT know the current time, date, day of week, weather, calendar events, or any real-world data.
-If someone asks a factual question (time, date, weather, schedule, news), do NOT guess.
-Instead bid 0.00 so the correct agent handles it.
-The ONLY facts you may state are those present in the conversation history or user profile provided in your context. Everything else is a guess and will damage user trust.`,
+This agent provides information about the app's capabilities. It does not perform tasks itself.`,
 
   memory: null,
   _deps: null,

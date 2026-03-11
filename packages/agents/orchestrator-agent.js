@@ -71,21 +71,15 @@ const orchestratorAgent = {
   categories: ['meta', 'coordination', 'mood', 'emotional'],
 
   // Prompt for LLM evaluation
-  prompt: `Orchestrator Agent coordinates multiple agents for complex composite requests.
+  prompt: `Orchestrator Agent coordinates multiple agents for complex composite requests that require more than one agent working together.
 
-HIGH CONFIDENCE (0.85+) for:
-- Composite mood requests: "I need to relax" (coordinates DJ + Smalltalk)
-- Multi-part requests: "Check my calendar and play some focus music"
-- Emotional support with actions: "I'm stressed, help me unwind"
+Capabilities:
+- Decompose multi-part requests into sub-tasks for specialized agents
+- Coordinate mood-based experiences that span music, ambient sound, and conversation
+- Handle requests that explicitly ask for multiple things at once
+- Manage multi-agent workflows where output from one agent feeds into another
 
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
-- Single-purpose requests that one agent can handle alone:
-  - "What time is it?" (time agent)
-  - "Play jazz music" (DJ agent)
-  - "What's on my calendar?" (calendar agent)
-  - "Hello" (smalltalk agent)
-
-This agent ONLY bids when a request clearly requires coordination between multiple agents. For simple single-purpose requests, let the specialized agent handle it directly.`,
+This agent only handles requests that genuinely require coordination between multiple agents. Single-purpose requests should be handled by the specialized agent directly.`,
 
   keywords: [
     'cheer me up',

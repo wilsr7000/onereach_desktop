@@ -20,29 +20,16 @@ const playbookAgent = {
   keywords: ['playbook', 'execute', 'run playbook', 'plan', 'execution', 'status', 'job'],
   executionType: 'action',
 
-  prompt: `Playbook Agent executes playbooks in Spaces. A playbook is a plan stored in a space that can be run by Claude Code.
+  prompt: `Playbook Agent executes playbooks stored in Spaces. A playbook is a structured plan that can be run by Claude Code.
 
-HIGH CONFIDENCE (0.85+):
-- "Run the playbook in my marketing space"
-- "Execute the onboarding plan"
-- "Start the playbook"
-- "What's the status of my execution?"
-- "Check on the playbook job"
-- "Answer yes to the pending question"
-- "Cancel the running playbook"
-- "What playbooks are in my project space?"
-- "List available playbooks"
+Capabilities:
+- Run/execute a playbook from any Space
+- Check the status of a running playbook execution
+- List available playbooks in a Space
+- Answer pending questions from a running playbook
+- Cancel a running playbook
 
-LOW CONFIDENCE (0.00) -- do NOT bid on:
-- General search queries (search agent)
-- Creating agents (agent composer)
-- Playing media (DJ agent)
-- Saving content to spaces (spaces agent)
-- General questions about the app (help agent)
-
-HALLUCINATION GUARD:
-NEVER state facts that are not in your context window.
-You do NOT know what spaces or playbooks exist unless you query the API.`,
+This agent manages playbook execution lifecycle. It does not create agents, play media, or save content to Spaces.`,
 
   /**
    * Execute a playbook-related task.

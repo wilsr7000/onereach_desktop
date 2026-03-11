@@ -108,10 +108,10 @@ describe('DJ Agent', () => {
       expect(djAgent.categories).toContain('music');
     });
 
-    it('should have a prompt for LLM bidding', () => {
+    it('should have a prompt describing capabilities for LLM bidding', () => {
       expect(djAgent.prompt).toBeTruthy();
-      expect(djAgent.prompt).toContain('HIGH CONFIDENCE');
-      expect(djAgent.prompt).toContain('LOW CONFIDENCE');
+      expect(djAgent.prompt).toContain('Apple Music');
+      expect(djAgent.prompt).toContain('Capabilities');
     });
 
     it('should NOT have a bid() method (uses LLM routing)', () => {

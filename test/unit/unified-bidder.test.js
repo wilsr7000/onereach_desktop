@@ -14,6 +14,7 @@ const mockChat = vi.fn().mockResolvedValue({
 vi.mock('../../packages/agents/circuit-breaker', () => ({
   getCircuit: vi.fn().mockReturnValue({
     fire: vi.fn((fn) => fn()),
+    execute: vi.fn((fn) => fn()),
     isOpen: vi.fn().mockReturnValue(false),
     stats: { failures: 0, successes: 0, opens: 0 },
   }),
@@ -21,10 +22,17 @@ vi.mock('../../packages/agents/circuit-breaker', () => ({
 vi.mock('../../spaces-api', () => ({
   getSpacesAPI: vi.fn().mockReturnValue(null),
 }));
-vi.mock('../../lib/ai-service', () => ({
-  default: { chat: mockChat },
-  chat: mockChat,
-}));
+vi.mock('../../lib/ai-service', () => {
+  const obj = { chat: mockChat };
+  return new Proxy(obj, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      if (prop === 'default') return target;
+      if (prop === '__esModule') return false;
+      return undefined;
+    },
+  });
+});
 vi.mock('../../lib/log-event-queue', () => ({
   getLogQueue: () => ({
     info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
@@ -48,6 +56,7 @@ describe('Unified Bidder', () => {
     vi.mock('../../packages/agents/circuit-breaker', () => ({
       getCircuit: vi.fn().mockReturnValue({
         fire: vi.fn((fn) => fn()),
+        execute: vi.fn((fn) => fn()),
         isOpen: vi.fn().mockReturnValue(false),
         stats: { failures: 0, successes: 0, opens: 0 },
       }),
@@ -127,6 +136,20 @@ describe('Unified Bidder', () => {
       const agent = fakeAgent('test');
       const bid = await bidder.evaluateAgentBid(agent, { content: 'test' });
       expect(bid.confidence).toBe(0);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // Sanity check logic (tested via full module to verify integration)
+  // ═══════════════════════════════════════════════════════════════
+
+  describe('sanity check behavior', () => {
+    it('does NOT contain regex-based confidence overrides', () => {
+      const source = require('fs').readFileSync(
+        require('path').resolve(__dirname, '../../packages/agents/unified-bidder.js'), 'utf8'
+      );
+      expect(source).not.toContain('indicatesNoMatch');
+      expect(source).not.toContain('indicatesClearMatch');
     });
   });
 

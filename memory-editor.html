@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline';">
+  <title>Memory Editor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #121218;
+      --bg-surface: #1a1a24;
+      --bg-hover: #22222e;
+      --bg-active: #2a2a3a;
+      --border: rgba(255,255,255,0.08);
+      --border-active: rgba(139,92,246,0.4);
+      --text: #e0e0e0;
+      --text-muted: #888;
+      --text-dim: #555;
+      --accent: #8b5cf6;
+      --accent-dim: rgba(139,92,246,0.15);
+      --green: #34d399;
+      --green-bg: rgba(52,211,153,0.1);
+      --red: #f87171;
+      --red-bg: rgba(248,113,113,0.1);
+      --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --radius: 8px;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ═══════════════ TITLE BAR ═══════════════ */
+    .title-bar {
+      height: 38px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+    }
+    .title-bar-text {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-left: 8px;
+    }
+    .title-bar-close {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: #ff5f57;
+      border: none;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+      transition: opacity 0.15s;
+    }
+    .title-bar-close:hover { opacity: 0.8; }
+
+    /* ═══════════════ MAIN LAYOUT ═══════════════ */
+    .main-layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ═══════════════ SIDEBAR ═══════════════ */
+    .sidebar {
+      width: 250px;
+      min-width: 200px;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .sidebar-search {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-search input {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 12px;
+      outline: none;
+    }
+    .sidebar-search input:focus {
+      border-color: var(--border-active);
+    }
+    .sidebar-search input::placeholder { color: var(--text-dim); }
+
+    .agent-list {
+      flex: 1;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.1) transparent;
+    }
+    .agent-list::-webkit-scrollbar { width: 4px; }
+    .agent-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+    .agent-item {
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    .agent-item:hover { background: var(--bg-hover); }
+    .agent-item.active { background: var(--bg-active); border-left: 3px solid var(--accent); }
+    .agent-item-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+    .agent-item-meta {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .pending-badge {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      margin-left: 6px;
+      font-weight: 600;
+    }
+
+    /* ═══════════════ CONTENT AREA ═══════════════ */
+    .content-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .toolbar-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .tab-group {
+      display: flex;
+      gap: 2px;
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 2px;
+    }
+    .tab-btn {
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: none;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { background: var(--accent-dim); color: var(--accent); }
+
+    .toolbar-btn {
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .toolbar-btn:hover { background: var(--bg-hover); color: var(--text); }
+    .toolbar-btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .toolbar-btn.primary:hover { opacity: 0.9; }
+    .toolbar-btn.danger { color: var(--red); }
+    .toolbar-btn.danger:hover { background: var(--red-bg); }
+    .toolbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .unsaved-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: none;
+    }
+    .unsaved-dot.visible { display: block; }
+
+    /* ═══════════════ EDITOR PANELS ═══════════════ */
+    .editor-container {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    .edit-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .edit-pane-header {
+      padding: 6px 16px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-surface);
+      flex-shrink: 0;
+    }
+
+    #editorTextarea {
+      flex: 1;
+      width: 100%;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--text);
+      border: none;
+      outline: none;
+      resize: none;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      tab-size: 2;
+      user-select: text;
+    }
+
+    .preview-pane {
+      flex: 1;
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 16px 20px;
+      user-select: text;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.1) transparent;
+    }
+    .preview-pane::-webkit-scrollbar { width: 4px; }
+    .preview-pane::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+    .preview-pane h1 { font-size: 20px; margin-bottom: 12px; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .preview-pane h2 { font-size: 16px; margin-top: 20px; margin-bottom: 8px; color: var(--accent); }
+    .preview-pane h3 { font-size: 14px; margin-top: 16px; margin-bottom: 6px; color: var(--text); }
+    .preview-pane p { margin-bottom: 8px; line-height: 1.6; font-size: 13px; }
+    .preview-pane ul, .preview-pane ol { margin-left: 20px; margin-bottom: 8px; }
+    .preview-pane li { margin-bottom: 4px; font-size: 13px; line-height: 1.5; }
+    .preview-pane blockquote { border-left: 3px solid var(--accent-dim); padding-left: 12px; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
+    .preview-pane code { background: var(--bg-surface); padding: 2px 5px; border-radius: 3px; font-family: var(--font-mono); font-size: 12px; }
+    .preview-pane pre { background: var(--bg-surface); padding: 12px; border-radius: var(--radius); overflow-x: auto; margin-bottom: 8px; }
+    .preview-pane pre code { padding: 0; background: none; }
+    .preview-pane strong { color: #fff; }
+    .preview-pane em { color: var(--text-muted); }
+    .preview-pane hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+    /* ═══════════════ DIFF VIEW ═══════════════ */
+    .diff-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: none;
+      user-select: text;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.1) transparent;
+    }
+    .diff-container::-webkit-scrollbar { width: 4px; }
+    .diff-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+    .diff-header {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .diff-reason {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      padding: 8px 12px;
+      background: var(--accent-dim);
+      border-radius: var(--radius);
+    }
+
+    .diff-line {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.7;
+      padding: 1px 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .diff-line.added { background: var(--green-bg); color: var(--green); }
+    .diff-line.added::before { content: '+ '; }
+    .diff-line.removed { background: var(--red-bg); color: var(--red); }
+    .diff-line.removed::before { content: '- '; }
+    .diff-line.context { color: var(--text-dim); }
+
+    .diff-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ═══════════════ PENDING EDITS BAR ═══════════════ */
+    .pending-bar {
+      display: none;
+      padding: 10px 16px;
+      background: var(--accent-dim);
+      border-bottom: 1px solid var(--border-active);
+      font-size: 12px;
+      color: var(--accent);
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .pending-bar.visible { display: flex; }
+    .pending-bar-text { flex: 1; }
+
+    /* ═══════════════ CHAT PANEL ═══════════════ */
+    .chat-panel {
+      border-top: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: var(--bg-surface);
+      flex-shrink: 0;
+    }
+    .chat-input {
+      flex: 1;
+      padding: 8px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      font-family: var(--font-sans);
+    }
+    .chat-input:focus { border-color: var(--border-active); }
+    .chat-input::placeholder { color: var(--text-dim); }
+    .chat-input:disabled { opacity: 0.5; }
+    .chat-send {
+      padding: 8px 16px;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .chat-send:hover { opacity: 0.9; }
+    .chat-send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ═══════════════ EMPTY STATE ═══════════════ */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 8px;
+      color: var(--text-dim);
+    }
+    .empty-state-title { font-size: 16px; font-weight: 500; }
+    .empty-state-sub { font-size: 13px; }
+
+    /* ═══════════════ TOAST ═══════════════ */
+    .toast {
+      position: fixed;
+      bottom: 60px;
+      right: 20px;
+      padding: 10px 18px;
+      background: var(--bg-active);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 12px;
+      color: var(--text);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: all 0.25s ease;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .toast.visible { opacity: 1; transform: translateY(0); }
+    .toast.success { border-color: var(--green); color: var(--green); }
+    .toast.error { border-color: var(--red); color: var(--red); }
+  </style>
+</head>
+<body>
+  <!-- Title Bar -->
+  <div class="title-bar">
+    <button class="title-bar-close" id="btnClose"></button>
+    <span class="title-bar-text">Memory Editor</span>
+  </div>
+
+  <div class="main-layout">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-search">
+        <input type="text" id="searchInput" placeholder="Search agents...">
+      </div>
+      <div class="agent-list" id="agentList"></div>
+    </div>
+
+    <!-- Content -->
+    <div class="content-area" id="contentArea">
+      <!-- Empty state (shown when no agent selected) -->
+      <div class="empty-state" id="emptyState">
+        <div class="empty-state-title">Agent Memory Editor</div>
+        <div class="empty-state-sub">Select an agent from the sidebar to view and edit its memory</div>
+      </div>
+
+      <!-- Active editor (hidden until agent selected) -->
+      <div id="activeEditor" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
+        <!-- Pending edits notification bar -->
+        <div class="pending-bar" id="pendingBar">
+          <span class="pending-bar-text" id="pendingBarText">Proposed changes available</span>
+          <button class="toolbar-btn" id="btnViewPending" style="padding:4px 10px; font-size:11px;">Review Changes</button>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <span class="toolbar-title" id="toolbarTitle">Agent Memory</span>
+          <div class="unsaved-dot" id="unsavedDot"></div>
+
+          <div class="tab-group">
+            <button class="tab-btn active" data-tab="edit">Edit</button>
+            <button class="tab-btn" data-tab="diff">Diff</button>
+          </div>
+
+          <button class="toolbar-btn" id="btnRevert" disabled>Revert</button>
+          <button class="toolbar-btn primary" id="btnSave" disabled>Save</button>
+        </div>
+
+        <!-- Edit tab: editor + preview -->
+        <div class="editor-container" id="editTab">
+          <div class="edit-pane">
+            <div class="edit-pane-header">Markdown</div>
+            <textarea id="editorTextarea" spellcheck="false"></textarea>
+          </div>
+          <div class="preview-pane" id="previewPane">
+            <div class="edit-pane-header" style="margin:-16px -20px 16px; padding:6px 20px;">Preview</div>
+            <div id="previewContent"></div>
+          </div>
+        </div>
+
+        <!-- Diff tab -->
+        <div class="diff-container" id="diffTab"></div>
+
+        <!-- Chat panel -->
+        <div class="chat-panel">
+          <input type="text" class="chat-input" id="chatInput"
+            placeholder="Describe an edit... (e.g. 'remove the blues preference')">
+          <button class="chat-send" id="chatSend">Apply</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ═══════════════════════════════════════════════════════════
+    // STATE
+    // ═══════════════════════════════════════════════════════════
+    let agents = [];
+    let selectedAgentId = null;
+    let originalContent = '';
+    let currentContent = '';
+    let pendingEditsForAgent = [];
+
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => document.querySelectorAll(sel);
+
+    // ═══════════════════════════════════════════════════════════
+    // SIMPLE MARKDOWN RENDERER
+    // ═══════════════════════════════════════════════════════════
+    function renderMarkdown(md) {
+      if (!md) return '';
+      const esc = (s) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const lines = md.split('\n');
+      let html = '';
+      let inCodeBlock = false;
+      let inList = false;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (line.startsWith('```')) {
+          if (inCodeBlock) { html += '</code></pre>'; inCodeBlock = false; }
+          else { html += '<pre><code>'; inCodeBlock = true; }
+          continue;
+        }
+        if (inCodeBlock) { html += esc(line) + '\n'; continue; }
+
+        if (line.match(/^#{1,6}\s/)) {
+          if (inList) { html += '</ul>'; inList = false; }
+          const level = line.match(/^(#+)/)[1].length;
+          const text = inlineFormat(line.replace(/^#+\s*/, ''));
+          html += `<h${level}>${text}</h${level}>`;
+          continue;
+        }
+
+        if (line.startsWith('> ')) {
+          if (inList) { html += '</ul>'; inList = false; }
+          html += `<blockquote>${inlineFormat(esc(line.slice(2)))}</blockquote>`;
+          continue;
+        }
+
+        if (line.match(/^[-*]\s/)) {
+          if (!inList) { html += '<ul>'; inList = true; }
+          html += `<li>${inlineFormat(esc(line.replace(/^[-*]\s*/, '')))}</li>`;
+          continue;
+        }
+
+        if (line.match(/^\d+\.\s/)) {
+          if (!inList) { html += '<ul>'; inList = true; }
+          html += `<li>${inlineFormat(esc(line.replace(/^\d+\.\s*/, '')))}</li>`;
+          continue;
+        }
+
+        if (inList && line.trim() === '') { html += '</ul>'; inList = false; }
+
+        if (line.startsWith('---') || line.startsWith('***')) { html += '<hr>'; continue; }
+
+        if (line.trim() === '') { html += '<br>'; continue; }
+
+        if (inList) { html += '</ul>'; inList = false; }
+        html += `<p>${inlineFormat(esc(line))}</p>`;
+      }
+
+      if (inList) html += '</ul>';
+      if (inCodeBlock) html += '</code></pre>';
+      return html;
+    }
+
+    function inlineFormat(text) {
+      return text
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`(.+?)`/g, '<code>$1</code>');
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // LINE DIFF
+    // ═══════════════════════════════════════════════════════════
+    function computeDiff(oldText, newText) {
+      const oldLines = oldText.split('\n');
+      const newLines = newText.split('\n');
+      const result = [];
+      const maxLen = Math.max(oldLines.length, newLines.length);
+
+      const oldSet = new Set(oldLines);
+      const newSet = new Set(newLines);
+
+      const removed = oldLines.filter(l => !newSet.has(l));
+      const added = newLines.filter(l => !oldSet.has(l));
+      const removedSet = new Set(removed);
+      const addedSet = new Set(added);
+
+      let oi = 0, ni = 0;
+      while (oi < oldLines.length || ni < newLines.length) {
+        if (oi < oldLines.length && ni < newLines.length && oldLines[oi] === newLines[ni]) {
+          result.push({ type: 'context', text: oldLines[oi] });
+          oi++; ni++;
+        } else if (oi < oldLines.length && removedSet.has(oldLines[oi])) {
+          result.push({ type: 'removed', text: oldLines[oi] });
+          oi++;
+        } else if (ni < newLines.length && addedSet.has(newLines[ni])) {
+          result.push({ type: 'added', text: newLines[ni] });
+          ni++;
+        } else if (oi < oldLines.length && ni < newLines.length) {
+          result.push({ type: 'removed', text: oldLines[oi] });
+          result.push({ type: 'added', text: newLines[ni] });
+          oi++; ni++;
+        } else if (oi < oldLines.length) {
+          result.push({ type: 'removed', text: oldLines[oi] });
+          oi++;
+        } else {
+          result.push({ type: 'added', text: newLines[ni] });
+          ni++;
+        }
+      }
+      return result;
+    }
+
+    function renderDiff(oldText, newText, reason) {
+      const lines = computeDiff(oldText, newText);
+      const hasChanges = lines.some(l => l.type !== 'context');
+      if (!hasChanges) return '<div class="diff-header">No changes</div>';
+
+      let html = '<div class="diff-header">Changes</div>';
+      if (reason) html += `<div class="diff-reason">${escHtml(reason)}</div>`;
+      for (const line of lines) {
+        html += `<div class="diff-line ${line.type}">${escHtml(line.text)}</div>`;
+      }
+      return html;
+    }
+
+    function escHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SIDEBAR
+    // ═══════════════════════════════════════════════════════════
+    async function loadAgentList() {
+      agents = await window.memoryEditor.listAgentMemories();
+      const pending = await window.memoryEditor.getPendingEdits();
+      const pendingByAgent = {};
+      for (const p of pending) {
+        pendingByAgent[p.agentId] = (pendingByAgent[p.agentId] || 0) + 1;
+      }
+
+      renderAgentList(pendingByAgent);
+    }
+
+    function renderAgentList(pendingByAgent = {}) {
+      const filter = ($('#searchInput').value || '').toLowerCase();
+      const list = $('#agentList');
+      list.innerHTML = '';
+
+      const filtered = agents.filter(a =>
+        a.displayName.toLowerCase().includes(filter) || a.agentId.toLowerCase().includes(filter)
+      );
+
+      for (const agent of filtered) {
+        const div = document.createElement('div');
+        div.className = 'agent-item' + (agent.agentId === selectedAgentId ? ' active' : '');
+        const pendingCount = pendingByAgent[agent.agentId] || 0;
+        const badge = pendingCount > 0 ? `<span class="pending-badge">${pendingCount}</span>` : '';
+
+        const updatedText = agent.lastUpdated
+          ? new Date(agent.lastUpdated).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+          : 'Never';
+
+        const sizeText = agent.sizeChars > 0 ? `${(agent.sizeChars / 1024).toFixed(1)}KB` : '';
+
+        div.innerHTML = `
+          <div class="agent-item-name">${escHtml(agent.displayName)}${badge}</div>
+          <div class="agent-item-meta">${updatedText}${sizeText ? ' &middot; ' + sizeText : ''}</div>
+        `;
+        div.addEventListener('click', () => selectAgent(agent.agentId));
+        list.appendChild(div);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // AGENT SELECTION
+    // ═══════════════════════════════════════════════════════════
+    async function selectAgent(agentId) {
+      if (selectedAgentId === agentId) return;
+
+      if (hasUnsavedChanges() && !confirm('You have unsaved changes. Discard them?')) return;
+
+      selectedAgentId = agentId;
+
+      // Highlight in sidebar
+      $$('.agent-item').forEach((el, i) => {
+        el.classList.toggle('active', agents[i]?.agentId === agentId);
+      });
+
+      // Load content
+      const data = await window.memoryEditor.loadMemory(agentId);
+      originalContent = data.content;
+      currentContent = data.content;
+
+      // Show editor
+      $('#emptyState').style.display = 'none';
+      const editor = $('#activeEditor');
+      editor.style.display = 'flex';
+
+      // Set content
+      $('#toolbarTitle').textContent = data.displayName + ' Memory';
+      $('#editorTextarea').value = currentContent;
+      updatePreview();
+      updateUnsavedState();
+
+      // Check for pending edits
+      const pending = await window.memoryEditor.getPendingEdits();
+      pendingEditsForAgent = pending.filter(p => p.agentId === agentId);
+      updatePendingBar();
+
+      // Default to edit tab
+      switchTab('edit');
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // TABS
+    // ═══════════════════════════════════════════════════════════
+    function switchTab(tab) {
+      $$('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+      $('#editTab').style.display = tab === 'edit' ? 'flex' : 'none';
+      $('#diffTab').style.display = tab === 'diff' ? 'block' : 'none';
+
+      if (tab === 'diff') {
+        if (pendingEditsForAgent.length > 0) {
+          const edit = pendingEditsForAgent[0];
+          const oldText = edit.section ? (edit.oldContent || '') : originalContent;
+          const newText = edit.section ? (edit.newContent || '') : currentContent;
+          let html = renderDiff(oldText, newText, edit.reason);
+          html += `<div class="diff-actions">
+            <button class="toolbar-btn primary" onclick="applyPendingEdit('${edit.editId}')">Apply Changes</button>
+            <button class="toolbar-btn danger" onclick="rejectPendingEdit('${edit.editId}')">Reject</button>
+          </div>`;
+          $('#diffTab').innerHTML = html;
+        } else {
+          $('#diffTab').innerHTML = renderDiff(originalContent, currentContent, 'Your unsaved edits');
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // EDITOR
+    // ═══════════════════════════════════════════════════════════
+    function updatePreview() {
+      $('#previewContent').innerHTML = renderMarkdown(currentContent);
+    }
+
+    function hasUnsavedChanges() {
+      return currentContent !== originalContent;
+    }
+
+    function updateUnsavedState() {
+      const changed = hasUnsavedChanges();
+      $('#unsavedDot').classList.toggle('visible', changed);
+      $('#btnSave').disabled = !changed;
+      $('#btnRevert').disabled = !changed;
+    }
+
+    function updatePendingBar() {
+      const bar = $('#pendingBar');
+      if (pendingEditsForAgent.length > 0) {
+        bar.classList.add('visible');
+        $('#pendingBarText').textContent =
+          `${pendingEditsForAgent.length} proposed change(s) from Memory Agent`;
+      } else {
+        bar.classList.remove('visible');
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ACTIONS
+    // ═══════════════════════════════════════════════════════════
+    async function saveMemory() {
+      if (!selectedAgentId || !hasUnsavedChanges()) return;
+      try {
+        await window.memoryEditor.saveMemory(selectedAgentId, currentContent);
+        originalContent = currentContent;
+        updateUnsavedState();
+        showToast('Memory saved', 'success');
+        loadAgentList();
+      } catch (err) {
+        showToast('Failed to save: ' + err.message, 'error');
+      }
+    }
+
+    function revertMemory() {
+      if (!hasUnsavedChanges()) return;
+      currentContent = originalContent;
+      $('#editorTextarea').value = currentContent;
+      updatePreview();
+      updateUnsavedState();
+      showToast('Reverted to saved version');
+    }
+
+    async function applyPendingEdit(editId) {
+      try {
+        await window.memoryEditor.applyPendingEdit(editId);
+        pendingEditsForAgent = pendingEditsForAgent.filter(p => p.editId !== editId);
+        updatePendingBar();
+
+        // Reload content
+        const data = await window.memoryEditor.loadMemory(selectedAgentId);
+        originalContent = data.content;
+        currentContent = data.content;
+        $('#editorTextarea').value = currentContent;
+        updatePreview();
+        updateUnsavedState();
+        switchTab('edit');
+        showToast('Changes applied', 'success');
+        loadAgentList();
+      } catch (err) {
+        showToast('Failed to apply: ' + err.message, 'error');
+      }
+    }
+
+    async function rejectPendingEdit(editId) {
+      await window.memoryEditor.rejectPendingEdit(editId);
+      pendingEditsForAgent = pendingEditsForAgent.filter(p => p.editId !== editId);
+      updatePendingBar();
+      switchTab('edit');
+      showToast('Changes rejected');
+      loadAgentList();
+    }
+
+    async function handleChatEdit() {
+      const input = $('#chatInput');
+      const instruction = input.value.trim();
+      if (!instruction || !selectedAgentId) return;
+
+      const btn = $('#chatSend');
+      const prevText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Working...';
+      input.disabled = true;
+
+      try {
+        const result = await window.memoryEditor.chatEdit(selectedAgentId, currentContent, instruction);
+        if (result.newContent && result.newContent !== currentContent) {
+          const oldContent = currentContent;
+          currentContent = result.newContent;
+          $('#editorTextarea').value = currentContent;
+          updatePreview();
+          updateUnsavedState();
+
+          // Show diff
+          switchTab('diff');
+          $('#diffTab').innerHTML = renderDiff(oldContent, currentContent, result.summary || instruction);
+
+          input.value = '';
+          showToast(result.summary || 'Edit applied', 'success');
+        } else {
+          showToast('No changes were made', 'error');
+        }
+      } catch (err) {
+        showToast('AI edit failed: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prevText;
+        input.disabled = false;
+        input.focus();
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // TOAST
+    // ═══════════════════════════════════════════════════════════
+    let toastTimer;
+    function showToast(msg, type = '') {
+      const el = $('#toast');
+      el.textContent = msg;
+      el.className = 'toast visible' + (type ? ' ' + type : '');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('visible'), 2500);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // EVENT BINDINGS
+    // ═══════════════════════════════════════════════════════════
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Window close
+      $('#btnClose').addEventListener('click', () => window.memoryEditor.close());
+
+      // Search
+      $('#searchInput').addEventListener('input', () => renderAgentList());
+
+      // Tabs
+      $$('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+      });
+
+      // Editor input
+      $('#editorTextarea').addEventListener('input', (e) => {
+        currentContent = e.target.value;
+        updatePreview();
+        updateUnsavedState();
+      });
+
+      // Toolbar
+      $('#btnSave').addEventListener('click', saveMemory);
+      $('#btnRevert').addEventListener('click', revertMemory);
+      $('#btnViewPending').addEventListener('click', () => switchTab('diff'));
+
+      // Chat
+      $('#chatSend').addEventListener('click', handleChatEdit);
+      $('#chatInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleChatEdit();
+        }
+      });
+
+      // Keyboard shortcuts
+      document.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+          e.preventDefault();
+          saveMemory();
+        }
+        if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
+          e.preventDefault();
+          revertMemory();
+        }
+      });
+
+      // IPC events
+      window.memoryEditor.onPendingEdit((data) => {
+        if (data.agentId === selectedAgentId) {
+          pendingEditsForAgent.push(data);
+          updatePendingBar();
+          showToast('New proposed change from Memory Agent');
+        }
+        loadAgentList();
+      });
+
+      window.memoryEditor.onMemoryUpdated((data) => {
+        if (data.agentId === selectedAgentId && !hasUnsavedChanges()) {
+          selectAgent(data.agentId);
+        }
+        loadAgentList();
+      });
+
+      window.memoryEditor.onOpenAgent((agentId) => {
+        if (agentId) selectAgent(agentId);
+      });
+
+      // Initial load
+      await loadAgentList();
+    });
+  </script>
+</body>
+</html>

@@ -156,33 +156,18 @@ const browserAgent = {
     'geolocation and timezone spoofing',
   ],
 
-  prompt: `Browser Agent handles tasks that require controlling a web browser to interact with websites.
+  prompt: `Browser Agent controls a web browser to interact with websites using Playwright automation.
 
-HIGH CONFIDENCE (0.85+) - BID when the user wants to:
-- Navigate to a specific website: "Go to github.com", "Open twitter.com"
-- Interact with a web page: "Click the sign-up button on X", "Fill out the contact form on Y"
-- Extract data from a website: "Get the headlines from CNN", "Scrape the price from Amazon"
-- Complete a multi-step web workflow: "Go to the store and add the first item to cart"
-- Take a screenshot of a website: "Screenshot the homepage of example.com"
-- Check website status: "Is example.com loading properly?"
-- Search on a specific website: "Search for 'AI tools' on Product Hunt"
-- Fill out web forms: "Submit a support ticket on the help page"
+Capabilities:
+- Navigate to specific websites
+- Click buttons, fill forms, and interact with page elements
+- Take screenshots of web pages
+- Complete multi-step web workflows (sign up, purchase, submit forms)
+- Check website status and loading
+- Search within specific websites
+- Extract data from interactive web applications
 
-MEDIUM CONFIDENCE (0.50-0.84) - BID when:
-- General web browsing tasks that might need interaction
-- Tasks involving checking specific content on a page
-- "Download the PDF from..." (navigate + click download)
-
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID:
-- General web searches without a target site (search agent handles those)
-- Questions that can be answered from knowledge (smalltalk/search agents)
-- Non-web tasks: calendar, email, weather, time, music
-- File operations that don't involve a browser
-- "Search for X" without a specific website target
-
-KEY DISTINCTION: This agent drives a REAL BROWSER. It clicks, types, navigates. 
-The search agent answers questions FROM search results. If the user wants to 
-interact WITH a website, this agent handles it.`,
+This agent drives a real browser and interacts with web page elements. It clicks, types, and navigates.`,
 
   // Memory instance
   memory: null,

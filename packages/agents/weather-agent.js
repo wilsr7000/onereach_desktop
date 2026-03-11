@@ -317,23 +317,16 @@ const weatherAgent = {
     return { section: 'Weather', priority: 2, content: "Weather data isn't available right now." };
   },
 
-  prompt: `Weather Agent provides current weather conditions using live data from wttr.in.
+  prompt: `Weather Agent provides current weather conditions and forecasts using live data from wttr.in.
 
-HIGH CONFIDENCE (0.85+) for:
-- "What's the weather?" / "How's the weather?" -- current conditions
-- "Is it going to rain?" / "Will it rain today?" -- weather forecast
-- "Temperature outside" / "How cold is it?" -- temperature check
-- "What's the weather in NYC?" -- weather for a specific location
-- Any question about weather conditions, temperature, rain, snow, wind, humidity, forecast
-- "Do I need an umbrella?" / "Should I bring a jacket?" -- weather-based advice
+Capabilities:
+- Current weather conditions for any location
+- Temperature, humidity, wind speed, and precipitation
+- Weather forecasts (today, tomorrow, multi-day)
+- Weather-based recommendations (umbrella, jacket, etc.)
+- Automatic weather for cities on the user's calendar
 
-This agent has LIVE weather data and is calendar-aware -- it checks your schedule
-for meetings in other cities and includes that weather automatically.
-
-LOW CONFIDENCE (0.00) -- do NOT bid on:
-- General knowledge questions: "What causes rain?" (search agent)
-- Calendar/schedule: "What's happening today?" (calendar agent)
-- Time queries: "What time is it?" (time agent)`,
+This agent has live weather data. It reports real-time conditions and forecasts.`,
 
   // Memory instance
   memory: null,

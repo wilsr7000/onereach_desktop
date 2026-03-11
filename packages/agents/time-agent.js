@@ -77,24 +77,15 @@ const timeAgent = {
   },
 
   // Prompt for LLM evaluation - be specific about what this agent handles
-  prompt: `Time Agent answers questions about the CURRENT time, date, day of week, month, or year from the system clock.
+  prompt: `Time Agent reads the current time, date, day of week, month, and year from the system clock.
 
-HIGH CONFIDENCE (0.85+) -- these are ALL time-agent queries:
-- "What time is it?" / "What's the time?" / "Time please" → current time
-- "What's today's date?" / "What's the date?" / "What's the date today?" → current date
-- "What day is it?" / "What day is it today?" / "What day of the week is it?" → current day name
-- "What month is it?" / "What year is it?" → current month/year
-- Any variation asking for the ACTUAL current time, date, or day of week
+Capabilities:
+- Report the current time
+- Report today's date
+- Report the current day of week
+- Report the current month and year
 
-This agent reads the SYSTEM CLOCK. It answers "what is the date/time RIGHT NOW".
-
-LOW CONFIDENCE (0.00) -- do NOT bid on these:
-- Schedule/calendar queries: "What do I have today?" / "What's happening Tuesday?" (calendar agent)
-- Meeting questions: "When is my next meeting?" (calendar agent)
-- Weather questions: "What's it like outside?" (weather agent)
-- Any question about events, appointments, or schedules on a date
-
-The difference: "What's today's date?" = TIME (asking the actual date). "What do I have today?" = CALENDAR (asking about events).`,
+This agent reads the system clock. It answers questions about what the current time or date is right now.`,
 
   // Memory instance
   memory: null,

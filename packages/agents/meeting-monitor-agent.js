@@ -72,11 +72,9 @@ const meetingMonitorAgent = {
   executionType: 'system',
   bidExcluded: true, // This agent is auto-started, not user-triggered via voice
 
-  prompt: `Meeting Monitor Agent runs automatically during recordings. It is NOT triggered by user voice commands.
-It monitors the live transcript and health metrics to detect problems.
+  prompt: `Meeting Monitor Agent runs automatically during recordings to monitor transcript and health metrics.
 
-CONFIDENCE: 0.00 for ALL user requests -- this agent should NEVER win a bid.
-It is a background system agent that auto-starts when recording begins.`,
+This is a background system agent that auto-starts when recording begins. It is not triggered by user voice commands and should never win a bid for user requests.`,
 
   memory: null,
 

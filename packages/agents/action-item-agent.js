@@ -68,20 +68,15 @@ const actionItemAgent = {
     return { section: 'Action Items', priority: 5, content: null };
   },
 
-  prompt: `Action Item Agent captures TODO/action items from meetings.
+  prompt: `Action Item Agent captures TODO items, action items, and follow-ups from conversations and meetings.
 
-HIGH CONFIDENCE (0.80+) for:
-- Explicit action items: "action item: John to send the proposal", "todo: review the budget"
-- Follow-ups: "follow up with Sarah", "remind me to check on the build"
-- Assignments: "assign this to Mike", "John is responsible for the report"
+Capabilities:
+- Capture explicit action items and TODOs
+- Record follow-up tasks with assignees
+- Track task assignments and responsibilities
+- Log action items with deadlines when mentioned
 
-LOW CONFIDENCE (0.00) -- do NOT bid on:
-- Calendar scheduling with specific times: "add a meeting at 2pm", "schedule a sync tomorrow at 11am", "book a call Thursday at 3pm" -> calendar-create-agent
-- Calendar queries: "what's on my calendar", "any meetings today" -> calendar-query-agent
-- Calendar delete/cancel: "cancel the meeting", "delete the standup" -> calendar-delete-agent
-- General questions or knowledge: "what time is it", "tell me a joke" -> other agents
-
-CRITICAL: If the user mentions a SPECIFIC TIME (at 2pm, at 11am, tomorrow, Monday, etc.) and wants to ADD/SCHEDULE/CREATE something, this is a CALENDAR EVENT, not an action item. Bid 0.00.`,
+This agent captures task-oriented items from conversation. It does not schedule calendar events with specific times.`,
 
   memory: null,
 

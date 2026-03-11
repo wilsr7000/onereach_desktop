@@ -309,32 +309,21 @@ const djAgent = {
   acks: ['On it!', 'Got it!', 'You got it!', 'Coming right up!', 'Let me handle that.'],
 
   // Prompt for LLM evaluation - describes what this agent does
-  prompt: `Personal DJ controls Apple Music and Apple Podcasts apps - playback, preferences, and discovery.
+  prompt: `Personal DJ that controls Apple Music and Apple Podcasts on this Mac.
 
-HIGH CONFIDENCE (0.85+) - Apple Music/Podcasts ACTIONS:
-- PLAY music: "play jazz", "play something relaxing", "play Taylor Swift"
-- PLAY podcasts: "play the daily", "play a tech podcast", "play my podcasts"
-- Playback control: play, pause, stop, skip, next, previous, shuffle, repeat
-- Volume: louder, quieter, turn up, turn down, mute, unmute
-- What's playing: "what song is this", "what's playing", "who sings this"
-- Speakers/AirPlay: HomePod, speakers, living room, bedroom, kitchen
-- Music preferences: "I like jazz", "remember I prefer rock", "my favorite genre"
-- Mood/vibe requests (even without "play"): "set the mood for writing", "I need focus music", "something chill", "get me pumped up", "music for cooking", "background music"
-- Vague requests: "play something", "surprise me", "change it up", "something different"
-- Feedback: "I like this", "skip this", "more like this"
+Capabilities:
+- Play music by mood, genre, artist, song name, or vibe description
+- Play podcasts from Apple Podcasts (subscriptions or catalog search)
+- Create playlists (mood-based, genre-based, custom filtered)
+- All playback controls: play, pause, stop, skip, next, previous, shuffle, repeat
+- Volume control: up, down, set specific level, mute, unmute
+- AirPlay/speaker routing: send audio to HomePod, Apple TV, or any AirPlay device
+- Identify what's currently playing
+- Music feedback: like/dislike, rate songs, "more like this", "something different"
+- Learn and remember the user's music preferences over time
 
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
-- INFORMATION about podcasts: "tell me about X podcast", "what is X podcast about", "who hosts X"
-- INFORMATION about artists: "tell me about Taylor Swift", "who is Drake"
-- Research queries: "what are the best podcasts about tech" (Search Agent finds info, DJ plays)
-- These are SEARCH queries - user wants to LEARN, not PLAY
-
-KEY DISTINCTION:
-- "Play the future of work podcast" → DJ Agent (Apple Podcasts action)
-- "Tell me about the future of work podcast" → Search Agent (information lookup)
-- "Find podcasts about AI" → Could be either - if they want to PLAY, DJ. If they want to LEARN, Search.
-
-This agent CONTROLS Apple Music and Podcasts apps. It does not provide information ABOUT media.`,
+This agent executes actions on Apple Music and Apple Podcasts. It does not provide
+informational answers about artists, albums, or podcasts -- those are search queries.`,
 
   capabilities: [
     'Play music by mood, genre, artist, or song',

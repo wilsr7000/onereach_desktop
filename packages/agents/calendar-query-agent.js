@@ -73,29 +73,18 @@ const calendarQueryAgent = {
   estimatedExecutionMs: 3000,
   dataSources: ['calendar-api', 'calendar-store'],
 
-  prompt: `Calendar Query Agent answers questions about the user's schedule and meetings.
+  prompt: `Calendar Query Agent answers questions about the user's schedule, meetings, and availability.
 
-HIGH CONFIDENCE (0.90+):
-- "What's on my calendar today/tomorrow/this week?"
-- "What meetings do I have today?"
-- "When is my next meeting?"
-- "Am I free at 2pm?" / "What does my afternoon look like?"
-- "Do I have any conflicts this week?"
-- "Join my meeting" / "Get my meeting link" / "Open the Zoom"
-- "How many meetings do I have today?"
-- "What's first thing tomorrow morning?"
-- "Tell me about my 3pm meeting"
-- "Check my schedule for Friday"
+Capabilities:
+- Check today's/tomorrow's/this week's schedule
+- Look up specific meetings and their details (time, location, attendees, links)
+- Check availability at a specific time or date range
+- Count meetings on a given day
+- Find the next upcoming meeting
+- Retrieve meeting join links (Zoom, Teams, Google Meet)
+- Answer questions about schedule conflicts
 
-MEDIUM CONFIDENCE (0.60-0.89):
-- "What's going on today?" (might be general, but calendar is a strong candidate)
-- "Brief me" (daily-brief-agent should win, but calendar contributes)
-
-LOW CONFIDENCE (below 0.60) -- do NOT bid:
-- "Create a meeting" / "Add an event" → calendar-create-agent
-- "Cancel my meeting" / "Delete the standup" → calendar-delete-agent
-- "Move my meeting to 3pm" / "Change the location" → calendar-edit-agent
-- Anything about creating, modifying, or deleting events`,
+This agent reads calendar data. It does not create, modify, or delete events.`,
 
   /**
    * Briefing contribution. Accepts optional { targetDate, dateLabel } from daily-brief-agent.

@@ -43,23 +43,12 @@ const calendarDeleteAgent = {
 
   prompt: `Calendar Delete Agent removes events from the user's calendar.
 
-HIGH CONFIDENCE (0.90+):
-- "Cancel my 3pm meeting"
-- "Delete the standup"
-- "Remove the team sync from my calendar"
-- "Cancel tomorrow's lunch"
-- "Delete all my meetings on Friday" (with confirmation)
-- "Skip the recurring standup this week"
+Capabilities:
+- Cancel/delete individual meetings and events
+- Remove recurring event instances (single occurrence or entire series)
+- Bulk-delete events on a specific day (with confirmation)
 
-MEDIUM CONFIDENCE (0.60-0.89):
-- "I don't need that meeting anymore" (needs context)
-- "Get rid of the 2pm" (informal deletion)
-
-LOW CONFIDENCE (below 0.60) -- do NOT bid:
-- "What's on my calendar?" → calendar-query-agent
-- "Create a meeting" → calendar-create-agent
-- "Move my meeting to 3pm" → calendar-edit-agent
-- Questions about events without deletion intent`,
+This agent deletes calendar events. It does not create, modify, or query events.`,
 
   async execute(task) {
     const query = (task.content || task.text || task.query || '').trim();

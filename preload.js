@@ -1010,9 +1010,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onHUDActivity: (callback) => {
     const handler = (event, data) => callback(data);
     ipcRenderer.on('hud:activity', handler);
-    // Return cleanup function
     return () => ipcRenderer.removeListener('hud:activity', handler);
   },
+
+  // Auto-login retry (used by the GSX overlay "Try Again" button)
+  retryAutoLogin: () => ipcRenderer.send('gsx:retry-auto-login'),
 });
 
 // Expose Resource Manager API for CPU/GPU throttling

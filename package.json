@@ -1,7 +1,7 @@
 {
   "name": "gsx-power-user",
   "productName": "Onereach.ai",
-  "version": "4.5.0",
+  "version": "4.5.1",
   "description": "GSX Power User Desktop Application",
   "main": "main.js",
   "icon": "assets/icon.icns",
@@ -92,7 +92,7 @@
     "release:quick": "./scripts/release-master.sh --quick"
   },
   "build": {
-    "appId": "com.onereach.app",
+    "appId": "com.gsx.poweruser",
     "productName": "Onereach.ai",
     "asarUnpack": [
       "aider_bridge/**/*"
@@ -213,7 +213,7 @@
     "@playwright/test": "^1.57.0",
     "@vitest/coverage-v8": "^4.0.16",
     "adm-zip": "^0.5.16",
-    "electron": "^41.0.0-beta.3",
+    "electron": "^41.0.0",
     "electron-builder": "^24.9.1",
     "eslint": "^9.39.2",
     "husky": "^9.1.7",

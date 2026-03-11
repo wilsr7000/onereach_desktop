@@ -72,22 +72,13 @@ const mediaAgent = {
   // Prompt for LLM evaluation
   prompt: `Media Agent controls music playback on Apple Music and Spotify.
 
-HIGH CONFIDENCE (0.85+) for:
-- Playback control: "Play", "Pause", "Stop", "Skip", "Next song", "Previous"
-- Volume control: "Volume up", "Turn it down", "Mute", "Unmute"
-- AirPlay/speakers: "Play on living room", "Switch to HomePod", "AirPlay to bedroom"
-- Now playing: "What's playing?", "What song is this?"
+Capabilities:
+- Playback control: play, pause, stop, skip, next, previous
+- Volume control: up, down, set level, mute, unmute
+- AirPlay/speaker routing: send audio to HomePod, Apple TV, or any AirPlay device
+- Identify what's currently playing
 
-MEDIUM CONFIDENCE (0.50-0.70) for:
-- Generic music requests: "Play music" (DJ agent might be better for recommendations)
-
-LOW CONFIDENCE (0.00-0.20) - DO NOT BID on these:
-- Music recommendations: "Play something relaxing" (DJ agent handles mood-based requests)
-- Calendar queries: "What do I have today?"
-- Time queries: "What time is it?"
-- Non-media commands
-
-This agent controls the Music app and Spotify directly. For music recommendations based on mood, the DJ agent is more appropriate.`,
+This agent controls the Music app and Spotify directly for basic playback and speaker control.`,
 
   // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
   // NEVER add keyword/regex bidding here. See .cursorrules.

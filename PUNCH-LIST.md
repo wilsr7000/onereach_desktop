@@ -451,6 +451,50 @@
 
 ## Recently Completed
 
+- [x] **GSX Auto-Login Reliability Overhaul** (v4.5.x)
+  - Root cause: entire auto-login flow used blind `sleep()` delays (800ms-2400ms) to wait for React forms to render, causing failures when the auth server was slow or fast
+  - Fix 1: Replaced sleep-retry loop with MutationObserver-based `waitForAuthForm()` -- resolves instantly when form inputs appear, with 10s timeout fallback
+  - Fix 2: Replaced blind 1500ms post-submit sleep with `waitForPostSubmitTransition()` -- observes for 2FA page, error messages, or auth frame redirect
+  - Fix 3: Wired up dead "Try Again" button -- added `retryAutoLogin` to preload IPC bridge + per-window `webContents.ipc` handler
+  - Fix 4: Centralized auth selectors into `AUTH_SELECTORS` constant and extracted `findAuthFrame`/`waitForAuthFrame` helpers to eliminate duplicated selector strings
+  - Fix 5: Fixed broken rate-limit log message (`Math` as property name, empty template placeholders)
+  - Fix 6: Deleted orphaned `lib/auto-login.js` (unused `AutoLoginManager` class, never imported)
+  - Files: `lib/gsx-autologin.js`, `preload.js`
+
+- [x] **GSX IDW Refresh Button Race Condition** (v4.5.x)
+  - The toolbar refresh button in GSX IDW windows sometimes did nothing when clicked
+  - Root cause: `clearCacheAndReload()` uses fire-and-forget `ipcRenderer.send` (returns `undefined`), so `|| location.reload()` always ran too, creating a race between main-process `reloadIgnoringCache()` and renderer `location.reload()` that could leave the page in a broken navigation state
+  - Fix 1: Replaced `clearCacheAndReload?.() || location.reload()` with proper `if/else` so only one reload mechanism fires
+  - Fix 2: Added `win.isDestroyed()` guards and a 3-second timeout on `session.clearCache()` so reload always proceeds even if cache clear hangs
+  - Files: `lib/gsx-autologin.js`, `main.js`
+
+- [x] **Unified Bidder Simplification** (v4.5.x)
+  - Rewrote bidder evaluation prompt: removed 150 lines of hand-holding (example queries, domain routing rules, calendar/time/weather heuristics) and replaced with a simple 30-line capability-matching prompt
+  - Rewrote ALL 26 agent prompts from example-based (HIGH/LOW CONFIDENCE + sample phrases + "do NOT bid" lists) to capability-based (describe what the agent does, let the LLM figure out if requests match)
+  - Removed regex-based sanity checks (`indicatesNoMatch`, `indicatesClearMatch`) that overrode LLM confidence scores -- violates the 100% LLM routing policy
+  - Fixed cache: replaced two-tier fuzzy key system (regex pronoun detection + truncated context hashing) with exact-match cache keys (agent ID + full task content)
+  - Fixed agent generator template (`lib/ai-agent-generator.js`): no longer requires new agents to include HIGH/LOW CONFIDENCE bidding sections
+  - Root cause: "Create a new playlist and exclude songs similar to..." was dead-lettered because the DJ agent bid 0.00 -- the LLM was overwhelmed by the verbose prompt and didn't recognize playlist creation as a DJ capability
+  - Agents updated: dj-agent, calendar-query-agent, calendar-create-agent, calendar-edit-agent, calendar-delete-agent, time-agent, weather-agent, daily-brief-agent, email-agent, memory-agent, orchestrator-agent, app-agent, help-agent, search-agent, smalltalk-agent, docs-agent, spelling-agent, browsing-agent, browser-agent, recorder-agent, playbook-agent, action-item-agent, sound-effects-agent, media-agent, meeting-monitor-agent, error-agent
+  - Files: `packages/agents/*.js`, `lib/ai-agent-generator.js`, `packages/agents/unified-bidder.js`, `test/unit/unified-bidder.test.js`, `test/unit/dj-agent.test.js`, `test/unit/weather-agent.test.js`, `test/unit/browsing-agent.test.js`
+
+- [x] **Memory Editor Core Component** (v4.5.x)
+  - New `lib/memory-editor-api.js` -- backend API with pending edit queue, CRUD, AI chat editing
+  - New `preload-memory-editor.js` -- IPC bridge exposing `window.memoryEditor`
+  - New `memory-editor.html` -- sidebar, markdown editor with live preview, diff view, chat panel
+  - `createMemoryEditorWindow()` in `main.js` with IPC registration and export
+  - Modified `memory-agent.js` to route changes through editor (proposeEdit) when editor is open, falling back to direct writes when closed
+  - Added to Tools menu, action-executor, and app-agent product catalog for voice access
+  - Supports: review-before-apply flow, on-demand editing, AI-powered chat edits via `fast` profile
+
+- [x] **Bidding Inverse Sanity Check** (v4.5.x)
+  - Fixed brittleness in 100% LLM-based agent routing where the LLM would return near-zero confidence despite reasoning that described a clear match (e.g., "direct, explicit request" with 0.05 confidence)
+  - Added inverse sanity check: when reasoning indicates a clear match but confidence is below 0.3, boost to 0.85
+  - Applied to both single-agent and batch evaluation paths in `unified-bidder.js`
+  - Added "Build an agent for this" as a fallback option on all rephrase disambiguation responses
+  - Improved `generateClarificationOptions` prompt to correctly classify straightforward requests as `capability_gap` when agents fail to bid
+  - Fixed HUD rendering bug where `opt.action` was displayed instead of `opt.description` for disambiguation options
+
 - [x] **AI Error Diagnosis for Custom Agents** (v4.5.x)
   - When a non-system (user-created) agent fails execution, the error-agent now runs AI-powered diagnosis via `ai.diagnoseAgentFailure()` and `ai.generateAgentFix()`
   - Built-in (system) agents continue to get the original canned error messages -- no AI cost for known agent failures
