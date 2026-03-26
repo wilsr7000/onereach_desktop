@@ -130,3 +130,46 @@ const { getPlaybookMethods, getSyncMethods } = require('./preload-playbook-sync'
 contextBridge.exposeInMainWorld('playbook', getPlaybookMethods('preload-minimal'));
 contextBridge.exposeInMainWorld('sync', getSyncMethods());
 console.log('[Minimal Preload] playbook + sync APIs exposed');
+
+// ========================================
+// CENTRALIZED AI SERVICE BRIDGE
+// Provides window.ai for LLM calls routed through the main process,
+// bypassing renderer-side CSP restrictions.
+// ========================================
+contextBridge.exposeInMainWorld('ai', {
+  chat: (opts) => ipcRenderer.invoke('ai:chat', opts),
+  complete: (prompt, opts) => ipcRenderer.invoke('ai:complete', prompt, opts),
+  json: (prompt, opts) => ipcRenderer.invoke('ai:json', prompt, opts),
+  vision: (imageData, prompt, opts) => ipcRenderer.invoke('ai:vision', imageData, prompt, opts),
+  embed: (input, opts) => ipcRenderer.invoke('ai:embed', input, opts),
+  transcribe: (audioBuffer, opts) => ipcRenderer.invoke('ai:transcribe', audioBuffer, opts),
+  chatStream: (opts) => ipcRenderer.invoke('ai:chatStream', opts),
+  onStreamChunk: (requestId, callback) => {
+    const channel = `ai:stream:${requestId}`;
+    const handler = (_event, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+});
+console.log('[Minimal Preload] ai bridge exposed');
+
+// ========================================
+// SPEECH BRIDGES
+// Provides window.speechBridge, window.realtimeSpeech, window.micManager,
+// window.voiceTTS for voice features routed through the main process.
+// ========================================
+try {
+  const {
+    getSpeechBridgeMethods,
+    getRealtimeSpeechMethods,
+    getMicManagerMethods,
+    getVoiceTTSMethods,
+  } = require('./preload-speech');
+  contextBridge.exposeInMainWorld('speechBridge', getSpeechBridgeMethods());
+  contextBridge.exposeInMainWorld('realtimeSpeech', getRealtimeSpeechMethods());
+  contextBridge.exposeInMainWorld('micManager', getMicManagerMethods());
+  contextBridge.exposeInMainWorld('voiceTTS', getVoiceTTSMethods());
+  console.log('[Minimal Preload] speech bridges exposed');
+} catch (err) {
+  console.warn('[Minimal Preload] Speech module unavailable:', err.message);
+}

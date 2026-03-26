@@ -934,9 +934,11 @@ contextBridge.exposeInMainWorld('clipboard', {
 
   // Event listeners
   onHistoryUpdate: (callback) => {
-    ipcRenderer.on('clipboard:history-updated', (event, history) => {
+    const handler = (event, history) => {
       callback(history);
-    });
+    };
+    ipcRenderer.on('clipboard:history-updated', handler);
+    return () => ipcRenderer.removeListener('clipboard:history-updated', handler);
   },
 });
 

@@ -40,6 +40,25 @@
 - [ ] **HUD position** - Sometimes resets after restart
 - [ ] **Agent summaries** - Improve quality/relevance
 
+### Edison SDK & Dev Tools
+- [x] **Edison SDK Integration (Phase 0)** - Installed and integrated 13 Edison platform SDKs with centralized manager
+  - `lib/edison-sdk-manager.js`: token management, lazy init, 14 multi-step test functions, quick actions
+  - Settings UI: Edison SDKs tab with connection config, test dashboard, interactive exploration
+  - IPC bridge: 7 channels in preload.js + main.js for renderer access
+  - SDKs: key-value-storage, flows, bots, deployer, discovery, library, files-sync, accounts, api-tokens, files, step-templates, tags, data-hub-svc
+  - 11/14 tests pass, 2 partial (token auth limitations), 1 known fail (KV needs user-level token)
+  - Files: `lib/edison-sdk-manager.js`, `settings.html`, `preload.js`, `main.js`, `package.json`
+- [x] **GSX Dev Tools Menu (Phase 1)** - COMPLETE
+  - [x] Dev Tools menu via `lib/menu-sections/dev-tools-builder.js` (flow context, event log, library, SDK dashboard)
+  - [x] Flow context tracking via `lib/gsx-flow-context.js` -- intercepts Edison API calls in GSX windows
+  - [x] Structured event logging via `lib/edison-event-logger.js` with `callFlow()` backend
+  - [x] Library Browser window (`library-browser.html`) -- search, browse step templates
+  - [x] Bottom toolbar overlay in GSX BrowserWindow (flow label, step count, updates reactively)
+  - [x] Configure Step -- discovers "Step configurator API" flow by name, calls it with step data, shows progress modal with refresh/confirm/activate guidance
+    - `findFlowByName()` + `getFlowHttpPath()` in `lib/edison-sdk-manager.js` (cached discovery)
+    - `configure-step.html` progress UI with phased status updates
+  - Files: `lib/gsx-flow-context.js`, `lib/menu-sections/dev-tools-builder.js`, `lib/edison-event-logger.js`, `library-browser.html`, `lib/gsx-autologin.js`, `menu.js`, `main.js`, `preload.js`, `configure-step.html`
+
 ### Video Editor
 - [x] **Voice selector UI** - Was hardcoded to 'Rachel' voice
   - Fixed: All voice generation functions now read from the existing `elevenLabsVoiceSelect` dropdown (9 voices)
@@ -101,6 +120,13 @@
   - Files: `test/unit/playbook-executor.test.js`, `test/e2e/playbook-api.spec.js`
 
 ### Voice / Agent Exchange
+- [x] **Calendar create/delete agents broken** (v4.5.x)
+  - **Delete: searched wrong events** -- `getEventsForDay` returns a 14-day window; the delete agent searched ALL of them instead of filtering to the specific day. "Cancel today's standup" could match a standup from next week.
+  - Fix: Run events through `analyzeDay()` to filter to the target day before name-matching
+  - **Delete: empty searchText returned no results** -- If the LLM couldn't extract a search term, every event was skipped (`if (!searchLower) return false`). Now falls back to showing all events for the day and asking the user to pick.
+  - **Delete: no-match unhelpful** -- Error message didn't show what events exist. Now lists the day's events so the user can retry with the right name.
+  - **Create: multi-turn injected "null" into LLM** -- `_resumeMissingFields` built a synthetic query like `Create "Meeting" on null at null`, confusing the LLM on re-execution. Now only includes non-null fields.
+  - Files: `packages/agents/calendar-delete-agent.js`, `packages/agents/calendar-create-agent.js`
 - [x] **Calendar Agent: replaced regex pre-routing with LLM-driven classification** - "Cancel the Weekly Sync" was misrouted to recurring creation because regex matched "Weekly Sync"
   - Root cause: 6 regex-based pre-route detectors (`_isBriefRequest`, `_isRecurringRequest`, etc.) matched keywords in event names, ignoring user intent -- violated project's "no regex classification" rule
   - Fix: Removed all regex pre-routing. All requests now flow through `_askLLMAboutCalendar` which understands intent semantically. Updated the LLM system prompt to cover all action types (morning_brief, week_summary, find_free_slots, add_recurring, resolve_conflicts, delete_event, add_event, event_details). Added `recurring_create` handler to `_handleLocalAction`.
@@ -198,6 +224,12 @@
 - [ ] **Sync conflicts** - Better handling when GSX sync conflicts
 
 ### WISER Meeting
+- [x] **Screen share blank in Electron 41** - Screen capture produced blank frames because `getUserMedia` with `chromeMediaSource: 'desktop'` is deprecated
+  - Added `setDisplayMediaRequestHandler` on the recorder session so `getDisplayMedia()` receives the correct source
+  - Replaced all `getUserMedia({ chromeMediaSource: 'desktop' })` calls with `getDisplayMedia()` (screen capture, PiP, LiveKit session share)
+  - Updated legacy system audio fallback from deprecated approach to display media handler with loopback
+  - Added `recorder:set-screen-source` IPC + preload bridge to pass selected source ID to the handler
+  - Files: recorder.js, recorder.html, preload-recorder.js
 - [ ] **Meeting Hub Landing Page** - Riverside-style hub shown when WISER Meeting opens
   - New Meeting: Live Meeting (host via LiveKit), Quick Record (solo camera/screen/both), Schedule (generate room link)
   - Join Meeting: enter meeting ID/room name, validate against GSX KV, connect as guest via LiveKit
@@ -205,6 +237,14 @@
   - Hub syncs name and space to all downstream selectors (targetSpace, saveSpace, sessionSpaceSelect)
   - Home button in title bar to return to hub when not recording
   - Files: recorder.html
+- [x] **Meeting Rooms Sidebar** - Persistent sidebar in WISER Meeting hub showing all Spaces as perpetual meeting rooms
+  - Each Space has a stable room name derived from its name (e.g., "Team Standup" -> `team-standup`)
+  - Perpetual meeting link per room: `{guestPageUrl}?room={roomName}` -- URL never changes
+  - Sidebar shows all non-system spaces with icon, name, room slug, Copy Link and Host buttons
+  - Click a room to pre-select that space in the hub; Host button starts a live meeting immediately
+  - Filter/search rooms by name; sidebar syncs bidirectionally with hub space selector
+  - Guest page now polls for host with "Waiting for host to start" message instead of immediate error
+  - Files: recorder.html, lib/capture-guest-page.js
 - [ ] **Default transcription ON** - Live captions enabled by default for every recording
   - captionsEnabled defaults to true; CC toggle and overlay set to active on init
   - Warning shown if OpenAI API key missing ("Live transcription unavailable")
@@ -283,6 +323,12 @@
 ## 🟡 Medium Priority
 
 ### Clipboard Manager
+- [x] **Spaces copy button unclickable -- orb window blocking clicks** (v4.5.x)
+  - Voice Orb window (`alwaysOnTop: true`, `transparent: true`) blocked clicks to any window behind it because native click-through (`setIgnoreMouseEvents`) was never wired up -- the IPC handler was a no-op
+  - CSS `pointer-events: none` only works at web level, not at OS level; on macOS the entire window rectangle intercepted clicks even over transparent areas
+  - Fix: Enabled `setIgnoreMouseEvents(true, { forward: true })` at window creation so transparent areas pass clicks through
+  - Added mouseenter/mouseleave handlers in `orb.html` on all interactive regions (orb, context menu, chat panel, sound settings) to toggle click-through off when the cursor enters the orb and back on when it leaves
+  - Files: `main.js`, `orb.html`
 - [ ] **Image paste quality** - Some images lose quality
 - [ ] **Large file handling** - Slow with files >50MB
 - [ ] **Duplicate detection** - Sometimes misses near-duplicates
@@ -451,6 +497,109 @@
 
 ## Recently Completed
 
+- [x] **GSX Teacher Agent** (v4.6.x)
+  - Built-in tutor agent (`packages/agents/teacher-agent.js`) with 8-module curriculum (28 lessons)
+  - Modules: Getting Started, Power User, Building Agents, Building Skills, Creating IDW, App Capabilities, Knowledge Models, Using Spaces
+  - LLM-based intent classification (next_lesson, specific_lesson, question, exercise, progress)
+  - Progress tracking via agent memory -- remembers completed lessons across sessions
+  - Hands-on exercises with guided walkthroughs for each lesson
+  - Opens relevant app windows during lessons (Settings, Agent Manager, Video Editor, etc.)
+  - Registered as `teacher-agent` in agent-registry.js
+
+- [x] **App Self-Healing System** (v4.6.x)
+  - External watchdog process (`lib/watchdog.js`): pings `/health` every 15s, auto-restarts app after 45s unresponsive
+  - Internal health monitor (`lib/health-monitor.js`): event loop lag detection, CPU/memory monitoring, renderer auto-reload
+  - Post-crash notification: reads `crash-recovery.json` on boot, notifies user what happened
+  - Situation-aware logging: every log entry includes `context` (focusedWindow, flowId, stepId)
+  - Periodic situation snapshots every 60s logged as `category: 'situation'`
+  - Unified `GET /app/status` endpoint: situation + log stats + recent logs + errors in one call
+  - Health data included in `app-situation` snapshots
+  - Bug fixes: double-response in log-server POST handlers, context cache shallow-copy, watchdog packaged-app relaunch
+  - Files: `lib/watchdog.js`, `lib/health-monitor.js`, `lib/log-event-queue.js`, `lib/log-server.js`, `action-executor.js`, `main.js`
+
+- [x] **Desktop Autopilot** (v4.6.x)
+  - Unified facade (`lib/desktop-autopilot.js`) combining browser automation, app control, and macOS system control
+  - Adopted `browser-use` npm package (v0.5) to replace custom Playwright wrapper for browser automation
+  - Custom LLM adapter (`lib/browser-use-adapter.js`) routes all AI calls through `lib/ai-service.js` for cost tracking
+  - 6 new agent tools in `lib/agent-tools.js`: `desktop_browse`, `desktop_app_action`, `desktop_app_situation`, `desktop_applescript`, `desktop_mouse`, `desktop_keyboard`
+  - 7 new actions in `action-executor.js` under `desktop` category
+  - REST endpoints: `GET /app/desktop/status`, `POST /app/desktop/browser/*`, `POST /app/desktop/system/*`
+  - Settings UI: renamed Browser Automation tab to Automation, added master toggle + 3 sub-toggles
+  - Off by default; System Control (AppleScript/mouse/keyboard) is double-gated
+  - Browser agent updated to use Desktop Autopilot as primary path with legacy fallback
+  - Docs: Section 9 added to `APP-CONTROL-API-REFERENCE.md`
+
+- [x] **Centralized App Control API** (v4.5.x)
+  - Expanded `action-executor.js` from ~20 to 120+ registered actions covering every app operation
+  - Categories: windows, IDW, GSX, agents (CRUD + execution + memory), settings, modules, tabs, credentials, budget, AI, voice, video, backup, dev-tools, learning, share, system
+  - Added REST API: `GET/POST /app/actions` on log server (port 47292) for external control
+  - Added `action:execute`, `action:list`, `action:has`, `action:info` to preload.js invoke whitelist
+  - Refactored menu.js to use `executeAction()` for GSX Create, Video Editor, Recorder, Module Manager
+  - 26 unit tests in `test/unit/action-executor.test.js` (registry shape, param validation, execution, category coverage)
+  - Comprehensive docs: `docs/internal/APP-CONTROL-API-REFERENCE.md`
+  - Updated `docs/openapi-spec.js` with `/app/actions` endpoints and `lib/ipc-registry.js` with action channels
+  - Files: `action-executor.js`, `lib/log-server.js`, `menu.js`, `preload.js`, `docs/openapi-spec.js`, `lib/ipc-registry.js`
+
+- [x] **Invisible window layers blocking desktop** (v4.5.x)
+  - **IDW loading overlay never removed**: Full-screen overlay (`z-index: 9999`) injected into main window via `executeJavaScript` was never cleaned up; when content window closed and main window re-appeared, the overlay blocked the entire UI
+  - Fix: Remove `#loading-overlay` on both the `closed` and error paths in `browserWindow.js`
+  - **Smart Export modal orphaned**: Created with `parent: getFocusedWindow()` (could be null) and no `closed` handler; if parent closed first or IPC never fired, the modal persisted invisibly
+  - Fix: Fall back to `mainWindow` when no focused window; add `closed` handler
+  - **Auth popup never closed**: SSO popup only closed on specific callback URL; no timeout, no tracking, duplicates could pile up
+  - Fix: Track in `global._ssoAuthPopup` to prevent duplicates; add 90s auto-close timeout; add `closed` handler
+  - **Black Hole input dialog leaked Promise**: Only closed via IPC response; if user closed the window manually (Cmd+W), the Promise never resolved and the IPC listener leaked
+  - Fix: Add `closed` handler that resolves the Promise and removes the IPC listener
+  - **Create Data Source overlay not removed on error**: If `addDataSource()` threw, the full-screen overlay stayed, blocking the Spaces UI
+  - Fix: Call `overlay.remove()` in the catch block
+  - Files: `browserWindow.js`, `main.js`, `clipboard-viewer.js`
+
+- [x] **Phase A: Auth module consolidation -- eliminate selector drift** (v4.5.x)
+  - Created `lib/auth-scripts.js` -- single source of truth for all auth CSS selectors and injectable script builders (11 exports)
+  - Replaced 31 inline `executeJavaScript` auth scripts across 3 files with shared builder calls
+  - `browser-renderer.js`: 11 inline scripts replaced (form detection, page type, login fill, 2FA fill, account select, auth status check)
+  - `browserWindow.js`: 7 inline scripts replaced; fixed React `.value` bug in 2FA fill (was using `codeField.value = code` instead of `nativeInputValueSetter`)
+  - `lib/gsx-autologin.js`: 13 inline scripts replaced; removed local `AUTH_SELECTORS` (was missing `verificationCode`, `twoFactorCode`)
+  - Added heuristic 2FA fallback: detects single visible short numeric input + auth text patterns
+  - Added `preload.js` bridge so renderer process can access builders via `window.authScripts`
+  - Unit test validates all builders produce parseable JS with special character escaping
+  - Files: `lib/auth-scripts.js` (new), `browser-renderer.js`, `browserWindow.js`, `lib/gsx-autologin.js`, `preload.js`, `test/unit/auth-scripts.test.js` (new)
+
+- [x] **Auto-login fails: post-auth monitor can't detect 2FA page** (v4.5.x)
+  - `monitorPostAuth` used narrower 2FA selectors than the cross-origin path, missing `input[maxlength="6"]` and `input[name="verificationCode"]`
+  - After successful login form submission, the 2FA page was misidentified as `login` for all 12 polls, causing timeout
+  - Aligned 2FA selectors in `monitorPostAuth`, `attemptAutoLogin`, and `fill2FACode` with the broader set used in `attemptCrossOrigin2FA`
+  - Added text-based 2FA detection fallback (matches "verification code", "6-digit", etc.)
+  - File: `browser-renderer.js`
+
+- [x] **WISER Meeting screen share not visible to other participants** (v4.5.x)
+  - Screen capture was only displayed locally — never published to LiveKit room
+  - Added `sessionToggleScreenShare`, `sessionPublishScreenShare`, `sessionStopScreenShare` methods to publish screen track via `localParticipant.publishTrack` with `Track.Source.ScreenShare`
+  - Intercepted screen/both mode switches during active session to stay in session mode
+  - Updated TrackSubscribed handlers (host, guest-in-hub, guest page) to use `objectFit: contain` for screen share tracks
+  - Files: `recorder.html`, `lib/capture-guest-page.js`
+
+- [x] **Memory Usage Optimization** (v4.5.x)
+  - Added `backgroundThrottling: false` to all 27+ BrowserWindow instances across `browserWindow.js` and `main.js` to reduce idle memory/CPU from background windows
+  - Fixed GSX partition leak: added `unregisterPartition` and `removeCookieListener` calls in GSX window close handler (`browserWindow.js`)
+  - Fixed auth window listener accumulation: moved `ipc-message` listener out of `did-finish-load` so only one listener is registered per auth window (`browserWindow.js`)
+  - Fixed tab close login state leak: `closeTab()` now cleans up `autoLoginState`, `tabsWithActiveLogin`, and `globalLoginQueue` (`browser-renderer.js`)
+  - Fixed Blob URL leaks in `clipboard-viewer.js` (TTS audio, media preview) and `video-editor-app.js` (video upload, audio import) -- now revokes old URLs before replacing
+  - Added unsubscribe returns to event listeners in `preload-smart-export.js`, `preload-command-hud.js`, `preload-command-palette.js`, `preload-external-ai.js`
+  - Added 200-message cap to `ai-conversation-capture.js` to prevent unbounded message array growth
+  - Added 500-entry limit to IDW Feed image cache (`uxmag-script.js`) and 50-entry limit to orb SFX cache (`orb-sound-library.js`)
+  - Files: `browserWindow.js`, `main.js`, `browser-renderer.js`, `clipboard-viewer.js`, `video-editor-app.js`, `preload-smart-export.js`, `preload-command-hud.js`, `preload-command-palette.js`, `preload-external-ai.js`, `src/ai-conversation-capture.js`, `Flipboard-IDW-Feed/uxmag-script.js`, `lib/orb/orb-sound-library.js`, `lib/gsx-autologin.js`
+
+- [x] **GSX Menu Logs Into Wrong Account** (v4.5.x)
+  - Root cause 1: all GSX windows in the same IDW environment shared a single session partition (`persist:gsx-edison`), so once you authenticated as Account A, opening a tool for Account B reused Account A's cookies
+  - Root cause 2: after login + 2FA, multi-account users see an account picker page, but the GSX auto-login had zero handling for it -- the flow only detected login, 2FA, and errors
+  - Fix 1: Include `accountId` in the partition key (`persist:gsx-edison-{accountId}`) so each account gets its own isolated session
+  - Fix 2: Removed the global `gsxAccountId` settings override -- every GSX window was overwriting the shared setting, causing "last account wins" in menu generation and browser tab account selection
+  - Fix 3: Added account selection detection to `waitForPostSubmitTransition` -- now detects account picker elements after login/2FA submit
+  - Fix 4: Added `selectAccountInAuthFrame` function (4 strategies: link href, data attributes, HTML content match, form submit) to auto-click the correct account
+  - Fix 5: Added `handleAccountSelection` orchestrator that selects the account and waits for the auth frame to disappear
+  - Fix 6: Threaded `targetAccountId` from the URL through `gsxAutoLoginState` so it's available at the account selection step
+  - Files: `lib/gsx-autologin.js`
+
 - [x] **GSX Auto-Login Reliability Overhaul** (v4.5.x)
   - Root cause: entire auto-login flow used blind `sleep()` delays (800ms-2400ms) to wait for React forms to render, causing failures when the auth server was slow or fast
   - Fix 1: Replaced sleep-retry loop with MutationObserver-based `waitForAuthForm()` -- resolves instantly when form inputs appear, with 10s timeout fallback
@@ -467,6 +616,14 @@
   - Fix 1: Replaced `clearCacheAndReload?.() || location.reload()` with proper `if/else` so only one reload mechanism fires
   - Fix 2: Added `win.isDestroyed()` guards and a 3-second timeout on `session.clearCache()` so reload always proceeds even if cache clear hangs
   - Files: `lib/gsx-autologin.js`, `main.js`
+
+- [x] **GSX Refresh Still Blocked by beforeunload** (v4.5.x)
+  - Refresh button still sometimes did nothing even after the race-condition fix
+  - Root cause: GSX pages (OneReach platform SPAs) register `beforeunload` handlers for unsaved-state protection. `reloadIgnoringCache()` triggers `beforeunload`, and without a `will-prevent-unload` handler Electron silently honors the page's prevention, so the reload never happens
+  - Secondary cause: Module-manager web tool windows used `preload-spaces.js` which lacked `clearCacheAndReload`, so they always fell back to `location.reload()` with the same blocking issue
+  - Fix 1: Added a one-time `will-prevent-unload` override in the `clear-cache-and-reload` IPC handler so user-initiated refresh always goes through
+  - Fix 2: Added `clearCacheAndReload` and `triggerMissionControl` to `preload-spaces.js` so web tool windows use the IPC path
+  - Files: `main.js`, `preload-spaces.js`
 
 - [x] **Unified Bidder Simplification** (v4.5.x)
   - Rewrote bidder evaluation prompt: removed 150 lines of hand-holding (example queries, domain routing rules, calendar/time/weather heuristics) and replaced with a simple 30-line capability-matching prompt

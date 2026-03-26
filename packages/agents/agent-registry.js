@@ -63,12 +63,15 @@ const BUILT_IN_AGENT_IDS = [
   'meeting-notes-agent', // Captures notes, key points, bookmarks
   // Documentation
   'docs-agent', // RAG-grounded documentation assistant -- answers from official app docs
+  'teacher-agent', // Interactive tutor -- structured curriculum for learning GSX Power User
   'daily-brief-agent', // Meta-agent - orchestrates morning briefing from time, weather, calendar, email, etc.
   'memory-agent', // Memory manager - lets users view, correct, update, or delete personal facts/preferences
   'playbook-agent', // Playbook executor - runs playbooks in spaces, relays questions, reports results
   'browser-agent', // Browser automation - autonomous web navigation, form filling, data extraction via Playwright
   'browsing-agent', // Browsing API - resilient web research, page reading, form filling via native Electron BrowserWindow
   'sound-effects-agent', // Sound Designer - plays SFX, manages ambient soundscapes, generates custom sounds
+  'tickets-agent', // Ticket manager - full CRUD for Agentic TMS tickets via Edison KV
+  'playbooks-launch-agent', // Playbooks launcher - opens WISER Playbooks with AI space matching
 ];
 
 // ==================== VALIDATION ====================

@@ -104,7 +104,7 @@ describe('AI Service', () => {
       expect(Object.keys(DEFAULT_MODEL_PROFILES)).toEqual(expect.arrayContaining(expectedProfiles));
       expect(Object.keys(DEFAULT_MODEL_PROFILES).length).toBe(expectedProfiles.length);
 
-      for (const [profile] of Object.entries(DEFAULT_MODEL_PROFILES)) {
+      for (const [_name, profile] of Object.entries(DEFAULT_MODEL_PROFILES)) {
         expect(profile.provider).toBeTruthy();
         expect(profile.model).toBeTruthy();
         expect(['openai', 'anthropic']).toContain(profile.provider);

@@ -28,7 +28,7 @@ const { getUserProfile } = require('../../lib/user-profile-store');
 const ai = require('../../lib/ai-service');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
-const { buildBriefUISpec } = require('../../lib/calendar-format');
+const { buildBriefUISpec, buildDayViewSpec } = require('../../lib/calendar-format');
 
 // Timeouts for briefing collection
 // Calendar agent fetches from omnical API which can take 2-3s cold, so allow more time
@@ -281,17 +281,23 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
     // 6. Log this briefing to memory history
     this._logBriefingToHistory(contributions);
 
-    // 7. Build UI card from calendar contributions if available
+    // 7. Build rich day-view UI from calendar contributions + composed briefing
     let ui;
     const calContrib = contributions.find((c) => c.briefData && c.briefData.timeline?.length > 0);
     if (calContrib) {
-      try { ui = buildBriefUISpec(calContrib.briefData); } catch (_) { /* non-fatal */ }
+      try {
+        ui = buildDayViewSpec(calContrib.briefData, fullSpeech);
+      } catch (e) {
+        log.info('agent', '[DailyBrief] dayView spec failed, falling back to eventList', { error: e.message });
+        try { ui = buildBriefUISpec(calContrib.briefData); } catch (_) { /* non-fatal */ }
+      }
     }
 
     return {
       success: true,
       message: fullSpeech,
       ui,
+      panelWidth: ui?.type === 'dayView' ? 480 : undefined,
       soundCue: { type: 'one-shot', name: 'morning-motif', volume: 0.4 },
       data: {
         type: 'morning_brief',

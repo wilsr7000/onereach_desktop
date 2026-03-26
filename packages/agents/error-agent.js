@@ -109,7 +109,8 @@ const errorAgent = {
    * @returns {Object} Result with user-facing error message
    */
   async execute(task) {
-    const reason = task.metadata?.errorReason || task.error || 'Unknown error';
+   try {
+    const reason = String(task.metadata?.errorReason || task.error || 'Unknown error');
     const originalContent = task.content || 'your request';
     const failedAgentId = task.assignedAgent || task.metadata?.lastAgentId || null;
 
@@ -182,6 +183,14 @@ const errorAgent = {
         diagnosticAvailable: false,
       },
     };
+   } catch (execErr) {
+    log.error('agent', 'Error agent itself failed', { error: execErr.message });
+    return {
+      success: true,
+      output: 'Something went wrong. Please try again.',
+      data: { errorAgent: true, internalError: true },
+    };
+   }
   },
 };
 

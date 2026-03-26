@@ -626,6 +626,29 @@
         margin: 6px 8px;
       }
 
+      /* ==================== PIN TOAST ==================== */
+      .orb-pin-toast {
+        position: fixed;
+        bottom: 120px;
+        left: 50%;
+        transform: translateX(-50%) translateY(8px);
+        background: rgba(15, 15, 25, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 8px;
+        padding: 8px 14px;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 12px;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.3s ease, transform 0.3s ease;
+        z-index: 10000;
+      }
+      .orb-pin-toast.visible {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
       /* ==================== TEXT CHAT PANEL ==================== */
       .text-chat-panel {
         position: fixed;
@@ -923,19 +946,11 @@
   <body>
     <!-- Context Menu - outside container for proper positioning -->
     <div class="orb-context-menu" id="contextMenu">
-      <div class="context-menu-item" id="menuTextChat">
+      <div class="context-menu-item" id="menuPinToggle">
         <svg viewBox="0 0 24 24">
-          <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" />
+          <path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4zm3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z" />
         </svg>
-        <span>Text Chat</span>
-      </div>
-      <div class="context-menu-item" id="menuVoice">
-        <svg viewBox="0 0 24 24">
-          <path
-            d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"
-          />
-        </svg>
-        <span>Voice Mode</span>
+        <span id="menuPinLabel">Unpin</span>
       </div>
       <div class="context-menu-divider"></div>
       <div class="context-menu-item" id="menuSoundSettings">
@@ -953,6 +968,9 @@
         <span>Settings</span>
       </div>
     </div>
+
+    <!-- Pin toast notification -->
+    <div class="orb-pin-toast" id="orbPinToast"></div>
 
     <!-- Sound Settings Panel -->
     <div id="soundSettingsPanel" style="
@@ -1018,7 +1036,7 @@
       </div>
       <div class="ring"></div>
       <div class="ring-secondary"></div>
-      <button class="orb-type-btn" id="orbTypeBtn" title="Type a message">
+      <button class="orb-type-btn" id="orbTypeBtn" title="Type">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
         </svg>
@@ -1651,7 +1669,7 @@
 
           // Handle error returns
           if (!result || result.error) {
-            console.warn('[Orb] submitTask returned error:', result?.error);
+            handleOrbError('submit', result?.error || 'Task submission failed');
             return;
           }
 
@@ -1701,15 +1719,7 @@
             console.log('[Orb] No specific action, transcript recorded');
           }
         } catch (err) {
-          console.error('[Orb] Submit error:', err?.message || err);
-
-          try {
-            await window.orbAPI.speak('Sorry, something went wrong. ' + (err?.message || ''));
-          } catch (speakErr) {
-            console.warn('[Orb] Could not speak error:', speakErr);
-            showTranscript('Something went wrong. ' + (err?.message || 'Try again.'), false);
-            setTimeout(hideTranscript, 4000);
-          }
+          handleOrbError('submit', err);
         } finally {
           _isProcessing = false;
         }
@@ -1770,10 +1780,10 @@
             console.log('[Orb] Task settled, clearing active task:', _activeTaskId);
             _activeTaskId = null;
           }
-          // Handle task failure / dead letter -- clear active task
+          // Handle task failure / dead letter -- surface error to user
           if (event.type === 'task:dead_letter' || event.type === 'task:route_to_error_agent') {
-            console.log('[Orb] Task failed, clearing active task:', _activeTaskId);
-            _activeTaskId = null;
+            console.log('[Orb] Task failed:', event.type, _activeTaskId);
+            handleOrbError('dead_letter', event.error || event.reason || '');
           }
         });
 
@@ -1831,6 +1841,12 @@
 
       // Update overflow indicators when user manually scrolls the transcript
       transcriptInner.addEventListener('scroll', _updateOverflowIndicators);
+
+      // Pin / ephemeral state
+      let isPinned = localStorage.getItem('orbPinned') !== 'false';
+      let _isEphemeral = false;
+      let _autoHideTimer = null;
+      const AUTO_HIDE_DELAY = 4000;
 
       // Text chat state
       let isTextChatOpen = false;
@@ -1952,7 +1968,13 @@
       }
 
       // Type button next to orb
-      document.getElementById('orbTypeBtn').addEventListener('click', (e) => {
+      const orbTypeBtn = document.getElementById('orbTypeBtn');
+      orbTypeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openTextChat();
+      });
+      orbTypeBtn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
         e.stopPropagation();
         openTextChat();
       });
@@ -1966,17 +1988,31 @@
         hintEl.addEventListener('animationend', () => { hintEl.style.display = 'none'; });
       }
 
-      // Context menu handlers
-      document.getElementById('menuTextChat').addEventListener('click', () => {
-        hideContextMenu();
-        openTextChat();
-      });
+      // Sync pin label with persisted state
+      document.getElementById('menuPinLabel').textContent = isPinned ? 'Unpin' : 'Pin';
 
-      document.getElementById('menuVoice').addEventListener('click', () => {
+      // Context menu handlers
+      document.getElementById('menuPinToggle').addEventListener('click', () => {
         hideContextMenu();
-        closeTextChat();
-        if (S.phase === 'idle') {
-          startListening();
+        if (isPinned) {
+          isPinned = false;
+          localStorage.setItem('orbPinned', 'false');
+          document.getElementById('menuPinLabel').textContent = 'Pin';
+          let hideDelay = 300;
+          if (!localStorage.getItem('orbFirstUnpinShown')) {
+            localStorage.setItem('orbFirstUnpinShown', '1');
+            showPinToast('Press \u2318+Shift+O to summon the orb');
+            hideDelay = 2500;
+          }
+          setTimeout(() => {
+            if (window.orbAPI?.hide) window.orbAPI.hide();
+          }, hideDelay);
+        } else {
+          isPinned = true;
+          _isEphemeral = false;
+          clearAutoHideTimer();
+          localStorage.setItem('orbPinned', 'true');
+          document.getElementById('menuPinLabel').textContent = 'Unpin';
         }
       });
 
@@ -1986,6 +2022,51 @@
           window.orbAPI.openSettings();
         }
       });
+
+      function showPinToast(msg) {
+        const toast = document.getElementById('orbPinToast');
+        toast.textContent = msg;
+        toast.classList.add('visible');
+        setTimeout(() => toast.classList.remove('visible'), 4000);
+      }
+
+      // ==================== EPHEMERAL AUTO-HIDE ====================
+      function clearAutoHideTimer() {
+        if (_autoHideTimer) {
+          clearTimeout(_autoHideTimer);
+          _autoHideTimer = null;
+        }
+      }
+
+      function startAutoHideTimer() {
+        clearAutoHideTimer();
+        if (!_isEphemeral || isTextChatOpen) return;
+        _autoHideTimer = setTimeout(() => {
+          _autoHideTimer = null;
+          fadeOutAndHide();
+        }, AUTO_HIDE_DELAY);
+      }
+
+      function fadeOutAndHide() {
+        const container = document.querySelector('.orb-container');
+        container.style.transition = 'opacity 0.4s ease';
+        container.style.opacity = '0';
+        setTimeout(() => {
+          if (window.orbAPI?.hide) window.orbAPI.hide();
+          container.style.opacity = '1';
+          container.style.transition = '';
+          _isEphemeral = false;
+        }, 420);
+      }
+
+      if (window.orbAPI?.onSummoned) {
+        window.orbAPI.onSummoned(() => {
+          if (!isPinned) {
+            _isEphemeral = true;
+            clearAutoHideTimer();
+          }
+        });
+      }
 
       // ==================== SOUND SETTINGS PANEL ====================
       const soundPanel = document.getElementById('soundSettingsPanel');
@@ -2062,60 +2143,27 @@
       let currentChatAnchor = 'bottom-right';
 
       async function openTextChat() {
+        clearAutoHideTimer();
         isTextChatOpen = true;
 
-        // Determine which quadrant of the screen the orb is in
-        const windowX = window.screenX;
-        const windowY = window.screenY;
-        const screenWidth = window.screen.availWidth;
-        const screenHeight = window.screen.availHeight;
-
-        // Calculate center points
-        const windowCenterX = windowX + window.outerWidth / 2;
-        const windowCenterY = windowY + window.outerHeight / 2;
-        const screenCenterX = screenWidth / 2;
-        const screenCenterY = screenHeight / 2;
-
-        // Determine quadrant
-        const isRight = windowCenterX > screenCenterX;
-        const isBottom = windowCenterY > screenCenterY;
-
-        // Remove existing position classes
+        // Use the tracked orb side (reliable from settings + drag events).
+        // window.screenX/Y is unreliable on macOS transparent frameless windows
+        // until the first interaction, causing mis-positioned chat on fresh launch.
         const orbContainer = document.querySelector('.orb-container');
         orbContainer.classList.remove('orb-bottom-right', 'orb-bottom-left', 'orb-top-right', 'orb-top-left');
         textChatPanel.classList.remove('pos-top-left', 'pos-top-right', 'pos-bottom-left', 'pos-bottom-right');
 
-        // Determine anchor and apply classes based on quadrant
-        // Chat panel appears opposite to orb position
-        if (isBottom && isRight) {
-          // Orb at bottom-right of screen: orb stays bottom-right, chat above
-          currentChatAnchor = 'bottom-right';
-          orbContainer.classList.add('orb-bottom-right');
-          textChatPanel.classList.add('pos-top-left');
-        } else if (isBottom && !isRight) {
-          // Orb at bottom-left of screen: orb stays bottom-left, chat above
+        if (currentOrbSide === 'left') {
           currentChatAnchor = 'bottom-left';
           orbContainer.classList.add('orb-bottom-left');
           textChatPanel.classList.add('pos-top-right');
-        } else if (!isBottom && isRight) {
-          // Orb at top-right of screen: orb moves to top-right, chat below
-          currentChatAnchor = 'top-right';
-          orbContainer.classList.add('orb-top-right');
-          textChatPanel.classList.add('pos-bottom-left');
         } else {
-          // Orb at top-left of screen: orb moves to top-left, chat below
-          currentChatAnchor = 'top-left';
-          orbContainer.classList.add('orb-top-left');
-          textChatPanel.classList.add('pos-bottom-right');
+          currentChatAnchor = 'bottom-right';
+          orbContainer.classList.add('orb-bottom-right');
+          textChatPanel.classList.add('pos-top-left');
         }
 
-        console.log(
-          '[TextChat] Position:',
-          isRight ? 'right' : 'left',
-          isBottom ? 'bottom' : 'top',
-          'anchor:',
-          currentChatAnchor
-        );
+        console.log('[TextChat] Side:', currentOrbSide, 'anchor:', currentChatAnchor);
 
         // Expand the window to accommodate the chat panel
         if (window.orbAPI?.expandForChat) {
@@ -2155,6 +2203,8 @@
         // Restore the correct side class (left or right) based on current screen position
         orbContainer.classList.add(currentOrbSide === 'left' ? 'orb-bottom-left' : 'orb-bottom-right');
         currentChatAnchor = currentOrbSide === 'left' ? 'bottom-left' : 'bottom-right';
+
+        if (_isEphemeral) startAutoHideTimer();
       }
 
       chatCloseBtn.addEventListener('click', closeTextChat);
@@ -2215,8 +2265,7 @@
           // Add confirmation
           addChatMessage('assistant', 'Got it. Working on that.');
         } catch (error) {
-          console.error('[TextChat] Error:', error);
-          addChatMessage('assistant', 'Sorry, something went wrong.');
+          handleOrbError('text_chat', error, { chatMode: true });
         }
 
         chatSendBtn.disabled = false;
@@ -2325,6 +2374,55 @@
             break;
           default:
             orb.title = 'Click to start listening';
+        }
+      }
+
+      /**
+       * Unified error boundary for the orb. Every user-facing error flows here.
+       * Plays the error tone, shows the red error flash, displays feedback, and
+       * ensures the orb transitions out of processing state.
+       *
+       * @param {string} source - Where the error originated (submit, dead_letter, function_call, text_chat)
+       * @param {string|Error|Object} error - The error or message
+       * @param {Object} [context] - Additional context
+       * @param {boolean} [context.chatMode] - Show error as chat message instead of transcript
+       * @param {string} [context.callId] - Function call ID to respond to before transitioning
+       */
+      function handleOrbError(source, error, context = {}) {
+        const msg = typeof error === 'string' ? error : (error?.message || error?.error || '');
+
+        const isStartup = msg.includes('Exchange not running') || msg.includes('not available');
+        const isRateLimit = msg.includes('rate limit') || msg.includes('429');
+
+        const userMessage = isStartup
+          ? "I'm still starting up. Give me a moment."
+          : isRateLimit
+            ? 'Too many requests. Wait a moment and try again.'
+            : msg || 'Something went wrong. Try again.';
+
+        if (window.OrbAudio) window.OrbAudio.playErrorTone();
+
+        // Activate the error CSS state (red glow + shake) briefly
+        orb.classList.remove('listening', 'processing', 'connecting', 'speaking', 'awaiting', 'ambient');
+        orb.classList.add('error');
+        setTimeout(() => orb.classList.remove('error'), 2000);
+
+        if (context.chatMode) {
+          addChatMessage('assistant', userMessage);
+        } else {
+          showTranscript(userMessage, false);
+          setTimeout(hideTranscript, 4000);
+        }
+
+        // Respond to pending function call if applicable
+        if (context.callId && window.orbAPI?.respondToFunction) {
+          window.orbAPI.respondToFunction(context.callId, userMessage).catch(() => {});
+          S.set('pendingFunctionCallId', null);
+        }
+
+        _activeTaskId = null;
+        if (S.current !== 'idle') {
+          S.endSession('error-' + source);
         }
       }
 
@@ -2768,19 +2866,9 @@
           stopAudioCapture();
           window.orbAPI.disconnect();
 
-          const isError =
-            reason &&
-            reason !== 'user-stop' &&
-            reason !== 'ws-disconnected' &&
-            reason !== 'tts-complete' &&
-            from !== 'speaking';
-          if (isError) {
-            showTranscript('Something went wrong. Try again.', false);
-            setTimeout(hideTranscript, 3000);
-          } else {
-            // Hide any lingering transcript (agent text, streaming deltas, etc.)
-            hideTranscript();
-          }
+          // Errors are now handled at source via handleOrbError(), so idle
+          // entry just cleans up any lingering transcript.
+          hideTranscript();
           transcriptEl.classList.remove('agent-speaking');
 
           // Play completion tone when task finishes normally (not on error/user-stop)
@@ -2799,6 +2887,11 @@
             hasActivePanel: false,
           });
           updateUI('idle');
+
+          // Ephemeral auto-hide: start countdown when returning to idle after interaction
+          if (_isEphemeral && from !== 'idle') {
+            startAutoHideTimer();
+          }
         }
       });
 
@@ -2827,9 +2920,7 @@
 
         try {
           if (!window.agentHUD || !window.agentHUD.submitTask) {
-            console.error('[Orb] window.agentHUD not available');
-            await window.orbAPI.respondToFunction(callId, "I'm not ready yet. Try again in a moment.");
-            S.set('pendingFunctionCallId', null);
+            handleOrbError('function_call', 'HUD API not available', { callId });
             return;
           }
 
@@ -2841,14 +2932,7 @@
 
           // Handle error returns
           if (!result || result.error) {
-            const errMsg = result?.error || 'Unknown error';
-            console.warn('[Orb] submitTask returned error:', errMsg);
-            const userMsg =
-              errMsg.includes('Exchange not running') || errMsg.includes('not available')
-                ? "I'm still starting up. Try again in a moment."
-                : result?.message || 'I had trouble processing that. Try again.';
-            await window.orbAPI.respondToFunction(callId, userMsg);
-            S.set('pendingFunctionCallId', null);
+            handleOrbError('function_call', result?.error || 'Unknown error', { callId });
             return;
           }
 
@@ -2913,9 +2997,7 @@
             S.set('pendingFunctionCallId', null);
           }
         } catch (err) {
-          console.error('[Orb] Error processing function call:', err?.message || err);
-          await window.orbAPI.respondToFunction(callId, 'Sorry, something went wrong. ' + (err?.message || ''));
-          S.set('pendingFunctionCallId', null);
+          handleOrbError('function_call', err, { callId });
         } finally {
           const count = (S.get('pendingSubmitCount') || 1) - 1;
           S.set('pendingSubmitCount', count);
@@ -3119,6 +3201,7 @@
       // ==================== LIFECYCLE FUNCTIONS ====================
 
       function startListening() {
+        clearAutoHideTimer();
         if (S.phase === 'ambient') {
           S.transition('idle', 'ambient-engage');
         }
@@ -3354,13 +3437,43 @@
       // =====================================================================
       // Click-through toggle: make transparent areas pass through to windows
       // behind (e.g. clipboard viewer) while keeping the orb itself clickable.
-      // setIgnoreMouseEvents(true, { forward: true }) is set in main process
-      // at window creation. Here we toggle it off when the cursor enters any
+      // Main process sets setIgnoreMouseEvents(true, { forward: true }) at
+      // window creation. Here we toggle it off when the cursor enters any
       // interactive element so clicks register, then back on when it leaves.
       // =====================================================================
-      // Click-through: window starts collapsed (170x110, orb + type button).
-      // It expands dynamically for tooltip/chat and collapses when done.
-      console.log('[Orb] Click-through: using dynamic window resizing');
+      {
+        const interactiveRoots = [
+          document.querySelector('.orb-container'),
+          document.getElementById('contextMenu'),
+          document.getElementById('textChatPanel'),
+          document.getElementById('soundSettingsPanel'),
+        ].filter(Boolean);
+
+        let hoveredCount = 0;
+        let reenableTimer = null;
+
+        function syncClickThrough() {
+          clearTimeout(reenableTimer);
+          if (hoveredCount > 0) {
+            window.orbAPI.setClickThrough(false);
+          } else {
+            // Small debounce so moving between adjacent elements doesn't flicker
+            reenableTimer = setTimeout(() => {
+              if (hoveredCount <= 0) {
+                hoveredCount = 0;
+                window.orbAPI.setClickThrough(true);
+              }
+            }, 60);
+          }
+        }
+
+        interactiveRoots.forEach((el) => {
+          el.addEventListener('mouseenter', () => { hoveredCount++; syncClickThrough(); });
+          el.addEventListener('mouseleave', () => { hoveredCount--; syncClickThrough(); });
+        });
+
+        console.log(`[Orb] Click-through enabled for ${interactiveRoots.length} interactive regions`);
+      }
 
 
       // Log ready state

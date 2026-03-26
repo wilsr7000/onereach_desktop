@@ -164,6 +164,7 @@ contextBridge.exposeInMainWorld('api', {
       'get-image-creators',
       'get-video-creators',
       'get-audio-generators',
+      'get-ui-design-tools',
       'module:install-from-url',
       'module:install-from-file',
       'module:uninstall',
@@ -226,6 +227,7 @@ contextBridge.exposeInMainWorld('api', {
       'get-image-creators',
       'get-video-creators',
       'get-audio-generators',
+      'get-ui-design-tools',
       'external-bots-saved',
       'image-creators-saved',
       'video-creators-saved',
@@ -495,6 +497,7 @@ contextBridge.exposeInMainWorld('api', {
       'onereach:delete-totp',
       'onereach:test-login',
       'onereach:execute-in-frame',
+      'onereach:confirm-auto-login',
       // TOTP channels
       'totp:scan-qr-screen',
       'totp:get-current-code',
@@ -506,6 +509,25 @@ contextBridge.exposeInMainWorld('api', {
       'webmcp:tab-navigated',
       'webmcp:call-tool-result',
       'webmcp:get-discovered-tools',
+      // Action executor channels
+      'action:execute',
+      'action:list',
+      'action:has',
+      'action:info',
+      // Module manager channels
+      'module:get-installed',
+      'module:get-web-tools',
+      'module:add-web-tool',
+      'module:evaluate',
+      'module:download-temp',
+      'module:install-from-file',
+      'module:install-from-url',
+      'module:check-claude-api',
+      'module:ai-review',
+      'module:open',
+      'module:uninstall',
+      'module:open-web-tool',
+      'module:delete-web-tool',
     ];
     if (validChannels.includes(channel)) {
       return ipcRenderer.invoke(channel, ...args);
@@ -947,6 +969,7 @@ contextBridge.exposeInMainWorld('electron', {
         'onereach:delete-totp',
         'onereach:test-login',
         'onereach:execute-in-frame',
+        'onereach:confirm-auto-login',
         // TOTP channels
         'totp:scan-qr-screen',
         'totp:get-current-code',
@@ -991,6 +1014,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Log event (for branch events)
   logEvent: (eventType, eventData) => ipcRenderer.send('logger:event', { eventType, eventData }),
 
+  // Edison flow/step context detection (sent by hooks in GSX windows)
+  send: (channel, data) => {
+    const allowedChannels = ['edison-flow-detected', 'edison-step-detected', 'dev-tools-action'];
+    if (allowedChannels.includes(channel)) {
+      ipcRenderer.send(channel, data);
+    }
+  },
+
   // Agent intervention system
   // Listen for agent escalation notifications
   onAgentIntervention: (callback) => {
@@ -1016,6 +1047,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Auto-login retry (used by the GSX overlay "Try Again" button)
   retryAutoLogin: () => ipcRenderer.send('gsx:retry-auto-login'),
 });
+
+// Shared auth script builders for auto-login (browser-renderer.js uses these)
+try {
+  const authScripts = require('./lib/auth-scripts');
+  contextBridge.exposeInMainWorld('authScripts', {
+    SELECTORS: authScripts.SELECTORS,
+    buildDetectFormLocationScript: () => authScripts.buildDetectFormLocationScript(),
+    buildDetectPageTypeScript: () => authScripts.buildDetectPageTypeScript(),
+    buildDetect2FAScript: () => authScripts.buildDetect2FAScript(),
+    buildFillLoginScript: (email, password, opts) => authScripts.buildFillLoginScript(email, password, opts),
+    buildIframeLoginScript: (email, password) => authScripts.buildIframeLoginScript(email, password),
+    buildFillTOTPScript: (code, opts) => authScripts.buildFillTOTPScript(code, opts),
+    buildSubmitButtonScript: (fallbackTexts) => authScripts.buildSubmitButtonScript(fallbackTexts),
+    buildSelectAccountScript: (targetAccountId) => authScripts.buildSelectAccountScript(targetAccountId),
+    buildAuthStateCheckScript: () => authScripts.buildAuthStateCheckScript(),
+    buildCheckAuthStatusScript: () => authScripts.buildCheckAuthStatusScript(),
+  });
+} catch (_) {
+  // auth-scripts may not load in sandboxed webview contexts -- non-fatal
+}
 
 // Expose Resource Manager API for CPU/GPU throttling
 contextBridge.exposeInMainWorld('terminal', {
@@ -2413,6 +2464,43 @@ contextBridge.exposeInMainWorld('testAgent', {
 
   // Enable/disable tracing for debugging
   setTracing: (enabled) => ipcRenderer.invoke('test-agent:set-tracing', enabled),
+});
+
+// ---------------------------------------------------------------------------
+// Edison SDK API (for Settings → Edison SDKs tab)
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('edisonSDK', {
+  getStatus: () => ipcRenderer.invoke('edison-sdk:get-status'),
+  testAll: () => ipcRenderer.invoke('edison-sdk:test-all'),
+  testSDK: (name) => ipcRenderer.invoke('edison-sdk:test', name),
+  refreshToken: () => ipcRenderer.invoke('edison-sdk:refresh-token'),
+  listSpaces: () => ipcRenderer.invoke('edison-sdk:list-spaces'),
+  searchLibrary: (query) => ipcRenderer.invoke('edison-sdk:search-library', query),
+  browseKV: (collection, prefix) => ipcRenderer.invoke('edison-sdk:browse-kv', collection, prefix),
+});
+
+// ---------------------------------------------------------------------------
+// Edison Library Browser API
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('edisonLibrary', {
+  search: (query, take) => ipcRenderer.invoke('edison-library:search', query, take),
+  getSpaces: () => ipcRenderer.invoke('edison-library:get-spaces'),
+  getStepTemplates: (opts) => ipcRenderer.invoke('edison-library:get-step-templates', opts),
+  getPopular: () => ipcRenderer.invoke('edison-library:get-popular'),
+});
+
+// ---------------------------------------------------------------------------
+// Dev Tools API (flow validation, etc.)
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('devTools', {
+  validateFlow: (flowId) => ipcRenderer.invoke('dev-tools:validate-flow', flowId),
+  configureStep: (stepId, instruction) => ipcRenderer.invoke('dev-tools:configure-step', { stepId, instruction }),
+  evaluateFlowLogs: (params) => ipcRenderer.invoke('dev-tools:evaluate-flow-logs', params || {}),
+  fetchNewFlowLogs: (since) => ipcRenderer.invoke('dev-tools:fetch-new-flow-logs', { since }),
+  getFlowStepTip: () => ipcRenderer.invoke('dev-tools:flow-step-tip'),
+  getFlowLibrarySuggestions: () => ipcRenderer.invoke('dev-tools:flow-library-suggestions'),
+  getFlowContext: () => ipcRenderer.invoke('get-flow-context'),
+  designStep: (params) => ipcRenderer.invoke('dev-tools:design-step', params),
 });
 
 // Playbook + Sync APIs (shared module)

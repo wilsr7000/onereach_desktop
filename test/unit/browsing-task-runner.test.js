@@ -551,7 +551,7 @@ describe('BrowsingTaskRunner', () => {
       mockChat.mockResolvedValueOnce({ content: '{"action":"done","result":{"ok":true}}' });
 
       const visionDeps = { ...deps, ai: { chat: mockChat, vision: mockVision } };
-      const result = await taskRunner.run({ task: 'Click button', useVision: 'auto', visionThreshold: 3, _deps: visionDeps });
+      const _result = await taskRunner.run({ task: 'Click button', useVision: 'auto', visionThreshold: 3, _deps: visionDeps });
 
       expect(mockVision).toHaveBeenCalled();
       expect(mockBrowsingAPI.screenshot).toHaveBeenCalled();
@@ -570,7 +570,7 @@ describe('BrowsingTaskRunner', () => {
       mockChat.mockResolvedValueOnce({ content: '{"action":"done","result":{"ok":true}}' });
 
       const visionDeps = { ...deps, ai: { chat: mockChat, vision: mockVision } };
-      const result = await taskRunner.run({ task: 'Click button', useVision: 'auto', visionThreshold: 3, _deps: visionDeps });
+      const _result = await taskRunner.run({ task: 'Click button', useVision: 'auto', visionThreshold: 3, _deps: visionDeps });
 
       expect(mockVision).not.toHaveBeenCalled();
       expect(mockBrowsingAPI.screenshot).not.toHaveBeenCalled();
@@ -584,7 +584,7 @@ describe('BrowsingTaskRunner', () => {
       mockVision.mockResolvedValue('{"action":"done","result":{"ok":true}}');
 
       const visionDeps = { ...deps, ai: { chat: mockChat, vision: mockVision } };
-      const result = await taskRunner.run({ task: 'Click button', useVision: 'always', _deps: visionDeps });
+      const _result = await taskRunner.run({ task: 'Click button', useVision: 'always', _deps: visionDeps });
 
       expect(mockVision).toHaveBeenCalled();
     });
@@ -594,7 +594,7 @@ describe('BrowsingTaskRunner', () => {
       mockChat.mockResolvedValueOnce({ content: '{"action":"done","result":{}}' });
 
       const visionDeps = { ...deps, ai: { chat: mockChat, vision: mockVision } };
-      const result = await taskRunner.run({ task: 'Click button', useVision: 'never', _deps: visionDeps });
+      const _result = await taskRunner.run({ task: 'Click button', useVision: 'never', _deps: visionDeps });
 
       expect(mockVision).not.toHaveBeenCalled();
       expect(mockBrowsingAPI.screenshot).not.toHaveBeenCalled();
@@ -603,9 +603,9 @@ describe('BrowsingTaskRunner', () => {
     it('should cap vision calls at maxVisionSteps', async () => {
       mockBrowsingAPI.snapshot.mockResolvedValue({ refs: [{ ref: 1, role: 'button', name: 'OK' }], totalElements: 1 });
 
-      let callCount = 0;
+      let _callCount = 0;
       mockVision.mockImplementation(() => {
-        callCount++;
+        _callCount++;
         return Promise.resolve('{"action":"scroll","value":"down"}');
       });
       mockChat.mockImplementation(() => Promise.resolve({ content: '{"action":"scroll","value":"down"}' }));

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Desktop Autopilot</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column;
+      -webkit-app-region: drag;
+    }
+    button, input, a { -webkit-app-region: no-drag; }
+
+    header {
+      padding: 14px 20px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    }
+    header h1 { font-size: 14px; font-weight: 600; color: #f1f5f9; flex: 1; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .status-dot.idle { background: #475569; }
+    .status-dot.running { background: #3b82f6; animation: pulse 1.5s infinite; }
+    .status-dot.done { background: #22c55e; }
+    .status-dot.error { background: #ef4444; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .flow {
+      flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 0;
+    }
+
+    .tier {
+      display: flex; align-items: stretch; gap: 0; position: relative;
+    }
+    .tier-rail {
+      width: 32px; display: flex; flex-direction: column; align-items: center; flex-shrink: 0;
+    }
+    .tier-node {
+      width: 20px; height: 20px; border-radius: 50%; border: 2px solid #334155;
+      background: #1e293b; display: flex; align-items: center; justify-content: center; z-index: 1;
+      flex-shrink: 0; transition: all 0.3s;
+    }
+    .tier-node svg { width: 10px; height: 10px; stroke: #475569; fill: none; stroke-width: 2; }
+    .tier-line { width: 2px; flex: 1; background: #1e293b; min-height: 12px; }
+
+    .tier.active .tier-node { border-color: #3b82f6; background: #1e3a5f; }
+    .tier.active .tier-node svg { stroke: #60a5fa; }
+    .tier.passed .tier-node { border-color: #22c55e; background: #14532d; }
+    .tier.passed .tier-node svg { stroke: #4ade80; }
+    .tier.failed .tier-node { border-color: #ef4444; background: #450a0a; }
+    .tier.failed .tier-node svg { stroke: #f87171; }
+    .tier.skipped .tier-node { border-color: #334155; opacity: 0.4; }
+
+    .tier-content {
+      flex: 1; padding: 4px 0 16px 12px; min-height: 48px;
+    }
+    .tier-label {
+      font-size: 12px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .tier.active .tier-label { color: #60a5fa; }
+    .tier.passed .tier-label { color: #4ade80; }
+    .tier.failed .tier-label { color: #f87171; }
+
+    .tier-detail {
+      font-size: 12px; color: #64748b; line-height: 1.5;
+    }
+    .tier.active .tier-detail { color: #94a3b8; }
+
+    .tier-time {
+      font-size: 11px; color: #475569; margin-top: 4px; font-variant-numeric: tabular-nums;
+    }
+
+    .steps-list {
+      margin-top: 6px; padding-left: 0; list-style: none; font-size: 11px; color: #64748b;
+    }
+    .steps-list li {
+      padding: 2px 0; border-left: 2px solid #1e293b; padding-left: 8px; margin-left: 4px;
+    }
+    .steps-list li.current { border-left-color: #3b82f6; color: #94a3b8; }
+
+    .result-box {
+      margin: 8px 0 0; padding: 10px 12px; background: #1e293b; border-radius: 6px;
+      font-size: 12px; line-height: 1.6; color: #cbd5e1; white-space: pre-wrap;
+      max-height: 200px; overflow-y: auto; border: 1px solid #334155;
+    }
+
+    .task-bar {
+      padding: 12px 20px; background: #1e293b; border-top: 1px solid #334155;
+      display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+    }
+    .task-input {
+      flex: 1; padding: 8px 12px; background: #0f172a; border: 1px solid #334155; border-radius: 6px;
+      color: #e2e8f0; font-size: 13px; outline: none;
+    }
+    .task-input:focus { border-color: #3b82f6; }
+    .task-input::placeholder { color: #475569; }
+    .run-btn {
+      padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500; cursor: pointer;
+    }
+    .run-btn:hover { background: #2563eb; }
+    .run-btn:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+
+    .check-svg { display: none; }
+    .tier.passed .check-svg { display: block; }
+    .tier.passed .default-svg { display: none; }
+
+    .spinner {
+      width: 10px; height: 10px; border: 2px solid #3b82f6; border-top-color: transparent;
+      border-radius: 50%; animation: spin 0.8s linear infinite; display: none;
+    }
+    .tier.active .spinner { display: block; }
+    .tier.active .default-svg { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="status-dot idle" id="statusDot"></div>
+  <h1>Desktop Autopilot</h1>
+  <span id="elapsed" style="font-size: 11px; color: #475569; font-variant-numeric: tabular-nums;"></span>
+</header>
+
+<div class="flow" id="flow">
+
+  <!-- Tier 1: Cache -->
+  <div class="tier" id="tier1">
+    <div class="tier-rail">
+      <div class="tier-node">
+        <svg class="default-svg" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <svg class="check-svg" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        <div class="spinner"></div>
+      </div>
+      <div class="tier-line"></div>
+    </div>
+    <div class="tier-content">
+      <div class="tier-label">Tier 1 -- Cached Script</div>
+      <div class="tier-detail" id="tier1Detail">Checking for cached script...</div>
+      <div class="tier-time" id="tier1Time"></div>
+    </div>
+  </div>
+
+  <!-- Tier 2: Claude Direct -->
+  <div class="tier" id="tier2">
+    <div class="tier-rail">
+      <div class="tier-node">
+        <svg class="default-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        <svg class="check-svg" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        <div class="spinner"></div>
+      </div>
+      <div class="tier-line"></div>
+    </div>
+    <div class="tier-content">
+      <div class="tier-label">Tier 2 -- Claude Script Generation</div>
+      <div class="tier-detail" id="tier2Detail">Waiting...</div>
+      <div class="tier-time" id="tier2Time"></div>
+    </div>
+  </div>
+
+  <!-- Tier 3: Browser-use -->
+  <div class="tier" id="tier3">
+    <div class="tier-rail">
+      <div class="tier-node">
+        <svg class="default-svg" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <svg class="check-svg" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        <div class="spinner"></div>
+      </div>
+      <div class="tier-line" style="background:transparent;"></div>
+    </div>
+    <div class="tier-content">
+      <div class="tier-label">Tier 3 -- Browser Exploration</div>
+      <div class="tier-detail" id="tier3Detail">Waiting...</div>
+      <div class="tier-time" id="tier3Time"></div>
+      <ul class="steps-list" id="stepsList"></ul>
+    </div>
+  </div>
+
+  <!-- Result -->
+  <div id="resultSection" style="display:none; margin-top: 8px;">
+    <div class="result-box" id="resultBox"></div>
+  </div>
+</div>
+
+<div class="task-bar">
+  <input type="text" class="task-input" id="taskInput" placeholder="Describe a browser task..." />
+  <button class="run-btn" id="runBtn" onclick="runTask()">Run</button>
+</div>
+
+<script>
+  const API = 'http://127.0.0.1:47292';
+  let running = false;
+  let startTime = null;
+  let elapsedInterval = null;
+  let pollInterval = null;
+  let lastLogId = null;
+
+  function $(id) { return document.getElementById(id); }
+
+  function setTier(id, state, detail) {
+    const el = $(id);
+    el.className = 'tier ' + state;
+    if (detail) $(id + 'Detail').textContent = detail;
+  }
+
+  function setTierTime(id, ms) {
+    $(id + 'Time').textContent = ms != null ? (ms / 1000).toFixed(1) + 's' : '';
+  }
+
+  function resetFlow() {
+    ['tier1', 'tier2', 'tier3'].forEach(id => {
+      $(id).className = 'tier';
+      $(id + 'Detail').textContent = 'Waiting...';
+      $(id + 'Time').textContent = '';
+    });
+    $('tier1Detail').textContent = 'Checking for cached script...';
+    $('stepsList').innerHTML = '';
+    $('resultSection').style.display = 'none';
+    $('resultBox').textContent = '';
+    $('statusDot').className = 'status-dot idle';
+    $('elapsed').textContent = '';
+    lastLogId = null;
+  }
+
+  function updateElapsed() {
+    if (!startTime) return;
+    const s = ((Date.now() - startTime) / 1000).toFixed(1);
+    $('elapsed').textContent = s + 's';
+  }
+
+  async function runTask() {
+    const task = $('taskInput').value.trim();
+    if (!task || running) return;
+
+    running = true;
+    startTime = Date.now();
+    $('runBtn').disabled = true;
+    $('statusDot').className = 'status-dot running';
+    resetFlow();
+    elapsedInterval = setInterval(updateElapsed, 100);
+
+    setTier('tier1', 'active', 'Checking cache...');
+
+    pollInterval = setInterval(pollLogs, 1500);
+
+    try {
+      const res = await fetch(API + '/app/desktop/browser/task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, headless: false, maxSteps: 40 }),
+      });
+      const data = await res.json();
+
+      clearInterval(pollInterval);
+      clearInterval(elapsedInterval);
+      const totalMs = Date.now() - startTime;
+      updateElapsed();
+
+      if (data.success) {
+        $('statusDot').className = 'status-dot done';
+
+        if (data.tier === 1) {
+          setTier('tier1', 'passed', 'Cache hit -- replayed script');
+          setTierTime('tier1', data.elapsed || totalMs);
+          setTier('tier2', 'skipped', 'Skipped');
+          setTier('tier3', 'skipped', 'Skipped');
+        } else if (data.tier === 2) {
+          setTier('tier1', 'failed', 'No cached script');
+          setTier('tier2', 'passed', 'Claude generated and ran script');
+          setTierTime('tier2', data.elapsed || totalMs);
+          setTier('tier3', 'skipped', 'Skipped');
+        } else {
+          setTier('tier1', 'failed', 'No cached script');
+          setTier('tier2', 'failed', 'Claude script failed or skipped');
+          setTier('tier3', 'passed', 'Browser-use completed in ' + (data.steps || 0) + ' steps');
+          setTierTime('tier3', totalMs);
+        }
+
+        if (data.finalResult) {
+          $('resultSection').style.display = 'block';
+          $('resultBox').textContent = data.finalResult;
+        }
+      } else {
+        $('statusDot').className = 'status-dot error';
+        setTier('tier1', 'failed', 'Failed');
+        setTier('tier2', 'failed', 'Failed');
+        setTier('tier3', 'failed', data.error || 'Task failed');
+        $('resultSection').style.display = 'block';
+        $('resultBox').textContent = 'Error: ' + (data.error || 'Unknown error');
+      }
+    } catch (err) {
+      clearInterval(pollInterval);
+      clearInterval(elapsedInterval);
+      $('statusDot').className = 'status-dot error';
+      $('resultSection').style.display = 'block';
+      $('resultBox').textContent = 'Connection error: ' + err.message;
+    }
+
+    running = false;
+    $('runBtn').disabled = false;
+  }
+
+  async function pollLogs() {
+    try {
+      const url = API + '/logs?category=desktop-autopilot&limit=10';
+      const res = await fetch(url);
+      const data = await res.json();
+      const entries = (data.data || []).reverse();
+
+      for (const entry of entries) {
+        if (lastLogId && entry.id <= lastLogId) continue;
+        lastLogId = entry.id;
+
+        const msg = entry.message || '';
+        const d = entry.data || {};
+
+        if (msg.includes('Tier 1 cache hit')) {
+          setTier('tier1', 'active', 'Cache hit, replaying...');
+        } else if (msg.includes('Tier 1 failed')) {
+          setTier('tier1', 'failed', d.reason || 'No match');
+        } else if (msg.includes('Tier 2')) {
+          setTier('tier1', 'failed', 'No cached script');
+          if (msg.includes('generating')) {
+            setTier('tier2', 'active', 'Claude is writing the script...');
+          } else if (msg.includes('succeeded')) {
+            setTier('tier2', 'passed', 'Script generated and executed');
+            setTierTime('tier2', d.elapsed);
+          } else if (msg.includes('failed')) {
+            setTier('tier2', 'failed', d.reason || 'Script failed validation');
+          }
+        } else if (msg.includes('Tier 3')) {
+          setTier('tier2', 'failed', 'Script failed or skipped');
+          if (msg.includes('exploring')) {
+            setTier('tier3', 'active', 'Browser-use is navigating...');
+          } else if (msg.includes('completed')) {
+            setTier('tier3', 'passed', (d.steps || 0) + ' steps completed');
+          }
+        } else if (msg.startsWith('Step ') && d.step) {
+          setTier('tier3', 'active', 'Browsing... (step ' + d.step + ')');
+          const url = msg.replace(/^Step \d+: /, '').slice(0, 60);
+          const li = document.createElement('li');
+          li.textContent = 'Step ' + d.step + ': ' + url;
+          li.className = 'current';
+          const list = $('stepsList');
+          const prev = list.querySelector('.current');
+          if (prev) prev.className = '';
+          list.appendChild(li);
+          list.scrollTop = list.scrollHeight;
+        } else if (msg.includes('refined and cached')) {
+          const li = document.createElement('li');
+          li.textContent = 'Script cached for next time';
+          li.style.color = '#4ade80';
+          $('stepsList').appendChild(li);
+        }
+      }
+    } catch { /* ignore polling errors */ }
+  }
+
+  $('taskInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runTask(); }
+  });
+</script>
+</body>
+</html>

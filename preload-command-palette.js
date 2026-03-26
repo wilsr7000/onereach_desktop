@@ -14,7 +14,15 @@ contextBridge.exposeInMainWorld('palette', {
 
   dismiss: () => ipcRenderer.invoke('palette:dismiss'),
 
-  onShow: (callback) => ipcRenderer.on('palette:show', () => callback()),
+  onShow: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('palette:show', handler);
+    return () => ipcRenderer.removeListener('palette:show', handler);
+  },
 
-  onHide: (callback) => ipcRenderer.on('palette:hide', () => callback()),
+  onHide: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('palette:hide', handler);
+    return () => ipcRenderer.removeListener('palette:hide', handler);
+  },
 });

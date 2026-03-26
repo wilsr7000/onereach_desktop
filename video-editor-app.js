@@ -16164,6 +16164,9 @@ const app = {
   processUploadedVideo(file) {
     // Show preview
     const preview = document.getElementById('aiVideoPreview');
+    if (preview.src && preview.src.startsWith('blob:')) {
+      URL.revokeObjectURL(preview.src);
+    }
     const url = URL.createObjectURL(file);
     preview.src = url;
 
@@ -16177,7 +16180,11 @@ const app = {
 
   cancelAIVideoUpload() {
     document.getElementById('aiVideoPreviewSection').style.display = 'none';
-    document.getElementById('aiVideoPreview').src = '';
+    const preview = document.getElementById('aiVideoPreview');
+    if (preview.src && preview.src.startsWith('blob:')) {
+      URL.revokeObjectURL(preview.src);
+    }
+    preview.src = '';
     this.aiVideoState.uploadedVideoPath = null;
   },
 
@@ -16415,13 +16422,23 @@ const app = {
     const currentTime = video?.currentTime || 0;
 
     files.forEach((file) => {
+      const blobUrl = file.path || URL.createObjectURL(file);
+
       // Add to recent files
       this.recentAudioFiles.unshift({
         name: file.name,
-        path: file.path || URL.createObjectURL(file),
+        path: blobUrl,
         size: file.size,
         type: file.type,
         addedAt: Date.now(),
+      });
+
+      // Revoke blob URLs from evicted entries
+      const evicted = this.recentAudioFiles.slice(10);
+      evicted.forEach((entry) => {
+        if (entry.path && entry.path.startsWith('blob:')) {
+          URL.revokeObjectURL(entry.path);
+        }
       });
 
       // Keep only last 10
@@ -16446,7 +16463,7 @@ const app = {
       if (track) {
         this.addClipToTrack(track.id, {
           name: file.name,
-          path: file.path || URL.createObjectURL(file),
+          path: blobUrl,
           startTime: currentTime,
           endTime: currentTime + 10, // Default duration, will be updated when loaded
           type: 'import',

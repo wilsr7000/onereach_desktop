@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configure Step</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      padding: 16px 24px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+    }
+    header h1 { font-size: 15px; font-weight: 600; color: #f1f5f9; flex: 1; }
+    .badge { padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge.ready { background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
+    .badge.running { background: rgba(234,179,8,0.15); color: #fde047; border: 1px solid rgba(234,179,8,0.3); }
+    .badge.success { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+    .badge.error { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+    main { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    main::-webkit-scrollbar { width: 8px; }
+    main::-webkit-scrollbar-track { background: #0f172a; }
+    main::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    main::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+    /* Input phase */
+    .input-container { width: 100%; max-width: 520px; }
+    .context-bar {
+      display: flex; gap: 12px; margin-bottom: 20px; padding: 12px 16px;
+      background: #1e293b; border-radius: 8px; font-size: 12px; color: #94a3b8;
+    }
+    .context-bar .ctx-item { display: flex; align-items: center; gap: 6px; }
+    .context-bar .ctx-label { color: #64748b; }
+    .context-bar .ctx-value { color: #e2e8f0; font-weight: 500; }
+    .input-label { font-size: 13px; font-weight: 500; color: #94a3b8; margin-bottom: 8px; }
+    .instruction-area {
+      width: 100%; min-height: 100px; max-height: 200px; resize: vertical;
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 12px 14px; font-size: 13px; line-height: 1.6; color: #e2e8f0;
+      font-family: inherit; outline: none; transition: border-color 0.2s;
+    }
+    .instruction-area:focus { border-color: #3b82f6; }
+    .instruction-area::placeholder { color: #475569; }
+    .input-hint { font-size: 11px; color: #475569; margin-top: 6px; }
+    .input-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+    /* Progress phase */
+    .progress-container { width: 100%; max-width: 480px; text-align: center; }
+    .spinner {
+      width: 40px; height: 40px; margin: 0 auto 20px; border: 3px solid #1e293b;
+      border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .progress-title { font-size: 16px; font-weight: 600; color: #f1f5f9; margin-bottom: 24px; }
+    .steps-list { text-align: left; margin: 0 auto; max-width: 360px; }
+    .step-row {
+      display: flex; align-items: center; gap: 10px; padding: 8px 0;
+      font-size: 13px; color: #64748b; transition: color 0.3s;
+    }
+    .step-row.active { color: #e2e8f0; }
+    .step-row.done { color: #4ade80; }
+    .step-row.failed { color: #f87171; }
+    .step-icon { width: 18px; height: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+    .step-icon .dot { width: 6px; height: 6px; border-radius: 50%; background: #334155; }
+    .step-row.active .dot { background: #3b82f6; animation: pulse 1s infinite; }
+    .step-row.done .dot { display: none; }
+    .step-row.failed .dot { display: none; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .step-icon svg { width: 16px; height: 16px; display: none; }
+    .step-row.done svg.check { display: block; }
+    .step-row.failed svg.xmark { display: block; }
+
+    /* Result phase */
+    .result-container { width: 100%; max-width: 520px; }
+    .result-icon { text-align: center; margin-bottom: 16px; }
+    .result-icon svg { width: 48px; height: 48px; }
+    .result-title { text-align: center; font-size: 18px; font-weight: 600; color: #f1f5f9; margin-bottom: 8px; }
+    .result-subtitle { text-align: center; font-size: 13px; color: #94a3b8; margin-bottom: 24px; line-height: 1.6; }
+    .result-details {
+      background: #1e293b; border-radius: 8px; padding: 16px; margin-bottom: 20px;
+      font-size: 13px; line-height: 1.6; max-height: 220px; overflow-y: auto;
+    }
+    .result-details::-webkit-scrollbar { width: 6px; }
+    .result-details::-webkit-scrollbar-track { background: transparent; }
+    .result-details::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .result-details pre {
+      white-space: pre-wrap; word-break: break-word; color: #cbd5e1;
+      font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px;
+    }
+    .result-meta { display: flex; gap: 16px; margin-bottom: 20px; font-size: 12px; color: #64748b; }
+    .result-meta span { display: flex; align-items: center; gap: 4px; }
+    .guidance {
+      background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); border-radius: 8px;
+      padding: 16px; margin-bottom: 20px;
+    }
+    .guidance-title { font-size: 13px; font-weight: 600; color: #93c5fd; margin-bottom: 8px; }
+    .guidance ol { margin: 0; padding-left: 20px; font-size: 13px; color: #94a3b8; line-height: 1.8; }
+    .guidance ol li { padding-left: 4px; }
+
+    .btn-row { display: flex; gap: 10px; justify-content: center; }
+    .btn {
+      padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+      font-family: inherit; transition: all 0.2s; border: 1px solid #334155;
+    }
+    .btn-primary { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.3); color: #93c5fd; }
+    .btn-primary:hover { background: rgba(59,130,246,0.25); color: #bfdbfe; }
+    .btn-secondary { background: #1e293b; color: #94a3b8; }
+    .btn-secondary:hover { background: #334155; color: #e2e8f0; }
+    .btn.copied { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); color: #4ade80; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .error-container { width: 100%; max-width: 480px; text-align: center; }
+    .error-msg {
+      background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); border-radius: 8px;
+      padding: 16px; margin: 16px 0 20px; font-size: 13px; color: #fca5a5; line-height: 1.6; text-align: left;
+    }
+
+    footer {
+      padding: 10px 24px; border-top: 1px solid #1e293b; font-size: 11px; color: #475569;
+      display: flex; justify-content: space-between; flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">Configure Step</h1>
+    <div id="statusBadge"><span class="badge ready">Ready</span></div>
+  </header>
+  <main id="content"></main>
+  <footer>
+    <span id="stepInfo"></span>
+    <span id="timestamp"></span>
+  </footer>
+  <script>
+    const STEPS = [
+      { id: 'discover', label: 'Finding Step configurator API flow' },
+      { id: 'call',     label: 'Sending request to configurator' },
+    ];
+
+    const checkSvg = '<svg class="check" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round"><polyline points="4 12 10 18 20 6"></polyline></svg>';
+    const xSvg = '<svg class="xmark" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"></line><line x1="6" y1="18" x2="18" y2="6"></line></svg>';
+    const successSvg = '<svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="22" stroke="#4ade80" stroke-width="2" fill="rgba(34,197,94,0.1)"/><polyline points="14 24 22 32 34 16" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const errorSvg = '<svg viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="22" stroke="#f87171" stroke-width="2" fill="rgba(239,68,68,0.1)"/><line x1="16" y1="16" x2="32" y2="32" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"/><line x1="16" y1="32" x2="32" y2="16" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"/></svg>';
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s || '';
+      return d.innerHTML;
+    }
+
+    function showInput() {
+      const content = document.getElementById('content');
+      content.style.justifyContent = 'center';
+      document.getElementById('statusBadge').innerHTML = '<span class="badge ready">Ready</span>';
+      document.getElementById('title').textContent = 'Configure Step';
+
+      let html = '<div class="input-container">';
+      html += '<div id="ctxBar" class="context-bar" style="display:none"></div>';
+      html += '<div class="input-label">Instructions (optional)</div>';
+      html += '<textarea id="instructionInput" class="instruction-area" placeholder="Describe what you want configured, e.g.:\n- Add error handling\n- Set the response format to JSON\n- Update the timeout to 30 seconds"></textarea>';
+      html += '<div class="input-hint">Leave blank to let the configurator use its defaults.</div>';
+      html += '<div class="input-actions">';
+      html += '<button class="btn btn-secondary" id="btnCancel">Cancel</button>';
+      html += '<button class="btn btn-primary" id="btnRun">Configure</button>';
+      html += '</div>';
+      html += '</div>';
+      content.innerHTML = html;
+
+      document.getElementById('btnCancel').onclick = () => window.close();
+      document.getElementById('btnRun').onclick = () => {
+        const instruction = document.getElementById('instructionInput').value.trim();
+        runConfigure(instruction || null);
+      };
+      document.getElementById('instructionInput').addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          document.getElementById('btnRun').click();
+        }
+      });
+
+      // Load context info
+      if (window.devTools && window.devTools.getFlowContext) {
+        window.devTools.getFlowContext().then(ctx => {
+          if (!ctx) return;
+          const bar = document.getElementById('ctxBar');
+          let items = '';
+          if (ctx.label) items += '<span class="ctx-item"><span class="ctx-label">Flow:</span><span class="ctx-value">' + esc(ctx.label) + '</span></span>';
+          if (ctx.stepLabel) items += '<span class="ctx-item"><span class="ctx-label">Step:</span><span class="ctx-value">' + esc(ctx.stepLabel) + '</span></span>';
+          else if (ctx.stepId) items += '<span class="ctx-item"><span class="ctx-label">Step:</span><span class="ctx-value">' + esc(ctx.stepId.substring(0, 12) + '...') + '</span></span>';
+          if (items) { bar.innerHTML = items; bar.style.display = 'flex'; }
+        }).catch(() => {});
+      }
+
+      document.getElementById('instructionInput').focus();
+    }
+
+    function showProgress() {
+      const content = document.getElementById('content');
+      content.style.justifyContent = 'center';
+      document.getElementById('statusBadge').innerHTML = '<span class="badge running">Running</span>';
+      let html = '<div class="progress-container">';
+      html += '<div class="spinner"></div>';
+      html += '<div class="progress-title">Configuring step...</div>';
+      html += '<div class="steps-list">';
+      STEPS.forEach((s, i) => {
+        html += '<div class="step-row' + (i === 0 ? ' active' : '') + '" id="pstep-' + s.id + '">';
+        html += '<span class="step-icon"><span class="dot"></span>' + checkSvg + xSvg + '</span>';
+        html += '<span>' + esc(s.label) + '</span>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+      content.innerHTML = html;
+    }
+
+    function advanceStep(id, failed) {
+      const row = document.getElementById('pstep-' + id);
+      if (!row) return;
+      row.classList.remove('active');
+      row.classList.add(failed ? 'failed' : 'done');
+      if (!failed) {
+        const next = row.nextElementSibling;
+        if (next) next.classList.add('active');
+      }
+    }
+
+    function showSuccess(data) {
+      const content = document.getElementById('content');
+      content.style.justifyContent = 'flex-start';
+
+      const isAsync = data.result && typeof data.result === 'object' && data.result.jobId && data.result.status === 'pending';
+      const badgeClass = isAsync ? 'running' : 'success';
+      const badgeText = isAsync ? 'Processing' : 'Done';
+
+      document.getElementById('statusBadge').innerHTML = '<span class="badge ' + badgeClass + '">' + badgeText + '</span>';
+      document.getElementById('title').textContent = data.stepLabel
+        ? 'Configured: ' + data.stepLabel
+        : 'Step Configured';
+      document.getElementById('stepInfo').textContent = data.stepId ? 'Step: ' + data.stepId : '';
+      document.getElementById('timestamp').textContent = data.ts || '';
+
+      let html = '<div class="result-container">';
+
+      if (isAsync) {
+        html += '<div class="result-icon">' + successSvg + '</div>';
+        html += '<div class="result-title">Configuration submitted</div>';
+        html += '<div class="result-subtitle">The configurator is processing your step in the background. This may take a minute.</div>';
+        html += '<div class="guidance"><div class="guidance-title">Next steps</div><ol>';
+        html += '<li>Wait a moment for the configurator to finish processing</li>';
+        html += '<li>Refresh the flow in Edison to see the changes</li>';
+        html += '<li>Review the updated step configuration</li>';
+        html += '<li>Activate the flow when you are satisfied</li>';
+        html += '</ol></div>';
+      } else {
+        html += '<div class="result-icon">' + successSvg + '</div>';
+        html += '<div class="result-title">Step configured and saved</div>';
+        html += '<div class="result-subtitle">The configurator has processed your step and saved the updated flow.</div>';
+        html += '<div class="guidance"><div class="guidance-title">Next steps</div><ol>';
+        html += '<li>Refresh the flow in Edison to see the changes</li>';
+        html += '<li>Review the updated step configuration</li>';
+        html += '<li>Activate the flow when you are satisfied</li>';
+        html += '</ol></div>';
+      }
+
+      if (data.result && typeof data.result === 'object') {
+        html += '<div class="result-meta">';
+        if (data.flowLabel) html += '<span>Flow: ' + esc(data.flowLabel) + '</span>';
+        if (data.stepLabel) html += '<span>Step: ' + esc(data.stepLabel) + '</span>';
+        html += '</div>';
+      }
+
+      const resultText = data.result
+        ? (typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2))
+        : 'No additional details returned.';
+
+      html += '<div class="result-details"><pre>' + esc(resultText) + '</pre></div>';
+      html += '<div class="btn-row">';
+      html += '<button class="btn btn-primary" id="btnCopy">Copy Result</button>';
+      html += '<button class="btn btn-secondary" id="btnAgain">Configure Again</button>';
+      html += '<button class="btn btn-secondary" id="btnClose">Close</button>';
+      html += '</div>';
+      html += '</div>';
+      content.innerHTML = html;
+
+      document.getElementById('btnCopy').onclick = async function () {
+        try {
+          if (window.electron?.clipboard?.writeText) {
+            await window.electron.clipboard.writeText(resultText);
+          } else {
+            await navigator.clipboard.writeText(resultText);
+          }
+        } catch (_) {
+          const ta = document.createElement('textarea');
+          ta.value = resultText;
+          ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        const btn = document.getElementById('btnCopy');
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'Copy Result'; btn.classList.remove('copied'); }, 1500);
+      };
+      document.getElementById('btnAgain').onclick = () => showInput();
+      document.getElementById('btnClose').onclick = () => window.close();
+    }
+
+    function showError(message, failedStep) {
+      if (failedStep) advanceStep(failedStep, true);
+      const spinner = document.querySelector('.spinner');
+      if (spinner) spinner.style.display = 'none';
+
+      const content = document.getElementById('content');
+      content.style.justifyContent = 'center';
+      document.getElementById('statusBadge').innerHTML = '<span class="badge error">Failed</span>';
+
+      let html = '<div class="error-container">';
+      html += '<div class="result-icon">' + errorSvg + '</div>';
+      html += '<div class="result-title">Configuration failed</div>';
+      html += '<div class="error-msg">' + esc(message) + '</div>';
+      html += '<div class="btn-row">';
+      html += '<button class="btn btn-primary" id="btnRetry">Back</button>';
+      html += '<button class="btn btn-secondary" id="btnClose">Close</button>';
+      html += '</div>';
+      html += '</div>';
+      content.innerHTML = html;
+
+      document.getElementById('btnRetry').onclick = () => showInput();
+      document.getElementById('btnClose').onclick = () => window.close();
+    }
+
+    async function runConfigure(instruction) {
+      showProgress();
+      await sleep(200);
+
+      try {
+        const result = await window.devTools.configureStep(null, instruction);
+
+        advanceStep('discover', false);
+        advanceStep('call', false);
+        advanceStep('wait', false);
+        await sleep(400);
+
+        if (result.error) {
+          let failedStep = 'wait';
+          if (result.error.includes('No flow ID') || result.error.includes('No step')) failedStep = 'discover';
+          else if (result.error.includes('Could not find') || result.error.includes('no HTTP gateway')) failedStep = 'discover';
+          else if (result.error.includes('HTTP')) failedStep = 'call';
+          showError(result.error, failedStep);
+          return;
+        }
+
+        showSuccess(result);
+      } catch (err) {
+        showError(err.message || 'An unexpected error occurred.', 'wait');
+      }
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    showInput();
+  </script>
+</body>
+</html>

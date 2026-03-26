@@ -48,6 +48,10 @@ class MultiTenantStore {
     this.tokens = {};
 
     // Token storage for 'or' cookie (account session): { edison: tokenData, ... }
+    // NOTE: The 'or' cookie is account-specific and is NOT propagated across
+    // partitions. This store is diagnostic-only -- it holds the last-captured
+    // 'or' per environment for debugging/logging. With per-account partitions,
+    // each partition establishes its own 'or' during authentication.
     this.orTokens = {};
 
     // Active partitions per environment: { edison: Set(['persist:tab-1', ...]) }
@@ -230,52 +234,12 @@ class MultiTenantStore {
   }
 
   /**
-   * Propagate 'or' token to all active partitions except the source
-   * @param {string} environment - The environment
-   * @param {string} sourcePartition - The partition where refresh originated
+   * @deprecated The 'or' cookie is account-specific and must not be propagated
+   * across partitions. Each partition establishes its own 'or' during auth.
+   * Kept as a no-op to avoid breaking any remaining call sites.
    */
-  async propagateOrToken(environment, sourcePartition) {
-    const token = this.getOrToken(environment);
-    if (!token) {
-      console.warn(`[MultiTenant] No or token to propagate for ${environment}`);
-      return;
-    }
-
-    const partitions = this.getActivePartitions(environment);
-    const targetPartitions = partitions.filter((p) => p !== sourcePartition);
-
-    if (targetPartitions.length === 0) {
-      console.log(`[MultiTenant] No other partitions to propagate or token to for ${environment}`);
-      return;
-    }
-
-    // Set re-entrancy guard to prevent loops from cookie listener callbacks
-    this.propagating = true;
-
-    console.log(`[MultiTenant] Propagating ${environment} or token to ${targetPartitions.length} partitions`);
-
-    const broaderDomain = this.getBroaderDomain(environment);
-
-    for (const partition of targetPartitions) {
-      try {
-        const ses = getElectronSession().fromPartition(partition);
-        await ses.cookies.set({
-          url: `https://api${broaderDomain}`,
-          name: 'or',
-          value: token.value,
-          domain: broaderDomain,
-          secure: token.secure !== false,
-          httpOnly: token.httpOnly !== false,
-          expirationDate: token.expiresAt,
-        });
-        console.log(`[MultiTenant] Propagated or token to ${partition}`);
-      } catch (err) {
-        console.error(`[MultiTenant] Failed to propagate or token to ${partition}:`, err.message);
-      }
-    }
-
-    // Reset re-entrancy guard
-    this.propagating = false;
+  async propagateOrToken(_environment, _sourcePartition) {
+    // No-op: or tokens are account-specific and should not cross partitions.
   }
 
   // ===== Persistence =====
@@ -471,12 +435,14 @@ class MultiTenantStore {
           }
         }
 
-        // Capture 'or' (account session token) for SSO
+        // Capture 'or' (account session token) for logging/debugging.
+        // NOTE: The 'or' cookie is ACCOUNT-SPECIFIC. We capture it for
+        // diagnostics but do NOT propagate it to other partitions, because
+        // each account's partition must establish its own 'or' session
+        // during authentication. See main.js comment at inject-token handler.
         if (cookie.name === 'or') {
-          const hasExisting = this.hasOrToken(environment);
-
           console.log(
-            `[MultiTenant] ${hasExisting ? 'Refreshed' : 'Captured'} ${environment} or token from ${partitionName}`
+            `[MultiTenant] Captured ${environment} or token from ${partitionName} (not propagated)`
           );
 
           await this.setOrToken(environment, {
@@ -487,11 +453,6 @@ class MultiTenantStore {
             expiresAt: cookie.expirationDate,
             sourcePartition: partitionName,
           });
-
-          // If refresh, propagate to all OTHER partitions (but prevent loops)
-          if (hasExisting && !this.propagating) {
-            await this.propagateOrToken(environment, partitionName);
-          }
         }
       }
     };
@@ -512,9 +473,9 @@ class MultiTenantStore {
    * GSX partitions should NOT be cleaned up since they're shared
    * @param {string} partitionName - The partition name
    */
-  removeCookieListener(partitionName) {
-    // Only remove tab partition listeners
-    if (!partitionName.startsWith('persist:tab-')) {
+  removeCookieListener(partitionName, { force = false } = {}) {
+    // By default only remove tab partitions; pass force=true for explicit GSX cleanup
+    if (!force && !partitionName.startsWith('persist:tab-')) {
       return;
     }
 

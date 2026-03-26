@@ -6,8 +6,9 @@
  *
  * Architecture:
  * - Receives natural language tasks via the task exchange
- * - Uses AI service to plan browser actions step-by-step
- * - Executes actions via lib/browser-automation.js (Playwright)
+ * - Primary path: Desktop Autopilot facade (browser-use npm package)
+ * - Fallback path: Direct lib/browser-automation.js (Playwright) for
+ *   when Desktop Autopilot is disabled or unavailable
  * - Returns results with screenshots and extracted data
  *
  * Safety guardrails:
@@ -25,7 +26,20 @@ const { renderAgentUI } = require('../../lib/agent-ui-renderer');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 
-// Lazy-load browser automation service (main process only)
+let _autopilot = null;
+function getAutopilot() {
+  if (!_autopilot) {
+    try {
+      _autopilot = require('../../lib/desktop-autopilot');
+    } catch (e) {
+      log.warn('agent', 'Desktop Autopilot not available, using legacy browser automation', { error: e.message });
+      return null;
+    }
+  }
+  return _autopilot;
+}
+
+// Lazy-load browser automation service (main process only) -- fallback path
 let browserService = null;
 function getBrowser() {
   if (!browserService) {
@@ -195,6 +209,22 @@ This agent drives a real browser and interacts with web page elements. It clicks
     }
   },
 
+  _recordTask(taskDescription, success) {
+    try {
+      if (!this.memory) return;
+      const timestamp = new Date().toISOString().split('T')[0];
+      const status = success ? 'completed' : 'failed';
+      this.memory.appendToSection(
+        'Recent Tasks',
+        `- ${timestamp}: "${taskDescription.substring(0, 50)}" (${status}, browser-use)`,
+        20
+      );
+      this.memory.save();
+    } catch {
+      // Non-fatal
+    }
+  },
+
   /**
    * Execute a browser automation task.
    * @param {Object} task - { content, metadata, ... }
@@ -214,6 +244,41 @@ This agent drives a real browser and interacts with web page elements. It clicks
     if (!this.memory) {
       await this.initialize();
     }
+
+    // ---- Primary path: Desktop Autopilot (browser-use) ----
+    const autopilot = getAutopilot();
+    if (autopilot && autopilot.isBrowserEnabled()) {
+      heartbeat('Running browser task with Desktop Autopilot...');
+      try {
+        const result = await autopilot.browser.runTask(taskDescription, {
+          useVision: true,
+          maxSteps: MAX_ACTIONS,
+        });
+
+        if (result.success) {
+          this._recordTask(taskDescription, true);
+          const message = result.finalResult || 'Browser task completed successfully.';
+          return {
+            success: true,
+            message,
+            data: {
+              steps: result.steps,
+              engine: 'browser-use',
+            },
+          };
+        }
+
+        log.warn('agent', 'Desktop Autopilot browser task failed, falling back to legacy', {
+          error: result.error,
+        });
+      } catch (autopilotErr) {
+        log.warn('agent', 'Desktop Autopilot error, falling back to legacy path', {
+          error: autopilotErr.message,
+        });
+      }
+    }
+
+    // ---- Fallback path: Legacy Playwright automation ----
 
     // Get the browser service
     const browser = getBrowser();

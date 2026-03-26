@@ -2610,7 +2610,12 @@ async function initializeExchangeBridge(config = {}) {
     try {
       const masterOrchestrator = require('../../packages/agents/master-orchestrator');
       exchangeInstance.setMasterEvaluator(async (task, bids) => {
-        return await masterOrchestrator.evaluate(task, bids);
+        try {
+          return await masterOrchestrator.evaluate(task, bids);
+        } catch (_e) {
+          log.error('voice', 'Master Orchestrator evaluation failed, falling back to rank order', { error: _e.message });
+          return null;
+        }
       });
       log.info('voice', 'Master Orchestrator enabled');
     } catch (e) {
@@ -3114,14 +3119,13 @@ function setupExchangeEvents() {
         stats.recordWin(winner.agentId);
         stats.recordExecution(winner.agentId);
 
-        // Record bid event for debugging
         stats.recordBidEvent({
           taskId: task.id,
           taskContent: task.content,
           bids: bidsSummary,
           winner,
         });
-      });
+      }).catch((_e) => { log.warn('voice', 'Stats init/record failed', { error: _e.message }); });
     } catch (e) {
       log.warn('voice', 'Stats tracking error', { data: e.message });
     }
@@ -3184,6 +3188,8 @@ function setupExchangeEvents() {
 
   // Task completed successfully
   exchangeInstance.on('task:settled', async ({ task, result, agentId }) => {
+   try {
+    const safeResult = result || {};
     log.info('voice', 'Task settled by', { agentId: agentId });
 
     // ── RELEASE PROCESSING LOCK ──
@@ -3536,9 +3542,12 @@ function setupExchangeEvents() {
     broadcastToWindows('voice-task:completed', {
       taskId: task.id,
       agentId,
-      result,
-      hasPanel: !!result.html,
+      result: safeResult,
+      hasPanel: !!safeResult.html,
     });
+   } catch (settledErr) {
+    log.error('voice', 'Error in task:settled handler', { error: settledErr.message, agentId, taskId: task?.id });
+   }
   });
 
   // Task executing - agent started working
@@ -4672,6 +4681,25 @@ async function processSubmit(transcript, options = {}) {
       // Screen context is optional -- don't block task submission
     }
 
+    // Build situational context so agents know what the user is doing right now
+    let situationContext = null;
+    try {
+      const { executeAction } = require('../../action-executor');
+      const result = await executeAction('app-situation');
+      if (result && result.success) {
+        const s = result.data;
+        situationContext = {
+          focusedWindow: s.windows?.focusedName || null,
+          openWindows: (s.windows?.open || []).filter(w => w.visible).map(w => w.name || w.title),
+          flowContext: s.flowContext || null,
+          orbVisible: s.voice?.orbVisible || false,
+          connectedAgents: s.agents?.connectedCount || 0,
+        };
+      }
+    } catch (_e) {
+      // Situation context is optional -- don't block task submission
+    }
+
     // Single task submit
     const { taskId, task: submittedTask } = await exchangeInstance.submit({
       content: text,
@@ -4685,6 +4713,7 @@ async function processSubmit(transcript, options = {}) {
         conversationText: convText,
         userProfileContext,
         screenContext,
+        situationContext,
         timestamp: Date.now(),
         ...metadata,
       },

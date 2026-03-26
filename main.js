@@ -53,6 +53,33 @@ let splashWindow = null;
 // Expose window registry globally for cross-module access
 global.windowRegistry = windowRegistry;
 
+// ============================================================================
+// GLOBAL ERROR HANDLERS -- catch anything that slips through
+// ============================================================================
+
+process.on('unhandledRejection', (reason, _promise) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error('[UNHANDLED REJECTION]', msg);
+  try {
+    const q = getLogQueue();
+    q.error('app', `Unhandled promise rejection: ${msg}`, {
+      stack: reason instanceof Error ? reason.stack : undefined,
+    });
+  } catch (_) { /* log queue may not be ready yet */ }
+});
+
+process.on('uncaughtException', (error, origin) => {
+  console.error(`[UNCAUGHT EXCEPTION] (${origin})`, error.message);
+  try {
+    const q = getLogQueue();
+    q.error('app', `Uncaught exception (${origin}): ${error.message}`, {
+      stack: error.stack,
+      origin,
+    });
+  } catch (_) { /* log queue may not be ready yet */ }
+  // Don't exit -- let the watchdog handle truly fatal states
+});
+
 // Enable Speech Recognition API in Electron
 // These must be set before app.whenReady()
 app.commandLine.appendSwitch('enable-speech-dispatcher');
@@ -553,6 +580,37 @@ app.on('will-finish-launching', () => {
 app.whenReady().then(() => {
   // Re-initialize logger now that app is ready
   logger = getLogger();
+
+  // Check for crash recovery from a previous watchdog-triggered restart
+  try {
+    const recoveryPath = path.join(app.getPath('userData'), 'crash-recovery.json');
+    if (fs.existsSync(recoveryPath)) {
+      const recoveryData = JSON.parse(fs.readFileSync(recoveryPath, 'utf8'));
+      console.log('[CrashRecovery] App was restarted by watchdog:', recoveryData.reason);
+      fs.unlinkSync(recoveryPath);
+      // Log to the queue after it's initialized (below), and notify user after window is ready
+      setTimeout(() => {
+        try {
+          const q = getLogQueue();
+          q.enqueue({
+            level: 'warn',
+            category: 'health-monitor',
+            message: `App recovered from a hang: ${recoveryData.reason}`,
+            data: recoveryData,
+            source: 'crash-recovery',
+          });
+          // Notify user via main window
+          if (global.mainWindow && !global.mainWindow.isDestroyed()) {
+            global.mainWindow.webContents.send('notification', {
+              title: 'App Recovered',
+              body: `The app was automatically restarted after becoming unresponsive. Previous uptime: ${recoveryData.watchdogUptime || '?'}s`,
+              type: 'warning',
+            });
+          }
+        } catch (_) { /* best effort */ }
+      }, 5000);
+    }
+  } catch (_) { /* no recovery file or parse error -- normal startup */ }
 
   // Initialize central logging event queue + REST/WebSocket server
   const logQueue = getLogQueue();
@@ -1537,6 +1595,14 @@ app.on('before-quit', (event) => {
         }
       } catch (error) {
         console.error('[App] Error stopping app manager agent:', error);
+      }
+
+      // Stop health monitor
+      try {
+        const { stopHealthMonitor } = require('./lib/health-monitor');
+        stopHealthMonitor();
+      } catch (_error) {
+        /* health monitor may not be started */
       }
 
       // Shutdown WebMCP consumer
@@ -2783,7 +2849,7 @@ function setupSpacesAPI() {
   ipcMain.handle('multi-tenant:inject-token', async (event, { environment, partition }) => {
     // SECURITY: Validate partition format
     const validTabPattern = /^persist:tab-\d+-[a-z0-9]+$/;
-    const validGsxPattern = /^persist:gsx-(edison|staging|production|dev)$/;
+    const validGsxPattern = /^persist:gsx-(edison|staging|production|dev)(-[a-f0-9-]+)?$/;
 
     if (!validTabPattern.test(partition) && !validGsxPattern.test(partition)) {
       console.warn(`[MultiTenant] Rejected invalid partition: ${partition}`);
@@ -2792,8 +2858,8 @@ function setupSpacesAPI() {
 
     // SECURITY: For GSX partitions, verify environment matches
     if (partition.startsWith('persist:gsx-')) {
-      const expectedPartition = `persist:gsx-${environment}`;
-      if (partition !== expectedPartition) {
+      const expectedPrefix = `persist:gsx-${environment}`;
+      if (!partition.startsWith(expectedPrefix)) {
         console.warn(`[MultiTenant] Environment mismatch: ${environment} vs ${partition}`);
         return { success: false, error: 'Environment/partition mismatch' };
       }
@@ -3032,6 +3098,28 @@ function setupSpacesAPI() {
         feature: 'auto-login',
       });
       return null;
+    }
+  });
+
+  // Confirm auto-login (shows native dialog if promptBeforeAutoLogin is enabled)
+  // Returns boolean for renderer compatibility
+  ipcMain.handle('onereach:confirm-auto-login', async (event, { email }) => {
+    try {
+      const { confirmAutoLogin } = require('./lib/auto-login-prompt');
+      const settingsManager = global.settingsManager;
+      const settings = settingsManager ? settingsManager.getAll() : {};
+      const autoLoginSettings = settings.autoLoginSettings || {};
+
+      const parentWindow = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow();
+      const result = await confirmAutoLogin(parentWindow, email, autoLoginSettings);
+      return result.allowed;
+    } catch (error) {
+      logger.error('[Auth] Confirm auto-login error', {
+        event: 'auth:confirm-error',
+        error: error.message,
+        feature: 'auto-login',
+      });
+      return true;
     }
   });
 
@@ -3894,7 +3982,7 @@ function setupSpacesAPI() {
 
   ipcMain.handle('browsing:get-auth-pool-domains', async () => {
     try { return await browsingAPI.getAuthPoolDomains(); }
-    catch (err) { return []; }
+    catch (_err) { return []; }
   });
 
   ipcMain.handle('browsing:import-chrome-cookies', async (_event, domain, sessionId) => {
@@ -3993,10 +4081,36 @@ let tabPickerCallback = null;
 function setupAppActionsIPC() {
   console.log('[AppActions] Setting up IPC handlers (delegating to action-executor)...');
 
-  const { executeAction, listActions, setupActionIPC } = require('./action-executor');
+  const { executeAction, listActions, setupActionIPC, startSituationLogger } = require('./action-executor');
 
   // Set up the action executor's IPC handlers
   setupActionIPC();
+
+  // Emit situational awareness snapshots into the log stream every 60s
+  startSituationLogger(60000);
+
+  // Start internal health monitor (event loop, CPU, memory, renderer health)
+  try {
+    const { startHealthMonitor } = require('./lib/health-monitor');
+    startHealthMonitor();
+  } catch (e) {
+    console.error('[HealthMonitor] Failed to start:', e.message);
+  }
+
+  // Spawn external watchdog process (survives main process hangs)
+  try {
+    const { fork } = require('child_process');
+    const userDataPath = require('electron').app.getPath('userData');
+    const watchdog = fork(
+      path.join(__dirname, 'lib/watchdog.js'),
+      [String(process.pid), '47292', userDataPath],
+      { detached: true, stdio: 'ignore' }
+    );
+    watchdog.unref();
+    console.log('[Watchdog] External watchdog spawned');
+  } catch (e) {
+    console.error('[Watchdog] Failed to spawn:', e.message);
+  }
 
   // Legacy IPC handler for backward compatibility
   ipcMain.handle('app:execute-action', async (event, action) => {
@@ -4106,6 +4220,7 @@ function createTabPickerWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload-tab-picker.js'),
+      backgroundThrottling: false,
     },
   });
 
@@ -4131,6 +4246,7 @@ function openExtensionSetupGuide() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload-minimal.js'),
+      backgroundThrottling: false,
     },
   });
 
@@ -4563,12 +4679,12 @@ function setupModuleManagerIPC() {
   });
 
   // Open web tool
-  ipcMain.handle('module:open-web-tool', async (event, toolId) => {
+  ipcMain.handle('module:open-web-tool', async (event, toolId, opts) => {
     try {
       if (!global.moduleManager) {
         return { success: false, error: 'Module manager not yet initialized' };
       }
-      global.moduleManager.openWebTool(toolId);
+      global.moduleManager.openWebTool(toolId, opts);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -7501,7 +7617,7 @@ function setupIPC() {
         try {
           await Promise.race([
             win.webContents.session.clearCache(),
-            new Promise(resolve => setTimeout(resolve, 3000)),
+            new Promise(resolve => { setTimeout(resolve, 3000); }),
           ]);
           console.log('[IPC] Cache cleared for window');
         } catch (_) {
@@ -7509,6 +7625,9 @@ function setupIPC() {
         }
 
         if (!win.isDestroyed()) {
+          // Override any beforeunload prevention so the user-initiated refresh always goes through.
+          // Without this, GSX pages with unsaved-state guards silently block the reload.
+          win.webContents.once('will-prevent-unload', (evt) => evt.preventDefault());
           win.webContents.reloadIgnoringCache();
           console.log('[IPC] Page reloaded ignoring cache');
         }
@@ -7608,6 +7727,1174 @@ function setupIPC() {
     } catch (error) {
       console.error('Error testing LLM connection:', error);
       return { success: false, error: error.message };
+    }
+  });
+
+  // ==================== EDISON SDK MANAGEMENT ====================
+
+  const edisonSdkManager = require('./lib/edison-sdk-manager');
+  const flowContext = require('./lib/gsx-flow-context');
+  flowContext.registerIPC();
+
+  const edisonEventLogger = require('./lib/edison-event-logger');
+
+  // Sync logging state from settings on startup
+  if (global.settingsManager) {
+    const loggingPref = global.settingsManager.get('edisonEventLogging');
+    if (loggingPref === false) edisonEventLogger.setEnabled(false);
+  }
+
+  // Rebuild menu when flow context changes so the Dev Tools menu reflects current flow
+  let menuRebuildTimer = null;
+  flowContext.onChange(() => {
+    if (menuRebuildTimer) clearTimeout(menuRebuildTimer);
+    menuRebuildTimer = setTimeout(() => {
+      try {
+        const { setApplicationMenu } = require('./menu');
+        setApplicationMenu();
+      } catch (_) { /* intentionally empty */ }
+    }, 500);
+  });
+
+  ipcMain.handle('edison-sdk:get-status', async () => {
+    try {
+      return edisonSdkManager.getStatus();
+    } catch (err) {
+      console.error('[Edison SDK] get-status error:', err);
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('edison-sdk:test-all', async () => {
+    try {
+      return await edisonSdkManager.testAll();
+    } catch (err) {
+      console.error('[Edison SDK] test-all error:', err);
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('edison-sdk:test', async (_event, name) => {
+    try {
+      return await edisonSdkManager.testSDK(name);
+    } catch (err) {
+      console.error(`[Edison SDK] test(${name}) error:`, err);
+      return { ok: false, steps: [{ name: 'Exception', ok: false, detail: err.message }] };
+    }
+  });
+
+  ipcMain.handle('edison-sdk:refresh-token', async () => {
+    try {
+      edisonSdkManager.invalidateInstances();
+      await edisonSdkManager.getToken(true);
+      return edisonSdkManager.getTokenStatus();
+    } catch (err) {
+      console.error('[Edison SDK] refresh-token error:', err);
+      return { status: 'error', message: err.message };
+    }
+  });
+
+  ipcMain.handle('edison-sdk:list-spaces', async () => {
+    try {
+      return await edisonSdkManager.listSpaces();
+    } catch (err) {
+      console.error('[Edison SDK] list-spaces error:', err);
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('edison-sdk:search-library', async (_event, query) => {
+    try {
+      return await edisonSdkManager.searchLibrary(query);
+    } catch (err) {
+      console.error('[Edison SDK] search-library error:', err);
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('edison-sdk:browse-kv', async (_event, collection, prefix) => {
+    try {
+      return await edisonSdkManager.browseKV(collection, prefix);
+    } catch (err) {
+      console.error('[Edison SDK] browse-kv error:', err);
+      return { error: err.message };
+    }
+  });
+
+  // ==================== EDISON LIBRARY BROWSER ====================
+
+  ipcMain.handle('edison-library:search', async (_event, query, take) => {
+    try {
+      return await edisonSdkManager.searchLibrary(query || '', take);
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('edison-library:get-spaces', async () => {
+    try {
+      return await edisonSdkManager.listSpaces();
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('edison-library:get-step-templates', async (_event, opts) => {
+    try {
+      const stApi = edisonSdkManager.getStepTemplates();
+      const templates = await stApi.listStepTemplates(opts || { skip: 0, take: 50 });
+      const items = templates?.items || templates?.data || templates || [];
+      return (Array.isArray(items) ? items : []).map(t => ({
+        id: t.id || t.stepTemplateId,
+        name: t.name || t.label || t.meta?.name || '(unnamed)',
+        description: t.description || t.meta?.help || '',
+        category: t.category || '',
+      }));
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('edison-library:get-popular', async () => {
+    try {
+      const stApi = edisonSdkManager.getStepTemplates();
+      return await stApi.listPopularStepTemplateIds();
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // ==================== FLOW VALIDATOR ====================
+
+  let _pendingConfigureStepId = null;
+
+  ipcMain.on('dev-tools-action', (_event, payload) => {
+    const action = typeof payload === 'string' ? payload : payload?.action;
+    const stepId = typeof payload === 'object' ? payload?.stepId : null;
+
+    if (action === 'evaluate-flow') {
+      try {
+        const { openValidatorResults } = require('./lib/menu-sections/dev-tools-builder');
+        openValidatorResults();
+      } catch (err) {
+        console.error('[Dev Tools] Failed to open validator:', err);
+      }
+    } else if (action === 'evaluate-flow-logs') {
+      try {
+        const { openFlowLogsResults } = require('./lib/menu-sections/dev-tools-builder');
+        openFlowLogsResults();
+      } catch (err) {
+        console.error('[Dev Tools] Failed to open flow logs:', err);
+      }
+    } else if (action === 'configure-step') {
+      _pendingConfigureStepId = stepId || flowContext.get()?.stepId || null;
+      try {
+        const { openConfigureStep } = require('./lib/menu-sections/dev-tools-builder');
+        openConfigureStep();
+      } catch (err) {
+        console.error('[Dev Tools] Failed to open configure step:', err);
+      }
+    } else if (action === 'build-step-template') {
+      try {
+        const { openBuildStepTemplate } = require('./lib/menu-sections/dev-tools-builder');
+        openBuildStepTemplate();
+      } catch (err) {
+        console.error('[Dev Tools] Failed to open build step template:', err);
+      }
+    }
+  });
+
+  ipcMain.handle('dev-tools:validate-flow', async (_event, flowId) => {
+    const REMOTE_VALIDATOR_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/validate-flow-v3';
+    const POLL_INTERVAL_MS = 2000;
+    const POLL_TIMEOUT_MS = 60000;
+
+    const log = require('./lib/log-event-queue').getLogQueue();
+    try {
+      let windowId;
+      if (!flowId) {
+        const ctx = flowContext.get();
+        flowId = ctx?.flowId;
+        windowId = ctx?.windowId;
+      }
+      if (!flowId) return { error: 'No flow ID available. Navigate to a flow first.' };
+
+      log.info('flow-validator', 'Starting remote validation', { flowId, windowId });
+
+      // Fetch flow via SDK with browser-captured token fallback
+      const edisonSdkManager = require('./lib/edison-sdk-manager');
+      let tokenFallbackUsed = false;
+      let originalTokenCache = null;
+      try {
+        await edisonSdkManager.getToken();
+      } catch (tokenErr) {
+        log.warn('flow-validator', 'SDK token failed, falling back to browser auth token', { error: tokenErr.message });
+        const browserToken = flowContext.getAuthToken();
+        if (!browserToken) {
+          return { error: 'No auth token available. Open or navigate to a flow first so the app can capture credentials.' };
+        }
+        originalTokenCache = edisonSdkManager._getTokenCache?.() || null;
+        edisonSdkManager._setTokenCache?.({ token: browserToken, expiresAt: Date.now() + 300000 });
+        tokenFallbackUsed = true;
+      }
+
+      let flowData;
+      try {
+        const flowsApi = edisonSdkManager.getFlows();
+        flowData = await flowsApi.getFlow(flowId);
+      } catch (sdkErr) {
+        if (tokenFallbackUsed && originalTokenCache) edisonSdkManager._setTokenCache?.(originalTokenCache);
+        log.error('flow-validator', 'SDK getFlow failed', { flowId, error: sdkErr.message });
+        return { error: `Failed to fetch flow via SDK: ${sdkErr.message}` };
+      } finally {
+        if (tokenFallbackUsed && originalTokenCache) edisonSdkManager._setTokenCache?.(originalTokenCache);
+      }
+
+      if (!flowData) return { error: `Flow ${flowId} not found.` };
+
+      const label = flowData?.data?.label || flowData?.label || null;
+      log.info('flow-validator', 'Flow fetched via SDK, sending to remote validator', { flowId, label, hasData: !!flowData?.data });
+
+      // Cache step map for label lookups elsewhere
+      try {
+        const trees = flowData?.data?.trees || flowData?.trees || {};
+        const mainSteps = trees?.main?.steps || [];
+        const arr = Array.isArray(mainSteps) ? mainSteps : Object.values(mainSteps);
+        const sm = {};
+        for (const s of arr) {
+          if (s?.id) sm[s.id] = { label: s.label || s.data?.label || null, type: s.type || s.stepTemplateId || null };
+        }
+        if (Object.keys(sm).length > 0) flowContext.setStepMap(sm);
+      } catch (_) { /* intentionally empty */ }
+
+      // POST flow to remote validator
+      const { net } = require('electron');
+      const postResp = await net.fetch(REMOTE_VALIDATOR_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flowJSON: flowData }),
+      });
+
+      if (!postResp.ok) {
+        const body = await postResp.text().catch(() => '');
+        log.error('flow-validator', 'Remote validator POST failed', { status: postResp.status, body: body.substring(0, 300) });
+        return { error: `Validation service error: HTTP ${postResp.status} ${postResp.statusText}` };
+      }
+
+      let remote = await postResp.json();
+      log.info('flow-validator', 'Remote validator response', { status: remote.status, hasValid: 'valid' in remote, jobId: remote.jobId });
+
+      // If synchronous result (has diagnostics), use it directly
+      if ('valid' in remote && Array.isArray(remote.diagnostics)) {
+        return adaptRemoteResult(remote, flowId, label);
+      }
+
+      // Async job -- poll for completion
+      if (remote.jobId && remote.status === 'pending') {
+        const jobId = remote.jobId;
+        log.info('flow-validator', 'Polling for async job', { jobId });
+        const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+        while (Date.now() < deadline) {
+          await new Promise(r => { setTimeout(r, POLL_INTERVAL_MS); });
+          try {
+            const pollResp = await net.fetch(`${REMOTE_VALIDATOR_URL}?jobId=${jobId}`, { method: 'GET' });
+            if (!pollResp.ok) continue;
+            const pollData = await pollResp.json();
+            if ('valid' in pollData && Array.isArray(pollData.diagnostics) && pollData.diagnostics[0]?.code !== 'NO_INPUT') {
+              log.info('flow-validator', 'Poll returned result', { jobId, valid: pollData.valid });
+              return adaptRemoteResult(pollData, flowId, label);
+            }
+            if (pollData.status === 'complete' || pollData.status === 'error') {
+              return adaptRemoteResult(pollData, flowId, label);
+            }
+          } catch (pollErr) {
+            log.warn('flow-validator', 'Poll attempt failed', { jobId, error: pollErr.message });
+          }
+        }
+
+        log.warn('flow-validator', 'Remote validation timed out', { jobId, timeoutMs: POLL_TIMEOUT_MS });
+        return { error: `Validation is still processing (job ${jobId}). Try again in a moment.` };
+      }
+
+      // Unexpected response shape -- best-effort pass-through
+      log.warn('flow-validator', 'Unexpected remote response shape', { keys: Object.keys(remote) });
+      return adaptRemoteResult(remote, flowId, label);
+    } catch (err) {
+      log.error('flow-validator', 'Validation failed', { error: err.message, stack: err.stack?.substring(0, 300) });
+      return { error: err.message };
+    }
+  });
+
+  function adaptRemoteResult(remote, flowId, label) {
+    const counts = remote.counts || { error: 0, warning: 0, info: 0 };
+    const diagnostics = Array.isArray(remote.diagnostics) ? remote.diagnostics.map(d => ({
+      code: d.code || '',
+      severity: d.severity || 'info',
+      message: d.message || '',
+      path: d.path || '',
+      fix: d.fix || '',
+    })) : [];
+
+    if (!counts.error && !counts.warning && !counts.info) {
+      for (const d of diagnostics) counts[d.severity] = (counts[d.severity] || 0) + 1;
+    }
+
+    const valid = 'valid' in remote ? remote.valid : counts.error === 0;
+
+    const parts = [];
+    if (counts.error) parts.push(`${counts.error} error${counts.error > 1 ? 's' : ''}`);
+    if (counts.warning) parts.push(`${counts.warning} warning${counts.warning > 1 ? 's' : ''}`);
+    if (counts.info) parts.push(`${counts.info} info note${counts.info > 1 ? 's' : ''}`);
+
+    return {
+      valid,
+      counts,
+      diagnostics,
+      summary: remote.summary || (parts.length ? parts.join(', ') : 'No issues found'),
+      ts: remote.ts || new Date().toISOString(),
+      flowId,
+      label,
+    };
+  }
+
+  // ==================== DESIGN STEP ====================
+
+  ipcMain.handle('dev-tools:design-step', async (_event, params) => {
+    const DESIGN_STEP_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/design-step';
+    const POLL_INTERVAL_MS = 2000;
+    const POLL_TIMEOUT_MS = 120000;
+
+    const log = require('./lib/log-event-queue').getLogQueue();
+    try {
+      const description = params?.description || '';
+      if (!description.trim()) return { error: 'Please provide a step description.' };
+
+      log.info('design-step', 'Submitting step design request', { descLength: description.length });
+
+      const { net } = require('electron');
+      const postResp = await net.fetch(DESIGN_STEP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description,
+          service: params?.service || '',
+          context: params?.context || '',
+          model: params?.model || '',
+        }),
+      });
+
+      if (!postResp.ok) {
+        const body = await postResp.text().catch(() => '');
+        log.error('design-step', 'POST failed', { status: postResp.status, body: body.substring(0, 300) });
+        return { error: `Design service error: HTTP ${postResp.status} ${postResp.statusText}` };
+      }
+
+      let remote = await postResp.json();
+      log.info('design-step', 'POST response', { status: remote.status, jobId: remote.jobId, hasResult: !!remote.result });
+
+      const remoteStatus = (remote.status || '').toLowerCase();
+      if (remote.result || (remoteStatus && remoteStatus !== 'pending')) {
+        return remote;
+      }
+
+      if (remote.jobId && remoteStatus === 'pending') {
+        const jobId = remote.jobId;
+        log.info('design-step', 'Polling for async job', { jobId });
+        const deadline = Date.now() + POLL_TIMEOUT_MS;
+        const encodedJobId = encodeURIComponent(jobId);
+
+        while (Date.now() < deadline) {
+          await new Promise(r => { setTimeout(r, POLL_INTERVAL_MS); });
+          try {
+            const pollResp = await net.fetch(`${DESIGN_STEP_URL}?jobID=${encodedJobId}`, { method: 'GET' });
+            if (!pollResp.ok) continue;
+            const pollData = await pollResp.json();
+            const pollStatus = (pollData.status || '').toLowerCase();
+            if (pollStatus === 'pending' || pollStatus.includes('no job found')) continue;
+            log.info('design-step', 'Poll returned result', { jobId, keys: Object.keys(pollData) });
+            return pollData;
+          } catch (pollErr) {
+            log.warn('design-step', 'Poll attempt failed', { jobId, error: pollErr.message });
+          }
+        }
+
+        log.warn('design-step', 'Design step timed out', { jobId, timeoutMs: POLL_TIMEOUT_MS });
+        return { error: `Design is still processing (job ${jobId}). Try again in a moment.` };
+      }
+
+      return remote;
+    } catch (err) {
+      log.error('design-step', 'Design step failed', { error: err.message, stack: err.stack?.substring(0, 300) });
+      return { error: err.message };
+    }
+  });
+
+  // ==================== EVALUATE FLOW LOGS ====================
+
+  // Resolve BeginningSessionId chains so multi-session executions group as one.
+  // First pass: map each requestId to its BeginningSessionId (from parsed event data).
+  // Second pass: return a lookup function that falls back to requestId for events
+  // without session metadata (runtime START/END/REPORT, plain strings).
+  function resolveChainIds(logEntries) {
+    const reqToChain = {};
+    for (const evt of logEntries) {
+      const rid = evt.requestId || 'unknown';
+      if (reqToChain[rid]) continue;
+      if (evt.message?.type === 'json' && evt.message.parsed) {
+        const p = evt.message.parsed;
+        const bsid = p.event?.BeginningSessionId || p.session?.id;
+        if (bsid) reqToChain[rid] = bsid;
+      }
+    }
+    return (evt) => reqToChain[evt.requestId] || evt.requestId || 'unknown';
+  }
+
+  ipcMain.handle('dev-tools:evaluate-flow-logs', async (_event, params) => {
+    const log = require('./lib/log-event-queue').getLogQueue();
+    const ai = require('./lib/ai-service');
+    const edisonSdkManager = require('./lib/edison-sdk-manager');
+    const mode = params?.mode || 'latest';
+    const before = params?.before || null;
+
+    try {
+      const ctx = flowContext.get();
+      const flowId = ctx?.flowId;
+      if (!flowId) return { error: 'No flow ID available. Navigate to a flow first.' };
+
+      log.info('flow-logs', 'Starting flow log evaluation', { flowId, mode, before });
+
+      // Token acquisition with browser-captured fallback
+      let tokenFallbackUsed = false;
+      let originalTokenCache = null;
+      try {
+        await edisonSdkManager.getToken();
+      } catch (tokenErr) {
+        log.warn('flow-logs', 'SDK token failed, falling back to browser auth token', { error: tokenErr.message });
+        const browserToken = flowContext.getAuthToken();
+        if (!browserToken) {
+          return { error: 'No auth token available. Open or navigate to a flow first so the app can capture credentials.' };
+        }
+        originalTokenCache = edisonSdkManager._getTokenCache?.() || null;
+        edisonSdkManager._setTokenCache?.({ token: browserToken, expiresAt: Date.now() + 300000 });
+        tokenFallbackUsed = true;
+      }
+
+      // Determine time range based on mode
+      let fetchStart, fetchEnd, fetchLimit;
+      if (mode === 'hour') {
+        fetchStart = Date.now() - 60 * 60 * 1000;
+        fetchEnd = 'now';
+        fetchLimit = 500;
+      } else if (mode === 'next' && before) {
+        fetchStart = before - 60 * 60 * 1000;
+        fetchEnd = before - 1;
+        fetchLimit = 200;
+      } else {
+        fetchStart = Date.now() - 60 * 60 * 1000;
+        fetchEnd = 'now';
+        fetchLimit = 200;
+      }
+
+      let logs;
+      try {
+        const flowsSDK = edisonSdkManager.getFlows();
+        log.info('flow-logs', 'Fetching logs via SDK', { flowId, mode, start: new Date(fetchStart).toISOString() });
+        logs = await flowsSDK.fetchAllFlowLogs({ flowId, limit: fetchLimit, start: fetchStart, end: fetchEnd });
+        const evtCount = logs?.events?.length ?? (Array.isArray(logs) ? logs.length : 0);
+        log.info('flow-logs', 'Logs fetched', { events: evtCount, mode });
+      } catch (fetchErr) {
+        log.error('flow-logs', 'fetchAllFlowLogs failed', { error: fetchErr.message });
+        return { error: `Failed to fetch flow logs: ${fetchErr.message}` };
+      } finally {
+        if (tokenFallbackUsed && originalTokenCache !== null) {
+          edisonSdkManager._setTokenCache?.(originalTokenCache);
+        }
+      }
+
+      const logEntries = Array.isArray(logs) ? logs : (logs?.events || logs?.items || logs?.data || []);
+      if (!logEntries.length) {
+        const noMsg = mode === 'next' ? 'No older sessions found.' : 'No log entries found for this flow in the selected time range.';
+        return { flowId, label: ctx.label || null, mode, logCount: 0, sessions: [], analysis: { summary: noMsg, sessions: [], patterns: [], recommendations: [] }, rawLogs: [], ts: new Date().toISOString() };
+      }
+
+      // Group events by execution chain (BeginningSessionId), falling back to requestId
+      const getChainId = resolveChainIds(logEntries);
+      const sessionMap = {};
+      for (const evt of logEntries) {
+        const sid = getChainId(evt);
+        if (!sessionMap[sid]) {
+          sessionMap[sid] = { sessionId: sid, events: [], startTs: evt.timestamp, endTs: evt.timestamp };
+        }
+        sessionMap[sid].events.push(evt);
+        if (evt.timestamp < sessionMap[sid].startTs) sessionMap[sid].startTs = evt.timestamp;
+        if (evt.timestamp > sessionMap[sid].endTs) sessionMap[sid].endTs = evt.timestamp;
+      }
+      const allSessions = Object.values(sessionMap).sort((a, b) => b.startTs - a.startTs);
+      for (const s of allSessions) { s.durationMs = s.endTs - s.startTs; s.eventCount = s.events.length; }
+
+      // For 'latest' and 'next', only analyze the most recent session
+      const sessionsToAnalyze = (mode === 'hour') ? allSessions : [allSessions[0]];
+      const eventsToAnalyze = [];
+      for (const s of sessionsToAnalyze) eventsToAnalyze.push(...s.events);
+
+      log.info('flow-logs', 'Sessions extracted', { total: allSessions.length, analyzing: sessionsToAnalyze.length, events: eventsToAnalyze.length, mode });
+
+      // Truncate for AI context
+      let logsForAI = JSON.stringify(eventsToAnalyze, null, 2);
+      const MAX_LOG_CHARS = 100000;
+      let truncated = false;
+      if (logsForAI.length > MAX_LOG_CHARS) {
+        truncated = true;
+        const truncCount = Math.floor(eventsToAnalyze.length * (MAX_LOG_CHARS / logsForAI.length));
+        logsForAI = JSON.stringify(eventsToAnalyze.slice(0, truncCount), null, 2);
+      }
+
+      const truncNote = truncated ? `\n\nNote: Logs were truncated from ${eventsToAnalyze.length} entries to fit context.` : '';
+      const sessionSummary = sessionsToAnalyze.slice(0, 20).map(s =>
+        `Session ${s.sessionId}: ${s.eventCount} events, ${s.durationMs}ms, started ${new Date(s.startTs).toISOString()}`
+      ).join('\n');
+
+      // Build step ID -> name lookup so the AI can reference steps by name
+      const sMap = flowContext.getStepMap();
+      const stepEntries = Object.entries(sMap).filter(([, v]) => v.label);
+      const stepLookupBlock = stepEntries.length > 0
+        ? '\n\nSTEP ID TO NAME MAP (use step NAMES, not IDs, in all output):\n' +
+          stepEntries.map(([id, v]) => `  ${id} = "${v.label}"`).join('\n')
+        : '';
+
+      const analysis = await ai.json(
+        `You are an expert Edison / OneReach.ai flow engineer reviewing CloudWatch execution logs.
+Analyze the following logs and return a structured JSON diagnostic report.
+
+SESSION OVERVIEW:
+${sessionSummary}
+${stepLookupBlock}
+
+IMPORTANT: Group every issue under the session it belongs to. Each session object MUST use the sessionId shown in the overview above.
+IMPORTANT: When referencing steps, ALWAYS use the human-readable step NAME from the map above, never the raw UUID. If a step ID is not in the map, show a truncated ID with context (e.g. "step abc123...").
+
+────────────────────────────────
+WHAT TO LOOK FOR (be thorough):
+────────────────────────────────
+
+ERRORS (severity: "error"):
+- Unhandled exceptions, stack traces, or crash messages
+- HTTP 4xx/5xx responses from external services
+- Timeout errors (Lambda, HTTP, or step-level)
+- "Task timed out" or "REPORT" lines showing duration near the Lambda limit
+- Steps that fail silently (invoked but produce no output or result)
+
+WARNINGS (severity: "warning"):
+- LONG EXECUTION TIMES: Flag any step or Lambda invocation taking >5 seconds. If a full session exceeds 30 seconds, warn about total duration. Quote the actual durations you find.
+- MISSING REPORTING TAGS: If step events lack reporting labels/tags (e.g. steps fire without descriptive event names, missing "event.Name" or only generic names like "step_1"), warn that reporting tags are not configured — this makes debugging harder.
+- MISSING ERROR HANDLING: If the flow has no try/catch patterns, no error-routing steps, or errors propagate unhandled to the top level, warn about it.
+- MISSING TIMEOUTS: If HTTP calls or sub-flow invocations appear without timeout configuration, flag it.
+- Repeated retries or looping patterns that suggest infinite-loop risk
+- Data flow issues: variables referenced but never set, empty payloads passed between steps
+
+INFORMATIONAL (severity: "info"):
+- Normal execution flow observations
+- Sub-flow / multi-session chain structure (note how many child sessions exist)
+- Step execution order and branching paths taken
+
+────────────────────────────────
+RECOMMENDATIONS:
+────────────────────────────────
+Based on the log evidence, suggest concrete improvements:
+- Where to add error handling or try/catch wrappers
+- Where to add or tighten timeout values
+- Steps that should have reporting tags added
+- Performance bottlenecks that could be parallelized or cached
+- Any obvious architectural improvements (e.g. unnecessary sequential calls that could be parallel)
+
+Be specific — reference step names, event types, or session IDs when possible.
+
+LOGS:
+\`\`\`json
+${logsForAI}
+\`\`\`${truncNote}
+
+Return ONLY valid JSON with this exact structure:
+{
+  "summary": "2-3 sentence overall assessment including health, performance, and completeness of error handling",
+  "sessions": [
+    {
+      "sessionId": "the session chain ID",
+      "status": "ok|warning|error",
+      "summary": "one-line session description",
+      "durationNote": "total execution time and whether it is acceptable or slow (null if unknown)",
+      "issues": [
+        { "severity": "error|warning|info", "message": "concise description", "details": "additional context with specific step names or durations", "timestamp": "relevant timestamp or null" }
+      ]
+    }
+  ],
+  "patterns": [
+    { "name": "pattern name", "description": "what was observed", "count": 0 }
+  ],
+  "recommendations": [
+    "specific, actionable suggestion referencing step names or session IDs where applicable"
+  ]
+}`,
+        { profile: 'standard', maxTokens: 4000, feature: 'flow-log-analysis', temperature: 0.2 }
+      );
+
+      log.info('flow-logs', 'AI analysis complete', { mode, sessions: analysis?.sessions?.length || 0 });
+
+      return {
+        flowId,
+        label: ctx.label || null,
+        mode,
+        logCount: eventsToAnalyze.length,
+        sessions: sessionsToAnalyze.map(s => ({ sessionId: s.sessionId, startTs: s.startTs, endTs: s.endTs, durationMs: s.durationMs, eventCount: s.eventCount })),
+        analysis,
+        rawLogs: eventsToAnalyze,
+        ts: new Date().toISOString(),
+      };
+    } catch (err) {
+      log.error('flow-logs', 'Flow log evaluation failed', { error: err.message, stack: err.stack?.substring(0, 300) });
+      return { error: err.message };
+    }
+  });
+
+  // ==================== FETCH NEW FLOW LOGS (incremental) ====================
+
+  ipcMain.handle('dev-tools:fetch-new-flow-logs', async (_event, { since }) => {
+    const log = require('./lib/log-event-queue').getLogQueue();
+    const edisonSdkManager = require('./lib/edison-sdk-manager');
+
+    try {
+      const ctx = flowContext.get();
+      const flowId = ctx?.flowId;
+      if (!flowId) return { error: 'No flow ID', events: [], sessions: [] };
+
+      let tokenFallbackUsed = false;
+      let originalTokenCache = null;
+      try {
+        await edisonSdkManager.getToken();
+      } catch (_tokenErr) {
+        const browserToken = flowContext.getAuthToken();
+        if (!browserToken) return { error: 'No auth token', events: [], sessions: [] };
+        originalTokenCache = edisonSdkManager._getTokenCache?.() || null;
+        edisonSdkManager._setTokenCache?.({ token: browserToken, expiresAt: Date.now() + 300000 });
+        tokenFallbackUsed = true;
+      }
+
+      let logs;
+      try {
+        const flowsSDK = edisonSdkManager.getFlows();
+        const start = typeof since === 'number' ? since + 1 : Date.now() - 60000;
+        logs = await flowsSDK.fetchAllFlowLogs({ flowId, limit: 200, start, end: 'now' });
+      } catch (fetchErr) {
+        return { error: fetchErr.message, events: [], sessions: [] };
+      } finally {
+        if (tokenFallbackUsed && originalTokenCache !== null) {
+          edisonSdkManager._setTokenCache?.(originalTokenCache);
+        }
+      }
+
+      const logEntries = Array.isArray(logs) ? logs : (logs?.events || logs?.items || logs?.data || []);
+      if (!logEntries.length) return { events: [], sessions: [], ts: new Date().toISOString() };
+
+      const getChainId = resolveChainIds(logEntries);
+      const sessionMap = {};
+      for (const evt of logEntries) {
+        const sid = getChainId(evt);
+        if (!sessionMap[sid]) sessionMap[sid] = { sessionId: sid, events: [], startTs: evt.timestamp, endTs: evt.timestamp };
+        sessionMap[sid].events.push(evt);
+        if (evt.timestamp < sessionMap[sid].startTs) sessionMap[sid].startTs = evt.timestamp;
+        if (evt.timestamp > sessionMap[sid].endTs) sessionMap[sid].endTs = evt.timestamp;
+      }
+      const sessions = Object.values(sessionMap).sort((a, b) => b.startTs - a.startTs);
+      for (const s of sessions) { s.durationMs = s.endTs - s.startTs; s.eventCount = s.events.length; }
+
+      log.info('flow-logs', 'Incremental fetch', { since: new Date(since).toISOString(), newEvents: logEntries.length, newSessions: sessions.length });
+
+      return {
+        events: logEntries,
+        sessions: sessions.map(s => ({ sessionId: s.sessionId, startTs: s.startTs, endTs: s.endTs, durationMs: s.durationMs, eventCount: s.eventCount })),
+        ts: new Date().toISOString(),
+      };
+    } catch (err) {
+      return { error: err.message, events: [], sessions: [] };
+    }
+  });
+
+  // ==================== FLOW STEP TIP (loading screen) ====================
+
+  ipcMain.handle('dev-tools:flow-step-tip', async () => {
+    const log = require('./lib/log-event-queue').getLogQueue();
+    try {
+      const ctx = flowContext.get();
+      const flowId = ctx?.flowId;
+      if (!flowId) return { tips: [] };
+
+      const authToken = flowContext.getAuthToken();
+      if (!authToken) return { tips: [] };
+
+      const { net } = require('electron');
+      const resp = await net.fetch(`https://datahub.edison.api.onereach.ai/flows/${flowId}`, {
+        method: 'GET',
+        headers: { 'Authorization': authToken, 'Content-Type': 'application/json' },
+      });
+      if (!resp.ok) return { tips: [] };
+
+      const flowData = await resp.json();
+      const templates = flowData?.data?.stepTemplates;
+      if (!Array.isArray(templates)) return { tips: [] };
+
+      const withHelp = templates.filter(t =>
+        t && t.label && ((t.help && t.help.trim()) || (t.description && t.description.trim()))
+      );
+      if (withHelp.length === 0) return { tips: [] };
+
+      // Pick up to 5 random distinct templates
+      const shuffled = withHelp.sort(() => Math.random() - 0.5);
+      const picked = shuffled.slice(0, Math.min(5, shuffled.length));
+
+      const stepsBlock = picked.map((tpl, i) => {
+        const help = ((tpl.help && tpl.help.trim()) || tpl.description.trim()).substring(0, 300);
+        return `${i + 1}. Step: "${tpl.label}" — Help: ${help}`;
+      }).join('\n');
+
+      const ai = require('./lib/ai-service');
+      const raw = await ai.complete(
+        `You are a senior Edison conversational experience designer and technical architect.\nFor each flow step below, write one insightful tip categorized as Design (conversational UX), Technical (architecture/performance), or Agentic (AI/automation). Consider:\n- Design: How this step shapes the user's conversational experience\n- Technical: Architecture value, performance, data flow, error resilience\n- Agentic: How this step enables AI agents, stores user preferences for later recall, or reduces complexity for agents\n\nFormat each line as: [Category] Tip — Use case.\nKeep each under 30 words. One per line, numbered. No preamble.\n\n${stepsBlock}`,
+        { profile: 'standard', maxTokens: 500, temperature: 0.7, feature: 'flow-step-tip' }
+      );
+
+      const lines = (raw || '').split('\n').map(l => l.replace(/^\d+[\.\)]\s*/, '').trim()).filter(Boolean);
+      const tips = picked.map((tpl, i) => {
+        const line = lines[i] || '';
+        const catMatch = line.match(/^\[(Design|Technical|Agentic)\]\s*/i);
+        const category = catMatch ? catMatch[1].charAt(0).toUpperCase() + catMatch[1].slice(1).toLowerCase() : null;
+        const tipText = catMatch ? line.substring(catMatch[0].length).trim() : line;
+        return { stepName: tpl.label, tip: tipText || null, category };
+      }).filter(t => t.tip);
+
+      log.info('flow-step-tip', 'Tips generated', { count: tips.length });
+      return { tips };
+    } catch (err) {
+      log.warn('flow-step-tip', 'Tip generation failed (non-fatal)', { error: err.message });
+      return { tips: [] };
+    }
+  });
+
+  // ==================== FLOW LIBRARY SUGGESTIONS (loading screen) ====================
+
+  ipcMain.handle('dev-tools:flow-library-suggestions', async () => {
+    const log = require('./lib/log-event-queue').getLogQueue();
+    try {
+      const ctx = flowContext.get();
+      const flowId = ctx?.flowId;
+      if (!flowId) return { suggestions: [] };
+
+      const authToken = flowContext.getAuthToken();
+      if (!authToken) return { suggestions: [] };
+
+      const { net } = require('electron');
+      const resp = await net.fetch(`https://datahub.edison.api.onereach.ai/flows/${flowId}`, {
+        method: 'GET',
+        headers: { 'Authorization': authToken, 'Content-Type': 'application/json' },
+      });
+      if (!resp.ok) return { suggestions: [] };
+
+      const flowData = await resp.json();
+      const templates = flowData?.data?.stepTemplates;
+      const existingNames = new Set(
+        (Array.isArray(templates) ? templates : [])
+          .map(t => (t.label || '').toLowerCase().trim())
+          .filter(Boolean)
+      );
+
+      const flowLabel = flowData.name || ctx.label || 'flow';
+
+      const edisonSdkManager = require('./lib/edison-sdk-manager');
+      const libraryResults = await edisonSdkManager.searchLibrary(flowLabel);
+      if (!Array.isArray(libraryResults) || libraryResults.length === 0) return { suggestions: [] };
+
+      const novel = libraryResults.filter(r =>
+        r.name && !existingNames.has(r.name.toLowerCase().trim())
+      ).slice(0, 3);
+      if (novel.length === 0) return { suggestions: [] };
+
+      const stepsBlock = novel.map((r, i) =>
+        `${i + 1}. "${r.name}" — ${(r.description || 'no description').substring(0, 200)}`
+      ).join('\n');
+
+      const ai = require('./lib/ai-service');
+      const raw = await ai.complete(
+        `You are a senior Edison conversational experience designer and technical architect.\nThe flow "${flowLabel}" already uses steps like: ${[...existingNames].slice(0, 8).join(', ')}.\n\nFor each library step below, explain how it could complement this flow. Categorize as Design (conversational UX), Technical (architecture/performance), or Agentic (AI/automation). Consider:\n- Design: How adding this step improves the conversation experience\n- Technical: Architecture benefits, error handling, data flow improvements\n- Agentic: How it enables AI agents, stores preferences for cross-conversation recall, or reduces agent complexity\n\nFormat: [Category] How it helps — Use case.\nKeep each under 30 words. One per line, numbered. No preamble.\n\n${stepsBlock}`,
+        { profile: 'standard', maxTokens: 400, temperature: 0.7, feature: 'flow-library-suggestion' }
+      );
+
+      const lines = (raw || '').split('\n').map(l => l.replace(/^\d+[\.\)]\s*/, '').trim()).filter(Boolean);
+      const suggestions = novel.map((r, i) => {
+        const line = lines[i] || '';
+        const catMatch = line.match(/^\[(Design|Technical|Agentic)\]\s*/i);
+        const category = catMatch ? catMatch[1].charAt(0).toUpperCase() + catMatch[1].slice(1).toLowerCase() : null;
+        const tipText = catMatch ? line.substring(catMatch[0].length).trim() : line;
+        return { name: r.name, description: r.description || '', tip: tipText || null, category };
+      }).filter(s => s.tip);
+
+      log.info('flow-library-suggestions', 'Suggestions generated', { count: suggestions.length });
+      return { suggestions };
+    } catch (err) {
+      log.warn('flow-library-suggestions', 'Suggestion generation failed (non-fatal)', { error: err.message });
+      return { suggestions: [] };
+    }
+  });
+
+  // ==================== CONFIGURE STEP ====================
+
+  ipcMain.handle('dev-tools:configure-step', async (_event, params) => {
+    const log = require('./lib/log-event-queue').getLogQueue();
+    const { net } = require('electron');
+    const edisonSdkManager = require('./lib/edison-sdk-manager');
+
+    const DATAHUB = 'https://datahub.edison.api.onereach.ai';
+    const EM = 'https://em.edison.api.onereach.ai';
+    const CONFIGURATOR_NAME = 'step configurator api';
+
+    function authHeaders(token) {
+      return { 'Authorization': token, 'Content-Type': 'application/json' };
+    }
+
+    try {
+      log.info('configure-step', 'Handler invoked', { params: JSON.stringify(params).substring(0, 200) });
+
+      const ctx = flowContext.get();
+      const lastStep = flowContext.getLastStep();
+      let stepId = params?.stepId || _pendingConfigureStepId || ctx?.stepId || lastStep?.stepId;
+      const instruction = params?.instruction || null;
+      _pendingConfigureStepId = null;
+
+      const useLastStep = lastStep && lastStep.stepId === stepId && lastStep.flowId;
+      let flowId = useLastStep ? lastStep.flowId : ctx?.flowId;
+      if (!flowId) flowId = lastStep?.flowId || ctx?.flowId;
+      const botId = ctx?.botId;
+
+      log.info('configure-step', 'Context resolved', {
+        flowId: flowId || null, stepId: stepId || null, botId: botId || null,
+        ctxFlowId: ctx?.flowId, ctxStepId: ctx?.stepId, lastStepId: lastStep?.stepId,
+      });
+
+      if (!flowId) return { error: 'No flow ID available. Navigate to a flow first.' };
+      if (!stepId) return { error: 'No step selected. Click a step in the flow editor first.' };
+
+      const authToken = flowContext.getAuthToken();
+      if (!authToken) {
+        return { error: 'No auth token available. Open or navigate to a flow first so the app can capture credentials.' };
+      }
+
+      log.info('configure-step', 'Fetching flow metadata for botId');
+
+      let flowBotId = botId || null;
+      let flowLabel = null;
+      let stepLabel = lastStep?.stepLabel || ctx?.stepLabel || null;
+      try {
+        const abortCtrl = new AbortController();
+        const metaTimeout = setTimeout(() => abortCtrl.abort(), 8000);
+        const flowResp = await net.fetch(`${DATAHUB}/flows/${flowId}`, {
+          method: 'GET', headers: authHeaders(authToken), signal: abortCtrl.signal,
+        });
+        clearTimeout(metaTimeout);
+        log.info('configure-step', 'Flow metadata response', { status: flowResp.status });
+        if (flowResp.ok) {
+          const flowData = await flowResp.json();
+          flowBotId = flowData?.botId || flowData?.data?.botId || flowBotId;
+          flowLabel = flowData?.data?.label || flowData?.label || null;
+        }
+      } catch (fetchErr) {
+        log.warn('configure-step', 'Flow metadata fetch failed (non-fatal)', { error: fetchErr.message });
+      }
+
+      log.info('configure-step', 'Starting step configuration', {
+        flowId, stepId, botId: flowBotId, hasInstruction: !!instruction,
+      });
+
+      // --- Find "Step configurator API" flow ---
+      let configuratorFlowId = null;
+      let configuratorHttpPath = null;
+
+      log.info('configure-step', 'Trying SDK discovery (5s timeout)');
+      try {
+        const sdkTimeout = new Promise((_, rej) => { setTimeout(() => rej(new Error('SDK discovery timeout (5s)')), 5000); });
+        configuratorFlowId = await Promise.race([
+          edisonSdkManager.findFlowByName('Step configurator API', botId),
+          sdkTimeout,
+        ]);
+        log.info('configure-step', 'SDK discovery result', { found: !!configuratorFlowId });
+        if (configuratorFlowId) {
+          configuratorHttpPath = await Promise.race([
+            edisonSdkManager.getFlowHttpPath(configuratorFlowId),
+            new Promise((_, rej) => { setTimeout(() => rej(new Error('SDK path timeout')), 5000); }),
+          ]);
+          log.info('configure-step', 'SDK path result', { path: configuratorHttpPath });
+        }
+      } catch (sdkErr) {
+        log.warn('configure-step', 'SDK discovery failed, falling back to datahub search', { error: sdkErr.message });
+      }
+
+      let configuratorBotId = null;
+      let configuratorFlowObj = null;
+
+      if (!configuratorFlowId) {
+        log.info('configure-step', 'Searching for configurator flow via datahub');
+        const botsResp = await net.fetch(`${DATAHUB}/bots`, {
+          method: 'GET', headers: authHeaders(authToken),
+        });
+        log.info('configure-step', 'Bots list response', { status: botsResp.status });
+
+        let botIds = flowBotId ? [flowBotId] : [];
+        if (botsResp.ok) {
+          const botsData = await botsResp.json();
+          const botItems = Array.isArray(botsData) ? botsData : (botsData?.items || botsData?.data || []);
+          for (const b of botItems) {
+            const bid = b.botId || b.id || b._id;
+            if (bid && !botIds.includes(bid)) botIds.push(bid);
+          }
+        }
+        log.info('configure-step', 'Searching across bots', { count: botIds.length });
+
+        for (const bid of botIds) {
+          if (configuratorFlowId) break;
+          try {
+            const listResp = await net.fetch(`${DATAHUB}/flows?botId=${bid}`, {
+              method: 'GET', headers: authHeaders(authToken),
+            });
+            if (!listResp.ok) continue;
+            const listData = await listResp.json();
+            const flows = Array.isArray(listData) ? listData : (listData?.items || listData?.data || []);
+            for (const f of flows) {
+              const label = (f.data?.label || f.label || '').trim().toLowerCase();
+              if (label === CONFIGURATOR_NAME) {
+                configuratorFlowId = f.flowId || f.id || f._id;
+                configuratorBotId = bid;
+                configuratorFlowObj = f;
+                log.info('configure-step', 'Found configurator via datahub', { configuratorFlowId, botId: bid });
+                break;
+              }
+            }
+          } catch (e) {
+            log.warn('configure-step', 'Failed to list flows in bot', { botId: bid, error: e.message });
+          }
+        }
+      }
+
+      if (!configuratorFlowId) {
+        return { error: 'Could not find "Step configurator API" flow in your account. Ensure the flow exists and is deployed.' };
+      }
+
+      // --- Get the configurator flow's HTTP gateway path ---
+      function extractGatewayPath(flowObj) {
+        const d = flowObj?.data || flowObj;
+        const tplArr = d?.stepTemplates || [];
+        const gatewayTplIds = new Set(tplArr.filter(t => t?.isGatewayStep).map(t => t.id));
+        for (const tn of Object.keys(d?.trees || {})) {
+          const stps = d.trees[tn]?.steps || [];
+          const arr = Array.isArray(stps) ? stps : Object.values(stps);
+          for (const step of arr) {
+            const isGw = step.isGatewayStep === true || (step.type && gatewayTplIds.has(step.type));
+            if (!isGw) continue;
+            const raw = step.stepInputData?.path || step.data?.path;
+            if (raw) {
+              const cleaned = String(raw).replace(/^`|`$/g, '').trim();
+              if (cleaned) return cleaned;
+            }
+          }
+        }
+        return null;
+      }
+
+      if (!configuratorHttpPath && configuratorFlowObj) {
+        configuratorHttpPath = extractGatewayPath(configuratorFlowObj);
+      }
+
+      if (!configuratorHttpPath) {
+        const fetchUrls = [
+          `${DATAHUB}/flows/${configuratorFlowId}`,
+          configuratorBotId ? `${DATAHUB}/bots/${configuratorBotId}/flows/${configuratorFlowId}` : null,
+          configuratorBotId ? `${DATAHUB}/flows/${configuratorFlowId}?botId=${configuratorBotId}` : null,
+        ].filter(Boolean);
+
+        for (const fetchUrl of fetchUrls) {
+          try {
+            const cfgResp = await net.fetch(fetchUrl, { method: 'GET', headers: authHeaders(authToken) });
+            if (cfgResp.ok) {
+              const cfgFlow = await cfgResp.json();
+              configuratorHttpPath = extractGatewayPath(cfgFlow);
+              if (configuratorHttpPath) break;
+            }
+          } catch (_) { /* try next URL */ }
+        }
+      }
+
+      if (!configuratorHttpPath) {
+        return { error: 'The "Step configurator API" flow has no HTTP gateway path configured. Check that the flow has an HTTP trigger step with a path set.' };
+      }
+
+      // --- Call the configurator flow ---
+      const flowAccountId = configuratorFlowObj?.accountId;
+      const accountId = flowAccountId || edisonSdkManager.getAccountId();
+
+      log.info('configure-step', 'Calling configurator', {
+        httpPath: configuratorHttpPath, stepId, flowId, accountId, botId: flowBotId,
+        hasInstruction: !!instruction,
+      });
+
+      const callUrl = `${EM}/http/${accountId}/${configuratorHttpPath}`;
+      const payload = {
+        action: 'configureInPlace',
+        flowId,
+        stepId,
+        activate: false,
+      };
+      if (instruction) payload.instruction = instruction;
+
+      // Log reproducible curl for debugging
+      const payloadJson = JSON.stringify(payload);
+      log.info('configure-step', 'DEBUG curl POST', {
+        curl: `curl -X POST '${callUrl}' -H 'Authorization: ${authToken.substring(0, 30)}...' -H 'Content-Type: application/json' -d '${payloadJson.substring(0, 500)}'`,
+      });
+
+      const callResp = await net.fetch(callUrl, {
+        method: 'POST',
+        headers: authHeaders(authToken),
+        body: payloadJson,
+      });
+
+      if (!callResp.ok) {
+        const body = await callResp.text().catch(() => '');
+        log.error('configure-step', 'Configurator call failed', { status: callResp.status, body: body.substring(0, 300) });
+        return { error: `Configurator returned HTTP ${callResp.status}: ${body.substring(0, 200)}` };
+      }
+
+      const contentType = callResp.headers.get('content-type') || '';
+      let result = contentType.includes('json') ? await callResp.json() : await callResp.text();
+
+      log.info('configure-step', 'POST response', {
+        status: callResp.status,
+        resultPreview: (typeof result === 'string' ? result : JSON.stringify(result)).substring(0, 500),
+      });
+
+      // --- Poll for job completion if async ---
+      const jobId = result?.jobId;
+      if (jobId && result?.status === 'pending') {
+        // Test all poll methods to find what works
+        const testMethods = [
+          { label: 'net-fetch', method: 'GET', url: `${callUrl}?jobID=${encodeURIComponent(jobId)}`, headers: { 'Authorization': authToken } },
+        ];
+        for (const tm of testMethods) {
+          try {
+            const tr = await net.fetch(tm.url, { method: tm.method, headers: tm.headers });
+            const tb = await tr.text();
+            log.info('configure-step', `POLL-TEST [${tm.label}]`, { status: tr.status, body: tb.substring(0, 400), url: tm.url });
+          } catch (te) {
+            log.info('configure-step', `POLL-TEST [${tm.label}] error`, { error: te.message });
+          }
+        }
+
+        // Also test with Node native https to compare
+        try {
+          const testUrl = `${callUrl}?jobID=${encodeURIComponent(jobId)}`;
+          const nodeResult = await new Promise((resolve, reject) => {
+            const https = require('https');
+            const parsed = new URL(testUrl);
+            const opts = { method: 'GET', hostname: parsed.hostname, path: parsed.pathname + parsed.search, headers: { 'Authorization': authToken } };
+            const req = https.request(opts, (res) => {
+              let body = '';
+              res.on('data', c => body += c);
+              res.on('end', () => resolve({ status: res.statusCode, body }));
+            });
+            req.on('error', reject);
+            req.end();
+          });
+          log.info('configure-step', 'POLL-TEST [node-https]', {
+            status: nodeResult.status, body: nodeResult.body.substring(0, 400),
+            path: new URL(`${callUrl}?jobID=${encodeURIComponent(jobId)}`).pathname + new URL(`${callUrl}?jobID=${encodeURIComponent(jobId)}`).search,
+          });
+        } catch (ne) {
+          log.info('configure-step', 'POLL-TEST [node-https] error', { error: ne.message });
+        }
+
+        log.info('configure-step', 'Job queued, polling for completion', { jobId });
+        const POLL_MAX = 180000;
+        const POLL_INTERVAL_START = 3000;
+        const POLL_INTERVAL_MAX = 10000;
+        const pollStart = Date.now();
+        let interval = POLL_INTERVAL_START;
+
+        while (Date.now() - pollStart < POLL_MAX) {
+          await new Promise(r => { setTimeout(r, interval); });
+          interval = Math.min(interval * 1.5, POLL_INTERVAL_MAX);
+
+          try {
+            const pollUrl = `${callUrl}?jobID=${encodeURIComponent(jobId)}`;
+            log.info('configure-step', 'Polling', { url: pollUrl.substring(0, 120), elapsed: Date.now() - pollStart });
+            const pollResp = await net.fetch(pollUrl, {
+              method: 'GET',
+              headers: { 'Authorization': authToken },
+            });
+            const pollText = await pollResp.text();
+
+            if (!pollResp.ok) {
+              log.warn('configure-step', 'Poll HTTP error', {
+                status: pollResp.status, body: pollText.substring(0, 300), elapsed: Date.now() - pollStart,
+              });
+              continue;
+            }
+
+            let pollResult;
+            try { pollResult = JSON.parse(pollText); } catch (_) { pollResult = pollText; }
+
+            log.info('configure-step', 'Poll response', {
+              type: typeof pollResult, preview: pollText.substring(0, 300), elapsed: Date.now() - pollStart,
+            });
+
+            if (typeof pollResult === 'object' && pollResult?.status === 'pending') {
+              continue;
+            }
+
+            if (typeof pollResult === 'string' && (pollResult.startsWith('Invalid') || pollResult.startsWith('Error'))) {
+              log.warn('configure-step', 'Poll error response', { body: pollText.substring(0, 300) });
+              continue;
+            }
+
+            log.info('configure-step', 'Job completed', { jobId, elapsed: Date.now() - pollStart });
+            result = pollResult;
+            break;
+          } catch (pollErr) {
+            log.warn('configure-step', 'Poll exception', { error: pollErr.message, elapsed: Date.now() - pollStart });
+          }
+        }
+
+        if (typeof result === 'object' && result?.status === 'pending') {
+          log.warn('configure-step', 'Job polling timed out', { jobId, elapsed: Date.now() - pollStart });
+        }
+      }
+
+      const resultSummary = typeof result === 'string'
+        ? result.substring(0, 500)
+        : JSON.stringify(result).substring(0, 500);
+      log.info('configure-step', 'Configuration complete', {
+        flowId, stepId, hasResult: !!result,
+        resultType: typeof result,
+        resultPreview: resultSummary,
+      });
+
+      return {
+        success: true,
+        flowId,
+        stepId,
+        stepLabel: stepLabel || null,
+        flowLabel: flowLabel || null,
+        result,
+        ts: new Date().toISOString(),
+      };
+    } catch (err) {
+      log.error('configure-step', 'Configuration failed', { error: err.message, stack: err.stack?.substring(0, 300) });
+      return { error: err.message };
     }
   });
 
@@ -8592,26 +9879,31 @@ function setupIPC() {
       const space = await api.get(spaceId);
       const items = await api.items.list(spaceId);
 
-      // Create modal window
+      const parentWin = BrowserWindow.getFocusedWindow() || browserWindow.getMainWindow();
+
       const modalWindow = new BrowserWindow({
         width: 780,
         height: 720,
-        parent: BrowserWindow.getFocusedWindow(),
-        modal: true,
+        parent: parentWin || undefined,
+        modal: !!parentWin,
         show: false,
         resizable: false,
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
           preload: path.join(__dirname, 'preload-smart-export.js'),
+          backgroundThrottling: false,
         },
+      });
+
+      modalWindow.on('closed', () => {
+        console.log('[SmartExport] Modal window closed');
       });
 
       modalWindow.loadFile('smart-export-format-modal.html');
 
       modalWindow.once('ready-to-show', () => {
         modalWindow.show();
-        // Send space data to modal
         modalWindow.webContents.send('space-data', {
           id: spaceId,
           name: space?.name || 'Unnamed Space',
@@ -9247,6 +10539,7 @@ function setupIPC() {
 
   // Handle opening clipboard viewer from widgets
   ipcMain.on('open-clipboard-viewer', async () => {
+   try {
     console.log('Received request to open clipboard viewer');
 
     // Ensure clipboard manager is initialized
@@ -9283,6 +10576,9 @@ function setupIPC() {
       const { dialog } = require('electron');
       dialog.showErrorBox('Error', 'Failed to open Work Space Knowledge Manager. Please try again.');
     }
+   } catch (_err) {
+    console.error('[open-clipboard-viewer] Unhandled error:', _err);
+   }
   });
 
   // Handle showing Voice Orb from renderer
@@ -9666,6 +10962,7 @@ function setupIPC() {
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
+        backgroundThrottling: false,
       },
     });
 
@@ -9749,17 +11046,20 @@ function setupIPC() {
       inputWindow.show();
     });
 
-    // Wait for response
     return new Promise((resolve) => {
-      ipcMain.once('input-dialog-response', async (evt, spaceName) => {
-        inputWindow.close();
+      let resolved = false;
+
+      const onResponse = async (evt, spaceName) => {
+        if (resolved) return;
+        resolved = true;
+
+        if (!inputWindow.isDestroyed()) inputWindow.close();
 
         if (!spaceName) {
           resolve({ success: false });
           return;
         }
 
-        // Create the space using the unified SpacesAPI
         try {
           const newSpace = await spacesAPI.create(spaceName, {
             icon: '📁',
@@ -9774,6 +11074,17 @@ function setupIPC() {
         } catch (error) {
           console.error('Error creating space:', error);
           resolve({ success: false, error: error.message });
+        }
+      };
+
+      ipcMain.once('input-dialog-response', onResponse);
+
+      // If user closes the window manually (Cmd+W, etc.), resolve and clean up
+      inputWindow.once('closed', () => {
+        if (!resolved) {
+          resolved = true;
+          ipcMain.removeListener('input-dialog-response', onResponse);
+          resolve({ success: false });
         }
       });
     });
@@ -10424,7 +11735,12 @@ function setupIPC() {
           if (message && message.type === 'auth-popup') {
             console.log('Creating auth popup window for URL:', message.url);
 
-            // Create a popup window for authentication
+            // Close any existing auth popup to prevent duplicates
+            if (global._ssoAuthPopup && !global._ssoAuthPopup.isDestroyed()) {
+              global._ssoAuthPopup.close();
+              global._ssoAuthPopup = null;
+            }
+
             const authWindow = new BrowserWindow({
               width: 800,
               height: 600,
@@ -10434,17 +11750,31 @@ function setupIPC() {
                 webSecurity: true,
                 webviewTag: true,
                 preload: path.join(__dirname, 'preload.js'),
+                backgroundThrottling: false,
               },
             });
+            global._ssoAuthPopup = authWindow;
 
-            // Load the authentication URL
+            // Auto-close after 90s if auth doesn't complete
+            const authTimeout = setTimeout(() => {
+              if (authWindow && !authWindow.isDestroyed()) {
+                console.log('[Auth] Popup timed out after 90s, closing');
+                authWindow.close();
+              }
+            }, 90000);
+
+            authWindow.on('closed', () => {
+              clearTimeout(authTimeout);
+              if (global._ssoAuthPopup === authWindow) {
+                global._ssoAuthPopup = null;
+              }
+            });
+
             authWindow.loadURL(message.url);
 
-            // Handle successful authentication
             authWindow.webContents.on('will-navigate', (event, url) => {
               if (url.includes('/callback') && url.includes('sso.global.api.onereach.ai')) {
                 console.log('Detected SSO callback URL in popup:', url);
-                // Send success message to the main window
                 const mainWindow = browserWindow.getMainWindow();
                 if (mainWindow) {
                   mainWindow.webContents.send('sso-success', {
@@ -10453,7 +11783,6 @@ function setupIPC() {
                     redirectUrl: 'https://idw.edison.onereach.ai/idw-marvin-dev',
                   });
                 }
-                // Close the popup window
                 authWindow.close();
               }
             });
@@ -10588,6 +11917,7 @@ function setupIPC() {
 
   // Direct handler for GSX links
   ipcMain.on('open-gsx-link', async (event, data) => {
+   try {
     const multiTenantStore = require('./multi-tenant-store');
 
     console.log('[GSX IPC] Received direct request to open GSX link:', data);
@@ -10621,6 +11951,9 @@ function setupIPC() {
         console.error('[GSX IPC] Error opening GSX window:', err);
       }
     }
+   } catch (_err) {
+    console.error('[open-gsx-link] Unhandled error:', _err);
+   }
   });
 
   // Update handlers
@@ -13897,6 +15230,7 @@ function openSettingsWindow() {
       webSecurity: true,
       enableRemoteModule: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -13959,6 +15293,7 @@ function openDashboardWindow() {
       webSecurity: true,
       enableRemoteModule: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -14053,6 +15388,7 @@ function openBudgetDashboard() {
       webSecurity: true,
       enableRemoteModule: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -14110,6 +15446,7 @@ function openBudgetEstimator() {
       webSecurity: true,
       enableRemoteModule: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -14370,6 +15707,7 @@ function openIDWEnvironment(url, label) {
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
+      backgroundThrottling: false,
     },
   });
 
@@ -15229,6 +16567,7 @@ function openBudgetSetup() {
       webSecurity: true,
       enableRemoteModule: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -15587,6 +16926,7 @@ function setupOrbIPC() {
   ipcMain.handle('orb:show', () => {
     if (orbWindow && !orbWindow.isDestroyed()) {
       orbWindow.show();
+      orbWindow.webContents.send('orb:summoned');
     }
   });
 
@@ -15761,8 +17101,17 @@ function setupOrbIPC() {
     }
   });
 
-  // Click-through IPC handler - kept as no-op for backward compatibility.
-  ipcMain.handle('orb:set-click-through', () => {});
+  // Click-through: toggle native setIgnoreMouseEvents so transparent areas
+  // of the orb window pass clicks to windows behind (e.g. Spaces copy buttons).
+  // The renderer calls this on mouseenter/mouseleave of interactive elements.
+  ipcMain.handle('orb:set-click-through', (event, ignore) => {
+    if (!orbWindow || orbWindow.isDestroyed()) return;
+    if (ignore) {
+      orbWindow.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      orbWindow.setIgnoreMouseEvents(false);
+    }
+  });
 
   console.log('[VoiceOrb] IPC handlers registered');
 }
@@ -15885,6 +17234,7 @@ function createOrbWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false, // Required for preload-hud-api.js require()
+      backgroundThrottling: false,
     },
   });
 
@@ -15908,10 +17258,10 @@ function createOrbWindow() {
       .catch((err) => log.warn('main', 'dock show after orb setVisibleOnAllWorkspaces', { error: err.message }));
   }
 
-  // Click-through: native transparent-pixel and setIgnoreMouseEvents both
-  // fail on macOS with setAlwaysOnTop('floating') + setVisibleOnAllWorkspaces.
-  // Instead, the window is created at a small collapsed size (just the orb)
-  // and only expands when tooltip/chat content needs to be visible.
+  // Click-through: enable setIgnoreMouseEvents so transparent areas pass
+  // clicks to windows behind. The renderer toggles this off/on via IPC when
+  // the cursor enters/leaves interactive elements (orb, chat panel, etc.).
+  orbWindow.setIgnoreMouseEvents(true, { forward: true });
 
   // Load the orb UI
   orbWindow.loadFile(path.join(__dirname, 'orb.html'));
@@ -15950,12 +17300,12 @@ function createOrbWindow() {
  */
 function toggleOrbWindow() {
   if (!orbWindow || orbWindow.isDestroyed()) {
-    // Create if not exists
     createOrbWindow();
   } else if (orbWindow.isVisible()) {
     orbWindow.hide();
   } else {
     orbWindow.show();
+    orbWindow.webContents.send('orb:summoned');
   }
 }
 
@@ -15967,6 +17317,7 @@ function showOrbWindow() {
     createOrbWindow();
   } else {
     orbWindow.show();
+    orbWindow.webContents.send('orb:summoned');
   }
 }
 
@@ -16347,11 +17698,15 @@ function createCommandHUDWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
   // Attach structured log forwarding
   browserWindow.attachLogForwarder(commandHUDWindow, 'app');
+
+  // Start with click-through so it never blocks while hidden
+  commandHUDWindow.setIgnoreMouseEvents(true, { forward: true });
 
   // Set window level to float above everything
   commandHUDWindow.setAlwaysOnTop(true, 'floating');
@@ -16411,6 +17766,7 @@ function createCommandPaletteWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -16592,6 +17948,8 @@ ipcMain.handle('palette:dismiss', async () => {
   return { success: true };
 });
 
+let _hudSafetyTimer = null;
+
 /**
  * Show the Command HUD with a task
  */
@@ -16609,9 +17967,20 @@ function showCommandHUD(task) {
 
   // Send task to HUD
   if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+    commandHUDWindow.setIgnoreMouseEvents(false);
     commandHUDWindow.webContents.send('hud:task', task);
     commandHUDWindow.show();
   }
+
+  // Safety net: force-hide after 60s if renderer didn't dismiss
+  if (_hudSafetyTimer) clearTimeout(_hudSafetyTimer);
+  _hudSafetyTimer = setTimeout(() => {
+    _hudSafetyTimer = null;
+    if (commandHUDWindow && !commandHUDWindow.isDestroyed() && commandHUDWindow.isVisible()) {
+      console.log('[HUD] Safety timeout: force-hiding stale HUD window');
+      hideCommandHUD();
+    }
+  }, 60000);
 
 }
 
@@ -16619,7 +17988,9 @@ function showCommandHUD(task) {
  * Hide the Command HUD
  */
 function hideCommandHUD() {
+  if (_hudSafetyTimer) { clearTimeout(_hudSafetyTimer); _hudSafetyTimer = null; }
   if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
+    commandHUDWindow.setIgnoreMouseEvents(true, { forward: true });
     commandHUDWindow.hide();
   }
 }
@@ -16713,6 +18084,7 @@ function setupCommandHUDIPC() {
 
   // Show context menu on right-click
   ipcMain.on('hud:show-context-menu', async () => {
+   try {
     if (!commandHUDWindow || commandHUDWindow.isDestroyed()) return;
 
     const { Menu } = require('electron');
@@ -16791,6 +18163,9 @@ function setupCommandHUDIPC() {
     ]);
 
     contextMenu.popup({ window: commandHUDWindow });
+   } catch (_err) {
+    console.error('[hud:show-context-menu] Unhandled error:', _err);
+   }
   });
 
   // Trigger specific agent with transcript
@@ -16936,6 +18311,7 @@ function createMemoryEditorWindow(options = {}) {
       preload: path.join(__dirname, 'preload-memory-editor.js'),
       webSecurity: true,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -16995,6 +18371,7 @@ function createAgentManagerWindow() {
       preload: path.join(__dirname, 'preload-agent-manager.js'),
       webSecurity: true,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -17492,6 +18869,7 @@ function createClaudeCodeWindow(options = {}) {
       preload: path.join(__dirname, 'preload-claude-code.js'),
       webSecurity: true,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -17545,6 +18923,7 @@ function createClaudeTerminalWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload-claude-terminal.js'),
+      backgroundThrottling: false,
     },
   });
 
@@ -18912,13 +20291,19 @@ function createSplashWindow() {
     return splashWindow;
   }
 
+  const { screen } = require('electron');
+  const cursor = screen.getCursorScreenPoint();
+  const width = 480;
+  const height = 320;
+
   splashWindow = new BrowserWindow({
-    width: 480,
-    height: 320,
+    width,
+    height,
+    x: Math.round(cursor.x - width / 2),
+    y: Math.round(cursor.y - height / 2),
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    center: true,
     resizable: false,
     movable: false,
     minimizable: false,
@@ -18932,6 +20317,7 @@ function createSplashWindow() {
       preload: path.join(__dirname, 'preload-splash.js'),
       webSecurity: true,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -18989,6 +20375,7 @@ function createIntroWizardWindow(isFirstRun) {
       preload: path.join(__dirname, 'preload-intro-wizard.js'),
       webSecurity: true,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 

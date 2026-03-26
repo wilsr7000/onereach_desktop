@@ -12,9 +12,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 function ipcWithTimeout(channel, args = [], ms = 15000) {
   return Promise.race([
     ipcRenderer.invoke(channel, ...args),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`IPC timeout: ${channel} (${ms}ms)`)), ms)
-    ),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`IPC timeout: ${channel} (${ms}ms)`)), ms);
+    }),
   ]);
 }
 
@@ -237,6 +237,18 @@ contextBridge.exposeInMainWorld('orbAPI', {
     const handler = (event, side) => callback(side);
     ipcRenderer.on('orb:initial-side', handler);
     return () => ipcRenderer.removeListener('orb:initial-side', handler);
+  },
+
+  /**
+   * Listen for summon events (window shown via toggle/shortcut/menu).
+   * Used by the renderer to enter ephemeral mode when unpinned.
+   * @param {function} callback - Called with no arguments
+   * @returns {function} Cleanup function to remove the listener
+   */
+  onSummoned: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('orb:summoned', handler);
+    return () => ipcRenderer.removeListener('orb:summoned', handler);
   },
 
   /**

@@ -542,6 +542,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /**
+   * Clear HTTP cache and reload (used by the GSX toolbar refresh button).
+   * Routes through main process so it can override beforeunload prevention.
+   */
+  clearCacheAndReload: (options) => ipcRenderer.send('clear-cache-and-reload', options),
+
+  triggerMissionControl: () => ipcRenderer.send('trigger-mission-control'),
+
+  /**
    * Get basic window info
    * @returns {Object} Window info
    */
@@ -558,49 +566,79 @@ ipcRenderer.on('close-window', () => {
 });
 
 // ============================================
+// CENTRALIZED AI SERVICE BRIDGE
+// ============================================
+
+contextBridge.exposeInMainWorld('ai', {
+  chat: (opts) => ipcRenderer.invoke('ai:chat', opts),
+  complete: (prompt, opts) => ipcRenderer.invoke('ai:complete', prompt, opts),
+  json: (prompt, opts) => ipcRenderer.invoke('ai:json', prompt, opts),
+  vision: (imageData, prompt, opts) => ipcRenderer.invoke('ai:vision', imageData, prompt, opts),
+  embed: (input, opts) => ipcRenderer.invoke('ai:embed', input, opts),
+  transcribe: (audioBuffer, opts) => ipcRenderer.invoke('ai:transcribe', audioBuffer, opts),
+  chatStream: (opts) => ipcRenderer.invoke('ai:chatStream', opts),
+  onStreamChunk: (requestId, callback) => {
+    const channel = `ai:stream:${requestId}`;
+    const handler = (_event, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+});
+
+// ============================================
 // SPEECH RECOGNITION APIS
 // (Web Speech API doesn't work in Electron - use these instead)
 // ============================================
 
-// Expose Speech Recognition Bridge (ElevenLabs Scribe API)
-// Use this instead of webkitSpeechRecognition which doesn't work in Electron
-// Speech/Voice APIs (shared module)
-const {
-  getSpeechBridgeMethods,
-  getRealtimeSpeechMethods,
-  getMicManagerMethods,
-  getVoiceTTSMethods,
-} = require('./preload-speech');
-contextBridge.exposeInMainWorld('speechBridge', getSpeechBridgeMethods());
-
-contextBridge.exposeInMainWorld('realtimeSpeech', getRealtimeSpeechMethods());
-
-contextBridge.exposeInMainWorld('micManager', getMicManagerMethods());
-contextBridge.exposeInMainWorld('voiceTTS', getVoiceTTSMethods());
+try {
+  const {
+    getSpeechBridgeMethods,
+    getRealtimeSpeechMethods,
+    getMicManagerMethods,
+    getVoiceTTSMethods,
+  } = require('./preload-speech');
+  contextBridge.exposeInMainWorld('speechBridge', getSpeechBridgeMethods());
+  contextBridge.exposeInMainWorld('realtimeSpeech', getRealtimeSpeechMethods());
+  contextBridge.exposeInMainWorld('micManager', getMicManagerMethods());
+  contextBridge.exposeInMainWorld('voiceTTS', getVoiceTTSMethods());
+} catch (err) {
+  console.warn('[preload-spaces] Speech module unavailable:', err.message);
+}
 
 // ============================================
 // CLIPBOARD API
 // (For windows where Edit menu paste may not work)
 // ============================================
 
-// Clipboard API (shared module)
-const { getClipboardMethods } = require('./preload-clipboard-shared');
-contextBridge.exposeInMainWorld('clipboardAPI', getClipboardMethods({ includeHTML: true, includeHasText: true }));
+try {
+  const { getClipboardMethods } = require('./preload-clipboard-shared');
+  contextBridge.exposeInMainWorld('clipboardAPI', getClipboardMethods({ includeHTML: true, includeHasText: true }));
+} catch (err) {
+  console.warn('[preload-spaces] Clipboard module unavailable:', err.message);
+}
 
 // ============================================
 // ORB CONTROL API
 // Uses the shared module from preload-orb-control.js.
 // ============================================
-const { getOrbControlMethods } = require('./preload-orb-control');
-contextBridge.exposeInMainWorld('orbControl', getOrbControlMethods());
-console.log('[preload-spaces] orbControl API exposed (shared module)');
+try {
+  const { getOrbControlMethods } = require('./preload-orb-control');
+  contextBridge.exposeInMainWorld('orbControl', getOrbControlMethods());
+  console.log('[preload-spaces] orbControl API exposed (shared module)');
+} catch (err) {
+  console.warn('[preload-spaces] Orb control module unavailable:', err.message);
+}
 
 // Playbook + Sync APIs (shared module)
-const { getPlaybookMethods, getSyncMethods } = require('./preload-playbook-sync');
-contextBridge.exposeInMainWorld('playbook', getPlaybookMethods('preload-spaces'));
-contextBridge.exposeInMainWorld('sync', getSyncMethods());
+try {
+  const { getPlaybookMethods, getSyncMethods } = require('./preload-playbook-sync');
+  contextBridge.exposeInMainWorld('playbook', getPlaybookMethods('preload-spaces'));
+  contextBridge.exposeInMainWorld('sync', getSyncMethods());
+} catch (err) {
+  console.warn('[preload-spaces] Playbook/sync module unavailable:', err.message);
+}
 
 // Debug flag to verify preload loaded (check with window.__preloadSpacesLoaded)
 contextBridge.exposeInMainWorld('__preloadSpacesLoaded', true);
 
-console.log('[preload-spaces] Spaces API loaded (with speech, clipboard, orb control, playbook, and sync support)');
+console.log('[preload-spaces] Spaces API loaded (with ai, speech, clipboard, orb control, playbook, and sync support)');

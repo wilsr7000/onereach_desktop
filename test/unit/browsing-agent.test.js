@@ -49,7 +49,7 @@ describe('BrowsingAgent', () => {
 
   describe('Task Classification', () => {
     it('should route URLs to page reader', () => {
-      const { classifyTask } = require('../../packages/agents/browsing-agent.js');
+      const { classifyTask: _classifyTask } = require('../../packages/agents/browsing-agent.js');
       // classifyTask is not exported, but we can test via execute behavior
       // These tests verify the agent's overall behavior
     });

@@ -609,64 +609,9 @@ async function selectAccountOnPage(webview, tabId, targetAccountId) {
   logAuthEvent('info', 'Attempting account selection', { event: 'auth:select-attempt', tabId, targetAccountId });
 
   try {
-    const result = await webview.executeJavaScript(`
-            (function() {
-                const targetId = ${JSON.stringify(targetAccountId)};
-                console.log('[AutoLogin AccountSelect] Looking for account:', targetId);
-                
-                // Strategy 1: Find links with accountId in href
-                const allLinks = document.querySelectorAll('a');
-                for (const link of allLinks) {
-                    if (link.href && link.href.includes(targetId)) {
-                        console.log('[AutoLogin AccountSelect] Found link with accountId:', link.textContent?.trim());
-                        link.click();
-                        return { success: true, method: 'link-href', text: link.textContent?.trim() };
-                    }
-                }
-                
-                // Strategy 2: Find elements with data-account-id or similar data attributes
-                const dataElements = document.querySelectorAll('[data-account-id], [data-id], [data-account]');
-                for (const el of dataElements) {
-                    const attrId = el.dataset.accountId || el.dataset.id || el.dataset.account;
-                    if (attrId === targetId) {
-                        console.log('[AutoLogin AccountSelect] Found element with data attribute');
-                        el.click();
-                        return { success: true, method: 'data-attribute' };
-                    }
-                }
-                
-                // Strategy 3: Find any clickable element whose outerHTML contains the account ID
-                const clickable = document.querySelectorAll('a, button, [role="button"], [onclick], li[class*="account"], div[class*="account"], .account-item, .account-card, .account-option');
-                for (const el of clickable) {
-                    const html = el.outerHTML || '';
-                    if (html.includes(targetId)) {
-                        console.log('[AutoLogin AccountSelect] Found clickable element containing accountId:', el.tagName, el.textContent?.trim()?.substring(0, 50));
-                        el.click();
-                        return { success: true, method: 'html-content-match' };
-                    }
-                }
-                
-                // Strategy 4: Find forms or hidden inputs with the accountId
-                const forms = document.querySelectorAll('form');
-                for (const form of forms) {
-                    const html = form.outerHTML || '';
-                    if (html.includes(targetId)) {
-                        const submitBtn = form.querySelector('button[type="submit"], button, input[type="submit"]');
-                        if (submitBtn) {
-                            console.log('[AutoLogin AccountSelect] Found form with accountId, clicking submit');
-                            submitBtn.click();
-                            return { success: true, method: 'form-submit' };
-                        }
-                    }
-                }
-                
-                // Log what we see for debugging
-                const visibleText = document.body ? document.body.innerText.substring(0, 500) : '';
-                console.log('[AutoLogin AccountSelect] Could not find account. Page text:', visibleText);
-                
-                return { success: false, reason: 'no_matching_account', visibleClickable: clickable.length };
-            })()
-        `);
+    const result = await webview.executeJavaScript(
+      window.authScripts.buildSelectAccountScript(targetAccountId)
+    );
 
     if (result.success) {
       logAuthEvent('info', 'Account selected successfully', {
@@ -895,50 +840,7 @@ async function attemptAutoLoginWithRetry(webview, url, tabId, attempt) {
 
   // Check if form fields exist yet
   const formInfo = await webview
-    .executeJavaScript(
-      `
-        (function() {
-            // Check main document
-            const hasPasswordInMain = !!document.querySelector('input[type="password"]');
-            if (hasPasswordInMain) {
-                console.log('[AutoLogin] Form found in main document');
-                return { location: 'main', crossOrigin: false };
-            }
-            
-            // Check for iframes
-            const iframes = document.querySelectorAll('iframe');
-            console.log('[AutoLogin] Found ' + iframes.length + ' iframes');
-            
-            let hasCrossOriginIframe = false;
-            
-            for (let i = 0; i < iframes.length; i++) {
-                const iframe = iframes[i];
-                const src = iframe.src || '';
-                
-                try {
-                    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                    if (iframeDoc && iframeDoc.querySelector('input[type="password"]')) {
-                        console.log('[AutoLogin] Form found in same-origin iframe ' + i);
-                        return { location: 'iframe-' + i, crossOrigin: false };
-                    }
-                } catch (e) {
-                    // Cross-origin iframe - we can't access it directly
-                    console.log('[AutoLogin] Cross-origin iframe detected: ' + src);
-                    // Check if this looks like an auth iframe
-                    if (src.includes('auth.') && src.includes('onereach.ai')) {
-                        hasCrossOriginIframe = true;
-                    }
-                }
-            }
-            
-            if (hasCrossOriginIframe) {
-                return { location: 'cross-origin', crossOrigin: true };
-            }
-            
-            return { location: 'none', crossOrigin: false };
-        })()
-    `
-    )
+    .executeJavaScript(window.authScripts.buildDetectFormLocationScript())
     .catch(() => ({ location: 'error', crossOrigin: false }));
 
   logAuthEvent('info', `Form detection: ${formInfo.location}`, {
@@ -984,61 +886,9 @@ async function attemptIframeAutoLogin(webview, url, tabId) {
 
     logAuthEvent('info', 'Filling iframe login form', { event: 'auth:iframe-fill', tabId, email: credentials.email });
 
-    const filled = await webview.executeJavaScript(`
-            (function() {
-                const email = ${JSON.stringify(credentials.email)};
-                const password = ${JSON.stringify(credentials.password)};
-                
-                function fillInput(input, value) {
-                    if (!input) return false;
-                    input.focus();
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                        window.HTMLInputElement.prototype, 'value'
-                    ).set;
-                    nativeInputValueSetter.call(input, value);
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                    return true;
-                }
-                
-                // Find the iframe with the form
-                const iframes = document.querySelectorAll('iframe');
-                for (let iframe of iframes) {
-                    try {
-                        const doc = iframe.contentDocument || iframe.contentWindow.document;
-                        if (!doc) continue;
-                        
-                        const passwordField = doc.querySelector('input[type="password"]');
-                        if (!passwordField) continue;
-                        
-                        const emailField = doc.querySelector(
-                            'input[type="email"], input[type="text"][name*="email" i], ' +
-                            'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
-                            'input[placeholder*="email" i], input[placeholder*="user" i]'
-                        );
-                        
-                        if (emailField) fillInput(emailField, email);
-                        fillInput(passwordField, password);
-                        
-                        // Click submit
-                        setTimeout(() => {
-                            const submitBtn = doc.querySelector('button[type="submit"], input[type="submit"]') ||
-                                             doc.querySelector('form button');
-                            if (submitBtn) {
-                                console.log('[AutoLogin] Clicking iframe submit button');
-                                submitBtn.click();
-                            }
-                        }, 500);
-                        
-                        console.log('[AutoLogin] Filled iframe form');
-                        return true;
-                    } catch (e) {
-                        console.log('[AutoLogin] Could not access iframe:', e.message);
-                    }
-                }
-                return false;
-            })()
-        `);
+    const filled = await webview.executeJavaScript(
+      window.authScripts.buildIframeLoginScript(credentials.email, credentials.password)
+    );
 
     // Mark form as filled if successful
     if (filled) {
@@ -1070,89 +920,7 @@ async function attemptCrossOriginAutoLogin(webview, tabId) {
     logAuthEvent('info', 'Cross-origin login via IPC', { event: 'auth:xorigin-start', tabId, webContentsId });
 
     // Build the login script
-    const loginScript = `
-            (function() {
-                const email = ${JSON.stringify(credentials.email)};
-                const password = ${JSON.stringify(credentials.password)};
-                
-                console.log('[CrossOrigin AutoLogin] Running in auth frame');
-                console.log('[CrossOrigin AutoLogin] URL:', window.location.href);
-                
-                // Log all inputs for debugging
-                const allInputs = document.querySelectorAll('input');
-                console.log('[CrossOrigin AutoLogin] Found ' + allInputs.length + ' inputs');
-                allInputs.forEach((inp, i) => {
-                    if (inp.type !== 'hidden') {
-                        console.log('[CrossOrigin AutoLogin] Input ' + i + ': type=' + inp.type + ', name=' + inp.name);
-                    }
-                });
-                
-                function fillInput(input, value) {
-                    if (!input) return false;
-                    input.focus();
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                        window.HTMLInputElement.prototype, 'value'
-                    ).set;
-                    if (nativeInputValueSetter) {
-                        nativeInputValueSetter.call(input, value);
-                    } else {
-                        input.value = value;
-                    }
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-                    console.log('[CrossOrigin AutoLogin] Filled:', input.name || input.type);
-                    return true;
-                }
-                
-                // Find email field (broad search)
-                const emailField = document.querySelector(
-                    'input[type="email"], input[type="text"][name*="email" i], ' +
-                    'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
-                    'input[autocomplete="email"], input[autocomplete="username"], ' +
-                    'input[placeholder*="email" i], input[placeholder*="user" i], ' +
-                    'input[type="text"]:not([name*="search"])' // Fallback: first text input
-                );
-                
-                // Find password field
-                const passwordField = document.querySelector('input[type="password"]');
-                
-                if (!passwordField) {
-                    console.log('[CrossOrigin AutoLogin] No password field found');
-                    return { success: false, reason: 'no_password_field' };
-                }
-                
-                if (emailField) {
-                    fillInput(emailField, email);
-                }
-                fillInput(passwordField, password);
-                
-                // Click submit after a delay
-                setTimeout(() => {
-                    const submitBtn = document.querySelector(
-                        'button[type="submit"], input[type="submit"], button.submit'
-                    ) || document.querySelector('form button:not([type="button"])');
-                    
-                    if (submitBtn) {
-                        console.log('[CrossOrigin AutoLogin] Clicking submit:', submitBtn.textContent || submitBtn.type);
-                        submitBtn.click();
-                    } else {
-                        // Find by text
-                        const buttons = document.querySelectorAll('button');
-                        for (const btn of buttons) {
-                            const text = (btn.textContent || '').toLowerCase();
-                            if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('continue')) {
-                                console.log('[CrossOrigin AutoLogin] Clicking button by text:', btn.textContent);
-                                btn.click();
-                                break;
-                            }
-                        }
-                    }
-                }, 500);
-                
-                return { success: true, emailFound: !!emailField, passwordFound: !!passwordField };
-            })()
-        `;
+    const loginScript = window.authScripts.buildFillLoginScript(credentials.email, credentials.password);
 
     // Execute in the auth iframe via main process
     const result = await window.api.invoke('onereach:execute-in-frame', {
@@ -1211,57 +979,7 @@ async function attemptCrossOrigin2FA(webview, tabId, attempt) {
     const webContentsId = webview.getWebContentsId();
 
     // First, check if we're on a 2FA page
-    const detect2FAScript = `
-            (function() {
-                console.log('[2FA Detection] Checking for 2FA page...');
-                console.log('[2FA Detection] URL:', window.location.href);
-                
-                const allInputs = document.querySelectorAll('input');
-                console.log('[2FA Detection] Found ' + allInputs.length + ' inputs');
-                allInputs.forEach((inp, i) => {
-                    if (inp.type !== 'hidden') {
-                        console.log('[2FA Detection] Input ' + i + ': type=' + inp.type + ', name=' + inp.name + ', maxlength=' + inp.maxLength);
-                    }
-                });
-                
-                // Check for 2FA indicators
-                const pageText = document.body ? document.body.innerText.toLowerCase() : '';
-                const has2FAText = pageText.includes('two-factor') || pageText.includes('2fa') || 
-                                  pageText.includes('verification code') || pageText.includes('authenticator') ||
-                                  pageText.includes('enter the code') || pageText.includes('6-digit') ||
-                                  pageText.includes('security code') || pageText.includes('authentication code');
-                
-                // Look for 2FA input fields
-                const totpInput = document.querySelector(
-                    'input[name="totp"], input[name="code"], input[name="otp"], ' +
-                    'input[name="verificationCode"], input[name="twoFactorCode"], ' +
-                    'input[autocomplete="one-time-code"], ' +
-                    'input[inputmode="numeric"][maxlength="6"], ' +
-                    'input[maxlength="6"]:not([type="password"]):not([name*="email"]):not([name*="user"]), ' +
-                    'input[placeholder*="code" i], input[placeholder*="2fa" i], input[placeholder*="authenticator" i]'
-                );
-                
-                // Also check for password field (means we're still on login)
-                const passwordField = document.querySelector('input[type="password"]');
-                
-                if (totpInput) {
-                    console.log('[2FA Detection] Found 2FA input field');
-                    return { is2FAPage: true, reason: 'totp_input_found' };
-                }
-                
-                if (has2FAText && !passwordField) {
-                    console.log('[2FA Detection] 2FA text detected, no password field');
-                    return { is2FAPage: true, reason: '2fa_text_found' };
-                }
-                
-                if (passwordField) {
-                    console.log('[2FA Detection] Still on login page (password field present)');
-                    return { is2FAPage: false, reason: 'still_login_page' };
-                }
-                
-                return { is2FAPage: false, reason: 'unknown' };
-            })()
-        `;
+    const detect2FAScript = window.authScripts.buildDetect2FAScript();
 
     const detectResult = await window.api.invoke('onereach:execute-in-frame', {
       webContentsId,
@@ -1321,90 +1039,7 @@ async function attemptCrossOrigin2FA(webview, tabId, attempt) {
     });
 
     // Fill in the 2FA code
-    const fill2FAScript = `
-            (function() {
-                const code = ${JSON.stringify(totpCode)};
-                
-                console.log('[2FA Fill] Attempting to fill 2FA code');
-                
-                function fillInput(input, value) {
-                    if (!input) return false;
-                    input.focus();
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                        window.HTMLInputElement.prototype, 'value'
-                    ).set;
-                    if (nativeInputValueSetter) {
-                        nativeInputValueSetter.call(input, value);
-                    } else {
-                        input.value = value;
-                    }
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-                    return true;
-                }
-                
-                // Find 2FA input
-                const totpInput = document.querySelector(
-                    'input[name="totp"], input[name="code"], input[name="otp"], ' +
-                    'input[name="verificationCode"], input[name="twoFactorCode"], ' +
-                    'input[autocomplete="one-time-code"], ' +
-                    'input[inputmode="numeric"][maxlength="6"], ' +
-                    'input[maxlength="6"]:not([type="password"]):not([name*="email"]):not([name*="user"]), ' +
-                    'input[placeholder*="code" i]'
-                );
-                
-                if (!totpInput) {
-                    // Try finding any numeric input
-                    const numericInputs = document.querySelectorAll('input[type="text"], input[type="tel"], input[inputmode="numeric"]');
-                    for (const inp of numericInputs) {
-                        if (inp.maxLength === 6 || inp.placeholder.toLowerCase().includes('code')) {
-                            console.log('[2FA Fill] Found potential 2FA input by heuristic');
-                            fillInput(inp, code);
-                            
-                            setTimeout(() => {
-                                const submitBtn = document.querySelector('button[type="submit"]') || 
-                                                 document.querySelector('form button');
-                                if (submitBtn) {
-                                    console.log('[2FA Fill] Clicking submit');
-                                    submitBtn.click();
-                                }
-                            }, 500);
-                            
-                            return { success: true, method: 'heuristic' };
-                        }
-                    }
-                    console.log('[2FA Fill] No 2FA input found');
-                    return { success: false, reason: 'no_totp_input' };
-                }
-                
-                console.log('[2FA Fill] Found 2FA input:', totpInput.name || totpInput.id);
-                fillInput(totpInput, code);
-                
-                // Click submit after a delay
-                setTimeout(() => {
-                    const submitBtn = document.querySelector('button[type="submit"]') || 
-                                     document.querySelector('form button:not([type="button"])');
-                    if (submitBtn) {
-                        console.log('[2FA Fill] Clicking submit:', submitBtn.textContent);
-                        submitBtn.click();
-                    } else {
-                        // Try finding verify/continue button
-                        const buttons = document.querySelectorAll('button');
-                        for (const btn of buttons) {
-                            const text = (btn.textContent || '').toLowerCase();
-                            if (text.includes('verify') || text.includes('confirm') || text.includes('submit') || text.includes('continue')) {
-                                console.log('[2FA Fill] Clicking button by text:', btn.textContent);
-                                btn.click();
-                                break;
-                            }
-                        }
-                    }
-                }, 500);
-                
-                return { success: true, method: 'direct' };
-            })()
-        `;
+    const fill2FAScript = window.authScripts.buildFillTOTPScript(totpCode);
 
     const fillResult = await window.api.invoke('onereach:execute-in-frame', {
       webContentsId,
@@ -1463,66 +1098,10 @@ async function fill2FACode(webview, tabId, credentials) {
     timeRemaining: codeResult.timeRemaining,
   });
 
-  const filled = await webview.executeJavaScript(`
-        (function() {
-            const code = ${JSON.stringify(codeResult.code)};
-            
-            const totpInput = document.querySelector(
-                'input[name="totp"], input[name="code"], input[name="otp"], ' +
-                'input[autocomplete="one-time-code"], ' +
-                'input[inputmode="numeric"][maxlength="6"], ' +
-                'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
-                'input[type="text"][maxlength="6"], input[type="number"][maxlength="6"]'
-            );
-            
-            if (!totpInput) {
-                console.log('[AutoLogin 2FA] No TOTP input found');
-                return false;
-            }
-            
-            console.log('[AutoLogin 2FA] Found TOTP input:', totpInput.name || totpInput.id || totpInput.type);
-            
-            totpInput.focus();
-            
-            // React compatibility - set native value
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, 'value'
-            ).set;
-            if (nativeInputValueSetter) {
-                nativeInputValueSetter.call(totpInput, code);
-            } else {
-                totpInput.value = code;
-            }
-            totpInput.dispatchEvent(new Event('input', { bubbles: true }));
-            totpInput.dispatchEvent(new Event('change', { bubbles: true }));
-            totpInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-            
-            // Auto-submit after a short delay
-            setTimeout(function() {
-                const submitBtn = document.querySelector(
-                    'button[type="submit"], input[type="submit"]'
-                ) || document.querySelector('form button:not([type="button"])');
-                
-                if (submitBtn) {
-                    console.log('[AutoLogin 2FA] Clicking submit:', submitBtn.textContent || submitBtn.type);
-                    submitBtn.click();
-                } else {
-                    // Try finding verify/continue button by text
-                    const buttons = document.querySelectorAll('button');
-                    for (const btn of buttons) {
-                        const text = (btn.textContent || '').toLowerCase();
-                        if (text.includes('verify') || text.includes('confirm') || text.includes('submit') || text.includes('continue')) {
-                            console.log('[AutoLogin 2FA] Clicking button by text:', btn.textContent);
-                            btn.click();
-                            break;
-                        }
-                    }
-                }
-            }, 300);
-            
-            return true;
-        })()
-    `);
+  const totpResult = await webview.executeJavaScript(
+    window.authScripts.buildFillTOTPScript(codeResult.code)
+  );
+  const filled = totpResult && totpResult.success;
 
   if (filled) {
     logAuthEvent('info', '2FA code filled successfully', { event: 'auth:2fa-filled', tabId });
@@ -1570,44 +1149,9 @@ async function monitorPostAuth(webview, tabId, originalUrl, credentials, targetA
     }
 
     // Detect current page type
-    const curPageType = await webview.executeJavaScript(`
-            (function() {
-                // Check for 2FA inputs
-                var totpInputs = document.querySelectorAll(
-                    'input[name="totp"], input[name="code"], input[name="otp"], ' +
-                    'input[autocomplete="one-time-code"], ' +
-                    'input[inputmode="numeric"][maxlength="6"], ' +
-                    'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
-                    'input[placeholder*="authenticator" i]'
-                );
-                var visible2FA = Array.from(totpInputs).find(function(input) {
-                    var rect = input.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                });
-                if (visible2FA) return '2fa';
-                
-                // Check for login form (still on login page)
-                var passwordInput = document.querySelector('input[type="password"]');
-                if (passwordInput) return 'login';
-                
-                // Check for account selection page
-                var pageText = document.body ? document.body.innerText.toLowerCase() : '';
-                var hasAccountText = pageText.includes('choose') || pageText.includes('select') || 
-                                    pageText.includes('switch') || pageText.includes('account');
-                var accountLinks = document.querySelectorAll('a[href*="accountId"], [data-account-id], [data-account], .account-item, .account-card');
-                var clickableItems = document.querySelectorAll('a, button, [role="button"]');
-                var accountClickable = Array.from(clickableItems).filter(function(el) {
-                    var html = el.outerHTML || '';
-                    return html.includes('account') || html.includes('Account');
-                });
-                
-                if (accountLinks.length > 0 || (hasAccountText && accountClickable.length > 0)) {
-                    return 'account-select';
-                }
-                
-                return 'other';
-            })()
-        `);
+    const curPageType = await webview.executeJavaScript(
+      window.authScripts.buildDetectPageTypeScript()
+    );
 
     logAuthEvent('info', `Monitor poll ${attempt + 1}/${maxAttempts}: ${curPageType}`, {
       event: 'auth:monitor-poll',
@@ -1689,78 +1233,9 @@ async function attemptAutoLogin(webview, url, tabId) {
     }
 
     // Detect page type (login, 2fa, or other)
-    const pageType = await webview.executeJavaScript(`
-            (function() {
-                // Log all inputs for debugging
-                const allInputs = document.querySelectorAll('input');
-                console.log('[AutoLogin] Found ' + allInputs.length + ' input fields on page');
-                allInputs.forEach((inp, i) => {
-                    if (inp.type !== 'hidden') {
-                        console.log('[AutoLogin] Input ' + i + ': type=' + inp.type + ', name=' + inp.name + ', placeholder=' + inp.placeholder + ', id=' + inp.id);
-                    }
-                });
-                
-                // Check for 2FA input first (more specific)
-                const totpInputs = document.querySelectorAll(
-                    'input[name="totp"], input[name="code"], input[name="otp"], ' +
-                    'input[autocomplete="one-time-code"], ' +
-                    'input[inputmode="numeric"][maxlength="6"], ' +
-                    'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
-                    'input[placeholder*="authenticator" i]'
-                );
-                
-                const visible2FA = Array.from(totpInputs).find(input => {
-                    const rect = input.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                });
-                
-                if (visible2FA) {
-                    console.log('[AutoLogin] Found 2FA field');
-                    return '2fa';
-                }
-                
-                // Check for login form - broader search
-                const passwordInput = document.querySelector('input[type="password"]');
-                const emailInput = document.querySelector(
-                    'input[type="email"], input[type="text"][name*="email" i], ' +
-                    'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
-                    'input[autocomplete="email"], input[autocomplete="username"], ' +
-                    'input[placeholder*="email" i], input[placeholder*="user" i]'
-                );
-                
-                console.log('[AutoLogin] Email field found:', !!emailInput, 'Password field found:', !!passwordInput);
-                
-                if (passwordInput && emailInput) {
-                    console.log('[AutoLogin] Login form detected');
-                    return 'login';
-                }
-                
-                // Check for password-only (might be second step)
-                if (passwordInput) {
-                    console.log('[AutoLogin] Password field only - might be step 2');
-                    return 'password-only';
-                }
-                
-                // Check for account selection page (appears after login/2FA)
-                // No password field, no 2FA field, but has clickable account items
-                var pageText = document.body ? document.body.innerText.toLowerCase() : '';
-                var hasAccountText = pageText.includes('choose') || pageText.includes('select') || 
-                                    pageText.includes('switch') || pageText.includes('account');
-                var accountLinks = document.querySelectorAll('a[href*="accountId"], [data-account-id], [data-account], .account-item, .account-card');
-                var clickableItems = document.querySelectorAll('a, button, [role="button"]');
-                var accountClickable = Array.from(clickableItems).filter(function(el) {
-                    var html = el.outerHTML || '';
-                    return html.includes('account') || html.includes('Account');
-                });
-                
-                if (accountLinks.length > 0 || (hasAccountText && accountClickable.length > 0)) {
-                    console.log('[AutoLogin] Account selection page detected (links:', accountLinks.length, 'text:', hasAccountText, ')');
-                    return 'account-select';
-                }
-                
-                return 'other';
-            })()
-        `);
+    const pageType = await webview.executeJavaScript(
+      window.authScripts.buildDetectPageTypeScript()
+    );
 
     logAuthEvent('info', `Page type detected: ${pageType}`, { event: 'auth:page-type', tabId, pageType, url });
 
@@ -1774,6 +1249,17 @@ async function attemptAutoLogin(webview, url, tabId) {
     if (!credentials || !credentials.email || !credentials.password) {
       logAuthEvent('warn', 'No credentials configured', { event: 'auth:no-credentials', tabId });
       return;
+    }
+
+    // Prompt user for confirmation before filling (delegates to main process dialog)
+    try {
+      const confirmed = await window.api.invoke('onereach:confirm-auto-login', { email: credentials.email });
+      if (!confirmed) {
+        logAuthEvent('info', 'User declined auto-login prompt', { event: 'auth:declined', tabId });
+        return;
+      }
+    } catch (promptErr) {
+      logAuthEvent('warn', 'Auto-login prompt failed, proceeding', { event: 'auth:prompt-error', error: promptErr.message });
     }
 
     logAuthEvent('info', 'Credentials retrieved', {
@@ -1791,75 +1277,9 @@ async function attemptAutoLogin(webview, url, tabId) {
         email: credentials.email,
       });
 
-      await webview.executeJavaScript(`
-                (function() {
-                    const email = ${JSON.stringify(credentials.email)};
-                    const password = ${JSON.stringify(credentials.password)};
-                    
-                    function fillInput(input, value) {
-                        if (!input) return false;
-                        input.focus();
-                        
-                        // React compatibility - set native value
-                        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                            window.HTMLInputElement.prototype, 'value'
-                        ).set;
-                        nativeInputValueSetter.call(input, value);
-                        
-                        // Dispatch events
-                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                        input.dispatchEvent(new Event('change', { bubbles: true }));
-                        input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-                        
-                        console.log('[AutoLogin] Filled field:', input.name || input.type);
-                        return true;
-                    }
-                    
-                    // Find and fill email (broader search)
-                    const emailInput = document.querySelector(
-                        'input[type="email"], input[type="text"][name*="email" i], ' +
-                        'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
-                        'input[autocomplete="email"], input[autocomplete="username"], ' +
-                        'input[placeholder*="email" i], input[placeholder*="user" i]'
-                    );
-                    if (emailInput) {
-                        fillInput(emailInput, email);
-                    }
-                    
-                    // Find and fill password
-                    const passwordInput = document.querySelector('input[type="password"]');
-                    if (passwordInput) {
-                        fillInput(passwordInput, password);
-                    }
-                    
-                    // Auto-submit after a delay
-                    setTimeout(() => {
-                        // Try multiple submit button selectors
-                        const submitBtn = document.querySelector(
-                            'button[type="submit"], input[type="submit"], ' +
-                            'button.submit, button.login, button.signin'
-                        ) || document.querySelector('form button:not([type="button"])');
-                        
-                        if (submitBtn) {
-                            console.log('[AutoLogin] Clicking submit button:', submitBtn.textContent || submitBtn.type);
-                            submitBtn.click();
-                        } else {
-                            // Try finding by text content
-                            const buttons = document.querySelectorAll('button');
-                            for (const btn of buttons) {
-                                const text = (btn.textContent || '').toLowerCase();
-                                if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('submit') || text.includes('continue')) {
-                                    console.log('[AutoLogin] Clicking button by text:', btn.textContent);
-                                    btn.click();
-                                    break;
-                                }
-                            }
-                        }
-                    }, 500);
-                    
-                    return true;
-                })()
-            `);
+      await webview.executeJavaScript(
+        window.authScripts.buildFillLoginScript(credentials.email, credentials.password)
+      );
 
       // Track that login form was filled and clear active login lock
       markFormFilled(tabId);
@@ -3772,7 +3192,7 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
       }
     }
 
-    const failedUrl = e.validatedURL || '';
+    const _failedUrl = e.validatedURL || '';
     const desc = e.errorDescription || 'Unknown error';
     try {
       webview.executeJavaScript(`
@@ -4381,6 +3801,11 @@ function closeTab(tabId) {
     // Clean up WebMCP proxy agents for this tab
     cleanupWebMCPForTab(tabId);
 
+    // Clean up auto-login state for this tab
+    autoLoginState.delete(tabId);
+    tabsWithActiveLogin.delete(tabId);
+    globalLoginQueue = globalLoginQueue.filter((entry) => entry.tabId !== tabId);
+
     // Cleanup multi-tenant token tracking
     if (tab.partition && tab.environment) {
       // Unregister partition from refresh propagation
@@ -4557,61 +3982,7 @@ function checkTabAuthentication(tabId, webview) {
   console.log(`Manually checking authentication for tab ${tabId}`);
 
   webview
-    .executeJavaScript(
-      `
-        (function() {
-            // Check if we're on a login page or need authentication
-            const isLoginPage = window.location.href.includes('/login') || 
-                              window.location.href.includes('/auth') ||
-                              document.querySelector('input[type="password"]') !== null;
-            
-            // Check for common login/auth UI elements
-            const hasLoginForm = document.querySelector('form[action*="login"]') !== null ||
-                               document.querySelector('button[type="submit"]') !== null;
-            
-            // Check page content for login keywords
-            const bodyText = document.body ? document.body.innerText.toLowerCase() : '';
-            const hasLoginKeywords = bodyText.includes('sign in') || 
-                                   bodyText.includes('log in') ||
-                                   bodyText.includes('login') ||
-                                   bodyText.includes('password');
-            
-            // Check if we have any content that suggests we're authenticated
-            const hasAuthenticatedContent = document.querySelector('.chat-interface') !== null ||
-                                          document.querySelector('[class*="message"]') !== null ||
-                                          document.querySelector('[class*="chat"]') !== null ||
-                                          document.querySelector('iframe[src*="chat"]') !== null;
-            
-            // Check for empty or minimal content (common when not authenticated)
-            const isEmptyPage = !document.body || 
-                              document.body.innerText.trim().length < 50 ||
-                              document.body.children.length < 3;
-            
-            // Check for OneReach-specific elements that indicate authentication
-            const hasOneReachChat = document.querySelector('[id*="onereach"]') !== null ||
-                                  document.querySelector('[class*="onereach"]') !== null ||
-                                  window.OneReach !== undefined;
-            
-            // For OneReach chat URLs, if the page is empty or minimal, it likely needs auth
-            const isOneReachChatUrl = window.location.href.includes('chat.') && 
-                                    window.location.href.includes('.onereach.ai');
-            
-            const needsAuth = (isLoginPage || hasLoginForm || hasLoginKeywords || 
-                             (isOneReachChatUrl && isEmptyPage && !hasAuthenticatedContent)) && 
-                             !hasAuthenticatedContent;
-            
-            return {
-                needsAuth: needsAuth,
-                currentUrl: window.location.href,
-                title: document.title,
-                bodyLength: document.body ? document.body.innerText.length : 0,
-                hasAuthenticatedContent: hasAuthenticatedContent,
-                isEmptyPage: isEmptyPage,
-                isOneReachChatUrl: isOneReachChatUrl
-            };
-        })();
-    `
-    )
+    .executeJavaScript(window.authScripts.buildCheckAuthStatusScript())
     .then((authCheck) => {
       console.log(`Tab ${tabId} auth check:`, authCheck);
       console.log(`- needsAuth: ${authCheck.needsAuth}`);

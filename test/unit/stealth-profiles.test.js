@@ -5,7 +5,7 @@ import {
   getProfile,
   listProfiles,
   shouldPreferChrome,
-  PROFILES,
+  PROFILES as _PROFILES,
 } from '../../lib/stealth-profiles.js';
 
 describe('stealth-profiles', () => {

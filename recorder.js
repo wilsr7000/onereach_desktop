@@ -62,7 +62,7 @@ class Recorder {
       targetProject: options.projectId || null,
     });
 
-    this.instructions = options;
+    this.instructions = options.instructions ? options : null;
     this.targetSpace = options.spaceId || null;
     this.targetProject = options.projectId || null;
 
@@ -93,6 +93,31 @@ class Recorder {
     } catch (_e) {
       /* browserWindow may not be available */
     }
+
+    // Screen capture: setDisplayMediaRequestHandler replaces the deprecated
+    // getUserMedia({ chromeMediaSource: 'desktop' }) approach that produces
+    // blank frames in Electron 25+. The renderer calls setScreenShareSource(id)
+    // before getDisplayMedia() so the handler knows which source to provide.
+    this._pendingScreenSourceId = null;
+    this.window.webContents.session.setDisplayMediaRequestHandler(async (request, callback) => {
+      try {
+        const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+        const video = this._pendingScreenSourceId
+          ? (sources.find((s) => s.id === this._pendingScreenSourceId) || sources[0])
+          : sources[0];
+        this._pendingScreenSourceId = null;
+        if (!video) {
+          callback({});
+          return;
+        }
+        const response = { video };
+        if (request.audioRequested) response.audio = 'loopback';
+        callback(response);
+      } catch (error) {
+        log.error('recorder', 'Display media handler error', { error: error.message });
+        callback({});
+      }
+    });
 
     // Enable dev tools keyboard shortcut (Cmd+Option+I / Ctrl+Shift+I)
     this.window.webContents.on('before-input-event', (event, input) => {
@@ -325,6 +350,11 @@ class Recorder {
       }
     });
 
+    // Tell the display-media handler which source to provide on the next getDisplayMedia() call
+    ipcMain.handle('recorder:set-screen-source', (event, sourceId) => {
+      this._pendingScreenSourceId = sourceId;
+    });
+
     // Get screen sources (desktopCapturer is main-process only in Electron 25+)
     ipcMain.handle('recorder:get-screen-sources', async () => {
       try {
@@ -465,18 +495,35 @@ class Recorder {
     // Get OpenAI API key for live transcription
     ipcMain.handle('recorder:get-openai-key', async () => {
       try {
+        // #region agent log
+        const _dbgHasSettings = !!global.settingsManager;
+        const _dbgAllKeys = _dbgHasSettings ? Object.keys(global.settingsManager.settings || {}).filter(k => k.toLowerCase().includes('key') || k.toLowerCase().includes('provider')) : [];
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:IPC-handler-entry',message:'recorder:get-openai-key handler called',data:{hasSettingsManager:_dbgHasSettings,settingsKeyNames:_dbgAllKeys},timestamp:Date.now(),hypothesisId:'A,D'})}).catch(()=>{});
+        // #endregion
         if (global.settingsManager) {
           const openaiKey = global.settingsManager.get('openaiApiKey');
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:openaiApiKey-check',message:'openaiApiKey lookup result',data:{hasKey:!!openaiKey,keyLength:openaiKey?openaiKey.length:0,keyPrefix:openaiKey?openaiKey.substring(0,7):'(empty)',keyType:typeof openaiKey},timestamp:Date.now(),hypothesisId:'B,C'})}).catch(()=>{});
+          // #endregion
           if (openaiKey) return { success: true, key: openaiKey };
 
           const llmKey = global.settingsManager.get('llmApiKey');
           const provider = global.settingsManager.get('llmProvider');
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:llmKey-fallback',message:'llmApiKey fallback check',data:{hasLlmKey:!!llmKey,llmKeyLength:llmKey?llmKey.length:0,llmKeyPrefix:llmKey?llmKey.substring(0,7):'(empty)',provider:provider,providerCheck:llmKey?{noProvider:!provider,isOpenai:provider==='openai',startsSk:llmKey.startsWith('sk-')}:null},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
           if (llmKey && (!provider || provider === 'openai' || llmKey.startsWith('sk-'))) {
             return { success: true, key: llmKey };
           }
         }
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:no-key-found',message:'No OpenAI key found - returning failure',data:{hadSettingsManager:!!global.settingsManager},timestamp:Date.now(),hypothesisId:'A,B,C'})}).catch(()=>{});
+        // #endregion
         return { success: false, error: 'No OpenAI API key configured' };
       } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:catch-error',message:'Exception in get-openai-key handler',data:{error:error.message,stack:error.stack?.substring(0,300)},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
         return { success: false, error: error.message };
       }
     });
@@ -815,9 +862,9 @@ class Recorder {
           method: 'DELETE',
         });
         const respStatus = resp.status;
-        let respBody = '';
+        let _respBody = '';
         try {
-          respBody = await resp.text();
+          _respBody = await resp.text();
         } catch {
           /* no-op */
         }

@@ -10,7 +10,7 @@
  */
 
 const { getAgentMemory } = require('../../lib/agent-memory-store');
-const { learnFromInteraction, getTimeContext } = require('../../lib/thinking-agent');
+const { learnFromInteraction: _learnFromInteraction, getTimeContext } = require('../../lib/thinking-agent');
 
 const smalltalkAgent = {
   id: 'smalltalk-agent',

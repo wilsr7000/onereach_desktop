@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach as _afterEach } from 'vitest';
 
 vi.mock('../../lib/browser-stealth', () => ({
   getUserAgent: vi.fn().mockReturnValue('Mozilla/5.0 Chrome/125.0.0.0'),

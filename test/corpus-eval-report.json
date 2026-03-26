@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-11T15:45:16.843Z",
+  "timestamp": "2026-03-26T07:00:35.534Z",
   "summary": {
     "total": 63,
     "passed": 38,
@@ -14,7 +14,7 @@
       "user": "What time is it?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 8:43 AM"
+      "response": "It's 12:00 AM"
     },
     {
       "conversation": "Time: basic queries",
@@ -22,7 +22,7 @@
       "user": "And what day is it today?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Wednesday, March 11, 2026"
+      "response": "It's Thursday, March 26, 2026"
     },
     {
       "conversation": "Time: basic queries",
@@ -30,7 +30,7 @@
       "user": "What is the date?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Wednesday, March 11, 2026"
+      "response": "It's Thursday, March 26, 2026"
     },
     {
       "conversation": "Time: timezone awareness",
@@ -46,7 +46,7 @@
       "user": "And in London?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 8:43 AM"
+      "response": "It's 12:00 AM"
     },
     {
       "conversation": "Weather: city provided",
@@ -54,7 +54,7 @@
       "user": "What is the weather in Denver?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 24°F and partly cloudy in Denver, feels like 13°F. Humidity is 77%"
+      "response": "It's 58°F and clear in Denver"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -62,7 +62,7 @@
       "user": "What's the weather?",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "It's 45°F and clear in Berkeley. Humidity is 97%"
+      "response": "It's 57°F and clear in Berkeley. Humidity is 74%"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -70,7 +70,7 @@
       "user": "San Francisco",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 45°F and clear in Berkeley. Humidity is 97%"
+      "response": "It's 57°F and clear in Berkeley. Humidity is 74%"
     },
     {
       "conversation": "Weather: forecast request",
@@ -78,7 +78,7 @@
       "user": "Will it rain tomorrow in Seattle?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 45°F and clear in Berkeley. Humidity is 97%"
+      "response": "It's 57°F and clear in Berkeley. Humidity is 74%"
     },
     {
       "conversation": "Spelling: common words",
@@ -126,7 +126,7 @@
       "user": "Hello there",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I'm here to help! Just let me know what you need."
+      "response": "What can I do for you?"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -150,7 +150,7 @@
       "user": "Goodbye",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Take care, Robb!"
+      "response": "Goodbye, Robb! Have a great night!"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -182,7 +182,7 @@
       "user": "What can you do?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I have 26 capabilities across several areas. I can help with calendar management and daily briefings"
+      "response": "I have 29 capabilities across several areas. I can help with calendar management and daily briefings"
     },
     {
       "conversation": "Help: capabilities inquiry",
@@ -190,7 +190,7 @@
       "user": "Tell me more about the agents",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I have 26 capabilities across several areas. I can help with calendar management and daily briefings"
+      "response": "I have 29 capabilities across several areas. I can help with calendar management and daily briefings"
     },
     {
       "conversation": "Help: feature questions",
@@ -310,7 +310,7 @@
       "user": "Play some jazz music",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Let me find that for you..."
+      "response": "I couldn't find exactly what you wanted, but I started playing some music"
     },
     {
       "conversation": "DJ: music requests",
@@ -318,7 +318,7 @@
       "user": "Something more upbeat",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Let me find that for you..."
+      "response": "I couldn't find exactly what you wanted, but I started playing some music"
     },
     {
       "conversation": "Recorder: start recording",
@@ -398,7 +398,7 @@
       "user": "Give me my morning briefing",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good morning, Robb. Current time: 8:45 AM. Date: Wednesday, March 11, 2026. Time of day: morning. It"
+      "response": "Good morning, Robb. Current time: 12:00 AM. Date: Thursday, March 26, 2026. Time of day: morning. It"
     },
     {
       "conversation": "Memory: store and recall preferences",
@@ -494,7 +494,7 @@
       "user": "asdfghjkl",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "What was that?"
+      "response": "Hmm, what's that?"
     },
     {
       "conversation": "Edge: single word",

@@ -292,7 +292,7 @@ describe('Agent Middleware', () => {
       const agent = {
         id: 'slow-agent',
         name: 'Slow Agent',
-        execute: () => new Promise((resolve) => setTimeout(() => resolve({ success: true, message: 'late' }), 5000)),
+        execute: () => new Promise((resolve) => { setTimeout(() => resolve({ success: true, message: 'late' }), 5000); }),
       };
       const result = await safeExecuteAgent(agent, { content: 'hello' }, { timeoutMs: 100 });
       expect(result.success).toBe(false);

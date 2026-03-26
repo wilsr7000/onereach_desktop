@@ -17,6 +17,8 @@ const { app } = require('electron');
 const { getLogQueue } = require('../lib/log-event-queue');
 const log = getLogQueue();
 
+const MAX_CONVERSATION_MESSAGES = 200;
+
 // AI service configurations
 const AI_SERVICE_CONFIG = {
   Claude: {
@@ -187,6 +189,9 @@ class ConversationCapture {
       };
 
       conversation.messages.push(prompt);
+      if (conversation.messages.length > MAX_CONVERSATION_MESSAGES) {
+        conversation.messages = conversation.messages.slice(-MAX_CONVERSATION_MESSAGES);
+      }
       conversation.lastActivity = Date.now();
 
       log.info('app', '[ConversationCapture] Captured prompt for', { v0: conversationKey });
@@ -287,6 +292,9 @@ class ConversationCapture {
       }
 
       conversation.messages.push(response);
+      if (conversation.messages.length > MAX_CONVERSATION_MESSAGES) {
+        conversation.messages = conversation.messages.slice(-MAX_CONVERSATION_MESSAGES);
+      }
       conversation.lastActivity = Date.now();
       conversation.exchangeCount++;
 

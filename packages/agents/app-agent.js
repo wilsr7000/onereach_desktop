@@ -17,6 +17,14 @@ const ai = require('../../lib/ai-service');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 
+function _formatUptime(seconds) {
+  if (seconds < 60) return `${seconds} seconds`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return m > 0 ? `${h} hour${h > 1 ? 's' : ''} and ${m} minute${m > 1 ? 's' : ''}` : `${h} hour${h > 1 ? 's' : ''}`;
+}
+
 // ==================== APP KNOWLEDGE BASE ====================
 
 const APP_PRODUCTS = {
@@ -776,7 +784,7 @@ const appAgent = {
   id: 'app-agent',
   name: 'App Guide',
   description:
-    'Opens any app or menu item by name using intelligent matching. Handles AI services, image/video generators, IDW environments, and app features. Also gives tours and playbooks for all features.',
+    'Opens any app or menu item by name using intelligent matching. Reports live app status, open windows, and what the user is currently doing. Handles AI services, image/video generators, IDW environments, and app features. Also gives tours and playbooks for all features.',
   voice: 'nova', // Warm, helpful guide voice
   acks: ['Let me help with that.', 'I can show you.', 'Opening that for you.'],
   categories: ['system', 'app', 'help', 'tutorial', 'ai'],
@@ -807,21 +815,29 @@ const appAgent = {
     'step by step',
     'actions',
     'what can i do',
+    'status',
+    'what is open',
+    'what am i doing',
+    'what is running',
+    'app status',
+    'situation',
+    'whats going on',
     ...Object.values(APP_PRODUCTS).flatMap((p) => p.keywords),
     ...Object.values(PLAYBOOKS).flatMap((p) => p.keywords),
   ],
   executionType: 'action', // Opens windows, navigates menus
 
-  prompt: `App Guide opens app windows, navigates to features, runs tours, and executes step-by-step playbooks.
+  prompt: `App Guide opens app windows, navigates to features, reports live app status, runs tours, and executes step-by-step playbooks.
 
 Capabilities:
+- Report live app status: what windows are open, which is focused, uptime, connected agents, voice orb state, recent activity
 - Open any app window: Settings, Video Editor, Spaces, GSX Create, Agent Manager, Health Dashboard, etc.
 - Navigate to specific features within the app
 - Run interactive feature tours
 - Execute step-by-step playbooks (getting started, recording, exporting, etc.)
 - Answer questions about where to find features in the app
 
-This agent opens and navigates to parts of the app. It does not perform the actual tasks those features provide.`,
+This agent opens and navigates to parts of the app and reports its runtime status. It does not perform the actual tasks those features provide.`,
 
   // Memory for tracking user's learning progress
   memory: null,
@@ -905,6 +921,9 @@ This agent opens and navigates to parts of the app. It does not perform the actu
       log.info('agent', `LLM classified intent: ${intent.type} (confidence: ${intent.confidence})`);
 
       switch (intent.type) {
+        case 'status':
+          return this._handleStatusRequest(task);
+
         case 'open_app':
           // Try to find and open a menu item
           const menuResult = await this._openMenuItemWithLLM(task.content);
@@ -970,6 +989,7 @@ This agent opens and navigates to parts of the app. It does not perform the actu
   async _classifyIntent(userRequest) {
     try {
       const prompt = `Classify this user request into ONE of these intent types:
+- status: User wants to know what the app is doing, what is open, runtime health, current situation
 - open_app: User wants to open/launch an app, tool, or feature
 - run_tutorial: User wants a step-by-step guide or playbook tutorial
 - list_tutorials: User wants to see available tutorials/playbooks
@@ -1666,6 +1686,68 @@ Respond with JSON only:
       message: `${product.name}: ${product.description}.${canOpen ? ' Say "open" and I\'ll launch it.' : ''} ${product.access}.${hasActions ? ` ${actionCount} actions available.` : ''} Would you like a tour, see the actions, or run a playbook?`,
       data: { productId: product.id },
     };
+  },
+
+  /**
+   * Handle status request -- live app situational awareness
+   */
+  async _handleStatusRequest(_task) {
+    try {
+      const { executeAction } = require('../../action-executor');
+      const result = await executeAction('app-situation');
+      if (!result || !result.success) {
+        return { success: true, message: 'I could not retrieve the app status right now. Try again in a moment.' };
+      }
+      const s = result.data;
+
+      const parts = [];
+
+      // App basics
+      parts.push(`The app is running version ${s.app?.version || 'unknown'}, up for ${_formatUptime(s.app?.uptime || 0)}.`);
+
+      // Windows
+      const wins = s.windows || {};
+      const visibleWindows = (wins.open || []).filter(w => w.visible);
+      if (visibleWindows.length > 0) {
+        const names = visibleWindows.map(w => w.name || w.title).join(', ');
+        parts.push(`You have ${visibleWindows.length} window${visibleWindows.length > 1 ? 's' : ''} open: ${names}.`);
+        if (wins.focusedName) {
+          parts.push(`${wins.focusedName} is currently in focus.`);
+        }
+      } else {
+        parts.push('No windows are currently visible.');
+      }
+
+      // Flow context
+      if (s.flowContext?.label) {
+        let flowMsg = `You are working in the Edison flow "${s.flowContext.label}"`;
+        if (s.flowContext.stepLabel) flowMsg += ` on the "${s.flowContext.stepLabel}" step`;
+        parts.push(flowMsg + '.');
+      }
+
+      // Voice
+      if (s.voice?.orbVisible) {
+        parts.push(s.voice.listening ? 'The Voice Orb is active and listening.' : 'The Voice Orb is visible.');
+      }
+
+      // Agents
+      const agents = s.agents || {};
+      if (agents.exchangeRunning) {
+        parts.push(`The agent exchange is running with ${agents.connectedCount} agent${agents.connectedCount !== 1 ? 's' : ''} connected.`);
+      }
+
+      // Recent activity
+      const bids = s.recentActivity?.recentBids || [];
+      if (bids.length > 0) {
+        const last = bids[0];
+        parts.push(`The most recent voice task was "${last.taskContent}"${last.winnerName ? `, handled by ${last.winnerName}` : ''}.`);
+      }
+
+      return { success: true, message: parts.join(' ') };
+    } catch (error) {
+      log.error('agent', 'Status request failed', { error: error.message });
+      return { success: true, message: 'I had trouble getting the app status. The health dashboard might have more details.' };
+    }
   },
 
   /**

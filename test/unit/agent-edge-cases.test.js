@@ -7,7 +7,7 @@
  * { success, needsInput }.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach as _afterEach } from 'vitest';
 
 // ── Shared mocks ──────────────────────────────────────────────────────────
 
@@ -140,9 +140,9 @@ djAgent.execute = vi.fn(async (task) => {
       try {
         return await Promise.race([
           djAgent._handleChoiceResponse(task, djAgent._gatherContext()),
-          new Promise((resolve) =>
-            setTimeout(() => resolve({ success: false, message: 'Timed out playing music (test)' }), 3000)
-          ),
+          new Promise((resolve) => {
+            setTimeout(() => resolve({ success: false, message: 'Timed out playing music (test)' }), 3000);
+          }),
         ]);
       } catch (e) {
         return { success: false, message: e.message };
@@ -153,7 +153,7 @@ djAgent.execute = vi.fn(async (task) => {
     // the agent asks the user what mood they're in
     const context = djAgent._gatherContext();
     return djAgent._askMood(context);
-  } catch (error) {
+  } catch (_error) {
     return {
       success: false,
       message: 'I had trouble getting your music ready. Let me try again.',
@@ -352,7 +352,7 @@ describe('Agent Edge Cases & Chaos Tests', { timeout: 10000 }, () => {
           const result = weatherAgent.extractLocation(input);
           // Should return string or null, never throw
           expect(result === null || typeof result === 'string').toBe(true);
-        } catch (e) {
+        } catch (_e) {
           threw = true;
         }
         expect(threw).toBe(false);
@@ -421,7 +421,7 @@ describe('Agent Edge Cases & Chaos Tests', { timeout: 10000 }, () => {
           const result = djAgent._matchPattern(input || '');
           // Should return an object or null, never crash
           expect(result === null || typeof result === 'object').toBe(true);
-        } catch (e) {
+        } catch (_e) {
           threw = true;
         }
         expect(threw).toBe(false);
@@ -455,7 +455,7 @@ describe('Agent Edge Cases & Chaos Tests', { timeout: 10000 }, () => {
         try {
           const result = djAgent._detectMoodFromRequest(input);
           expect(result === null || typeof result === 'string').toBe(true);
-        } catch (e) {
+        } catch (_e) {
           threw = true;
         }
         expect(threw).toBe(false);
@@ -491,7 +491,7 @@ describe('Agent Edge Cases & Chaos Tests', { timeout: 10000 }, () => {
         let threw = false;
         try {
           result = await timeAgent.execute(makeTask(input || ''), {});
-        } catch (e) {
+        } catch (_e) {
           threw = true;
         }
 
@@ -529,7 +529,7 @@ describe('Agent Edge Cases & Chaos Tests', { timeout: 10000 }, () => {
         let threw = false;
         try {
           result = await spellingAgent.execute(makeTask(input), {});
-        } catch (e) {
+        } catch (_e) {
           threw = true;
         }
 
@@ -572,7 +572,7 @@ describe('Agent Edge Cases & Chaos Tests', { timeout: 10000 }, () => {
         let threw = false;
         try {
           result = await smalltalkAgent.execute(makeTask(input), {});
-        } catch (e) {
+        } catch (_e) {
           threw = true;
         }
 
@@ -610,7 +610,7 @@ describe('Agent Edge Cases & Chaos Tests', { timeout: 10000 }, () => {
         let threw = false;
         try {
           result = await dailyBriefAgent.execute(makeTask(input), {});
-        } catch (e) {
+        } catch (_e) {
           threw = true;
         }
 

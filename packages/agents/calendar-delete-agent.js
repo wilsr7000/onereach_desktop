@@ -13,8 +13,9 @@
 const ai = require('../../lib/ai-service');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
-const { getEventsForDay, deleteEventVerified } = require('../../lib/calendar-fetch');
+const { getEventsForDay, deleteEventVerified, resolveTimeframe: _resolveTimeframe } = require('../../lib/calendar-fetch');
 const { confirmDelete, buildDayUISpec, formatEventTime } = require('../../lib/calendar-format');
+const { analyzeDay } = require('../../lib/calendar-data');
 
 const calendarDeleteAgent = {
   id: 'calendar-delete-agent',
@@ -72,25 +73,55 @@ This agent deletes calendar events. It does not create, modify, or query events.
       const intent = await this._parseDeleteIntent(query, now);
       log.info('calendar-delete', 'Parsed delete intent', { intent });
 
-      // Step 2: Find the target event
+      // Step 2: Find the target event (filter to the specific day first)
       const { events, dateRange } = await getEventsForDay(intent.timeframe, now);
+      const day = analyzeDay(events, dateRange.start, now);
+      const dayEvents = day.all.map((e) => e.event);
 
-      if (!events || events.length === 0) {
+      if (!dayEvents || dayEvents.length === 0) {
         return { success: false, message: `You don't have any events ${dateRange.label.toLowerCase()} to cancel.` };
       }
 
-      // Search for matching event
       const searchLower = (intent.searchText || '').toLowerCase();
-      const matches = events.filter((e) => {
+
+      // If no search text, show all events for the day and ask the user to pick
+      if (!searchLower) {
+        const list = dayEvents
+          .slice(0, 8)
+          .map((e) => {
+            const time = formatEventTime(e);
+            return `"${e.summary}" at ${time}`;
+          })
+          .join(', ');
+
+        return {
+          success: true,
+          needsInput: {
+            prompt: `Which event ${dateRange.label.toLowerCase()} should I cancel? You have: ${list}`,
+            agentId: this.id,
+            context: {
+              calendarState: 'awaiting_delete_selection',
+              matches: dayEvents.map((e) => ({ id: e.id, summary: e.summary, calendarId: e.calendarId || 'primary' })),
+              targetDate: intent.timeframe,
+            },
+          },
+        };
+      }
+
+      const matches = dayEvents.filter((e) => {
         const title = (e.summary || '').toLowerCase();
-        if (!searchLower) return false;
         return title.includes(searchLower) || searchLower.includes(title);
       });
 
       if (matches.length === 0) {
+        // Show what events exist so user can pick
+        const list = dayEvents
+          .slice(0, 5)
+          .map((e) => `"${e.summary}" at ${formatEventTime(e)}`)
+          .join(', ');
         return {
           success: false,
-          message: `I couldn't find an event matching "${intent.searchText || query}" ${dateRange.label.toLowerCase()}.`,
+          message: `I couldn't find "${intent.searchText}" ${dateRange.label.toLowerCase()}. Your events: ${list}`,
         };
       }
 
@@ -117,7 +148,6 @@ This agent deletes calendar events. It does not create, modify, or query events.
         };
       }
 
-      // Single match: proceed
       const target = matches[0];
 
       // Step 3: Delete with verification

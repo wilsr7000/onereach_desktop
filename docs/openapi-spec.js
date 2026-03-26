@@ -302,6 +302,46 @@ function schemaDefinitions() {
         message: { type: 'string' },
       },
     },
+    AppActionListItem: {
+      type: 'object',
+      description: 'Summary of an action within a category list',
+      properties: {
+        id: { type: 'string', description: 'Action identifier (same as path actionId)' },
+        type: { type: 'string' },
+        description: { type: 'string' },
+      },
+    },
+    AppActionsListResponse: {
+      type: 'object',
+      required: ['actions'],
+      properties: {
+        actions: {
+          type: 'object',
+          description: 'Map of category name to actions in that category',
+          additionalProperties: arr(ref('AppActionListItem')),
+        },
+      },
+    },
+    AppActionInfo: {
+      type: 'object',
+      properties: {
+        type: { type: 'string' },
+        category: { type: 'string' },
+        description: { type: 'string' },
+        params: arr({ type: 'string' }),
+        optionalParams: arr({ type: 'string' }),
+      },
+    },
+    AppActionExecuteResponse: {
+      type: 'object',
+      required: ['success'],
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        error: { type: 'string' },
+        data: { description: 'Optional action-specific result (any JSON)' },
+      },
+    },
   };
 }
 
@@ -1093,6 +1133,53 @@ function logServerPaths() {
         operationId: 'getAppPid',
         description: 'Served on port 47292.',
         responseSchema: { type: 'object', properties: { pid: { type: 'integer' } } },
+      }),
+    },
+    '/app/status': {
+      get: ep('App Control', 'Unified situational awareness and recent logs', {
+        operationId: 'getAppStatus',
+        description:
+          'Returns a comprehensive snapshot of the current app state (situation) ' +
+          'merged with log statistics and recent log entries. Combines the output of ' +
+          '`POST /app/actions/app-situation`, `GET /logs/stats`, and `GET /logs?limit=25` ' +
+          'into a single call. Served on port 47292.',
+        responseSchema: {
+          type: 'object',
+          properties: {
+            situation: { type: 'object', description: 'Full app-situation snapshot (windows, flow, orb, agents, settings)' },
+            logStats: { type: 'object', description: 'Aggregated log statistics (counts by level/category, error rate)' },
+            recentLogs: { type: 'array', items: { type: 'object' }, description: 'Last 25 log entries' },
+            recentErrors: { type: 'array', items: { type: 'object' }, description: 'Last 10 error-level entries' },
+          },
+        },
+      }),
+    },
+    '/app/actions': {
+      get: ep('App Control', 'List available actions by category', {
+        operationId: 'listAppActions',
+        description: 'Returns all registered actions grouped by category. Served on port 47292.',
+        responseSchema: ref('AppActionsListResponse'),
+      }),
+    },
+    '/app/actions/{actionId}': {
+      get: ep('App Control', 'Get action metadata', {
+        operationId: 'getAppAction',
+        description: 'Returns type, category, description, and parameter names. Served on port 47292.',
+        params: [{ name: 'actionId', in: 'path', required: true, schema: { type: 'string' }, description: 'Registered action ID' }],
+        responses: {
+          200: { description: 'Action metadata', content: { 'application/json': { schema: ref('AppActionInfo') } } },
+          404: { description: 'Action not found', content: { 'application/json': { schema: ref('Error') } } },
+        },
+      }),
+      post: ep('App Control', 'Execute an action', {
+        operationId: 'executeAppAction',
+        description: 'Runs the action with the given JSON parameters. Served on port 47292.',
+        params: [{ name: 'actionId', in: 'path', required: true, schema: { type: 'string' }, description: 'Registered action ID' }],
+        body: { type: 'object', description: 'Action parameters as key-value pairs', additionalProperties: true },
+        responses: {
+          200: { description: 'Execution result', content: { 'application/json': { schema: ref('AppActionExecuteResponse') } } },
+          404: { description: 'Action not found', content: { 'application/json': { schema: ref('Error') } } },
+        },
       }),
     },
   };

@@ -26,10 +26,21 @@ function buildEvaluationPrompt(task, bids) {
     })
     .join('\n\n');
 
+  let situationText = '';
+  if (task.metadata?.situationContext) {
+    const sc = task.metadata.situationContext;
+    const parts = [];
+    if (sc.focusedWindow) parts.push(`Active window: ${sc.focusedWindow}`);
+    if (sc.openWindows?.length) parts.push(`Open: ${sc.openWindows.join(', ')}`);
+    if (sc.flowContext?.label) parts.push(`Edison flow: ${sc.flowContext.label}`);
+    if (sc.flowContext?.stepLabel) parts.push(`Step: ${sc.flowContext.stepLabel}`);
+    if (parts.length > 0) situationText = `\nCURRENT SITUATION:\n${parts.join('\n')}\n`;
+  }
+
   return `You are the Master Orchestrator - the supervisor that evaluates all agent bids and makes intelligent routing decisions.
 
 USER REQUEST: "${task.content || task}"
-
+${situationText}
 SUBMITTED BIDS (${bids.length} agents):
 ${bidsText}
 

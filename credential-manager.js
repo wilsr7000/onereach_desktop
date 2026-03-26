@@ -335,8 +335,7 @@ class CredentialManager {
 
       try {
         await getKeytar().deletePassword(`${SERVICE_NAME}-meta`, accountKey);
-      } catch (_e) {
-      }
+      } catch (_e) { /* intentionally empty */ }
 
       cacheInvalidate(SERVICE_NAME, accountKey);
       cacheInvalidate(`${SERVICE_NAME}-meta`, accountKey);
@@ -448,6 +447,7 @@ class CredentialManager {
    * @returns {Promise<{email: string, password: string, totpSecret: string|null}|null>}
    */
   async getOneReachCredentials() {
+    this._lastError = null;
     try {
       const metaStr = await cachedGetPassword(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);
       if (!metaStr) {
@@ -464,8 +464,7 @@ class CredentialManager {
       let totpSecret = null;
       try {
         totpSecret = await cachedGetPassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
-      } catch (_e) {
-      }
+      } catch (_e) { /* intentionally empty */ }
 
       return {
         email: meta.email,
@@ -476,8 +475,16 @@ class CredentialManager {
       };
     } catch (error) {
       console.error('[CredentialManager] Failed to get OneReach credentials:', error);
+      this._lastError = error.message || 'Unknown keychain error';
       return null;
     }
+  }
+
+  /**
+   * Returns the error message from the most recent getOneReachCredentials failure, or null.
+   */
+  getLastError() {
+    return this._lastError || null;
   }
 
   /**
@@ -574,8 +581,7 @@ class CredentialManager {
 
       try {
         await getKeytar().deletePassword(TOTP_SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
-      } catch (_e) {
-      }
+      } catch (_e) { /* intentionally empty */ }
 
       cacheInvalidate(SERVICE_NAME, ONEREACH_ACCOUNT_KEY);
       cacheInvalidate(`${SERVICE_NAME}-onereach-meta`, ONEREACH_ACCOUNT_KEY);

@@ -139,6 +139,17 @@ ${agent.prompt || agent.description || 'No description provided'}
     // No summaries yet
   }
 
+  let situationText = '';
+  if (typeof task === 'object' && task.metadata?.situationContext) {
+    const sc = task.metadata.situationContext;
+    const parts = [];
+    if (sc.focusedWindow) parts.push(`Active window: ${sc.focusedWindow}`);
+    if (sc.openWindows?.length) parts.push(`Open windows: ${sc.openWindows.join(', ')}`);
+    if (sc.flowContext?.label) parts.push(`Edison flow: ${sc.flowContext.label}`);
+    if (sc.flowContext?.stepLabel) parts.push(`Current step: ${sc.flowContext.stepLabel}`);
+    if (parts.length > 0) situationText = parts.join('\n');
+  }
+
   const conversationSection = conversationText
     ? `\nRECENT CONVERSATION:\n${conversationText}\n`
     : '';
@@ -151,14 +162,20 @@ ${agent.prompt || agent.description || 'No description provided'}
     ? `\nPREVIOUS SESSIONS:\n${sessionSummaryText}\n`
     : '';
 
+  const situationSection = situationText
+    ? `\nCURRENT SITUATION (what the user is doing right now):\n${situationText}\n`
+    : '';
+
   return `You are evaluating whether a specific agent can handle a user's request.
 
 Read the agent's description and capabilities below. Then read the user's request.
 Can this agent fulfill what the user is asking for? Rate your confidence based on
 how well the request falls within the agent's capabilities.
+Use the current situation to understand context -- for example, if the user says
+"this" or "here", consider what window or tool they are currently using.
 
 ${agentInfo}
-${userProfileSection}${sessionSummarySection}${conversationSection}
+${userProfileSection}${sessionSummarySection}${situationSection}${conversationSection}
 USER REQUEST: "${userRequest}"
 
 Use conversation history to resolve pronouns ("it", "that", "this", etc.).

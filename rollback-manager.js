@@ -85,8 +85,42 @@ class RollbackManager {
     }
   }
 
-  async createRestoreScript() {
-    return null;
+  async createRestoreScript(version) {
+    try {
+      this._ensureBackupDir();
+      const backups = await this.getAvailableBackups();
+      const target = version
+        ? backups.find(b => b.version === version)
+        : backups[0];
+      if (!target) return null;
+
+      const scriptPath = path.join(this.backupDir, `restore-v${target.version}.sh`);
+      const appDir = path.resolve(__dirname);
+      const script = [
+        '#!/bin/bash',
+        `# Restore GSX Power User to v${target.version}`,
+        `# Generated: ${new Date().toISOString()}`,
+        '',
+        `BACKUP_DIR="${target.path}"`,
+        `APP_DIR="${appDir}"`,
+        '',
+        'if [ ! -d "$BACKUP_DIR" ]; then',
+        '  echo "Backup not found: $BACKUP_DIR"',
+        '  exit 1',
+        'fi',
+        '',
+        'echo "Restoring from v' + target.version + '..."',
+        'cp -f "$BACKUP_DIR/backup-metadata.json" "$APP_DIR/restore-marker.json" 2>/dev/null',
+        'echo "Restore marker written. Restart the app to complete."',
+      ].join('\n');
+
+      const fsSync = require('fs');
+      fsSync.writeFileSync(scriptPath, script, { mode: 0o755 });
+      return scriptPath;
+    } catch (error) {
+      console.error('Failed to create restore script:', error);
+      return null;
+    }
   }
   formatSize(bytes) {
     return `${(bytes / 1024).toFixed(1)} KB`;

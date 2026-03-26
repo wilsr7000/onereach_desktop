@@ -48,7 +48,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Listen for space data
   onSpaceData: (callback) => {
-    ipcRenderer.on('space-data', (event, data) => callback(data));
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('space-data', handler);
+    return () => ipcRenderer.removeListener('space-data', handler);
   },
 });
 

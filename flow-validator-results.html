@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flow Validation Results</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      padding: 16px 24px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+    }
+    header h1 { font-size: 15px; font-weight: 600; color: #f1f5f9; flex: 1; }
+    .badge { padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge.pass { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+    .badge.fail { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+    .summary-bar {
+      padding: 12px 24px; background: #1e293b; display: flex; gap: 20px; align-items: center; flex-shrink: 0;
+      font-size: 12px; color: #94a3b8;
+    }
+    .count { display: flex; align-items: center; gap: 5px; }
+    .count .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot.err { background: #ef4444; }
+    .dot.warn { background: #f59e0b; }
+    .dot.info { background: #3b82f6; }
+    .count .num { font-weight: 600; color: #e2e8f0; }
+    .actions { margin-left: auto; display: flex; gap: 8px; }
+    .actions button {
+      padding: 5px 14px; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer;
+      font-family: inherit; transition: all 0.2s; border: 1px solid #334155;
+    }
+    .btn-copy { background: #1e293b; color: #94a3b8; }
+    .btn-copy:hover { background: #334155; color: #e2e8f0; }
+    .btn-copy.copied { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); color: #4ade80; }
+    .btn-md { background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); color: #93c5fd; }
+    .btn-md:hover { background: rgba(59,130,246,0.2); color: #bfdbfe; }
+    main { flex: 1; overflow-y: auto; padding: 0; }
+    main::-webkit-scrollbar { width: 8px; }
+    main::-webkit-scrollbar-track { background: #0f172a; }
+    main::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    main::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .diagnostic {
+      padding: 10px 24px; border-bottom: 1px solid #1e293b; display: flex; gap: 10px; align-items: flex-start;
+      font-size: 13px; transition: background 0.15s; cursor: pointer;
+    }
+    .diagnostic:hover { background: rgba(255,255,255,0.03); }
+    .diagnostic.unchecked { opacity: 0.35; }
+    .diagnostic input[type="checkbox"] {
+      flex-shrink: 0; margin-top: 2px; width: 14px; height: 14px; accent-color: #3b82f6; cursor: pointer;
+    }
+    .sev { width: 56px; flex-shrink: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; padding-top: 1px; }
+    .sev.error { color: #f87171; }
+    .sev.warning { color: #fbbf24; }
+    .sev.info { color: #60a5fa; }
+    .msg { flex: 1; color: #cbd5e1; line-height: 1.5; }
+    .msg .code { color: #64748b; font-size: 11px; margin-left: 6px; }
+    .msg .path { display: block; color: #475569; font-size: 11px; margin-top: 2px; font-family: 'SF Mono', Menlo, monospace; }
+    .msg .fix { display: block; color: #94a3b8; font-size: 12px; margin-top: 4px; font-style: italic; }
+    .select-controls { display: flex; gap: 6px; align-items: center; }
+    .select-controls button {
+      padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 500; cursor: pointer;
+      font-family: inherit; border: 1px solid #334155; background: #1e293b; color: #94a3b8; transition: all 0.15s;
+    }
+    .select-controls button:hover { background: #334155; color: #e2e8f0; }
+    .select-controls button.active { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.3); color: #93c5fd; }
+    .selected-count { font-size: 11px; color: #64748b; margin-left: 4px; }
+    .empty { text-align: center; padding: 60px 20px; color: #475569; }
+    .empty h2 { font-size: 16px; font-weight: 500; color: #94a3b8; margin-bottom: 6px; }
+    .loading { text-align: center; padding: 60px 20px; color: #64748b; font-size: 13px; }
+    footer {
+      padding: 10px 24px; border-top: 1px solid #1e293b; font-size: 11px; color: #475569;
+      display: flex; justify-content: space-between; flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">Flow Validation</h1>
+    <div id="statusBadge"></div>
+  </header>
+  <div class="summary-bar" id="summaryBar" style="display:none;">
+    <div class="count"><span class="dot err"></span><span class="num" id="errCount">0</span> errors</div>
+    <div class="count"><span class="dot warn"></span><span class="num" id="warnCount">0</span> warnings</div>
+    <div class="count"><span class="dot info"></span><span class="num" id="infoCount">0</span> info</div>
+    <div class="select-controls" id="selectControls" style="display:none;">
+      <button id="btnAll" title="Select all">All</button>
+      <button id="btnNone" title="Deselect all">None</button>
+      <button id="btnErrors" title="Toggle errors only">Errors</button>
+      <button id="btnWarnings" title="Toggle warnings only">Warnings</button>
+      <span class="selected-count" id="selectedCount"></span>
+    </div>
+    <div class="actions">
+      <button class="btn-copy" id="copyJson" title="Copy selected as JSON">Copy JSON</button>
+      <button class="btn-md" id="copyMd" title="Copy selected as Markdown for LLM">Copy for LLM</button>
+    </div>
+  </div>
+  <main id="content">
+    <div class="loading" id="loading">Validating flow...</div>
+  </main>
+  <footer>
+    <span id="flowInfo"></span>
+    <span id="timestamp"></span>
+  </footer>
+  <script>
+    let fullResult = null;
+
+    async function run() {
+      const loading = document.getElementById('loading');
+      try {
+        fullResult = await window.devTools.validateFlow();
+        loading.style.display = 'none';
+
+        if (fullResult.error) {
+          document.getElementById('content').innerHTML = '<div class="empty"><h2>Validation Error</h2><p>' + esc(fullResult.error) + '</p></div>';
+          return;
+        }
+
+        document.getElementById('title').textContent = fullResult.label ? 'Validation: ' + fullResult.label : 'Flow Validation';
+        document.getElementById('statusBadge').innerHTML = fullResult.valid
+          ? '<span class="badge pass">Pass</span>'
+          : '<span class="badge fail">Fail</span>';
+        document.getElementById('summaryBar').style.display = 'flex';
+        document.getElementById('errCount').textContent = fullResult.counts.error || 0;
+        document.getElementById('warnCount').textContent = fullResult.counts.warning || 0;
+        document.getElementById('infoCount').textContent = fullResult.counts.info || 0;
+        document.getElementById('flowInfo').textContent = fullResult.flowId ? 'Flow: ' + fullResult.flowId : '';
+        document.getElementById('timestamp').textContent = fullResult.ts || '';
+
+        const content = document.getElementById('content');
+        if (!fullResult.diagnostics || fullResult.diagnostics.length === 0) {
+          content.innerHTML = '<div class="empty"><h2>No issues found</h2><p>This flow passed all validation checks.</p></div>';
+          return;
+        }
+
+        document.getElementById('selectControls').style.display = 'flex';
+
+        content.innerHTML = fullResult.diagnostics.map((d, i) => {
+          let html = '<div class="diagnostic" data-idx="' + i + '" data-severity="' + esc(d.severity) + '">';
+          html += '<input type="checkbox" checked data-idx="' + i + '">';
+          html += '<span class="sev ' + esc(d.severity) + '">' + esc(d.severity) + '</span>';
+          html += '<span class="msg">' + esc(d.message);
+          if (d.code) html += '<span class="code">[' + esc(d.code) + ']</span>';
+          if (d.path) html += '<span class="path">' + esc(d.path) + '</span>';
+          if (d.fix) html += '<span class="fix">' + esc(d.fix) + '</span>';
+          html += '</span></div>';
+          return html;
+        }).join('');
+
+        content.addEventListener('click', (e) => {
+          const row = e.target.closest('.diagnostic');
+          if (!row) return;
+          if (e.target.tagName === 'INPUT') {
+            row.classList.toggle('unchecked', !e.target.checked);
+            updateSelectedCount();
+            return;
+          }
+          const cb = row.querySelector('input[type="checkbox"]');
+          cb.checked = !cb.checked;
+          row.classList.toggle('unchecked', !cb.checked);
+          updateSelectedCount();
+        });
+
+        document.getElementById('btnAll').onclick = () => setAll(true);
+        document.getElementById('btnNone').onclick = () => setAll(false);
+        document.getElementById('btnErrors').onclick = () => setOnlySeverity('error');
+        document.getElementById('btnWarnings').onclick = () => setOnlySeverity('warning');
+
+        document.getElementById('copyJson').onclick = () => copyToClipboard(JSON.stringify(getSelectedResult(), null, 2), 'copyJson');
+        document.getElementById('copyMd').onclick = () => copyToClipboard(toMarkdown(getSelectedResult()), 'copyMd');
+
+        updateSelectedCount();
+
+      } catch (err) {
+        loading.style.display = 'none';
+        document.getElementById('content').innerHTML = '<div class="empty"><h2>Error</h2><p>' + esc(err.message) + '</p></div>';
+      }
+    }
+
+    function getCheckedIndices() {
+      return [...document.querySelectorAll('.diagnostic input[type="checkbox"]:checked')].map(cb => parseInt(cb.dataset.idx));
+    }
+
+    function getSelectedResult() {
+      const indices = new Set(getCheckedIndices());
+      const filtered = fullResult.diagnostics.filter((_, i) => indices.has(i));
+      const counts = { error: 0, warning: 0, info: 0 };
+      for (const d of filtered) counts[d.severity] = (counts[d.severity] || 0) + 1;
+      return { ...fullResult, diagnostics: filtered, counts, summary: `${counts.error} errors, ${counts.warning} warnings, ${counts.info} info notes` };
+    }
+
+    function updateSelectedCount() {
+      const total = fullResult.diagnostics.length;
+      const selected = getCheckedIndices().length;
+      document.getElementById('selectedCount').textContent = selected === total ? '' : selected + ' / ' + total + ' selected';
+    }
+
+    function setAll(checked) {
+      document.querySelectorAll('.diagnostic input[type="checkbox"]').forEach(cb => {
+        cb.checked = checked;
+        cb.closest('.diagnostic').classList.toggle('unchecked', !checked);
+      });
+      updateSelectedCount();
+    }
+
+    function setOnlySeverity(sev) {
+      document.querySelectorAll('.diagnostic').forEach(row => {
+        const match = row.dataset.severity === sev;
+        const cb = row.querySelector('input[type="checkbox"]');
+        cb.checked = match;
+        row.classList.toggle('unchecked', !match);
+      });
+      updateSelectedCount();
+    }
+
+    function toMarkdown(result) {
+      const lines = [];
+      lines.push('# Flow Validation Report');
+      lines.push('');
+      if (result.label) lines.push('**Flow:** ' + result.label);
+      if (result.flowId) lines.push('**ID:** `' + result.flowId + '`');
+      lines.push('**Status:** ' + (result.valid ? 'PASS' : 'FAIL'));
+      lines.push('**Summary:** ' + result.summary);
+      lines.push('');
+
+      if (result.diagnostics && result.diagnostics.length > 0) {
+        lines.push('## Diagnostics');
+        lines.push('');
+        lines.push('| Severity | Code | Message | Path | Fix |');
+        lines.push('|----------|------|---------|------|-----|');
+        for (const d of result.diagnostics) {
+          const sev = d.severity || '';
+          const code = d.code || '';
+          const msg = (d.message || '').replace(/\|/g, '\\|');
+          const path = (d.path || '').replace(/\|/g, '\\|');
+          const fix = (d.fix || '').replace(/\|/g, '\\|');
+          lines.push('| ' + sev + ' | ' + code + ' | ' + msg + ' | ' + path + ' | ' + fix + ' |');
+        }
+      }
+      lines.push('');
+      return lines.join('\n');
+    }
+
+    async function copyToClipboard(text, btnId) {
+      try {
+        if (window.electron?.clipboard?.writeText) {
+          await window.electron.clipboard.writeText(text);
+        } else {
+          await navigator.clipboard.writeText(text);
+        }
+      } catch (_) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      const btn = document.getElementById(btnId);
+      const orig = btn.textContent;
+      btn.textContent = 'Copied';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s || '';
+      return d.innerHTML;
+    }
+
+    run();
+  </script>
+</body>
+</html>

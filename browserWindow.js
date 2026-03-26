@@ -21,6 +21,7 @@ let authTokens = new Map();
 // Credential manager and TOTP manager for auto-login
 let credentialManager = null;
 let totpManager = null;
+const authScripts = require('./lib/auth-scripts');
 
 // Track auto-login state per GSX window to prevent duplicate attempts
 const gsxAutoLoginState = new Map();
@@ -182,46 +183,7 @@ async function attemptGSXAutoLoginWithRetry(gsxWindow, url, attempt = 0) {
     // Check if form fields exist yet (including cross-origin detection)
     const formInfo = await safeExecuteJS(
       gsxWindow,
-      `
-      (function() {
-        const hasPasswordInMain = !!document.querySelector('input[type="password"]');
-        if (hasPasswordInMain) {
-          log.info('window', 'Form found in main document')
-          return { location: 'main', crossOrigin: false };
-        }
-        
-        // Check iframes
-        const iframes = document.querySelectorAll('iframe');
-        log.info('window', 'Found \' + iframes.length + \' iframes')
-        
-        let hasCrossOriginAuthIframe = false;
-        
-        for (let i = 0; i < iframes.length; i++) {
-          const iframe = iframes[i];
-          const src = iframe.src || '';
-          
-          try {
-            const doc = iframe.contentDocument || iframe.contentWindow.document;
-            if (doc && doc.querySelector('input[type="password"]')) {
-              log.info('window', 'Form found in same-origin iframe \' +')
-              return { location: 'iframe', crossOrigin: false };
-            }
-          } catch (e) {
-            // Cross-origin iframe
-            log.info('window', 'Cross-origin iframe detected: \' + sr')
-            if (src.includes('auth.') && src.includes('onereach.ai')) {
-              hasCrossOriginAuthIframe = true;
-            }
-          }
-        }
-        
-        if (hasCrossOriginAuthIframe) {
-          return { location: 'cross-origin', crossOrigin: true };
-        }
-        
-        return { location: 'none', crossOrigin: false };
-      })()
-    `
+      authScripts.buildDetectFormLocationScript()
     );
 
     // If safeExecuteJS returned undefined, the window was destroyed
@@ -300,73 +262,7 @@ async function attemptGSXCrossOriginLogin(gsxWindow, windowId) {
     }
 
     // Build and execute login script
-    const loginScript = `
-      (function() {
-        const email = ${JSON.stringify(credentials.email)};
-        const password = ${JSON.stringify(credentials.password)};
-        
-        log.info('window', 'Running in auth frame')
-        log.info('window', 'URL', { href: window.location.href })
-        
-        function fillInput(input, value) {
-          if (!input) return false;
-          input.focus();
-          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype, 'value'
-          ).set;
-          if (nativeInputValueSetter) {
-            nativeInputValueSetter.call(input, value);
-          } else {
-            input.value = value;
-          }
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-          log.info('window', 'Filled', { detail: input.name || input.type })
-          return true;
-        }
-        
-        // Find email field
-        const emailField = document.querySelector(
-          'input[type="email"], input[type="text"][name*="email" i], ' +
-          'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
-          'input[placeholder*="email" i], input[type="text"]:not([name*="search"])'
-        );
-        
-        // Find password field
-        const passwordField = document.querySelector('input[type="password"]');
-        
-        if (!passwordField) {
-          log.info('window', 'No password field found')
-          return { success: false, reason: 'no_password_field' };
-        }
-        
-        if (emailField) fillInput(emailField, email);
-        fillInput(passwordField, password);
-        
-        // Click submit
-        setTimeout(() => {
-          const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]') ||
-                           document.querySelector('form button:not([type="button"])');
-          if (submitBtn) {
-            log.info('window', 'Clicking submit', { textContent: submitBtn.textContent })
-            submitBtn.click();
-          } else {
-            const buttons = document.querySelectorAll('button');
-            for (const btn of buttons) {
-              const text = (btn.textContent || '').toLowerCase();
-              if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('continue')) {
-                log.info('window', 'Clicking button by text', { textContent: btn.textContent })
-                btn.click();
-                break;
-              }
-            }
-          }
-        }, 500);
-        
-        return { success: true };
-      })()
-    `;
+    const loginScript = authScripts.buildFillLoginScript(credentials.email, credentials.password);
 
     const result = await authFrame.executeJavaScript(loginScript);
     log.info('window', 'Login result', { result });
@@ -432,19 +328,9 @@ async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
     }
 
     // Check if on 2FA page
-    const detection = await authFrame.executeJavaScript(`
-      (function() {
-        const passwordField = document.querySelector('input[type="password"]');
-        const totpInput = document.querySelector(
-          'input[name="totp"], input[name="code"], input[name="otp"], ' +
-          'input[autocomplete="one-time-code"], input[maxlength="6"]:not([type="password"])'
-        );
-        
-        if (totpInput) return { is2FAPage: true };
-        if (passwordField) return { is2FAPage: false, reason: 'still_login' };
-        return { is2FAPage: false, reason: 'unknown' };
-      })()
-    `);
+    const detection = await authFrame.executeJavaScript(
+      authScripts.buildDetect2FAScript()
+    );
 
     log.info('window', 'Detection', { detection });
 
@@ -479,49 +365,9 @@ async function attemptGSXCrossOrigin2FA(gsxWindow, windowId, attempt) {
     log.info('window', 'Generated TOTP code, filling form...');
 
     // Fill 2FA code
-    const fillResult = await authFrame.executeJavaScript(`
-      (function() {
-        const code = ${JSON.stringify(code)};
-        
-        function fillInput(input, value) {
-          if (!input) return false;
-          input.focus();
-          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-            window.HTMLInputElement.prototype, 'value'
-          ).set;
-          if (nativeInputValueSetter) {
-            nativeInputValueSetter.call(input, value);
-          } else {
-            input.value = value;
-          }
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          return true;
-        }
-        
-        const totpInput = document.querySelector(
-          'input[name="totp"], input[name="code"], input[name="otp"], ' +
-          'input[autocomplete="one-time-code"], input[maxlength="6"]:not([type="password"])'
-        ) || document.querySelector('input[type="text"]:not([name*="email"]):not([name*="user"])');
-        
-        if (totpInput) {
-          fillInput(totpInput, code);
-          
-          setTimeout(() => {
-            const submitBtn = document.querySelector('button[type="submit"]') ||
-                             document.querySelector('form button');
-            if (submitBtn) {
-              console.log('[GSX Auth] Clicking submit');
-              submitBtn.click();
-            }
-          }, 500);
-          
-          return { success: true };
-        }
-        
-        return { success: false };
-      })()
-    `);
+    const fillResult = await authFrame.executeJavaScript(
+      authScripts.buildFillTOTPScript(code)
+    );
 
     log.info('window', 'Fill result', { fillResult });
 
@@ -567,59 +413,18 @@ async function attemptGSXAutoLogin(gsxWindow, _url) {
       return;
     }
 
+    // Prompt user for confirmation (respects session memory + per-environment flags)
+    const { confirmAutoLogin } = require('./lib/auto-login-prompt');
+    const confirmResult = await confirmAutoLogin(gsxWindow, credentials.email, autoLoginSettings);
+    if (!confirmResult.allowed) {
+      log.info('window', 'Auto-login not proceeding', { reason: confirmResult.reason });
+      return;
+    }
+
     // Detect page type with detailed logging
-    const pageType = await gsxWindow.webContents.executeJavaScript(`
-      (function() {
-        // Log all inputs for debugging
-        const allInputs = document.querySelectorAll('input');
-        console.log('[GSX Auth] Found ' + allInputs.length + ' input fields on page');
-        allInputs.forEach((inp, i) => {
-          if (inp.type !== 'hidden') {
-            console.log('[GSX Auth] Input ' + i + ': type=' + inp.type + ', name=' + inp.name + ', placeholder=' + inp.placeholder);
-          }
-        });
-        
-        const pageContent = document.body ? document.body.innerText.toLowerCase() : '';
-        
-        // Check for 2FA page indicators
-        const has2FAField = document.querySelector(
-          'input[name="code"], input[name="otp"], input[name="totp"], ' +
-          'input[placeholder*="code" i], input[placeholder*="2fa" i], ' +
-          'input[placeholder*="authenticator" i], input[maxlength="6"][inputmode="numeric"]'
-        );
-        const has2FAText = pageContent.includes('two-factor') || pageContent.includes('2fa') || 
-                          pageContent.includes('verification code') || pageContent.includes('authenticator') ||
-                          pageContent.includes('enter the code') || pageContent.includes('6-digit');
-        
-        if (has2FAField || (has2FAText && !document.querySelector('input[type="password"]'))) {
-          console.log('[GSX Auth] 2FA page detected');
-          return '2fa';
-        }
-        
-        // Check for login page indicators (broader search)
-        const hasEmailField = document.querySelector(
-          'input[type="email"], input[type="text"][name*="email" i], ' +
-          'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
-          'input[autocomplete="email"], input[autocomplete="username"], ' +
-          'input[placeholder*="email" i], input[placeholder*="user" i]'
-        );
-        const hasPasswordField = document.querySelector('input[type="password"]');
-        
-        console.log('[GSX Auth] Email field:', !!hasEmailField, 'Password field:', !!hasPasswordField);
-        
-        if (hasEmailField && hasPasswordField) {
-          console.log('[GSX Auth] Login form detected');
-          return 'login';
-        }
-        
-        if (hasPasswordField) {
-          console.log('[GSX Auth] Password-only page');
-          return 'password-only';
-        }
-        
-        return 'other';
-      })()
-    `);
+    const pageType = await gsxWindow.webContents.executeJavaScript(
+      authScripts.buildDetectPageTypeScript()
+    );
 
     log.info('window', 'Page type', { pageType });
 
@@ -630,73 +435,9 @@ async function attemptGSXAutoLogin(gsxWindow, _url) {
     if (pageType === 'login' || pageType === 'password-only') {
       log.info('window', 'Filling', { pageType, arg2: 'form for', email: credentials.email });
 
-      await gsxWindow.webContents.executeJavaScript(`
-        (function() {
-          const email = ${JSON.stringify(credentials.email)};
-          const password = ${JSON.stringify(credentials.password)};
-          
-          function fillInput(input, value) {
-            if (!input) return false;
-            input.focus();
-            
-            // React compatibility - set native value
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-              window.HTMLInputElement.prototype, 'value'
-            ).set;
-            nativeInputValueSetter.call(input, value);
-            
-            // Dispatch events
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-            
-            console.log('[GSX Auth] Filled field:', input.name || input.type);
-            return true;
-          }
-          
-          // Find and fill email field (broader search)
-          const emailField = document.querySelector(
-            'input[type="email"], input[type="text"][name*="email" i], ' +
-            'input[type="text"][name*="user" i], input[name="email"], input[name="username"], ' +
-            'input[autocomplete="email"], input[autocomplete="username"], ' +
-            'input[placeholder*="email" i], input[placeholder*="user" i]'
-          );
-          if (emailField) {
-            fillInput(emailField, email);
-          }
-          
-          // Find and fill password field
-          const passwordField = document.querySelector('input[type="password"]');
-          if (passwordField) {
-            fillInput(passwordField, password);
-          }
-          
-          // Find and click submit button after a short delay
-          setTimeout(() => {
-            const submitBtn = document.querySelector(
-              'button[type="submit"], input[type="submit"], button.submit, button.login'
-            ) || document.querySelector('form button:not([type="button"])');
-            
-            if (submitBtn) {
-              console.log('[GSX Auth] Clicking submit:', submitBtn.textContent || submitBtn.type);
-              submitBtn.click();
-            } else {
-              // Try finding by text content
-              const buttons = document.querySelectorAll('button');
-              for (const btn of buttons) {
-                const text = (btn.textContent || '').toLowerCase();
-                if (text.includes('sign in') || text.includes('log in') || text.includes('login') || text.includes('submit') || text.includes('continue')) {
-                  console.log('[GSX Auth] Clicking button by text:', btn.textContent);
-                  btn.click();
-                  break;
-                }
-              }
-            }
-          }, 500);
-          
-          return true;
-        })()
-      `);
+      await gsxWindow.webContents.executeJavaScript(
+        authScripts.buildFillLoginScript(credentials.email, credentials.password)
+      );
     } else if (pageType === '2fa') {
       if (!credentials.totpSecret) {
         log.info('window', 'No TOTP secret configured');
@@ -713,38 +454,9 @@ async function attemptGSXAutoLogin(gsxWindow, _url) {
       const code = totpManager.generateCode(credentials.totpSecret);
       log.info('window', 'Filling 2FA code');
 
-      await gsxWindow.webContents.executeJavaScript(`
-        (function() {
-          const code = ${JSON.stringify(code)};
-          
-          // Find 2FA input field
-          const codeField = document.querySelector('input[name="code"], input[name="otp"], input[name="totp"], input[placeholder*="code" i], input[placeholder*="2fa" i], input[maxlength="6"]');
-          if (codeField) {
-            codeField.value = code;
-            codeField.dispatchEvent(new Event('input', { bubbles: true }));
-            codeField.dispatchEvent(new Event('change', { bubbles: true }));
-            
-            // Auto-submit after a short delay
-            setTimeout(() => {
-              const submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
-              if (submitBtn) {
-                submitBtn.click();
-              } else {
-                const buttons = document.querySelectorAll('button');
-                for (const btn of buttons) {
-                  const text = btn.textContent.toLowerCase();
-                  if (text.includes('verify') || text.includes('submit') || text.includes('continue') || text.includes('confirm')) {
-                    btn.click();
-                    break;
-                  }
-                }
-              }
-            }, 500);
-          }
-          
-          return true;
-        })()
-      `);
+      await gsxWindow.webContents.executeJavaScript(
+        authScripts.buildFillTOTPScript(code)
+      );
     }
   } catch (error) {
     log.error('window', 'Error', { error: error.message });
@@ -787,11 +499,12 @@ function createMainWindow(app) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: false,
       preload: path.join(app.getAppPath(), 'preload.js'),
       webSecurity: true,
       allowRunningInsecureContent: false,
       webviewTag: true,
-      // Enable features needed for media/voice
+      backgroundThrottling: false,
       enableBlinkFeatures: 'MediaStreamAPI,WebRTC,AudioWorklet,WebAudio,MediaRecorder',
       experimentalFeatures: true,
     },
@@ -975,7 +688,7 @@ function createMainWindow(app) {
             "style-src 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
             "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-            "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://*.openai.com https://*.chatgpt.com ws://localhost:3322 wss://*.onereach.ai http://127.0.0.1:47291 http://localhost:47291 https://*.livekit.cloud wss://*.livekit.cloud; " +
+            "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://*.openai.com https://*.chatgpt.com ws://localhost:3322 wss://*.onereach.ai wss://*.openai.com http://127.0.0.1:47291 http://localhost:47291 https://*.livekit.cloud wss://*.livekit.cloud; " +
             "img-src 'self' data: spaces: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
             "font-src 'self' data: https://*.onereach.ai https://fonts.gstatic.com; " +
             "media-src 'self' blob: https://*.onereach.ai https://*.chatgpt.com https://*.openai.com; " +
@@ -1509,6 +1222,7 @@ function createSecureContentWindow(parentWindow) {
       sandbox: true,
       enableRemoteModule: false, // Disable remote module
       preload: path.join(__dirname, 'preload-minimal.js'), // Use a minimal preload script
+      backgroundThrottling: false,
     },
   });
 
@@ -1525,7 +1239,7 @@ function createSecureContentWindow(parentWindow) {
               "style-src 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
               "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-              "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 http://127.0.0.1:47291 http://localhost:47291; " +
+              "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://*.openai.com wss://*.openai.com ws://localhost:3322 http://127.0.0.1:47291 http://localhost:47291; " +
               "img-src 'self' data: spaces: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
               "font-src 'self' data: https://*.onereach.ai https://fonts.gstatic.com; " +
               "media-src 'self' blob: https://*.onereach.ai; " +
@@ -1825,8 +1539,11 @@ function openURLInMainWindow(url) {
       contentWindow.show();
     });
 
-    // When content window is closed, show main window again
+    // When content window is closed, show main window again and clean up overlay
     contentWindow.on('closed', () => {
+      mainWindow.webContents
+        .executeJavaScript(`document.getElementById('loading-overlay')?.remove();`)
+        .catch(() => {});
       mainWindow.show();
       mainWindow.focus();
     });
@@ -1834,9 +1551,11 @@ function openURLInMainWindow(url) {
     // Load the URL in the content window
     contentWindow.loadURL(urlObj.href).catch((error) => {
       log.error('window', 'Error loading URL', { error: error.message || error });
-      contentWindow.close(); // Close the content window on error
+      mainWindow.webContents
+        .executeJavaScript(`document.getElementById('loading-overlay')?.remove();`)
+        .catch(() => {});
+      contentWindow.close();
 
-      // Show error notification
       mainWindow.webContents.send('show-notification', {
         title: 'Error',
         body: `Failed to load IDW environment: ${error.message}`,
@@ -1877,6 +1596,7 @@ function createSetupWizardWindow(options = {}) {
       webSecurity: true,
       enableRemoteModule: false,
       sandbox: false, // Disable sandbox to allow IPC access
+      backgroundThrottling: false,
     },
     ...options,
   });
@@ -1897,7 +1617,7 @@ function createSetupWizardWindow(options = {}) {
               "style-src 'self' 'unsafe-inline' https://*.onereach.ai; " +
               "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai; " +
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-              "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 http://127.0.0.1:47291 http://localhost:47291; " +
+              "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://*.openai.com wss://*.openai.com ws://localhost:3322 http://127.0.0.1:47291 http://localhost:47291; " +
               "img-src 'self' data: spaces: https://*.onereach.ai; " +
               "font-src 'self' data: https://*.onereach.ai; " +
               "media-src 'self' https://*.onereach.ai; " +
@@ -1925,6 +1645,7 @@ function createTestWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: true,
+      backgroundThrottling: false,
     },
   });
 
@@ -1944,7 +1665,7 @@ function createTestWindow() {
               "style-src 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
               "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-              "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 http://127.0.0.1:47291 http://localhost:47291; " +
+              "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://*.openai.com wss://*.openai.com ws://localhost:3322 http://127.0.0.1:47291 http://localhost:47291; " +
               "img-src 'self' data: spaces: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
               "font-src 'self' data: https://*.onereach.ai https://fonts.gstatic.com; " +
               "media-src 'self' https://*.onereach.ai; " +
@@ -2052,6 +1773,7 @@ async function openGSXWindow(url, title, idwEnvironment) {
       // Enable media access for screen sharing
       enableRemoteModule: false,
       allowRunningInsecureContent: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -2071,7 +1793,7 @@ async function openGSXWindow(url, title, idwEnvironment) {
               "style-src 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
               "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
-              "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai ws://localhost:3322 wss://*.onereach.ai http://127.0.0.1:47291 http://localhost:47291; " +
+              "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://*.openai.com wss://*.openai.com ws://localhost:3322 wss://*.onereach.ai http://127.0.0.1:47291 http://localhost:47291; " +
               "img-src 'self' data: spaces: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
               "font-src 'self' data: https://*.onereach.ai https://fonts.gstatic.com; " +
               "media-src 'self' blob: https://*.onereach.ai; " +
@@ -2123,6 +1845,9 @@ async function openGSXWindow(url, title, idwEnvironment) {
     log.info('window', 'GSX Window closed: ...', { title });
     // Clean up auto-login state to prevent memory leak
     cleanupGSXAutoLoginState(gsxWindow.id);
+    // Clean up multi-tenant partition and cookie listener
+    multiTenantStore.unregisterPartition(idwEnvironment, fullPartition);
+    multiTenantStore.removeCookieListener(fullPartition, { force: true });
   });
 
   gsxWindow.on('hide', () => {
@@ -2366,6 +2091,7 @@ function getAuthWindow() {
       preload: path.join(__dirname, 'preload.js'),
       // Use a dedicated partition for auth
       partition: 'persist:auth',
+      backgroundThrottling: false,
     },
   });
 
@@ -2377,22 +2103,19 @@ function getAuthWindow() {
     authWindow = null;
   });
 
-  // Set up token sharing via IPC
-  authWindow.webContents.on('did-finish-load', () => {
-    // Listen for successful authentication
-    authWindow.webContents.on('ipc-message', (event, channel, ...args) => {
-      if (channel === 'auth-success') {
-        const [token, service] = args;
-        authTokens.set(service, token);
+  // Set up token sharing via IPC (single listener, not inside did-finish-load)
+  authWindow.webContents.on('ipc-message', (event, channel, ...args) => {
+    if (channel === 'auth-success') {
+      const [token, service] = args;
+      authTokens.set(service, token);
 
-        // Broadcast token to all windows (with destroyed-window guard)
-        BrowserWindow.getAllWindows().forEach((win) => {
-          if (win !== authWindow) {
-            safeSend(win, 'auth-token-update', { service, token });
-          }
-        });
-      }
-    });
+      // Broadcast token to all windows (with destroyed-window guard)
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (win !== authWindow) {
+          safeSend(win, 'auth-token-update', { service, token });
+        }
+      });
+    }
   });
 
   return authWindow;

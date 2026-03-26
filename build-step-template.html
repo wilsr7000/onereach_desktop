@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Build a Step Template</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      padding: 12px 24px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+    }
+    header h1 { font-size: 15px; font-weight: 600; color: #f1f5f9; }
+
+    .playbook-bar {
+      padding: 10px 24px; background: #1e293b; border-bottom: 1px solid #0f172a;
+      display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    }
+    .playbook-bar label {
+      font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+    .playbook-bar select {
+      background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 5px 10px;
+      color: #e2e8f0; font-size: 12px; font-family: inherit; outline: none; transition: border-color 0.2s;
+      min-width: 140px; max-width: 220px;
+    }
+    .playbook-bar select:focus { border-color: #3b82f6; }
+    .playbook-bar select:disabled { opacity: 0.5; }
+    .playbook-bar .sep { width: 1px; height: 20px; background: #334155; flex-shrink: 0; }
+    .btn-small {
+      padding: 5px 14px; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer;
+      font-family: inherit; border: 1px solid rgba(168,85,247,0.3); transition: all 0.2s;
+      background: rgba(168,85,247,0.1); color: #c4b5fd; white-space: nowrap;
+    }
+    .btn-small:hover { background: rgba(168,85,247,0.2); color: #ddd6fe; }
+    .playbook-status { font-size: 11px; color: #64748b; margin-left: auto; white-space: nowrap; }
+
+    .main-area { flex: 1; display: flex; min-height: 0; }
+
+    .pane {
+      flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+    }
+    .pane-header {
+      padding: 8px 16px; font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase;
+      letter-spacing: 0.5px; border-bottom: 1px solid #1e293b; flex-shrink: 0; background: #0f172a;
+    }
+    .divider { width: 1px; background: #1e293b; flex-shrink: 0; }
+
+    .pane-body {
+      flex: 1; overflow-y: auto; padding: 20px; font-size: 13px; line-height: 1.7; color: #cbd5e1;
+    }
+    .pane-body::-webkit-scrollbar { width: 8px; }
+    .pane-body::-webkit-scrollbar-track { background: #0f172a; }
+    .pane-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+    .rich-content h1, .rich-content h2, .rich-content h3 { color: #f1f5f9; margin: 16px 0 8px; }
+    .rich-content h1 { font-size: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 8px; }
+    .rich-content h2 { font-size: 16px; }
+    .rich-content h3 { font-size: 14px; }
+    .rich-content p { margin: 8px 0; }
+    .rich-content ul, .rich-content ol { margin: 8px 0 8px 24px; }
+    .rich-content li { margin: 4px 0; }
+    .rich-content code {
+      background: #1e293b; padding: 2px 5px; border-radius: 3px; font-size: 12px;
+      font-family: 'SF Mono', Menlo, monospace; color: #93c5fd;
+    }
+    .rich-content pre { background: #1e293b; padding: 14px; border-radius: 6px; margin: 10px 0; overflow-x: auto; }
+    .rich-content pre code { background: none; padding: 0; }
+    .rich-content blockquote { border-left: 3px solid #334155; padding-left: 14px; color: #94a3b8; margin: 10px 0; }
+    .rich-content strong { color: #f1f5f9; }
+    .rich-content table { border-collapse: collapse; margin: 10px 0; width: 100%; }
+    .rich-content th, .rich-content td { border: 1px solid #334155; padding: 6px 10px; text-align: left; font-size: 12px; }
+    .rich-content th { background: #1e293b; color: #f1f5f9; font-weight: 600; }
+
+    .empty-state {
+      color: #475569; font-style: italic; display: flex; align-items: center; justify-content: center;
+      height: 100%; text-align: center; padding: 40px;
+    }
+    .empty-state p { max-width: 280px; line-height: 1.6; }
+
+    .options-bar {
+      padding: 12px 24px; background: #1e293b; border-top: 1px solid #0f172a;
+      display: flex; gap: 16px; align-items: center; flex-shrink: 0;
+    }
+    .field-group { display: flex; align-items: center; gap: 6px; }
+    .field-group label { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.3px; }
+    .field-group input {
+      background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 5px 10px;
+      color: #e2e8f0; font-size: 12px; font-family: inherit; outline: none; width: 160px;
+      transition: border-color 0.2s;
+    }
+    .field-group input:focus { border-color: #3b82f6; }
+    .submit-area { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .btn-submit {
+      padding: 7px 20px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+      font-family: inherit; border: 1px solid rgba(59,130,246,0.4); transition: all 0.2s;
+      background: rgba(59,130,246,0.15); color: #93c5fd;
+    }
+    .btn-submit:hover { background: rgba(59,130,246,0.25); color: #bfdbfe; }
+    .btn-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-build {
+      padding: 7px 20px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+      font-family: inherit; border: 1px solid rgba(34,197,94,0.4); transition: all 0.2s;
+      background: rgba(34,197,94,0.15); color: #86efac;
+    }
+    .btn-build:hover { background: rgba(34,197,94,0.25); color: #bbf7d0; }
+    .btn-build:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-clear {
+      padding: 6px 14px; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer;
+      font-family: inherit; border: 1px solid #334155; background: transparent; color: #94a3b8; transition: all 0.2s;
+    }
+    .btn-clear:hover { background: #334155; color: #e2e8f0; }
+
+    .loading { display: flex; align-items: center; gap: 10px; padding: 24px; color: #94a3b8; font-size: 13px; }
+    .spinner {
+      width: 16px; height: 16px; border: 2px solid #334155; border-top-color: #3b82f6;
+      border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error-msg { color: #f87171; padding: 24px; font-size: 13px; }
+
+    footer {
+      padding: 6px 24px; border-top: 1px solid #1e293b; font-size: 11px; color: #475569; flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Build a Step Template</h1>
+  </header>
+
+  <div class="playbook-bar">
+    <label>Load Playbook</label>
+    <select id="spaceSelect" title="Select a space"><option value="">Loading spaces...</option></select>
+    <select id="playbookSelect" disabled title="Select a playbook"><option value="">Select a space first</option></select>
+    <div class="sep"></div>
+    <button class="btn-small" id="createPlaybookBtn">Create Playbook</button>
+    <span class="playbook-status" id="playbookStatus"></span>
+  </div>
+
+  <div class="main-area">
+    <div class="pane">
+      <div class="pane-header">Playbook</div>
+      <div class="pane-body rich-content" id="playbookPane">
+        <div class="empty-state"><p>Select a playbook above to preview its content</p></div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="pane">
+      <div class="pane-header">Technical Spec</div>
+      <div class="pane-body rich-content" id="specPane">
+        <div class="empty-state"><p>Load a playbook and click Design Step to generate the technical specification</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="options-bar">
+    <div class="field-group">
+      <label for="service">Service</label>
+      <input type="text" id="service" placeholder="e.g. webhook, storage">
+    </div>
+    <div class="field-group">
+      <label for="context">Context</label>
+      <input type="text" id="context" placeholder="e.g. REST API integration">
+    </div>
+    <div class="submit-area">
+      <button class="btn-clear" id="clearBtn">Clear</button>
+      <button class="btn-submit" id="submitBtn" disabled>Generate Tech Specification</button>
+      <button class="btn-build" id="buildBtn" disabled>Build Step</button>
+    </div>
+  </div>
+
+  <footer id="footer"></footer>
+
+  <script>
+    const playbookPane = document.getElementById('playbookPane');
+    const specPane = document.getElementById('specPane');
+    const submitBtn = document.getElementById('submitBtn');
+    const buildBtn = document.getElementById('buildBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const footer = document.getElementById('footer');
+    const spaceSelect = document.getElementById('spaceSelect');
+    const playbookSelect = document.getElementById('playbookSelect');
+    const playbookStatus = document.getElementById('playbookStatus');
+    const createPlaybookBtn = document.getElementById('createPlaybookBtn');
+
+    let loadedPlaybook = null;
+    let generatedSpec = null;
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function renderMarkdown(text) {
+      if (!text) return '';
+      return text
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+        .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+        .replace(/^\- (.+)$/gm, '<li>$1</li>')
+        .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>');
+    }
+
+    // --- Playbook loading ---
+
+    async function loadSpaces() {
+      try {
+        const spaces = await window.spaces.list();
+        spaceSelect.innerHTML = '<option value="">-- Select Space --</option>';
+        for (const sp of spaces) {
+          const opt = document.createElement('option');
+          opt.value = sp.id;
+          opt.textContent = sp.name || sp.id;
+          spaceSelect.appendChild(opt);
+        }
+      } catch (err) {
+        spaceSelect.innerHTML = '<option value="">Failed to load spaces</option>';
+        console.error('Failed to load spaces:', err);
+      }
+    }
+
+    spaceSelect.addEventListener('change', async () => {
+      const spaceId = spaceSelect.value;
+      playbookSelect.innerHTML = '<option value="">Loading playbooks...</option>';
+      playbookSelect.disabled = true;
+      playbookStatus.textContent = '';
+
+      if (!spaceId) {
+        playbookSelect.innerHTML = '<option value="">Select a space first</option>';
+        return;
+      }
+
+      try {
+        const allItems = await window.spaces.items.list(spaceId, { tags: ['riff-source'], includeContent: true });
+        const items = (allItems || []).filter(item => !item.metadata?._isTrashed);
+        if (items.length === 0) {
+          playbookSelect.innerHTML = '<option value="">No playbooks in this space</option>';
+          return;
+        }
+        playbookSelect.innerHTML = '<option value="">-- Select Playbook --</option>';
+        for (const item of items) {
+          const opt = document.createElement('option');
+          opt.value = item.id;
+          opt.textContent = item.metadata?._title || item.metadata?.title || item.fileName || 'Untitled';
+          playbookSelect.appendChild(opt);
+        }
+        playbookSelect.disabled = false;
+        playbookStatus.textContent = items.length + ' playbook' + (items.length !== 1 ? 's' : '');
+      } catch (err) {
+        playbookSelect.innerHTML = '<option value="">Failed to load playbooks</option>';
+        console.error('Failed to load playbooks:', err);
+      }
+    });
+
+    playbookSelect.addEventListener('change', async () => {
+      const itemId = playbookSelect.value;
+      const spaceId = spaceSelect.value;
+      if (!itemId || !spaceId) return;
+
+      playbookStatus.textContent = 'Loading...';
+      try {
+        const item = await window.spaces.items.get(spaceId, itemId);
+        loadedPlaybook = item;
+
+        const htmlContent = item?.content || '';
+        const mdContent = item?.metadata?._markdownContent || '';
+
+        if (htmlContent || mdContent) {
+          if (htmlContent.trim().startsWith('<')) {
+            playbookPane.innerHTML = htmlContent;
+          } else {
+            playbookPane.innerHTML = renderMarkdown(mdContent || htmlContent);
+          }
+          submitBtn.disabled = false;
+          playbookStatus.textContent = 'Loaded';
+        } else {
+          playbookPane.innerHTML = '<div class="empty-state"><p>This playbook has no content</p></div>';
+          submitBtn.disabled = true;
+          playbookStatus.textContent = 'Empty';
+        }
+      } catch (err) {
+        playbookStatus.textContent = 'Load failed';
+        console.error('Failed to load playbook content:', err);
+      }
+    });
+
+    createPlaybookBtn.addEventListener('click', async () => {
+      try {
+        const tools = await window.api.invoke('module:get-web-tools');
+        const pb = (tools || []).find(t => /playbook/i.test(t.name));
+        if (pb) {
+          await window.api.invoke('module:open-web-tool', pb.id);
+        } else {
+          playbookStatus.textContent = 'WISER Playbooks not installed';
+        }
+      } catch (err) {
+        console.error('Failed to open WISER Playbooks:', err);
+        playbookStatus.textContent = 'Could not open Playbooks';
+      }
+    });
+
+    loadSpaces();
+
+    // --- Design Step submission ---
+
+    clearBtn.addEventListener('click', () => {
+      loadedPlaybook = null;
+      generatedSpec = null;
+      playbookPane.innerHTML = '<div class="empty-state"><p>Select a playbook above to preview its content</p></div>';
+      specPane.innerHTML = '<div class="empty-state"><p>Load a playbook and click Design Step to generate the technical specification</p></div>';
+      document.getElementById('service').value = '';
+      document.getElementById('context').value = '';
+      submitBtn.disabled = true;
+      buildBtn.disabled = true;
+      playbookSelect.innerHTML = '<option value="">Select a space first</option>';
+      playbookSelect.disabled = true;
+      spaceSelect.value = '';
+      playbookStatus.textContent = '';
+      footer.textContent = '';
+    });
+
+    submitBtn.addEventListener('click', async () => {
+      if (!loadedPlaybook) return;
+
+      const description = loadedPlaybook.metadata?._markdownContent
+        || loadedPlaybook.content?.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+        || '';
+
+      if (!description) { playbookStatus.textContent = 'No content to design from'; return; }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Generating...';
+      specPane.innerHTML = '<div class="loading"><div class="spinner"></div>Designing step template... this typically takes 30-60 seconds.</div>';
+      footer.textContent = '';
+
+      try {
+        const result = await window.devTools.designStep({
+          description,
+          service: document.getElementById('service').value.trim(),
+          context: document.getElementById('context').value.trim(),
+          model: '',
+        });
+
+        if (result.error) {
+          specPane.innerHTML = '<div class="error-msg">' + esc(result.error) + '</div>';
+          generatedSpec = null;
+          buildBtn.disabled = true;
+        } else {
+          generatedSpec = result;
+          renderSpec(result);
+          buildBtn.disabled = false;
+          saveSpecToSpace(result);
+        }
+      } catch (err) {
+        specPane.innerHTML = '<div class="error-msg">' + esc(err.message || 'Unknown error') + '</div>';
+        generatedSpec = null;
+        buildBtn.disabled = true;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Generate Tech Specification';
+      }
+    });
+
+    function renderSpec(data) {
+      let content = '';
+      const payload = data.spec || data.result || data;
+
+      if (typeof payload === 'string') {
+        content = renderMarkdown(payload);
+      } else if (typeof payload === 'object') {
+        content = renderSpecObject(payload);
+      } else {
+        content = renderSpecObject(data);
+      }
+
+      specPane.innerHTML = content;
+
+      const ts = data.ts || data.timestamp || '';
+      const jobId = data.jobId || '';
+      const parts = [];
+      if (ts) parts.push(ts);
+      if (jobId) parts.push('Job: ' + jobId);
+      footer.textContent = parts.join('  |  ');
+    }
+
+    function renderSpecObject(obj) {
+      let html = '';
+      const skip = new Set(['jobId', 'status', 'ts', 'timestamp']);
+
+      for (const [key, val] of Object.entries(obj)) {
+        if (skip.has(key)) continue;
+        if (typeof val === 'string' && val.length > 50) {
+          html += '<h3>' + esc(key) + '</h3>';
+          html += renderMarkdown(val);
+        } else if (typeof val === 'object' && val !== null) {
+          html += '<h3>' + esc(key) + '</h3>';
+          html += '<pre><code>' + esc(JSON.stringify(val, null, 2)) + '</code></pre>';
+        } else if (val !== null && val !== undefined && val !== '') {
+          html += '<p><strong>' + esc(key) + ':</strong> ' + esc(String(val)) + '</p>';
+        }
+      }
+
+      if (!html) {
+        html = '<pre><code>' + esc(JSON.stringify(obj, null, 2)) + '</code></pre>';
+      }
+      return html;
+    }
+
+    async function saveSpecToSpace(specData) {
+      const spaceId = spaceSelect.value;
+      if (!spaceId) return;
+
+      const playbookTitle = loadedPlaybook?.metadata?._title
+        || loadedPlaybook?.metadata?.title
+        || loadedPlaybook?.fileName
+        || 'Untitled';
+
+      const payload = specData.spec || specData.result || specData;
+      const specContent = typeof payload === 'string'
+        ? payload
+        : JSON.stringify(payload, null, 2);
+
+      try {
+        await window.spaces.items.add(spaceId, {
+          content: specContent,
+          contentType: 'text/markdown',
+          fileName: playbookTitle + ' - Tech Spec.md',
+          metadata: {
+            _title: playbookTitle + ' - Tech Spec',
+            _sourcePlaybookId: loadedPlaybook?.id || null,
+            _generatedAt: new Date().toISOString(),
+            _type: 'tech-spec',
+            tags: ['tech-spec'],
+          },
+          tags: ['tech-spec'],
+        });
+        playbookStatus.textContent = 'Spec saved to space';
+      } catch (err) {
+        console.error('Failed to save spec to space:', err);
+        playbookStatus.textContent = 'Spec generated (save failed)';
+      }
+    }
+
+    buildBtn.addEventListener('click', async () => {
+      if (!generatedSpec) return;
+      buildBtn.disabled = true;
+      buildBtn.textContent = 'Building...';
+      playbookStatus.textContent = 'Build started...';
+
+      try {
+        // Placeholder: future integration with build pipeline
+        playbookStatus.textContent = 'Build step not yet connected';
+      } finally {
+        buildBtn.disabled = false;
+        buildBtn.textContent = 'Build Step';
+      }
+    });
+  </script>
+</body>
+</html>

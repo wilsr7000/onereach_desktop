@@ -1422,19 +1422,33 @@
 
       // Show HUD
       function show() {
+        _clearDismissTimer();
         hudContainer.classList.remove('hiding');
         hudContainer.classList.add('visible');
         clearAutoHide();
         startQueueStatsUpdates();
       }
 
-      // Hide HUD
+      // Hide HUD (CSS animation + native window hide after transition)
+      let _dismissTimer = null;
+      function _clearDismissTimer() {
+        if (_dismissTimer) { clearTimeout(_dismissTimer); _dismissTimer = null; }
+      }
+
       function hide() {
         hudContainer.classList.add('hiding');
         hudContainer.classList.remove('visible');
         clearAutoHide();
         clearErrorFade();
         stopQueueStatsUpdates();
+
+        _clearDismissTimer();
+        _dismissTimer = setTimeout(() => {
+          _dismissTimer = null;
+          if (window.commandHUD && window.commandHUD.dismiss) {
+            window.commandHUD.dismiss();
+          }
+        }, 350);
       }
 
       // Clear auto-hide timer
@@ -1643,6 +1657,13 @@
         // of the generic success/fail card. The agent keeps its panel alive
         // when needsInput is set (multi-turn conversation).
         if (result.html) {
+          // Expand HUD width for agents that request more room (e.g. daily brief dayView)
+          if (result.panelWidth && typeof result.panelWidth === 'number' && window.commandHUD?.resizeWindow) {
+            const container = document.getElementById('hud-container');
+            const curHeight = container ? container.offsetHeight : 420;
+            window.commandHUD.resizeWindow(result.panelWidth, Math.max(curHeight, 520));
+          }
+
           const agentId = result.agentId || result.metadata?.agentId || 'unknown';
           const agentName = result.agentName || result.metadata?.agentName || agentId;
           addAgentUIPanel(agentId, agentName, result.html);
@@ -1747,8 +1768,11 @@
         // Reset subtasks
         clearSubtasks();
 
-        // Reset agent UI panels
+        // Reset agent UI panels and restore default HUD width
         clearAllAgentUIPanels();
+        if (window.commandHUD?.resizeWindow) {
+          window.commandHUD.resizeWindow(340, 420);
+        }
       }
 
       // ==================== SUBTASK FUNCTIONS ====================

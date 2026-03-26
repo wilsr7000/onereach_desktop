@@ -522,13 +522,9 @@
         inset: 0;
         z-index: 50;
         display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
+        flex-direction: row;
         background: var(--bg-base);
-        padding: 32px 24px;
-        gap: 8px;
-        overflow-y: auto;
+        overflow: hidden;
       }
 
       .meeting-hub.hidden { display: none; }
@@ -815,6 +811,208 @@
 
       .hub-link-box:hover {
         border-color: var(--accent-blue);
+      }
+
+      /* ============================================
+       HUB SIDEBAR (Meeting Rooms)
+       ============================================ */
+      .hub-layout {
+        display: flex;
+        width: 100%;
+        height: 100%;
+      }
+
+      .hub-sidebar {
+        width: 260px;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        background: rgba(22, 22, 34, 0.6);
+        border-right: 1px solid var(--border-color);
+        overflow: hidden;
+      }
+
+      .hub-sidebar-header {
+        padding: 20px 16px 12px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+
+      .hub-sidebar-search {
+        padding: 0 12px 12px;
+      }
+
+      .hub-sidebar-search input {
+        width: 100%;
+        padding: 8px 12px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-size: 12px;
+        font-family: inherit;
+        transition: border-color var(--transition-fast);
+      }
+
+      .hub-sidebar-search input:focus {
+        outline: none;
+        border-color: var(--accent-blue);
+      }
+
+      .hub-sidebar-search input::placeholder {
+        color: var(--text-muted);
+      }
+
+      .hub-sidebar-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 8px 12px;
+      }
+
+      .hub-room-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 10px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition: background var(--transition-fast);
+        position: relative;
+      }
+
+      .hub-room-row:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .hub-room-row.active {
+        background: rgba(77, 124, 255, 0.1);
+      }
+
+      .hub-room-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        flex-shrink: 0;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color);
+      }
+
+      .hub-room-info {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .hub-room-name {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .hub-room-slug {
+        font-size: 11px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-family: 'JetBrains Mono', monospace;
+      }
+
+      .hub-room-actions {
+        display: flex;
+        gap: 4px;
+        opacity: 0;
+        transition: opacity var(--transition-fast);
+        flex-shrink: 0;
+      }
+
+      .hub-room-row:hover .hub-room-actions {
+        opacity: 1;
+      }
+
+      .hub-room-btn {
+        padding: 4px 8px;
+        font-size: 11px;
+        font-weight: 500;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        font-family: inherit;
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+
+      .hub-room-btn:hover {
+        border-color: var(--border-light);
+        color: var(--text-primary);
+      }
+
+      .hub-room-btn.host {
+        background: rgba(77, 124, 255, 0.15);
+        border-color: rgba(77, 124, 255, 0.3);
+        color: var(--accent-blue);
+      }
+
+      .hub-room-btn.host:hover {
+        background: rgba(77, 124, 255, 0.25);
+        border-color: rgba(77, 124, 255, 0.5);
+      }
+
+      .hub-sidebar-empty {
+        padding: 24px 16px;
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        line-height: 1.5;
+      }
+
+      .hub-room-toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%) translateY(40px);
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-light);
+        color: var(--text-primary);
+        padding: 8px 16px;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        font-weight: 500;
+        opacity: 0;
+        transition: all 0.2s ease;
+        pointer-events: none;
+        z-index: 100;
+      }
+
+      .hub-room-toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      .hub-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 24px;
+        gap: 8px;
+        overflow-y: auto;
+        min-width: 0;
       }
 
       /* ============================================
@@ -2415,6 +2613,11 @@
         width: 100%;
         height: 100%;
         object-fit: cover;
+      }
+
+      .session-participant video[data-screen-share] {
+        object-fit: contain;
+        background: #000;
       }
 
       /* ---- Spotlight participant (3+ mode) ---- */
@@ -4148,6 +4351,17 @@
     <div class="main-layout">
       <!-- Meeting Hub Landing Page (shown on first open) -->
       <div class="meeting-hub" id="meetingHub">
+        <!-- Sidebar: perpetual meeting rooms per space -->
+        <div class="hub-sidebar" id="hubSidebar">
+          <div class="hub-sidebar-header">Your Rooms</div>
+          <div class="hub-sidebar-search">
+            <input type="text" id="hubRoomSearch" placeholder="Filter rooms..." oninput="app.filterRooms(this.value)" />
+          </div>
+          <div class="hub-sidebar-list" id="hubRoomList"></div>
+        </div>
+
+        <!-- Main hub content -->
+        <div class="hub-main">
         <div class="hub-brand">WISER Meeting</div>
         <div class="hub-subtitle">Record, meet, and transcribe</div>
 
@@ -4241,6 +4455,8 @@
           <div class="hub-status" id="hubJoinStatus"></div>
           <div class="hub-back-link" onclick="app.hubBack()">Back</div>
         </div>
+        </div><!-- /.hub-main -->
+        <div class="hub-room-toast" id="hubRoomToast">Link copied</div>
       </div>
 
       <!-- Preview Area -->
@@ -5980,6 +6196,13 @@
         switchMode(mode) {
           if (mode === this.currentMode) return;
 
+          // During an active LiveKit session, screen/both requests toggle screen sharing
+          // without leaving session mode
+          if ((mode === 'screen' || mode === 'both') && this.sessionConnected && this._livekitRoom) {
+            this.sessionToggleScreenShare();
+            return;
+          }
+
           // If leaving session mode, clean up
           if (this.currentMode === 'session' && mode !== 'session') {
             this.sessionHideAllPanels();
@@ -6133,6 +6356,9 @@
 
             // Show pulse animation if no space selected yet
             this.updateTargetSpaceHighlight();
+
+            // Populate the room sidebar
+            this.loadRoomList();
           } catch (error) {
             console.error('[Recorder] Failed to load spaces:', error);
           }
@@ -6303,6 +6529,7 @@
         hideScreenPicker() {
           this.elements.screenPicker.classList.remove('active');
           this.pipModeSelection = false;
+          this._sessionScreenSharePending = false;
           if (!this.stream) {
             this.elements.videoSource.value = '';
           }
@@ -6316,7 +6543,10 @@
 
           this.elements.screenPicker.classList.remove('active');
 
-          if (this.pipModeSelection) {
+          if (this._sessionScreenSharePending && this.sessionConnected && this._livekitRoom) {
+            this._sessionScreenSharePending = false;
+            await this.sessionPublishScreenShare(this.selectedScreenSourceId);
+          } else if (this.pipModeSelection) {
             await this.startScreenPipCapture(this.selectedScreenSourceId);
           } else {
             await this.startScreenCapture(this.selectedScreenSourceId);
@@ -6369,19 +6599,14 @@
           try {
             const audioDeviceId = this.elements.audioSource.value;
 
-            // 1. Get screen video stream
-            const screenStream = await navigator.mediaDevices.getUserMedia({
+            // 1. Get screen video stream via display media handler
+            await window.recorder.setScreenShareSource(sourceId);
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
               audio: false,
-              video: {
-                mandatory: {
-                  chromeMediaSource: 'desktop',
-                  chromeMediaSourceId: sourceId,
-                },
-              },
             });
 
             // 2. Get system audio via native loopback (no drivers needed)
-            //    Falls back to legacy chromeMediaSource approach if unavailable
             let loopbackStream = null;
             let hasSystemAudio = false;
 
@@ -6389,34 +6614,23 @@
             if (loopbackStream) {
               hasSystemAudio = true;
             } else {
-              // Fallback: try legacy chromeMediaSource desktop audio (works on Windows)
-              // Desktop audio requires paired video capture, so we request both then discard the video
+              // Fallback: request system audio via display media handler's loopback support
               try {
-                const legacyStream = await navigator.mediaDevices.getUserMedia({
-                  audio: {
-                    mandatory: {
-                      chromeMediaSource: 'desktop',
-                      chromeMediaSourceId: sourceId,
-                    },
-                  },
-                  video: {
-                    mandatory: {
-                      chromeMediaSource: 'desktop',
-                      chromeMediaSourceId: sourceId,
-                    },
-                  },
+                await window.recorder.setScreenShareSource(sourceId);
+                const fallbackStream = await navigator.mediaDevices.getDisplayMedia({
+                  video: true,
+                  audio: true,
                 });
-                if (legacyStream.getAudioTracks().length > 0) {
-                  // Keep only the audio tracks, stop the redundant video tracks
-                  legacyStream.getVideoTracks().forEach((t) => t.stop());
-                  loopbackStream = new MediaStream(legacyStream.getAudioTracks());
+                if (fallbackStream.getAudioTracks().length > 0) {
+                  fallbackStream.getVideoTracks().forEach((t) => t.stop());
+                  loopbackStream = new MediaStream(fallbackStream.getAudioTracks());
                   hasSystemAudio = true;
-                  console.log('[Recorder] System audio captured via legacy chromeMediaSource');
+                  console.log('[Recorder] System audio captured via display media handler');
                 } else {
-                  legacyStream.getTracks().forEach((t) => t.stop());
+                  fallbackStream.getTracks().forEach((t) => t.stop());
                 }
-              } catch (legacyError) {
-                console.log('[Recorder] Legacy system audio also unavailable:', legacyError.message);
+              } catch (fallbackError) {
+                console.log('[Recorder] Display media audio fallback unavailable:', fallbackError.message);
               }
             }
 
@@ -6557,15 +6771,11 @@
           try {
             const audioDeviceId = this.elements.audioSource.value;
 
-            // 1. Get screen video stream (video only)
-            const screenStream = await navigator.mediaDevices.getUserMedia({
+            // 1. Get screen video stream via display media handler
+            await window.recorder.setScreenShareSource(sourceId);
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
               audio: false,
-              video: {
-                mandatory: {
-                  chromeMediaSource: 'desktop',
-                  chromeMediaSourceId: sourceId,
-                },
-              },
             });
 
             // 2. Get system audio via native loopback, with legacy fallback
@@ -6576,34 +6786,23 @@
             if (loopbackStream) {
               hasSystemAudio = true;
             } else {
-              // Fallback: try legacy chromeMediaSource desktop audio (works on Windows)
-              // Desktop audio requires paired video capture, so we request both then discard the video
+              // Fallback: request system audio via display media handler's loopback support
               try {
-                const legacyStream = await navigator.mediaDevices.getUserMedia({
-                  audio: {
-                    mandatory: {
-                      chromeMediaSource: 'desktop',
-                      chromeMediaSourceId: sourceId,
-                    },
-                  },
-                  video: {
-                    mandatory: {
-                      chromeMediaSource: 'desktop',
-                      chromeMediaSourceId: sourceId,
-                    },
-                  },
+                await window.recorder.setScreenShareSource(sourceId);
+                const fallbackStream = await navigator.mediaDevices.getDisplayMedia({
+                  video: true,
+                  audio: true,
                 });
-                if (legacyStream.getAudioTracks().length > 0) {
-                  // Keep only the audio tracks, stop the redundant video tracks
-                  legacyStream.getVideoTracks().forEach((t) => t.stop());
-                  loopbackStream = new MediaStream(legacyStream.getAudioTracks());
+                if (fallbackStream.getAudioTracks().length > 0) {
+                  fallbackStream.getVideoTracks().forEach((t) => t.stop());
+                  loopbackStream = new MediaStream(fallbackStream.getAudioTracks());
                   hasSystemAudio = true;
-                  console.log('[Recorder] System audio captured via legacy chromeMediaSource');
+                  console.log('[Recorder] System audio captured via display media handler');
                 } else {
-                  legacyStream.getTracks().forEach((t) => t.stop());
+                  fallbackStream.getTracks().forEach((t) => t.stop());
                 }
-              } catch (legacyError) {
-                console.log('[Recorder] Legacy system audio also unavailable:', legacyError.message);
+              } catch (fallbackError) {
+                console.log('[Recorder] Display media audio fallback unavailable:', fallbackError.message);
               }
             }
 
@@ -6892,12 +7091,21 @@
         async toggleCaptions() {
           if (!this.captionsEnabled) {
             try {
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:toggleCaptions',message:'toggleCaptions calling getOpenAIKey',data:{hasRecorder:!!window.recorder,hasFn:typeof window.recorder?.getOpenAIKey},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+              // #endregion
               const keyResult = await window.recorder.getOpenAIKey();
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:toggleCaptions-result',message:'getOpenAIKey returned',data:{keyResult:{success:keyResult?.success,hasKey:!!keyResult?.key,error:keyResult?.error}},timestamp:Date.now(),hypothesisId:'A,B,C,E'})}).catch(()=>{});
+              // #endregion
               if (!keyResult.success || !keyResult.key) {
                 this.showStatus('Live captions require an OpenAI API key. Add one in Settings.', 'error');
                 return;
               }
             } catch (e) {
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:toggleCaptions-error',message:'getOpenAIKey threw exception',data:{error:e.message,stack:e.stack?.substring(0,300)},timestamp:Date.now(),hypothesisId:'D,E'})}).catch(()=>{});
+              // #endregion
               this.showStatus('Could not verify API key for captions.', 'error');
               return;
             }
@@ -6925,7 +7133,13 @@
 
           try {
             // Get API key
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:startLiveTranscription',message:'startLiveTranscription calling getOpenAIKey',data:{hasPipAudioDest:!!this.pipAudioDestination},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
             const keyResult = await window.recorder.getOpenAIKey();
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:startLiveTranscription-result',message:'getOpenAIKey result in startLiveTranscription',data:{keyResult:{success:keyResult?.success,hasKey:!!keyResult?.key,error:keyResult?.error}},timestamp:Date.now(),hypothesisId:'A,B,C,E'})}).catch(()=>{});
+            // #endregion
             if (!keyResult.success || !keyResult.key) {
               console.log('[Transcription] No OpenAI API key available, skipping live captions');
               return;
@@ -8145,6 +8359,12 @@
         _audioGlowFrame: null, // requestAnimationFrame id for audio-reactive glow
         _localParticipantSid: 'local', // key used for the host's own tile
 
+        // Screen share within LiveKit session
+        _sessionScreenShareActive: false,
+        _sessionScreenShareTrack: null,
+        _sessionScreenShareStream: null,
+        _sessionScreenSharePending: false,
+
         // Session state for host address
         hostAddress: null,
         publicJoinUrl: null,
@@ -8181,6 +8401,7 @@
           const hubSel = document.getElementById('hubSpaceSelect');
           if (hubSel) {
             hubSel.classList.toggle('unset', !hubSel.value);
+            if (hubSel.value) this.selectRoom(hubSel.value);
           }
         },
 
@@ -8279,6 +8500,147 @@
           const hub = document.getElementById('meetingHub');
           if (hub) hub.classList.remove('hidden');
           this.hubBack();
+          this.loadRoomList();
+        },
+
+        // ── Room Sidebar ──────────────────────────────
+
+        _roomSpaces: [],
+        _guestPageUrl: '',
+        _selectedRoomId: null,
+
+        async loadRoomList() {
+          if (!window.recorder) return;
+          try {
+            const spaces = await window.recorder.getSpaces();
+            this._roomSpaces = (spaces || []).filter(s => !s.isSystem);
+
+            const urlResult = await window.recorder.getGuestPageUrl();
+            if (urlResult.success && urlResult.url) {
+              this._guestPageUrl = urlResult.url;
+            }
+
+            this._renderRoomList(this._roomSpaces);
+          } catch (err) {
+            console.error('[Hub] Failed to load room list:', err);
+          }
+        },
+
+        _deriveRoomName(spaceName) {
+          return (spaceName || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'wiser-meeting';
+        },
+
+        _renderRoomList(spaces) {
+          const list = document.getElementById('hubRoomList');
+          if (!list) return;
+          list.innerHTML = '';
+
+          if (!spaces || spaces.length === 0) {
+            list.innerHTML = '<div class="hub-sidebar-empty">No spaces yet. Create a space in the Spaces Manager to get a perpetual meeting room.</div>';
+            return;
+          }
+
+          spaces.forEach(space => {
+            const roomName = this._deriveRoomName(space.name || space.id);
+            const row = document.createElement('div');
+            row.className = 'hub-room-row' + (this._selectedRoomId === space.id ? ' active' : '');
+            row.dataset.spaceId = space.id;
+            row.onclick = (e) => {
+              if (e.target.closest('.hub-room-btn')) return;
+              this.selectRoom(space.id);
+            };
+
+            const iconColor = space.color || '#64c8ff';
+            const iconChar = space.icon || '\u25CB';
+
+            row.innerHTML =
+              '<div class="hub-room-icon" style="background:' + iconColor + '22;border-color:' + iconColor + '44;color:' + iconColor + '">' + iconChar + '</div>' +
+              '<div class="hub-room-info">' +
+                '<div class="hub-room-name">' + this._escHtml(space.name || space.id) + '</div>' +
+                '<div class="hub-room-slug">' + roomName + '</div>' +
+              '</div>' +
+              '<div class="hub-room-actions">' +
+                '<button class="hub-room-btn" onclick="app.copyRoomLink(\'' + roomName + '\')" title="Copy meeting link">Copy</button>' +
+                '<button class="hub-room-btn host" onclick="app.hostRoom(\'' + space.id + '\',\'' + this._escAttr(space.name || space.id) + '\')" title="Host a meeting in this room">Host</button>' +
+              '</div>';
+
+            list.appendChild(row);
+          });
+        },
+
+        _escHtml(str) {
+          const d = document.createElement('div');
+          d.textContent = str;
+          return d.innerHTML;
+        },
+
+        _escAttr(str) {
+          return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        },
+
+        selectRoom(spaceId) {
+          this._selectedRoomId = spaceId;
+          document.querySelectorAll('.hub-room-row').forEach(r => {
+            r.classList.toggle('active', r.dataset.spaceId === spaceId);
+          });
+          const hubSel = document.getElementById('hubSpaceSelect');
+          if (hubSel) {
+            hubSel.value = spaceId;
+            hubSel.classList.toggle('unset', !spaceId);
+          }
+        },
+
+        copyRoomLink(roomName) {
+          const url = this._guestPageUrl
+            ? this._guestPageUrl + '?room=' + encodeURIComponent(roomName)
+            : roomName;
+
+          const write = window.electronClipboard?.writeText
+            ? () => window.electronClipboard.writeText(url)
+            : () => navigator.clipboard.writeText(url);
+          write();
+
+          const toast = document.getElementById('hubRoomToast');
+          if (toast) {
+            toast.textContent = 'Link copied';
+            toast.classList.add('show');
+            clearTimeout(this._toastTimer);
+            this._toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
+          }
+        },
+
+        hostRoom(spaceId, spaceName) {
+          const hubSel = document.getElementById('hubSpaceSelect');
+          if (hubSel) {
+            hubSel.value = spaceId;
+            hubSel.classList.remove('unset');
+          }
+          const hubName = document.getElementById('hubNameInput');
+          if (hubName && !hubName.value.trim()) {
+            hubName.focus();
+            this.hubShowStatus('hubNewMeetingStatus', 'Enter your name first', 'error');
+            document.getElementById('hubMainActions').style.display = 'none';
+            document.getElementById('hubNewMeetingPanel').classList.add('visible');
+            return;
+          }
+          this.hubSyncToSelectors();
+          this.hubDismiss();
+          this.switchMode('session');
+          setTimeout(() => this.sessionHost(), 100);
+        },
+
+        filterRooms(query) {
+          const q = (query || '').toLowerCase().trim();
+          if (!q) {
+            this._renderRoomList(this._roomSpaces);
+            return;
+          }
+          const filtered = this._roomSpaces.filter(s => {
+            const name = (s.name || s.id || '').toLowerCase();
+            const slug = this._deriveRoomName(s.name || s.id);
+            return name.includes(q) || slug.includes(q);
+          });
+          this._renderRoomList(filtered);
         },
 
         hubStartLiveMeeting() {
@@ -8446,10 +8808,12 @@
             // Set up remote track handling (same as host flow)
             this._livekitRoom.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
               if (track.kind === Track.Kind.Video) {
+                const isScreenShare = pub.source === Track.Source.ScreenShare;
                 const el = track.attach();
                 el.style.width = '100%';
                 el.style.height = '100%';
-                el.style.objectFit = 'cover';
+                el.style.objectFit = isScreenShare ? 'contain' : 'cover';
+                if (isScreenShare) el.dataset.screenShare = 'true';
                 const container = document.getElementById('previewContainer');
                 if (container) container.appendChild(el);
               }
@@ -8571,14 +8935,16 @@
             // Track subscriptions — per-participant container management
             this._livekitRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
               const pName = participant.name || participant.identity;
-              console.log('[LiveKit] Track subscribed:', track.kind, 'from', pName);
+              const isScreenShare = publication.source === LivekitClient.Track.Source.ScreenShare;
+              console.log('[LiveKit] Track subscribed:', track.kind, isScreenShare ? '(screen share)' : '', 'from', pName);
               const container = this._ensureParticipantContainer(participant.sid, pName);
               const element = track.attach();
               if (track.kind === 'video') {
                 element.style.width = '100%';
                 element.style.height = '100%';
-                element.style.objectFit = 'cover';
+                element.style.objectFit = isScreenShare ? 'contain' : 'cover';
                 element.dataset.trackSid = track.sid;
+                if (isScreenShare) element.dataset.screenShare = 'true';
                 container.appendChild(element);
               } else if (track.kind === 'audio') {
                 element.dataset.trackSid = track.sid;
@@ -9150,6 +9516,74 @@
             cancelAnimationFrame(this._audioGlowFrame);
             this._audioGlowFrame = null;
           }
+        },
+
+        // Toggle screen sharing within an active LiveKit session
+        async sessionToggleScreenShare() {
+          if (this._sessionScreenShareActive) {
+            await this.sessionStopScreenShare();
+          } else {
+            this._sessionScreenSharePending = true;
+            await this.showScreenPicker(false);
+          }
+        },
+
+        // Capture screen and publish to LiveKit as ScreenShare source
+        async sessionPublishScreenShare(sourceId) {
+          try {
+            await window.recorder.setScreenShareSource(sourceId);
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
+              audio: false,
+            });
+
+            const screenTrack = screenStream.getVideoTracks()[0];
+            if (!screenTrack) {
+              this.showStatus('Failed to capture screen', 'error');
+              return;
+            }
+
+            await this._livekitRoom.localParticipant.publishTrack(screenTrack, {
+              source: LivekitClient.Track.Source.ScreenShare,
+              name: 'screen-share',
+            });
+
+            this._sessionScreenShareTrack = screenTrack;
+            this._sessionScreenShareStream = screenStream;
+            this._sessionScreenShareActive = true;
+
+            screenTrack.onended = () => {
+              this.sessionStopScreenShare();
+            };
+
+            this.showStatus('Screen sharing started', 'info');
+            console.log('[LiveKit] Screen share published:', sourceId);
+          } catch (error) {
+            console.error('[LiveKit] Screen share error:', error);
+            this.showStatus('Failed to share screen: ' + error.message, 'error');
+          }
+        },
+
+        // Stop screen sharing and unpublish from LiveKit
+        async sessionStopScreenShare() {
+          if (this._sessionScreenShareTrack) {
+            try {
+              await this._livekitRoom.localParticipant.unpublishTrack(this._sessionScreenShareTrack);
+            } catch (e) {
+              console.warn('[LiveKit] Failed to unpublish screen share:', e);
+            }
+            this._sessionScreenShareTrack.stop();
+            this._sessionScreenShareTrack = null;
+          }
+          if (this._sessionScreenShareStream) {
+            this._sessionScreenShareStream.getTracks().forEach((t) => t.stop());
+            this._sessionScreenShareStream = null;
+          }
+          this._sessionScreenShareActive = false;
+          this._sessionScreenSharePending = false;
+
+          this.showStatus('Screen sharing stopped', 'info');
+          console.log('[LiveKit] Screen share stopped');
         },
 
         // Send data to session peers (LiveKit or legacy data channel)
@@ -9844,6 +10278,18 @@
           this.sessionRole = null;
           this._currentSpeakerName = null;
 
+          // Stop screen share if active
+          if (this._sessionScreenShareTrack) {
+            this._sessionScreenShareTrack.stop();
+            this._sessionScreenShareTrack = null;
+          }
+          if (this._sessionScreenShareStream) {
+            this._sessionScreenShareStream.getTracks().forEach((t) => t.stop());
+            this._sessionScreenShareStream = null;
+          }
+          this._sessionScreenShareActive = false;
+          this._sessionScreenSharePending = false;
+
           // Reset track transfer state
           this.transferInProgress = false;
           this._transferSenderId = null;
@@ -10244,10 +10690,14 @@
             micState.className = 'ctx-item-state ' + (this.micMuted ? 'off' : 'on');
           }
 
-          // Screen mode
+          // Screen mode (also reflects session screen share)
           const screenState = document.getElementById('ctxScreenState');
           const bothState = document.getElementById('ctxBothState');
-          if (screenState) screenState.textContent = this.currentMode === 'screen' ? 'ACTIVE' : 'OFF';
+          const screenActive = this.currentMode === 'screen' || this._sessionScreenShareActive;
+          if (screenState) {
+            screenState.textContent = screenActive ? 'SHARING' : 'OFF';
+            screenState.className = 'ctx-item-state ' + (screenActive ? 'on' : '');
+          }
           if (bothState) bothState.textContent = this.currentMode === 'both' ? 'ACTIVE' : 'OFF';
 
           // Background

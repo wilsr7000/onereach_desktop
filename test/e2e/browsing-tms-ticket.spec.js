@@ -25,7 +25,7 @@ test.afterAll(async () => {
 });
 
 function wait(ms) {
-  return mainWindow.evaluate((t) => new Promise(r => setTimeout(r, t)), ms);
+  return mainWindow.evaluate((t) => new Promise(r => { setTimeout(r, t); }), ms);
 }
 
 async function snap(sid, interactive = true) {

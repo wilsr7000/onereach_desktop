@@ -244,7 +244,7 @@ Rules:
         continue;
       }
 
-      const match = store.findContact(guest);
+      const match = store.resolveGuest(guest);
       if (match && match.email) {
         resolved.push(match.email);
       } else {
@@ -313,11 +313,15 @@ Rules:
     else if (field === 'date') details.date = query;
     else if (field === 'time') details.time = query;
 
-    // Re-run execute with the filled-in details
-    return this.execute({
-      text: `Create "${details.title}" on ${details.date} at ${details.time}${details.location ? ' at ' + details.location : ''}${details.duration ? ' for ' + details.duration : ''}`,
-      context: {},
-    });
+    // Build a synthetic query using only non-null fields
+    const parts = [`Create "${details.title || 'event'}"`];
+    if (details.date) parts.push(`on ${details.date}`);
+    if (details.time) parts.push(`at ${details.time}`);
+    if (details.location) parts.push(`at ${details.location}`);
+    if (details.duration && details.duration !== '60m') parts.push(`for ${details.duration}`);
+    if (details.guests && details.guests.length > 0) parts.push(`with ${details.guests.join(', ')}`);
+
+    return this.execute({ text: parts.join(' '), context: {} });
   },
 };
 

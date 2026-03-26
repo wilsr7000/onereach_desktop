@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('recorder', {
   // (desktopCapturer is main-process only in Electron 25+, so we use IPC)
   getScreenSources: () => ipcRenderer.invoke('recorder:get-screen-sources'),
 
+  // Tell main which source to provide when getDisplayMedia() is called next
+  setScreenShareSource: (sourceId) => ipcRenderer.invoke('recorder:set-screen-source', sourceId),
+
   // System audio loopback (macOS 12.3+, Windows, Linux — no drivers needed)
   enableLoopbackAudio: () => ipcRenderer.invoke('enable-loopback-audio'),
   disableLoopbackAudio: () => ipcRenderer.invoke('disable-loopback-audio'),

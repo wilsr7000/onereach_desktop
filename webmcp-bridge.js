@@ -23,7 +23,7 @@
 
   const PREFIX = '__webmcp__';
   const tools = {};        // name -> { execute, definition }
-  let bridgeReady = false;
+  let _bridgeReady = false;
 
   // ── Helpers ──────────────────────────────────────────────
 
@@ -129,6 +129,6 @@
     return Object.values(tools).map((t) => t.definition);
   };
 
-  bridgeReady = true;
+  _bridgeReady = true;
   emit('bridge-ready', { toolCount: Object.keys(tools).length });
 })();

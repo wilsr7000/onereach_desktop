@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flow Log Analysis</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      padding: 16px 24px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+    }
+    header h1 { font-size: 15px; font-weight: 600; color: #f1f5f9; flex: 1; }
+    .badge { padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge.done { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+    .badge.loading { background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
+    .badge.error { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+    .summary-bar {
+      padding: 10px 24px; background: #1e293b; display: flex; gap: 16px; align-items: center; flex-shrink: 0;
+      font-size: 12px; color: #94a3b8; flex-wrap: wrap;
+    }
+    .count { display: flex; align-items: center; gap: 5px; }
+    .count .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot.total { background: #94a3b8; }
+    .dot.sess { background: #a78bfa; }
+    .dot.err { background: #ef4444; }
+    .dot.warn { background: #f59e0b; }
+    .count .num { font-weight: 600; color: #e2e8f0; }
+    .time-range { color: #64748b; font-size: 11px; font-style: italic; }
+    .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .actions button {
+      padding: 5px 14px; border-radius: 5px; font-size: 12px; font-weight: 500; cursor: pointer;
+      font-family: inherit; transition: all 0.2s; border: 1px solid #334155;
+    }
+    .btn-copy { background: #1e293b; color: #94a3b8; }
+    .btn-copy:hover { background: #334155; color: #e2e8f0; }
+    .btn-copy.copied { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); color: #4ade80; }
+    .btn-raw { background: rgba(139,92,246,0.1); border-color: rgba(139,92,246,0.3); color: #c4b5fd; }
+    .btn-raw:hover { background: rgba(139,92,246,0.2); color: #ddd6fe; }
+    main { flex: 1; overflow-y: auto; padding: 0; }
+    main::-webkit-scrollbar { width: 8px; }
+    main::-webkit-scrollbar-track { background: #0f172a; }
+    main::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    main::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .section { padding: 16px 24px; border-bottom: 1px solid #1e293b; }
+    .section-title {
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px;
+      color: #64748b; margin-bottom: 10px;
+    }
+    .ai-summary {
+      font-size: 13px; line-height: 1.6; color: #cbd5e1; padding: 12px 16px;
+      background: rgba(59,130,246,0.06); border: 1px solid rgba(59,130,246,0.12); border-radius: 6px;
+    }
+    .session-group { border-bottom: 1px solid #1e293b; }
+    .session-header {
+      padding: 10px 24px; display: flex; align-items: center; gap: 10px; cursor: pointer;
+      transition: background 0.15s; font-size: 12px;
+    }
+    .session-header:hover { background: rgba(255,255,255,0.03); }
+    .session-chevron { transition: transform 0.2s; display: inline-block; color: #475569; font-size: 10px; flex-shrink: 0; width: 14px; }
+    .session-group.open .session-chevron { transform: rotate(90deg); }
+    .session-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .session-status.ok { background: #4ade80; }
+    .session-status.warning { background: #f59e0b; }
+    .session-status.error { background: #ef4444; }
+    .session-id { font-family: 'SF Mono', Menlo, monospace; font-size: 11px; color: #94a3b8; }
+    .session-summary-text { flex: 1; color: #cbd5e1; font-size: 12px; }
+    .session-meta { display: flex; gap: 12px; align-items: center; flex-shrink: 0; }
+    .session-meta-item { font-size: 11px; color: #64748b; white-space: nowrap; }
+    .session-meta-item .val { color: #94a3b8; }
+    .session-meta-item .val.slow { color: #fbbf24; }
+    .time-ago { color: #64748b; font-size: 11px; white-space: nowrap; }
+    .duration-note {
+      font-size: 11px; color: #94a3b8; padding: 6px 24px 6px 0; font-style: italic;
+      border-bottom: 1px solid rgba(30,41,59,0.5);
+    }
+    .duration-note.slow { color: #fbbf24; }
+    .session-body { display: none; padding-left: 38px; }
+    .session-group.open .session-body { display: block; }
+    .session-group.highlight { animation: flash 1.5s ease-out; }
+    @keyframes flash { 0% { background: rgba(129,140,248,0.12); } 100% { background: transparent; } }
+    .diagnostic {
+      padding: 8px 24px 8px 0; border-bottom: 1px solid rgba(30,41,59,0.5); display: flex; gap: 10px; align-items: flex-start;
+      font-size: 13px; transition: background 0.15s;
+    }
+    .diagnostic:last-child { border-bottom: none; }
+    .diagnostic:hover { background: rgba(255,255,255,0.02); }
+    .sev { width: 56px; flex-shrink: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; padding-top: 1px; }
+    .sev.error { color: #f87171; }
+    .sev.warning { color: #fbbf24; }
+    .sev.info { color: #60a5fa; }
+    .msg { flex: 1; color: #cbd5e1; line-height: 1.5; }
+    .msg .details { display: block; color: #94a3b8; font-size: 12px; margin-top: 3px; }
+    .msg .ts { display: inline-block; color: #475569; font-size: 11px; margin-top: 2px; font-family: 'SF Mono', Menlo, monospace; }
+    .msg .ts-ago { color: #64748b; font-size: 10px; margin-left: 6px; }
+    .pattern {
+      padding: 8px 16px; margin-bottom: 6px; background: rgba(255,255,255,0.03);
+      border-radius: 5px; font-size: 13px; display: flex; gap: 10px; align-items: baseline;
+    }
+    .pattern-name { font-weight: 600; color: #e2e8f0; white-space: nowrap; }
+    .pattern-desc { color: #94a3b8; flex: 1; }
+    .pattern-count { color: #64748b; font-size: 11px; font-family: 'SF Mono', Menlo, monospace; white-space: nowrap; }
+    .recommendation {
+      padding: 6px 0; font-size: 13px; color: #cbd5e1; line-height: 1.5;
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    .recommendation::before { content: '\2192'; color: #4ade80; font-weight: 600; flex-shrink: 0; }
+    .raw-toggle {
+      padding: 10px 24px; cursor: pointer; font-size: 12px; color: #64748b;
+      border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 8px;
+      transition: background 0.15s;
+    }
+    .raw-toggle:hover { background: rgba(255,255,255,0.03); color: #94a3b8; }
+    .raw-toggle .chevron { transition: transform 0.2s; display: inline-block; }
+    .raw-toggle.open .chevron { transform: rotate(90deg); }
+    .raw-logs { display: none; padding: 12px 24px; max-height: 400px; overflow-y: auto; }
+    .raw-logs.visible { display: block; }
+    .raw-logs pre {
+      font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5;
+      color: #94a3b8; white-space: pre-wrap; word-break: break-all;
+    }
+    .load-more {
+      padding: 16px 24px; display: flex; gap: 10px; align-items: center; justify-content: center;
+      border-top: 1px solid #1e293b;
+    }
+    .load-more button {
+      padding: 8px 20px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer;
+      font-family: inherit; transition: all 0.2s; border: 1px solid #334155;
+    }
+    .load-more button:disabled { opacity: 0.4; cursor: default; }
+    .btn-next { background: #1e293b; color: #94a3b8; }
+    .btn-next:hover:not(:disabled) { background: #334155; color: #e2e8f0; }
+    .btn-hour { background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); color: #93c5fd; }
+    .btn-hour:hover:not(:disabled) { background: rgba(59,130,246,0.2); color: #bfdbfe; }
+    .load-status { font-size: 11px; color: #64748b; }
+    .empty { text-align: center; padding: 60px 20px; color: #475569; }
+    .empty h2 { font-size: 16px; font-weight: 500; color: #94a3b8; margin-bottom: 6px; }
+    .loading { text-align: center; padding: 60px 20px; color: #64748b; font-size: 13px; }
+    .loading .spinner {
+      display: inline-block; width: 20px; height: 20px; border: 2px solid #334155;
+      border-top-color: #60a5fa; border-radius: 50%; animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    .loading-tip {
+      margin-top: 16px; padding: 10px 20px; max-width: 420px; margin-left: auto; margin-right: auto;
+      font-size: 12px; line-height: 1.5; color: #94a3b8; text-align: center;
+      background: rgba(59,130,246,0.05); border: 1px solid rgba(59,130,246,0.1); border-radius: 6px;
+      min-height: 52px;
+    }
+    .loading-tip .tip-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: #64748b; margin-bottom: 4px; }
+    .loading-tip .tip-label.library { color: #4ade80; }
+    .loading-tip .tip-content {
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      opacity: 1; transform: translateY(0);
+    }
+    .loading-tip .tip-content.fade-out { opacity: 0; transform: translateY(-4px); }
+    .loading-tip .tip-content.fade-in { opacity: 0; transform: translateY(4px); }
+    .tip-icon { display: inline-block; vertical-align: -2px; margin-right: 4px; }
+    .tip-icon.flow { color: #a78bfa; }
+    .tip-icon.library { color: #4ade80; }
+    .loading-tip .tip-step { font-weight: 500; }
+    .loading-tip .tip-step.flow { color: #a78bfa; }
+    .loading-tip .tip-step.library { color: #4ade80; }
+    .tip-category {
+      display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-left: 6px;
+      vertical-align: 1px;
+    }
+    .tip-category.design { background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+    .tip-category.technical { background: rgba(96,165,250,0.15); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+    .tip-category.agentic { background: rgba(167,139,250,0.15); color: #c4b5fd; border: 1px solid rgba(167,139,250,0.3); }
+    .spinner-inline {
+      display: inline-block; width: 14px; height: 14px; border: 2px solid #334155;
+      border-top-color: #60a5fa; border-radius: 50%; animation: spin 0.8s linear infinite;
+      vertical-align: middle; margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    footer {
+      padding: 10px 24px; border-top: 1px solid #1e293b; font-size: 11px; color: #475569;
+      display: flex; justify-content: space-between; flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">Flow Log Analysis</h1>
+    <div id="statusBadge"><span class="badge loading">Analyzing</span></div>
+  </header>
+  <div class="summary-bar" id="summaryBar" style="display:none;">
+    <div class="count"><span class="dot total"></span><span class="num" id="logCount">0</span> events</div>
+    <div class="count"><span class="dot sess"></span><span class="num" id="sessionCount">0</span> sessions</div>
+    <div class="count"><span class="dot err"></span><span class="num" id="errCount">0</span> errors</div>
+    <div class="count"><span class="dot warn"></span><span class="num" id="warnCount">0</span> warnings</div>
+    <span class="time-range" id="timeRange"></span>
+    <div class="actions">
+      <button class="btn-copy" id="copyAnalysis" title="Copy analysis as JSON">Copy Analysis</button>
+      <button class="btn-raw" id="copyRaw" title="Copy raw log entries">Copy Raw Logs</button>
+    </div>
+  </div>
+  <main id="content">
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <div>Fetching latest session logs...</div>
+    </div>
+  </main>
+  <footer>
+    <span id="flowInfo"></span>
+    <span id="timestamp"></span>
+  </footer>
+  <script>
+    // -----------------------------------------------------------------------
+    // State
+    // -----------------------------------------------------------------------
+    var state = {
+      flowId: null,
+      label: null,
+      aiSessionMap: {},
+      sessionMap: {},
+      sessionOrder: [],
+      allRawLogs: [],
+      totalEvents: 0,
+      oldestTs: Infinity,
+      analysis: {},
+      fetching: false,
+    };
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+    var STEP_ICON = '<svg class="tip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="12" cy="2" r="1.5"/><line x1="12" y1="3.5" x2="12" y2="5"/></svg>';
+
+    function renderTipHTML(tip) {
+      var isLib = tip.type === 'library';
+      var label = isLib ? 'From the Library' : 'Did you know?';
+      var cls = isLib ? 'library' : 'flow';
+      var icon = STEP_ICON.replace('class="tip-icon"', 'class="tip-icon ' + cls + '"');
+      var catBadge = '';
+      if (tip.category) {
+        var catCls = tip.category.toLowerCase();
+        catBadge = '<span class="tip-category ' + esc(catCls) + '">' + esc(tip.category) + '</span>';
+      }
+      return '<div class="tip-label' + (isLib ? ' library' : '') + '">' + label + catBadge + '</div>'
+        + '<div class="tip-content">'
+        + icon
+        + '<span class="tip-step ' + cls + '">' + esc(tip.stepName) + '</span> — '
+        + esc(tip.tip) + '</div>';
+    }
+
+    function timeAgo(ts) {
+      if (!ts) return '';
+      var now = Date.now();
+      var ms = typeof ts === 'number' ? ts : new Date(ts).getTime();
+      var diff = now - ms;
+      if (diff < 0) return 'just now';
+      if (diff < 60000) return Math.floor(diff / 1000) + 's ago';
+      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+      if (diff < 86400000) {
+        var h = Math.floor(diff / 3600000);
+        var m = Math.floor((diff % 3600000) / 60000);
+        return h + 'h ' + (m > 0 ? m + 'm ' : '') + 'ago';
+      }
+      return Math.floor(diff / 86400000) + 'd ago';
+    }
+    function fmtDuration(ms) {
+      if (!ms || ms < 0) return '0ms';
+      if (ms < 1000) return ms + 'ms';
+      if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+      return (ms / 60000).toFixed(1) + 'm';
+    }
+    function fmtTime(ts) {
+      if (!ts) return '';
+      return new Date(typeof ts === 'number' ? ts : ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+    // -----------------------------------------------------------------------
+    // Merge result into state
+    // -----------------------------------------------------------------------
+    function mergeResult(result) {
+      var a = result.analysis || {};
+      var aiSessions = a.sessions || [];
+      for (var i = 0; i < aiSessions.length; i++) {
+        state.aiSessionMap[aiSessions[i].sessionId] = aiSessions[i];
+      }
+
+      // Merge analysis top-level fields
+      if (a.summary) state.analysis.summary = (state.analysis.summary ? state.analysis.summary + ' | ' : '') + a.summary;
+      state.analysis.sessions = (state.analysis.sessions || []).concat(aiSessions);
+      state.analysis.patterns = (state.analysis.patterns || []).concat(a.patterns || []);
+      state.analysis.recommendations = (state.analysis.recommendations || []).concat(a.recommendations || []);
+
+      var dataSessions = result.sessions || [];
+      var newSids = [];
+      for (var i = 0; i < dataSessions.length; i++) {
+        var ds = dataSessions[i];
+        if (!state.sessionMap[ds.sessionId]) {
+          state.sessionMap[ds.sessionId] = ds;
+          newSids.push(ds.sessionId);
+        } else {
+          var ex = state.sessionMap[ds.sessionId];
+          if (ds.startTs < ex.startTs) ex.startTs = ds.startTs;
+          if (ds.endTs > ex.endTs) ex.endTs = ds.endTs;
+          ex.durationMs = ex.endTs - ex.startTs;
+          ex.eventCount = Math.max(ex.eventCount, ds.eventCount);
+        }
+        if (ds.startTs < state.oldestTs) state.oldestTs = ds.startTs;
+      }
+
+      state.allRawLogs = state.allRawLogs.concat(result.rawLogs || []);
+      state.totalEvents += (result.logCount || 0);
+
+      state.sessionOrder = Object.keys(state.sessionMap).sort(function(a, b) {
+        return state.sessionMap[b].startTs - state.sessionMap[a].startTs;
+      });
+
+      return newSids;
+    }
+
+    // -----------------------------------------------------------------------
+    // Render
+    // -----------------------------------------------------------------------
+    function countIssues() {
+      var e = 0, w = 0;
+      var sessions = state.analysis.sessions || [];
+      for (var i = 0; i < sessions.length; i++) {
+        var iss = sessions[i].issues || [];
+        for (var j = 0; j < iss.length; j++) {
+          if (iss[j].severity === 'error') e++;
+          else if (iss[j].severity === 'warning') w++;
+        }
+      }
+      return { errors: e, warnings: w };
+    }
+
+    function updateSummaryBar() {
+      var c = countIssues();
+      document.getElementById('logCount').textContent = state.totalEvents;
+      document.getElementById('sessionCount').textContent = state.sessionOrder.length;
+      document.getElementById('errCount').textContent = c.errors;
+      document.getElementById('warnCount').textContent = c.warnings;
+      document.getElementById('statusBadge').innerHTML = c.errors > 0
+        ? '<span class="badge error">' + c.errors + ' Error' + (c.errors > 1 ? 's' : '') + '</span>'
+        : '<span class="badge done">Clean</span>';
+
+      if (state.sessionOrder.length > 0) {
+        var newest = state.sessionMap[state.sessionOrder[0]];
+        var oldest = state.sessionMap[state.sessionOrder[state.sessionOrder.length - 1]];
+        document.getElementById('timeRange').textContent =
+          timeAgo(newest.endTs || newest.startTs) + ' \u2013 ' + timeAgo(oldest.startTs);
+      }
+    }
+
+    function renderSessionRow(sid, isNew) {
+      var ds = state.sessionMap[sid];
+      var as = state.aiSessionMap[sid] || null;
+      var status = as ? as.status || 'ok' : 'ok';
+      var sessionIssues = as ? (as.issues || []) : [];
+      var durationNote = as ? as.durationNote || null : null;
+      var isSlow = ds.durationMs > 30000;
+      var startOpen = status === 'error' || status === 'warning' || state.sessionOrder.length <= 3;
+
+      var h = '<div class="session-group' + (startOpen ? ' open' : '') + (isNew ? ' highlight' : '') + '" data-sid="' + esc(sid) + '">';
+      h += '<div class="session-header">';
+      h += '<span class="session-chevron">&#9654;</span>';
+      h += '<span class="session-status ' + esc(status) + '"></span>';
+      h += '<span class="session-id">' + esc(sid.length > 16 ? sid.substring(0, 16) + '\u2026' : sid) + '</span>';
+      h += '<span class="session-summary-text">' + esc(as ? as.summary || '' : '') + '</span>';
+      h += '<span class="session-meta">';
+      h += '<span class="session-meta-item"><span class="val">' + ds.eventCount + '</span> events</span>';
+      h += '<span class="session-meta-item"><span class="val' + (isSlow ? ' slow' : '') + '">' + fmtDuration(ds.durationMs) + '</span></span>';
+      h += '</span>';
+      h += '<span class="time-ago">' + esc(timeAgo(ds.startTs)) + '</span>';
+      h += '</div>';
+      h += '<div class="session-body">';
+      if (durationNote) {
+        h += '<div class="duration-note' + (isSlow ? ' slow' : '') + '">' + esc(durationNote) + '</div>';
+      }
+      if (sessionIssues.length > 0) {
+        for (var i = 0; i < sessionIssues.length; i++) {
+          var d = sessionIssues[i];
+          h += '<div class="diagnostic">';
+          h += '<span class="sev ' + esc(d.severity) + '">' + esc(d.severity) + '</span>';
+          h += '<span class="msg">' + esc(d.message);
+          if (d.details) h += '<span class="details">' + esc(d.details) + '</span>';
+          if (d.timestamp) {
+            h += '<span class="ts">' + esc(typeof d.timestamp === 'number' ? fmtTime(d.timestamp) : String(d.timestamp)) + '</span>';
+            h += '<span class="ts-ago">' + esc(timeAgo(d.timestamp)) + '</span>';
+          }
+          h += '</span></div>';
+        }
+      } else {
+        h += '<div class="diagnostic"><span class="sev info">info</span><span class="msg">No issues detected</span></div>';
+      }
+      h += '</div></div>';
+      return h;
+    }
+
+    function renderAll() {
+      var a = state.analysis;
+      var patterns = a.patterns || [];
+      var recs = a.recommendations || [];
+      var html = '';
+
+      if (a.summary) {
+        html += '<div class="section"><div class="section-title">Summary</div><div class="ai-summary">' + esc(a.summary) + '</div></div>';
+      }
+
+      if (state.sessionOrder.length > 0) {
+        html += '<div class="section" id="sessionsHeader"><div class="section-title">Sessions (' + state.sessionOrder.length + ')</div></div>';
+        html += '<div id="sessionsList">';
+        for (var i = 0; i < state.sessionOrder.length; i++) {
+          html += renderSessionRow(state.sessionOrder[i], false);
+        }
+        html += '</div>';
+      }
+
+      if (patterns.length > 0) {
+        html += '<div class="section"><div class="section-title">Patterns</div>';
+        for (var i = 0; i < patterns.length; i++) {
+          var p = patterns[i];
+          html += '<div class="pattern"><span class="pattern-name">' + esc(p.name) + '</span>';
+          html += '<span class="pattern-desc">' + esc(p.description) + '</span>';
+          if (p.count) html += '<span class="pattern-count">x' + p.count + '</span>';
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+
+      if (recs.length > 0) {
+        html += '<div class="section"><div class="section-title">Recommendations</div>';
+        for (var i = 0; i < recs.length; i++) {
+          html += '<div class="recommendation">' + esc(recs[i]) + '</div>';
+        }
+        html += '</div>';
+      }
+
+      if (!state.sessionOrder.length && !patterns.length && !recs.length && !a.summary) {
+        html += '<div class="empty"><h2>No diagnostics</h2><p>No log entries found.</p></div>';
+      }
+
+      // Raw logs
+      html += '<div class="raw-toggle" id="rawToggle"><span class="chevron">&#9654;</span> Raw Log Entries (' + state.totalEvents + ')</div>';
+      html += '<div class="raw-logs" id="rawLogs"><pre id="rawPre"></pre></div>';
+
+      // Load more buttons
+      html += '<div class="load-more" id="loadMore">';
+      html += '<button class="btn-next" id="btnNext">Next Session</button>';
+      html += '<button class="btn-hour" id="btnHour">Last Hour</button>';
+      html += '<span class="load-status" id="loadStatus"></span>';
+      html += '</div>';
+
+      document.getElementById('content').innerHTML = html;
+      document.getElementById('rawPre').textContent = JSON.stringify(state.allRawLogs, null, 2);
+
+      bindSessionToggles();
+      document.getElementById('rawToggle').onclick = function() { this.classList.toggle('open'); document.getElementById('rawLogs').classList.toggle('visible'); };
+      document.getElementById('btnNext').onclick = loadNext;
+      document.getElementById('btnHour').onclick = loadHour;
+    }
+
+    function bindSessionToggles() {
+      var headers = document.querySelectorAll('.session-header');
+      for (var i = 0; i < headers.length; i++) {
+        headers[i].onclick = function() { this.parentElement.classList.toggle('open'); };
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Load more actions
+    // -----------------------------------------------------------------------
+    async function loadNext() {
+      if (state.fetching) return;
+      state.fetching = true;
+      var btn = document.getElementById('btnNext');
+      var status = document.getElementById('loadStatus');
+      btn.disabled = true;
+      status.innerHTML = '<span class="spinner-inline"></span>Fetching previous session...';
+
+      try {
+        var result = await window.devTools.evaluateFlowLogs({ mode: 'next', before: state.oldestTs });
+        if (result.error) {
+          status.textContent = result.error;
+          setTimeout(function() { status.textContent = ''; }, 4000);
+        } else if ((result.sessions || []).length === 0) {
+          status.textContent = 'No older sessions found';
+          setTimeout(function() { status.textContent = ''; }, 4000);
+        } else {
+          var newSids = mergeResult(result);
+          updateSummaryBar();
+          // Append new sessions at the bottom of the list
+          var list = document.getElementById('sessionsList');
+          if (list) {
+            for (var i = 0; i < newSids.length; i++) {
+              var tmp = document.createElement('div');
+              tmp.innerHTML = renderSessionRow(newSids[i], true);
+              var node = tmp.firstChild;
+              node.querySelector('.session-header').onclick = function() { this.parentElement.classList.toggle('open'); };
+              list.appendChild(node);
+            }
+          }
+          var hdr = document.getElementById('sessionsHeader');
+          if (hdr) hdr.querySelector('.section-title').textContent = 'Sessions (' + state.sessionOrder.length + ')';
+          // Update raw logs
+          document.getElementById('rawPre').textContent = JSON.stringify(state.allRawLogs, null, 2);
+          var rt = document.getElementById('rawToggle');
+          if (rt) rt.firstChild.nextSibling.textContent = ' Raw Log Entries (' + state.totalEvents + ')';
+          status.textContent = '+' + (result.sessions || []).length + ' session' + ((result.sessions || []).length > 1 ? 's' : '');
+          setTimeout(function() { status.textContent = ''; }, 3000);
+        }
+      } catch (err) {
+        status.textContent = err.message;
+        setTimeout(function() { status.textContent = ''; }, 4000);
+      }
+      btn.disabled = false;
+      state.fetching = false;
+    }
+
+    async function loadHour() {
+      if (state.fetching) return;
+      state.fetching = true;
+      var btn = document.getElementById('btnHour');
+      var btnNext = document.getElementById('btnNext');
+      var status = document.getElementById('loadStatus');
+      btn.disabled = true;
+      btnNext.disabled = true;
+      status.innerHTML = '<span class="spinner-inline"></span>Fetching last hour...';
+
+      try {
+        // Reset state for full reload
+        state.aiSessionMap = {};
+        state.sessionMap = {};
+        state.sessionOrder = [];
+        state.allRawLogs = [];
+        state.totalEvents = 0;
+        state.oldestTs = Infinity;
+        state.analysis = {};
+
+        var result = await window.devTools.evaluateFlowLogs({ mode: 'hour' });
+        if (result.error) {
+          status.textContent = result.error;
+          setTimeout(function() { status.textContent = ''; }, 4000);
+        } else {
+          mergeResult(result);
+          updateSummaryBar();
+          renderAll();
+          status.textContent = '';
+        }
+      } catch (err) {
+        status.textContent = err.message;
+        setTimeout(function() { status.textContent = ''; }, 4000);
+      }
+      btn.disabled = false;
+      btnNext.disabled = false;
+      state.fetching = false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Initial load — latest session only
+    // -----------------------------------------------------------------------
+    async function run() {
+      var loading = document.getElementById('loading');
+
+      // Fire tip generation in parallel -- cosmetic, never blocks
+      var tipRotateTimer = null;
+      var allTips = [];
+      var tipDiv = null;
+      var tipIdx = 0;
+
+      function showTip(idx) {
+        if (!tipDiv || loading.style.display === 'none') return;
+        tipDiv.innerHTML = renderTipHTML(allTips[idx]);
+      }
+
+      function startRotation() {
+        if (tipRotateTimer || allTips.length <= 1) return;
+        tipRotateTimer = setInterval(function() {
+          if (loading.style.display === 'none') { clearInterval(tipRotateTimer); return; }
+          var content = tipDiv && tipDiv.querySelector('.tip-content');
+          if (!content) { clearInterval(tipRotateTimer); return; }
+          content.classList.add('fade-out');
+          setTimeout(function() {
+            tipIdx = (tipIdx + 1) % allTips.length;
+            showTip(tipIdx);
+            var c = tipDiv.querySelector('.tip-content');
+            if (c) {
+              c.classList.add('fade-in');
+              requestAnimationFrame(function() {
+                requestAnimationFrame(function() { if (c) c.classList.remove('fade-in'); });
+              });
+            }
+          }, 300);
+        }, 10000);
+      }
+
+      window.devTools.getFlowStepTip().then(function(result) {
+        var tips = (result && result.tips) || [];
+        if (tips.length === 0 || loading.style.display === 'none') return;
+
+        for (var i = 0; i < tips.length; i++) {
+          tips[i].type = 'flow';
+          allTips.push(tips[i]);
+        }
+
+        tipDiv = document.createElement('div');
+        tipDiv.className = 'loading-tip';
+        showTip(0);
+        loading.appendChild(tipDiv);
+        startRotation();
+      }).catch(function() {});
+
+      // Library suggestions -- arrives after initial tips, appended to rotation
+      window.devTools.getFlowLibrarySuggestions().then(function(result) {
+        var suggestions = (result && result.suggestions) || [];
+        if (suggestions.length === 0 || loading.style.display === 'none') return;
+
+        for (var i = 0; i < suggestions.length; i++) {
+          allTips.push({ stepName: suggestions[i].name, tip: suggestions[i].tip, type: 'library', category: suggestions[i].category || null });
+        }
+
+        // If no initial tips loaded yet, create the container now
+        if (!tipDiv && allTips.length > 0) {
+          tipDiv = document.createElement('div');
+          tipDiv.className = 'loading-tip';
+          showTip(0);
+          loading.appendChild(tipDiv);
+        }
+        startRotation();
+      }).catch(function() {});
+
+      try {
+        var result = await window.devTools.evaluateFlowLogs({ mode: 'latest' });
+        loading.style.display = 'none';
+        if (tipRotateTimer) clearInterval(tipRotateTimer);
+
+        if (result.error) {
+          document.getElementById('statusBadge').innerHTML = '<span class="badge error">Error</span>';
+          document.getElementById('content').innerHTML = '<div class="empty"><h2>Analysis Error</h2><p>' + esc(result.error) + '</p></div>';
+          return;
+        }
+
+        state.flowId = result.flowId;
+        state.label = result.label;
+        state.analysis = {};
+        mergeResult(result);
+
+        document.getElementById('title').textContent = state.label ? 'Log Analysis: ' + state.label : 'Flow Log Analysis';
+        document.getElementById('summaryBar').style.display = 'flex';
+        document.getElementById('flowInfo').textContent = state.flowId ? 'Flow: ' + state.flowId : '';
+        document.getElementById('timestamp').textContent = result.ts || '';
+
+        updateSummaryBar();
+        renderAll();
+
+        document.getElementById('copyAnalysis').onclick = function() { copyToClipboard(JSON.stringify(state.analysis, null, 2), 'copyAnalysis'); };
+        document.getElementById('copyRaw').onclick = function() { copyToClipboard(JSON.stringify(state.allRawLogs, null, 2), 'copyRaw'); };
+
+      } catch (err) {
+        loading.style.display = 'none';
+        if (tipRotateTimer) clearInterval(tipRotateTimer);
+        document.getElementById('statusBadge').innerHTML = '<span class="badge error">Error</span>';
+        document.getElementById('content').innerHTML = '<div class="empty"><h2>Error</h2><p>' + esc(err.message) + '</p></div>';
+      }
+    }
+
+    // Refresh time-ago labels every 30s
+    setInterval(function() {
+      var agos = document.querySelectorAll('.session-group .time-ago');
+      for (var i = 0; i < agos.length; i++) {
+        var group = agos[i].closest('.session-group');
+        if (group && state.sessionMap[group.dataset.sid]) {
+          agos[i].textContent = timeAgo(state.sessionMap[group.dataset.sid].startTs);
+        }
+      }
+      if (state.sessionOrder.length > 0) {
+        var newest = state.sessionMap[state.sessionOrder[0]];
+        var oldest = state.sessionMap[state.sessionOrder[state.sessionOrder.length - 1]];
+        var tr = document.getElementById('timeRange');
+        if (tr) tr.textContent = timeAgo(newest.endTs || newest.startTs) + ' \u2013 ' + timeAgo(oldest.startTs);
+      }
+    }, 30000);
+
+    async function copyToClipboard(text, btnId) {
+      try {
+        if (window.electron && window.electron.clipboard && window.electron.clipboard.writeText) {
+          await window.electron.clipboard.writeText(text);
+        } else {
+          await navigator.clipboard.writeText(text);
+        }
+      } catch (_) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      var btn = document.getElementById(btnId);
+      var orig = btn.textContent;
+      btn.textContent = 'Copied';
+      btn.classList.add('copied');
+      setTimeout(function() { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+    }
+
+    run();
+  </script>
+</body>
+</html>

@@ -384,7 +384,7 @@ describe('Middleware Tool Injection', () => {
     const agent = {
       name: 'slow-agent',
       id: 'slow-agent',
-      execute: () => new Promise((resolve) => setTimeout(resolve, 60000)),
+      execute: () => new Promise((resolve) => { setTimeout(resolve, 60000); }),
     };
     const result = await middleware.safeExecuteAgent(agent, { content: 'hi' }, { timeoutMs: 100 });
     expect(result.success).toBe(false);

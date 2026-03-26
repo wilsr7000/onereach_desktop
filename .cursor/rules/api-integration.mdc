@@ -1,0 +1,42 @@
+---
+description: Always consult internal API docs and existing conventions before integrating features
+alwaysApply: true
+---
+
+# API Integration Protocol
+
+Before writing integration code, **always read the relevant API docs and source conventions first**. This prevents reinventing filtering, using wrong storage backends, or missing existing capabilities.
+
+## Required Checks
+
+### 1. Spaces API (`spaces-api.js`)
+- `items.list(spaceId, opts)` supports: `type`, `pinned`, `tags`, `anyTags`, `limit`, `offset`, `includeContent`
+- `items.get(spaceId, itemId)` returns full item with content
+- Tags are the canonical way to filter by asset origin (e.g. WISER Playbooks tags items `riff-source`)
+- **Never use `clipboard:get-item-content` for Spaces items** -- different storage system, IDs don't match
+
+### 2. IPC Registry (`lib/ipc-registry.js`)
+- Single source of truth for all IPC channel names
+- Check before creating new IPC handlers -- one may already exist
+
+### 3. Preload Bridges (`preload.js`, `preload-spaces.js`)
+- Check what's already exposed to renderer via `contextBridge`
+- Key namespaces: `window.spaces`, `window.clipboard`, `window.api`, `window.ai`, `window.playbook`, `window.devTools`
+
+### 4. Module Manager (`module-manager.js`)
+- Web tools are registered dynamically and listed via `module:get-web-tools`
+- Open tools via `module:open-web-tool` with optional `{ url }` override for deep links
+- **Never hardcode web tool URLs** -- look up by name from the registry
+
+### 5. External App Conventions
+When integrating with features built by external apps (WISER Playbooks, Ticketing, etc.):
+- **Fetch and read the app's source** to understand how it stores/tags/identifies its data
+- Check what tags, metadata fields, or content markers it uses
+- Use those same signals for filtering -- don't invent heuristics
+
+## Reference Files
+- `docs/internal/APP-CONTROL-API-REFERENCE.md` -- Action executor (143 actions)
+- `docs/internal/API-DOCUMENTATION.md` -- Lessons API
+- `lib/ipc-registry.js` -- All IPC channels
+- `spaces-api.js` lines 270-310 -- Items list with filter options
+- `preload.js` -- All renderer-exposed APIs

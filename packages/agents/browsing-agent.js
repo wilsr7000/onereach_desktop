@@ -18,7 +18,7 @@ const log = getLogQueue();
 
 let browsingAPI, fastPath, taskRunner, templates;
 
-function getBrowsingAPI() {
+function _getBrowsingAPI() {
   if (!browsingAPI) browsingAPI = require('../../lib/browsing-api');
   return browsingAPI;
 }
@@ -28,7 +28,7 @@ function getFastPath() {
   return fastPath;
 }
 
-function getTaskRunner() {
+function _getTaskRunner() {
   if (!taskRunner) taskRunner = require('../../lib/browsing-task-runner');
   return taskRunner;
 }

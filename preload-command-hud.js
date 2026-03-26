@@ -24,16 +24,44 @@ contextBridge.exposeInMainWorld('commandHUD', {
   getQueueStats: (queueName) => ipcRenderer.invoke('voice-task-sdk:queue-stats', queueName),
 
   // Event listeners for HUD state
-  onShow: (callback) => ipcRenderer.on('hud:show', () => callback()),
-  onHide: (callback) => ipcRenderer.on('hud:hide', () => callback()),
-  onTask: (callback) => ipcRenderer.on('hud:task', (_, task) => callback(task)),
-  onResult: (callback) => ipcRenderer.on('hud:result', (_, result) => callback(result)),
-  onReset: (callback) => ipcRenderer.on('hud:reset', () => callback()),
-  onTaskLifecycle: (callback) => ipcRenderer.on('voice-task:lifecycle', (_, event) => callback(event)),
+  onShow: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('hud:show', handler);
+    return () => ipcRenderer.removeListener('hud:show', handler);
+  },
+  onHide: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('hud:hide', handler);
+    return () => ipcRenderer.removeListener('hud:hide', handler);
+  },
+  onTask: (callback) => {
+    const handler = (_, task) => callback(task);
+    ipcRenderer.on('hud:task', handler);
+    return () => ipcRenderer.removeListener('hud:task', handler);
+  },
+  onResult: (callback) => {
+    const handler = (_, result) => callback(result);
+    ipcRenderer.on('hud:result', handler);
+    return () => ipcRenderer.removeListener('hud:result', handler);
+  },
+  onReset: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('hud:reset', handler);
+    return () => ipcRenderer.removeListener('hud:reset', handler);
+  },
+  onTaskLifecycle: (callback) => {
+    const handler = (_, event) => callback(event);
+    ipcRenderer.on('voice-task:lifecycle', handler);
+    return () => ipcRenderer.removeListener('voice-task:lifecycle', handler);
+  },
 
   // ==================== SUBTASK EVENTS ====================
   // Listen for subtask events (spawned by agents during execution)
-  onSubtask: (callback) => ipcRenderer.on('subtask:event', (_, subtask) => callback(subtask)),
+  onSubtask: (callback) => {
+    const handler = (_, subtask) => callback(subtask);
+    ipcRenderer.on('subtask:event', handler);
+    return () => ipcRenderer.removeListener('subtask:event', handler);
+  },
 
   // ==================== CONTEXT MENU ====================
 
@@ -41,8 +69,16 @@ contextBridge.exposeInMainWorld('commandHUD', {
   showContextMenu: () => ipcRenderer.send('hud:show-context-menu'),
 
   // Listen for context menu actions
-  onShowTextInput: (callback) => ipcRenderer.on('hud:action:text-input', () => callback()),
-  onTriggerAgent: (callback) => ipcRenderer.on('hud:action:trigger-agent', (_, agent) => callback(agent)),
+  onShowTextInput: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('hud:action:text-input', handler);
+    return () => ipcRenderer.removeListener('hud:action:text-input', handler);
+  },
+  onTriggerAgent: (callback) => {
+    const handler = (_, agent) => callback(agent);
+    ipcRenderer.on('hud:action:trigger-agent', handler);
+    return () => ipcRenderer.removeListener('hud:action:trigger-agent', handler);
+  },
 
   // ==================== TEXT INPUT ====================
 
@@ -88,17 +124,23 @@ contextBridge.exposeInMainWorld('commandHUD', {
 
   // Listen for disambiguation state
   onDisambiguation: (callback) => {
-    ipcRenderer.on('hud:disambiguation', (_, state) => callback(state));
+    const handler = (_, state) => callback(state);
+    ipcRenderer.on('hud:disambiguation', handler);
+    return () => ipcRenderer.removeListener('hud:disambiguation', handler);
   },
 
   // Listen for listening state during disambiguation
   onDisambiguationListening: (callback) => {
-    ipcRenderer.on('hud:disambiguation:listening', (_, listening) => callback(listening));
+    const handler = (_, listening) => callback(listening);
+    ipcRenderer.on('hud:disambiguation:listening', handler);
+    return () => ipcRenderer.removeListener('hud:disambiguation:listening', handler);
   },
 
   // Listen for voice response during disambiguation
   onDisambiguationVoiceResponse: (callback) => {
-    ipcRenderer.on('hud:disambiguation:voice-response', (_, response) => callback(response));
+    const handler = (_, response) => callback(response);
+    ipcRenderer.on('hud:disambiguation:voice-response', handler);
+    return () => ipcRenderer.removeListener('hud:disambiguation:voice-response', handler);
   },
 
   // ==================== CONTACTS ====================
@@ -193,7 +235,22 @@ contextBridge.exposeInMainWorld('commandHUD', {
 // ==========================================
 // CENTRALIZED HUD API (shared across tools)
 // ==========================================
-const { getHudApiMethods } = require('./preload-hud-api');
-contextBridge.exposeInMainWorld('agentHUD', getHudApiMethods());
-
-console.log('[PreloadHUD] commandHUD + agentHUD exposed');
+try {
+  const { getHudApiMethods } = require('./preload-hud-api');
+  contextBridge.exposeInMainWorld('agentHUD', getHudApiMethods());
+  console.log('[PreloadHUD] commandHUD + agentHUD exposed');
+} catch (hudErr) {
+  console.error('[PreloadHUD] FAILED to load agentHUD:', hudErr.message);
+  console.error('[PreloadHUD] Stack:', hudErr.stack?.split('\n').slice(0, 3).join(' | '));
+  try {
+    contextBridge.exposeInMainWorld('agentHUD', {
+      submitTask: () => Promise.reject(new Error('HUD API failed to load: ' + hudErr.message)),
+      onLifecycle: () => {},
+      onResult: () => {},
+      onDisambiguation: () => {},
+      onNeedsInput: () => {},
+    });
+  } catch (_) {
+    /* already exposed or sandbox issue */
+  }
+}

@@ -528,7 +528,7 @@
             <path d="M10 10H8" />
             <path d="M12 12v2" />
           </svg>
-          Browser Automation
+          Automation
         </div>
         <div class="sidebar-tab" data-tab="general" onclick="switchTab('general')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -538,6 +538,15 @@
             />
           </svg>
           General
+        </div>
+        <div class="sidebar-tab" data-tab="edison-sdks" onclick="switchTab('edison-sdks')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="2" y="2" width="20" height="8" rx="2" />
+            <rect x="2" y="14" width="20" height="8" rx="2" />
+            <circle cx="6" cy="6" r="1" fill="currentColor" />
+            <circle cx="6" cy="18" r="1" fill="currentColor" />
+          </svg>
+          Edison SDKs
         </div>
       </nav>
 
@@ -1039,6 +1048,14 @@
               <p class="info-text">When disabled, credentials will be pre-filled but you'll need to click submit</p>
             </div>
 
+            <div class="form-group" style="margin-top: 8px">
+              <label class="checkbox-group">
+                <input type="checkbox" id="autologin-prompt" checked />
+                <span>Ask before signing in</span>
+              </label>
+              <p class="info-text">Show a confirmation dialog before auto-login fills your credentials. After confirming once, the prompt is skipped for the rest of the session.</p>
+            </div>
+
             <!-- Actions -->
             <div style="display: flex; gap: 10px; margin-top: 20px">
               <button class="btn-primary" onclick="saveOneReachCredentials()">Save Credentials</button>
@@ -1202,9 +1219,56 @@
           </div>
         </div>
 
-        <!-- ==================== TAB 6: Browser Automation ==================== -->
+        <!-- ==================== TAB 6: Automation ==================== -->
         <div class="tab-pane" id="pane-browser-automation">
           <div class="section">
+            <h2 class="section-title">Desktop Autopilot</h2>
+            <p class="section-subtitle">
+              Allow agents and the REST API to automate browser, app, and desktop actions
+            </p>
+
+            <div class="form-group">
+              <div class="checkbox-group">
+                <input type="checkbox" id="desktopAutopilotEnabled" />
+                <label for="desktopAutopilotEnabled" style="margin-bottom: 0">Enable Desktop Autopilot</label>
+              </div>
+              <div class="info-text">
+                Master toggle for all Desktop Autopilot capabilities. When enabled, agents and the REST API
+                (port 47292) can drive browser automation, app control, and system actions.
+              </div>
+            </div>
+
+            <div id="autopilotSubToggles" style="margin-left: 24px; opacity: 0.5; pointer-events: none">
+              <div class="form-group">
+                <div class="checkbox-group">
+                  <input type="checkbox" id="desktopAutopilotBrowser" checked />
+                  <label for="desktopAutopilotBrowser" style="margin-bottom: 0">Browser Automation</label>
+                </div>
+                <div class="info-text">AI-driven web browsing, form filling, screenshots, and data extraction</div>
+              </div>
+
+              <div class="form-group">
+                <div class="checkbox-group">
+                  <input type="checkbox" id="desktopAutopilotAppControl" checked />
+                  <label for="desktopAutopilotAppControl" style="margin-bottom: 0">App Control</label>
+                </div>
+                <div class="info-text">Open windows, manage settings, control agents, tabs, and other app features</div>
+              </div>
+
+              <div class="form-group">
+                <div class="checkbox-group">
+                  <input type="checkbox" id="desktopAutopilotSystem" />
+                  <label for="desktopAutopilotSystem" style="margin-bottom: 0">System Control</label>
+                </div>
+                <div class="info-text" style="color: var(--text-warning, #e6a817)">
+                  AppleScript, mouse, and keyboard automation. Grants agents the ability to control
+                  any application on your Mac. Enable only if you trust all connected agents.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section" style="border-top: 1px solid var(--border, #333); margin-top: 16px; padding-top: 16px">
             <h2 class="section-title">Browser Automation</h2>
             <p class="section-subtitle">
               Configure the AI browser agent that can navigate websites, fill forms, and extract data autonomously
@@ -1372,6 +1436,63 @@
             </button>
           </div>
         </div>
+
+        <!-- ==================== TAB 8: Edison SDKs ==================== -->
+        <div class="tab-pane" id="pane-edison-sdks">
+          <div class="section">
+            <h2 class="section-title">Connection</h2>
+            <div class="form-group">
+              <label for="edisonAccountId">Account ID</label>
+              <input type="text" id="edisonAccountId" placeholder="35254342-4a2e-475b-aec1-18547e517e29" />
+            </div>
+            <div class="form-group">
+              <label for="edisonDiscoveryUrl">Discovery URL</label>
+              <input type="text" id="edisonDiscoveryUrl" placeholder="https://discovery.edison.api.onereach.ai" />
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; margin-top:8px;">
+              <div id="edisonTokenBadge" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:4px;font-size:12px;background:rgba(255,255,255,0.06);color:#999;">
+                Token: not loaded
+              </div>
+              <button class="btn-secondary" onclick="edisonRefreshToken()" style="font-size:12px;padding:4px 12px;">Refresh Token</button>
+            </div>
+          </div>
+
+          <div class="section">
+            <h2 class="section-title">SDK Test Dashboard</h2>
+            <div style="margin-bottom:12px;">
+              <button class="btn-primary" onclick="edisonTestAll()" id="edisonTestAllBtn" style="font-size:13px;padding:6px 16px;">Test All SDKs</button>
+              <span id="edisonTestAllStatus" style="margin-left:10px;font-size:12px;color:#999;"></span>
+            </div>
+            <div id="edisonSdkCards" style="display:flex;flex-direction:column;gap:8px;">
+            </div>
+          </div>
+
+          <div class="section">
+            <h2 class="section-title">Quick Actions</h2>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <div>
+                <button class="btn-secondary" onclick="edisonListSpaces()" style="font-size:12px;padding:4px 12px;">List Spaces</button>
+                <div id="edisonSpacesResult" style="margin-top:6px;font-size:12px;max-height:200px;overflow-y:auto;display:none;background:rgba(0,0,0,0.2);border-radius:4px;padding:8px;"></div>
+              </div>
+              <div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <input type="text" id="edisonLibraryQuery" placeholder="Search templates..." style="flex:1;font-size:12px;padding:4px 8px;" />
+                  <button class="btn-secondary" onclick="edisonSearchLibrary()" style="font-size:12px;padding:4px 12px;">Search Library</button>
+                </div>
+                <div id="edisonLibraryResult" style="margin-top:6px;font-size:12px;max-height:200px;overflow-y:auto;display:none;background:rgba(0,0,0,0.2);border-radius:4px;padding:8px;"></div>
+              </div>
+              <div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <input type="text" id="edisonKVCollection" placeholder="Collection name" style="flex:1;font-size:12px;padding:4px 8px;" value="__sdk_test" />
+                  <input type="text" id="edisonKVPrefix" placeholder="Key prefix (optional)" style="flex:1;font-size:12px;padding:4px 8px;" />
+                  <button class="btn-secondary" onclick="edisonBrowseKV()" style="font-size:12px;padding:4px 12px;">Browse KV</button>
+                </div>
+                <div id="edisonKVResult" style="margin-top:6px;font-size:12px;max-height:200px;overflow-y:auto;display:none;background:rgba(0,0,0,0.2);border-radius:4px;padding:8px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -1499,6 +1620,13 @@
           document.getElementById('budgetShowEstimates').checked = settings.budgetShowEstimates !== false;
           document.getElementById('budgetConfirmThreshold').value = settings.budgetConfirmThreshold || 0.05;
 
+          // Desktop Autopilot
+          document.getElementById('desktopAutopilotEnabled').checked = settings.desktopAutopilotEnabled === true;
+          document.getElementById('desktopAutopilotBrowser').checked = settings.desktopAutopilotBrowser !== false;
+          document.getElementById('desktopAutopilotAppControl').checked = settings.desktopAutopilotAppControl !== false;
+          document.getElementById('desktopAutopilotSystem').checked = settings.desktopAutopilotSystem === true;
+          toggleAutopilotSubToggles(settings.desktopAutopilotEnabled === true);
+
           // Browser Automation
           document.getElementById('browserAutomationEnabled').checked = settings.browserAutomationEnabled !== false;
           document.getElementById('browserAutomationHeadless').checked = settings.browserAutomationHeadless !== 'off';
@@ -1520,6 +1648,11 @@
             'https://em.staging.api.onereach.ai/http/48cc49ef-ab05-4d51-acc6-559c7ff22150/idw_quick_starts';
           document.getElementById('learningApiMethod').value = settings.learningApiMethod || 'POST';
           document.getElementById('learningApiCache').checked = settings.learningApiCache !== false;
+
+          // Edison SDK settings
+          document.getElementById('edisonAccountId').value = settings.edisonAccountId || '35254342-4a2e-475b-aec1-18547e517e29';
+          document.getElementById('edisonDiscoveryUrl').value = settings.edisonDiscoveryUrl || 'https://discovery.edison.api.onereach.ai';
+          loadEdisonSDKStatus();
 
           // Update card statuses
           updateApiKeyCardStatus();
@@ -1598,6 +1731,11 @@
           budgetEnabled: document.getElementById('budgetEnabled').checked,
           budgetShowEstimates: document.getElementById('budgetShowEstimates').checked,
           budgetConfirmThreshold: parseFloat(document.getElementById('budgetConfirmThreshold').value) || 0.05,
+          // Desktop Autopilot
+          desktopAutopilotEnabled: document.getElementById('desktopAutopilotEnabled').checked,
+          desktopAutopilotBrowser: document.getElementById('desktopAutopilotBrowser').checked,
+          desktopAutopilotAppControl: document.getElementById('desktopAutopilotAppControl').checked,
+          desktopAutopilotSystem: document.getElementById('desktopAutopilotSystem').checked,
           // Browser Automation
           browserAutomationEnabled: document.getElementById('browserAutomationEnabled').checked,
           browserAutomationHeadless: document.getElementById('browserAutomationHeadless').checked ? 'on' : 'off',
@@ -1614,6 +1752,9 @@
           learningApiUrl: document.getElementById('learningApiUrl').value,
           learningApiMethod: document.getElementById('learningApiMethod').value,
           learningApiCache: document.getElementById('learningApiCache').checked,
+          // Edison SDK
+          edisonAccountId: document.getElementById('edisonAccountId').value,
+          edisonDiscoveryUrl: document.getElementById('edisonDiscoveryUrl').value,
         };
 
         try {
@@ -1757,6 +1898,23 @@
         const group = document.getElementById('captureSettingsGroup');
         if (group) group.style.opacity = enabled ? '1' : '0.5';
       }
+
+      // ==================== DESKTOP AUTOPILOT TOGGLE ====================
+
+      function toggleAutopilotSubToggles(enabled) {
+        const group = document.getElementById('autopilotSubToggles');
+        if (group) {
+          group.style.opacity = enabled ? '1' : '0.5';
+          group.style.pointerEvents = enabled ? 'auto' : 'none';
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const masterToggle = document.getElementById('desktopAutopilotEnabled');
+        if (masterToggle) {
+          masterToggle.addEventListener('change', () => toggleAutopilotSubToggles(masterToggle.checked));
+        }
+      });
 
       // ==================== VIDEO PLATFORM CONNECTIONS ====================
 
@@ -2097,6 +2255,7 @@
           document.getElementById('autologin-staging').checked = autoLoginSettings.staging !== false;
           document.getElementById('autologin-production').checked = autoLoginSettings.production !== false;
           document.getElementById('autologin-enabled').checked = autoLoginSettings.enabled !== false;
+          document.getElementById('autologin-prompt').checked = autoLoginSettings.promptBeforeAutoLogin !== false;
         } catch (error) {
           console.error('Failed to load OneReach credentials:', error);
         }
@@ -2120,6 +2279,7 @@
               staging: document.getElementById('autologin-staging').checked,
               production: document.getElementById('autologin-production').checked,
               enabled: document.getElementById('autologin-enabled').checked,
+              promptBeforeAutoLogin: document.getElementById('autologin-prompt').checked,
             };
             settings.autoLoginSettings = autoLoginSettings;
             await window.api.saveSettings({ autoLoginSettings });
@@ -2264,6 +2424,216 @@
           }
         } catch (error) {
           showStatus('Test failed: ' + error.message, 'error');
+        }
+      }
+
+      // ==================== EDISON SDK FUNCTIONS ====================
+
+      const SDK_ORDER = ['token', 'key-value-storage', 'flows', 'bots', 'deployer', 'discovery', 'library', 'files-sync', 'accounts', 'api-tokens', 'files', 'step-templates', 'tags', 'data-hub-svc'];
+      const SDK_LABELS = {
+        token: 'Token',
+        'key-value-storage': 'Key-Value Storage',
+        flows: 'Flows',
+        bots: 'Bots',
+        deployer: 'Deployer',
+        discovery: 'Discovery',
+        library: 'Library',
+        'files-sync': 'Files Sync',
+        accounts: 'Accounts',
+        'api-tokens': 'API Tokens',
+        files: 'Files',
+        'step-templates': 'Step Templates',
+        tags: 'Tags',
+        'data-hub-svc': 'Data Hub',
+      };
+
+      function edisonBadgeHtml(status) {
+        const colors = { valid: '#4ade80', expired: '#fbbf24', none: '#999', error: '#f87171' };
+        const c = colors[status] || colors.none;
+        return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};"></span>`;
+      }
+
+      function updateTokenBadge(tokenInfo) {
+        const el = document.getElementById('edisonTokenBadge');
+        if (!tokenInfo || tokenInfo.status === 'none') {
+          el.innerHTML = `${edisonBadgeHtml('none')} Token: not loaded`;
+          el.style.color = '#999';
+        } else if (tokenInfo.status === 'expired') {
+          el.innerHTML = `${edisonBadgeHtml('expired')} Token: expired`;
+          el.style.color = '#fbbf24';
+        } else {
+          el.innerHTML = `${edisonBadgeHtml('valid')} ${tokenInfo.maskedToken || 'FLOW ...'} &mdash; ${tokenInfo.message}`;
+          el.style.color = '#4ade80';
+        }
+      }
+
+      function buildSdkCards(statusData) {
+        const container = document.getElementById('edisonSdkCards');
+        container.innerHTML = '';
+        for (const name of SDK_ORDER) {
+          const label = SDK_LABELS[name];
+          const sdkInfo = statusData?.sdks?.[name];
+          const testResult = statusData?.lastTestResults?.[name];
+          const version = sdkInfo?.version || (name === 'token' ? '' : 'n/a');
+
+          const card = document.createElement('div');
+          card.id = `sdk-card-${name}`;
+          card.style.cssText = 'background:rgba(255,255,255,0.04);border:1px solid #3e3e3e;border-radius:6px;padding:10px 14px;';
+
+          const statusBadge = testResult
+            ? (testResult.ok
+              ? `<span style="color:#4ade80;font-size:12px;">passed</span>`
+              : `<span style="color:#f87171;font-size:12px;">failed</span>`)
+            : `<span style="color:#666;font-size:12px;">untested</span>`;
+
+          const testedAt = testResult?.testedAt ? ` &mdash; ${new Date(testResult.testedAt).toLocaleTimeString()}` : '';
+          const totalMs = testResult?.totalLatencyMs ? ` (${testResult.totalLatencyMs}ms)` : '';
+
+          card.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <strong style="font-size:13px;">${label}</strong>
+                ${version ? `<span style="color:#666;font-size:11px;margin-left:8px;">v${version}</span>` : ''}
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                ${statusBadge}${totalMs ? `<span style="color:#666;font-size:11px;">${totalMs}</span>` : ''}
+                <button class="btn-secondary" onclick="edisonTestSingle('${name}')" style="font-size:11px;padding:2px 10px;" id="btn-test-${name}">Test</button>
+              </div>
+            </div>
+            ${testedAt ? `<div style="color:#555;font-size:10px;margin-top:2px;">Last tested${testedAt}</div>` : ''}
+            <div id="sdk-steps-${name}" style="margin-top:6px;display:${testResult ? 'block' : 'none'};">
+              ${testResult ? renderSteps(testResult.steps) : ''}
+            </div>
+          `;
+          container.appendChild(card);
+        }
+      }
+
+      function renderSteps(steps) {
+        if (!steps || !steps.length) return '';
+        return steps.map(s => {
+          const icon = s.ok ? '<span style="color:#4ade80;">&#10003;</span>' : '<span style="color:#f87171;">&#10007;</span>';
+          const lat = s.latencyMs > 0 ? `<span style="color:#666;margin-left:6px;">${s.latencyMs}ms</span>` : '';
+          return `<div style="font-size:11px;padding:2px 0;display:flex;align-items:baseline;gap:6px;">${icon} <span style="min-width:120px;">${s.name}</span>${lat}<span style="color:#888;flex:1;">${s.detail || ''}</span></div>`;
+        }).join('');
+      }
+
+      async function loadEdisonSDKStatus() {
+        if (typeof window.edisonSDK === 'undefined') return;
+        try {
+          const status = await window.edisonSDK.getStatus();
+          updateTokenBadge(status.token);
+          buildSdkCards(status);
+        } catch (err) {
+          console.error('Edison SDK status load error:', err);
+        }
+      }
+
+      async function edisonRefreshToken() {
+        const badge = document.getElementById('edisonTokenBadge');
+        badge.innerHTML = 'Refreshing...';
+        badge.style.color = '#60a5fa';
+        try {
+          const result = await window.edisonSDK.refreshToken();
+          updateTokenBadge(result);
+          showStatus('Token refreshed', 'success');
+        } catch (err) {
+          updateTokenBadge({ status: 'error' });
+          showStatus('Token refresh failed: ' + err.message, 'error');
+        }
+      }
+
+      async function edisonTestAll() {
+        const btn = document.getElementById('edisonTestAllBtn');
+        const status = document.getElementById('edisonTestAllStatus');
+        btn.disabled = true;
+        btn.textContent = 'Testing...';
+        status.textContent = '';
+
+        for (const name of SDK_ORDER) {
+          const stepEl = document.getElementById(`sdk-steps-${name}`);
+          if (stepEl) { stepEl.style.display = 'block'; stepEl.innerHTML = '<div style="color:#60a5fa;font-size:11px;">Running...</div>'; }
+          const btnEl = document.getElementById(`btn-test-${name}`);
+          if (btnEl) btnEl.disabled = true;
+        }
+
+        try {
+          const results = await window.edisonSDK.testAll();
+          const statusData = await window.edisonSDK.getStatus();
+          statusData.lastTestResults = results;
+          buildSdkCards(statusData);
+          updateTokenBadge(statusData.token);
+
+          const passed = Object.values(results).filter(r => r.ok).length;
+          const total = Object.keys(results).length;
+          status.textContent = `${passed}/${total} passed`;
+          status.style.color = passed === total ? '#4ade80' : '#fbbf24';
+        } catch (err) {
+          status.textContent = 'Error: ' + err.message;
+          status.style.color = '#f87171';
+        }
+        btn.disabled = false;
+        btn.textContent = 'Test All SDKs';
+      }
+
+      async function edisonTestSingle(name) {
+        const btnEl = document.getElementById(`btn-test-${name}`);
+        const stepEl = document.getElementById(`sdk-steps-${name}`);
+        if (btnEl) btnEl.disabled = true;
+        if (stepEl) { stepEl.style.display = 'block'; stepEl.innerHTML = '<div style="color:#60a5fa;font-size:11px;">Running...</div>'; }
+
+        try {
+          const result = await window.edisonSDK.testSDK(name);
+          const statusData = await window.edisonSDK.getStatus();
+          buildSdkCards(statusData);
+        } catch (err) {
+          if (stepEl) stepEl.innerHTML = `<div style="color:#f87171;font-size:11px;">Error: ${err.message}</div>`;
+        }
+        if (btnEl) btnEl.disabled = false;
+      }
+
+      async function edisonListSpaces() {
+        const el = document.getElementById('edisonSpacesResult');
+        el.style.display = 'block';
+        el.innerHTML = '<span style="color:#60a5fa;">Loading...</span>';
+        try {
+          const spaces = await window.edisonSDK.listSpaces();
+          if (spaces.error) { el.innerHTML = `<span style="color:#f87171;">${spaces.error}</span>`; return; }
+          if (!spaces.length) { el.innerHTML = '<span style="color:#999;">No spaces found</span>'; return; }
+          el.innerHTML = spaces.map(s => `<div style="padding:2px 0;"><strong>${s.label}</strong> <span style="color:#666;">${s.id}</span>${s.description ? ` &mdash; ${s.description}` : ''}</div>`).join('');
+        } catch (err) {
+          el.innerHTML = `<span style="color:#f87171;">Error: ${err.message}</span>`;
+        }
+      }
+
+      async function edisonSearchLibrary() {
+        const query = document.getElementById('edisonLibraryQuery').value || 'http';
+        const el = document.getElementById('edisonLibraryResult');
+        el.style.display = 'block';
+        el.innerHTML = '<span style="color:#60a5fa;">Searching...</span>';
+        try {
+          const items = await window.edisonSDK.searchLibrary(query);
+          if (items.error) { el.innerHTML = `<span style="color:#f87171;">${items.error}</span>`; return; }
+          if (!items.length) { el.innerHTML = '<span style="color:#999;">No results</span>'; return; }
+          el.innerHTML = items.map(i => `<div style="padding:2px 0;"><strong>${i.name}</strong>${i.version ? ` v${i.version}` : ''} <span style="color:#666;">${i.id || ''}</span>${i.description ? `<br><span style="color:#888;">${i.description}</span>` : ''}</div>`).join('');
+        } catch (err) {
+          el.innerHTML = `<span style="color:#f87171;">Error: ${err.message}</span>`;
+        }
+      }
+
+      async function edisonBrowseKV() {
+        const collection = document.getElementById('edisonKVCollection').value || '__sdk_test';
+        const prefix = document.getElementById('edisonKVPrefix').value || '';
+        const el = document.getElementById('edisonKVResult');
+        el.style.display = 'block';
+        el.innerHTML = '<span style="color:#60a5fa;">Loading...</span>';
+        try {
+          const items = await window.edisonSDK.browseKV(collection, prefix);
+          if (items.error) { el.innerHTML = `<span style="color:#f87171;">${items.error}</span>`; return; }
+          if (!items.length) { el.innerHTML = '<span style="color:#999;">No keys found</span>'; return; }
+          el.innerHTML = items.map(i => `<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);"><strong>${i.key}</strong><br><pre style="margin:2px 0;font-size:10px;color:#888;white-space:pre-wrap;max-height:60px;overflow:hidden;">${JSON.stringify(i.value, null, 2)}</pre></div>`).join('');
+        } catch (err) {
+          el.innerHTML = `<span style="color:#f87171;">Error: ${err.message}</span>`;
         }
       }
 

@@ -102,6 +102,7 @@ const menuCache = {
 // have been extracted to lib/gsx-autologin.js and lib/gsx-window-tracker.js
 
 const { buildIDWAndGSXMenuItems } = require('./lib/menu-sections/idw-gsx-builder');
+const { buildDevToolsMenu } = require('./lib/menu-sections/dev-tools-builder');
 
 /**
  * Creates and returns the application menu
@@ -253,6 +254,9 @@ function createMenu(showTestMenu = false, idwEnvironments = []) {
     // Tools menu
     _buildToolsMenu(showTestMenu),
 
+    // Dev Tools menu (Edison flow builder developer tools)
+    buildDevToolsMenu(),
+
     // Help menu
     _buildHelpMenu(showTestMenu),
 
@@ -317,6 +321,7 @@ function _buildUniversityMenu() {
               console.log('[Menu] User opened Quick Starts tutorials page');
               const preloadPath = path.join(__dirname, 'preload.js');
               const tutorialsWindow = new BrowserWindow({
+                show: false,
                 width: 1400,
                 height: 900,
                 webPreferences: {
@@ -327,6 +332,9 @@ function _buildUniversityMenu() {
                   webSecurity: true,
                   enableRemoteModule: false,
                 },
+              });
+              tutorialsWindow.once('ready-to-show', () => {
+                tutorialsWindow.show();
               });
               tutorialsWindow.loadFile('tutorials.html');
               tutorialsWindow.webContents.on('preload-error', (event, preloadPath, error) => {
@@ -371,6 +379,7 @@ function _buildUniversityMenu() {
         label: 'AI Run Times',
         click: () => {
           const aiWindow = new BrowserWindow({
+            show: false,
             width: 1200,
             height: 800,
             webPreferences: {
@@ -379,6 +388,9 @@ function _buildUniversityMenu() {
               webSecurity: true,
               preload: path.join(__dirname, 'Flipboard-IDW-Feed/preload.js'),
             },
+          });
+          aiWindow.once('ready-to-show', () => {
+            aiWindow.show();
           });
           aiWindow.loadFile('Flipboard-IDW-Feed/uxmag.html');
         },
@@ -657,89 +669,32 @@ function _buildToolsMenu(_showTestMenu) {
         label: 'GSX Create',
         accelerator: 'CommandOrControl+Shift+A',
         click: () => {
-          const { screen } = require('electron');
-          // Use the focused window's display for sizing (multi-monitor)
-          const focused = BrowserWindow.getFocusedWindow();
-          const display = focused
-            ? screen.getDisplayNearestPoint({ x: focused.getBounds().x, y: focused.getBounds().y })
-            : screen.getPrimaryDisplay();
-          const { width: screenWidth, height: screenHeight } = display.workAreaSize;
-
-          const aiderWindow = new BrowserWindow({
-            width: Math.min(1800, screenWidth - 100),
-            height: Math.min(1100, screenHeight - 100),
-            title: 'GSX Create',
-            webPreferences: {
-              nodeIntegration: false,
-              contextIsolation: true,
-              preload: path.join(__dirname, 'preload.js'),
-            },
-          });
-          aiderWindow.loadFile('aider-ui.html');
+          const { executeAction } = require('./action-executor');
+          executeAction('open-gsx-create');
         },
       },
       {
         label: 'Video Editor',
         accelerator: 'CommandOrControl+Shift+V',
         click: () => {
-          const videoEditorWindow = new BrowserWindow({
-            width: 1400,
-            height: 900,
-            title: 'Video Editor',
-            webPreferences: {
-              nodeIntegration: false,
-              contextIsolation: true,
-              devTools: true,
-              preload: path.join(__dirname, 'preload-video-editor.js'),
-            },
-          });
-          videoEditorWindow.loadFile('video-editor.html');
-          videoEditorWindow.webContents.on('before-input-event', (event, input) => {
-            if ((input.meta && input.alt && input.key === 'i') || (input.control && input.shift && input.key === 'I')) {
-              videoEditorWindow.webContents.toggleDevTools();
-            }
-          });
-          if (global.videoEditor) {
-            global.videoEditor.setupIPC(videoEditorWindow);
-          }
+          const { executeAction } = require('./action-executor');
+          executeAction('open-video-editor');
         },
       },
       {
         label: 'WISER Meeting',
         accelerator: 'CommandOrControl+Shift+M',
         click: () => {
-          if (global.recorder) {
-            global.recorder.open();
-          } else {
-            const recorderWindow = new BrowserWindow({
-              width: 800,
-              height: 700,
-              title: 'WISER Meeting',
-              webPreferences: {
-                nodeIntegration: false,
-                contextIsolation: true,
-                preload: path.join(__dirname, 'preload-recorder.js'),
-              },
-            });
-            recorderWindow.loadFile('recorder.html');
-          }
+          const { executeAction } = require('./action-executor');
+          executeAction('open-recorder');
         },
       },
       { type: 'separator' },
       {
         label: 'Manage Tools...',
         click: () => {
-          const managerWindow = new BrowserWindow({
-            width: 800,
-            height: 600,
-            webPreferences: {
-              nodeIntegration: false,
-              contextIsolation: true,
-              preload: path.join(__dirname, 'preload.js'),
-            },
-            title: 'Module Manager',
-          });
-          managerWindow.loadFile('module-manager-ui.html');
+          const { executeAction } = require('./action-executor');
+          executeAction('open-module-manager');
         },
       },
     ],
@@ -801,6 +756,7 @@ Right-click anywhere: Paste to Black Hole`;
         label: 'Browser Extension Setup',
         click: () => {
           const setupWindow = new BrowserWindow({
+            show: false,
             width: 600,
             height: 700,
             backgroundColor: '#0d0d14',
@@ -809,6 +765,9 @@ Right-click anywhere: Paste to Black Hole`;
               contextIsolation: true,
               preload: path.join(__dirname, 'preload-minimal.js'),
             },
+          });
+          setupWindow.once('ready-to-show', () => {
+            setupWindow.show();
           });
           setupWindow.loadFile('extension-setup.html');
         },
@@ -821,6 +780,7 @@ Right-click anywhere: Paste to Black Hole`;
             label: 'Local Documentation (README)',
             click: () => {
               const docWindow = new BrowserWindow({
+                show: false,
                 width: 1000,
                 height: 800,
                 webPreferences: {
@@ -829,6 +789,9 @@ Right-click anywhere: Paste to Black Hole`;
                   preload: path.join(__dirname, 'preload.js'),
                   webSecurity: true,
                 },
+              });
+              docWindow.once('ready-to-show', () => {
+                docWindow.show();
               });
               try {
                 docWindow.loadFile('docs-readme.html');
@@ -842,6 +805,7 @@ Right-click anywhere: Paste to Black Hole`;
             label: 'AI Run Times Guide',
             click: () => {
               const aiHelpWindow = new BrowserWindow({
+                show: false,
                 width: 1000,
                 height: 800,
                 webPreferences: {
@@ -850,6 +814,9 @@ Right-click anywhere: Paste to Black Hole`;
                   preload: path.join(__dirname, 'preload.js'),
                   webSecurity: true,
                 },
+              });
+              aiHelpWindow.once('ready-to-show', () => {
+                aiHelpWindow.show();
               });
               try {
                 aiHelpWindow.loadFile('docs-ai-insights.html');
@@ -875,6 +842,7 @@ Right-click anywhere: Paste to Black Hole`;
             label: 'Spaces API Guide',
             click: () => {
               const apiDocWindow = new BrowserWindow({
+                show: false,
                 width: 1100,
                 height: 900,
                 webPreferences: {
@@ -883,6 +851,9 @@ Right-click anywhere: Paste to Black Hole`;
                   preload: path.join(__dirname, 'preload.js'),
                   webSecurity: true,
                 },
+              });
+              apiDocWindow.once('ready-to-show', () => {
+                apiDocWindow.show();
               });
               try {
                 apiDocWindow.loadFile('docs-spaces-api.html');
@@ -1248,6 +1219,7 @@ Right-click anywhere: Paste to Black Hole`;
               accelerator: 'CmdOrCtrl+Shift+T',
               click: () => {
                 const testWindow = new BrowserWindow({
+                  show: false,
                   width: 1200,
                   height: 900,
                   webPreferences: {
@@ -1257,6 +1229,9 @@ Right-click anywhere: Paste to Black Hole`;
                     webSecurity: true,
                   },
                 });
+                testWindow.once('ready-to-show', () => {
+                  testWindow.show();
+                });
                 testWindow.loadFile('test-runner.html');
               },
             },
@@ -1265,6 +1240,7 @@ Right-click anywhere: Paste to Black Hole`;
               accelerator: 'CmdOrCtrl+Shift+L',
               click: () => {
                 const logWindow = new BrowserWindow({
+                  show: false,
                   width: 1200,
                   height: 800,
                   webPreferences: {
@@ -1274,6 +1250,9 @@ Right-click anywhere: Paste to Black Hole`;
                     webSecurity: true,
                   },
                   title: 'Event Log Viewer',
+                });
+                logWindow.once('ready-to-show', () => {
+                  logWindow.show();
                 });
                 logWindow.loadFile('log-viewer.html');
               },
@@ -1351,6 +1330,7 @@ Right-click anywhere: Paste to Black Hole`;
               label: 'Debug: Open Setup Wizard',
               click: async () => {
                 const wizardWindow = new BrowserWindow({
+                  show: false,
                   width: 1000,
                   height: 700,
                   webPreferences: {
@@ -1361,6 +1341,9 @@ Right-click anywhere: Paste to Black Hole`;
                     enableRemoteModule: false,
                     sandbox: false,
                   },
+                });
+                wizardWindow.once('ready-to-show', () => {
+                  wizardWindow.show();
                 });
                 wizardWindow.loadFile('setup-wizard.html');
               },

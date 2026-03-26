@@ -2620,6 +2620,13 @@ class FlipboardReader {
 
     async saveImageCache() {
         try {
+            // Evict oldest entries if cache exceeds limit
+            const MAX_IMAGE_CACHE = 500;
+            if (this.imageCache.size > MAX_IMAGE_CACHE) {
+                const keys = Array.from(this.imageCache.keys());
+                const toRemove = keys.slice(0, keys.length - MAX_IMAGE_CACHE);
+                toRemove.forEach((k) => this.imageCache.delete(k));
+            }
             const data = Array.from(this.imageCache.entries());
             // Save to disk (persists across app restarts)
             if (window.flipboardAPI && window.flipboardAPI.saveCache) {

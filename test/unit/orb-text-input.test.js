@@ -73,7 +73,7 @@ function createOrbTextInputEnv() {
       if (result && result.message) {
         addChatMessage('assistant', result.message);
       }
-    } catch (err) {
+    } catch (_err) {
       addChatMessage('error', 'Something went wrong. Please try again.');
     }
   }

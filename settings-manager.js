@@ -322,6 +322,11 @@ class SettingsManager {
       // Diagnostic logging level: 'off', 'error', 'warn', 'info', 'debug'
       // Controls log queue min level, log server, and renderer console capture
       diagnosticLogging: 'info',
+      // Desktop Autopilot — off by default; users must opt in
+      desktopAutopilotEnabled: false,
+      desktopAutopilotBrowser: true,
+      desktopAutopilotAppControl: true,
+      desktopAutopilotSystem: false,
     };
 
     return defaults[key];

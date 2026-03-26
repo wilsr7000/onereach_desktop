@@ -3470,38 +3470,38 @@
             case 'idw':
               typeLabel = 'IDW';
               typeClass = 'idw';
-              itemName = item.label;
-              itemUrl = item.homeUrl;
+              itemName = item.label || item.id || 'Unnamed IDW';
+              itemUrl = item.homeUrl || item.chatUrl || '';
               break;
             case 'external':
               typeLabel = 'Agent';
               typeClass = 'external';
-              itemName = item.name;
-              itemUrl = item.chatUrl;
+              itemName = item.name || item.id || 'Unnamed Agent';
+              itemUrl = item.chatUrl || item.url || '';
               break;
             case 'image':
               typeLabel = 'Image';
               typeClass = 'image';
-              itemName = item.name;
-              itemUrl = item.url;
+              itemName = item.name || item.id || 'Unnamed';
+              itemUrl = item.url || '';
               break;
             case 'video':
               typeLabel = 'Video';
               typeClass = 'video';
-              itemName = item.name;
-              itemUrl = item.url;
+              itemName = item.name || item.id || 'Unnamed';
+              itemUrl = item.url || '';
               break;
             case 'audio':
               typeLabel = 'Audio';
               typeClass = 'audio';
-              itemName = item.name;
-              itemUrl = item.url;
+              itemName = item.name || item.id || 'Unnamed';
+              itemUrl = item.url || '';
               break;
             case 'ui-design':
               typeLabel = 'UI Design';
               typeClass = 'ui-design';
-              itemName = item.name;
-              itemUrl = item.url;
+              itemName = item.name || item.id || 'Unnamed';
+              itemUrl = item.url || '';
               break;
           }
 
@@ -3664,7 +3664,41 @@
       window.addEventListener('DOMContentLoaded', () => {
         console.log('Setup wizard DOM loaded');
 
-        // Load data from main process
+        // Register listeners BEFORE sending requests so replies aren't missed
+        if (window.api && window.api.receive) {
+          window.api.receive('get-idw-environments', (environments) => {
+            console.log('[SetupWizard] Received IDW environments:', environments?.length || 0);
+            localStorage.setItem('idwEnvironments', JSON.stringify(environments));
+            populateEnvironmentsList();
+          });
+
+          window.api.receive('get-external-bots', (bots) => {
+            localStorage.setItem('externalBots', JSON.stringify(bots));
+            populateEnvironmentsList();
+          });
+
+          window.api.receive('get-image-creators', (creators) => {
+            localStorage.setItem('imageCreators', JSON.stringify(creators));
+            populateEnvironmentsList();
+          });
+
+          window.api.receive('get-video-creators', (creators) => {
+            localStorage.setItem('videoCreators', JSON.stringify(creators));
+            populateEnvironmentsList();
+          });
+
+          window.api.receive('get-audio-generators', (generators) => {
+            localStorage.setItem('audioGenerators', JSON.stringify(generators));
+            populateEnvironmentsList();
+          });
+
+          window.api.receive('get-ui-design-tools', (tools) => {
+            localStorage.setItem('uiDesignTools', JSON.stringify(tools));
+            populateEnvironmentsList();
+          });
+        }
+
+        // Now request data from main process (listeners are already in place)
         if (window.api && window.api.send) {
           window.api.send('get-idw-environments');
           window.api.send('get-external-bots');
@@ -3672,40 +3706,6 @@
           window.api.send('get-video-creators');
           window.api.send('get-audio-generators');
           window.api.send('get-ui-design-tools');
-        }
-
-        // Listen for responses
-        if (window.api && window.api.on) {
-          window.api.on('get-idw-environments', (environments) => {
-            console.log('[SetupWizard] Received IDW environments:', environments?.length || 0);
-            localStorage.setItem('idwEnvironments', JSON.stringify(environments));
-            populateEnvironmentsList();
-          });
-
-          window.api.on('get-external-bots', (bots) => {
-            localStorage.setItem('externalBots', JSON.stringify(bots));
-            populateEnvironmentsList();
-          });
-
-          window.api.on('get-image-creators', (creators) => {
-            localStorage.setItem('imageCreators', JSON.stringify(creators));
-            populateEnvironmentsList();
-          });
-
-          window.api.on('get-video-creators', (creators) => {
-            localStorage.setItem('videoCreators', JSON.stringify(creators));
-            populateEnvironmentsList();
-          });
-
-          window.api.on('get-audio-generators', (generators) => {
-            localStorage.setItem('audioGenerators', JSON.stringify(generators));
-            populateEnvironmentsList();
-          });
-
-          window.api.on('get-ui-design-tools', (tools) => {
-            localStorage.setItem('uiDesignTools', JSON.stringify(tools));
-            populateEnvironmentsList();
-          });
         }
 
         // Initialize the environments list

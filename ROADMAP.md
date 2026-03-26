@@ -25,6 +25,7 @@
 | **AI Creators** | 🟢 Active | Image/Video/Audio AI tools |
 | **Budget Manager** | 🟢 Active | LLM cost tracking |
 | **App Health** | 🟡 Beta | System monitoring dashboard |
+| **Edison Dev Tools** | 🟡 In Progress | Edison SDK integration & flow builder developer tools |
 
 ---
 
@@ -255,6 +256,41 @@
 
 ---
 
+## 🔧 Edison Dev Tools
+
+*Developer tools for the Edison flow builder, powered by Edison SDKs*
+
+### Current State
+- ✅ 13 Edison SDKs installed and integrated (`lib/edison-sdk-manager.js`)
+- ✅ Centralized token management with caching (FLOW token from `refresh_token` endpoint)
+- ✅ Lazy SDK initialization with thorough test suites (14 tests, 11 pass, 2 partial, 1 known auth limitation)
+- ✅ Settings UI: Edison SDKs tab with connection config, test dashboard, quick actions
+- ✅ IPC bridge for renderer access (7 channels)
+- ✅ Working SDKs: Flows, Bots, Discovery (51 services), Library, Files (938 folders), Step Templates (1664), Tags (CRUD), Data Hub, Deployer, Files Sync
+
+### Roadmap
+
+#### Q1 2026
+- [x] **Phase 0: SDK Foundation** - Install, integrate, test all Edison SDKs
+- [x] **Phase 1: Dev Tools Menu** - Complete
+  - Dev Tools menu (`lib/menu-sections/dev-tools-builder.js`)
+  - Flow context tracking (`lib/gsx-flow-context.js`)
+  - Structured event logging (`lib/edison-event-logger.js`)
+  - Library Browser window (`library-browser.html`)
+  - Bottom toolbar overlay with reactive flow context
+
+#### Q2 2026
+- [ ] **Phase 2: Auto Test Flow** - Call Edison flow endpoint with flow context, display results
+- [ ] **Phase 3: AI-Powered Actions** - Flow validation, optimization suggestions, auto-documentation
+- [ ] **Phase 4: Provisioning** - Auto-create Dev Tools space and utility flows in user account
+
+### Known Constraints
+- KV Storage SDK requires user-level platform token (not FLOW token) -- event logging may need flow HTTP endpoint fallback
+- Accounts and API Tokens SDKs not fully functional in current Edison environment
+- Files SDK `createRootFolder()` requires SUPER_ADMIN role
+
+---
+
 ## 🤖 AI Agents & Creators
 
 *Access external AI services and capture your creations*
@@ -314,6 +350,7 @@
 - [x] **Calendar Agent v3 (Refactor)** - Monolithic calendar-agent.js (4800 lines) replaced with specialized agents: calendar-query-agent (read schedule, join meeting), calendar-create-agent (verified create with guest resolution), calendar-edit-agent (delete+recreate), calendar-delete-agent (verified delete with disambiguation). Three-layer architecture: calendar-data.js (pure analysis, 65 tests), calendar-fetch.js (async API + verified mutations), calendar-format.js (UI rendering + TTS). All date resolution in JavaScript (no LLM date guessing).
 - [x] **Command Palette (Cmd+K)** - Spotlight-style overlay to search all features, agents, spaces, AI services, and voice commands. Fuzzy search, keyboard navigation, category grouping.
 - [x] **Dynamic Help Agent** - "What can you do?" now returns categorized overview of all 28 registered agents with spoken summary + HTML panel
+- [x] **GSX Teacher Agent** - Built-in tutor with 8-module, 28-lesson curriculum. Covers Getting Started, Power User tips, Building Agents, Building Skills, Creating IDW, App Capabilities, Knowledge Models, Using Spaces. LLM intent routing, progress tracking via memory, hands-on exercises, opens relevant windows during lessons.
 - [ ] **Multi-window** - Same agent in multiple windows
 - [ ] **Keyboard shortcuts** - Quick agent switching
 - [ ] **Context sharing** - Share Spaces content with AI agents
@@ -321,6 +358,7 @@
 #### Q2 2026
 - [x] **Browser Automation Agent** - Autonomous browser control via Playwright. AI agent navigates websites, fills forms, clicks buttons, extracts data, takes screenshots. Ref-based accessibility snapshot interaction. Configurable safety guardrails (max actions, domain blocklist, execution timeout). Settings UI, IPC bridge, web-scraper consolidation.
 - [x] **Browsing API (Comet-class)** - Native Electron BrowserWindow-based browsing service. Session management with hidden/HITL modes. Anti-detection stealth (user agent, plugins, permissions, WebGL, Chrome runtime mocking). Error detection (CAPTCHA, auth walls, bot blocks, paywalls, consent). Fast-path search (DuckDuckGo API + HTTP extraction with caching). Declarative agent template system with site-specific recipes, LLM fallback, retry/backoff. LLM-driven observe/think/act task runner with checkpoint/resume and model escalation. Parallel browsing sessions. IPC bridge exposed as `window.browsing`. Exchange-registered browsing agent with 7 starter templates (weather, web search, page reader, news, GitHub, form filler, page monitor). Safety guardrails (domain blocklist, sensitive field detection, action limits). Multi-step orchestration (research, workflow, compare-pages). 140 unit tests across 9 suites.
+- [x] **Desktop Autopilot** - Unified automation facade combining browser-use npm (replaces custom Playwright wrapper), 143-action app control, and macOS system control (AppleScript/mouse/keyboard). 6 agent tools, 7 action-executor actions, dedicated REST API (`/app/desktop/*`), settings-gated with double opt-in for system control. Browser agent updated to use autopilot as primary path.
 - [ ] **Agent chaining** - Connect agents to work together
 - [ ] **Agent marketplace** - Share/discover community agents (built on Agent Spaces)
 - [x] **Custom agent personalities** - Voice, memory, briefing, multi-turn for generated agents (delivered in First-Class Custom Agents)

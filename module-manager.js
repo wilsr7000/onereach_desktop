@@ -430,13 +430,15 @@ class ModuleManager {
     return { ...tool, agentCreated };
   }
 
-  openWebTool(toolId) {
+  openWebTool(toolId, opts = {}) {
     const tools = this.loadWebTools();
     const tool = tools.find((t) => t.id === toolId);
 
     if (!tool) {
       throw new Error(`Web tool not found: ${toolId}`);
     }
+
+    const loadUrl = opts.url || tool.url;
 
     // Get screen dimensions
     const { screen } = require('electron');
@@ -1137,10 +1139,10 @@ class ModuleManager {
       }
     });
 
-    window.loadURL(tool.url);
+    window.loadURL(loadUrl);
     console.log(`[WebTool] ========================================`);
     console.log(`[WebTool] Opened: ${tool.name}`);
-    console.log(`[WebTool] URL: ${tool.url}`);
+    console.log(`[WebTool] URL: ${loadUrl}`);
     console.log(`[WebTool] Window ID: ${window.id}`);
     console.log(`[WebTool] Keyboard handlers: ACTIVE`);
     console.log(`[WebTool] Try pressing Cmd+V - you should see logs in this terminal`);

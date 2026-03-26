@@ -2442,8 +2442,8 @@ function isPlaybookNote(item) {
   return !!extractPlaybookNoteId(item);
 }
 
-// Open Playbook note in GSX Playbook tool
-function openInPlaybook() {
+// Open Playbook note in WISER Playbooks web tool
+async function openInPlaybook() {
   if (!currentPreviewItem) {
     console.error('No item selected for Playbook');
     return;
@@ -2456,25 +2456,21 @@ function openInPlaybook() {
     return;
   }
 
-  // GSX Playbook deep link format
-  const baseUrl =
-    'https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/playbook/index.html';
-  const deepLink = `${baseUrl}?playbook=${playbookNoteId}`;
+  console.log('[Playbook] Opening Playbook note:', playbookNoteId);
 
-  console.log('[Playbook] Opening Playbook note:', playbookNoteId, deepLink);
-
-  // Open in internal GSX window (not external browser)
-  if (window.clipboard && window.clipboard.openGSXWindow) {
-    window.clipboard.openGSXWindow(deepLink, 'Playbook');
+  try {
+    const tools = await window.api.invoke('module:get-web-tools');
+    const pb = (tools || []).find(t => /playbook/i.test(t.name));
+    if (!pb) {
+      showNotification({ type: 'error', message: 'WISER Playbooks tool not installed' });
+      return;
+    }
+    const deepLink = `${pb.url}?playbook=${playbookNoteId}`;
+    await window.api.invoke('module:open-web-tool', pb.id, { url: deepLink });
     showNotification({ type: 'success', message: 'Opening in Playbook...' });
-  } else if (window.electronAPI && window.electronAPI.openExternal) {
-    // Fallback to external browser
-    window.electronAPI.openExternal(deepLink);
-    showNotification({ type: 'success', message: 'Opening in browser...' });
-  } else {
-    // Last resort fallback
-    window.open(deepLink, '_blank');
-    showNotification({ type: 'info', message: 'Opened in new tab' });
+  } catch (err) {
+    console.error('[Playbook] Failed to open via web tool API:', err);
+    showNotification({ type: 'error', message: 'Could not open Playbook' });
   }
 }
 
@@ -5943,6 +5939,7 @@ function showCreateDataSourceDialog() {
       filterItems();
     } catch (err) {
       console.error('[DataSource] Create error:', err);
+      overlay.remove();
       showNotification('Error creating data source: ' + err.message, 'error');
     }
   };
@@ -8652,6 +8649,9 @@ async function loadAttachedTTSAudio(itemId) {
 
       console.log('[TTS] Created blob URL:', blobUrl);
 
+      if (audioPlayer.src && audioPlayer.src.startsWith('blob:')) {
+        URL.revokeObjectURL(audioPlayer.src);
+      }
       audioPlayer.src = blobUrl;
       audioPlayer.load(); // Explicitly load the audio
 
@@ -8771,6 +8771,9 @@ async function generateSpeech() {
 
       // Set up audio player
       const audioPlayer = document.getElementById('ttsAudioPlayer');
+      if (audioPlayer.src && audioPlayer.src.startsWith('blob:')) {
+        URL.revokeObjectURL(audioPlayer.src);
+      }
       audioPlayer.src = audioUrl;
 
       // Store the audio data for saving
@@ -9294,6 +9297,9 @@ async function loadMediaForPreview(item) {
 
           console.log('[Media] Created blob URL:', blobUrl, 'size:', blob.size);
 
+          if (mediaPlayer.src && mediaPlayer.src.startsWith('blob:')) {
+            URL.revokeObjectURL(mediaPlayer.src);
+          }
           mediaPlayer.src = blobUrl;
           mediaPlayer.load(); // Explicitly load
 

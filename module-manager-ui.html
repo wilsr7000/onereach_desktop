@@ -345,7 +345,10 @@
     </div>
 
     <script>
-      const { ipcRenderer } = require('electron');
+      const ipcRenderer = {
+        invoke: (...args) => window.api.invoke(...args),
+        send: (...args) => window.api.send(...args),
+      };
 
       // Module Manager namespace
       window.ModuleManager = {
