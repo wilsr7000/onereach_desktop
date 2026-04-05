@@ -224,6 +224,14 @@
 - [ ] **Sync conflicts** - Better handling when GSX sync conflicts
 
 ### WISER Meeting
+- [x] **Screen share presentation layout + dedicated container** - Screen share tracks were appended into the same participant container as camera, causing video stacking; no screen share button in session controls
+  - Screen share tracks now render in a dedicated `.screen-share-container` above the participant grid
+  - Added presentation layout mode: screen share fills top area, participants go to a bottom thumbnail strip
+  - Added screen share button to session media controls bar (mute/camera/bg/screen share)
+  - Added "You are sharing your screen" banner with stop button
+  - Mirrored all fixes in the guest page (`capture-guest-page.js`) with version bump to 7
+  - TrackUnsubscribed handlers now detect screen share removal and revert layout
+  - Files: recorder.html, lib/capture-guest-page.js
 - [x] **Screen share blank in Electron 41** - Screen capture produced blank frames because `getUserMedia` with `chromeMediaSource: 'desktop'` is deprecated
   - Added `setDisplayMediaRequestHandler` on the recorder session so `getDisplayMedia()` receives the correct source
   - Replaced all `getUserMedia({ chromeMediaSource: 'desktop' })` calls with `getDisplayMedia()` (screen capture, PiP, LiveKit session share)
@@ -496,6 +504,14 @@
 ---
 
 ## Recently Completed
+
+- [x] **Mode Card Welcome Experience** (v4.6.x)
+  - Replaced 5-slide intro wizard and changelog with single rotating mode card per launch
+  - 9 cards covering Conversational Experience Modes: Seek, Learn, Monitor, Plan, Create, Train, Coordinate, Simulate, Browse
+  - Organized under 3 parents: Acquire Knowledge, Do, Explore
+  - Shows one card per load, rotates sequentially, never the same twice until full cycle
+  - Compact 500x420 frameless modal, "Got it" dismiss
+  - Files: `intro-wizard.html`, `preload-intro-wizard.js`, `settings-manager.js`, `main.js`
 
 - [x] **GSX Teacher Agent** (v4.6.x)
   - Built-in tutor agent (`packages/agents/teacher-agent.js`) with 8-module curriculum (28 lessons)

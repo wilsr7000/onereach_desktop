@@ -1103,6 +1103,56 @@ class OmniGraphClient {
   }
 
   /**
+   * Get the latest Commit node for a space.
+   * @param {string} spaceId
+   * @returns {Promise<{hash: string, timestamp: number, message: string, author: string}|null>}
+   */
+  async getLatestCommit(spaceId) {
+    const cypher = `
+      MATCH (c:Commit)-[:IN_SPACE]->(s:Space {id: '${escapeCypher(spaceId)}'})
+      RETURN c
+      ORDER BY c.timestamp DESC
+      LIMIT 1
+    `;
+    const result = await this.executeQuery(cypher);
+    const node = result?.[0]?.c;
+    if (!node) return null;
+    const props = node.properties || node;
+    return {
+      hash: props.hash || null,
+      timestamp: props.timestamp || null,
+      message: props.message || null,
+      author: props.author || null,
+    };
+  }
+
+  /**
+   * Get all active assets in a space with content hashes for diffing.
+   * @param {string} spaceId
+   * @returns {Promise<Array<{id, title, type, contentHash, fileUrl, updated_at}>>}
+   */
+  async getSpaceAssetsWithHashes(spaceId) {
+    const cypher = `
+      MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: '${escapeCypher(spaceId)}'})
+      WHERE a.active = true OR a.active IS NULL
+      RETURN a.id AS id, a.title AS title, a.assetType AS type,
+             a.contentHash AS contentHash, a.fileUrl AS fileUrl,
+             a.updated_at AS updatedAt, a.spaceId AS spaceId
+      ORDER BY a.updated_at DESC
+    `;
+    const result = await this.executeQuery(cypher);
+    return (result || []).map(r => ({
+      id: r.id,
+      title: r.title,
+      type: r.type,
+      contentHash: r.contentHash || null,
+      fileUrl: r.fileUrl || null,
+      updatedAt: r.updatedAt || null,
+      spaceId: r.spaceId,
+    }));
+  }
+
+  /**
    * Soft delete an Asset node
    * @param {string} assetId - Asset ID
    * @returns {Promise<Object>} Updated asset node
@@ -1334,6 +1384,513 @@ class OmniGraphClient {
       // Internal flag (not rendered by UI) -- used to build featured list
       _featured: node.featured === true || node.featured === 'true',
     };
+  }
+
+  // ============================================
+  // LIBRARY: ORGANIZATION, TEAM, LIBRARY
+  // ============================================
+
+  /**
+   * Ensure an Organization node exists. Idempotent (MERGE on id).
+   * @param {Object} org - { id, name, domain, plan }
+   * @returns {Promise<Object>} Organization node
+   */
+  async ensureOrganization(org) {
+    const now = Date.now();
+    const user = this.currentUser;
+    const cypher = `
+      MERGE (o:Organization {id: '${escapeCypher(org.id)}'})
+      ON CREATE SET
+          o.name = '${escapeCypher(org.name || org.id)}',
+          o.domain = '${escapeCypher(org.domain || '')}',
+          o.plan = '${escapeCypher(org.plan || 'free')}',
+          o.active = true,
+          o.created_by_app_name = '${APP_IDENTITY.name}',
+          o.created_by_app_id = '${APP_IDENTITY.id}',
+          o.created_by_user = '${escapeCypher(user)}',
+          o.created_at = ${now},
+          o.updated_by_app_name = '${APP_IDENTITY.name}',
+          o.updated_by_app_id = '${APP_IDENTITY.id}',
+          o.updated_by_user = '${escapeCypher(user)}',
+          o.updated_at = ${now},
+          o._history = '[]'
+      ON MATCH SET
+          o.updated_by_app_name = '${APP_IDENTITY.name}',
+          o.updated_by_app_id = '${APP_IDENTITY.id}',
+          o.updated_by_user = '${escapeCypher(user)}',
+          o.updated_at = ${now}
+      RETURN o
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Ensure a Team node exists and is linked to its Organization.
+   * @param {Object} team - { id, name, orgId, description }
+   * @returns {Promise<Object>} Team node
+   */
+  async ensureTeam(team) {
+    const now = Date.now();
+    const user = this.currentUser;
+    const cypher = `
+      MERGE (t:Team {id: '${escapeCypher(team.id)}'})
+      ON CREATE SET
+          t.name = '${escapeCypher(team.name || team.id)}',
+          t.description = '${escapeCypher(team.description || '')}',
+          t.active = true,
+          t.created_by_app_name = '${APP_IDENTITY.name}',
+          t.created_by_app_id = '${APP_IDENTITY.id}',
+          t.created_by_user = '${escapeCypher(user)}',
+          t.created_at = ${now},
+          t.updated_by_app_name = '${APP_IDENTITY.name}',
+          t.updated_by_app_id = '${APP_IDENTITY.id}',
+          t.updated_by_user = '${escapeCypher(user)}',
+          t.updated_at = ${now},
+          t._history = '[]'
+      ON MATCH SET
+          t.updated_by_app_name = '${APP_IDENTITY.name}',
+          t.updated_by_app_id = '${APP_IDENTITY.id}',
+          t.updated_by_user = '${escapeCypher(user)}',
+          t.updated_at = ${now}
+      WITH t
+      MATCH (o:Organization {id: '${escapeCypher(team.orgId)}'})
+      MERGE (o)-[:HAS_TEAM]->(t)
+      RETURN t
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Add a Person as a member of a Team.
+   * @param {string} teamId - Team ID
+   * @param {string} email - Person email
+   * @param {string} [role='member'] - Role within the team
+   * @returns {Promise<Object>} Result
+   */
+  async addTeamMember(teamId, email, role = 'member') {
+    const now = Date.now();
+    const cypher = `
+      MATCH (t:Team {id: '${escapeCypher(teamId)}'})
+      MATCH (p:Person {id: '${escapeCypher(email)}'})
+      MERGE (t)-[r:MEMBER]->(p)
+      SET r.role = '${escapeCypher(role)}',
+          r.joinedAt = coalesce(r.joinedAt, ${now})
+      RETURN p, t
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Remove a Person from a Team.
+   * @param {string} teamId - Team ID
+   * @param {string} email - Person email
+   * @returns {Promise<Object>} Result
+   */
+  async removeTeamMember(teamId, email) {
+    const cypher = `
+      MATCH (t:Team {id: '${escapeCypher(teamId)}'})-[r:MEMBER]->(p:Person {id: '${escapeCypher(email)}'})
+      DELETE r
+      RETURN p
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Ensure a Library node exists and is linked to its Organization.
+   * @param {Object} lib - { id, orgId, name, description }
+   * @returns {Promise<Object>} Library node
+   */
+  async ensureLibrary(lib) {
+    const now = Date.now();
+    const user = this.currentUser;
+    const cypher = `
+      MERGE (l:Library {id: '${escapeCypher(lib.id)}'})
+      ON CREATE SET
+          l.name = '${escapeCypher(lib.name || 'Library')}',
+          l.description = '${escapeCypher(lib.description || '')}',
+          l.active = true,
+          l.created_by_app_name = '${APP_IDENTITY.name}',
+          l.created_by_app_id = '${APP_IDENTITY.id}',
+          l.created_by_user = '${escapeCypher(user)}',
+          l.created_at = ${now},
+          l.updated_by_app_name = '${APP_IDENTITY.name}',
+          l.updated_by_app_id = '${APP_IDENTITY.id}',
+          l.updated_by_user = '${escapeCypher(user)}',
+          l.updated_at = ${now},
+          l._history = '[]'
+      ON MATCH SET
+          l.updated_by_app_name = '${APP_IDENTITY.name}',
+          l.updated_by_app_id = '${APP_IDENTITY.id}',
+          l.updated_by_user = '${escapeCypher(user)}',
+          l.updated_at = ${now}
+      WITH l
+      MATCH (o:Organization {id: '${escapeCypher(lib.orgId)}'})
+      MERGE (o)-[:HAS_LIBRARY]->(l)
+      RETURN l
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Add an item (IDW, Tool, or Agent) to a Library.
+   * @param {string} libraryId - Library ID
+   * @param {string} itemId - Item node ID
+   * @param {string} itemLabel - Node label ('IDW', 'Tool', or 'Agent')
+   * @returns {Promise<Object>} Result
+   */
+  async addToLibrary(libraryId, itemId, itemLabel) {
+    if (!['IDW', 'Tool', 'Agent'].includes(itemLabel)) {
+      throw new Error(`Invalid item label: ${itemLabel}. Must be IDW, Tool, or Agent.`);
+    }
+    const now = Date.now();
+    const user = this.currentUser;
+    const cypher = `
+      MATCH (l:Library {id: '${escapeCypher(libraryId)}'})
+      MATCH (item:${itemLabel} {id: '${escapeCypher(itemId)}'})
+      MERGE (l)-[r:CONTAINS]->(item)
+      SET r.addedAt = coalesce(r.addedAt, ${now}),
+          r.addedBy = '${escapeCypher(user)}'
+      RETURN item
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Remove an item from a Library.
+   * @param {string} libraryId - Library ID
+   * @param {string} itemId - Item node ID
+   * @param {string} itemLabel - Node label ('IDW', 'Tool', or 'Agent')
+   * @returns {Promise<Object>} Result
+   */
+  async removeFromLibrary(libraryId, itemId, itemLabel) {
+    if (!['IDW', 'Tool', 'Agent'].includes(itemLabel)) {
+      throw new Error(`Invalid item label: ${itemLabel}. Must be IDW, Tool, or Agent.`);
+    }
+    const cypher = `
+      MATCH (l:Library {id: '${escapeCypher(libraryId)}'})-[r:CONTAINS]->(item:${itemLabel} {id: '${escapeCypher(itemId)}'})
+      DELETE r
+      RETURN item
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  // ============================================
+  // LIBRARY: TOOL AND AGENT NODES
+  // ============================================
+
+  /**
+   * Create or update a Tool node.
+   * @param {Object} tool - { id, name, url, description, docsUrl, windowSize, type, category }
+   * @returns {Promise<Object>} Tool node
+   */
+  async upsertTool(tool) {
+    const now = Date.now();
+    const user = this.currentUser;
+    const cypher = `
+      MERGE (t:Tool {id: '${escapeCypher(tool.id)}'})
+      ON CREATE SET
+          t.active = true,
+          t.created_by_app_name = '${APP_IDENTITY.name}',
+          t.created_by_app_id = '${APP_IDENTITY.id}',
+          t.created_by_user = '${escapeCypher(user)}',
+          t.created_at = ${now},
+          t._history = '[]'
+      SET t.name = '${escapeCypher(tool.name || '')}',
+          t.url = '${escapeCypher(tool.url || '')}',
+          t.description = '${escapeCypher(tool.description || '')}',
+          t.docsUrl = '${escapeCypher(tool.docsUrl || '')}',
+          t.windowSize = '${escapeCypher(tool.windowSize || 'large')}',
+          t.type = '${escapeCypher(tool.type || 'weblink')}',
+          t.category = '${escapeCypher(tool.category || '')}',
+          t.updated_by_app_name = '${APP_IDENTITY.name}',
+          t.updated_by_app_id = '${APP_IDENTITY.id}',
+          t.updated_by_user = '${escapeCypher(user)}',
+          t.updated_at = ${now}
+      RETURN t
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Get a Tool node by ID.
+   * @param {string} toolId - Tool ID
+   * @returns {Promise<Object|null>} Tool node or null
+   */
+  async getTool(toolId) {
+    const cypher = `
+      MATCH (t:Tool {id: '${escapeCypher(toolId)}'})
+      WHERE t.active = true OR t.active IS NULL
+      RETURN t LIMIT 1
+    `;
+    const result = await this.executeQuery(cypher);
+    const node = result?.[0]?.t;
+    return node?.properties || node || null;
+  }
+
+  /**
+   * Create or update an Agent node.
+   * @param {Object} agent - { id, name, description, categories, keywords, executionType, builtin, prompt, capabilities }
+   * @returns {Promise<Object>} Agent node
+   */
+  async upsertAgent(agent) {
+    const now = Date.now();
+    const user = this.currentUser;
+    const cats = JSON.stringify(agent.categories || []);
+    const kw = JSON.stringify(agent.keywords || []);
+    const caps = JSON.stringify(agent.capabilities || []);
+    const cypher = `
+      MERGE (a:Agent {id: '${escapeCypher(agent.id)}'})
+      ON CREATE SET
+          a.active = true,
+          a.created_by_app_name = '${APP_IDENTITY.name}',
+          a.created_by_app_id = '${APP_IDENTITY.id}',
+          a.created_by_user = '${escapeCypher(user)}',
+          a.created_at = ${now},
+          a._history = '[]'
+      SET a.name = '${escapeCypher(agent.name || '')}',
+          a.description = '${escapeCypher(agent.description || '')}',
+          a.categories = '${escapeCypher(cats)}',
+          a.keywords = '${escapeCypher(kw)}',
+          a.capabilities = '${escapeCypher(caps)}',
+          a.executionType = '${escapeCypher(agent.executionType || '')}',
+          a.builtin = ${agent.builtin === true},
+          a.prompt = '${escapeCypher(agent.prompt || '')}',
+          a.updated_by_app_name = '${APP_IDENTITY.name}',
+          a.updated_by_app_id = '${APP_IDENTITY.id}',
+          a.updated_by_user = '${escapeCypher(user)}',
+          a.updated_at = ${now}
+      RETURN a
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Get an Agent node by ID.
+   * @param {string} agentId - Agent ID
+   * @returns {Promise<Object|null>} Agent node or null
+   */
+  async getAgent(agentId) {
+    const cypher = `
+      MATCH (a:Agent {id: '${escapeCypher(agentId)}'})
+      WHERE a.active = true OR a.active IS NULL
+      RETURN a LIMIT 1
+    `;
+    const result = await this.executeQuery(cypher);
+    const node = result?.[0]?.a;
+    return node?.properties || node || null;
+  }
+
+  // ============================================
+  // LIBRARY: ENABLE / DISABLE / QUERY
+  // ============================================
+
+  /**
+   * Enable an item for a user (create ENABLED relationship).
+   * @param {string} email - Person email
+   * @param {string} itemId - Item node ID
+   * @param {string} itemLabel - Node label ('IDW', 'Tool', or 'Agent')
+   * @param {string} [source='manual'] - How it was enabled
+   * @returns {Promise<Object>} Result
+   */
+  async enableItem(email, itemId, itemLabel, source = 'manual') {
+    if (!['IDW', 'Tool', 'Agent'].includes(itemLabel)) {
+      throw new Error(`Invalid item label: ${itemLabel}. Must be IDW, Tool, or Agent.`);
+    }
+    const now = Date.now();
+    const cypher = `
+      MATCH (p:Person {id: '${escapeCypher(email)}'})
+      MATCH (item:${itemLabel} {id: '${escapeCypher(itemId)}'})
+      MERGE (p)-[r:ENABLED]->(item)
+      SET r.enabledAt = coalesce(r.enabledAt, ${now}),
+          r.source = '${escapeCypher(source)}'
+      RETURN item
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Disable an item for a user (delete ENABLED relationship).
+   * @param {string} email - Person email
+   * @param {string} itemId - Item node ID
+   * @param {string} itemLabel - Node label ('IDW', 'Tool', or 'Agent')
+   * @returns {Promise<Object>} Result
+   */
+  async disableItem(email, itemId, itemLabel) {
+    if (!['IDW', 'Tool', 'Agent'].includes(itemLabel)) {
+      throw new Error(`Invalid item label: ${itemLabel}. Must be IDW, Tool, or Agent.`);
+    }
+    const cypher = `
+      MATCH (p:Person {id: '${escapeCypher(email)}'})-[r:ENABLED]->(item:${itemLabel} {id: '${escapeCypher(itemId)}'})
+      DELETE r
+      RETURN item
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Get all items a user has enabled, grouped by type.
+   * @param {string} email - Person email
+   * @returns {Promise<Object>} { idws: [], tools: [], agents: [] }
+   */
+  async getEnabledItems(email) {
+    const cypher = `
+      MATCH (p:Person {id: '${escapeCypher(email)}'})-[r:ENABLED]->(item)
+      WHERE (item:IDW OR item:Tool OR item:Agent)
+        AND (item.active = true OR item.active IS NULL)
+      RETURN item, labels(item) AS nodeLabels, r.enabledAt AS enabledAt, r.source AS source
+      ORDER BY r.enabledAt DESC
+    `;
+    const result = await this.executeQuery(cypher) || [];
+    const out = { idws: [], tools: [], agents: [] };
+    for (const row of result) {
+      const node = row.item?.properties || row.item || {};
+      const labels = row.nodeLabels || [];
+      const meta = { enabledAt: row.enabledAt, source: row.source };
+      if (labels.includes('IDW')) out.idws.push({ ...node, ...meta });
+      else if (labels.includes('Tool')) out.tools.push({ ...node, ...meta });
+      else if (labels.includes('Agent')) out.agents.push({ ...node, ...meta });
+    }
+    return out;
+  }
+
+  /**
+   * Get all items available to a user via their Organization's Library.
+   * Traverses: Person <- MEMBER - Team <- HAS_TEAM - Org - HAS_LIBRARY -> Library - CONTAINS -> items
+   * @param {string} email - Person email
+   * @returns {Promise<Object>} { idws: [], tools: [], agents: [], organization: null }
+   */
+  async getLibraryForUser(email) {
+    const cypher = `
+      MATCH (p:Person {id: '${escapeCypher(email)}'})<-[:MEMBER]-(t:Team)<-[:HAS_TEAM]-(o:Organization)-[:HAS_LIBRARY]->(l:Library)-[:CONTAINS]->(item)
+      WHERE (item.active = true OR item.active IS NULL)
+        AND (o.active = true OR o.active IS NULL)
+      RETURN item, labels(item) AS nodeLabels, o.id AS orgId, o.name AS orgName, l.id AS libraryId
+      ORDER BY item.name
+    `;
+    const result = await this.executeQuery(cypher) || [];
+    const out = { idws: [], tools: [], agents: [], organization: null };
+    for (const row of result) {
+      if (!out.organization && row.orgId) {
+        out.organization = { id: row.orgId, name: row.orgName, libraryId: row.libraryId };
+      }
+      const node = row.item?.properties || row.item || {};
+      const labels = row.nodeLabels || [];
+      if (labels.includes('IDW')) out.idws.push(this._mapGraphNodeToIDW(node));
+      else if (labels.includes('Tool')) out.tools.push(node);
+      else if (labels.includes('Agent')) out.agents.push(node);
+    }
+    return out;
+  }
+
+  /**
+   * Get the Organization a user belongs to (via Team membership).
+   * @param {string} email - Person email
+   * @returns {Promise<Object|null>} Organization node or null
+   */
+  async getOrganizationForUser(email) {
+    const cypher = `
+      MATCH (p:Person {id: '${escapeCypher(email)}'})<-[:MEMBER]-(t:Team)<-[:HAS_TEAM]-(o:Organization)
+      WHERE o.active = true OR o.active IS NULL
+      RETURN o LIMIT 1
+    `;
+    const result = await this.executeQuery(cypher);
+    const node = result?.[0]?.o;
+    return node?.properties || node || null;
+  }
+
+  // ============================================
+  // LIBRARY: SCHEMA BOOTSTRAP
+  // ============================================
+
+  /**
+   * Ensure all Library-related schemas exist in the graph.
+   * Idempotent -- safe to call on every app startup.
+   * Creates Schema nodes for Organization, Team, Library, Tool, Agent.
+   * Patches Person and IDW schemas to document new relationships.
+   * @returns {Promise<void>}
+   */
+  async ensureLibrarySchema() {
+    if (this._librarySchemaEnsured) return;
+
+    try {
+      await this.upsertSchema({
+        entity: 'Organization',
+        version: '1.0.0',
+        description: 'Top-level organization that owns a Library of IDWs, Tools, and Agents',
+        storagePattern: 'graph',
+        instructions: 'MERGE on id. Properties: name, domain, plan (free|pro|enterprise), active. Relationships: HAS_TEAM to Team, HAS_LIBRARY to Library.',
+        relationships: '{"HAS_TEAM":"Team","HAS_LIBRARY":"Library"}',
+      });
+
+      await this.upsertSchema({
+        entity: 'Team',
+        version: '1.0.0',
+        description: 'A group within an Organization. Members are Person nodes.',
+        storagePattern: 'graph',
+        instructions: 'MERGE on id. Connected to Organization via HAS_TEAM. Members connected via MEMBER relationship to Person nodes. MEMBER has role and joinedAt properties.',
+        relationships: '{"MEMBER":"Person"}',
+      });
+
+      await this.upsertSchema({
+        entity: 'Library',
+        version: '1.0.0',
+        description: 'Catalog of all IDWs, Tools, and Agents available to an Organization',
+        storagePattern: 'graph',
+        instructions: 'One Library per Organization via HAS_LIBRARY. Items linked via CONTAINS relationship to IDW, Tool, or Agent nodes. CONTAINS has addedAt and addedBy properties.',
+        relationships: '{"CONTAINS":"IDW,Tool,Agent"}',
+      });
+
+      await this.upsertSchema({
+        entity: 'Tool',
+        version: '1.0.0',
+        description: 'A web tool (weblink) that can be opened in the app',
+        storagePattern: 'graph',
+        instructions: 'MERGE on id. Properties: name, url, description, docsUrl, windowSize, type, category, active. Connected to Library via CONTAINS. Enabled by Person via ENABLED.',
+        relationships: '{}',
+      });
+
+      await this.upsertSchema({
+        entity: 'Agent',
+        version: '1.0.0',
+        description: 'A voice agent (built-in or custom) that participates in the task exchange',
+        storagePattern: 'graph',
+        instructions: 'MERGE on id. Properties: name, description, categories (JSON array), keywords (JSON array), capabilities (JSON array), executionType, builtin (boolean), prompt, active. Connected to Library via CONTAINS. Enabled by Person via ENABLED.',
+        relationships: '{}',
+      });
+
+      const patchSchemaRels = async (entity, newRels) => {
+        const schema = await this.getSchema(entity);
+        if (!schema) return;
+        let rels = {};
+        try { rels = JSON.parse(schema.relationships || '{}'); } catch (_) {}
+        let patched = false;
+        for (const [key, val] of Object.entries(newRels)) {
+          if (!rels[key]) { rels[key] = val; patched = true; }
+        }
+        if (patched) {
+          const now = Date.now();
+          await this.executeQuery(`
+            MATCH (s:Schema {entity: '${escapeCypher(entity)}'})
+            SET s.relationships = '${escapeCypher(JSON.stringify(rels))}',
+                s.updated_by_app_name = '${APP_IDENTITY.name}',
+                s.updated_by_app_id = '${APP_IDENTITY.id}',
+                s.updated_by_user = '${escapeCypher(this.currentUser)}',
+                s.updated_at = ${now}
+            RETURN s
+          `);
+          console.log(`[OmniGraph] Patched ${entity} schema with new relationships`);
+        }
+      };
+
+      await patchSchemaRels('Person', { MEMBER: 'Team (inbound)', ENABLED: 'IDW,Tool,Agent' });
+      await patchSchemaRels('IDW', { ENABLED: 'Person (inbound)', CONTAINS: 'Library (inbound)' });
+
+      this._librarySchemaEnsured = true;
+      console.log('[OmniGraph] Library schema ensured (Organization, Team, Library, Tool, Agent)');
+    } catch (error) {
+      console.error('[OmniGraph] Failed to ensure Library schema:', error.message);
+      this._librarySchemaError = error.message;
+    }
   }
 
   // ============================================

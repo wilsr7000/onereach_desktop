@@ -42,6 +42,8 @@ function getSyncMethods() {
     push: (spaceId, opts) => ipcRenderer.invoke('sync:push', spaceId, opts),
     pull: (spaceId) => ipcRenderer.invoke('sync:pull', spaceId),
     status: (spaceId) => ipcRenderer.invoke('sync:status', spaceId),
+    managerStatus: () => ipcRenderer.invoke('sync:manager-status'),
+    verify: () => ipcRenderer.invoke('sync:verify'),
   };
 }
 

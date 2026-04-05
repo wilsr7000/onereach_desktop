@@ -2168,6 +2168,50 @@
           color: rgba(255, 255, 255, 0.5);
       }
 
+      .sync-status {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          padding: 2px 8px;
+          border-radius: 4px;
+          transition: background 0.2s;
+      }
+
+      .sync-status:hover {
+          background: rgba(255, 255, 255, 0.06);
+      }
+
+      .sync-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.3);
+          flex-shrink: 0;
+      }
+
+      .sync-dot.synced {
+          background: #00c878;
+      }
+
+      .sync-dot.pending {
+          background: #ffa502;
+          animation: pulse-sync 1.5s ease-in-out infinite;
+      }
+
+      .sync-dot.offline {
+          background: rgba(255, 255, 255, 0.2);
+      }
+
+      .sync-dot.conflict {
+          background: #ff4757;
+      }
+
+      @keyframes pulse-sync {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+      }
+
       .shortcut {
           background: rgba(255, 255, 255, 0.08);
           padding: 4px 8px;
@@ -6132,6 +6176,10 @@
 
           <div class="footer">
             <span>Press <span class="shortcut">Esc</span> to close</span>
+            <span class="sync-status" id="syncStatus" title="Click to refresh sync status" onclick="window._refreshSyncStatus && window._refreshSyncStatus()">
+              <span class="sync-dot" id="syncDot"></span>
+              <span id="syncLabel">Checking sync...</span>
+            </span>
             <span id="itemCount">0 items</span>
           </div>
         </div>
@@ -8839,6 +8887,88 @@ Obtain an API key from the developer portal at...
         });
 
         console.log('[WebMCP Provider] Registered Spaces tools');
+      })();
+    </script>
+    <script>
+      (function() {
+        const dot = document.getElementById('syncDot');
+        const label = document.getElementById('syncLabel');
+        if (!dot || !label) return;
+
+        async function quickStatus() {
+          try {
+            if (!window.sync?.managerStatus) {
+              label.textContent = 'Sync unavailable';
+              dot.className = 'sync-dot offline';
+              return;
+            }
+            const status = await window.sync.managerStatus();
+            if (!status.running) {
+              label.textContent = 'Sync off';
+              dot.className = 'sync-dot offline';
+              return;
+            }
+            if (!status.graphConnected) {
+              label.textContent = 'Graph offline';
+              dot.className = 'sync-dot offline';
+              return;
+            }
+            const spaces = status.spaces || {};
+            const ids = Object.keys(spaces);
+            const hasPending = ids.some(id => spaces[id].pendingPush);
+            const hasConflicts = ids.some(id => spaces[id].lastPullConflicts > 0);
+            if (hasConflicts) {
+              label.textContent = 'Sync conflict';
+              dot.className = 'sync-dot conflict';
+            } else if (hasPending) {
+              label.textContent = 'Syncing...';
+              dot.className = 'sync-dot pending';
+            } else {
+              label.textContent = 'All synced';
+              dot.className = 'sync-dot synced';
+            }
+          } catch {
+            label.textContent = 'Sync unavailable';
+            dot.className = 'sync-dot offline';
+          }
+        }
+
+        async function verifySync() {
+          if (!window.sync?.verify) { quickStatus(); return; }
+          label.textContent = 'Verifying...';
+          dot.className = 'sync-dot pending';
+          try {
+            const result = await window.sync.verify();
+            if (!result.verified) {
+              label.textContent = result.reason || 'Verify failed';
+              dot.className = 'sync-dot offline';
+              return;
+            }
+            if (result.conflicts > 0) {
+              label.textContent = result.conflicts + ' conflict' + (result.conflicts > 1 ? 's' : '');
+              dot.className = 'sync-dot conflict';
+            } else if (result.totalMissingLocally > 0) {
+              label.textContent = result.totalMissingLocally + ' to pull';
+              dot.className = 'sync-dot pending';
+            } else if (result.totalMissingRemotely > 0) {
+              label.textContent = result.totalMissingRemotely + ' to push';
+              dot.className = 'sync-dot pending';
+            } else if (result.allInSync) {
+              label.textContent = 'Verified: all synced (' + result.spacesChecked + ' spaces)';
+              dot.className = 'sync-dot synced';
+            } else {
+              label.textContent = 'Checked ' + result.spacesChecked + ' spaces';
+              dot.className = 'sync-dot synced';
+            }
+          } catch {
+            label.textContent = 'Verify failed';
+            dot.className = 'sync-dot offline';
+          }
+        }
+
+        window._refreshSyncStatus = verifySync;
+        quickStatus();
+        setInterval(quickStatus, 30000);
       })();
     </script>
   </body>

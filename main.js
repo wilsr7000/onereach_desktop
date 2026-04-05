@@ -1825,6 +1825,16 @@ function setupSpacesAPI() {
     }, 30000);
   }
 
+  // ---- SYNC MANAGER ----
+  try {
+    const { getSyncManager } = require('./lib/spaces-sync-manager');
+    const syncManager = getSyncManager();
+    syncManager.start();
+    console.log('[SyncManager] Started');
+  } catch (err) {
+    console.warn('[SyncManager] Failed to start:', err.message);
+  }
+
   // ---- SPACE MANAGEMENT ----
 
   // List all spaces
@@ -2560,6 +2570,15 @@ function setupSpacesAPI() {
   ipcMain.handle('spaces:gsx:initialize', async (event, endpoint, currentUser) => {
     try {
       spacesAPI.gsx.initialize(endpoint, null, currentUser);
+
+      // Trigger graph library sync after successful connection
+      try {
+        const { triggerGraphSync } = require('./lib/graph-library-sync');
+        triggerGraphSync(currentUser).catch((err) => {
+          console.warn('[GraphSync] Non-fatal sync error:', err.message);
+        });
+      } catch (_) {}
+
       return { success: true };
     } catch (error) {
       log.error('spaces', 'IPC spaces:gsx:initialize failed', { error: error.message });
@@ -2816,6 +2835,88 @@ function setupSpacesAPI() {
       return await require('./lib/spaces-sync').status(spaceId);
     } catch (error) {
       return { error: error.message };
+    }
+  });
+
+  ipcMain.handle('sync:manager-status', async () => {
+    try {
+      const { getSyncManager } = require('./lib/spaces-sync-manager');
+      const mgr = getSyncManager();
+      const { getOmniGraphClient } = require('./omnigraph-client');
+      const graph = getOmniGraphClient();
+      return {
+        running: mgr.isRunning(),
+        deviceId: mgr.getDeviceId(),
+        graphConnected: !!(graph?.endpoint),
+        spaces: mgr.getAllStatus(),
+      };
+    } catch (error) {
+      return { running: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('sync:verify', async () => {
+    try {
+      const { getSyncManager } = require('./lib/spaces-sync-manager');
+      const mgr = getSyncManager();
+      const { getOmniGraphClient } = require('./omnigraph-client');
+      const graph = getOmniGraphClient();
+      if (!graph?.endpoint) {
+        return { verified: false, reason: 'Graph not connected' };
+      }
+
+      const { getSpacesAPI } = require('./spaces-api');
+      const api = getSpacesAPI();
+      const spaces = await api.list();
+      const results = [];
+
+      for (const space of (spaces || [])) {
+        if (space.isSystem) continue;
+        try {
+          const remoteCommit = await graph.getLatestCommit(space.id);
+          const localState = mgr.getStatus(space.id);
+          const remoteAssets = await graph.getSpaceAssetsWithHashes(space.id);
+          const localItems = await api.items.list(space.id, { limit: 500 });
+
+          const remoteIds = new Set((remoteAssets || []).map(a => a.id).filter(Boolean));
+          const localIds = new Set((localItems || []).map(i => i.id));
+          const missingLocally = [...remoteIds].filter(id => !localIds.has(id)).length;
+          const missingRemotely = [...localIds].filter(id => !remoteIds.has(id)).length;
+
+          results.push({
+            spaceId: space.id,
+            name: space.name,
+            inSync: missingLocally === 0 && missingRemotely === 0,
+            localItems: localIds.size,
+            remoteAssets: remoteIds.size,
+            missingLocally,
+            missingRemotely,
+            remoteCommit: remoteCommit?.hash?.slice(0, 8) || null,
+            lastPush: localState.lastPushAt || null,
+            lastPull: localState.lastPullAt || null,
+            pendingPush: localState.pendingPush || false,
+          });
+        } catch (e) {
+          results.push({ spaceId: space.id, name: space.name, error: e.message });
+        }
+      }
+
+      const allInSync = results.every(r => r.inSync || r.error);
+      const totalMissingLocally = results.reduce((s, r) => s + (r.missingLocally || 0), 0);
+      const totalMissingRemotely = results.reduce((s, r) => s + (r.missingRemotely || 0), 0);
+      const conflicts = results.filter(r => r.missingLocally > 0 && r.missingRemotely > 0).length;
+
+      return {
+        verified: true,
+        allInSync,
+        spacesChecked: results.length,
+        totalMissingLocally,
+        totalMissingRemotely,
+        conflicts,
+        spaces: results,
+      };
+    } catch (error) {
+      return { verified: false, reason: error.message };
     }
   });
 
@@ -4546,6 +4647,18 @@ function setupModuleManagerIPC() {
 
       const directory = await client.getIDWDirectory(installedIds);
       console.log('[IDW Store] Loaded', directory.availableIDWs.all.length, 'IDWs from graph');
+
+      // Trigger graph library sync now that we know the graph is working
+      try {
+        const { triggerGraphSync } = require('./lib/graph-library-sync');
+        const userEmail = client.currentUser || (settingsManager && settingsManager.get('userEmail'));
+        if (userEmail) {
+          triggerGraphSync(userEmail).catch((err) => {
+            console.warn('[GraphSync] Non-fatal sync error:', err.message);
+          });
+        }
+      } catch (_) {}
+
       return directory;
     } catch (error) {
       console.error('[IDW Store] Error fetching directory from graph:', error);
@@ -4736,7 +4849,9 @@ function setupDependencyIPC() {
 
       // Stream output back to renderer
       const result = await depManager.installDependency(depName, (output) => {
-        event.sender.send('deps:install-output', { depName, ...output });
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('deps:install-output', { depName, ...output });
+        }
       });
 
       return { success: true, ...result };
@@ -4753,7 +4868,9 @@ function setupDependencyIPC() {
 
       // Stream output back to renderer
       const result = await depManager.installAllMissing((output) => {
-        event.sender.send('deps:install-output', output);
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('deps:install-output', output);
+        }
       });
 
       return { success: result.allSuccessful, ...result };
@@ -4918,7 +5035,9 @@ function setupAiderIPC() {
       let tokenBuffer = '';
 
       const result = await aiderBridge.runPromptStreaming(message, (token) => {
-        event.sender.send(channel, { type: 'token', token });
+        if (!event.sender.isDestroyed()) {
+          event.sender.send(channel, { type: 'token', token });
+        }
 
         // Accumulate tokens to detect patterns
         tokenBuffer += token;
@@ -4958,7 +5077,9 @@ function setupAiderIPC() {
         phase: 'Execute',
       });
 
-      event.sender.send(channel, { type: 'done', result });
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(channel, { type: 'done', result });
+      }
       return result;
     } catch (error) {
       console.error('[Aider] Streaming prompt failed:', error);
@@ -4970,7 +5091,9 @@ function setupAiderIPC() {
         phase: 'Execute',
       });
 
-      event.sender.send(channel, { type: 'error', error: error.message });
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(channel, { type: 'error', error: error.message });
+      }
       return { success: false, error: error.message };
     }
   });
@@ -5149,9 +5272,13 @@ function setupAiderIPC() {
       if (channel) {
         // Streaming mode
         result = await branchAiderManager.runBranchPrompt(branchId, prompt, (token) => {
-          event.sender.send(channel, { type: 'token', token });
+          if (!event.sender.isDestroyed()) {
+            event.sender.send(channel, { type: 'token', token });
+          }
         });
-        event.sender.send(channel, { type: 'done', result });
+        if (!event.sender.isDestroyed()) {
+          event.sender.send(channel, { type: 'done', result });
+        }
       } else {
         // Non-streaming mode
         result = await branchAiderManager.runBranchPrompt(branchId, prompt);
@@ -5160,7 +5287,7 @@ function setupAiderIPC() {
       return result;
     } catch (error) {
       console.error('[BranchAider] Prompt failed:', error);
-      if (channel) {
+      if (channel && !event.sender.isDestroyed()) {
         event.sender.send(channel, { type: 'error', error: error.message });
       }
       return { success: false, error: error.message };
@@ -11542,9 +11669,11 @@ Return ONLY valid JSON with this exact structure:
         const contextMenu = Menu.buildFromTemplate(menuTemplate);
 
         // Use setImmediate to ensure the menu shows after all other handlers
+        const sender = event.sender;
         setImmediate(() => {
-          const win = BrowserWindow.fromWebContents(event.sender);
-          if (win) {
+          if (!sender || sender.isDestroyed()) return;
+          const win = BrowserWindow.fromWebContents(sender);
+          if (win && !win.isDestroyed()) {
             contextMenu.popup({
               window: win,
               x: params.x,
@@ -15502,8 +15631,8 @@ function openSetupWizard() {
 
   // Create the setup wizard window using our module
   let wizardWindow = browserWindow.createSetupWizardWindow({
-    width: 1000,
-    height: 800,
+    width: 1200,
+    height: 850,
     show: false, // Don't show until content is loaded
   });
 
@@ -17235,6 +17364,7 @@ function createOrbWindow() {
       nodeIntegration: false,
       sandbox: false, // Required for preload-hud-api.js require()
       backgroundThrottling: false,
+      devTools: false,
     },
   });
 
@@ -18397,6 +18527,58 @@ function createAgentManagerWindow() {
   return agentManagerWindow;
 }
 
+// ==================== AGENT EXPLORER ====================
+
+let agentExplorerWindow = null;
+
+function createAgentExplorerWindow() {
+  if (agentExplorerWindow && !agentExplorerWindow.isDestroyed()) {
+    agentExplorerWindow.focus();
+    return agentExplorerWindow;
+  }
+
+  console.log('[AgentExplorer] Creating agent explorer window...');
+
+  agentExplorerWindow = new BrowserWindow({
+    width: 1200,
+    height: 850,
+    minWidth: 900,
+    minHeight: 600,
+    title: 'Agent Explorer',
+    frame: false,
+    transparent: false,
+    backgroundColor: '#1a1a24',
+    center: true,
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload-agent-explorer.js'),
+      webSecurity: true,
+      sandbox: false,
+      backgroundThrottling: false,
+    },
+  });
+
+  browserWindow.attachLogForwarder(agentExplorerWindow, 'agent');
+
+  agentExplorerWindow.on('closed', () => {
+    console.log('[AgentExplorer] Window closed');
+    agentExplorerWindow = null;
+  });
+
+  agentExplorerWindow.loadFile('agent-explorer.html').catch((err) => {
+    console.error('[AgentExplorer] Error loading agent-explorer.html:', err);
+  });
+  windowRegistry.register('agent-explorer', agentExplorerWindow);
+
+  agentExplorerWindow.webContents.on('did-finish-load', () => {
+    console.log('[AgentExplorer] Window loaded successfully');
+  });
+
+  return agentExplorerWindow;
+}
+
 /**
  * Setup Agent Manager IPC handlers
  */
@@ -18412,6 +18594,13 @@ function setupAgentManagerIPC() {
   ipcMain.on('agent-manager:close', () => {
     if (agentManagerWindow && !agentManagerWindow.isDestroyed()) {
       agentManagerWindow.close();
+    }
+  });
+
+  // Close explorer window
+  ipcMain.on('agent-explorer:close', () => {
+    if (agentExplorerWindow && !agentExplorerWindow.isDestroyed()) {
+      agentExplorerWindow.close();
     }
   });
 
@@ -18806,6 +18995,134 @@ function setupAgentManagerIPC() {
       console.error('[AgentManager] Get agent bid history error:', error);
       return [];
     }
+  });
+
+  // ==================== TOOL THUMBNAILS ====================
+
+  const thumbDir = path.join(app.getPath('userData'), 'tool-thumbnails');
+
+  async function captureWithStrategy(url, strategy) {
+    let win;
+    try {
+      win = new BrowserWindow({
+        width: 1280,
+        height: 900,
+        show: false,
+        webPreferences: { nodeIntegration: false, contextIsolation: true, offscreen: true },
+      });
+
+      await win.loadURL(url);
+
+      if (strategy === 'extended-wait') {
+        await new Promise((r) => setTimeout(r, 5000));
+      } else {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+
+      if (strategy === 'scrolled') {
+        await win.webContents.executeJavaScript('window.scrollBy(0, 300)');
+        await new Promise((r) => setTimeout(r, 500));
+      }
+
+      const image = await win.webContents.capturePage();
+      return image.resize({ width: 400, height: 300 }).toPNG();
+    } finally {
+      if (win && !win.isDestroyed()) win.close();
+    }
+  }
+
+  async function scoreScreenshot(pngBuf) {
+    try {
+      const ai = require('./lib/ai-service');
+      const b64 = pngBuf.toString('base64');
+      const result = await ai.vision(b64, [
+        'Rate this website screenshot as a thumbnail preview (1-10).',
+        'Score LOW (1-3) if: mostly blank/white, login wall, cookie banner covering content,',
+        '  error page, loading spinner, CAPTCHA, or no meaningful content visible.',
+        'Score HIGH (7-10) if: actual page content visible, recognizable UI, informative.',
+        'Reply with ONLY a JSON object: {"score": N, "reason": "brief reason"}',
+      ].join('\n'), { profile: 'fast', feature: 'tool-thumbnail', maxTokens: 100 });
+
+      const text = result?.content || result?.message || '';
+      const match = text.match(/\{[^}]*"score"\s*:\s*(\d+)[^}]*\}/);
+      if (match) return parseInt(match[1], 10);
+      const numMatch = text.match(/\b(\d{1,2})\b/);
+      return numMatch ? parseInt(numMatch[1], 10) : 5;
+    } catch (err) {
+      console.warn('[AgentExplorer] Vision scoring unavailable:', err.message);
+      return -1;
+    }
+  }
+
+  async function generateToolThumbnail(toolId, url) {
+    if (!toolId || !url) return null;
+
+    const safeId = toolId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const thumbPath = path.join(thumbDir, `${safeId}.png`);
+
+    try {
+      if (!fs.existsSync(thumbDir)) {
+        fs.mkdirSync(thumbDir, { recursive: true });
+      }
+
+      const defaultBuf = await captureWithStrategy(url, 'default');
+      const defaultScore = await scoreScreenshot(defaultBuf);
+
+      if (defaultScore >= 6 || defaultScore === -1) {
+        fs.writeFileSync(thumbPath, defaultBuf);
+        return `data:image/png;base64,${defaultBuf.toString('base64')}`;
+      }
+
+      console.log(`[AgentExplorer] Default capture scored ${defaultScore}/10 for ${toolId}, trying alternatives`);
+
+      const candidates = [{ buf: defaultBuf, score: defaultScore }];
+
+      try {
+        const scrolledBuf = await captureWithStrategy(url, 'scrolled');
+        const scrolledScore = await scoreScreenshot(scrolledBuf);
+        candidates.push({ buf: scrolledBuf, score: scrolledScore });
+      } catch (_) {}
+
+      try {
+        const extBuf = await captureWithStrategy(url, 'extended-wait');
+        const extScore = await scoreScreenshot(extBuf);
+        candidates.push({ buf: extBuf, score: extScore });
+      } catch (_) {}
+
+      candidates.sort((a, b) => b.score - a.score);
+      const best = candidates[0];
+
+      console.log(`[AgentExplorer] Best capture scored ${best.score}/10 for ${toolId}`);
+      fs.writeFileSync(thumbPath, best.buf);
+      return `data:image/png;base64,${best.buf.toString('base64')}`;
+    } catch (err) {
+      console.error('[AgentExplorer] Thumbnail capture error:', err.message);
+      return null;
+    }
+  }
+
+  ipcMain.handle('agent-explorer:refresh-tool-thumbnail', async (_event, toolId, url) => {
+    if (!toolId || !url) return null;
+    const safeId = toolId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const thumbPath = path.join(thumbDir, `${safeId}.png`);
+    try { if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath); } catch (_) {}
+    return generateToolThumbnail(toolId, url);
+  });
+
+  ipcMain.handle('agent-explorer:get-tool-thumbnail', async (_event, toolId, url) => {
+    if (!toolId || !url) return null;
+
+    const safeId = toolId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const thumbPath = path.join(thumbDir, `${safeId}.png`);
+
+    try {
+      if (fs.existsSync(thumbPath)) {
+        const buf = fs.readFileSync(thumbPath);
+        return `data:image/png;base64,${buf.toString('base64')}`;
+      }
+    } catch (_) {}
+
+    return generateToolThumbnail(toolId, url);
   });
 
   console.log('[AgentManager] IPC handlers registered');
@@ -20347,28 +20664,29 @@ function setupSplashIPC() {
 // ==================== INTRO WIZARD ====================
 
 /**
- * Create and show the intro wizard window
- * Shows intro for first-time users, or updates for returning users
+ * Create and show the mode card welcome window.
+ * Shows one rotating Conversational Experience Mode card per launch.
  */
-function createIntroWizardWindow(isFirstRun) {
+function createIntroWizardWindow() {
   if (introWizardWindow && !introWizardWindow.isDestroyed()) {
     introWizardWindow.focus();
     return introWizardWindow;
   }
 
-  console.log('[IntroWizard] Creating intro wizard window...');
+  console.log('[ModeCard] Creating mode card window...');
 
   introWizardWindow = new BrowserWindow({
-    width: 720,
-    height: 600,
-    minWidth: 600,
-    minHeight: 500,
+    width: 500,
+    height: 420,
+    minWidth: 400,
+    minHeight: 360,
     title: 'Welcome to Onereach.ai',
     frame: false,
     transparent: false,
-    backgroundColor: '#141414',
+    backgroundColor: '#0a0a0a',
     center: true,
-    resizable: true,
+    resizable: false,
+    skipTaskbar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -20380,98 +20698,60 @@ function createIntroWizardWindow(isFirstRun) {
   });
 
   introWizardWindow.on('closed', () => {
-    console.log('[IntroWizard] Window closed');
+    console.log('[ModeCard] Window closed');
     introWizardWindow = null;
-
-    if (isFirstRun) {
-      const mw = browserWindow.getMainWindow();
-      if (mw && !mw.isDestroyed() && mw.webContents) {
-        mw.webContents.send('show-welcome-overlay');
-      }
-    }
   });
   windowRegistry.register('intro-wizard', introWizardWindow);
 
-  // Load the intro wizard HTML
   introWizardWindow.loadFile('intro-wizard.html').catch((err) => {
-    console.error('[IntroWizard] Error loading intro-wizard.html:', err);
+    console.error('[ModeCard] Error loading intro-wizard.html:', err);
   });
 
   introWizardWindow.webContents.on('did-finish-load', () => {
-    console.log('[IntroWizard] Window loaded successfully');
+    console.log('[ModeCard] Window loaded successfully');
   });
 
   return introWizardWindow;
 }
 
 /**
- * Setup Intro Wizard IPC handlers
+ * Setup Mode Card IPC handlers
  */
 function setupIntroWizardIPC() {
   const { getSettingsManager } = require('./settings-manager');
-  const packageJson = require('./package.json');
 
-  // Get initialization data for the wizard
-  ipcMain.handle('intro-wizard:get-init-data', async () => {
+  ipcMain.handle('mode-card:get-index', async () => {
     const settings = getSettingsManager();
-    return {
-      currentVersion: packageJson.version,
-      lastSeenVersion: settings.getLastSeenVersion(),
-      isFirstRun: settings.isFirstRun(),
-    };
+    return settings.getModeCardIndex();
   });
 
-  // Mark current version as seen
-  ipcMain.handle('intro-wizard:mark-seen', async () => {
+  ipcMain.handle('mode-card:dismiss', async () => {
     const settings = getSettingsManager();
-    settings.setLastSeenVersion(packageJson.version);
-    console.log('[IntroWizard] Marked version as seen:', packageJson.version);
-    return true;
-  });
-
-  // Close the wizard window
-  ipcMain.handle('intro-wizard:close', async () => {
+    const next = settings.advanceModeCardIndex();
+    console.log('[ModeCard] Dismissed, next card index:', next);
     if (introWizardWindow && !introWizardWindow.isDestroyed()) {
       introWizardWindow.close();
     }
     return true;
   });
 
-  // Open Settings from wizard
-  ipcMain.handle('intro-wizard:open-settings', async () => {
-    if (typeof global.openSettingsWindowGlobal === 'function') {
-      global.openSettingsWindowGlobal();
-    }
-    return true;
-  });
-
-  console.log('[IntroWizard] IPC handlers registered');
+  console.log('[ModeCard] IPC handlers registered');
 }
 
 /**
- * Check if intro wizard should be shown and show it
- * Call this after the main window is ready
+ * Show mode card welcome on every launch.
+ * One rotating card per load -- no version gating.
  */
 function checkAndShowIntroWizard() {
   const { getSettingsManager } = require('./settings-manager');
-  const packageJson = require('./package.json');
-
   const settings = getSettingsManager();
-  const currentVersion = packageJson.version;
 
-  if (settings.shouldShowIntroWizard(currentVersion)) {
-    const isFirstRun = settings.isFirstRun();
-    console.log(
-      `[IntroWizard] Showing wizard - ${isFirstRun ? 'First run' : 'Update from ' + settings.getLastSeenVersion()}`
-    );
+  const cardIndex = settings.getModeCardIndex();
+  console.log('[ModeCard] Showing card index:', cardIndex);
 
-    // Delay slightly to let main window finish loading
-    setTimeout(() => {
-      createIntroWizardWindow(isFirstRun);
-    }, 500);
-  } else {
-    console.log('[IntroWizard] Not showing - already seen version', currentVersion);
-  }
+  setTimeout(() => {
+    createIntroWizardWindow();
+  }, 500);
 }
 
 // Export functions for use in other modules
@@ -20491,6 +20771,8 @@ module.exports = {
   checkAndShowIntroWizard,
   // Agent Manager
   createAgentManagerWindow,
+  // Agent Explorer
+  createAgentExplorerWindow,
   // Memory Editor
   createMemoryEditorWindow,
   // Claude Code UI

@@ -538,6 +538,18 @@ class SettingsManager {
     return this.compareVersions(currentVersion, lastSeen) > 0;
   }
 
+  // Mode card rotation (welcome experience)
+  getModeCardIndex() {
+    return this.get('modeCardIndex') || 0;
+  }
+
+  advanceModeCardIndex() {
+    const current = this.getModeCardIndex();
+    const next = (current + 1) % 9;
+    this.set('modeCardIndex', next);
+    return next;
+  }
+
   /**
    * Compare semantic versions
    * @returns 1 if a > b, -1 if a < b, 0 if equal

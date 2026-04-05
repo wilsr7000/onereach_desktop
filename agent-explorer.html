@@ -1,0 +1,2142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self' *; style-src 'self' 'unsafe-inline' * https://fonts.googleapis.com; style-src-elem 'self' 'unsafe-inline' * https://fonts.googleapis.com; font-src 'self' data: * https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; connect-src 'self' *; img-src 'self' data: blob:">
+  <title>Agent Explorer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #1a1a24;
+      --surface: rgba(255,255,255,0.03);
+      --surface-2: rgba(255,255,255,0.05);
+      --border: rgba(255,255,255,0.08);
+      --border-bright: rgba(255,255,255,0.15);
+      --text: #e0e0e0;
+      --text-dim: #999;
+      --text-dimmer: #666;
+      --accent: #8b5cf6;
+      --accent-light: #c4b5fd;
+      --accent-dim: rgba(139,92,246,0.15);
+      --accent-dimmer: rgba(139,92,246,0.06);
+      --amber: #fbbf24;
+      --blue: #0099ff;
+      --red: #ef4444;
+      --purple: #a78bfa;
+      --green: #22c55e;
+      --teal: #06b6d4;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── NAV / TITLEBAR ── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px 0 32px;
+      height: 56px;
+      background: rgba(13,13,15,0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      -webkit-app-region: drag;
+    }
+
+    .nav-logo {
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: -0.01em;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-logo-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #8b5cf6;
+      box-shadow: 0 0 8px rgba(139,92,246,0.6);
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      -webkit-app-region: no-drag;
+    }
+
+    .btn-ghost {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      color: #ccc;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-ghost:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
+
+    .btn-danger { border-color: rgba(239,68,68,0.3); color: #fca5a5; }
+    .btn-danger:hover { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.4); color: #fca5a5; }
+
+    .btn-accent {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: none;
+      background: var(--blue);
+      color: #fff;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-accent:hover { background: #0080dd; }
+
+    .titlebar-close {
+      width: 32px; height: 32px;
+      border: none;
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 18px;
+      cursor: pointer;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .titlebar-close:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
+
+    /* ── MAIN LAYOUT ── */
+    .layout {
+      display: grid;
+      grid-template-columns: 220px 1fr 280px;
+      gap: 0;
+      padding-top: 56px;
+      min-height: 100vh;
+    }
+
+    /* ── LEFT SIDEBAR ── */
+    .sidebar-left {
+      position: sticky;
+      top: 56px;
+      height: calc(100vh - 56px);
+      padding: 24px 16px;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      overflow-y: auto;
+      animation: fadeUp 0.4s ease both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .sidebar-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-dimmer);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 14px 10px 6px;
+    }
+
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: all 0.15s;
+      color: var(--text-dim);
+      font-size: 13.5px;
+      border: 1px solid transparent;
+    }
+
+    .sidebar-item:hover { background: var(--surface-2); color: var(--text); }
+
+    .sidebar-item.active {
+      background: var(--accent-dimmer);
+      color: var(--accent-light);
+      border-color: rgba(139,92,246,0.3);
+    }
+
+    .sidebar-item-icon {
+      width: 16px;
+      height: 16px;
+      opacity: 0.5;
+      margin-right: 9px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-item.active .sidebar-item-icon { opacity: 1; }
+
+    .sidebar-item-left { display: flex; align-items: center; }
+
+    .sidebar-count {
+      font-size: 11px;
+      color: var(--text-dimmer);
+      background: rgba(255,255,255,0.05);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    .sidebar-item.active .sidebar-count {
+      background: var(--accent-dim);
+      color: var(--accent-light);
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 8px 0;
+    }
+
+    /* ── MAIN CONTENT ── */
+    .main {
+      padding: 28px 32px;
+      overflow-y: auto;
+      height: calc(100vh - 56px);
+      animation: fadeUp 0.4s ease 0.05s both;
+    }
+
+    .main-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .main-title {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      line-height: 1;
+      margin-bottom: 6px;
+      color: #fff;
+    }
+
+    .main-sub {
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 10px 14px;
+      margin-bottom: 24px;
+      transition: border-color 0.15s;
+    }
+
+    .search-bar:focus-within { border-color: var(--border-bright); }
+
+    .search-icon { color: var(--text-dimmer); flex-shrink: 0; }
+
+    .search-bar input {
+      background: none;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      flex: 1;
+    }
+
+    .search-bar input::placeholder { color: var(--text-dimmer); }
+
+    .search-hint {
+      font-size: 11px;
+      color: var(--text-dimmer);
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
+
+    .filter-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      padding: 5px 12px;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+      background: transparent;
+      font-family: inherit;
+    }
+
+    .chip:hover { border-color: var(--border-bright); color: var(--text); }
+
+    .chip.active {
+      border-color: rgba(139,92,246,0.4);
+      color: var(--accent-light);
+      background: var(--accent-dimmer);
+    }
+
+    /* Featured banner */
+    .featured {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px 24px;
+      margin-bottom: 28px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .featured::before {
+      content: '';
+      position: absolute;
+      top: -60px; right: -40px;
+      width: 220px; height: 220px;
+      background: radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .featured-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accent-light);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .featured-tag-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 2s ease infinite;
+    }
+
+    .featured-title {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 7px;
+      line-height: 1.1;
+      color: #fff;
+    }
+
+    .featured-desc {
+      color: var(--text-dim);
+      font-size: 13px;
+      max-width: 460px;
+      line-height: 1.55;
+      margin-bottom: 16px;
+    }
+
+    .featured-meta {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .meta-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-dimmer); }
+
+    .featured-visual {
+      width: 120px;
+      height: 90px;
+      border-radius: 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .mini-chart {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 40px;
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      padding: 0 10px;
+      opacity: 0.4;
+    }
+
+    .mini-bar {
+      flex: 1;
+      background: var(--accent-light);
+      border-radius: 2px 2px 0 0;
+    }
+
+    /* Agent grid */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: #fff;
+    }
+
+    .section-link {
+      font-size: 11px;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: color 0.15s;
+      letter-spacing: 0.02em;
+    }
+
+    .section-link:hover { color: var(--accent); }
+
+    .agent-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+
+    .agent-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+      animation: fadeUp 0.4s ease both;
+    }
+
+    .agent-card:hover {
+      border-color: rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.05);
+    }
+
+    .agent-card.disabled { opacity: 0.45; }
+
+    .card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .agent-icon {
+      width: 36px; height: 36px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    .agent-icon img.thumb {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 9px;
+    }
+
+    .card-thumb {
+      position: relative;
+      width: calc(100% + 32px);
+      margin: -16px -16px 12px -16px;
+      height: 140px;
+      overflow: hidden;
+      background: rgba(255,255,255,0.02);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .card-thumb-placeholder {
+      color: #555;
+      font-size: 11px;
+    }
+
+    .thumb-refresh {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(0,0,0,0.55);
+      color: rgba(255,255,255,0.6);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.15s, background 0.15s;
+      z-index: 2;
+      backdrop-filter: blur(4px);
+    }
+
+    .card-thumb:hover .thumb-refresh,
+    .thumb-refresh:focus { opacity: 1; }
+
+    .thumb-refresh:hover {
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      border-color: rgba(255,255,255,0.25);
+    }
+
+    .thumb-refresh.spinning svg {
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .card-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      text-transform: uppercase;
+    }
+
+    .badge-builtin { background: rgba(139,92,246,0.2); color: #c4b5fd; }
+    .badge-custom { background: rgba(34,197,94,0.2); color: #86efac; }
+    .badge-popular { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    .badge-meeting { background: rgba(139,92,246,0.15); color: #c4b5fd; }
+    .badge-tool { background: rgba(59,130,246,0.2); color: #93c5fd; }
+    .badge-idw { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    .badge-idw-installed { background: rgba(34,197,94,0.2); color: #86efac; }
+
+    .card-name {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 5px;
+      color: #fff;
+    }
+
+    .card-desc {
+      color: #999;
+      font-size: 13px;
+      line-height: 1.5;
+      margin-bottom: 14px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-tags { display: flex; gap: 5px; }
+
+    .tag {
+      font-size: 11px;
+      color: var(--accent-light);
+      background: rgba(139,92,246,0.15);
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+
+    .card-stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: #888;
+    }
+
+    /* Toggle switch */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 34px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: var(--surface-2);
+      border: 1px solid var(--border-bright);
+      border-radius: 18px;
+      transition: all 0.2s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      height: 12px; width: 12px;
+      left: 2px; bottom: 2px;
+      background: var(--text-dim);
+      border-radius: 50%;
+      transition: all 0.2s;
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background: rgba(139,92,246,0.2);
+      border-color: rgba(139,92,246,0.4);
+    }
+
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(16px);
+      background: #8b5cf6;
+    }
+
+    /* Icon colors (matched to agent-manager palette) */
+    .ic-green { background: rgba(34,197,94,0.15); }
+    .ic-blue { background: rgba(59,130,246,0.15); }
+    .ic-amber { background: rgba(251,191,36,0.15); }
+    .ic-purple { background: rgba(139,92,246,0.15); }
+    .ic-red { background: rgba(239,68,68,0.15); }
+    .ic-teal { background: rgba(6,182,212,0.15); }
+
+    /* ── RIGHT PANEL ── */
+    .sidebar-right {
+      position: sticky;
+      top: 56px;
+      height: calc(100vh - 56px);
+      padding: 24px 20px;
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+      animation: fadeUp 0.4s ease 0.1s both;
+    }
+
+    .panel-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: #888;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #888;
+    }
+
+    .trending-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .trending-item:hover .trending-name { color: var(--accent); }
+    .trending-item:last-child { border-bottom: none; }
+
+    .trending-rank {
+      font-size: 11px;
+      color: var(--text-dimmer);
+      width: 16px;
+      flex-shrink: 0;
+    }
+
+    .trending-icon {
+      width: 28px; height: 28px;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+
+    .trending-info { flex: 1; min-width: 0; }
+    .trending-name { font-size: 12.5px; font-weight: 500; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .trending-cat { font-size: 11px; color: var(--text-dimmer); }
+
+    .trending-stat {
+      font-size: 11px;
+      color: var(--green);
+      flex-shrink: 0;
+    }
+
+    .activity-item {
+      display: flex;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .activity-item:last-child { border-bottom: none; }
+
+    .activity-dot {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .activity-text { font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+    .activity-text strong { color: var(--text); font-weight: 500; }
+    .activity-time {
+      font-size: 10px;
+      color: var(--text-dimmer);
+      margin-top: 3px;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+
+    .status-live { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); animation: pulse 1.8s ease infinite; }
+
+    /* Detail overlay */
+    .detail-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      align-items: center;
+      justify-content: center;
+    }
+
+    .detail-overlay.visible { display: flex; }
+
+    .detail-panel {
+      background: var(--surface);
+      border: 1px solid var(--border-bright);
+      border-radius: 14px;
+      width: 520px;
+      max-height: 80vh;
+      overflow-y: auto;
+      padding: 28px;
+      animation: fadeUp 0.25s ease;
+    }
+
+    .detail-close {
+      float: right;
+      width: 28px; height: 28px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .detail-close:hover { background: var(--surface-2); color: var(--text); }
+
+    .detail-header { display: flex; gap: 16px; margin-bottom: 20px; }
+
+    .detail-icon {
+      width: 52px; height: 52px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+
+    .detail-title {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 4px;
+      color: #fff;
+    }
+
+    .detail-category {
+      font-size: 11px;
+      color: #888;
+    }
+
+    .detail-desc {
+      color: var(--text-dim);
+      font-size: 13.5px;
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+
+    .detail-stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .detail-stat {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: center;
+    }
+
+    .detail-stat-value {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+
+    .detail-stat-label {
+      font-size: 10px;
+      color: #888;
+    }
+
+    .detail-keywords {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-bottom: 20px;
+    }
+
+    .detail-actions {
+      display: flex;
+      gap: 8px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .detail-actions .btn-accent,
+    .detail-actions .btn-ghost { flex: 1; text-align: center; }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--text-dimmer);
+    }
+
+    .empty-state-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #ccc;
+      margin-bottom: 6px;
+    }
+
+    /* Scrollbar */
+    * { scrollbar-width: thin; scrollbar-color: #3a3a4a #1a1a24; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: var(--bg); border-radius: 5px; }
+    ::-webkit-scrollbar-thumb { background: #3a3a4a; border-radius: 5px; border: 2px solid var(--bg); }
+    ::-webkit-scrollbar-thumb:hover { background: #4a4a5a; }
+    ::-webkit-scrollbar-corner { background: var(--bg); }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-logo">
+      <div class="nav-logo-dot"></div>
+      Agent Explorer
+    </div>
+    <div class="nav-right">
+      <button class="btn-ghost" id="openManagerBtn">Manage Agents</button>
+      <button class="btn-ghost" id="addIDWBtn">Add IDW</button>
+      <button class="btn-accent" id="buildAgentBtn">Build Agent</button>
+      <button class="titlebar-close" id="closeBtn">&times;</button>
+    </div>
+  </nav>
+
+  <!-- LAYOUT -->
+  <div class="layout">
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar-left">
+      <div class="sidebar-label">Categories</div>
+
+      <div class="sidebar-item active" data-category="all" onclick="filterCategory('all')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+          All Agents
+        </div>
+        <span class="sidebar-count" id="count-all">0</span>
+      </div>
+
+      <div class="sidebar-item" data-category="productivity" onclick="filterCategory('productivity')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg>
+          Productivity
+        </div>
+        <span class="sidebar-count" id="count-productivity">0</span>
+      </div>
+
+      <div class="sidebar-item" data-category="information" onclick="filterCategory('information')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M10.5 10.5L14 14" stroke-linecap="round"/></svg>
+          Information
+        </div>
+        <span class="sidebar-count" id="count-information">0</span>
+      </div>
+
+      <div class="sidebar-item" data-category="media" onclick="filterCategory('media')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2l1.5 4.5H14l-3.5 2.7 1.3 4.3L8 11l-3.8 2.5 1.3-4.3L2 6.5h4.5z"/></svg>
+          Media &amp; Creative
+        </div>
+        <span class="sidebar-count" id="count-media">0</span>
+      </div>
+
+      <div class="sidebar-item" data-category="system" onclick="filterCategory('system')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.9 2.9l1.4 1.4M11.7 11.7l1.4 1.4M2.9 13.1l1.4-1.4M11.7 4.3l1.4-1.4"/></svg>
+          System
+        </div>
+        <span class="sidebar-count" id="count-system">0</span>
+      </div>
+
+      <div class="sidebar-item" data-category="utility" onclick="filterCategory('utility')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2l-1 5 5-1-8 8 1-5-5 1z"/></svg>
+          Utility
+        </div>
+        <span class="sidebar-count" id="count-utility">0</span>
+      </div>
+
+      <div class="sidebar-item" data-category="communication" onclick="filterCategory('communication')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="9" rx="1.5"/><path d="M5 6h6M5 9h4"/></svg>
+          Communication
+        </div>
+        <span class="sidebar-count" id="count-communication">0</span>
+      </div>
+
+      <div class="divider"></div>
+      <div class="sidebar-label">Source</div>
+
+      <div class="sidebar-item" data-category="custom" onclick="filterCategory('custom')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
+          Custom Agents
+        </div>
+        <span class="sidebar-count" id="count-custom">0</span>
+      </div>
+
+      <div class="sidebar-item" data-category="tools" onclick="filterCategory('tools')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.5 2.5l4 4M10 6l-6.5 6.5L2 14l1.5-1.5L10 6z"/><path d="M11 2l3 3-1 1-3-3z"/></svg>
+          Tools
+        </div>
+        <span class="sidebar-count" id="count-tools">0</span>
+      </div>
+
+      <div class="divider"></div>
+      <div class="sidebar-label">Marketplace</div>
+
+      <div class="sidebar-item" data-category="idw" onclick="filterCategory('idw')">
+        <div class="sidebar-item-left">
+          <svg class="sidebar-item-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 6h6M5 8.5h4M5 11h5"/></svg>
+          IDW Store
+        </div>
+        <span class="sidebar-count" id="count-idw">0</span>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main">
+      <div class="main-header">
+        <div>
+          <h1 class="main-title">Agent Explorer</h1>
+          <p class="main-sub" id="agentSubtitle">Loading agents...</p>
+        </div>
+      </div>
+
+      <div class="search-bar">
+        <svg class="search-icon" width="15" height="15" viewBox="0 0 15 15" fill="none"><circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <input type="text" id="searchInput" placeholder="Search agents, capabilities, or keywords...">
+        <span class="search-hint">Search</span>
+      </div>
+
+      <div class="filter-row">
+        <button class="chip active" data-filter="all" onclick="filterChip('all')">All</button>
+        <button class="chip" data-filter="builtin" onclick="filterChip('builtin')">Built-in</button>
+        <button class="chip" data-filter="custom" onclick="filterChip('custom')">Custom</button>
+        <button class="chip" data-filter="enabled" onclick="filterChip('enabled')">Enabled</button>
+        <button class="chip" data-filter="meeting" onclick="filterChip('meeting')">Meeting</button>
+        <button class="chip" data-filter="tools" onclick="filterChip('tools')">Tools</button>
+        <button class="chip" data-filter="idw" onclick="filterChip('idw')">IDWs</button>
+      </div>
+
+      <div id="featuredBanner"></div>
+
+      <div class="section-header">
+        <div class="section-title" id="gridTitle">All agents</div>
+        <div class="section-link" id="gridCount"></div>
+      </div>
+
+      <div class="agent-grid" id="agentGrid"></div>
+
+      <div id="emptyState" style="display:none;">
+        <div class="empty-state">
+          <div class="empty-state-title">No agents match your filters</div>
+          <p style="color:var(--text-dimmer);font-size:13px;">Try a different search term or category.</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT SIDEBAR -->
+    <aside class="sidebar-right">
+      <div class="panel-title">Platform stats</div>
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--accent-light);" id="statTotalRuns">--</div>
+          <div class="stat-label">total runs</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statTotalAgents">--</div>
+          <div class="stat-label">agents</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--green);" id="statEnabled">--</div>
+          <div class="stat-label">enabled</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--amber);" id="statCategories">6</div>
+          <div class="stat-label">categories</div>
+        </div>
+      </div>
+
+      <div class="divider" style="margin-bottom:16px;"></div>
+
+      <div class="panel-title">Most active</div>
+      <div id="trendingList">
+        <div style="color:var(--text-dimmer);font-size:12px;padding:8px 0;">No activity yet</div>
+      </div>
+
+      <div class="divider" style="margin:16px 0;"></div>
+
+      <div class="panel-title">Recent activity</div>
+      <div id="activityFeed">
+        <div style="color:var(--text-dimmer);font-size:12px;padding:8px 0;">No recent bids</div>
+      </div>
+
+      <div class="divider" style="margin:16px 0;"></div>
+
+      <div style="background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.2);border-radius:12px;padding:16px;">
+        <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:6px;">Build your own agent</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.5;">Create a custom voice agent with the Agent Composer.</div>
+        <button class="btn-accent" style="width:100%;font-size:12.5px;padding:8px;" onclick="openComposer()">Open Composer</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- DETAIL OVERLAY -->
+  <div class="detail-overlay" id="detailOverlay" onclick="if(event.target===this)closeDetail()">
+    <div class="detail-panel" id="detailPanel"></div>
+  </div>
+
+  <script>
+    // ==================== CONSTANTS ====================
+
+    const CATEGORY_LABELS = {
+      productivity: 'Productivity',
+      information: 'Information',
+      media: 'Media & Creative',
+      system: 'System',
+      utility: 'Utility',
+      communication: 'Communication',
+    };
+
+    const CATEGORY_MAP = {
+      'calendar-query-agent': 'productivity',
+      'calendar-create-agent': 'productivity',
+      'calendar-edit-agent': 'productivity',
+      'calendar-delete-agent': 'productivity',
+      'action-item-agent': 'productivity',
+      'email-agent': 'productivity',
+      'daily-brief-agent': 'productivity',
+      'time-agent': 'information',
+      'weather-agent': 'information',
+      'search-agent': 'information',
+      'browsing-agent': 'information',
+      'browser-agent': 'information',
+      'docs-agent': 'information',
+      'dj-agent': 'media',
+      'recorder-agent': 'media',
+      'sound-effects-agent': 'media',
+      'spaces-agent': 'system',
+      'app-agent': 'system',
+      'memory-agent': 'system',
+      'help-agent': 'system',
+      'error-agent': 'system',
+      'orchestrator-agent': 'system',
+      'spelling-agent': 'utility',
+      'smalltalk-agent': 'utility',
+      'playbook-agent': 'utility',
+      'meeting-monitor-agent': 'communication',
+      'meeting-notes-agent': 'communication',
+      'decision-agent': 'communication',
+      'tickets-agent': 'utility',
+      'teacher-agent': 'information',
+      'playbooks-launch-agent': 'productivity',
+      'media-agent': 'media',
+    };
+
+    const AGENT_UI = {
+      'calendar-query-agent':    { icon: '&#128197;', color: 'blue' },
+      'calendar-create-agent':   { icon: '&#128197;', color: 'blue' },
+      'calendar-edit-agent':     { icon: '&#128197;', color: 'blue' },
+      'calendar-delete-agent':   { icon: '&#128197;', color: 'blue' },
+      'action-item-agent':       { icon: '&#9745;',   color: 'green' },
+      'email-agent':             { icon: '&#9993;',   color: 'amber' },
+      'daily-brief-agent':       { icon: '&#9788;',   color: 'amber' },
+      'time-agent':              { icon: '&#128336;', color: 'blue' },
+      'weather-agent':           { icon: '&#9925;',   color: 'teal' },
+      'search-agent':            { icon: '&#128269;', color: 'purple' },
+      'browsing-agent':          { icon: '&#127760;', color: 'teal' },
+      'browser-agent':           { icon: '&#128421;', color: 'blue' },
+      'docs-agent':              { icon: '&#128214;', color: 'purple' },
+      'teacher-agent':           { icon: '&#127891;', color: 'blue' },
+      'dj-agent':                { icon: '&#127925;', color: 'purple' },
+      'recorder-agent':          { icon: '&#127909;', color: 'red' },
+      'sound-effects-agent':     { icon: '&#127926;', color: 'amber' },
+      'media-agent':             { icon: '&#127926;', color: 'amber' },
+      'spaces-agent':            { icon: '&#128451;', color: 'blue' },
+      'app-agent':               { icon: '&#128736;', color: 'green' },
+      'memory-agent':            { icon: '&#129504;', color: 'purple' },
+      'help-agent':              { icon: '&#10067;',  color: 'amber' },
+      'error-agent':             { icon: '&#9888;',   color: 'red' },
+      'orchestrator-agent':      { icon: '&#9881;',   color: 'blue' },
+      'spelling-agent':          { icon: '&#128221;', color: 'green' },
+      'smalltalk-agent':         { icon: '&#128172;', color: 'amber' },
+      'playbook-agent':          { icon: '&#9654;',   color: 'teal' },
+      'playbooks-launch-agent':  { icon: '&#128640;', color: 'teal' },
+      'meeting-monitor-agent':   { icon: '&#128225;', color: 'red' },
+      'meeting-notes-agent':     { icon: '&#9998;',   color: 'green' },
+      'decision-agent':          { icon: '&#9878;',   color: 'purple' },
+      'tickets-agent':           { icon: '&#127915;', color: 'amber' },
+    };
+
+    // ==================== STATE ====================
+
+    let allAgents = [];
+    let agentStats = {};
+    let bidHistory = [];
+    let enabledStates = {};
+    let currentCategory = 'all';
+    let currentChipFilter = 'all';
+    let searchQuery = '';
+
+    // ==================== DATA LOADING ====================
+
+    async function loadData() {
+      try {
+        const [builtinAgents, builtinStates, localAgents, stats, history, webTools, idwDir] = await Promise.all([
+          window.agentExplorer.getBuiltinAgents().catch(() => []),
+          window.agentExplorer.getBuiltinAgentStates().catch(() => ({})),
+          window.agentExplorer.getLocalAgents().catch(() => []),
+          window.agentExplorer.getAllStats().catch(() => ({})),
+          window.agentExplorer.getBidHistory(20).catch(() => []),
+          window.agentExplorer.getWebTools().catch(() => []),
+          window.agentExplorer.fetchIDWDirectory().catch(() => null),
+        ]);
+
+        enabledStates = builtinStates || {};
+        agentStats = stats || {};
+        bidHistory = history || [];
+
+        const builtin = (builtinAgents || []).map(a => ({
+          ...a,
+          itemType: 'agent',
+          builtin: true,
+          enabled: enabledStates[a.id] !== false,
+          category: CATEGORY_MAP[a.id] || a.categories?.[0] || 'system',
+          ui: AGENT_UI[a.id] || { icon: '&#129302;', color: 'blue' },
+          stats: agentStats[a.id] || null,
+        }));
+
+        const custom = (localAgents || []).map(a => ({
+          ...a,
+          itemType: 'agent',
+          builtin: false,
+          enabled: a.enabled !== false,
+          category: CATEGORY_MAP[a.id] || a.categories?.[0] || 'utility',
+          ui: { icon: '&#129302;', color: 'teal' },
+          stats: agentStats[a.id] || null,
+        }));
+
+        const tools = (webTools || []).map(t => ({
+          id: t.id,
+          name: t.name || 'Unnamed Tool',
+          description: t.description || t.url || '',
+          url: t.url,
+          docsUrl: t.docsUrl,
+          windowSize: t.windowSize,
+          itemType: 'tool',
+          builtin: false,
+          enabled: true,
+          category: 'tools',
+          categories: ['tool'],
+          keywords: [t.type || 'weblink'],
+          ui: { icon: '&#128279;', color: 'blue' },
+          stats: null,
+        }));
+
+        let idws = [];
+        let installedEnvs = [];
+        try {
+          installedEnvs = await window.agentExplorer.getIDWEnvironments() || [];
+        } catch (_) {}
+        const installedIds = new Set(installedEnvs.map(e => e.id).filter(Boolean));
+        const catalogIdSet = new Set();
+
+        if (idwDir && idwDir.availableIDWs) {
+          const catalog = idwDir.availableIDWs.all || [];
+          idws = catalog.map(d => {
+            catalogIdSet.add(d.id);
+            catalogIdSet.add(`store-${d.id}`);
+            return {
+              id: d.id,
+              name: d.name || 'Unnamed IDW',
+              description: d.description || '',
+              developer: d.developer,
+              rating: d.rating,
+              reviewCount: d.reviewCount,
+              version: d.version,
+              pricing: d.pricing,
+              idwUrl: d.url,
+              homePageURL: d.homePageURL,
+              idwCategory: d.category,
+              tags: d.tags || [],
+              installed: installedIds.has(d.id) || installedIds.has(`store-${d.id}`),
+              itemType: 'idw',
+              builtin: false,
+              enabled: installedIds.has(d.id) || installedIds.has(`store-${d.id}`),
+              category: 'idw',
+              categories: [d.category || 'idw'].filter(Boolean),
+              keywords: d.tags || [],
+              ui: { icon: '&#127968;', color: d._featured ? 'purple' : 'amber' },
+              stats: null,
+              _raw: d,
+            };
+          });
+        }
+
+        const localIdws = installedEnvs
+          .filter(e => e.id && !catalogIdSet.has(e.id) && !catalogIdSet.has(e.storeData?.idwId))
+          .map(e => ({
+            id: e.id,
+            name: e.label || e.id,
+            description: e.description || '',
+            developer: e.storeData?.developer || '',
+            idwUrl: e.chatUrl || '',
+            homePageURL: e.homeUrl || '',
+            idwCategory: e.category || '',
+            tags: [],
+            installed: true,
+            itemType: 'idw',
+            builtin: false,
+            enabled: true,
+            category: 'idw',
+            categories: [e.category || 'idw'].filter(Boolean),
+            keywords: [],
+            ui: { icon: '&#127968;', color: 'green' },
+            stats: null,
+            _menuEntry: e,
+          }));
+
+        allAgents = [...builtin, ...custom, ...tools, ...idws, ...localIdws];
+        render();
+      } catch (err) {
+        console.error('[AgentExplorer] Load error:', err);
+      }
+    }
+
+    // ==================== FILTERING ====================
+
+    function getFilteredAgents() {
+      let list = allAgents;
+
+      if (currentCategory === 'custom') {
+        list = list.filter(a => a.itemType === 'agent' && !a.builtin);
+      } else if (currentCategory === 'tools') {
+        list = list.filter(a => a.itemType === 'tool');
+      } else if (currentCategory === 'idw') {
+        list = list.filter(a => a.itemType === 'idw');
+      } else if (currentCategory !== 'all') {
+        list = list.filter(a => a.category === currentCategory);
+      }
+
+      if (currentChipFilter === 'builtin') {
+        list = list.filter(a => a.builtin);
+      } else if (currentChipFilter === 'custom') {
+        list = list.filter(a => a.itemType === 'agent' && !a.builtin);
+      } else if (currentChipFilter === 'enabled') {
+        list = list.filter(a => a.enabled);
+      } else if (currentChipFilter === 'meeting') {
+        list = list.filter(a => a.category === 'communication' || (a.categories && a.categories.includes('meeting')));
+      } else if (currentChipFilter === 'tools') {
+        list = list.filter(a => a.itemType === 'tool');
+      } else if (currentChipFilter === 'idw') {
+        list = list.filter(a => a.itemType === 'idw');
+      }
+
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        list = list.filter(a =>
+          a.name?.toLowerCase().includes(q) ||
+          a.description?.toLowerCase().includes(q) ||
+          (a.keywords || []).some(k => k.toLowerCase().includes(q)) ||
+          (a.categories || []).some(c => c.toLowerCase().includes(q)) ||
+          (a.capabilities || []).some(c => c.toLowerCase().includes(q))
+        );
+      }
+
+      return list;
+    }
+
+    function filterCategory(cat) {
+      currentCategory = cat;
+      document.querySelectorAll('.sidebar-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.category === cat);
+      });
+      renderGrid();
+    }
+
+    function filterChip(chip) {
+      currentChipFilter = chip;
+      document.querySelectorAll('.chip').forEach(el => {
+        el.classList.toggle('active', el.dataset.filter === chip);
+      });
+      renderGrid();
+    }
+
+    // ==================== RENDERING ====================
+
+    function render() {
+      renderSidebarCounts();
+      renderFeatured();
+      renderGrid();
+      renderStats();
+      renderTrending();
+      renderActivity();
+    }
+
+    function renderSidebarCounts() {
+      const agents = allAgents.filter(a => a.itemType === 'agent');
+      const customAgents = agents.filter(a => !a.builtin);
+      const toolItems = allAgents.filter(a => a.itemType === 'tool');
+      const idwItems = allAgents.filter(a => a.itemType === 'idw');
+
+      document.getElementById('count-all').textContent = allAgents.length.toLocaleString();
+      document.getElementById('count-custom').textContent = customAgents.length.toLocaleString();
+      document.getElementById('count-tools').textContent = toolItems.length.toLocaleString();
+      document.getElementById('count-idw').textContent = idwItems.length.toLocaleString();
+
+      const cats = {};
+      agents.filter(a => a.builtin).forEach(a => {
+        const cat = a.category;
+        cats[cat] = (cats[cat] || 0) + 1;
+      });
+
+      Object.keys(CATEGORY_LABELS).forEach(key => {
+        const el = document.getElementById('count-' + key);
+        if (el) el.textContent = (cats[key] || 0).toString();
+      });
+
+      const parts = [];
+      parts.push(`${agents.length} agent${agents.length !== 1 ? 's' : ''}`);
+      if (toolItems.length) parts.push(`${toolItems.length} tool${toolItems.length !== 1 ? 's' : ''}`);
+      if (idwItems.length) parts.push(`${idwItems.length} IDW${idwItems.length !== 1 ? 's' : ''}`);
+      document.getElementById('agentSubtitle').textContent = parts.join(', ') + ' available';
+    }
+
+    function renderFeatured() {
+      const container = document.getElementById('featuredBanner');
+      let featured = allAgents.find(a => a.id === 'app-agent');
+
+      const agentsWithStats = allAgents
+        .filter(a => a.stats && a.stats.executions > 0)
+        .sort((a, b) => b.stats.executions - a.stats.executions);
+
+      if (agentsWithStats.length > 0) {
+        featured = agentsWithStats[0];
+      }
+
+      if (!featured) {
+        featured = allAgents[0];
+      }
+
+      if (!featured) {
+        container.innerHTML = '';
+        return;
+      }
+
+      const ui = featured.ui || { icon: '&#129302;', color: 'blue' };
+      const stats = featured.stats;
+      const execCount = stats ? stats.executions : 0;
+      const successRate = stats && stats.executions > 0
+        ? Math.round((stats.successes / stats.executions) * 100)
+        : 0;
+      const catLabel = CATEGORY_LABELS[featured.category] || featured.category;
+
+      container.innerHTML = `
+        <div class="featured">
+          <div>
+            <div class="featured-tag"><div class="featured-tag-dot"></div>Most Active Agent</div>
+            <div class="featured-title">${escapeHtml(featured.name)}</div>
+            <p class="featured-desc">${escapeHtml(featured.description || '')}</p>
+            <div class="featured-meta">
+              ${execCount > 0 ? `<div class="meta-item">${execCount.toLocaleString()} executions</div><div class="meta-dot"></div>` : ''}
+              ${successRate > 0 ? `<div class="meta-item" style="color:var(--green);">${successRate}% success</div><div class="meta-dot"></div>` : ''}
+              <div class="meta-item" style="color:var(--accent-light);">${catLabel}</div>
+              <div class="meta-dot"></div>
+              <div class="meta-item">${featured.builtin ? 'Built-in' : 'Custom'}</div>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:8px;">
+              <button class="btn-accent" style="font-size:12px;padding:7px 16px;" onclick="showDetail('${featured.id}')">View Details</button>
+            </div>
+          </div>
+          <div class="featured-visual">
+            <span style="font-size:32px;">${ui.icon}</span>
+            <div class="mini-chart">
+              <div class="mini-bar" style="height:30%"></div>
+              <div class="mini-bar" style="height:50%"></div>
+              <div class="mini-bar" style="height:40%"></div>
+              <div class="mini-bar" style="height:70%"></div>
+              <div class="mini-bar" style="height:60%"></div>
+              <div class="mini-bar" style="height:90%"></div>
+              <div class="mini-bar" style="height:75%"></div>
+              <div class="mini-bar" style="height:100%"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderGrid() {
+      const filtered = getFilteredAgents();
+      const grid = document.getElementById('agentGrid');
+      const empty = document.getElementById('emptyState');
+      const gridTitle = document.getElementById('gridTitle');
+      const gridCount = document.getElementById('gridCount');
+
+      const titleMap = { all: 'All items', custom: 'Custom agents', tools: 'Web Tools', idw: 'IDW Store' };
+      const catLabel = titleMap[currentCategory] || CATEGORY_LABELS[currentCategory] || currentCategory;
+
+      gridTitle.textContent = catLabel;
+      gridCount.textContent = `${filtered.length} item${filtered.length !== 1 ? 's' : ''}`;
+
+      if (filtered.length === 0) {
+        grid.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      grid.style.display = 'grid';
+      empty.style.display = 'none';
+
+      const topIds = new Set(
+        allAgents
+          .filter(a => a.stats && a.stats.executions > 0)
+          .sort((a, b) => b.stats.executions - a.stats.executions)
+          .slice(0, 5)
+          .map(a => a.id)
+      );
+
+      grid.innerHTML = filtered.map((agent, i) => {
+        const ui = agent.ui || { icon: '&#129302;', color: 'blue' };
+        const stats = agent.stats;
+        const execCount = stats ? stats.executions : 0;
+        const catLabel = CATEGORY_LABELS[agent.category] || agent.category;
+        const isEnabled = agent.enabled;
+
+        let badgeHtml = '';
+        if (agent.itemType === 'tool') {
+          badgeHtml = '<span class="badge badge-tool">TOOL</span>';
+        } else if (agent.itemType === 'idw') {
+          badgeHtml = agent.installed
+            ? '<span class="badge badge-idw-installed">INSTALLED</span>'
+            : '<span class="badge badge-idw">IDW</span>';
+        } else if (!agent.builtin) {
+          badgeHtml = '<span class="badge badge-custom">CUSTOM</span>';
+        } else if (topIds.has(agent.id)) {
+          badgeHtml = '<span class="badge badge-popular">POPULAR</span>';
+        } else if (agent.categories && agent.categories.includes('meeting')) {
+          badgeHtml = '<span class="badge badge-meeting">MEETING</span>';
+        } else {
+          badgeHtml = '<span class="badge badge-builtin">BUILT-IN</span>';
+        }
+
+        const tags = (agent.categories || []).slice(0, 2)
+          .map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('');
+
+        return `
+          <div class="agent-card ${isEnabled ? '' : 'disabled'}" data-id="${agent.id}" data-type="${agent.itemType}" ${agent.itemType === 'tool' && agent.url ? `data-url="${escapeHtml(agent.url)}"` : ''} style="animation-delay:${Math.min(i * 0.03, 0.3)}s" onclick="showDetail('${agent.id}')">
+            ${agent.itemType === 'tool' ? `<div class="card-thumb" id="thumb-${safeAttr(agent.id)}"><button class="thumb-refresh" title="Refresh preview" onclick="event.stopPropagation();refreshThumb('${agent.id}','${escapeHtml(agent.url || '')}',this)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button><span class="card-thumb-placeholder">Loading preview...</span></div>` : ''}
+            <div class="card-top">
+              <div class="agent-icon ic-${ui.color}">${ui.icon}</div>
+              <div class="card-actions">
+                ${badgeHtml}
+                ${agent.itemType === 'agent' ? `<label class="toggle-switch" onclick="event.stopPropagation()">
+                  <input type="checkbox" ${isEnabled ? 'checked' : ''}
+                    onchange="toggleAgent('${agent.id}', this.checked, ${agent.builtin})">
+                  <span class="toggle-slider"></span>` : '<label style="display:none">'}
+                </label>
+              </div>
+            </div>
+            <div class="card-name">${escapeHtml(agent.name)}</div>
+            <div class="card-desc">${escapeHtml(agent.description || '')}</div>
+            <div class="card-footer">
+              <div class="card-tags">${tags}</div>
+              <div class="card-stat">
+                ${agent.itemType === 'tool' ? 'Web Tool'
+                  : agent.itemType === 'idw' ? (agent.developer || 'IDW')
+                  : execCount > 0 ? execCount.toLocaleString() + ' runs' : catLabel}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      setTimeout(loadToolThumbnails, 100);
+    }
+
+    async function refreshThumb(toolId, url, btnEl) {
+      if (!toolId || !url) return;
+      if (btnEl) btnEl.classList.add('spinning');
+
+      const thumbEl = document.getElementById('thumb-' + safeAttr(toolId));
+      try {
+        const dataUrl = await window.agentExplorer.refreshToolThumbnail(toolId, url);
+        if (thumbEl && thumbEl.isConnected) {
+          const refreshBtn = thumbEl.querySelector('.thumb-refresh');
+          if (dataUrl) {
+            thumbEl.innerHTML = `<img src="${dataUrl}" alt="">`;
+          } else {
+            thumbEl.innerHTML = '<span class="card-thumb-placeholder">No preview</span>';
+          }
+          if (refreshBtn) thumbEl.prepend(refreshBtn);
+        }
+      } catch (err) {
+        console.error('[AgentExplorer] Refresh thumb error:', err);
+      }
+      if (btnEl) btnEl.classList.remove('spinning');
+    }
+
+    async function refreshDetailThumb(toolId, url, btnEl) {
+      if (!toolId || !url) return;
+      if (btnEl) btnEl.classList.add('spinning');
+      try {
+        const dataUrl = await window.agentExplorer.refreshToolThumbnail(toolId, url);
+        const el = document.getElementById('toolThumbPreview');
+        if (el) {
+          const refreshBtn = el.querySelector('.thumb-refresh');
+          if (dataUrl) {
+            el.innerHTML = `<img src="${dataUrl}" style="width:100%;display:block;border-radius:8px;" alt="Preview">`;
+          } else {
+            el.innerHTML = '<span style="color:#666;font-size:12px;">Preview unavailable</span>';
+          }
+          if (refreshBtn) el.prepend(refreshBtn);
+        }
+        // Also update the grid card thumbnail
+        const cardThumb = document.getElementById('thumb-' + safeAttr(toolId));
+        if (cardThumb && dataUrl) {
+          const cardBtn = cardThumb.querySelector('.thumb-refresh');
+          cardThumb.innerHTML = `<img src="${dataUrl}" alt="">`;
+          if (cardBtn) cardThumb.prepend(cardBtn);
+        }
+      } catch (err) {
+        console.error('[AgentExplorer] Refresh detail thumb error:', err);
+      }
+      if (btnEl) btnEl.classList.remove('spinning');
+    }
+
+    function loadToolThumbnails() {
+      const toolCards = document.querySelectorAll('.agent-card[data-type="tool"]');
+      toolCards.forEach(card => {
+        const toolId = card.dataset.id;
+        const toolUrl = card.dataset.url;
+        if (!toolId || !toolUrl) return;
+
+        const thumbEl = document.getElementById('thumb-' + safeAttr(toolId));
+        if (!thumbEl || thumbEl.dataset.loaded) return;
+        thumbEl.dataset.loaded = '1';
+
+        window.agentExplorer.getToolThumbnail(toolId, toolUrl).then(dataUrl => {
+          if (!thumbEl.isConnected) return;
+          if (dataUrl) {
+            thumbEl.innerHTML = `<img src="${dataUrl}" alt="">`;
+          } else {
+            thumbEl.innerHTML = '<span class="card-thumb-placeholder">No preview</span>';
+          }
+        }).catch(() => {
+          if (thumbEl.isConnected) {
+            thumbEl.innerHTML = '<span class="card-thumb-placeholder">No preview</span>';
+          }
+        });
+      });
+    }
+
+    function renderStats() {
+      let totalRuns = 0;
+      let enabledCount = 0;
+
+      allAgents.forEach(a => {
+        if (a.stats) totalRuns += (a.stats.executions || 0);
+        if (a.enabled) enabledCount++;
+      });
+
+      document.getElementById('statTotalRuns').textContent = totalRuns > 0 ? totalRuns.toLocaleString() : '0';
+      document.getElementById('statTotalAgents').textContent = allAgents.length.toString();
+      document.getElementById('statEnabled').textContent = enabledCount.toString();
+    }
+
+    function renderTrending() {
+      const container = document.getElementById('trendingList');
+      const ranked = allAgents
+        .filter(a => a.stats && a.stats.executions > 0)
+        .sort((a, b) => b.stats.executions - a.stats.executions)
+        .slice(0, 5);
+
+      if (ranked.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-dimmer);font-size:12px;padding:8px 0;">No activity yet</div>';
+        return;
+      }
+
+      container.innerHTML = ranked.map((agent, i) => {
+        const ui = agent.ui || { icon: '&#129302;', color: 'blue' };
+        const catLabel = CATEGORY_LABELS[agent.category] || agent.category;
+        const execs = agent.stats.executions;
+
+        return `
+          <div class="trending-item" onclick="showDetail('${agent.id}')">
+            <div class="trending-rank">${String(i + 1).padStart(2, '0')}</div>
+            <div class="trending-icon ic-${ui.color}">${ui.icon}</div>
+            <div class="trending-info">
+              <div class="trending-name">${escapeHtml(agent.name)}</div>
+              <div class="trending-cat">${catLabel}</div>
+            </div>
+            <div class="trending-stat">${execs.toLocaleString()}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderActivity() {
+      const container = document.getElementById('activityFeed');
+
+      if (!bidHistory || bidHistory.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-dimmer);font-size:12px;padding:8px 0;">No recent bids</div>';
+        return;
+      }
+
+      container.innerHTML = bidHistory.slice(0, 8).map(entry => {
+        const agentName = entry.agentName || entry.agentId || 'Unknown';
+        const confidence = entry.confidence ? `${Math.round(entry.confidence * 100)}%` : '';
+        const won = entry.won;
+        const timeAgo = formatTimeAgo(entry.timestamp);
+
+        return `
+          <div class="activity-item">
+            <div class="activity-dot">${won ? '<span style="color:var(--green);">&#10003;</span>' : '<span style="color:var(--text-dimmer);">&#8226;</span>'}</div>
+            <div>
+              <div class="activity-text">
+                <strong>${escapeHtml(agentName)}</strong>
+                ${won ? 'won bid' : 'bid'} ${confidence ? 'at ' + confidence : ''}
+              </div>
+              <div class="activity-time">
+                <span class="status-dot ${won ? 'status-live' : ''}" style="${won ? '' : 'background:var(--text-dimmer)'}"></span>
+                ${timeAgo}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ==================== DETAIL PANEL ====================
+
+    function showDetail(agentId) {
+      const agent = allAgents.find(a => a.id === agentId);
+      if (!agent) return;
+
+      const ui = agent.ui || { icon: '&#129302;', color: 'blue' };
+      const panel = document.getElementById('detailPanel');
+
+      if (agent.itemType === 'tool') {
+        panel.innerHTML = buildToolDetail(agent, ui);
+      } else if (agent.itemType === 'idw') {
+        panel.innerHTML = buildIDWDetail(agent, ui);
+      } else {
+        panel.innerHTML = buildAgentDetail(agent, ui);
+      }
+
+      document.getElementById('detailOverlay').classList.add('visible');
+    }
+
+    function buildAgentDetail(agent, ui) {
+      const stats = agent.stats;
+      const catLabel = CATEGORY_LABELS[agent.category] || agent.category;
+      const isEnabled = agent.enabled;
+      const execCount = stats?.executions || 0;
+      const successRate = execCount > 0 ? Math.round((stats.successes / execCount) * 100) : 0;
+      const avgLatency = execCount > 0 ? Math.round(stats.totalExecutionTimeMs / execCount) : 0;
+      const keywords = (agent.keywords || []).concat(agent.capabilities || []);
+
+      return `
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <div class="detail-header">
+          <div class="detail-icon ic-${ui.color}">${ui.icon}</div>
+          <div>
+            <div class="detail-title">${escapeHtml(agent.name)}</div>
+            <div class="detail-category">${catLabel} &middot; ${agent.builtin ? 'Built-in' : 'Custom'}</div>
+          </div>
+        </div>
+        <p class="detail-desc">${escapeHtml(agent.description || 'No description available.')}</p>
+        <div class="detail-stats-row">
+          <div class="detail-stat">
+            <div class="detail-stat-value" style="color:var(--accent-light);">${execCount.toLocaleString()}</div>
+            <div class="detail-stat-label">executions</div>
+          </div>
+          <div class="detail-stat">
+            <div class="detail-stat-value" style="color:var(--green);">${successRate}%</div>
+            <div class="detail-stat-label">success</div>
+          </div>
+          <div class="detail-stat">
+            <div class="detail-stat-value" style="color:var(--amber);">${avgLatency > 0 ? avgLatency + 'ms' : '--'}</div>
+            <div class="detail-stat-label">avg latency</div>
+          </div>
+        </div>
+        ${keywords.length > 0 ? `<div class="detail-keywords">${keywords.map(k => `<span class="tag">${escapeHtml(k)}</span>`).join('')}</div>` : ''}
+        <div class="detail-actions">
+          <label class="toggle-switch" style="flex:none;margin-right:8px;" title="${isEnabled ? 'Disable' : 'Enable'}">
+            <input type="checkbox" ${isEnabled ? 'checked' : ''} onchange="toggleAgent('${agent.id}', this.checked, ${agent.builtin})">
+            <span class="toggle-slider"></span>
+          </label>
+          ${!agent.builtin ? `<button class="btn-ghost" onclick="openComposerFor('${agent.id}')">Edit in Composer</button>` : ''}
+          <button class="btn-ghost" onclick="closeDetail()">Close</button>
+        </div>
+      `;
+    }
+
+    function buildToolDetail(tool, ui) {
+      const html = `
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <div class="detail-header">
+          <div class="detail-icon ic-${ui.color}">${ui.icon}</div>
+          <div>
+            <div class="detail-title">${escapeHtml(tool.name)}</div>
+            <div class="detail-category">Web Tool</div>
+          </div>
+        </div>
+        <div id="toolThumbPreview" style="position:relative;margin-bottom:16px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);min-height:60px;display:flex;align-items:center;justify-content:center;">
+          <button class="thumb-refresh" style="opacity:1;" title="Refresh preview" onclick="refreshDetailThumb('${escapeHtml(tool.id)}','${escapeHtml(tool.url || '')}',this)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></button>
+          <span style="color:#666;font-size:12px;">Loading preview...</span>
+        </div>
+        <p class="detail-desc">${escapeHtml(tool.description || tool.url || 'No description available.')}</p>
+        ${tool.url ? `<div style="margin-bottom:16px;"><span class="tag">${escapeHtml(tool.url)}</span></div>` : ''}
+        ${tool.windowSize ? `<div style="font-size:12px;color:#888;margin-bottom:16px;">Window size: ${escapeHtml(tool.windowSize)}</div>` : ''}
+        <div class="detail-actions">
+          <button class="btn-accent" onclick="openTool('${tool.id}')">Open Tool</button>
+          <button class="btn-ghost btn-danger" onclick="removeTool('${tool.id}')">Remove Tool</button>
+          <button class="btn-ghost" onclick="closeDetail()">Close</button>
+        </div>
+      `;
+
+      if (tool.url) {
+        setTimeout(() => {
+          window.agentExplorer.getToolThumbnail(tool.id, tool.url).then(dataUrl => {
+            const el = document.getElementById('toolThumbPreview');
+            if (el && dataUrl) {
+              el.innerHTML = `<img src="${dataUrl}" style="width:100%;display:block;border-radius:8px;" alt="Preview">`;
+            } else if (el) {
+              el.innerHTML = '<span style="color:#666;font-size:12px;">Preview unavailable</span>';
+            }
+          }).catch(() => {
+            const el = document.getElementById('toolThumbPreview');
+            if (el) el.innerHTML = '<span style="color:#666;font-size:12px;">Preview unavailable</span>';
+          });
+        }, 50);
+      }
+
+      return html;
+    }
+
+    function buildIDWDetail(idw, ui) {
+      const ratingHtml = idw.rating ? `<div class="detail-stat"><div class="detail-stat-value" style="color:var(--amber);">${idw.rating}</div><div class="detail-stat-label">rating</div></div>` : '';
+      const reviewHtml = idw.reviewCount ? `<div class="detail-stat"><div class="detail-stat-value">${idw.reviewCount}</div><div class="detail-stat-label">reviews</div></div>` : '';
+      const versionHtml = idw.version ? `<div class="detail-stat"><div class="detail-stat-value" style="color:var(--accent-light);">${escapeHtml(idw.version)}</div><div class="detail-stat-label">version</div></div>` : '';
+      const tags = idw.tags || [];
+
+      return `
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <div class="detail-header">
+          <div class="detail-icon ic-${ui.color}">${ui.icon}</div>
+          <div>
+            <div class="detail-title">${escapeHtml(idw.name)}</div>
+            <div class="detail-category">${escapeHtml(idw.idwCategory || 'IDW')}${idw.developer ? ' &middot; by ' + escapeHtml(idw.developer) : ''}</div>
+          </div>
+        </div>
+        <p class="detail-desc">${escapeHtml(idw.description || 'No description available.')}</p>
+        ${(ratingHtml || reviewHtml || versionHtml) ? `<div class="detail-stats-row">${ratingHtml}${reviewHtml}${versionHtml}</div>` : ''}
+        ${idw.pricing ? `<div style="font-size:12px;color:#888;margin-bottom:12px;">Pricing: ${escapeHtml(idw.pricing)}</div>` : ''}
+        ${tags.length > 0 ? `<div class="detail-keywords">${tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+        ${idw.idwUrl || idw.homePageURL ? `<div style="margin-bottom:12px;"><span class="tag">${escapeHtml(idw.idwUrl || idw.homePageURL)}</span></div>` : ''}
+        <div class="detail-actions">
+          ${idw.installed
+            ? `<button class="btn-ghost btn-danger" onclick="removeIDW('${escapeHtml(idw._menuEntry ? idw.id : 'store-' + idw.id)}')">Remove from Menu</button>`
+            : `<button class="btn-accent" onclick="installIDW('${idw.id}')">Add to Menu</button>`}
+          <button class="btn-ghost" onclick="closeDetail()">Close</button>
+        </div>
+      `;
+    }
+
+    function closeDetail() {
+      document.getElementById('detailOverlay').classList.remove('visible');
+    }
+
+    function showAddIDWForm() {
+      document.getElementById('detailPanel').innerHTML = `
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <div class="detail-title" style="margin-bottom:20px;">Add IDW to Menu</div>
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">Name</label>
+            <input id="addIdwName" type="text" placeholder="My Digital Worker"
+              style="width:100%;padding:9px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.03);color:#fff;font-size:14px;outline:none;">
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">Chat URL</label>
+            <input id="addIdwChatUrl" type="url" placeholder="https://idw.edison.onereach.ai/..."
+              style="width:100%;padding:9px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.03);color:#fff;font-size:14px;outline:none;">
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">Home URL (optional)</label>
+            <input id="addIdwHomeUrl" type="url" placeholder="https://..."
+              style="width:100%;padding:9px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.03);color:#fff;font-size:14px;outline:none;">
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">Description (optional)</label>
+            <input id="addIdwDesc" type="text" placeholder="What does this IDW do?"
+              style="width:100%;padding:9px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.03);color:#fff;font-size:14px;outline:none;">
+          </div>
+        </div>
+        <div id="addIdwError" style="color:#ef4444;font-size:12px;margin-top:8px;display:none;"></div>
+        <div class="detail-actions" style="margin-top:20px;">
+          <button class="btn-accent" onclick="submitAddIDW()">Add to Menu</button>
+          <button class="btn-ghost" onclick="closeDetail()">Cancel</button>
+        </div>
+      `;
+      document.getElementById('detailOverlay').classList.add('visible');
+      setTimeout(() => document.getElementById('addIdwName')?.focus(), 100);
+    }
+
+    async function submitAddIDW() {
+      const name = document.getElementById('addIdwName')?.value?.trim();
+      const chatUrl = document.getElementById('addIdwChatUrl')?.value?.trim();
+      const homeUrl = document.getElementById('addIdwHomeUrl')?.value?.trim();
+      const description = document.getElementById('addIdwDesc')?.value?.trim();
+      const errEl = document.getElementById('addIdwError');
+
+      if (!name || !chatUrl) {
+        if (errEl) { errEl.textContent = 'Name and Chat URL are required.'; errEl.style.display = 'block'; }
+        return;
+      }
+
+      try {
+        const env = {
+          id: 'idw-' + Date.now(),
+          label: name,
+          chatUrl,
+          homeUrl: homeUrl || '',
+          type: 'idw',
+          environment: 'custom',
+          description: description || '',
+        };
+
+        const result = await window.agentExplorer.addIDWEnvironment(env);
+        if (result && result.success === false) {
+          if (errEl) { errEl.textContent = result.error || 'Failed to add IDW.'; errEl.style.display = 'block'; }
+          return;
+        }
+
+        closeDetail();
+        await loadData();
+      } catch (err) {
+        console.error('[AgentExplorer] Add IDW error:', err);
+        if (errEl) { errEl.textContent = err.message || 'Failed to add IDW.'; errEl.style.display = 'block'; }
+      }
+    }
+
+    // ==================== ACTIONS ====================
+
+    async function toggleAgent(agentId, enabled, isBuiltin) {
+      const agent = allAgents.find(a => a.id === agentId);
+      if (agent) agent.enabled = enabled;
+
+      if (isBuiltin) {
+        try {
+          await window.agentExplorer.setBuiltinAgentEnabled(agentId, enabled);
+          enabledStates[agentId] = enabled;
+        } catch (err) {
+          console.error('[AgentExplorer] Toggle error:', err);
+          if (agent) agent.enabled = !enabled;
+        }
+      }
+
+      renderSidebarCounts();
+      renderStats();
+      renderGrid();
+    }
+
+    function openComposer() {
+      window.agentExplorer.enhanceAgent(null);
+    }
+
+    function openComposerFor(agentId) {
+      window.agentExplorer.enhanceAgent(agentId);
+    }
+
+    function openTool(toolId) {
+      window.agentExplorer.openWebTool(toolId, {});
+      closeDetail();
+    }
+
+    async function installIDW(idwId) {
+      const idw = allAgents.find(a => a.id === idwId && a.itemType === 'idw');
+      if (!idw || !idw._raw) return;
+
+      try {
+        const result = await window.agentExplorer.addIDWToMenu(idw._raw);
+        if (result && result.success) {
+          idw.installed = true;
+          idw.enabled = true;
+          renderGrid();
+          showDetail(idwId);
+        }
+      } catch (err) {
+        console.error('[AgentExplorer] Install IDW error:', err);
+      }
+    }
+
+    async function removeIDW(idwId) {
+      try {
+        const result = await window.agentExplorer.removeIDWEnvironment(idwId);
+        if (result && result.success === false) {
+          console.warn('[AgentExplorer] Remove IDW failed:', result.error);
+        }
+        const idw = allAgents.find(a => a.itemType === 'idw' && (a.id === idwId || ('store-' + a.id) === idwId));
+        if (idw) {
+          if (idw._menuEntry) {
+            allAgents = allAgents.filter(a => a.id !== idw.id);
+          } else {
+            idw.installed = false;
+            idw.enabled = false;
+          }
+        }
+        closeDetail();
+        renderSidebarCounts();
+        renderGrid();
+      } catch (err) {
+        console.error('[AgentExplorer] Remove IDW error:', err);
+      }
+    }
+
+    async function removeTool(toolId) {
+      try {
+        const result = await window.agentExplorer.deleteWebTool(toolId);
+        if (result && result.success) {
+          allAgents = allAgents.filter(a => a.id !== toolId);
+          closeDetail();
+          renderSidebarCounts();
+          renderStats();
+          renderGrid();
+        }
+      } catch (err) {
+        console.error('[AgentExplorer] Remove tool error:', err);
+      }
+    }
+
+    // ==================== UTILITIES ====================
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function safeAttr(str) {
+      return (str || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    }
+
+    function formatTimeAgo(ts) {
+      if (!ts) return '';
+      const diff = Date.now() - new Date(ts).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return mins + ' min ago';
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + ' hr ago';
+      return Math.floor(hrs / 24) + ' day ago';
+    }
+
+    // ==================== EVENT HANDLERS ====================
+
+    document.getElementById('closeBtn').addEventListener('click', () => {
+      window.agentExplorer.close();
+    });
+
+    document.getElementById('openManagerBtn').addEventListener('click', () => {
+      window.agentExplorer.openAgentManager();
+    });
+
+    document.getElementById('buildAgentBtn').addEventListener('click', () => {
+      openComposer();
+    });
+
+    document.getElementById('addIDWBtn').addEventListener('click', () => {
+      showAddIDWForm();
+    });
+
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      renderGrid();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (document.getElementById('detailOverlay').classList.contains('visible')) {
+          closeDetail();
+        }
+      }
+    });
+
+    // ==================== INIT ====================
+
+    async function init() {
+      if (!window.agentExplorer) {
+        console.error('[AgentExplorer] API not available');
+        return;
+      }
+      await loadData();
+      console.log('[AgentExplorer] Loaded', allAgents.length, 'agents');
+    }
+
+    init();
+  </script>
+</body>
+</html>

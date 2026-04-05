@@ -792,43 +792,42 @@ class ClipboardManagerV2 {
   }
 
   getHistory() {
-    // Ensure history is loaded (lazy loading)
     this.ensureHistoryLoaded();
 
-    // Load content and metadata on demand for items that need it
+    // Return copies with content loaded on demand -- do NOT mutate this.history
     return this.history.map((item) => {
-      if (item._needsContent || !item.metadata || Object.keys(item.metadata || {}).length < 3) {
+      const result = { ...item };
+
+      if (result._needsContent) {
         try {
           const fullItem = this.storage.loadItem(item.id);
-          item.content = fullItem.content;
-          item.thumbnail = fullItem.thumbnail;
-          item._needsContent = false;
+          result.content = fullItem.content;
+          result.thumbnail = fullItem.thumbnail;
+          result._needsContent = false;
 
-          // Merge metadata from storage
           if (fullItem.metadata) {
-            item.metadata = { ...item.metadata, ...fullItem.metadata };
-
-            // Update fileSize from metadata if not set
-            if (!item.fileSize && fullItem.metadata.fileSize) {
-              item.fileSize = fullItem.metadata.fileSize;
+            result.metadata = { ...item.metadata, ...fullItem.metadata };
+            if (!result.fileSize && fullItem.metadata.fileSize) {
+              result.fileSize = fullItem.metadata.fileSize;
             }
           }
 
-          // For files, update the filePath to the stored location
           if (item.type === 'file' && fullItem.content) {
-            item.filePath = fullItem.content; // Storage returns the actual file path
-
-            // Get file size if not set
-            if (!item.fileSize && fullItem.content) {
+            result.filePath = fullItem.content;
+            if (!result.fileSize) {
               try {
                 const fs = require('fs');
-                const stats = fs.statSync(fullItem.content);
-                item.fileSize = stats.size;
-              } catch (err) {
-                console.warn('[clipboard-manager-v2-adapter] file stat:', err.message);
-              }
+                result.fileSize = fs.statSync(fullItem.content).size;
+              } catch {}
             }
           }
+
+          // Cache only lightweight metadata back to the original (not content)
+          if (fullItem.metadata && (!item.metadata || Object.keys(item.metadata).length < 3)) {
+            item.metadata = result.metadata;
+          }
+          if (result.fileSize && !item.fileSize) item.fileSize = result.fileSize;
+          if (result.filePath && !item.filePath) item.filePath = result.filePath;
         } catch (error) {
           const logger = getLogger();
           logger.warn('Clipboard item content load failed', {
@@ -838,40 +837,35 @@ class ClipboardManagerV2 {
         }
       }
 
-      // Detect jsonSubtype SEPARATELY for items that don't have it yet
-      // This runs even for items with metadata already loaded
-      if (!item.jsonSubtype && (item.type === 'text' || (item.type === 'file' && item.fileExt === '.json'))) {
+      // Detect jsonSubtype if needed
+      if (!result.jsonSubtype && (item.type === 'text' || (item.type === 'file' && item.fileExt === '.json'))) {
         try {
           let detectedSubtype = null;
 
-          // For text items, check if content is JSON
           if (item.type === 'text') {
-            // Load content if not already loaded
-            if (!item.content) {
+            if (!result.content) {
               const fullItem = this.storage.loadItem(item.id);
-              item.content = fullItem.content;
+              result.content = fullItem.content;
             }
-            const content = typeof item.content === 'string' ? item.content : null;
+            const content = typeof result.content === 'string' ? result.content : null;
             if (content && (content.trim().startsWith('{') || content.trim().startsWith('['))) {
               detectedSubtype = this.detectJsonSubtype(content);
             }
           }
 
-          // For file items with .json extension
           if (item.type === 'file' && item.fileExt === '.json') {
-            // Load content (file path) if not already loaded
-            if (!item.content) {
+            if (!result.content) {
               const fullItem = this.storage.loadItem(item.id);
-              item.content = fullItem.content;
+              result.content = fullItem.content;
             }
-            if (item.content) {
-              detectedSubtype = this.detectJsonSubtypeFromFile(item.content);
+            if (result.content) {
+              detectedSubtype = this.detectJsonSubtypeFromFile(result.content);
             }
           }
 
           if (detectedSubtype) {
+            result.jsonSubtype = detectedSubtype;
             item.jsonSubtype = detectedSubtype;
-            // Update the storage index for future loads
             const indexEntry = this.storage.index.items.find((i) => i.id === item.id);
             if (indexEntry && !indexEntry.jsonSubtype) {
               indexEntry.jsonSubtype = detectedSubtype;
@@ -1395,10 +1389,34 @@ class ClipboardManagerV2 {
 
   notifyHistoryUpdate() {
     if (BrowserWindow) {
+      const lightweight = this._getLightweightHistory();
       BrowserWindow.getAllWindows().forEach((window) => {
-        window.webContents.send('clipboard:history-updated', this.getHistory());
+        if (!window.isDestroyed()) {
+          window.webContents.send('clipboard:history-updated', lightweight);
+        }
       });
     }
+  }
+
+  _getLightweightHistory() {
+    this.ensureHistoryLoaded();
+    return this.history.map((item) => ({
+      id: item.id,
+      type: item.type,
+      preview: item.preview,
+      timestamp: item.timestamp,
+      pinned: item.pinned,
+      spaceId: item.spaceId,
+      fileName: item.fileName,
+      fileSize: item.fileSize,
+      fileType: item.fileType,
+      fileCategory: item.fileCategory,
+      fileExt: item.fileExt,
+      jsonSubtype: item.jsonSubtype,
+      tags: item.tags,
+      metadata: item.metadata,
+      _needsContent: true,
+    }));
   }
 
   notifySpacesUpdate() {

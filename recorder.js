@@ -492,6 +492,334 @@ class Recorder {
       }
     });
 
+    // ==========================================
+    // MEETING OBJECT CRUD
+    // ==========================================
+
+    ipcMain.handle('recorder:create-meeting', async (event, { spaceId, templateId, options }) => {
+      try {
+        const { createFromTemplate, createMeetingObject, toSpaceItem, validate } = require('./lib/meeting-schema');
+        const { getTemplate } = require('./lib/meeting-templates');
+
+        let meeting;
+        if (templateId) {
+          meeting = createFromTemplate(templateId, { ...options, spaceId }, getTemplate);
+        } else {
+          meeting = createMeetingObject({ ...options, spaceId });
+        }
+
+        const { valid, errors } = validate(meeting);
+        if (!valid) {
+          return { success: false, error: 'Validation failed: ' + errors.join(', ') };
+        }
+
+        const clipboardManager = getClipboardManager();
+        if (!clipboardManager) {
+          return { success: false, error: 'Storage not available' };
+        }
+
+        const spaceItem = toSpaceItem(meeting);
+        await clipboardManager.addToHistory(spaceItem);
+        const savedItem = clipboardManager.history?.[0];
+
+        log.info('recorder', 'Meeting object created', { meetingId: meeting.id, spaceId, templateId });
+        return { success: true, meeting, itemId: savedItem?.id };
+      } catch (error) {
+        log.error('recorder', 'Failed to create meeting object', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle('recorder:get-meetings', async (event, { spaceId, limit }) => {
+      try {
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const { fromSpaceItem } = require('./lib/meeting-schema');
+
+        const items = await api.items.list(spaceId, {
+          tags: ['wiser-meeting'],
+          includeContent: true,
+          limit: limit || 50,
+        });
+
+        const meetings = (items || [])
+          .map(item => ({ ...fromSpaceItem(item), _itemId: item.id }))
+          .filter(Boolean);
+
+        return { success: true, meetings };
+      } catch (error) {
+        log.error('recorder', 'Failed to get meetings', { error: error.message });
+        return { success: false, error: error.message, meetings: [] };
+      }
+    });
+
+    ipcMain.handle('recorder:update-meeting', async (event, { spaceId, itemId, meeting }) => {
+      try {
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+
+        await api.items.update(spaceId, itemId, {
+          content: JSON.stringify(meeting, null, 2),
+          metadata: {
+            status: meeting.status,
+            meetingId: meeting.id,
+          },
+        });
+
+        log.info('recorder', 'Meeting object updated', { meetingId: meeting.id, status: meeting.status });
+        return { success: true };
+      } catch (error) {
+        log.error('recorder', 'Failed to update meeting', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle('recorder:get-templates', async (event, { spaceId } = {}) => {
+      try {
+        const { getAllTemplates, mergeTemplates } = require('./lib/meeting-templates');
+
+        let customTemplates = [];
+        let suggestedIds = [];
+        let pastAttendees = [];
+
+        if (spaceId) {
+          const { getSpacesAPI } = require('./spaces-api');
+          const api = getSpacesAPI();
+
+          // Load custom templates from this space
+          try {
+            const { customTemplateFromSpaceItem } = require('./lib/meeting-templates');
+            const tplItems = await api.items.list(spaceId, {
+              tags: ['wiser-template'],
+              includeContent: true,
+            });
+            customTemplates = (tplItems || []).map(customTemplateFromSpaceItem).filter(Boolean);
+          } catch { /* no custom templates */ }
+
+          // Analyze space content to suggest templates
+          try {
+            const allItems = await api.items.list(spaceId, { limit: 30 });
+            const meetingItems = (allItems || []).filter(i => (i.tags || []).includes('wiser-meeting'));
+            const fileItems = (allItems || []).filter(i => i.type === 'file');
+            const textItems = (allItems || []).filter(i => i.type === 'text' && !(i.tags || []).includes('wiser-meeting'));
+
+            const hasScreenRecordings = fileItems.some(i => (i.fileName || '').includes('screen'));
+            const hasCameraRecordings = fileItems.some(i =>
+              (i.fileType || '').startsWith('video/') && !(i.fileName || '').includes('screen')
+            );
+            const hasTranscripts = textItems.some(i =>
+              (i.metadata?.source === 'recorder-transcript') || (i.tags || []).includes('transcript')
+            );
+
+            // Extract past meeting templates and attendees
+            const pastTemplateIds = [];
+            for (const mi of meetingItems) {
+              try {
+                const { fromSpaceItem } = require('./lib/meeting-schema');
+                const m = fromSpaceItem(mi);
+                if (m?.templateId) pastTemplateIds.push(m.templateId);
+                if (m?.contacts) {
+                  for (const c of m.contacts) {
+                    if (c.email && !pastAttendees.some(a => a.email === c.email)) {
+                      pastAttendees.push({
+                        email: c.email,
+                        displayName: c.displayName || c.email,
+                        meetingCount: (pastAttendees.find(a => a.email === c.email)?.meetingCount || 0) + 1,
+                      });
+                    }
+                  }
+                }
+              } catch {}
+            }
+
+            // Heuristic ranking (no LLM cost)
+            const scores = {};
+            const templates = getAllTemplates();
+            for (const t of templates) {
+              let score = 0;
+              if (pastTemplateIds.includes(t.id)) score += 5;
+              if (hasScreenRecordings && (t.captureMode === 'both' || t.screenShare)) score += 3;
+              if (hasCameraRecordings && t.captureMode === 'camera') score += 2;
+              if (hasTranscripts && t.ai?.transcription) score += 1;
+              if (meetingItems.length > 3 && t.category === 'live') score += 2;
+              if (meetingItems.length === 0 && t.id === 'quick-touch-base') score += 3;
+              if (fileItems.length > 5 && t.id === 'share-screen') score += 2;
+              scores[t.id] = score;
+            }
+
+            suggestedIds = Object.entries(scores)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 3)
+              .filter(([, s]) => s > 0)
+              .map(([id]) => id);
+
+          } catch (e) {
+            log.warn('recorder', 'Template suggestion analysis failed', { error: e.message });
+          }
+        }
+
+        const all = mergeTemplates(customTemplates);
+        const byCategory = { live: [], async: [], broadcast: [] };
+        for (const t of all) {
+          if (byCategory[t.category]) byCategory[t.category].push(t);
+        }
+
+        return { success: true, templates: all, byCategory, suggestedIds, pastAttendees };
+      } catch (error) {
+        log.error('recorder', 'Failed to get templates', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle('recorder:complete-meeting', async (event, { spaceId, itemId, meetingId, participants }) => {
+      try {
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const { fromSpaceItem, completeMeeting } = require('./lib/meeting-schema');
+
+        const item = await api.items.get(spaceId, itemId);
+        if (!item) {
+          return { success: false, error: 'Meeting item not found' };
+        }
+
+        let meeting = fromSpaceItem(item);
+        if (!meeting || meeting.id !== meetingId) {
+          return { success: false, error: 'Meeting ID mismatch' };
+        }
+
+        meeting = completeMeeting(meeting, { participants });
+
+        await api.items.update(spaceId, itemId, {
+          content: JSON.stringify(meeting, null, 2),
+          metadata: { status: 'completed' },
+        });
+
+        log.info('recorder', 'Meeting completed', { meetingId, duration: meeting.during.actualDuration });
+        return { success: true, meeting };
+      } catch (error) {
+        log.error('recorder', 'Failed to complete meeting', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle('recorder:post-meeting-analyze', async (event, { spaceId, itemId, meetingId }) => {
+      try {
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const { fromSpaceItem } = require('./lib/meeting-schema');
+
+        const item = await api.items.get(spaceId, itemId);
+        if (!item) return { success: false, error: 'Meeting not found' };
+
+        let meeting = fromSpaceItem(item);
+        if (!meeting) return { success: false, error: 'Invalid meeting data' };
+
+        const transcriptText = (meeting.during?.transcript?.live || []).join('\n');
+        if (!transcriptText && !meeting.post?.transcriptItemId) {
+          log.info('recorder', 'No transcript for post-meeting analysis', { meetingId });
+          return { success: true, skipped: true, reason: 'no transcript' };
+        }
+
+        let fullTranscript = transcriptText;
+        if (!fullTranscript && meeting.post?.transcriptItemId) {
+          try {
+            const tItem = await api.items.get(spaceId, meeting.post.transcriptItemId);
+            if (tItem?.content) fullTranscript = tItem.content;
+          } catch {}
+        }
+
+        if (!fullTranscript || fullTranscript.length < 50) {
+          return { success: true, skipped: true, reason: 'transcript too short' };
+        }
+
+        const ai = require('./lib/ai-service');
+        const attendeeNames = (meeting.contacts || []).map(c => c.displayName).filter(Boolean).join(', ');
+        const duration = meeting.during?.actualDuration || 0;
+
+        const analysis = await ai.json(
+          `Analyze this meeting transcript and extract structured results.
+
+Meeting: ${meeting.calendar?.vevent?.summary || 'Meeting'}
+Duration: ${duration} minutes
+Participants: ${attendeeNames || 'Unknown'}
+
+Transcript:
+${fullTranscript.slice(0, 8000)}
+
+Respond with JSON:
+{
+  "actionItems": [{ "text": "...", "assignee": "name or null", "deadline": null }],
+  "decisions": ["..."],
+  "summary": "2-3 sentence summary",
+  "vibeScore": {
+    "score": 1-10,
+    "factors": ["..."],
+    "positiveSignals": ["..."],
+    "ruptures": []
+  }
+}`,
+          { profile: 'standard', feature: 'post-meeting-analysis', maxTokens: 1500 }
+        );
+
+        if (analysis) {
+          meeting.post.actionItems = analysis.actionItems || [];
+          meeting.post.decisions = analysis.decisions || [];
+          meeting.post.summary = analysis.summary || null;
+          meeting.post.vibeScore = analysis.vibeScore || null;
+          meeting.post.checkpoints.summarized = true;
+          meeting.post.checkpoints.allItemsAssigned = (analysis.actionItems || []).every(a => a.assignee);
+
+          await api.items.update(spaceId, itemId, {
+            content: JSON.stringify(meeting, null, 2),
+            metadata: { status: 'completed', analyzed: true },
+          });
+
+          log.info('recorder', 'Post-meeting analysis complete', {
+            meetingId,
+            actionItems: (analysis.actionItems || []).length,
+            vibeScore: analysis.vibeScore?.score,
+          });
+        }
+
+        return { success: true, meeting };
+      } catch (error) {
+        log.error('recorder', 'Post-meeting analysis failed', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle('recorder:save-custom-template', async (event, { spaceId, meeting, name, description, scope }) => {
+      try {
+        const { createCustomTemplate, customTemplateToSpaceItem } = require('./lib/meeting-templates');
+
+        const template = createCustomTemplate({ meeting, name, description, scope });
+        const spaceItem = customTemplateToSpaceItem(template, spaceId);
+
+        const clipboardManager = getClipboardManager();
+        if (!clipboardManager) {
+          return { success: false, error: 'Storage not available' };
+        }
+
+        await clipboardManager.addToHistory(spaceItem);
+        log.info('recorder', 'Custom template saved', { templateId: template.id, name, scope });
+        return { success: true, template };
+      } catch (error) {
+        log.error('recorder', 'Failed to save custom template', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+
+    // ==========================================
+    // MEETING OVERLAYS
+    // ==========================================
+
+    ipcMain.handle('recorder:push-overlay', (event, overlay) => {
+      if (this.window && !this.window.isDestroyed()) {
+        this.window.webContents.send('recorder:overlay', overlay);
+      }
+      return { success: true };
+    });
+
     // Get OpenAI API key for live transcription
     ipcMain.handle('recorder:get-openai-key', async () => {
       try {

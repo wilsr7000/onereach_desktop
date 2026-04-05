@@ -65,6 +65,25 @@ contextBridge.exposeInMainWorld('recorder', {
   },
 
   // ==========================================
+  // MEETING OBJECTS
+  // ==========================================
+
+  // Overlays
+  pushOverlay: (data) => ipcRenderer.invoke('recorder:push-overlay', data),
+  onOverlay: (callback) => {
+    ipcRenderer.removeAllListeners('recorder:overlay');
+    ipcRenderer.on('recorder:overlay', (event, overlay) => callback(overlay));
+  },
+
+  createMeeting: (data) => ipcRenderer.invoke('recorder:create-meeting', data),
+  getMeetings: (data) => ipcRenderer.invoke('recorder:get-meetings', data),
+  updateMeeting: (data) => ipcRenderer.invoke('recorder:update-meeting', data),
+  completeMeeting: (data) => ipcRenderer.invoke('recorder:complete-meeting', data),
+  postMeetingAnalyze: (data) => ipcRenderer.invoke('recorder:post-meeting-analyze', data),
+  getTemplates: (data) => ipcRenderer.invoke('recorder:get-templates', data),
+  saveCustomTemplate: (data) => ipcRenderer.invoke('recorder:save-custom-template', data),
+
+  // ==========================================
   // LIVEKIT SESSION (WISER Meeting via SFU)
   // ==========================================
 

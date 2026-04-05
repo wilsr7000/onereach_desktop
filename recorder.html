@@ -530,25 +530,27 @@
       .meeting-hub.hidden { display: none; }
 
       .hub-brand {
-        font-size: 22px;
-        font-weight: 600;
+        font-size: 20px;
+        font-weight: 700;
         color: var(--text-primary);
-        letter-spacing: -0.02em;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
       }
 
       .hub-subtitle {
-        font-size: 13px;
+        font-size: 11px;
         color: var(--text-muted);
-        margin-bottom: 20px;
+        margin-bottom: 12px;
+        letter-spacing: 0.02em;
       }
 
       .hub-identity {
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 8px;
         width: 100%;
-        max-width: 360px;
-        margin-bottom: 20px;
+        max-width: 480px;
+        margin-bottom: 8px;
       }
 
       .hub-identity input,
@@ -581,10 +583,11 @@
       }
 
       .hub-space-hint {
-        font-size: 11px;
+        font-size: 10px;
         color: var(--text-muted);
         text-align: center;
         line-height: 1.4;
+        letter-spacing: 0.01em;
       }
 
       .hub-actions {
@@ -632,6 +635,167 @@
         font-size: 11px;
         color: var(--text-muted);
         line-height: 1.4;
+      }
+
+      /* Template grid */
+      .hub-template-grid {
+        width: 100%;
+        max-width: 480px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .hub-template-category {
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--text-muted);
+        padding-left: 2px;
+      }
+
+      .hub-template-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+      }
+
+      .hub-tpl-card {
+        padding: 16px 8px 12px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        text-align: center;
+        min-height: 88px;
+        justify-content: center;
+        position: relative;
+      }
+
+      .hub-tpl-card:hover {
+        background: var(--bg-elevated);
+        border-color: var(--accent-blue);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+      }
+
+      .hub-tpl-card:active {
+        transform: translateY(0);
+        box-shadow: none;
+      }
+
+      .hub-tpl-card.suggested {
+        border-color: rgba(77, 124, 255, 0.35);
+        background: rgba(77, 124, 255, 0.05);
+      }
+
+      .hub-tpl-card.suggested::after {
+        content: '';
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent-blue);
+      }
+
+      .hub-tpl-card.suggested:hover {
+        border-color: var(--accent-blue);
+        background: rgba(77, 124, 255, 0.1);
+      }
+
+      .hub-tpl-card svg {
+        width: 22px;
+        height: 22px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+        opacity: 0.7;
+      }
+
+      .hub-tpl-card:hover svg {
+        color: var(--accent-blue);
+        opacity: 1;
+      }
+
+      .hub-tpl-card.suggested svg {
+        color: var(--accent-blue);
+        opacity: 0.9;
+      }
+
+      .hub-tpl-name {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-primary);
+        line-height: 1.2;
+        letter-spacing: -0.01em;
+      }
+
+      .hub-tpl-dur {
+        font-size: 9px;
+        color: var(--text-muted);
+        font-family: var(--font-mono, monospace);
+        letter-spacing: 0.03em;
+      }
+
+      /* Inline join row */
+      .hub-join-divider {
+        width: 100%;
+        max-width: 480px;
+        text-align: center;
+        font-size: 10px;
+        color: var(--text-muted);
+        position: relative;
+        margin: 8px 0 4px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .hub-join-divider span {
+        background: var(--bg-base);
+        padding: 0 12px;
+        position: relative;
+        z-index: 1;
+      }
+
+      .hub-join-divider::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: var(--border-color);
+      }
+
+      .hub-join-inline {
+        display: flex;
+        gap: 8px;
+        width: 100%;
+        max-width: 480px;
+      }
+
+      .hub-join-inline input {
+        flex: 1;
+        padding: 10px 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-size: 12px;
+        font-family: var(--font-mono, monospace);
+      }
+
+      .hub-join-inline input:focus {
+        outline: none;
+        border-color: var(--accent-blue);
+        box-shadow: 0 0 0 2px rgba(77, 124, 255, 0.1);
       }
 
       /* Hub sub-panels (New Meeting options, Join form) */
@@ -1008,9 +1172,9 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
-        padding: 32px 24px;
-        gap: 8px;
+        justify-content: flex-start;
+        padding: 24px 24px 32px;
+        gap: 16px;
         overflow-y: auto;
         min-width: 0;
       }
@@ -2650,6 +2814,10 @@
         position: absolute;
         bottom: 10px;
         left: 10px;
+        max-width: calc(100% - 20px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         background: rgba(0, 0, 0, 0.6);
         backdrop-filter: blur(8px);
         padding: 4px 12px;
@@ -2798,6 +2966,7 @@
         align-items: center;
         justify-content: center;
         gap: 20px;
+        overflow: hidden;
         position: absolute;
         inset: 0;
         background: var(--bg-base);
@@ -2810,18 +2979,24 @@
       }
 
       .session-code-display {
-        font-size: 56px;
+        font-size: clamp(20px, 5vw, 56px);
         font-weight: 700;
         color: var(--text-primary);
         text-transform: uppercase;
-        letter-spacing: 4px;
-        padding: 16px 32px;
+        letter-spacing: 2px;
+        padding: 16px 24px;
         background: var(--bg-panel);
         border: 2px solid var(--border-light);
         border-radius: var(--radius-lg);
         cursor: pointer;
         transition: all var(--transition-fast);
         position: relative;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        box-sizing: border-box;
+        word-break: break-all;
       }
 
       .session-code-display:hover {
@@ -2840,6 +3015,9 @@
         letter-spacing: 0;
         text-transform: none;
         white-space: nowrap;
+        max-width: 300px;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .waiting-text {
@@ -3116,6 +3294,223 @@
         background: rgba(77, 124, 255, 0.12);
         border-color: rgba(77, 124, 255, 0.25);
         color: var(--accent-blue, #4d7cff);
+      }
+
+      .session-media-btn.sharing {
+        background: rgba(0, 200, 120, 0.15);
+        border-color: rgba(0, 200, 120, 0.35);
+        color: var(--accent-green);
+      }
+
+      .session-media-btn.sharing:hover {
+        background: rgba(0, 200, 120, 0.25);
+      }
+
+      /* Dedicated screen share container (presentation mode) */
+      .screen-share-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: calc(100% - 140px);
+        z-index: 5;
+        background: #000;
+        border-radius: var(--radius-md) var(--radius-md) 0 0;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .screen-share-container video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+
+      .screen-share-label {
+        position: absolute;
+        top: 8px;
+        left: 10px;
+        max-width: calc(100% - 20px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11px;
+        color: var(--text-muted);
+        background: rgba(0, 0, 0, 0.6);
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        z-index: 6;
+        pointer-events: none;
+      }
+
+      /* Presentation layout: screen share fills top, participants go to bottom strip */
+      .preview-container.layout-presentation .session-participant {
+        position: absolute !important;
+        height: 130px !important;
+        bottom: 0 !important;
+        top: auto !important;
+        border-radius: var(--radius-sm);
+      }
+
+      /* Sharing banner shown when host is sharing */
+      .sharing-banner {
+        display: none;
+        position: absolute;
+        bottom: 145px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10;
+        background: rgba(0, 200, 120, 0.15);
+        border: 1px solid rgba(0, 200, 120, 0.3);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-radius: var(--radius-md);
+        padding: 6px 14px;
+        font-size: 12px;
+        color: var(--accent-green);
+        align-items: center;
+        gap: 10px;
+        white-space: nowrap;
+      }
+
+      .sharing-banner.visible {
+        display: flex;
+      }
+
+      .sharing-banner-stop {
+        background: rgba(255, 59, 78, 0.15);
+        border: 1px solid rgba(255, 59, 78, 0.3);
+        color: var(--accent-red);
+        border-radius: var(--radius-sm);
+        padding: 2px 10px;
+        font-size: 11px;
+        cursor: pointer;
+        transition: background var(--transition-fast);
+      }
+
+      .sharing-banner-stop:hover {
+        background: rgba(255, 59, 78, 0.3);
+      }
+
+      /* Meeting Overlay System */
+      .meeting-overlay-stack {
+        position: absolute;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 15;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-width: 90%;
+        pointer-events: none;
+      }
+
+      .meeting-overlay {
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: var(--radius-md);
+        padding: 8px 14px;
+        color: var(--text-primary);
+        font-size: 12px;
+        line-height: 1.4;
+        pointer-events: auto;
+        animation: overlayFadeIn 0.3s ease;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        max-width: 500px;
+      }
+
+      .meeting-overlay.type-translation {
+        border-color: rgba(77, 124, 255, 0.3);
+      }
+
+      .meeting-overlay.type-note {
+        border-color: rgba(0, 200, 120, 0.3);
+      }
+
+      .meeting-overlay.type-action {
+        border-color: rgba(255, 200, 0, 0.3);
+      }
+
+      .meeting-overlay.type-coach {
+        border-color: rgba(180, 120, 255, 0.3);
+      }
+
+      .meeting-overlay.type-alert {
+        border-color: rgba(255, 59, 78, 0.3);
+      }
+
+      .meeting-overlay-content {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .meeting-overlay-source {
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        margin-bottom: 2px;
+      }
+
+      .meeting-overlay-dismiss {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 0;
+        font-size: 16px;
+        line-height: 1;
+        flex-shrink: 0;
+      }
+
+      .meeting-overlay-dismiss:hover {
+        color: var(--text-primary);
+      }
+
+      .meeting-overlay.fading {
+        opacity: 0;
+        transition: opacity 0.5s ease;
+      }
+
+      @keyframes overlayFadeIn {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      /* AI assist transparency indicator (shown to guests when host has overlays) */
+      .ai-assist-indicator {
+        display: none;
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        z-index: 12;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(8px);
+        border-radius: 12px;
+        padding: 3px 10px;
+        font-size: 10px;
+        color: var(--text-muted);
+        align-items: center;
+        gap: 5px;
+      }
+
+      .ai-assist-indicator.visible {
+        display: flex;
+      }
+
+      .ai-assist-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(180, 120, 255, 0.7);
+        animation: waiting-pulse 1.5s ease-in-out infinite;
       }
 
       /* Background effect popover */
@@ -4289,6 +4684,102 @@
           width: 20px;
           height: 20px;
         }
+
+        /* Hub: stack templates vertically */
+        .hub-template-row {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .hub-tpl-card {
+          min-height: 70px;
+          padding: 10px 8px;
+        }
+
+        .hub-identity {
+          max-width: 100%;
+          padding: 0 16px;
+        }
+
+        .hub-join-inline {
+          max-width: 100%;
+          padding: 0 16px;
+        }
+
+        .hub-template-grid {
+          max-width: 100%;
+          padding: 0 12px;
+        }
+
+        /* Header: reduce macOS padding for non-Electron */
+        .header {
+          padding-left: max(16px, env(safe-area-inset-left));
+          padding-right: max(16px, env(safe-area-inset-right));
+        }
+
+        /* Session controls: floating pill at bottom */
+        .session-media-controls.visible {
+          position: fixed;
+          bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 50;
+          background: rgba(13, 13, 13, 0.9);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid var(--border-color);
+          border-radius: 24px;
+          padding: 8px 16px;
+          gap: 12px;
+        }
+
+        .session-media-btn {
+          width: 44px;
+          height: 44px;
+        }
+
+        /* Sharing banner: adjust for mobile */
+        .sharing-banner {
+          bottom: 80px;
+          font-size: 11px;
+          padding: 5px 12px;
+        }
+
+        /* Overlays: compact on mobile */
+        .meeting-overlay {
+          font-size: 11px;
+          padding: 6px 10px;
+          max-width: 95vw;
+        }
+
+        /* Preview: use dynamic viewport height */
+        .preview-wrapper {
+          height: calc(100dvh - 44px);
+        }
+
+        /* Session setup: tighter padding */
+        .session-setup,
+        .session-host-waiting,
+        .session-join-panel {
+          padding: 16px;
+        }
+
+        /* Session code: smaller on mobile */
+        .session-code-display {
+          font-size: clamp(16px, 4vw, 32px);
+          padding: 12px 16px;
+        }
+
+        /* End session button */
+        .end-session-btn {
+          bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+        }
+      }
+
+      /* Safe area insets for notched devices */
+      @supports (padding: env(safe-area-inset-top)) {
+        .header {
+          padding-top: env(safe-area-inset-top);
+        }
       }
     </style>
     <!-- LiveKit Client SDK (SFU for WISER Meeting) — loaded locally for CSP compliance -->
@@ -4373,95 +4864,42 @@
           <div class="hub-space-hint">Recordings, transcripts, and notes will be saved here</div>
         </div>
 
-        <div class="hub-actions" id="hubMainActions">
-          <div class="hub-card" onclick="app.hubNewMeeting()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <polygon points="23 7 16 12 23 17 23 7" />
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-            </svg>
-            <span class="hub-card-title">New Meeting</span>
-            <span class="hub-card-desc">Start recording or host a live session</span>
-          </div>
-          <div class="hub-card" onclick="app.hubJoinMeeting()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-              <polyline points="10 17 15 12 10 7" />
-              <line x1="15" y1="12" x2="3" y2="12" />
-            </svg>
-            <span class="hub-card-title">Join Meeting</span>
-            <span class="hub-card-desc">Enter a meeting ID to connect</span>
-          </div>
-        </div>
+        <!-- Template Grid -->
+        <div id="hubTemplateGrid" class="hub-template-grid"></div>
 
-        <!-- New Meeting sub-panel -->
-        <div class="hub-sub-panel" id="hubNewMeetingPanel">
-          <div class="hub-sub-title">New Meeting</div>
-          <div class="hub-sub-desc">Choose how you want to meet</div>
-          <div class="hub-option-cards">
-            <div class="hub-option-card" onclick="app.hubStartLiveMeeting()">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-              <div class="hub-option-info">
-                <span class="hub-option-title">Live Meeting</span>
-                <span class="hub-option-desc">Host a session and invite participants</span>
-              </div>
-            </div>
-            <div class="hub-option-card" onclick="app.hubStartQuickRecord('camera')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                <circle cx="12" cy="13" r="4" />
-              </svg>
-              <div class="hub-option-info">
-                <span class="hub-option-title">Quick Record</span>
-                <span class="hub-option-desc">Camera, screen, or both -- solo async recording</span>
-              </div>
-            </div>
-            <div class="hub-option-card" onclick="app.hubScheduleMeeting()">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                <line x1="16" y1="2" x2="16" y2="6" />
-                <line x1="8" y1="2" x2="8" y2="6" />
-                <line x1="3" y1="10" x2="21" y2="10" />
-              </svg>
-              <div class="hub-option-info">
-                <span class="hub-option-title">Schedule</span>
-                <span class="hub-option-desc">Create a room link to share for later</span>
-              </div>
-            </div>
-          </div>
-          <div class="hub-status" id="hubNewMeetingStatus"></div>
-          <!-- Schedule result (shown after generating link) -->
-          <div class="hub-schedule-result" id="hubScheduleResult">
-            <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">Meeting room created</div>
-            <div class="hub-link-box" id="hubScheduleLink" onclick="app.hubCopyScheduleLink()" title="Click to copy">---</div>
-            <div style="font-size: 11px; color: var(--text-muted);">Click to copy. Share this link with participants.</div>
-          </div>
-          <div class="hub-back-link" onclick="app.hubBack()">Back</div>
+        <div class="hub-join-divider">
+          <span>or</span>
         </div>
+        <div class="hub-join-inline">
+          <input type="text" id="hubJoinInput" placeholder="Paste a meeting link or room name" spellcheck="false" autocomplete="off"
+            onkeydown="if (event.key === 'Enter') app.hubJoinByRoomName()" />
+          <button class="hub-join-btn" id="hubJoinBtn" onclick="app.hubJoinByRoomName()">Join</button>
+        </div>
+        <div class="hub-status" id="hubJoinStatus"></div>
 
-        <!-- Join Meeting sub-panel -->
-        <div class="hub-sub-panel" id="hubJoinMeetingPanel">
-          <div class="hub-sub-title">Join Meeting</div>
-          <div class="hub-sub-desc">Enter the meeting room name to connect</div>
-          <div class="hub-join-row">
-            <input type="text" id="hubJoinInput" placeholder="e.g. team-standup" spellcheck="false" autocomplete="off"
-              onkeydown="if (event.key === 'Enter') app.hubJoinByRoomName()" />
-            <button class="hub-join-btn" id="hubJoinBtn" onclick="app.hubJoinByRoomName()">Join</button>
-          </div>
-          <div class="hub-status" id="hubJoinStatus"></div>
-          <div class="hub-back-link" onclick="app.hubBack()">Back</div>
+        <!-- Schedule result (shown after generating link) -->
+        <div class="hub-schedule-result" id="hubScheduleResult">
+          <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">Meeting room created</div>
+          <div class="hub-link-box" id="hubScheduleLink" onclick="app.hubCopyScheduleLink()" title="Click to copy">---</div>
+          <div style="font-size: 11px; color: var(--text-muted);">Click to copy. Share this link with participants.</div>
         </div>
+        <div class="hub-status" id="hubNewMeetingStatus"></div>
         </div><!-- /.hub-main -->
         <div class="hub-room-toast" id="hubRoomToast">Link copied</div>
       </div>
 
       <!-- Preview Area -->
       <div class="preview-wrapper">
+        <div class="sharing-banner" id="sharingBanner">
+          You are sharing your screen
+          <button class="sharing-banner-stop" onclick="app.sessionStopScreenShare()">Stop</button>
+        </div>
         <div class="preview-container" id="previewContainer">
+          <div class="meeting-overlay-stack" id="overlayStack"></div>
+          <div class="ai-assist-indicator" id="aiAssistIndicator">
+            <div class="ai-assist-dot"></div>
+            Host has AI assist active
+          </div>
           <video id="previewVideo" autoplay muted playsinline></video>
           <video id="reviewVideo" style="display: none" controls></video>
 
@@ -5288,6 +5726,13 @@
                 </div>
               </div>
             </button>
+            <button class="session-media-btn" id="screenShareBtn" onclick="app.sessionToggleScreenShare()" title="Share screen">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <polyline points="8 21 16 21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </button>
           </div>
 
           <button
@@ -5735,6 +6180,13 @@
             if (window.recorder.onMonitorAlert) {
               window.recorder.onMonitorAlert((alert) => {
                 this.showMonitorAlert(alert);
+              });
+            }
+
+            // Listen for meeting overlays
+            if (window.recorder.onOverlay) {
+              window.recorder.onOverlay((overlay) => {
+                this.pushOverlay(overlay);
               });
             }
           }
@@ -6357,8 +6809,9 @@
             // Show pulse animation if no space selected yet
             this.updateTargetSpaceHighlight();
 
-            // Populate the room sidebar
+            // Populate the room sidebar and template grid
             this.loadRoomList();
+            this.renderTemplateGrid();
           } catch (error) {
             console.error('[Recorder] Failed to load spaces:', error);
           }
@@ -8364,6 +8817,13 @@
         _sessionScreenShareTrack: null,
         _sessionScreenShareStream: null,
         _sessionScreenSharePending: false,
+        _remoteScreenShareEl: null,
+
+        // Meeting Object state
+        _activeMeeting: null,
+        _activeMeetingItemId: null,
+        _activeTemplateId: null,
+        _activeTemplateDuration: null,
 
         // Session state for host address
         hostAddress: null,
@@ -8403,6 +8863,7 @@
             hubSel.classList.toggle('unset', !hubSel.value);
             if (hubSel.value) this.selectRoom(hubSel.value);
           }
+          this.renderTemplateGrid();
         },
 
         hubValidate() {
@@ -8465,33 +8926,27 @@
 
         hubNewMeeting() {
           if (!this.hubValidate()) return;
-          document.getElementById('hubMainActions').style.display = 'none';
-          document.getElementById('hubNewMeetingPanel').classList.add('visible');
-          document.getElementById('hubJoinMeetingPanel').classList.remove('visible');
-          document.getElementById('hubScheduleResult').classList.remove('visible');
-          document.getElementById('hubNewMeetingStatus').textContent = '';
+          this.hubSyncToSelectors();
+          this.hubDismiss();
+          this.switchMode('session');
+          setTimeout(() => this.sessionHost(), 100);
         },
 
         hubJoinMeeting() {
           if (!this.hubValidate()) return;
-          document.getElementById('hubMainActions').style.display = 'none';
-          document.getElementById('hubJoinMeetingPanel').classList.add('visible');
-          document.getElementById('hubNewMeetingPanel').classList.remove('visible');
-          document.getElementById('hubJoinStatus').textContent = '';
           document.getElementById('hubJoinInput')?.focus();
         },
 
         hubBack() {
-          document.getElementById('hubMainActions').style.display = '';
-          document.getElementById('hubNewMeetingPanel').classList.remove('visible');
-          document.getElementById('hubJoinMeetingPanel').classList.remove('visible');
-          document.getElementById('hubScheduleResult').classList.remove('visible');
+          document.getElementById('hubScheduleResult')?.classList.remove('visible');
         },
 
         hubDismiss() {
           this.hubActive = false;
           const hub = document.getElementById('meetingHub');
           if (hub) hub.classList.add('hidden');
+          const hud = document.getElementById('pilotHud');
+          if (hud) hud.style.display = '';
         },
 
         hubShow() {
@@ -8499,8 +8954,137 @@
           this.hubActive = true;
           const hub = document.getElementById('meetingHub');
           if (hub) hub.classList.remove('hidden');
+          const hud = document.getElementById('pilotHud');
+          if (hud) hud.style.display = 'none';
           this.hubBack();
           this.loadRoomList();
+          this.renderTemplateGrid();
+        },
+
+        // ── Template Grid ───────────────────────────────
+
+        _TEMPLATE_ICONS: {
+          'quick-touch-base': '<circle cx="12" cy="7" r="4"/><path d="M5.8 21v-2a4 4 0 0 1 4-4h4.4a4 4 0 0 1 4 4v2"/>',
+          'touch-base': '<circle cx="9" cy="7" r="4"/><path d="M1 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+          'same-pager': '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
+          'co-design': '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
+          'brainstorming': '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>',
+          'marathon': '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+          'async-record': '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
+          'podcast': '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>',
+          'research': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+          'share-screen': '<rect x="2" y="3" width="20" height="14" rx="2"/><polyline points="8 21 16 21"/><line x1="12" y1="17" x2="12" y2="21"/><polyline points="9 10 12 7 15 10"/>',
+          'large-forum': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+          'webinar': '<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>',
+        },
+
+        _cachedTemplates: null,
+        _cachedSuggestedIds: [],
+        _cachedPastAttendees: [],
+
+        async renderTemplateGrid() {
+          const grid = document.getElementById('hubTemplateGrid');
+          if (!grid) return;
+
+          const spaceId = document.getElementById('hubSpaceSelect')?.value || null;
+          let templates = [];
+          let suggestedIds = [];
+
+          try {
+            const result = await window.recorder.getTemplates({ spaceId });
+            if (result.success) {
+              templates = result.templates || [];
+              suggestedIds = result.suggestedIds || [];
+              this._cachedTemplates = templates;
+              this._cachedSuggestedIds = suggestedIds;
+              this._cachedPastAttendees = result.pastAttendees || [];
+            }
+          } catch {
+            templates = this._cachedTemplates || [];
+          }
+
+          if (!templates.length) {
+            grid.innerHTML = '<div style="color:var(--text-muted);font-size:12px;text-align:center;">No templates available</div>';
+            return;
+          }
+
+          const cats = { live: [], async: [], broadcast: [] };
+          const custom = [];
+          for (const t of templates) {
+            if (t.source === 'user') { custom.push(t); continue; }
+            if (cats[t.category]) cats[t.category].push(t);
+          }
+
+          const catLabels = { live: 'Live', async: 'Async', broadcast: 'Broadcast' };
+          let html = '';
+
+          // Suggested section at top (if any)
+          if (suggestedIds.length > 0) {
+            const suggestedTemplates = suggestedIds.map(id => templates.find(t => t.id === id)).filter(Boolean);
+            if (suggestedTemplates.length) {
+              html += '<div class="hub-template-category">Suggested</div>';
+              html += '<div class="hub-template-row">';
+              for (const t of suggestedTemplates) {
+                const icon = this._TEMPLATE_ICONS[t.id] || '<circle cx="12" cy="12" r="10"/>';
+                html += '<div class="hub-tpl-card suggested" onclick="app.hubStartFromTemplate(\'' + t.id + '\')" title="' + (t.description || '') + '">';
+                html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">' + icon + '</svg>';
+                html += '<div class="hub-tpl-name">' + t.name + '</div>';
+                html += '<div class="hub-tpl-dur">' + t.suggestedDuration + ' min</div>';
+                html += '</div>';
+              }
+              html += '</div>';
+            }
+          }
+
+          for (const [cat, label] of Object.entries(catLabels)) {
+            const items = cats[cat];
+            if (!items.length) continue;
+            html += '<div class="hub-template-category">' + label + '</div>';
+            html += '<div class="hub-template-row">';
+            for (const t of items) {
+              const icon = this._TEMPLATE_ICONS[t.id] || '<circle cx="12" cy="12" r="10"/>';
+              html += '<div class="hub-tpl-card" onclick="app.hubStartFromTemplate(\'' + t.id + '\')" title="' + (t.description || '') + '">';
+              html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">' + icon + '</svg>';
+              html += '<div class="hub-tpl-name">' + t.name + '</div>';
+              html += '<div class="hub-tpl-dur">' + t.suggestedDuration + ' min</div>';
+              html += '</div>';
+            }
+            html += '</div>';
+          }
+
+          if (custom.length) {
+            html += '<div class="hub-template-category">Your Templates</div>';
+            html += '<div class="hub-template-row">';
+            for (const t of custom) {
+              html += '<div class="hub-tpl-card" onclick="app.hubStartFromTemplate(\'' + t.id + '\')" title="' + (t.description || '') + '">';
+              html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/></svg>';
+              html += '<div class="hub-tpl-name">' + t.name + '</div>';
+              html += '<div class="hub-tpl-dur">' + t.suggestedDuration + ' min</div>';
+              html += '</div>';
+            }
+            html += '</div>';
+          }
+
+          grid.innerHTML = html;
+        },
+
+        hubStartFromTemplate(templateId) {
+          if (!this.hubValidate()) return;
+          this.hubSyncToSelectors();
+
+          const template = (this._cachedTemplates || []).find(t => t.id === templateId) || null;
+
+          this._activeTemplateId = templateId;
+          this._activeTemplateDuration = template?.suggestedDuration || 30;
+
+          if (template?.sessionType === 'solo') {
+            this.hubDismiss();
+            this.switchMode(template.captureMode || 'camera');
+          } else {
+            this.hubDismiss();
+            this.switchMode('session');
+            setTimeout(() => this.sessionHost(), 100);
+          }
         },
 
         // ── Room Sidebar ──────────────────────────────
@@ -8807,19 +9391,29 @@
 
             // Set up remote track handling (same as host flow)
             this._livekitRoom.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
-              if (track.kind === Track.Kind.Video) {
-                const isScreenShare = pub.source === Track.Source.ScreenShare;
+              const pName = participant.name || participant.identity;
+              const isScreenShare = pub.source === Track.Source.ScreenShare;
+              if (track.kind === Track.Kind.Video && isScreenShare) {
+                const el = track.attach();
+                this._showRemoteScreenShare(el, track.sid, pName);
+              } else if (track.kind === Track.Kind.Video) {
                 const el = track.attach();
                 el.style.width = '100%';
                 el.style.height = '100%';
-                el.style.objectFit = isScreenShare ? 'contain' : 'cover';
-                if (isScreenShare) el.dataset.screenShare = 'true';
+                el.style.objectFit = 'cover';
                 const container = document.getElementById('previewContainer');
                 if (container) container.appendChild(el);
               }
               if (track.kind === Track.Kind.Audio) {
                 const el = track.attach();
                 document.body.appendChild(el);
+              }
+            });
+            this._livekitRoom.on(RoomEvent.TrackUnsubscribed, (track, pub) => {
+              const isScreenShare = pub.source === Track.Source.ScreenShare;
+              track.detach().forEach((el) => el.remove());
+              if (isScreenShare) {
+                this._hideRemoteScreenShare();
               }
             });
 
@@ -8913,7 +9507,29 @@
                 .replace(/[^a-z0-9]+/g, '-')
                 .replace(/^-+|-+$/g, '') || 'wiser-meeting';
 
-            // 2. Create LiveKit room and get tokens
+            // 2. Create Meeting Object
+            els.hostStatus.textContent = 'Creating meeting...';
+            try {
+              const meetingResult = await window.recorder.createMeeting({
+                spaceId: spaceSelect.value,
+                templateId: this._activeTemplateId || null,
+                options: {
+                  title: spaceName + ' Meeting',
+                  hostName: hostName,
+                  startTime: new Date().toISOString(),
+                  duration: this._activeTemplateDuration || 30,
+                },
+              });
+              if (meetingResult.success) {
+                this._activeMeeting = meetingResult.meeting;
+                this._activeMeetingItemId = meetingResult.itemId;
+                console.log('[Meeting] Object created:', meetingResult.meeting.id);
+              }
+            } catch (e) {
+              console.warn('[Meeting] Object creation failed (non-blocking):', e.message);
+            }
+
+            // 3. Create LiveKit room and get tokens
             els.hostStatus.textContent = 'Creating meeting room...';
             const result = await window.recorder.createRoom(roomName);
             if (!result.success) {
@@ -8937,20 +9553,22 @@
               const pName = participant.name || participant.identity;
               const isScreenShare = publication.source === LivekitClient.Track.Source.ScreenShare;
               console.log('[LiveKit] Track subscribed:', track.kind, isScreenShare ? '(screen share)' : '', 'from', pName);
-              const container = this._ensureParticipantContainer(participant.sid, pName);
               const element = track.attach();
-              if (track.kind === 'video') {
+
+              if (track.kind === 'video' && isScreenShare) {
+                this._showRemoteScreenShare(element, track.sid, pName);
+              } else if (track.kind === 'video') {
+                const container = this._ensureParticipantContainer(participant.sid, pName);
                 element.style.width = '100%';
                 element.style.height = '100%';
-                element.style.objectFit = isScreenShare ? 'contain' : 'cover';
+                element.style.objectFit = 'cover';
                 element.dataset.trackSid = track.sid;
-                if (isScreenShare) element.dataset.screenShare = 'true';
                 container.appendChild(element);
               } else if (track.kind === 'audio') {
+                const container = this._ensureParticipantContainer(participant.sid, pName);
                 element.dataset.trackSid = track.sid;
                 element.style.display = 'none';
                 container.appendChild(element);
-                // Explicitly play to overcome autoplay policy
                 const playPromise = element.play();
                 if (playPromise) {
                   playPromise
@@ -8962,7 +9580,11 @@
             });
 
             this._livekitRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+              const isScreenShare = publication.source === LivekitClient.Track.Source.ScreenShare;
               track.detach().forEach((el) => el.remove());
+              if (isScreenShare) {
+                this._hideRemoteScreenShare();
+              }
             });
 
             // Guest presence awareness
@@ -9044,6 +9666,10 @@
                   this.handleTrackTransferStart(msg, senderId);
                 } else if (msg.type === 'track-transfer-complete') {
                   this.handleTrackTransferComplete(senderId);
+                } else if (msg.type === 'meeting-overlay') {
+                  this.pushOverlay(msg.overlay);
+                } else if (msg.type === 'ai-assist-active') {
+                  this.setAiAssistVisible(msg.active);
                 }
               } catch {}
             });
@@ -9309,16 +9935,34 @@
           }
         },
 
-        // Update layout based on participant count
+        // Update layout based on participant count and screen share state
         _updateLayout() {
           const container = this.elements.previewContainer;
           const count = this._participants.size;
 
-          // Remove existing layout classes
-          container.classList.remove('layout-side-by-side', 'layout-speaker-view');
+          container.classList.remove('layout-side-by-side', 'layout-speaker-view', 'layout-presentation');
+
+          // Presentation mode: screen share occupies top area, participants fill bottom strip
+          if (this._remoteScreenShareEl || this._sessionScreenShareActive) {
+            container.classList.add('layout-presentation');
+            const thumbWidth = Math.min(160, Math.floor(container.clientWidth / Math.max(count, 1)) - 8);
+            const thumbGap = 6;
+            let idx = 0;
+            this._participants.forEach((entry) => {
+              entry.container.classList.remove('in-spotlight', 'in-thumbnails');
+              Object.assign(entry.container.style, {
+                width: thumbWidth + 'px',
+                height: '130px',
+                left: (idx * (thumbWidth + thumbGap)) + 'px',
+                top: 'auto',
+                bottom: '0',
+              });
+              idx++;
+            });
+            return;
+          }
 
           if (count <= 1) {
-            // Solo — full size
             this._participants.forEach((entry) => {
               entry.container.classList.remove('in-spotlight', 'in-thumbnails');
               Object.assign(entry.container.style, {
@@ -9332,7 +9976,6 @@
           }
 
           if (count === 2) {
-            // Side-by-side — position explicitly with JS
             container.classList.add('layout-side-by-side');
             let idx = 0;
             this._participants.forEach((entry) => {
@@ -9346,10 +9989,7 @@
               idx++;
             });
           } else {
-            // 3+ participants — speaker view
             container.classList.add('layout-speaker-view');
-
-            // If no spotlight yet, pick the first remote participant
             if (!this._currentSpotlightSid || !this._participants.has(this._currentSpotlightSid)) {
               this._pickNewSpotlight();
             } else {
@@ -9411,6 +10051,118 @@
 
           this._currentSpotlightSid = sid;
           this._applySpotlightLayout();
+        },
+
+        // Show a remote participant's screen share in a dedicated container
+        _showRemoteScreenShare(videoElement, trackSid, participantName) {
+          this._hideRemoteScreenShare();
+          const wrapper = document.createElement('div');
+          wrapper.className = 'screen-share-container';
+          wrapper.id = 'remoteScreenShareContainer';
+          videoElement.dataset.trackSid = trackSid;
+          wrapper.appendChild(videoElement);
+          const label = document.createElement('div');
+          label.className = 'screen-share-label';
+          label.textContent = (participantName || 'Participant') + ' is sharing';
+          wrapper.appendChild(label);
+          this.elements.previewContainer.appendChild(wrapper);
+          this._remoteScreenShareEl = wrapper;
+          this._updateLayout();
+        },
+
+        // Remove the remote screen share container
+        _hideRemoteScreenShare() {
+          if (this._remoteScreenShareEl) {
+            this._remoteScreenShareEl.remove();
+            this._remoteScreenShareEl = null;
+            this._updateLayout();
+          }
+        },
+
+        // Toggle screen share button and banner state
+        _updateScreenShareUI(active) {
+          const btn = document.getElementById('screenShareBtn');
+          if (btn) btn.classList.toggle('sharing', active);
+          const banner = document.getElementById('sharingBanner');
+          if (banner) banner.classList.toggle('visible', active);
+        },
+
+        // ── Meeting Overlay System ──────────────────────────────
+
+        _overlayTimers: new Map(),
+
+        pushOverlay(overlay) {
+          const stack = document.getElementById('overlayStack');
+          if (!stack) return;
+
+          const id = overlay.id || ('overlay_' + Date.now());
+
+          // Host-only overlays: don't broadcast, show AI assist indicator to guests
+          const isHostOnly = overlay.visibility === 'host';
+          if (isHostOnly && this.sessionRole !== 'host') return;
+
+          // Broadcast to remote participants (unless host-only)
+          if (!isHostOnly && !overlay._fromRemote && this._livekitRoom) {
+            this.sendSessionData({ type: 'meeting-overlay', overlay: { ...overlay, id, _fromRemote: true } });
+            // Show AI assist indicator to guests for host-only overlays
+          }
+          if (isHostOnly && this._livekitRoom) {
+            this.sendSessionData({ type: 'ai-assist-active', active: true });
+          }
+
+          const el = document.createElement('div');
+          el.className = 'meeting-overlay type-' + (overlay.type || 'note');
+          el.dataset.overlayId = id;
+
+          const sourceLabel = {
+            'ai-translation': 'Translation',
+            'ai-notes': 'AI Note',
+            'ai-action': 'Action Item',
+            'ai-coach': 'Coach',
+            'system': 'System',
+          }[overlay.source] || overlay.source || 'AI';
+
+          el.innerHTML =
+            '<div class="meeting-overlay-content">' +
+              '<div class="meeting-overlay-source">' + sourceLabel + '</div>' +
+              '<div>' + (overlay.content || '') + '</div>' +
+            '</div>' +
+            '<button class="meeting-overlay-dismiss" onclick="app.dismissOverlay(\'' + id + '\')">&times;</button>';
+
+          stack.appendChild(el);
+
+          const ttl = (overlay.ttl || 15) * 1000;
+          const timer = setTimeout(() => {
+            el.classList.add('fading');
+            setTimeout(() => el.remove(), 500);
+            this._overlayTimers.delete(id);
+          }, ttl);
+          this._overlayTimers.set(id, timer);
+        },
+
+        dismissOverlay(id) {
+          const el = document.querySelector('[data-overlay-id="' + id + '"]');
+          if (el) {
+            el.classList.add('fading');
+            setTimeout(() => el.remove(), 300);
+          }
+          const timer = this._overlayTimers.get(id);
+          if (timer) {
+            clearTimeout(timer);
+            this._overlayTimers.delete(id);
+          }
+        },
+
+        clearAllOverlays() {
+          const stack = document.getElementById('overlayStack');
+          if (stack) stack.innerHTML = '';
+          this._overlayTimers.forEach(t => clearTimeout(t));
+          this._overlayTimers.clear();
+        },
+
+        setAiAssistVisible(visible) {
+          const el = document.getElementById('aiAssistIndicator');
+          if (el) el.classList.toggle('visible', visible);
         },
 
         // Handle ActiveSpeakersChanged with debounce
@@ -9556,6 +10308,8 @@
               this.sessionStopScreenShare();
             };
 
+            this._updateScreenShareUI(true);
+            this._updateLayout();
             this.showStatus('Screen sharing started', 'info');
             console.log('[LiveKit] Screen share published:', sourceId);
           } catch (error) {
@@ -9582,6 +10336,8 @@
           this._sessionScreenShareActive = false;
           this._sessionScreenSharePending = false;
 
+          this._updateScreenShareUI(false);
+          this._updateLayout();
           this.showStatus('Screen sharing stopped', 'info');
           console.log('[LiveKit] Screen share stopped');
         },
@@ -10220,7 +10976,8 @@
           this.elements.previewContainer.classList.remove(
             'session-active',
             'layout-side-by-side',
-            'layout-speaker-view'
+            'layout-speaker-view',
+            'layout-presentation'
           );
 
           // Clean up remote video and session controls
@@ -10267,13 +11024,73 @@
           // Clean up WebRTC and signaling
           await this.sessionCleanup();
 
+          // Offer to save as custom template if a template was used
+          if (this._activeTemplateId && this._lastCompletedMeeting) {
+            this._offerSaveAsTemplate(this._lastCompletedMeeting);
+          }
+
           // Switch back to camera mode
           this.switchMode('camera');
           this.showStatus('Session ended', 'info');
         },
 
+        async _offerSaveAsTemplate(meeting) {
+          if (!meeting?.spaceId) return;
+          const name = prompt('Save this meeting setup as a template?\nEnter a name (or cancel to skip):');
+          if (!name) return;
+          try {
+            const result = await window.recorder.saveCustomTemplate({
+              spaceId: meeting.spaceId,
+              meeting,
+              name,
+              description: 'Created from ' + (meeting.calendar?.vevent?.summary || 'meeting'),
+              scope: 'space',
+            });
+            if (result?.success) {
+              this.showStatus('Template "' + name + '" saved', 'success');
+            }
+          } catch (e) {
+            console.warn('[Meeting] Save template failed:', e.message);
+          }
+        },
+
         // Cleanup session resources
         async sessionCleanup() {
+          // Complete the Meeting Object via IPC
+          if (this._activeMeeting && this._activeMeetingItemId) {
+            try {
+              const participants = [...(this._participants?.values() || [])].map(p => ({
+                identity: p.identity || 'Guest',
+              }));
+              await window.recorder.completeMeeting({
+                spaceId: this._activeMeeting.spaceId,
+                itemId: this._activeMeetingItemId,
+                meetingId: this._activeMeeting.id,
+                participants,
+              });
+              console.log('[Meeting] Object completed:', this._activeMeeting.id);
+
+              // Trigger post-meeting analysis (non-blocking background task)
+              const _analysisData = {
+                spaceId: this._activeMeeting.spaceId,
+                itemId: this._activeMeetingItemId,
+                meetingId: this._activeMeeting.id,
+              };
+              window.recorder.postMeetingAnalyze(_analysisData)
+                .then(r => {
+                  if (r?.success && !r.skipped) {
+                    console.log('[Meeting] Post-meeting analysis complete, vibe:', r.meeting?.post?.vibeScore?.score);
+                  }
+                })
+                .catch(e => console.warn('[Meeting] Post-meeting analysis failed:', e.message));
+            } catch (e) {
+              console.warn('[Meeting] Object completion failed (non-blocking):', e.message);
+            }
+            this._lastCompletedMeeting = this._activeMeeting;
+            this._activeMeeting = null;
+            this._activeMeetingItemId = null;
+          }
+
           this.sessionConnected = false;
           this.sessionRole = null;
           this._currentSpeakerName = null;
@@ -10289,6 +11106,10 @@
           }
           this._sessionScreenShareActive = false;
           this._sessionScreenSharePending = false;
+          this._updateScreenShareUI(false);
+          this._hideRemoteScreenShare();
+          this.clearAllOverlays();
+          this.setAiAssistVisible(false);
 
           // Reset track transfer state
           this.transferInProgress = false;
@@ -10384,6 +11205,12 @@
         initHUD() {
           // Activate HUD mode — hide old controls
           document.querySelector('.main-layout')?.classList.add('hud-active');
+
+          // Hide pilot HUD while hub is visible (it shows when hub dismisses)
+          if (this.hubActive) {
+            const hud = document.getElementById('pilotHud');
+            if (hud) hud.style.display = 'none';
+          }
 
           // Start HUD update loop (every 500ms)
           this._hudInterval = setInterval(() => this.updateHUD(), 500);

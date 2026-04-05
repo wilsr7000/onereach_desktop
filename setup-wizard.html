@@ -7,7 +7,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; style-src 'self' 'unsafe-inline' * https://*.onereach.ai; style-src-elem 'self' 'unsafe-inline' * https://*.onereach.ai; script-src 'self' 'unsafe-inline' 'unsafe-eval' * https://*.onereach.ai; connect-src 'self' * https://*.onereach.ai https://*.api.onereach.ai; img-src 'self' data: blob: spaces: * https://*.onereach.ai; font-src 'self' data: * https://*.onereach.ai; media-src 'self' * https://*.onereach.ai; object-src 'none'; base-uri 'self'"
     />
-    <title>Manage Your Digital Workers & Agents - GSX Power User</title>
+    <title>Agent Marketplace - GSX Power User</title>
     <style>
       body {
         background-color: #141414;
@@ -650,75 +650,80 @@
         color: rgba(255, 255, 255, 0.6);
       }
 
-      /* Manager view styles - Two-column layout */
+      /* Manager view styles - AGNT-inspired marketplace layout */
       .agent-manager-layout {
-        display: flex;
-        gap: 24px;
-        height: calc(100vh - 320px);
-        min-height: 400px;
-        max-height: 600px;
-        margin: 16px 0;
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        gap: 0;
+        height: calc(100vh - 140px);
+        min-height: 500px;
+        margin: 0 -24px;
       }
 
       /* Left Sidebar */
       .agent-sidebar {
-        width: 160px;
-        flex-shrink: 0;
+        width: 100%;
         display: flex;
         flex-direction: column;
+        gap: 2px;
         background: transparent;
-        border-radius: 0;
-        padding: 0;
-        border-right: 1px solid rgba(255, 255, 255, 0.04);
-        padding-right: 16px;
+        padding: 20px 14px;
+        border-right: 1px solid rgba(255, 255, 255, 0.06);
+        overflow-y: auto;
       }
 
       .agent-search {
         width: 100%;
-        padding: 8px 10px;
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        background: rgba(255, 255, 255, 0.02);
-        color: #ffffff;
-        border-radius: 6px;
+        padding: 9px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        background: rgba(255, 255, 255, 0.03);
+        color: #e8e8ea;
+        border-radius: 8px;
         font-size: 13px;
-        margin-bottom: 16px;
-        box-sizing: border-box;
-        transition: border-color 0.15s ease;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.15s;
+        margin-bottom: 12px;
       }
 
       .agent-search:focus {
-        outline: none;
-        border-color: #0099ff;
+        border-color: rgba(255, 255, 255, 0.14);
       }
 
       .agent-search::placeholder {
-        color: rgba(255, 255, 255, 0.3);
+        color: rgba(255, 255, 255, 0.25);
       }
 
       .category-list {
         flex: 1;
         overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
       }
 
       .category-item {
         display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 6px 8px;
-        border-radius: 4px;
+        justify-content: space-between;
+        padding: 7px 10px;
+        border-radius: 7px;
         cursor: pointer;
-        transition: color 0.15s ease;
-        margin-bottom: 2px;
-        color: rgba(255, 255, 255, 0.5);
+        transition: all 0.15s;
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 13px;
+        border: 1px solid transparent;
       }
 
       .category-item:hover {
+        background: rgba(255, 255, 255, 0.03);
         color: rgba(255, 255, 255, 0.8);
       }
 
       .category-item.active {
-        color: #0099ff;
-        background: transparent;
+        background: rgba(200, 255, 87, 0.04);
+        color: #c8ff57;
+        border-color: rgba(200, 255, 87, 0.12);
       }
 
       .category-icon {
@@ -732,15 +737,149 @@
       }
 
       .category-count {
-        font-size: 11px;
-        color: rgba(255, 255, 255, 0.35);
-        padding: 0;
-        min-width: auto;
-        text-align: right;
+        font-family: 'Menlo', 'Monaco', monospace;
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.04);
+        padding: 1px 6px;
+        border-radius: 4px;
       }
 
       .category-item.active .category-count {
+        background: rgba(200, 255, 87, 0.1);
+        color: #c8ff57;
+      }
+
+      .category-item.sub {
+        padding-left: 16px;
+        font-size: 12px;
+      }
+
+      .category-divider {
+        height: 1px;
+        background: rgba(255, 255, 255, 0.06);
+        margin: 8px 0;
+      }
+
+      .category-label {
+        font-family: 'Menlo', 'Monaco', monospace;
+        font-size: 9px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: rgba(255, 255, 255, 0.15);
+        padding: 12px 10px 4px;
+      }
+
+      /* Add card (appears at end of filtered grid) */
+      .environment-item.add-card {
+        border: 1px dashed rgba(255, 255, 255, 0.1);
+        background: transparent;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 140px;
+        cursor: pointer;
+      }
+
+      .environment-item.add-card:hover {
+        border-color: rgba(0, 153, 255, 0.4);
+        background: rgba(0, 153, 255, 0.04);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+      }
+
+      .add-card-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .add-card-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(0, 153, 255, 0.1);
         color: rgba(0, 153, 255, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        font-weight: 300;
+      }
+
+      .add-card-label {
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.4);
+        font-weight: 500;
+      }
+
+      .environment-item.add-card:hover .add-card-icon {
+        background: rgba(0, 153, 255, 0.2);
+        color: #0099ff;
+      }
+
+      .environment-item.add-card:hover .add-card-label {
+        color: rgba(255, 255, 255, 0.7);
+      }
+
+      /* Toggle switch */
+      .environment-toggle {
+        display: flex;
+        align-items: center;
+        margin-top: 8px;
+      }
+
+      .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 36px;
+        height: 20px;
+        cursor: pointer;
+      }
+
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .toggle-slider {
+        position: absolute;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        transition: background 0.2s;
+      }
+
+      .toggle-slider::before {
+        content: '';
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        left: 2px;
+        bottom: 2px;
+        background: rgba(255, 255, 255, 0.5);
+        border-radius: 50%;
+        transition: transform 0.2s, background 0.2s;
+      }
+
+      .toggle-switch input:checked + .toggle-slider {
+        background: rgba(200, 255, 87, 0.3);
+      }
+
+      .toggle-switch input:checked + .toggle-slider::before {
+        transform: translateX(16px);
+        background: #c8ff57;
+      }
+
+      .environment-item.disabled {
+        opacity: 0.4;
+      }
+
+      .environment-item.disabled:hover {
+        opacity: 0.6;
       }
 
       /* Main Content Area */
@@ -749,24 +888,29 @@
         display: flex;
         flex-direction: column;
         min-width: 0;
+        padding: 20px 28px;
+        overflow-y: auto;
       }
 
       .agent-list-header {
-        font-size: 12px;
+        font-family: 'Menlo', 'Monaco', monospace;
+        font-size: 10px;
         font-weight: 500;
-        color: rgba(255, 255, 255, 0.4);
+        color: rgba(255, 255, 255, 0.15);
         text-transform: uppercase;
-        letter-spacing: 0.5px;
-        padding: 0 0 8px 0;
-        margin-bottom: 12px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        letter-spacing: 0.12em;
+        padding: 0 0 12px 0;
         flex-shrink: 0;
       }
 
       .agent-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 10px;
+        align-content: start;
         flex: 1;
         overflow-y: auto;
-        padding-right: 8px;
+        padding-right: 4px;
       }
 
       .agent-list::-webkit-scrollbar {
@@ -812,20 +956,88 @@
       }
 
       .environment-item {
+        background: rgba(19, 19, 22, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 10px;
+        padding: 18px;
+        cursor: pointer;
+        transition: all 0.18s;
+        position: relative;
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 12px 0;
-        margin-bottom: 0;
-        background: transparent;
-        border: none;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-        border-radius: 0;
-        transition: background-color 0.15s ease;
+        flex-direction: column;
+        gap: 0;
+        min-height: 140px;
       }
 
       .environment-item:hover {
-        background: rgba(255, 255, 255, 0.02);
+        border-color: rgba(255, 255, 255, 0.14);
+        transform: translateY(-2px);
+        background: rgba(26, 26, 31, 0.9);
+      }
+
+      .environment-item-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .environment-item-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 9px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        flex-shrink: 0;
+      }
+
+      .environment-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #e8e8ea;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        line-height: 1.3;
+        margin-bottom: 8px;
+        word-break: break-word;
+      }
+
+      .environment-details {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.35);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        line-height: 1.5;
+        margin-bottom: 14px;
+        min-width: 0;
+      }
+
+      .environment-shortcut {
+        font-family: 'Menlo', 'Monaco', monospace;
+        font-size: 10px;
+        color: rgba(200, 255, 87, 0.6);
+        margin-top: 0;
+        margin-bottom: 14px;
+        background: rgba(200, 255, 87, 0.04);
+        border: 1px solid rgba(200, 255, 87, 0.1);
+        padding: 1px 6px;
+        border-radius: 3px;
+        display: inline-block;
+      }
+
+      .environment-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.04);
+        margin-top: auto;
       }
 
       .environment-info {
@@ -835,74 +1047,68 @@
         gap: 2px;
       }
 
-      .environment-item-info {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-
-      .environment-title {
-        font-size: 14px;
-        font-weight: 500;
-        color: #ffffff;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
       .environment-type {
-        font-size: 10px;
-        padding: 2px 6px;
-        background: transparent;
-        border-radius: 3px;
-        color: rgba(255, 255, 255, 0.5);
+        font-family: 'Menlo', 'Monaco', monospace;
+        font-size: 9px;
+        padding: 2px 7px;
+        border-radius: 4px;
+        letter-spacing: 0.05em;
         text-transform: uppercase;
-        letter-spacing: 0.3px;
+        border: 1px solid transparent;
+      }
+
+      .environment-type.tool {
+        color: #ffcc00;
+        background: rgba(255, 204, 0, 0.08);
+        border-color: rgba(255, 204, 0, 0.18);
+      }
+
+      .environment-type.skill {
+        color: #4ade80;
+        background: rgba(74, 222, 128, 0.08);
+        border-color: rgba(74, 222, 128, 0.18);
       }
 
       .environment-type.idw {
-        color: #0099ff;
+        color: #5b9cf6;
+        background: rgba(91, 156, 246, 0.08);
+        border-color: rgba(91, 156, 246, 0.18);
       }
 
       .environment-type.external {
-        color: #34c759;
+        color: #c8ff57;
+        background: rgba(200, 255, 87, 0.06);
+        border-color: rgba(200, 255, 87, 0.15);
       }
 
       .environment-type.image {
-        color: #ff9500;
+        color: #ffb547;
+        background: rgba(255, 181, 71, 0.08);
+        border-color: rgba(255, 181, 71, 0.18);
       }
 
       .environment-type.video {
-        color: #af52de;
+        color: #a78bfa;
+        background: rgba(167, 139, 250, 0.08);
+        border-color: rgba(167, 139, 250, 0.18);
       }
 
       .environment-type.audio {
-        color: #ff2d55;
+        color: #ff6b6b;
+        background: rgba(255, 107, 107, 0.08);
+        border-color: rgba(255, 107, 107, 0.18);
       }
 
       .environment-type.ui-design {
-        color: #5856d6;
-      }
-
-      .environment-details {
-        font-size: 12px;
-        color: rgba(255, 255, 255, 0.4);
-      }
-
-      .environment-shortcut {
-        font-size: 10px;
-        color: rgba(0, 153, 255, 0.8);
-        margin-top: 2px;
-        font-family: monospace;
-        background: transparent;
-        padding: 0;
-        display: inline-block;
+        color: #2dd4bf;
+        background: rgba(45, 212, 191, 0.08);
+        border-color: rgba(45, 212, 191, 0.18);
       }
 
       .environment-actions {
         display: flex;
-        gap: 6px;
+        gap: 4px;
+        margin-top: 8px;
         opacity: 0;
         transition: opacity 0.15s ease;
       }
@@ -912,10 +1118,10 @@
       }
 
       .action-btn {
-        padding: 6px 12px;
+        padding: 4px 8px;
         border: none;
         border-radius: 4px;
-        font-size: 12px;
+        font-size: 10px;
         cursor: pointer;
         transition: opacity 0.15s ease;
         background: transparent;
@@ -1148,7 +1354,7 @@
 
       .agents-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
         gap: 12px;
         flex: 1;
         overflow-y: auto;
@@ -1225,7 +1431,7 @@
       </div>
 
       <div class="step active" id="step0">
-        <h2>Manage Your Digital Workers & Agents</h2>
+        <h2>Agent Marketplace</h2>
 
         <!-- Two-column layout for sidebar + main list -->
         <div class="agent-manager-layout">
@@ -1240,37 +1446,38 @@
             />
             <div class="category-list">
               <div class="category-item active" data-type="all" onclick="filterByCategory('all')">
-                <span class="category-icon">📋</span>
                 <span class="category-name">All</span>
                 <span class="category-count" id="count-all">0</span>
               </div>
+              <div class="category-item" data-type="tool" onclick="filterByCategory('tool')">
+                <span class="category-name">Agentic Tools</span>
+                <span class="category-count" id="count-tool">0</span>
+              </div>
+              <div class="category-item" data-type="skill" onclick="filterByCategory('skill')">
+                <span class="category-name">Skills</span>
+                <span class="category-count" id="count-skill">0</span>
+              </div>
               <div class="category-item" data-type="idw" onclick="filterByCategory('idw')">
-                <span class="category-icon">🏢</span>
-                <span class="category-name">IDW</span>
+                <span class="category-name">Digital Workers</span>
                 <span class="category-count" id="count-idw">0</span>
               </div>
               <div class="category-item" data-type="external" onclick="filterByCategory('external')">
-                <span class="category-icon">🤖</span>
-                <span class="category-name">Agents</span>
+                <span class="category-name">General Purpose</span>
                 <span class="category-count" id="count-external">0</span>
               </div>
               <div class="category-item" data-type="image" onclick="filterByCategory('image')">
-                <span class="category-icon">🖼️</span>
                 <span class="category-name">Image</span>
                 <span class="category-count" id="count-image">0</span>
               </div>
               <div class="category-item" data-type="video" onclick="filterByCategory('video')">
-                <span class="category-icon">🎬</span>
                 <span class="category-name">Video</span>
                 <span class="category-count" id="count-video">0</span>
               </div>
               <div class="category-item" data-type="audio" onclick="filterByCategory('audio')">
-                <span class="category-icon">🔊</span>
                 <span class="category-name">Audio</span>
                 <span class="category-count" id="count-audio">0</span>
               </div>
               <div class="category-item" data-type="ui-design" onclick="filterByCategory('ui-design')">
-                <span class="category-icon">🎨</span>
                 <span class="category-name">UI Design</span>
                 <span class="category-count" id="count-ui-design">0</span>
               </div>
@@ -1284,13 +1491,6 @@
               <!-- Will be populated with existing environments and agents -->
             </div>
           </div>
-        </div>
-
-        <div class="add-button-container">
-          <button class="add-btn primary-add-btn" onclick="showAddChoice()">
-            <span style="font-size: 20px; margin-right: 8px">+</span>
-            Add New Digital Worker or Agent
-          </button>
         </div>
 
         <div class="button-container">
@@ -2443,6 +2643,7 @@
       // Function to choose add type
       function chooseAddType(type) {
         addType = type;
+        document.getElementById('step0').classList.remove('active');
         document.getElementById('step-choice').classList.remove('active');
 
         switch (type) {
@@ -2474,14 +2675,13 @@
         updateProgressBar();
       }
 
-      // Function to go back to choice screen
+      // Function to go back to manager view
       function backToChoice() {
-        // Hide all steps
         document.querySelectorAll('.step').forEach((step) => {
           step.classList.remove('active');
         });
-        // Show choice step
-        document.getElementById('step-choice').classList.add('active');
+        document.getElementById('step0').classList.add('active');
+        populateEnvironmentsList();
         updateProgressBar();
       }
 
@@ -3293,7 +3493,40 @@
       let currentSearchQuery = '';
       let searchDebounceTimer = null;
 
-      // Get all agent items from localStorage
+      // Built-in desktop skills (from agent-registry)
+      const BUILTIN_SKILLS = [
+        { id: 'weather-agent', name: 'Weather', description: 'Current weather and forecasts', type: 'skill', category: 'information' },
+        { id: 'calendar-query-agent', name: 'Calendar', description: 'Query your schedule and meetings', type: 'skill', category: 'productivity' },
+        { id: 'search-agent', name: 'Search', description: 'Search the web for information', type: 'skill', category: 'information' },
+        { id: 'browser-agent', name: 'Browser', description: 'Browse websites and extract content', type: 'skill', category: 'productivity' },
+        { id: 'spaces-agent', name: 'Spaces', description: 'Search and manage your spaces', type: 'skill', category: 'productivity' },
+        { id: 'recorder-agent', name: 'Recorder', description: 'Record video, screen, or audio', type: 'skill', category: 'media' },
+        { id: 'dj-agent', name: 'DJ', description: 'Play music and sound effects', type: 'skill', category: 'media' },
+        { id: 'memory-agent', name: 'Memory', description: 'Remember things across sessions', type: 'skill', category: 'productivity' },
+        { id: 'help-agent', name: 'Help', description: 'App help and documentation', type: 'skill', category: 'system' },
+        { id: 'daily-brief-agent', name: 'Daily Brief', description: 'Morning briefing with schedule and tasks', type: 'skill', category: 'productivity' },
+        { id: 'action-item-agent', name: 'Action Items', description: 'Track and manage action items', type: 'skill', category: 'productivity' },
+        { id: 'teacher-agent', name: 'Teacher', description: 'Learn about app features', type: 'skill', category: 'system' },
+        { id: 'tickets-agent', name: 'Tickets', description: 'Track and manage support tickets', type: 'skill', category: 'productivity' },
+      ];
+
+      // Built-in agentic tools
+      const BUILTIN_TOOLS = [
+        { id: 'open-video-editor', name: 'Video Editor', description: 'Edit and trim video recordings', type: 'tool', shortcut: 'Cmd+Shift+V' },
+        { id: 'open-gsx-create', name: 'GSX Create', description: 'AI-powered app builder', type: 'tool', shortcut: 'Cmd+Shift+A' },
+        { id: 'open-recorder', name: 'WISER Meeting', description: 'Record, meet, and transcribe', type: 'tool', shortcut: 'Cmd+Shift+M' },
+        { id: 'open-black-hole', name: 'Black Hole', description: 'Quick capture and file upload', type: 'tool', shortcut: 'Cmd+Shift+B' },
+        { id: 'open-spaces', name: 'Spaces Manager', description: 'Manage content spaces and items', type: 'tool', shortcut: 'Cmd+Shift+V' },
+        { id: 'open-claude-code-ui', name: 'Agent Composer', description: 'Create agents with AI', type: 'tool', shortcut: 'Cmd+Shift+G' },
+        { id: 'open-budget', name: 'Budget Dashboard', description: 'Track AI usage and costs', type: 'tool' },
+        { id: 'open-app-health', name: 'App Health', description: 'Monitor app performance and errors', type: 'tool', shortcut: 'Cmd+Shift+H' },
+        { id: 'toggle-voice-orb', name: 'Voice Orb', description: 'Voice assistant interface', type: 'tool', shortcut: 'Cmd+Shift+O' },
+        { id: 'open-idw-store', name: 'IDW Store', description: 'Browse and install digital workers', type: 'tool' },
+        { id: 'open-log-viewer', name: 'Log Viewer', description: 'View structured event logs', type: 'tool' },
+        { id: 'open-tutorials', name: 'Tutorials', description: 'Interactive learning guides', type: 'tool' },
+      ];
+
+      // Get all agent items from localStorage + built-in skills
       function getAllAgentItems() {
         const idwEnvironments = JSON.parse(localStorage.getItem('idwEnvironments') || '[]');
         const externalBots = JSON.parse(localStorage.getItem('externalBots') || '[]');
@@ -3301,39 +3534,51 @@
         const videoCreators = JSON.parse(localStorage.getItem('videoCreators') || '[]');
         const audioGenerators = JSON.parse(localStorage.getItem('audioGenerators') || '[]');
         const uiDesignTools = JSON.parse(localStorage.getItem('uiDesignTools') || '[]');
+        const skillStates = JSON.parse(localStorage.getItem('builtinAgentStates') || '{}');
+        const toolStates = JSON.parse(localStorage.getItem('toolStates') || '{}');
 
-        return {
-          all: [
-            ...idwEnvironments.map((env) => ({ ...env, type: 'idw' })),
-            ...externalBots.map((bot) => ({ ...bot, type: 'external' })),
-            ...imageCreators.map((creator) => ({ ...creator, type: 'image' })),
-            ...videoCreators.map((creator) => ({ ...creator, type: 'video' })),
-            ...audioGenerators.map((gen) => ({ ...gen, type: 'audio' })),
-            ...uiDesignTools.map((tool) => ({ ...tool, type: 'ui-design' })),
-          ],
-          counts: {
-            all:
-              idwEnvironments.length +
-              externalBots.length +
-              imageCreators.length +
-              videoCreators.length +
-              audioGenerators.length +
-              uiDesignTools.length,
-            idw: idwEnvironments.length,
-            external: externalBots.length,
-            image: imageCreators.length,
-            video: videoCreators.length,
-            audio: audioGenerators.length,
-            'ui-design': uiDesignTools.length,
-          },
+        const skills = BUILTIN_SKILLS.map(s => ({
+          ...s,
+          enabled: skillStates[s.id] !== false,
+        }));
+
+        const tools = BUILTIN_TOOLS.map(t => ({
+          ...t,
+          enabled: toolStates[t.id] !== false,
+        }));
+
+        const allItems = [
+          ...tools,
+          ...skills,
+          ...idwEnvironments.map((env) => ({ ...env, type: 'idw', enabled: env.enabled !== false })),
+          ...externalBots.map((bot) => ({ ...bot, type: 'external', enabled: bot.enabled !== false })),
+          ...imageCreators.map((c) => ({ ...c, type: 'image', enabled: c.enabled !== false })),
+          ...videoCreators.map((c) => ({ ...c, type: 'video', enabled: c.enabled !== false })),
+          ...audioGenerators.map((g) => ({ ...g, type: 'audio', enabled: g.enabled !== false })),
+          ...uiDesignTools.map((t) => ({ ...t, type: 'ui-design', enabled: t.enabled !== false })),
+        ];
+
+        const counts = {
+          all: allItems.length,
+          tool: tools.length,
+          skill: skills.length,
+          idw: idwEnvironments.length,
+          external: externalBots.length,
+          image: imageCreators.length,
+          video: videoCreators.length,
+          audio: audioGenerators.length,
+          'ui-design': uiDesignTools.length,
         };
+
+        return { all: allItems, counts };
       }
 
-      // Update category counts in sidebar
       function updateCategoryCounts() {
         const { counts } = getAllAgentItems();
 
         document.getElementById('count-all').textContent = counts.all;
+        document.getElementById('count-tool').textContent = counts.tool;
+        document.getElementById('count-skill').textContent = counts.skill;
         document.getElementById('count-idw').textContent = counts.idw;
         document.getElementById('count-external').textContent = counts.external;
         document.getElementById('count-image').textContent = counts.image;
@@ -3356,11 +3601,13 @@
 
         // Update header
         const headerMap = {
-          all: 'All Agents',
-          idw: 'IDW Environments',
-          external: 'External Agents',
-          image: 'Image Creators',
-          video: 'Video Creators',
+          all: 'All',
+          tool: 'Agentic Tools',
+          skill: 'Built-in Skills',
+          idw: 'Intelligent Digital Workers',
+          external: 'General Purpose',
+          image: 'Image Generators',
+          video: 'Video Generators',
           audio: 'Audio Generators',
           'ui-design': 'UI Design Tools',
         };
@@ -3381,22 +3628,8 @@
 
       // Get item name based on type
       function getItemName(item) {
-        switch (item.type) {
-          case 'idw':
-            return item.label || '';
-          case 'external':
-            return item.name || '';
-          case 'image':
-            return item.name || '';
-          case 'video':
-            return item.name || '';
-          case 'audio':
-            return item.name || '';
-          case 'ui-design':
-            return item.name || '';
-          default:
-            return '';
-        }
+        if (item.type === 'idw') return item.label || '';
+        return item.name || '';
       }
 
       // Function to populate environments list with filtering
@@ -3431,9 +3664,8 @@
         if (allItems.length === 0) {
           listContainer.innerHTML = `
                     <div class="agent-empty-state">
-                        <div class="icon">📋</div>
                         <div class="message">No digital workers or agents configured</div>
-                        <div style="margin-top: 8px; font-size: 12px;">Click the button below to add your first one</div>
+                        <div style="margin-top: 8px; font-size: 12px; color: rgba(255,255,255,0.4);">Click the button below to add your first one</div>
                     </div>
                 `;
           return;
@@ -3442,9 +3674,8 @@
         if (filteredItems.length === 0) {
           listContainer.innerHTML = `
                     <div class="agent-empty-state">
-                        <div class="icon">🔍</div>
                         <div class="message">No agents found</div>
-                        <div style="margin-top: 8px; font-size: 12px;">Try a different search or category</div>
+                        <div style="margin-top: 8px; font-size: 12px; color: rgba(255,255,255,0.4);">Try a different search or category</div>
                     </div>
                 `;
           return;
@@ -3467,14 +3698,26 @@
           let itemUrl = '';
 
           switch (item.type) {
+            case 'tool':
+              typeLabel = 'Tool';
+              typeClass = 'tool';
+              itemName = item.name || item.id || 'Unnamed Tool';
+              itemUrl = item.description || '';
+              break;
+            case 'skill':
+              typeLabel = 'Skill';
+              typeClass = 'skill';
+              itemName = item.name || item.id || 'Unnamed Skill';
+              itemUrl = item.description || '';
+              break;
             case 'idw':
-              typeLabel = 'IDW';
+              typeLabel = 'Digital Worker';
               typeClass = 'idw';
               itemName = item.label || item.id || 'Unnamed IDW';
               itemUrl = item.homeUrl || item.chatUrl || '';
               break;
             case 'external':
-              typeLabel = 'Agent';
+              typeLabel = 'General';
               typeClass = 'external';
               itemName = item.name || item.id || 'Unnamed Agent';
               itemUrl = item.chatUrl || item.url || '';
@@ -3506,28 +3749,91 @@
           }
 
           let shortcutInfo = '';
-          if ((item.type === 'idw' || item.type === 'external') && item.globalShortcut) {
-            shortcutInfo = `<div class="environment-shortcut">Shortcut: ${item.globalShortcut}</div>`;
+          if (item.shortcut) {
+            shortcutInfo = `<div class="environment-shortcut">${item.shortcut}</div>`;
+          } else if ((item.type === 'idw' || item.type === 'external') && item.globalShortcut) {
+            shortcutInfo = `<div class="environment-shortcut">${item.globalShortcut}</div>`;
           }
+
+          const iconMap = {
+            tool: 'T',
+            skill: 'S',
+            idw: 'W',
+            external: 'A',
+            image: 'I',
+            video: 'V',
+            audio: 'M',
+            'ui-design': 'U',
+          };
+          const iconLetter = iconMap[item.type] || '?';
+
+          const truncUrl = itemUrl.length > 40 ? itemUrl.substring(0, 40) + '...' : itemUrl;
+
+          const isEnabled = item.enabled !== false;
+          const toggleId = 'toggle-' + (item.id || '').replace(/[^a-z0-9]/gi, '_');
+
+          itemDiv.className = 'environment-item' + (isEnabled ? '' : ' disabled');
 
           itemDiv.innerHTML = `
                     <div class="environment-item-info">
+                        <div class="environment-item-icon ${typeClass}">${iconLetter}</div>
                         <div class="environment-title">
                             ${itemName}
                             <span class="environment-type ${typeClass}">${typeLabel}</span>
                         </div>
-                        <div class="environment-details">${itemUrl}</div>
+                        <div class="environment-details" title="${itemUrl}">${truncUrl}</div>
                         ${shortcutInfo}
                     </div>
-                    <div class="environment-actions">
-                        <button class="action-btn copy" onclick="copyItemUrl('${itemUrl.replace(/'/g, "\\'")}', this)" title="Copy link">Copy</button>
-                        <button class="action-btn edit" onclick="editItem('${item.type}', '${item.id}')">Edit</button>
-                        <button class="action-btn delete" onclick="deleteItem('${item.type}', '${item.id}')">Delete</button>
+                    <div class="environment-toggle">
+                        <label class="toggle-switch" onclick="event.stopPropagation();">
+                            <input type="checkbox" id="${toggleId}" ${isEnabled ? 'checked' : ''}
+                                onchange="toggleItem('${item.type}', '${item.id}', this.checked)" />
+                            <span class="toggle-slider"></span>
+                        </label>
                     </div>
                 `;
 
           listContainer.appendChild(itemDiv);
         });
+      }
+
+      // Toggle an item enabled/disabled
+      function toggleItem(type, id, enabled) {
+        if (type === 'skill') {
+          const states = JSON.parse(localStorage.getItem('builtinAgentStates') || '{}');
+          states[id] = enabled;
+          localStorage.setItem('builtinAgentStates', JSON.stringify(states));
+        } else if (type === 'tool') {
+          const states = JSON.parse(localStorage.getItem('toolStates') || '{}');
+          states[id] = enabled;
+          localStorage.setItem('toolStates', JSON.stringify(states));
+        } else {
+          // User-added items: set enabled flag in their storage array
+          const storageKeys = {
+            idw: 'idwEnvironments',
+            external: 'externalBots',
+            image: 'imageCreators',
+            video: 'videoCreators',
+            audio: 'audioGenerators',
+            'ui-design': 'uiDesignTools',
+          };
+          const key = storageKeys[type];
+          if (key) {
+            const items = JSON.parse(localStorage.getItem(key) || '[]');
+            const item = items.find(i => i.id === id);
+            if (item) {
+              item.enabled = enabled;
+              localStorage.setItem(key, JSON.stringify(items));
+              console.log('[Manager] Item toggled:', type, id, enabled);
+            }
+          }
+        }
+        // Refresh the card opacity
+        const card = document.getElementById('toggle-' + id.replace(/[^a-z0-9]/gi, '_'));
+        if (card) {
+          const cardEl = card.closest('.environment-item');
+          if (cardEl) cardEl.classList.toggle('disabled', !enabled);
+        }
       }
 
       // Function to edit an item

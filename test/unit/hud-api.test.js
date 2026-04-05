@@ -189,10 +189,10 @@ describe('HUD API', () => {
       expect(result.pass).toBe(false);
     });
 
-    it('passes short but valid transcripts through to LLM check', async () => {
-      // "um" is short but not empty -- the filter uses LLM for quality, not length
+    it('rejects filler phrases like "um"', async () => {
       const result = await hudApi.filterTranscript('um');
-      expect(result.pass).toBe(true); // LLM mock returns genuine: true
+      expect(result.pass).toBe(false);
+      expect(result.reason).toBe('filler or fragment');
     });
 
     it('passes reasonable transcripts', async () => {

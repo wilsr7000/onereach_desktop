@@ -581,6 +581,17 @@ function _buildToolsMenu(_showTestMenu) {
         },
       },
       {
+        label: 'Agent Explorer...',
+        click: () => {
+          try {
+            const main = require('./main');
+            if (main.createAgentExplorerWindow) main.createAgentExplorerWindow();
+          } catch (error) {
+            console.error('[Menu] Agent Explorer error:', error);
+          }
+        },
+      },
+      {
         label: 'Manage Agents...',
         click: () => {
           try {
