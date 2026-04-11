@@ -1176,8 +1176,10 @@
             console.log('[Orb] Interim speech done, work still active:', _activeTaskId || 'pending-submit');
             S.transition('processing', 'interim-speech-done');
           } else if (S.isSpeaking) {
-            // No active task -- this was the final response
-            S.transition('idle', 'tts-complete');
+            // No active task -- dwell-listen for follow-ups before going idle
+            const dwellMs = _pendingDwellMs || 0;
+            _pendingDwellMs = 0;
+            _startDwellListen(dwellMs, 'tts-complete');
           }
         });
       }
@@ -2977,6 +2979,10 @@
             // Standard response -- route through response router
             let responseText = result.message || "I'm not sure how to help with that.";
             const route = routeResult(result);
+
+            // Capture dwell duration for post-response listening
+            _pendingDwellMs = (route && typeof route.dwellMs === 'number') ? route.dwellMs : 0;
+
             if (route && (route.mode === 'tone' || route.mode === 'tone+visual')) {
               // Tone-only: play tone (already done in routeResult), suppress TTS
               const Audio = window.OrbAudio;
@@ -2986,7 +2992,8 @@
               await window.orbAPI.respondToFunction(callId, '');
               S.set('pendingFunctionCallId', null);
               if (!_activeTaskId && !(S.get('pendingSubmitCount') || 0)) {
-                S.transition('idle', 'tone-only-complete');
+                // Dwell-listen: stay listening briefly for follow-ups instead of going idle
+                _startDwellListen(_pendingDwellMs, 'tone-only-complete');
               }
               return;
             }
@@ -3009,6 +3016,64 @@
       // Track if a _needsInput result was received (for audio_done to know)
       let _pendingNeedsInput = false;
       let _activeTaskId = null; // Track whether a task is still executing (queued but not yet settled)
+
+      // Dynamic dwell: how long to keep listening after a response before going idle.
+      // Set by routeResult() when an agent result arrives, consumed by TTS end handlers.
+      let _pendingDwellMs = 0;
+      let _dwellTimeoutId = null;
+
+      /**
+       * Start a dwell-listen period after a response completes.
+       * The orb transitions to 'listening' for dwellMs, then auto-idles
+       * if the user doesn't speak. If dwellMs is 0 or the connection is
+       * down, falls back to idle immediately.
+       *
+       * @param {number} dwellMs - How long to listen (0 = skip, go idle)
+       * @param {string} reason - Debug reason for the transition
+       */
+      function _startDwellListen(dwellMs, reason) {
+        // Clear any previous dwell timeout
+        if (_dwellTimeoutId) {
+          clearTimeout(_dwellTimeoutId);
+          _dwellTimeoutId = null;
+        }
+
+        // No dwell requested, or not connected -- go idle
+        if (!dwellMs || dwellMs <= 0) {
+          S.transition('idle', reason);
+          return;
+        }
+
+        // Attempt to stay in listening mode
+        const transitioned = S.transition('listening', 'dwell-listen-' + reason);
+        if (!transitioned) {
+          // Transition wasn't valid from current state -- fall back to idle
+          S.transition('idle', reason + '-dwell-fallback');
+          return;
+        }
+
+        console.log(`[Orb] Dwell-listening for ${dwellMs}ms (reason: ${reason})`);
+
+        // Auto-idle after dwell period if user hasn't spoken
+        _dwellTimeoutId = setTimeout(() => {
+          _dwellTimeoutId = null;
+          // Only idle if still in listening (user speech would have moved us to processing)
+          if (S.phase === 'listening') {
+            console.log('[Orb] Dwell expired, going idle');
+            S.transition('idle', 'dwell-expired');
+          }
+        }, dwellMs);
+      }
+
+      /**
+       * Cancel dwell-listen (e.g., user clicked orb to dismiss, or new task submitted).
+       */
+      function _cancelDwell() {
+        if (_dwellTimeoutId) {
+          clearTimeout(_dwellTimeoutId);
+          _dwellTimeoutId = null;
+        }
+      }
 
       // Register the event router at page load
       if (window.OrbEventRouter && window.orbAPI) {
@@ -3077,8 +3142,10 @@
                 console.log('[Orb] audio_done: interim speech, work active:', _activeTaskId || 'pending-submit');
                 S.transition('processing', 'interim-speech-done');
               } else if (S.isSpeaking) {
-                // Normal command complete -- no active task
-                S.transition('idle', 'tts-complete');
+                // Normal command complete -- dwell-listen for follow-ups
+                const dwellMs = _pendingDwellMs || 0;
+                _pendingDwellMs = 0;
+                _startDwellListen(dwellMs, 'audio-done');
               }
             },
             clear_audio_buffer: (e) => {
@@ -3211,6 +3278,7 @@
       }
 
       function stopListening() {
+        _cancelDwell();
         S.endSession('user-stop');
       }
 

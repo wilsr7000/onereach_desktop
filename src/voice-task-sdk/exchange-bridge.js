@@ -2897,123 +2897,165 @@ function setupExchangeEvents() {
           /* non-fatal */
         }
       } else {
-        // Task was clear but no agent can handle it
-        log.info('voice', 'No agents for task, analyzing capability gap');
+        // Task was clear but no agent can handle it -- route to agent-builder-agent
+        // for a conversational feasibility assessment instead of generic disambiguation
+        log.info('voice', 'No agents for task, routing to agent-builder-agent');
 
         const rephraseAttempts = task.metadata?.rephraseAttempts || 0;
 
+        // Quick classification: is this a rephrase or a genuine capability gap?
         const { getAllAgents } = require('../../packages/agents/agent-registry');
         const agents = getAllAgents().filter((a) => !a.bidExcluded);
         const agentDescriptions = agents.map((a) => ({ name: a.name, description: a.description }));
 
-        let disambiguation = { classification: 'rephrase', options: [], gapSummary: null, buildProposal: null };
+        let classification = 'capability_gap';
+        let gapSummary = content;
         try {
-          disambiguation = await Promise.race([
-            generateClarificationOptions(content, agentDescriptions),
-            new Promise((_, reject) => {
-              setTimeout(() => reject(new Error('Disambiguation timeout')), 10000);
-            }),
+          const classResult = await Promise.race([
+            ai.json(
+              `The user said: "${content}"
+No agent was confident enough to handle this. Available agents:
+${agentDescriptions.map((a) => `- ${a.name}: ${a.description}`).join('\n')}
+
+Classify: "rephrase" (ambiguous, rephrasing would help) or "capability_gap" (no agent covers this).
+Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "one-sentence description of what's missing" }`,
+              { profile: 'fast', temperature: 0, maxTokens: 100, feature: 'exchange-bridge' },
+            ),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
           ]);
-        } catch (disErr) {
-          log.warn('voice', 'Disambiguation LLM failed, using generic response', { error: disErr.message });
+          classification = classResult.classification || 'capability_gap';
+          gapSummary = classResult.gapSummary || content;
+        } catch (_e) {
+          // Default to capability_gap -- agent-builder-agent handles both well
         }
 
-        const isCapabilityGap = disambiguation.classification === 'capability_gap';
-        const buildProposal = disambiguation.buildProposal || null;
+        if (classification === 'rephrase' && rephraseAttempts < 2) {
+          // Rephrase path -- use the existing rephrase flow
+          let rephraseResponse;
+          try {
+            rephraseResponse = await _buildRephraseResponse(content, agentDescriptions.map((a) => `- ${a.name}: ${a.description}`).join('\n'));
+          } catch (_e) {
+            rephraseResponse = {
+              classification: 'rephrase',
+              question: "I'm not sure what you meant. Could you rephrase that?",
+              options: [],
+            };
+          }
 
-        if (isCapabilityGap) {
-          log.info('voice', 'Capability gap detected', {
-            request: content.slice(0, 80),
-            gap: disambiguation.gapSummary,
-            effort: buildProposal?.effort,
-            cost: buildProposal?.estimatedCostPerUse,
-            integration: buildProposal?.integration,
+          const clarificationMessage = rephraseResponse.question || "Could you rephrase that?";
+          addToHistory('assistant', clarificationMessage, 'system');
+
+          hudApi.emitResult({
+            taskId: task.id,
+            success: false,
+            message: clarificationMessage,
+            agentId: 'system',
+            needsClarification: true,
           });
 
-          // Persist the capability gap (with build proposal) to the Wishlist space
+          if (rephraseResponse.options?.length > 0) {
+            broadcastToWindows('voice-task:disambiguation', {
+              taskId: task.id,
+              question: clarificationMessage,
+              options: rephraseResponse.options,
+              rephraseAttempts,
+            });
+            hudApi.emitDisambiguation({
+              taskId: task.id,
+              question: clarificationMessage,
+              options: rephraseResponse.options,
+            });
+          }
+
+          try {
+            const { getVoiceSpeaker } = require('../../voice-speaker');
+            const speaker = getVoiceSpeaker();
+            if (speaker) await speaker.speak(clarificationMessage, { voice: 'sage' });
+          } catch (_e) { /* non-fatal */ }
+        } else {
+          // Capability gap -- route directly to agent-builder-agent for a
+          // conversational feasibility assessment instead of generic buttons
+          log.info('voice', 'Capability gap detected, handing off to agent-builder-agent', {
+            request: content.slice(0, 80),
+            gap: gapSummary,
+          });
+
+          // Persist the gap to wishlist (non-blocking)
           try {
             const { getSpacesAPI } = require('../../spaces-api');
             const spacesApi = getSpacesAPI();
-            await _logCapabilityGap(spacesApi, content, disambiguation.gapSummary, buildProposal);
-          } catch (gapErr) {
-            log.warn('voice', 'Could not persist capability gap', { error: gapErr.message });
+            _logCapabilityGap(spacesApi, content, gapSummary, null).catch(() => {});
+          } catch (_e) { /* non-fatal */ }
+
+          // Execute agent-builder-agent directly with gap context
+          try {
+            const builderAgent = agents.find((a) => a.id === 'agent-builder-agent');
+            if (builderAgent) {
+              if (builderAgent.initialize) await builderAgent.initialize();
+              const result = await Promise.race([
+                builderAgent.execute({
+                  content,
+                  metadata: {
+                    capabilityGap: gapSummary,
+                    originalRequest: content,
+                    source: 'exchange-halt',
+                  },
+                }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Builder agent timeout')), 10000)),
+              ]);
+
+              const message = result.message || "I can look into building an agent for that. Want me to open WISER Playbooks and draft a plan?";
+              addToHistory('assistant', message, 'agent-builder-agent');
+
+              hudApi.emitResult({
+                taskId: task.id,
+                success: true,
+                message,
+                agentId: 'agent-builder-agent',
+                needsClarification: !!result.needsInput,
+                needsInput: result.needsInput || null,
+              });
+
+              // Speak the response
+              try {
+                const { getVoiceSpeaker } = require('../../voice-speaker');
+                const speaker = getVoiceSpeaker();
+                if (speaker) await speaker.speak(message, { voice: 'sage' });
+              } catch (_e) { /* non-fatal */ }
+            } else {
+              // agent-builder-agent not loaded -- fall back to generic message
+              const fallbackMsg = `I don't have an agent for that yet, but I could build one. Say "build an agent" to get started.`;
+              addToHistory('assistant', fallbackMsg, 'system');
+              hudApi.emitResult({
+                taskId: task.id,
+                success: false,
+                message: fallbackMsg,
+                agentId: 'system',
+                needsClarification: true,
+              });
+              try {
+                const { getVoiceSpeaker } = require('../../voice-speaker');
+                const speaker = getVoiceSpeaker();
+                if (speaker) await speaker.speak(fallbackMsg, { voice: 'sage' });
+              } catch (_e) { /* non-fatal */ }
+            }
+          } catch (builderErr) {
+            log.warn('voice', 'Agent-builder-agent failed, using fallback', { error: builderErr.message });
+            const fallbackMsg = `I can't handle that yet, but it might be buildable. Say "build an agent" and I'll assess what's needed.`;
+            addToHistory('assistant', fallbackMsg, 'system');
+            hudApi.emitResult({
+              taskId: task.id,
+              success: false,
+              message: fallbackMsg,
+              agentId: 'system',
+              needsClarification: true,
+            });
+            try {
+              const { getVoiceSpeaker } = require('../../voice-speaker');
+              const speaker = getVoiceSpeaker();
+              if (speaker) await speaker.speak(fallbackMsg, { voice: 'sage' });
+            } catch (_e) { /* non-fatal */ }
           }
-        }
-
-        let clarificationMessage;
-        if (isCapabilityGap && disambiguation.question) {
-          clarificationMessage = disambiguation.question;
-        } else if (disambiguation.options.length > 0) {
-          clarificationMessage = disambiguation.question;
-        } else {
-          clarificationMessage = `I don't have an agent that can handle "${content}" yet. I can build one for you, or I've noted it on the wishlist. Just say "build an agent for this" if you'd like.`;
-        }
-
-        addToHistory('assistant', clarificationMessage, 'system');
-
-        if (global.sendCommandHUDResult) {
-          global.sendCommandHUDResult({
-            success: false,
-            needsClarification: true,
-            suggestions: disambiguation.options.map((o) => o.label),
-            message: clarificationMessage,
-            capabilityGap: isCapabilityGap ? disambiguation.gapSummary : null,
-            buildProposal,
-          });
-        }
-
-        if (disambiguation.options.length > 0) {
-          const enrichedOptions = isCapabilityGap
-            ? disambiguation.options.map((o) => {
-                const lbl = o.label.toLowerCase();
-                if (lbl.includes('build it') || lbl.includes('build now')) {
-                  return { ...o, action: 'create-agent', gapDescription: disambiguation.gapSummary };
-                }
-                if (lbl.includes('playbook')) {
-                  return { ...o, action: 'create-playbook', gapDescription: disambiguation.gapSummary, buildProposal };
-                }
-                if (lbl.includes('wishlist')) {
-                  return { ...o, action: 'wishlist-ack' };
-                }
-                return o;
-              })
-            : disambiguation.options;
-
-          broadcastToWindows('voice-task:disambiguation', {
-            taskId: task.id,
-            question: disambiguation.question,
-            options: enrichedOptions,
-            rephraseAttempts,
-            capabilityGap: isCapabilityGap,
-            buildProposal,
-          });
-
-          hudApi.emitDisambiguation({
-            taskId: task.id,
-            question: disambiguation.question,
-            options: enrichedOptions,
-            capabilityGap: isCapabilityGap,
-            buildProposal,
-          });
-        }
-
-        hudApi.emitResult({
-          taskId: task.id,
-          success: false,
-          message: clarificationMessage,
-          agentId: 'system',
-          needsClarification: true,
-          capabilityGap: isCapabilityGap ? disambiguation.gapSummary : null,
-          buildProposal,
-        });
-
-        // Speak the clarification
-        try {
-          const { getVoiceSpeaker } = require('../../voice-speaker');
-          const speaker = getVoiceSpeaker();
-          if (speaker) await speaker.speak(clarificationMessage, { voice: 'sage' });
-        } catch (_e) {
-          /* non-fatal */
         }
       }
 

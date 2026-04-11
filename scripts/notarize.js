@@ -17,13 +17,13 @@ exports.default = async function notarizing(context) {
 
   console.log('🔐 Starting notarization process...');
   console.log(`   App: ${appName}`);
-  console.log(`   Bundle ID: com.onereach.app`);
+  console.log(`   Bundle ID: com.gsx.poweruser`);
   console.log(`   Apple ID: ${process.env.APPLE_ID}`);
   console.log(`   Team ID: ${process.env.APPLE_TEAM_ID}`);
 
   try {
     await notarize({
-      appBundleId: 'com.onereach.app',
+      appBundleId: 'com.gsx.poweruser',
       appPath: appPath,
       appleId: process.env.APPLE_ID,
       appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,

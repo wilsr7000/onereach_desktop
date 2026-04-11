@@ -1,7 +1,7 @@
 # Onereach.ai Punch List
 
 > Master list of bugs, fixes, and small features to address.
-> Updated: February 2026 | Current Version: 4.4.1
+> Updated: April 2026 | Current Version: 4.7.0
 
 ---
 
@@ -23,6 +23,17 @@
 ---
 
 ## 🟠 High Priority
+
+### Email Agent (IMAP)
+- [ ] **Email Agent IMAP Integration** - Replace stubbed email-agent with real IMAP/SMTP connectivity
+  - Added `imapflow`, `nodemailer`, `mailparser` dependencies
+  - New `lib/email-service.js`: multi-account IMAP connection manager with IDLE, reconnect state machine, SMTP sending
+  - New `lib/email-thread-engine.js`: RFC 5322 thread assembly + AI-assisted triage scoring (velocity, recency, direct/CC, sender importance, awaiting-reply, depth, sentiment)
+  - Extended `credential-manager.js` with email password helpers (keytar)
+  - Added "Email Accounts" tab in `settings.html` with guided setup wizard for Gmail, Outlook, Yahoo, iCloud, Custom IMAP
+  - Registered `email:*` IPC channels, wired handlers in `main.js`, exposed `window.email.*` in preload
+  - Rewrote `packages/agents/email-agent.js`: triage, threaded conversations, multi-account, real inbox/search/send
+  - Files: `lib/email-service.js`, `lib/email-thread-engine.js`, `credential-manager.js`, `settings.html`, `preload.js`, `main.js`, `lib/ipc-registry.js`, `packages/agents/email-agent.js`
 
 ### Web Monitors
 - [x] **Web monitors completely broken** - All monitor items had empty URLs, never checked (v4.1.x)

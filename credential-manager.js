@@ -17,6 +17,7 @@ function getKeytar() {
 
 const SERVICE_NAME = 'OneReach.ai-IDW';
 const TOTP_SERVICE_NAME = 'OneReach.ai-TOTP';
+const EMAIL_SERVICE_NAME = 'OneReach.ai-Email';
 const ONEREACH_ACCOUNT_KEY = 'onereach-unified-login';
 
 // Session-level cache: avoids repeated Keychain prompts for the same data.
@@ -618,6 +619,74 @@ class CredentialManager {
       console.error('[CredentialManager] Failed to update OneReach email:', error);
       return false;
     }
+  }
+
+  // ============================================================
+  // Email Account Credential Methods
+  // ============================================================
+
+  /**
+   * Save an email account password (App Password) to keychain.
+   * @param {string} accountId - Unique account identifier
+   * @param {string} password - IMAP/SMTP password or app-specific password
+   * @returns {Promise<boolean>}
+   */
+  async saveEmailPassword(accountId, password) {
+    try {
+      const accountKey = `email-${accountId}`;
+      await getKeytar().setPassword(EMAIL_SERVICE_NAME, accountKey, password);
+      cacheInvalidate(EMAIL_SERVICE_NAME, accountKey);
+      cacheInvalidateService(EMAIL_SERVICE_NAME);
+      console.log('[CredentialManager] Saved email password for account:', accountId);
+      return true;
+    } catch (error) {
+      console.error('[CredentialManager] Failed to save email password:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get an email account password from keychain.
+   * @param {string} accountId - Unique account identifier
+   * @returns {Promise<string|null>}
+   */
+  async getEmailPassword(accountId) {
+    try {
+      const accountKey = `email-${accountId}`;
+      return await cachedGetPassword(EMAIL_SERVICE_NAME, accountKey);
+    } catch (error) {
+      console.error('[CredentialManager] Failed to get email password:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Delete an email account password from keychain.
+   * @param {string} accountId - Unique account identifier
+   * @returns {Promise<boolean>}
+   */
+  async deleteEmailPassword(accountId) {
+    try {
+      const accountKey = `email-${accountId}`;
+      const deleted = await getKeytar().deletePassword(EMAIL_SERVICE_NAME, accountKey);
+      cacheInvalidate(EMAIL_SERVICE_NAME, accountKey);
+      cacheInvalidateService(EMAIL_SERVICE_NAME);
+      console.log('[CredentialManager] Deleted email password for account:', accountId);
+      return deleted;
+    } catch (error) {
+      console.error('[CredentialManager] Failed to delete email password:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if an email account has a stored password.
+   * @param {string} accountId - Unique account identifier
+   * @returns {Promise<boolean>}
+   */
+  async hasEmailPassword(accountId) {
+    const pw = await this.getEmailPassword(accountId);
+    return pw !== null;
   }
 
   /**

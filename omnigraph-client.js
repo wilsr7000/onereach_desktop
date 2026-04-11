@@ -1,16 +1,18 @@
 /**
- * OmniGraph Client
+ * OmniGraph Client — Neo4j Backend
  *
- * Client for the OmniGraph API (Cypher/RedisGraph) for managing
+ * Client for the Neo4j Cypher Proxy API for managing
  * GSX ecosystem nodes: Spaces, Asset Types, and Assets.
+ *
+ * Backend: Neo4j Aura via Edison HTTP Cypher Proxy
+ * Endpoint: POST .../omnidata/neon  (async job pattern: POST→jobId, GET→result)
  *
  * Follows the Temporal Graph Honor System v2.0.0:
  * - All nodes have provenance fields (created_by_*, updated_by_*, _history)
  * - All changes are tracked with history entries
  * - App identity is required for all operations
  *
- * Graph name: idw (fixed)
- * Timeout: 30 seconds
+ * Timeout: 60 seconds (polling)
  *
  * @module OmniGraphClient
  */
@@ -112,27 +114,38 @@ function capitalize(str) {
 /**
  * OmniGraph Client for managing GSX ecosystem graph nodes
  * Follows Temporal Graph Honor System v2.0.0
+ *
+ * Backend: Neo4j Aura via Edison HTTP Cypher Proxy (async job pattern)
  */
 class OmniGraphClient {
   /**
    * Create an OmniGraph client
    * @param {Object} options - Configuration options
-   * @param {string} options.endpoint - Full endpoint URL (e.g., https://em.edison.api.onereach.ai/http/{accountId}/omnigraph)
-   * @param {Function} options.getAuthToken - Function that returns current auth token
-   * @param {number} options.timeout - Request timeout in ms (default: 30000)
+   * @param {string} options.endpoint - Neo4j Cypher Proxy URL
+   * @param {string} options.neo4jPassword - Neo4j Aura instance password
+   * @param {string} options.neo4jUri - Neo4j Bolt URI (proxy converts to HTTPS)
+   * @param {string} options.neo4jUser - Neo4j username (default: 'neo4j')
+   * @param {string} options.database - Neo4j database name (default: 'neo4j')
+   * @param {Function} options.getAuthToken - Legacy: Function that returns current auth token
+   * @param {number} options.timeout - Polling timeout in ms (default: 60000)
+   * @param {number} options.pollInterval - Polling interval in ms (default: 1500)
    * @param {string} options.currentUser - Current user email for provenance tracking
    */
   constructor(options = {}) {
     this.endpoint = options.endpoint || null;
+    this.neo4jPassword = options.neo4jPassword || null;
+    this.neo4jUri = options.neo4jUri || null;
+    this.neo4jUser = options.neo4jUser || 'neo4j';
+    this.database = options.database || 'neo4j';
     this.getAuthToken = options.getAuthToken || (() => null);
-    this.timeout = options.timeout || 30000;
-    this.graphName = 'idw'; // Fixed graph name
+    this.timeout = options.timeout || 60000;
+    this.pollInterval = options.pollInterval || 1500;
     this.currentUser = options.currentUser || 'system'; // For provenance tracking
   }
 
   /**
    * Set the endpoint URL
-   * @param {string} endpoint - Full endpoint URL
+   * @param {string} endpoint - Neo4j Cypher Proxy URL
    */
   setEndpoint(endpoint) {
     this.endpoint = endpoint;
@@ -140,7 +153,43 @@ class OmniGraphClient {
   }
 
   /**
-   * Set the auth token getter function
+   * Set the Neo4j password for the Cypher Proxy
+   * @param {string} password - Neo4j Aura instance password
+   */
+  setNeo4jPassword(password) {
+    this.neo4jPassword = password;
+    console.log('[OmniGraph] Neo4j password configured');
+  }
+
+  /**
+   * Set the Neo4j connection URI (optional — proxy has a default)
+   * @param {string} uri - Neo4j Bolt-style URI (e.g. neo4j+s://xxx.databases.neo4j.io)
+   */
+  setNeo4jUri(uri) {
+    this.neo4jUri = uri;
+    console.log('[OmniGraph] Neo4j URI set to:', uri);
+  }
+
+  /**
+   * Configure all Neo4j Cypher Proxy settings at once
+   * @param {Object} config
+   * @param {string} config.endpoint - Proxy URL
+   * @param {string} config.neo4jPassword - Neo4j password
+   * @param {string} [config.neo4jUri] - Neo4j URI (optional)
+   * @param {string} [config.neo4jUser] - Neo4j username (default: 'neo4j')
+   * @param {string} [config.database] - Database name (default: 'neo4j')
+   */
+  setNeo4jConfig(config) {
+    if (config.endpoint) this.endpoint = config.endpoint;
+    if (config.neo4jPassword) this.neo4jPassword = config.neo4jPassword;
+    if (config.neo4jUri) this.neo4jUri = config.neo4jUri;
+    if (config.neo4jUser) this.neo4jUser = config.neo4jUser;
+    if (config.database) this.database = config.database;
+    console.log('[OmniGraph] Neo4j config set — endpoint:', this.endpoint);
+  }
+
+  /**
+   * Set the auth token getter function (legacy — not needed for Neo4j proxy)
    * @param {Function} fn - Function that returns auth token
    */
   setAuthTokenGetter(fn) {
@@ -161,7 +210,7 @@ class OmniGraphClient {
    * @returns {boolean} Whether client can make requests
    */
   isReady() {
-    return !!this.endpoint;
+    return !!(this.endpoint && this.neo4jPassword);
   }
 
   // ============================================
@@ -528,61 +577,126 @@ class OmniGraphClient {
   // ============================================
 
   /**
-   * Execute a Cypher query against the OmniGraph API
+   * Execute a Cypher query against the Neo4j Cypher Proxy
+   *
+   * Uses async job pattern:
+   * 1. POST {cypher, parameters, neo4jPassword} → {jobId}
+   * 2. Poll GET ?jobId=... → {result: {status, records, fields}}
+   *
    * @param {string} cypher - Cypher query string
-   * @returns {Promise<any>} Query result
-   * @throws {Error} On network or query error
+   * @param {Object} [parameters] - Bound parameters for $param references
+   * @returns {Promise<Array>} Array of record objects (each record is {key: value, ...})
+   * @throws {Error} On network, query, or timeout error
    */
-  async executeQuery(cypher) {
+  async executeQuery(cypher, parameters = {}) {
     if (!this.endpoint) {
       throw new Error('OmniGraph endpoint not configured');
     }
-
-    const token = await this.getAuthToken();
-    const headers = {
-      'Content-Type': 'application/json',
-    };
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    if (!this.neo4jPassword) {
+      throw new Error('Neo4j password not configured');
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    const startTime = Date.now();
 
     try {
       console.log('[OmniGraph] Executing query:', cypher.substring(0, 100) + '...');
 
-      const response = await fetch(this.endpoint, {
+      // Step 1: Submit the query
+      const postBody = {
+        cypher,
+        neo4jPassword: this.neo4jPassword,
+      };
+      if (parameters && Object.keys(parameters).length > 0) {
+        postBody.parameters = parameters;
+      }
+      if (this.neo4jUri) {
+        postBody.neo4jUri = this.neo4jUri;
+      }
+      if (this.neo4jUser && this.neo4jUser !== 'neo4j') {
+        postBody.neo4jUser = this.neo4jUser;
+      }
+      if (this.database && this.database !== 'neo4j') {
+        postBody.database = this.database;
+      }
+
+      const postResponse = await fetch(this.endpoint, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ graph: this.graphName, query: cypher }),
-        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(postBody),
       });
 
-      clearTimeout(timeoutId);
+      const postData = await postResponse.json();
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errorMsg = data.error || data.message || `HTTP ${response.status}`;
-        console.error('[OmniGraph] API error:', errorMsg);
+      if (!postResponse.ok) {
+        const errorMsg = postData.error || postData.message || `HTTP ${postResponse.status}`;
+        console.error('[OmniGraph] POST error:', errorMsg);
         throw new Error(errorMsg);
       }
 
-      if (data.error) {
-        console.error('[OmniGraph] Query error:', data.error);
-        throw new Error(data.error);
+      if (postData.error) {
+        console.error('[OmniGraph] Submission error:', postData.error);
+        throw new Error(postData.error);
       }
 
-      return data.result;
+      const jobId = postData.jobId;
+      if (!jobId) {
+        // Direct response (no job pattern) — return result directly
+        if (postData.result) {
+          return postData.result?.records || postData.result || [];
+        }
+        throw new Error('No jobId returned from proxy');
+      }
+
+      // Step 2: Poll for the result
+      const pollUrl = `${this.endpoint}?jobId=${encodeURIComponent(jobId)}`;
+      const maxAttempts = Math.ceil(this.timeout / this.pollInterval);
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, this.pollInterval));
+
+        const elapsed = Date.now() - startTime;
+        if (elapsed > this.timeout) {
+          throw new Error(`Neo4j query timed out after ${Math.round(elapsed / 1000)}s`);
+        }
+
+        const pollResponse = await fetch(pollUrl);
+        const pollData = await pollResponse.json();
+
+        // Still processing
+        if (pollData.status === 'job started' || pollData.status === 'pending') {
+          continue;
+        }
+
+        // Success
+        if (pollData.result?.status === 'ok') {
+          const records = pollData.result.records || [];
+          console.log(`[OmniGraph] Query returned ${records.length} records in ${Date.now() - startTime}ms`);
+          return records;
+        }
+
+        // Error from Neo4j
+        if (pollData.result?.status === 'error') {
+          const errorMsg = pollData.result.error || 'Neo4j query error';
+          console.error('[OmniGraph] Neo4j error:', errorMsg);
+          throw new Error(errorMsg);
+        }
+
+        // Flow-level error (timeout, crash)
+        if (pollData.status === 'error') {
+          const errorMsg = pollData.error || 'Proxy error';
+          console.error('[OmniGraph] Proxy error:', errorMsg);
+          throw new Error(errorMsg);
+        }
+
+        // Unknown response — keep polling
+        console.warn('[OmniGraph] Unexpected poll response:', JSON.stringify(pollData).substring(0, 200));
+      }
+
+      throw new Error(`Neo4j query polling timed out after ${maxAttempts} attempts`);
     } catch (error) {
-      clearTimeout(timeoutId);
-
       if (error.name === 'AbortError') {
-        throw new Error('OmniGraph query timed out (30s limit)');
+        throw new Error('Neo4j query aborted');
       }
-
       throw error;
     }
   }
@@ -1805,8 +1919,9 @@ class OmniGraphClient {
   /**
    * Ensure all Library-related schemas exist in the graph.
    * Idempotent -- safe to call on every app startup.
-   * Creates Schema nodes for Organization, Team, Library, Tool, Agent.
-   * Patches Person and IDW schemas to document new relationships.
+   * Creates Schema nodes for Organization, Team, Library, Tool, Agent,
+   * TaskQueue, TaskItem, Resource.
+   * Patches Person, IDW, and Event schemas to document new relationships.
    * @returns {Promise<void>}
    */
   async ensureLibrarySchema() {
@@ -1858,6 +1973,51 @@ class OmniGraphClient {
         relationships: '{}',
       });
 
+      await this.upsertSchema({
+        entity: 'TaskQueue',
+        version: '1.0.0',
+        description: 'A named queue that organizes and schedules TaskItems -- acts as the dispatcher and backpressure boundary for a category of work.',
+        storagePattern: 'graph',
+        id_pattern: 'slug string (e.g. digital-twin-queue, ingestion-queue)',
+        instructions: 'MERGE on id. Properties: name, status (active|paused|draining), concurrency_limit, retry_policy (JSON), created_at, updated_at. TaskItems linked via ENQUEUED_IN. Subscribers (Agent, IDW, Flow) linked via SUBSCRIBE_TO.',
+        relationships: '{"ENQUEUED_IN":"TaskItem (inbound)","SUBSCRIBE_TO":"Agent,IDW,Flow (inbound)"}',
+        crud_examples: JSON.stringify({
+          runnable: "MATCH (t:TaskItem {status:'queued'})-[:ENQUEUED_IN]->(q:TaskQueue {status:'active'}) WHERE NOT (t)-[:DEPENDS_ON_TASK]->(:TaskItem {status:'queued'}) AND NOT (t)-[:DEPENDS_ON_TASK]->(:TaskItem {status:'running'}) AND NOT (t)-[:REQUIRES]->(:Resource)-[:LOCKED_BY]->(:TaskItem {status:'running'}) RETURN t,q ORDER BY t.priority DESC, t.queued_at ASC LIMIT 10",
+          metrics: "MATCH (q:TaskQueue) OPTIONAL MATCH (t:TaskItem)-[:ENQUEUED_IN]->(q) RETURN q.id,q.name,q.status,count(t) AS total ORDER BY q.name",
+          dead_letters: "MATCH (t:TaskItem {status:'dead_letter'})-[:ENQUEUED_IN]->(q:TaskQueue) RETURN t.id,t.name,t.error,q.id AS queue ORDER BY t.completed_at DESC LIMIT 50",
+          subscribers: "MATCH (sub)-[:SUBSCRIBE_TO]->(q:TaskQueue) RETURN q.id,q.name,labels(sub) AS type,sub.id,sub.name",
+        }),
+      });
+
+      await this.upsertSchema({
+        entity: 'TaskItem',
+        version: '1.0.0',
+        description: 'A unit of work enqueued for processing -- the executable item in a TaskQueue with dependency tracking and retry state.',
+        storagePattern: 'graph',
+        id_pattern: 'generated string (e.g. task-<timestamp>-<random>)',
+        instructions: 'MERGE on id. Properties: name, status (queued|running|completed|failed|dead_letter), priority (integer, higher = first), payload (JSON), queued_at, started_at, completed_at, error, retry_count, max_retries. Linked to queue via ENQUEUED_IN. Dependencies via DEPENDS_ON_TASK. Resource locks via REQUIRES. Causal link from Event via TRIGGERS.',
+        relationships: '{"ENQUEUED_IN":"TaskQueue","DEPENDS_ON_TASK":"TaskItem","REQUIRES":"Resource"}',
+        crud_examples: JSON.stringify({
+          by_status: "MATCH (t:TaskItem {status:'queued'})-[:ENQUEUED_IN]->(q:TaskQueue) RETURN t.id,t.name,t.priority,q.name AS queue ORDER BY t.priority DESC LIMIT 50",
+          deps: "MATCH (t:TaskItem {id:$id}) OPTIONAL MATCH (t)-[:DEPENDS_ON_TASK]->(up:TaskItem) OPTIONAL MATCH (down:TaskItem)-[:DEPENDS_ON_TASK]->(t) RETURN t,collect(DISTINCT up) AS upstream,collect(DISTINCT down) AS downstream",
+          causal: "MATCH (e:Event)-[:TRIGGERS]->(t:TaskItem {id:$id}) OPTIONAL MATCH (e)-[:PRODUCED_BY]->(src) RETURN e,src,t",
+        }),
+      });
+
+      await this.upsertSchema({
+        entity: 'Resource',
+        version: '1.0.0',
+        description: 'A shared system resource that tasks compete for -- used for concurrency control and contention modeling in the task queue.',
+        storagePattern: 'graph',
+        id_pattern: 'slug string (e.g. res-omnigraph-db, res-email-service)',
+        instructions: 'MERGE on id. Properties: name, capacity (integer), status (available|degraded|offline). Locked by running tasks via LOCKED_BY. Requested by queued tasks via REQUIRES (inbound from TaskItem).',
+        relationships: '{"LOCKED_BY":"TaskItem","REQUIRES":"TaskItem (inbound)"}',
+        crud_examples: JSON.stringify({
+          contention: "MATCH (res:Resource) OPTIONAL MATCH (res)-[:LOCKED_BY]->(holder:TaskItem) RETURN res.id,res.name,res.capacity,res.status,holder.id AS locked_by",
+          waiters: "MATCH (w:TaskItem {status:'queued'})-[:REQUIRES]->(res:Resource)-[:LOCKED_BY]->(h:TaskItem {status:'running'}) RETURN res.id AS resource,h.id AS held_by,collect(w.id) AS waiting",
+        }),
+      });
+
       const patchSchemaRels = async (entity, newRels) => {
         const schema = await this.getSchema(entity);
         if (!schema) return;
@@ -1884,9 +2044,10 @@ class OmniGraphClient {
 
       await patchSchemaRels('Person', { MEMBER: 'Team (inbound)', ENABLED: 'IDW,Tool,Agent' });
       await patchSchemaRels('IDW', { ENABLED: 'Person (inbound)', CONTAINS: 'Library (inbound)' });
+      await patchSchemaRels('Event', { TRIGGERS: 'TaskItem' });
 
       this._librarySchemaEnsured = true;
-      console.log('[OmniGraph] Library schema ensured (Organization, Team, Library, Tool, Agent)');
+      console.log('[OmniGraph] Library schema ensured (Organization, Team, Library, Tool, Agent, TaskQueue, TaskItem, Resource)');
     } catch (error) {
       console.error('[OmniGraph] Failed to ensure Library schema:', error.message);
       this._librarySchemaError = error.message;
@@ -1898,7 +2059,7 @@ class OmniGraphClient {
   // ============================================
 
   /**
-   * Test connection to OmniGraph API
+   * Test connection to Neo4j via the Cypher Proxy
    * @returns {Promise<boolean>} Whether connection succeeded
    */
   async testConnection() {

@@ -553,13 +553,50 @@ function setupSDKIPC() {
       return { ...classification, queued: false, handled: true, message: `Generating a playbook for: ${description}` };
     }
 
-    if (classification.action === 'create-agent' || classification.action === 'open-agent-composer') {
-      log.info('voice', '[VoiceTaskSDK] Opening Agent Composer');
-
-      // Extract description from params if this is a create-agent request
+    if (classification.action === 'create-agent') {
+      // Route through agent-builder-agent for conversational feasibility assessment
+      log.info('voice', '[VoiceTaskSDK] Routing to agent-builder-agent for feasibility assessment');
       const description = classification.params?.description || '';
 
-      // Open the Claude Code window (GSX Agent Composer) with the description
+      if (description) {
+        addAssistantMessage(`Let me assess what it would take to build that.`);
+      }
+
+      // Submit as a task targeting agent-builder-agent directly
+      try {
+        const { submitTask } = require('../../lib/hud-api');
+        const result = await submitTask(description || transcript, {
+          targetAgentId: 'agent-builder-agent',
+          toolId: 'voice',
+          skipFilter: true,
+          metadata: { originalRequest: description || transcript },
+        });
+        return {
+          ...classification,
+          queued: true,
+          handled: true,
+          taskId: result?.taskId,
+          message: 'Assessing feasibility with Agent Builder.',
+        };
+      } catch (e) {
+        log.error('voice', '[VoiceTaskSDK] Could not route to agent-builder-agent', { error: e.message });
+        // Fallback: open Agent Composer directly
+        try {
+          const main = require('../../main');
+          if (main.createClaudeCodeWindow) {
+            main.createClaudeCodeWindow({ initialDescription: description });
+          }
+        } catch (_e) { /* non-fatal */ }
+        global.agentCreationMode = true;
+        addAssistantMessage(description ? `Opening the Agent Composer for: "${description}"` : 'Opening the Agent Composer.');
+        return { ...classification, queued: false, handled: true, message: 'Opening Agent Composer.' };
+      }
+    }
+
+    if (classification.action === 'open-agent-composer') {
+      // Direct composer open -- user explicitly asked for the composer UI
+      log.info('voice', '[VoiceTaskSDK] Opening Agent Composer');
+      const description = classification.params?.description || '';
       try {
         const main = require('../../main');
         if (main.createClaudeCodeWindow) {
@@ -568,16 +605,12 @@ function setupSDKIPC() {
       } catch (e) {
         log.error('voice', '[VoiceTaskSDK] Could not open Agent Composer window', { error: e });
       }
-
-      // Set global flag that we're in agent creation mode (for voice relay)
       global.agentCreationMode = true;
-
       if (description) {
         addAssistantMessage(`Opening the Agent Composer to create an agent for: "${description}"`);
       } else {
         addAssistantMessage('Opening the Agent Composer.');
       }
-
       return {
         ...classification,
         queued: false,
@@ -667,12 +700,28 @@ function setupSDKIPC() {
       return { action, queued: false, handled: true, message: `Generating a playbook for: ${description || 'unknown capability'}` };
     }
 
-    if (action === 'create-agent' || action === 'open-agent-composer') {
+    if (action === 'create-agent') {
+      // Route through agent-builder-agent for conversational assessment
+      log.info('voice', '[VoiceTaskSDK] Routing submit-action to agent-builder-agent');
+      const description = params?.description || originalTranscript || '';
+      try {
+        const { submitTask } = require('../../lib/hud-api');
+        const result = await submitTask(description, {
+          targetAgentId: 'agent-builder-agent',
+          toolId: 'voice',
+          skipFilter: true,
+          metadata: { originalRequest: description },
+        });
+        return { action, queued: true, handled: true, taskId: result?.taskId, message: 'Assessing feasibility.' };
+      } catch (_e) {
+        // Fallback to composer
+        log.warn('voice', '[VoiceTaskSDK] Agent builder fallback to composer');
+      }
+    }
+
+    if (action === 'open-agent-composer') {
       log.info('voice', '[VoiceTaskSDK] Opening Agent Composer');
-
-      // Extract description from params if available
       const description = params?.description || '';
-
       try {
         const main = require('../../main');
         if (main.createClaudeCodeWindow) {
@@ -681,16 +730,12 @@ function setupSDKIPC() {
       } catch (e) {
         log.error('voice', '[VoiceTaskSDK] Could not open Agent Composer window', { error: e });
       }
-
-      // Set global flag that we're in agent creation mode (for voice relay)
       global.agentCreationMode = true;
-
       if (description) {
         addAssistantMessage(`Opening the Agent Composer to create an agent for: "${description}"`);
       } else {
         addAssistantMessage('Opening the Agent Composer.');
       }
-
       return {
         action,
         queued: false,

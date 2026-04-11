@@ -1116,14 +1116,18 @@ Right-click anywhere: Paste to Black Hole`;
           } else if (typeof global.checkForUpdatesGlobal === 'function') {
             global.checkForUpdatesGlobal();
           } else {
-            const { dialog } = require('electron');
+            const { dialog, shell } = require('electron');
             dialog.showMessageBox(BrowserWindow.getFocusedWindow(), {
               type: 'info',
-              title: 'Updates Not Available',
-              message: 'Auto-update repository not configured',
-              detail:
-                'The public releases repository needs to be created first:\n\n1. Go to github.com/new\n2. Create repository: onereach_desktop\n3. Make it PUBLIC\n4. Run: npm run release',
-              buttons: ['OK'],
+              title: 'Auto-Update Not Available',
+              message: 'Automatic updates are not available in this build',
+              detail: 'You can download the latest version manually from our releases page.',
+              buttons: ['Download Manually', 'Cancel'],
+              defaultId: 0,
+            }).then((result) => {
+              if (result.response === 0) {
+                shell.openExternal('https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest');
+              }
             });
           }
         },

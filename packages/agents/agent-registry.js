@@ -72,6 +72,7 @@ const BUILT_IN_AGENT_IDS = [
   'sound-effects-agent', // Sound Designer - plays SFX, manages ambient soundscapes, generates custom sounds
   'tickets-agent', // Ticket manager - full CRUD for Agentic TMS tickets via Edison KV
   'playbooks-launch-agent', // Playbooks launcher - opens WISER Playbooks with AI space matching
+  'agent-builder-agent', // Agent builder - conversational feasibility assessment + WISER Playbooks drafting
 ];
 
 // ==================== VALIDATION ====================

@@ -869,11 +869,11 @@ function createMainWindow(app) {
 
   // Handle window close event - save state and close gracefully
   mainWindow.on('close', (event) => {
-    log.info('window', 'Close event', { isShuttingDown, isQuitting: !!global.isQuitting });
+    log.info('window', 'Close event', { isShuttingDown, isQuitting: !!global.isQuitting, isUpdating: !!global.isUpdatingApp });
 
-    // If app.quit() was called or already shutting down, allow immediate close
-    if (isShuttingDown || global.isQuitting) {
-      log.info('window', 'Allowing close (shutdown/quit in progress)');
+    // If installing an update, app.quit() was called, or already shutting down, allow immediate close
+    if (isShuttingDown || global.isQuitting || global.isUpdatingApp) {
+      log.info('window', 'Allowing close (shutdown/quit/update in progress)');
       return;
     }
 

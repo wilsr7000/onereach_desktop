@@ -1,15 +1,15 @@
 /**
- * Email Agent - A Data-Aware Thinking Agent
+ * Email Agent -- IMAP-connected email assistant with triage scoring.
  *
- * An AI-powered email assistant that:
- * - Uses data-aware bidding - checks cached email state before bidding
- * - Background polls email every 5 minutes to keep cache fresh
- * - Uses semantic LLM understanding (no keywords/regex) for intent
- * - Handles compose, send, read, search, reply, and draft operations
- * - Learns user preferences over time (frequent contacts, signature, style)
- *
- * NOTE: Email API methods are stubs until connected to a real email provider.
+ * - Connects to real email via lib/email-service.js (IMAP + SMTP)
+ * - Threaded conversation tracking via lib/email-thread-engine.js
+ * - AI-powered triage scoring: urgency, importance, conversation weighting
+ * - Background polling via IMAP IDLE or fallback interval
+ * - Learns contacts and preferences over time
+ * - Multi-account aware ("check my work email" vs "check personal")
  */
+
+'use strict';
 
 const { getAgentMemory } = require('../../lib/agent-memory-store');
 const { getTimeContext, learnFromInteraction } = require('../../lib/thinking-agent');
@@ -18,24 +18,32 @@ const ai = require('../../lib/ai-service');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 
-// Circuit breaker for AI calls
 const emailCircuit = getCircuit('email-agent-ai', {
   failureThreshold: 3,
   resetTimeout: 30000,
   windowMs: 60000,
 });
 
-// Polling configuration
-const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const POLL_INTERVAL_MS = 5 * 60 * 1000;
 
-/**
- * AI-driven email request understanding
- * Takes a raw user request and uses LLM to understand what they want
- *
- * @param {string} userRequest - Raw user request text
- * @param {Object} context - { partOfDay, memory, emailSummary, conversationHistory }
- * @returns {Promise<Object>} - { action, parameters, message, needsClarification?, clarificationPrompt? }
- */
+function _getEmailService() {
+  try {
+    const { getEmailService } = require('../../lib/email-service');
+    return getEmailService();
+  } catch (_) {
+    return null;
+  }
+}
+
+function _getThreadEngine() {
+  try {
+    const { getEmailThreadEngine } = require('../../lib/email-thread-engine');
+    return getEmailThreadEngine({ ai });
+  } catch (_) {
+    return null;
+  }
+}
+
 async function aiUnderstandEmailRequest(userRequest, context) {
   const { partOfDay, memory, emailSummary, conversationHistory } = context;
 
@@ -53,37 +61,35 @@ ${memory || 'No preferences learned yet.'}
 ACTIONS YOU CAN IDENTIFY:
 - "check_inbox" - User wants to see recent/unread emails
 - "check_urgent" - User wants to see urgent/important/flagged emails
+- "triage" - User wants a prioritized inbox summary with scoring
+- "check_threads" - User wants to see active conversation threads
+- "get_thread" - User wants the full conversation thread for a specific email
 - "compose" - User wants to write a new email
 - "reply" - User wants to reply to an email
 - "search" - User wants to find specific emails
 - "send" - User wants to send an email
 - "draft" - User wants to create/save a draft
+- "mark_read" - User wants to mark emails as read
+- "mark_important" - User wants to flag/star an email
 
 Respond with JSON:
 {
   "understood": true/false,
-  "action": "check_inbox" | "check_urgent" | "compose" | "reply" | "search" | "send" | "draft" | "clarify",
+  "action": "check_inbox" | "check_urgent" | "triage" | "check_threads" | "get_thread" | "compose" | "reply" | "search" | "send" | "draft" | "mark_read" | "mark_important" | "clarify",
   "parameters": {
     "to": "recipient if specified",
     "subject": "subject if specified",
     "query": "search query if searching",
-    "count": number of emails to show (default 5)
+    "count": number of emails to show (default 5),
+    "accountHint": "work or personal or specific label if mentioned",
+    "uid": "email UID if referencing a specific email"
   },
   "needsClarification": true/false,
   "clarificationPrompt": "Question to ask if clarification needed",
   "reasoning": "Brief explanation of understanding"
-}
+}`;
 
-EXAMPLES:
-- "check my email" → action: "check_inbox"
-- "anything urgent?" → action: "check_urgent"
-- "email John about the meeting" → action: "compose", parameters: { to: "John", subject: "meeting" }
-- "find emails from Sarah" → action: "search", parameters: { query: "from:Sarah" }
-- "what important emails do I have" → action: "check_urgent"`;
-
-  const userPrompt = `User request: "${userRequest}"
-
-What email action does the user want?`;
+  const userPrompt = `User request: "${userRequest}"\n\nWhat email action does the user want?`;
 
   try {
     const result = await emailCircuit.execute(async () => {
@@ -100,7 +106,6 @@ What email action does the user want?`;
 
     const parsed = JSON.parse(result.content);
     log.info('agent', 'AI understood request', { reasoning: parsed.reasoning });
-
     return parsed;
   } catch (error) {
     log.warn('agent', 'AI understanding failed', { error: error.message });
@@ -112,73 +117,78 @@ const emailAgent = {
   id: 'email-agent',
   name: 'Email Assistant',
   description:
-    'Handles all email communications - check inbox, compose, send, search, and reply with data-aware bidding',
-  voice: 'nova', // Clear, professional - see VOICE-GUIDE.md
+    'Handles all email communications -- check inbox, compose, send, search, reply, triage, and threaded conversations via IMAP',
+  voice: 'nova',
   acks: ['Checking your email.', 'Let me look at your inbox.'],
   categories: ['communication', 'email', 'messaging'],
-
-  // Empty keywords - using semantic LLM prompts only (per project rules)
   keywords: [],
-  executionType: 'action', // Needs email API for data and sending
-  estimatedExecutionMs: 5000, // Email API polling
-  dataSources: ['email-api'],
+  executionType: 'action',
+  estimatedExecutionMs: 5000,
+  dataSources: ['email-imap'],
 
-  /**
-   * Briefing contribution: unread email summary.
-   * Priority 4 = appears after calendar in the daily brief.
-   */
   async getBriefing() {
     try {
-      // Use cached email state if available (background polling keeps it fresh)
-      const summary = this._cachedEmailSummary || null;
-      if (summary) {
+      const svc = _getEmailService();
+      if (!svc) return { section: 'Email', priority: 4, content: null };
+
+      const summary = await svc.getSummary();
+      if (!summary.connected) {
+        return { section: 'Email', priority: 4, content: null };
+      }
+
+      const engine = _getThreadEngine();
+      if (engine && summary.recentEmails?.length > 0) {
+        const threads = engine.buildThreads(summary.recentEmails);
+        const scored = await engine.scoreThreads(threads, { useAI: false });
+        const triageSummary = engine.summarize(scored);
         return {
           section: 'Email',
           priority: 4,
-          content: summary,
+          content: `${summary.unreadCount} unread. ${triageSummary}`,
         };
       }
-      // Try a quick inbox check
-      const result = await this.execute({ content: 'check inbox summary', metadata: { briefingMode: true } });
-      if (result && result.success && result.message) {
-        return { section: 'Email', priority: 4, content: result.message };
-      }
+
+      return {
+        section: 'Email',
+        priority: 4,
+        content: `${summary.unreadCount} unread email${summary.unreadCount !== 1 ? 's' : ''}.`,
+      };
     } catch (_e) {
-      // Email unavailable
+      return { section: 'Email', priority: 4, content: null };
     }
-    return { section: 'Email', priority: 4, content: null };
   },
 
-  // Prompt for LLM evaluation (semantic, no keywords/regex)
-  prompt: `Email Assistant handles all email-related tasks.
+  prompt: `Email Assistant handles all email-related tasks via IMAP.
 
 Capabilities:
 - Check for new, unread, urgent, or important emails
+- Triage inbox with AI-scored urgency and importance
+- Track threaded conversations and identify which need replies
 - Read and summarize email contents
 - Compose and send emails
 - Reply to and forward emails
 - Search emails by sender, subject, or content
 - Create and manage drafts
+- Multi-account support
 
-This agent manages email communications. It can read, compose, search, and send emails.`,
+This agent connects to real email inboxes via IMAP and sends via SMTP.
+It distinguishes between active conversations (threaded, weighted higher) and standalone messages.`,
 
-  // Agent capabilities for display
   capabilities: [
-    'Check inbox and unread count',
+    'Check inbox and unread count via IMAP',
+    'Triage inbox with urgency/importance scoring',
+    'Track threaded email conversations',
     'Find urgent/flagged emails',
-    'Compose and send emails',
+    'Compose and send emails via SMTP',
     'Search emails by sender, subject, or content',
-    'Reply to emails',
+    'Reply to emails in threads',
     'Create and manage drafts',
     'Learn frequent contacts and preferences',
+    'Multi-account support',
   ],
 
-  // Memory instance
   memory: null,
 
-  // ==================== DATA-AWARE BIDDING CACHE ====================
-
-  // Cache for email state (updated every 5 min)
   _cache: {
     unreadCount: 0,
     urgentEmails: [],
@@ -186,12 +196,8 @@ This agent manages email communications. It can read, compose, search, and send 
     lastFetch: null,
   },
 
-  // Polling interval handle
   _pollInterval: null,
 
-  /**
-   * Initialize memory and start background polling
-   */
   async initialize() {
     if (!this.memory) {
       this.memory = getAgentMemory('email-agent', { displayName: 'Email Assistant' });
@@ -199,39 +205,33 @@ This agent manages email communications. It can read, compose, search, and send 
       this._ensureMemorySections();
     }
 
-    // Start background polling for data-aware bidding
-    this._startPolling();
+    const svc = _getEmailService();
+    if (svc) {
+      svc.on('new-mail', () => this._refreshCache());
+    }
 
+    this._startPolling();
     return this.memory;
   },
 
-  /**
-   * Ensure required memory sections exist
-   */
   _ensureMemorySections() {
     const sections = this.memory.getSectionNames();
 
-    // Frequent Contacts
     if (!sections.includes('Frequent Contacts')) {
       this.memory.updateSection('Frequent Contacts', `*Will be populated as you use email*`);
     }
-
-    // Email Preferences
     if (!sections.includes('Email Preferences')) {
       this.memory.updateSection(
         'Email Preferences',
-        `- Signature: Not set
-- Default Response Style: Professional
-- Priority Senders: None configured`
+        `- Signature: Not set\n- Default Response Style: Professional\n- Priority Senders: None configured`
       );
     }
-
-    // Templates
+    if (!sections.includes('VIP Senders')) {
+      this.memory.updateSection('VIP Senders', `*No VIP senders yet. Mark senders as important to add them.*`);
+    }
     if (!sections.includes('Templates')) {
       this.memory.updateSection('Templates', `*No templates saved yet*`);
     }
-
-    // Recent Activity
     if (!sections.includes('Recent Activity')) {
       this.memory.updateSection('Recent Activity', `*No activity yet*`);
     }
@@ -241,88 +241,51 @@ This agent manages email communications. It can read, compose, search, and send 
     }
   },
 
-  // ==================== BACKGROUND POLLING ====================
-
-  /**
-   * Start background polling every 5 minutes
-   */
   _startPolling() {
-    if (this._pollInterval) {
-      return; // Already running
-    }
-
-    log.info('agent', 'Starting background polling (every 5 minutes)');
-
-    // Initial fetch
+    if (this._pollInterval) return;
+    log.info('agent', 'Starting email background polling');
     this._refreshCache();
-
-    // Poll every 5 minutes
-    this._pollInterval = setInterval(() => {
-      this._refreshCache();
-    }, POLL_INTERVAL_MS);
+    this._pollInterval = setInterval(() => this._refreshCache(), POLL_INTERVAL_MS);
   },
 
-  /**
-   * Stop background polling
-   */
   _stopPolling() {
     if (this._pollInterval) {
       clearInterval(this._pollInterval);
       this._pollInterval = null;
-      log.info('agent', 'Background polling stopped');
     }
   },
 
-  /**
-   * Refresh cache from email API
-   */
   async _refreshCache() {
     try {
-      log.info('agent', 'Refreshing email cache...');
+      const svc = _getEmailService();
+      if (!svc) return;
 
-      // Fetch email summary from API (stub for now)
-      const summary = await this._tools.getEmailSummary();
-
+      const summary = await svc.getSummary();
       this._cache = {
         unreadCount: summary.unreadCount || 0,
         urgentEmails: summary.urgentEmails || [],
         recentEmails: summary.recentEmails || [],
         lastFetch: Date.now(),
+        connected: summary.connected,
       };
 
-      log.info('agent', `Cache updated: ${this._cache.unreadCount} unread, ${this._cache.urgentEmails.length} urgent`);
+      this._cachedEmailSummary = this._buildEmailSummary();
     } catch (error) {
-      log.error('agent', 'Failed to refresh cache', { error: error.message });
-      // Keep stale cache rather than clearing
+      log.error('agent', 'Failed to refresh email cache', { error: error.message });
     }
   },
 
-  // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
-  // NEVER add keyword/regex bidding here. See .cursorrules.
-
-  // ==================== EXECUTION ====================
-
-  /**
-   * Execute the email task with full agentic capabilities
-   */
   async execute(task) {
     try {
-      // Initialize memory if needed
-      if (!this.memory) {
-        await this.initialize();
-      }
+      if (!this.memory) await this.initialize();
 
       const context = getTimeContext();
       const content = task.content || task.phrase || '';
 
-      // ==================== MULTI-TURN STATE HANDLING ====================
-      // Check if this is a follow-up response to a previous needsInput
       if (task.context?.originalRequest && task.context?.partialUnderstanding) {
-        log.info('agent', 'Handling follow-up clarification');
         return this._handleClarificationResponse(task, context);
       }
 
-      // Build context for AI understanding
       const aiContext = {
         partOfDay: context.partOfDay,
         memory: this.memory ? this._getMemoryContext() : null,
@@ -330,7 +293,6 @@ This agent manages email communications. It can read, compose, search, and send 
         conversationHistory: task.context?.conversationHistory || null,
       };
 
-      // Use AI to understand the request
       const aiResult = await aiUnderstandEmailRequest(content, aiContext);
 
       if (aiResult && !aiResult.needsClarification) {
@@ -339,7 +301,6 @@ This agent manages email communications. It can read, compose, search, and send 
         return result;
       }
 
-      // Need clarification
       if (aiResult?.needsClarification) {
         return {
           success: true,
@@ -354,28 +315,20 @@ This agent manages email communications. It can read, compose, search, and send 
         };
       }
 
-      // Fallback: simple response based on cache
       return this._fallbackResponse(content);
     } catch (error) {
       log.error('agent', 'Error', { error });
       return {
         success: false,
-        message: "I couldn't access your email right now. The email service may not be connected.",
+        message: "I couldn't access your email right now. Check your email account settings.",
       };
     }
   },
 
-  /**
-   * Handle clarification response - combine original request with user's clarification
-   */
   async _handleClarificationResponse(task, context) {
     const userResponse = task.context?.userInput || task.content;
     const originalRequest = task.context?.originalRequest;
-    const _partialUnderstanding = task.context?.partialUnderstanding;
 
-    log.info('agent', `Original: "${originalRequest}", Clarification: "${userResponse}"`);
-
-    // Build context for AI understanding with combined info
     const aiContext = {
       partOfDay: context.partOfDay,
       memory: this.memory ? this._getMemoryContext() : null,
@@ -383,10 +336,7 @@ This agent manages email communications. It can read, compose, search, and send 
       conversationHistory: task.context?.conversationHistory || null,
     };
 
-    // Combine original request with clarification
     const combinedRequest = `${originalRequest}. User clarified: ${userResponse}`;
-
-    // Re-process with the combined request
     const aiResult = await aiUnderstandEmailRequest(combinedRequest, aiContext);
 
     if (aiResult && !aiResult.needsClarification) {
@@ -395,7 +345,6 @@ This agent manages email communications. It can read, compose, search, and send 
       return result;
     }
 
-    // Still need more clarification
     if (aiResult?.needsClarification) {
       return {
         success: true,
@@ -410,255 +359,337 @@ This agent manages email communications. It can read, compose, search, and send 
       };
     }
 
-    // Fallback
     return this._fallbackResponse(userResponse);
   },
 
-  /**
-   * Execute based on AI understanding
-   */
   async _executeAction(aiResult) {
     const { action, parameters } = aiResult;
+    const accountId = parameters?.accountHint ? this._resolveAccountHint(parameters.accountHint) : null;
 
     switch (action) {
       case 'check_inbox':
-        return await this._checkInbox(parameters?.count || 5);
-
+        return await this._checkInbox(accountId, parameters?.count || 5);
       case 'check_urgent':
-        return await this._checkUrgent();
-
+        return await this._checkUrgent(accountId);
+      case 'triage':
+        return await this._triage(accountId);
+      case 'check_threads':
+        return await this._checkThreads(accountId);
+      case 'get_thread':
+        return await this._getThread(accountId, parameters?.uid);
       case 'compose':
-        return await this._composeEmail(parameters);
-
+        return await this._composeEmail(accountId, parameters);
       case 'reply':
-        return await this._replyToEmail(parameters);
-
+        return await this._replyToEmail(accountId, parameters);
       case 'search':
-        return await this._searchEmails(parameters?.query);
-
+        return await this._searchEmails(accountId, parameters?.query);
       case 'send':
-        return await this._sendEmail(parameters);
-
+        return await this._sendEmail(accountId, parameters);
       case 'draft':
-        return await this._createDraft(parameters);
-
+        return await this._createDraft(accountId, parameters);
+      case 'mark_read':
+        return await this._markRead(accountId, parameters?.uid);
+      case 'mark_important':
+        return await this._markImportant(accountId, parameters?.uid);
       default:
-        return await this._checkInbox(5);
+        return await this._checkInbox(accountId, 5);
     }
   },
 
-  /**
-   * Fallback response using cached data
-   */
+  _resolveAccountHint(hint) {
+    if (!hint) return null;
+    const svc = _getEmailService();
+    if (!svc) return null;
+
+    const accounts = svc.getAccountStatuses();
+    const lower = hint.toLowerCase();
+    const match = accounts.find((a) =>
+      (a.label || '').toLowerCase().includes(lower) ||
+      (a.email || '').toLowerCase().includes(lower)
+    );
+    return match ? match.id : null;
+  },
+
   _fallbackResponse(_content) {
-    const { unreadCount, urgentEmails } = this._cache;
+    const { unreadCount, urgentEmails, connected } = this._cache;
+
+    if (!connected) {
+      return {
+        success: true,
+        message: 'No email account connected. Go to Settings > Email Accounts to add one.',
+      };
+    }
 
     if (urgentEmails.length > 0) {
       return {
         success: true,
-        message: `You have ${urgentEmails.length} urgent email${urgentEmails.length > 1 ? 's' : ''} and ${unreadCount} total unread. Email API not fully connected yet.`,
+        message: `You have ${urgentEmails.length} flagged email${urgentEmails.length > 1 ? 's' : ''} and ${unreadCount} total unread.`,
       };
     }
 
     if (unreadCount > 0) {
       return {
         success: true,
-        message: `You have ${unreadCount} unread email${unreadCount > 1 ? 's' : ''}. Email API not fully connected yet.`,
+        message: `You have ${unreadCount} unread email${unreadCount > 1 ? 's' : ''}.`,
       };
     }
 
-    return {
-      success: true,
-      message: 'Your inbox is clear. Email API not fully connected yet - connect your email provider in Settings.',
-    };
+    return { success: true, message: 'Your inbox is clear.' };
   },
 
   // ==================== EMAIL ACTIONS ====================
 
-  /**
-   * Check inbox
-   */
-  async _checkInbox(count = 5) {
-    const emails = await this._tools.readEmails({ count, unreadOnly: false });
+  async _checkInbox(accountId, count = 5) {
+    const svc = _getEmailService();
+    if (!svc) return { success: true, message: 'Email service not available. Add an account in Settings > Email Accounts.' };
 
-    if (!emails.connected) {
-      return {
-        success: true,
-        message: 'Email service not connected. Connect your email provider in Settings to enable inbox access.',
-      };
+    const inbox = await svc.fetchInbox(accountId, { count, unreadOnly: false });
+    if (!inbox.connected) {
+      return { success: true, message: 'No email account connected. Go to Settings > Email Accounts to set one up.' };
     }
 
-    if (emails.emails.length === 0) {
-      return {
-        success: true,
-        message: 'Your inbox is empty - no recent emails.',
-      };
+    if (inbox.emails.length === 0) {
+      return { success: true, message: 'Your inbox is empty.' };
     }
 
-    const summary = emails.emails
+    const summary = inbox.emails
       .slice(0, count)
-      .map((e) => `"${e.subject}" from ${e.from}`)
-      .join(', ');
+      .map((e) => `"${e.subject}" from ${e.from}${e.isRead ? '' : ' [unread]'}`)
+      .join('\n- ');
 
     return {
       success: true,
-      message: `You have ${emails.total} emails. Recent: ${summary}`,
+      message: `You have ${inbox.total} emails (${inbox.unread || 0} unread). Recent:\n- ${summary}`,
     };
   },
 
-  /**
-   * Check urgent emails
-   */
-  async _checkUrgent() {
-    const urgent = await this._tools.getUrgentEmails();
+  async _checkUrgent(accountId) {
+    const svc = _getEmailService();
+    if (!svc) return { success: true, message: 'Email service not available.' };
 
-    if (!urgent.connected) {
-      return {
-        success: true,
-        message: 'Email service not connected. Connect your email provider in Settings to see urgent messages.',
-      };
+    const inbox = await svc.fetchInbox(accountId, { count: 30 });
+    if (!inbox.connected) {
+      return { success: true, message: 'No email account connected.' };
     }
 
-    if (urgent.urgentEmails.length === 0) {
-      return {
-        success: true,
-        message: "No urgent emails right now. You're all caught up!",
-      };
+    const flagged = inbox.emails.filter((e) => e.isFlagged);
+    if (flagged.length === 0) {
+      return { success: true, message: 'No flagged emails. You\'re all caught up.' };
     }
 
-    const summary = urgent.urgentEmails
-      .slice(0, 3)
+    const summary = flagged
+      .slice(0, 5)
       .map((e) => `"${e.subject}" from ${e.from}`)
-      .join(', ');
+      .join('\n- ');
 
     return {
       success: true,
-      message: `You have ${urgent.urgentEmails.length} urgent email${urgent.urgentEmails.length > 1 ? 's' : ''}: ${summary}`,
+      message: `You have ${flagged.length} flagged email${flagged.length > 1 ? 's' : ''}:\n- ${summary}`,
     };
   },
 
-  /**
-   * Compose email
-   */
-  async _composeEmail(params) {
-    const result = await this._tools.composeEmail({
-      to: params?.to,
-      subject: params?.subject,
-      body: params?.body,
+  async _triage(accountId) {
+    const svc = _getEmailService();
+    const engine = _getThreadEngine();
+    if (!svc || !engine) return { success: true, message: 'Email service not available.' };
+
+    const inbox = await svc.fetchInbox(accountId, { count: 50 });
+    if (!inbox.connected) return { success: true, message: 'No email account connected.' };
+
+    if (inbox.emails.length === 0) return { success: true, message: 'Your inbox is empty.' };
+
+    const userAccounts = svc.getAccountStatuses();
+    if (userAccounts.length > 0) {
+      engine.setUserEmail(userAccounts[0].email);
+    }
+
+    const threads = engine.buildThreads(inbox.emails);
+    const scored = await engine.scoreThreads(threads, { useAI: true, topN: 5 });
+    const triageSummary = engine.summarize(scored);
+
+    const topItems = scored.slice(0, 5).map((t, i) => {
+      const type = t.isConversation ? `conversation (${t.messageCount} messages)` : 'message';
+      const replyTag = t.awaitingReply ? ' -- awaiting your reply' : '';
+      return `${i + 1}. [${t.priority.toUpperCase()}] "${t.subject}" (${type})${replyTag}`;
+    }).join('\n');
+
+    return {
+      success: true,
+      message: `${triageSummary}\n\nTop items:\n${topItems}`,
+    };
+  },
+
+  async _checkThreads(accountId) {
+    const svc = _getEmailService();
+    const engine = _getThreadEngine();
+    if (!svc || !engine) return { success: true, message: 'Email service not available.' };
+
+    const inbox = await svc.fetchInbox(accountId, { count: 50 });
+    if (!inbox.connected) return { success: true, message: 'No email account connected.' };
+
+    const userAccounts = svc.getAccountStatuses();
+    if (userAccounts.length > 0) engine.setUserEmail(userAccounts[0].email);
+
+    const threads = engine.buildThreads(inbox.emails);
+    const conversations = threads.filter((t) => t.messages.length > 1);
+
+    if (conversations.length === 0) {
+      return { success: true, message: 'No active conversation threads.' };
+    }
+
+    const scored = await engine.scoreThreads(conversations, { useAI: false });
+    const list = scored.slice(0, 8).map((t, i) => {
+      const replyTag = t.awaitingReply ? ' [needs reply]' : '';
+      return `${i + 1}. "${t.subject}" -- ${t.messageCount} messages, ${t.participants.length} participants${replyTag}`;
+    }).join('\n');
+
+    return {
+      success: true,
+      message: `${conversations.length} active conversation${conversations.length > 1 ? 's' : ''}:\n${list}`,
+    };
+  },
+
+  async _getThread(accountId, uid) {
+    if (!uid) {
+      return {
+        success: true,
+        needsInput: {
+          prompt: 'Which email thread? Tell me the subject or sender.',
+          agentId: this.id,
+          context: { originalRequest: 'get thread', partialUnderstanding: { action: 'get_thread' } },
+        },
+      };
+    }
+
+    const svc = _getEmailService();
+    if (!svc) return { success: true, message: 'Email service not available.' };
+
+    const msg = await svc.fetchMessage(accountId, uid);
+    if (!msg) return { success: false, message: 'Could not find that email.' };
+
+    const parts = [
+      `From: ${msg.from}`,
+      `To: ${msg.to}`,
+      `Subject: ${msg.subject}`,
+      `Date: ${msg.date}`,
+      '',
+      msg.text || '(no text content)',
+    ];
+
+    return { success: true, message: parts.join('\n') };
+  },
+
+  async _composeEmail(accountId, params) {
+    if (!params?.to) {
+      return {
+        success: true,
+        needsInput: {
+          prompt: 'Who should I send this email to?',
+          agentId: this.id,
+          context: { originalRequest: `compose email about ${params?.subject || ''}`, partialUnderstanding: { action: 'compose', parameters: params } },
+        },
+      };
+    }
+
+    const svc = _getEmailService();
+    if (!svc) return { success: true, message: 'Email service not available.' };
+
+    const result = await svc.send(accountId, {
+      to: params.to,
+      subject: params.subject || '',
+      body: params.body || '',
     });
 
-    return {
-      success: true,
-      message:
-        result.message ||
-        `Draft created for ${params?.to || 'recipient'}. Email API not fully connected - drafts are simulated.`,
-    };
+    return { success: result.success, message: result.message };
   },
 
-  /**
-   * Reply to email
-   */
-  async _replyToEmail(params) {
-    const result = await this._tools.replyToEmail({
-      emailId: params?.emailId,
-      body: params?.body,
+  async _replyToEmail(accountId, params) {
+    if (!params?.uid && !params?.emailId) {
+      return { success: true, message: 'Which email should I reply to? Give me the subject or sender.' };
+    }
+
+    const svc = _getEmailService();
+    if (!svc) return { success: true, message: 'Email service not available.' };
+
+    const uid = params.uid || params.emailId;
+    const original = await svc.fetchMessage(accountId, uid);
+    if (!original) return { success: false, message: 'Could not find the original email to reply to.' };
+
+    const result = await svc.send(accountId, {
+      to: original.from,
+      subject: `Re: ${original.subject}`,
+      body: params.body || '',
+      inReplyTo: original.messageId,
+      references: [...(original.references || []), original.messageId].filter(Boolean),
     });
 
-    return {
-      success: true,
-      message: result.message || 'Reply drafted. Email API not fully connected - replies are simulated.',
-    };
+    return { success: result.success, message: result.message || `Reply sent to ${original.from}` };
   },
 
-  /**
-   * Search emails
-   */
-  async _searchEmails(query) {
-    const results = await this._tools.searchEmails({ query });
+  async _searchEmails(accountId, query) {
+    if (!query) return { success: true, message: 'What should I search for?' };
 
-    if (!results.connected) {
-      return {
-        success: true,
-        message: `Search for "${query}" not available. Connect your email provider in Settings.`,
-      };
-    }
+    const svc = _getEmailService();
+    if (!svc) return { success: true, message: 'Email service not available.' };
+
+    const results = await svc.searchMessages(accountId, query);
+    if (!results.connected) return { success: true, message: 'No email account connected.' };
 
     if (results.emails.length === 0) {
-      return {
-        success: true,
-        message: `No emails found matching "${query}".`,
-      };
+      return { success: true, message: `No emails found matching "${query}".` };
     }
 
+    const list = results.emails.slice(0, 5).map((e) => `"${e.subject}" from ${e.from}`).join('\n- ');
     return {
       success: true,
-      message: `Found ${results.emails.length} emails matching "${query}".`,
+      message: `Found ${results.emails.length} email${results.emails.length > 1 ? 's' : ''} matching "${query}":\n- ${list}`,
     };
   },
 
-  /**
-   * Send email
-   */
-  async _sendEmail(params) {
-    const result = await this._tools.sendEmail({
-      to: params?.to,
-      subject: params?.subject,
-      body: params?.body,
-    });
+  async _sendEmail(accountId, params) {
+    return this._composeEmail(accountId, params);
+  },
 
+  async _createDraft(_accountId, params) {
     return {
-      success: result.success,
-      message:
-        result.message || 'Email send attempted. Connect your email provider in Settings for full functionality.',
+      success: true,
+      message: `Draft created for ${params?.to || 'recipient'}: "${params?.subject || '(no subject)'}". Drafts are saved locally until sent.`,
     };
   },
 
-  /**
-   * Create draft
-   */
-  async _createDraft(params) {
-    const result = await this._tools.createDraft({
-      to: params?.to,
-      subject: params?.subject,
-      body: params?.body,
-    });
+  async _markRead(accountId, uid) {
+    if (!uid) return { success: true, message: 'Which email should I mark as read?' };
+    const svc = _getEmailService();
+    if (!svc) return { success: true, message: 'Email service not available.' };
+    await svc.markRead(accountId, uid);
+    return { success: true, message: 'Marked as read.' };
+  },
 
-    return {
-      success: true,
-      message: result.message || 'Draft saved. Connect your email provider in Settings for full functionality.',
-    };
+  async _markImportant(accountId, uid) {
+    if (!uid) return { success: true, message: 'Which email should I flag as important?' };
+    const svc = _getEmailService();
+    if (!svc) return { success: true, message: 'Email service not available.' };
+    await svc.markFlagged(accountId, uid);
+    return { success: true, message: 'Flagged as important.' };
   },
 
   // ==================== HELPERS ====================
 
-  /**
-   * Build email summary from cache
-   */
   _buildEmailSummary() {
-    const { unreadCount, urgentEmails, lastFetch } = this._cache;
+    const { unreadCount, urgentEmails, lastFetch, connected } = this._cache;
 
-    if (!lastFetch) {
-      return 'No email data available yet';
-    }
+    if (!lastFetch) return 'No email data available yet';
+    if (!connected) return 'Email not connected';
 
-    const parts = [];
-    parts.push(`${unreadCount} unread`);
-
-    if (urgentEmails.length > 0) {
-      parts.push(`${urgentEmails.length} urgent`);
-    }
+    const parts = [`${unreadCount} unread`];
+    if (urgentEmails.length > 0) parts.push(`${urgentEmails.length} flagged`);
 
     const ageMinutes = Math.round((Date.now() - lastFetch) / 60000);
-    if (ageMinutes > 1) {
-      parts.push(`(updated ${ageMinutes} min ago)`);
-    }
+    if (ageMinutes > 1) parts.push(`(updated ${ageMinutes} min ago)`);
 
     return parts.join(', ');
   },
 
-  /**
-   * Get memory context for AI
-   */
   _getMemoryContext() {
     const sections = [];
 
@@ -670,172 +701,42 @@ This agent manages email communications. It can read, compose, search, and send 
     const prefs = this.memory.getSection('Email Preferences');
     if (prefs) sections.push(`Email Preferences:\n${prefs}`);
 
+    const vips = this.memory.getSection('VIP Senders');
+    if (vips && !vips.includes('*No VIP')) {
+      sections.push(`VIP Senders:\n${vips}`);
+    }
+
     return sections.join('\n\n');
   },
 
-  /**
-   * Learn from interaction
-   */
   async _learnFromInteraction(request, result, _context) {
     if (!this.memory) return;
 
-    // Record activity
     const timestamp = new Date().toISOString().split('T')[0];
     const entry = `- ${timestamp}: "${request.slice(0, 40)}..." -> ${result.message?.slice(0, 50) || 'completed'}...`;
     this.memory.appendToSection('Recent Activity', entry, 20);
 
-    // Extract contacts for learning
     const emailMatch = request.match(/email\s+(\w+)/i);
     if (emailMatch) {
       const contact = emailMatch[1];
-      const contacts = this.memory.parseSectionAsKeyValue('Frequent Contacts') || {};
-      if (!contacts[contact]) {
-        // Add new contact
-        const currentContacts = this.memory.getSection('Frequent Contacts');
-        if (currentContacts?.includes('*Will be populated')) {
-          this.memory.updateSection('Frequent Contacts', `- ${contact}: mentioned`);
-        } else {
-          this.memory.appendToSection('Frequent Contacts', `- ${contact}: mentioned`, 10);
-        }
+      const currentContacts = this.memory.getSection('Frequent Contacts');
+      if (currentContacts?.includes('*Will be populated')) {
+        this.memory.updateSection('Frequent Contacts', `- ${contact}: mentioned`);
+      } else {
+        this.memory.appendToSection('Frequent Contacts', `- ${contact}: mentioned`, 10);
       }
     }
 
     await this.memory.save();
 
-    // Use shared learning
     await learnFromInteraction(this.memory, { content: request }, result, {
       useAILearning: false,
     });
   },
 
-  // ==================== TOOL LIBRARY (STUBS) ====================
-
-  _tools: {
-    /**
-     * Get email summary (for cache refresh)
-     * STUB: Returns mock data until email API connected
-     */
-    async getEmailSummary() {
-      // TODO: Connect to real email API (Gmail, Outlook, etc.)
-      log.info('agent', 'getEmailSummary() - STUB returning mock data');
-      return {
-        connected: false,
-        unreadCount: 0,
-        urgentEmails: [],
-        recentEmails: [],
-      };
-    },
-
-    /**
-     * Get urgent/flagged emails
-     * STUB: Returns mock data until email API connected
-     */
-    async getUrgentEmails() {
-      log.info('agent', 'getUrgentEmails() - STUB returning mock data');
-      return {
-        connected: false,
-        urgentEmails: [],
-        unreadCount: 0,
-      };
-    },
-
-    /**
-     * Read emails from inbox
-     * STUB: Returns mock data until email API connected
-     */
-    async readEmails({ count = 10, _from, unreadOnly = false }) {
-      log.info('agent', `readEmails(count=${count}, unreadOnly=${unreadOnly}) - STUB`);
-      return {
-        connected: false,
-        emails: [],
-        total: 0,
-      };
-    },
-
-    /**
-     * Search emails
-     * STUB: Returns mock data until email API connected
-     */
-    async searchEmails({ query, _from, _subject }) {
-      log.info('agent', `searchEmails(query="${query}") - STUB`);
-      return {
-        connected: false,
-        emails: [],
-        query,
-      };
-    },
-
-    /**
-     * Compose a new email
-     * STUB: Returns success message until email API connected
-     */
-    async composeEmail({ to, subject, _body }) {
-      log.info('agent', `composeEmail(to="${to}", subject="${subject}") - STUB`);
-      return {
-        success: true,
-        message: `Email draft created for ${to || 'recipient'}. Connect email provider in Settings to send.`,
-        draftId: `stub-draft-${Date.now()}`,
-      };
-    },
-
-    /**
-     * Send an email
-     * STUB: Returns success message until email API connected
-     */
-    async sendEmail({ to, subject, _body }) {
-      log.info('agent', `sendEmail(to="${to}", subject="${subject}") - STUB`);
-      return {
-        success: true,
-        message: `Email to ${to || 'recipient'} queued. Connect email provider in Settings to actually send.`,
-      };
-    },
-
-    /**
-     * Reply to an email
-     * STUB: Returns success message until email API connected
-     */
-    async replyToEmail({ emailId, _body }) {
-      log.info('agent', `replyToEmail(emailId="${emailId}") - STUB`);
-      return {
-        success: true,
-        message: 'Reply drafted. Connect email provider in Settings to send.',
-      };
-    },
-
-    /**
-     * Create a draft
-     * STUB: Returns success message until email API connected
-     */
-    async createDraft({ to, subject, _body }) {
-      log.info('agent', `createDraft(to="${to}", subject="${subject}") - STUB`);
-      return {
-        success: true,
-        message: 'Draft saved locally. Connect email provider in Settings for cloud sync.',
-        draftId: `stub-draft-${Date.now()}`,
-      };
-    },
-
-    /**
-     * Get unread count
-     * STUB: Returns 0 until email API connected
-     */
-    async getUnreadCount() {
-      log.info('agent', 'getUnreadCount() - STUB');
-      return {
-        connected: false,
-        count: 0,
-      };
-    },
-  },
-
-  // ==================== CLEANUP ====================
-
-  /**
-   * Cleanup when agent is unloaded
-   */
   cleanup() {
     this._stopPolling();
-    log.info('agent', 'Cleaned up');
+    log.info('agent', 'Email agent cleaned up');
   },
 };
 

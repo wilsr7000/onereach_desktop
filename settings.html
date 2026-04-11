@@ -548,6 +548,13 @@
           </svg>
           Edison SDKs
         </div>
+        <div class="sidebar-tab" data-tab="email-accounts" onclick="switchTab('email-accounts')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="2" y="4" width="20" height="16" rx="2" />
+            <polyline points="22,6 12,13 2,6" />
+          </svg>
+          Email Accounts
+        </div>
       </nav>
 
       <!-- Content Area -->
@@ -1489,6 +1496,83 @@
                 </div>
                 <div id="edisonKVResult" style="margin-top:6px;font-size:12px;max-height:200px;overflow-y:auto;display:none;background:rgba(0,0,0,0.2);border-radius:4px;padding:8px;"></div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== TAB 9: Email Accounts ==================== -->
+        <div class="tab-pane" id="pane-email-accounts">
+          <div class="section">
+            <h2 class="section-title">Email Accounts</h2>
+            <p class="section-subtitle">Connect your email for the AI Email Agent. Passwords are stored in your system keychain.</p>
+
+            <div id="emailAccountsList" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
+
+            <button class="btn-primary" onclick="emailShowAddForm()" id="emailAddBtn" style="font-size:13px;padding:6px 16px;">Add Email Account</button>
+          </div>
+
+          <div class="section" id="emailSetupForm" style="display:none;">
+            <h2 class="section-title">Setup Email Account</h2>
+
+            <div class="form-group">
+              <label>Email Provider</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                <button class="btn-secondary email-provider-btn" data-provider="gmail" onclick="emailSelectProvider('gmail')" style="font-size:12px;padding:6px 14px;">Gmail</button>
+                <button class="btn-secondary email-provider-btn" data-provider="outlook" onclick="emailSelectProvider('outlook')" style="font-size:12px;padding:6px 14px;">Outlook / 365</button>
+                <button class="btn-secondary email-provider-btn" data-provider="yahoo" onclick="emailSelectProvider('yahoo')" style="font-size:12px;padding:6px 14px;">Yahoo Mail</button>
+                <button class="btn-secondary email-provider-btn" data-provider="icloud" onclick="emailSelectProvider('icloud')" style="font-size:12px;padding:6px 14px;">iCloud</button>
+                <button class="btn-secondary email-provider-btn" data-provider="custom" onclick="emailSelectProvider('custom')" style="font-size:12px;padding:6px 14px;">Custom IMAP</button>
+              </div>
+            </div>
+
+            <div id="emailProviderGuide" style="display:none;margin-bottom:16px;padding:12px;background:rgba(255,255,255,0.04);border-radius:6px;border-left:3px solid #5b9bd5;">
+              <p id="emailGuideText" style="font-size:13px;margin:0 0 8px 0;color:#ccc;"></p>
+              <a id="emailGuideLink" href="#" style="font-size:12px;color:#5b9bd5;" onclick="emailOpenSetupLink(event)">Open setup page</a>
+            </div>
+
+            <div class="form-group">
+              <label for="emailLabel">Account Label</label>
+              <input type="text" id="emailLabel" placeholder="e.g., Work Gmail" />
+            </div>
+
+            <div class="form-group">
+              <label for="emailAddress">Email Address</label>
+              <input type="email" id="emailAddress" placeholder="you@example.com" />
+            </div>
+
+            <div class="form-group">
+              <label for="emailPassword">App Password</label>
+              <input type="password" id="emailPassword" placeholder="Paste your app password here" />
+              <small style="color:#888;font-size:11px;">This is NOT your regular password. Generate an app-specific password from your provider.</small>
+            </div>
+
+            <div id="emailCustomFields" style="display:none;">
+              <div style="display:flex;gap:12px;">
+                <div class="form-group" style="flex:1;">
+                  <label for="emailImapHost">IMAP Host</label>
+                  <input type="text" id="emailImapHost" placeholder="imap.example.com" />
+                </div>
+                <div class="form-group" style="width:80px;">
+                  <label for="emailImapPort">Port</label>
+                  <input type="number" id="emailImapPort" value="993" />
+                </div>
+              </div>
+              <div style="display:flex;gap:12px;">
+                <div class="form-group" style="flex:1;">
+                  <label for="emailSmtpHost">SMTP Host</label>
+                  <input type="text" id="emailSmtpHost" placeholder="smtp.example.com" />
+                </div>
+                <div class="form-group" style="width:80px;">
+                  <label for="emailSmtpPort">Port</label>
+                  <input type="number" id="emailSmtpPort" value="465" />
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;align-items:center;margin-top:12px;">
+              <button class="btn-primary" onclick="emailTestAndSave()" id="emailSaveBtn" style="font-size:13px;padding:6px 16px;">Test Connection and Save</button>
+              <button class="btn-secondary" onclick="emailCancelSetup()" style="font-size:13px;padding:6px 16px;">Cancel</button>
+              <span id="emailTestStatus" style="font-size:12px;color:#999;"></span>
             </div>
           </div>
         </div>
@@ -2720,6 +2804,206 @@
 
         console.log('[WebMCP Provider] Registered settings tools');
       })();
+
+      // ==================== EMAIL ACCOUNTS ====================
+
+      const EMAIL_PROVIDERS = {
+        gmail: {
+          guide: 'Generate an App Password from your Google Account. You need 2-Step Verification enabled first.',
+          url: 'https://myaccount.google.com/apppasswords',
+          imapHost: 'imap.gmail.com', imapPort: 993,
+          smtpHost: 'smtp.gmail.com', smtpPort: 465,
+        },
+        outlook: {
+          guide: 'Create an App Password from your Microsoft Account Security page.',
+          url: 'https://account.live.com/proofs/manage/additional',
+          imapHost: 'outlook.office365.com', imapPort: 993,
+          smtpHost: 'smtp.office365.com', smtpPort: 587,
+        },
+        yahoo: {
+          guide: 'Generate an App Password from Yahoo Account Security settings.',
+          url: 'https://login.yahoo.com/account/security',
+          imapHost: 'imap.mail.yahoo.com', imapPort: 993,
+          smtpHost: 'smtp.mail.yahoo.com', smtpPort: 465,
+        },
+        icloud: {
+          guide: 'Generate an app-specific password from your Apple ID page.',
+          url: 'https://appleid.apple.com/account/manage',
+          imapHost: 'imap.mail.me.com', imapPort: 993,
+          smtpHost: 'smtp.mail.me.com', smtpPort: 587,
+        },
+        custom: {
+          guide: 'Enter your IMAP and SMTP server details manually.',
+          url: null,
+          imapHost: '', imapPort: 993,
+          smtpHost: '', smtpPort: 465,
+        },
+      };
+
+      let emailSelectedProvider = null;
+
+      async function emailLoadAccounts() {
+        const listEl = document.getElementById('emailAccountsList');
+        if (!listEl) return;
+
+        try {
+          const accounts = await window.email.getAccounts();
+          if (!accounts || accounts.length === 0) {
+            listEl.innerHTML = '<div style="color:#888;font-size:13px;padding:8px;">No email accounts configured.</div>';
+            return;
+          }
+
+          listEl.innerHTML = accounts.map(a => {
+            const stateColor = a.state === 'idle' || a.state === 'connected' ? '#4caf50' :
+                               a.state === 'connecting' ? '#ff9800' :
+                               a.state === 'error' ? '#f44336' : '#888';
+            const stateLabel = a.state === 'idle' ? 'Connected' :
+                               a.state === 'connected' ? 'Connected' :
+                               a.state === 'connecting' ? 'Connecting...' :
+                               a.state === 'error' ? 'Error' : 'Disconnected';
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:rgba(255,255,255,0.04);border-radius:6px;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="width:8px;height:8px;border-radius:50%;background:${stateColor};"></span>
+                <div>
+                  <div style="font-size:13px;font-weight:500;">${a.label || a.email}</div>
+                  <div style="font-size:11px;color:#888;">${a.email} -- ${a.provider} -- ${stateLabel}</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button class="btn-secondary" onclick="emailConnect('${a.id}')" style="font-size:11px;padding:3px 10px;">${a.state === 'idle' || a.state === 'connected' ? 'Reconnect' : 'Connect'}</button>
+                <button class="btn-secondary" onclick="emailRemove('${a.id}')" style="font-size:11px;padding:3px 10px;color:#f44336;">Remove</button>
+              </div>
+            </div>`;
+          }).join('');
+        } catch (err) {
+          listEl.innerHTML = `<div style="color:#f44336;font-size:13px;">Failed to load accounts: ${err.message}</div>`;
+        }
+      }
+
+      function emailShowAddForm() {
+        document.getElementById('emailSetupForm').style.display = '';
+        document.getElementById('emailAddBtn').style.display = 'none';
+        emailSelectedProvider = null;
+        document.getElementById('emailLabel').value = '';
+        document.getElementById('emailAddress').value = '';
+        document.getElementById('emailPassword').value = '';
+        document.getElementById('emailTestStatus').textContent = '';
+        document.getElementById('emailProviderGuide').style.display = 'none';
+        document.getElementById('emailCustomFields').style.display = 'none';
+        document.querySelectorAll('.email-provider-btn').forEach(b => b.style.borderColor = '');
+      }
+
+      function emailCancelSetup() {
+        document.getElementById('emailSetupForm').style.display = 'none';
+        document.getElementById('emailAddBtn').style.display = '';
+      }
+
+      function emailSelectProvider(provider) {
+        emailSelectedProvider = provider;
+        const info = EMAIL_PROVIDERS[provider];
+        document.querySelectorAll('.email-provider-btn').forEach(b => {
+          b.style.borderColor = b.dataset.provider === provider ? '#5b9bd5' : '';
+        });
+
+        const guideEl = document.getElementById('emailProviderGuide');
+        document.getElementById('emailGuideText').textContent = info.guide;
+        const linkEl = document.getElementById('emailGuideLink');
+        if (info.url) {
+          linkEl.href = info.url;
+          linkEl.style.display = '';
+        } else {
+          linkEl.style.display = 'none';
+        }
+        guideEl.style.display = '';
+
+        document.getElementById('emailCustomFields').style.display = provider === 'custom' ? '' : 'none';
+        if (provider !== 'custom') {
+          document.getElementById('emailImapHost').value = info.imapHost;
+          document.getElementById('emailImapPort').value = info.imapPort;
+          document.getElementById('emailSmtpHost').value = info.smtpHost;
+          document.getElementById('emailSmtpPort').value = info.smtpPort;
+        }
+      }
+
+      function emailOpenSetupLink(event) {
+        event.preventDefault();
+        const url = event.target.href;
+        if (url && url !== '#') {
+          if (window.api && window.api.openExternal) {
+            window.api.openExternal(url);
+          } else {
+            window.open(url, '_blank');
+          }
+        }
+      }
+
+      async function emailTestAndSave() {
+        const statusEl = document.getElementById('emailTestStatus');
+        const email = document.getElementById('emailAddress').value.trim();
+        const password = document.getElementById('emailPassword').value;
+        const label = document.getElementById('emailLabel').value.trim();
+        const provider = emailSelectedProvider || 'custom';
+
+        if (!email || !password) {
+          statusEl.textContent = 'Email and password are required.';
+          statusEl.style.color = '#f44336';
+          return;
+        }
+
+        const info = EMAIL_PROVIDERS[provider] || EMAIL_PROVIDERS.custom;
+        const imap = {
+          host: provider === 'custom' ? document.getElementById('emailImapHost').value : info.imapHost,
+          port: parseInt(provider === 'custom' ? document.getElementById('emailImapPort').value : info.imapPort, 10),
+          secure: true,
+        };
+        const smtpPort = parseInt(provider === 'custom' ? document.getElementById('emailSmtpPort').value : info.smtpPort, 10);
+        const smtp = {
+          host: provider === 'custom' ? document.getElementById('emailSmtpHost').value : info.smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+        };
+
+        statusEl.textContent = 'Testing connection...';
+        statusEl.style.color = '#ff9800';
+
+        try {
+          const result = await window.email.testConnection({ email, password, imap, smtp });
+          if (result.success) {
+            statusEl.textContent = 'Connection successful. Saving...';
+            statusEl.style.color = '#4caf50';
+
+            await window.email.addAccount({ label: label || email, email, provider, imap, smtp, password });
+            emailCancelSetup();
+            await emailLoadAccounts();
+            statusEl.textContent = '';
+          } else {
+            const errs = result.errors.map(e => `${e.type}: ${e.error}`).join('; ');
+            statusEl.textContent = `Connection failed: ${errs}`;
+            statusEl.style.color = '#f44336';
+          }
+        } catch (err) {
+          statusEl.textContent = `Error: ${err.message}`;
+          statusEl.style.color = '#f44336';
+        }
+      }
+
+      async function emailConnect(accountId) {
+        try { await window.email.connectAccount(accountId); } catch (_) { /* ignore */ }
+        await emailLoadAccounts();
+      }
+
+      async function emailRemove(accountId) {
+        if (!confirm('Remove this email account? The password will be deleted from keychain.')) return;
+        try { await window.email.removeAccount(accountId); } catch (_) { /* ignore */ }
+        await emailLoadAccounts();
+      }
+
+      // Load email accounts when tab is shown
+      const origSwitchTab = switchTab;
+      switchTab = function(tabId) {
+        origSwitchTab(tabId);
+        if (tabId === 'email-accounts') emailLoadAccounts();
+      };
     </script>
   </body>
 </html>

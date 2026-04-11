@@ -454,6 +454,8 @@ app.whenReady().then(() => {
     autoUpdater.logger = log;
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.allowDowngrade = false;
+    log.info('[AutoUpdate] electron-updater initialized, feed URL:', autoUpdater.getFeedURL?.() || 'default (GitHub)');
   } catch (e) {
     console.log('AutoUpdater not available:', e.message);
   }
@@ -1241,6 +1243,94 @@ app.whenReady().then(() => {
     console.error('[Main] Error setting up Evaluation IPC:', error);
   }
 
+  // --- Email Service IPC Handlers ---
+  try {
+    const { getEmailService } = require('./lib/email-service');
+    const emailService = getEmailService();
+    emailService.init({
+      credentialManager: require('./credential-manager'),
+      settingsManager: global.settingsManager,
+    });
+
+    global.emailService = emailService;
+
+    ipcMain.handle('email:get-accounts', async () => {
+      return emailService.getAccountStatuses();
+    });
+
+    ipcMain.handle('email:add-account', async (_event, config) => {
+      return emailService.addAccount(config);
+    });
+
+    ipcMain.handle('email:update-account', async (_event, id, updates) => {
+      return emailService.updateAccount(id, updates);
+    });
+
+    ipcMain.handle('email:remove-account', async (_event, id) => {
+      return emailService.removeAccount(id);
+    });
+
+    ipcMain.handle('email:test-connection', async (_event, config) => {
+      return emailService.testConnection(config);
+    });
+
+    ipcMain.handle('email:connect-account', async (_event, id) => {
+      return emailService.connectAccount(id);
+    });
+
+    ipcMain.handle('email:connect-all', async () => {
+      return emailService.connectAll();
+    });
+
+    ipcMain.handle('email:disconnect-all', async () => {
+      return emailService.disconnectAll();
+    });
+
+    ipcMain.handle('email:get-inbox', async (_event, accountId, opts) => {
+      return emailService.fetchInbox(accountId, opts);
+    });
+
+    ipcMain.handle('email:get-message', async (_event, accountId, uid) => {
+      return emailService.fetchMessage(accountId, uid);
+    });
+
+    ipcMain.handle('email:search', async (_event, accountId, query, opts) => {
+      return emailService.searchMessages(accountId, query, opts);
+    });
+
+    ipcMain.handle('email:send', async (_event, accountId, message) => {
+      return emailService.send(accountId, message);
+    });
+
+    ipcMain.handle('email:get-summary', async (_event, accountId) => {
+      return emailService.getSummary(accountId);
+    });
+
+    ipcMain.handle('email:get-provider-presets', async () => {
+      return emailService.getProviderPresets();
+    });
+
+    emailService.on('new-mail', (data) => {
+      if (global.mainWindow && !global.mainWindow.isDestroyed()) {
+        global.mainWindow.webContents.send('email:new-mail', data);
+      }
+    });
+
+    // Auto-connect on startup after a short delay
+    setTimeout(() => {
+      const accounts = emailService.getAccountStatuses();
+      if (accounts.length > 0) {
+        emailService.connectAll().catch((err) => {
+          console.warn('[Main] Email auto-connect failed:', err.message);
+        });
+      }
+    }, 10_000);
+
+    console.log('[Main] Email Service IPC initialized');
+  } catch (error) {
+    console.error('[Main] Error setting up Email Service IPC:', error);
+  }
+
   // --- Conversion API IPC Handlers ---
   try {
     const conversionService = require('./lib/conversion-service');
@@ -1472,15 +1562,17 @@ app.whenReady().then(() => {
   // Set up auto updater
   setupAutoUpdater();
 
-  // TIMING: Defer update check until after startup settles; prevents blocking app ready and lets main window load first.
-  // Check for updates in the background (non-blocking)
+  // Check if a previous update install failed (detects version mismatch)
+  verifyUpdateOnStartup();
+
+  // Deferred silent update check -- no dialogs unless an update is found
   setTimeout(() => {
     if (app.isPackaged) {
-      checkForUpdates();
+      checkForUpdates(false);
     } else {
       log.info('Not checking for updates in development mode');
     }
-  }, 5000); // Check after 5 seconds to not block startup
+  }, 5000);
 });
 
 // ============================================
@@ -1510,6 +1602,7 @@ app.on('before-quit', (event) => {
   // Skip cleanup if we're installing an update - let the updater handle everything
   if (global.isUpdatingApp) {
     console.log('[App] Skipping cleanup - app is updating');
+    _shutdownInProgress = false; // Reset so nothing blocks the updater's quit
     return;
   }
 
@@ -15180,18 +15273,21 @@ Return ONLY valid JSON with this exact structure:
 
   ipcMain.handle('check-for-updates', async () => {
     try {
-      // In development, just return a mock response
       if (process.env.NODE_ENV === 'development') {
         return { message: 'Update check not available in development mode' };
       }
-
       if (!autoUpdater) {
         return { message: 'Auto-updater not initialized' };
       }
       const result = await autoUpdater.checkForUpdates();
+      const currentVersion = app.getVersion();
+      const remoteVersion = result?.updateInfo?.version;
+      const updateAvailable = remoteVersion && remoteVersion !== currentVersion;
       return {
-        message: result.updateInfo ? `Update available: ${result.updateInfo.version}` : 'Up to date',
-        updateAvailable: !!result.updateInfo,
+        message: updateAvailable ? `Update available: ${remoteVersion}` : 'Up to date',
+        updateAvailable: !!updateAvailable,
+        currentVersion,
+        latestVersion: remoteVersion || currentVersion,
       };
     } catch (error) {
       return { message: 'Update check not available', error: error.message };
@@ -15866,14 +15962,125 @@ ipcMain.on('test-idw-load', () => {
 });
 
 // Setup Auto Updater handlers
+let isCheckingForUpdates = false;
+let lastManualCheck = false;
+let updateCheckInterval = null;
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const RELEASES_URL = 'https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest';
+
+// Persistent update state -- survives restarts so we can detect failed installs
+let _updateStateFile = null;
+function getUpdateStateFile() {
+  if (!_updateStateFile) {
+    _updateStateFile = path.join(app.getPath('userData'), 'update-state.json');
+  }
+  return _updateStateFile;
+}
+
+function readUpdateState() {
+  try {
+    const filePath = getUpdateStateFile();
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    }
+  } catch (_) { /* corrupt file, start fresh */ }
+  return { failedAttempts: 0, lastAttemptVersion: null, lastAttemptTime: null };
+}
+
+function writeUpdateState(state) {
+  try {
+    fs.writeFileSync(getUpdateStateFile(), JSON.stringify(state, null, 2));
+  } catch (err) {
+    log.warn('[AutoUpdate] Failed to write update state:', err.message);
+  }
+}
+
+function clearUpdateState() {
+  writeUpdateState({ failedAttempts: 0, lastAttemptVersion: null, lastAttemptTime: null });
+}
+
+/**
+ * On startup, check if a previous update install was attempted but failed
+ * (we wrote the target version before quitting -- if we're still on the old
+ * version, the install didn't take).
+ */
+function verifyUpdateOnStartup() {
+  const state = readUpdateState();
+  if (!state.lastAttemptVersion) return;
+
+  const currentVersion = app.getVersion();
+  if (state.lastAttemptVersion === currentVersion) {
+    log.info(`[AutoUpdate] Startup: running expected version ${currentVersion} -- update succeeded`);
+    clearUpdateState();
+    return;
+  }
+
+  // Still on old version -- the install failed
+  state.failedAttempts = (state.failedAttempts || 0) + 1;
+  writeUpdateState(state);
+
+  log.warn(`[AutoUpdate] Startup: expected v${state.lastAttemptVersion} but running v${currentVersion} -- install failed (attempt ${state.failedAttempts})`);
+
+  // After 2+ failures, proactively offer manual download
+  if (state.failedAttempts >= 2) {
+    app.whenReady().then(() => {
+      setTimeout(() => {
+        const parent = getDialogParent();
+        dialog.showMessageBox(parent || undefined, {
+          type: 'warning',
+          title: 'Update Could Not Be Applied',
+          message: `Automatic update to v${state.lastAttemptVersion} has failed ${state.failedAttempts} times`,
+          detail: 'This can happen due to macOS security settings or file permissions.\n\nYou can download the latest version manually from our releases page. Your settings and data will be preserved.',
+          buttons: ['Download Manually', 'Try Auto-Update Again', 'Skip'],
+          defaultId: 0,
+        }).then((result) => {
+          if (result.response === 0) {
+            shell.openExternal(RELEASES_URL);
+            clearUpdateState();
+          } else if (result.response === 1) {
+            clearUpdateState();
+            checkForUpdates(true);
+          } else {
+            // Skip -- don't clear state, will prompt again next restart
+          }
+        });
+      }, 3000);
+    });
+  }
+}
+
+function getDialogParent() {
+  return BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null;
+}
+
+/** Show a dialog offering manual download as fallback */
+function offerManualDownload(context) {
+  const parent = getDialogParent();
+  dialog.showMessageBox(parent || undefined, {
+    type: 'info',
+    title: 'Download Update Manually',
+    message: 'You can download the latest version directly',
+    detail: `${context}\n\nThe download page will open in your browser. Install the new version over the current one -- your settings and data will be preserved.`,
+    buttons: ['Open Download Page', 'Cancel'],
+    defaultId: 0,
+  }).then((result) => {
+    if (result.response === 0) {
+      shell.openExternal(RELEASES_URL);
+    }
+  });
+}
+
 function setupAutoUpdater() {
+  if (!autoUpdater) {
+    log.warn('Auto-updater not available, skipping setup');
+    return;
+  }
+
   log.info('Setting up auto updater');
 
-  // Check if we're in development mode
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
   if (isDev) {
-    // In development, use the dev-app-update.yml file
     const devUpdateConfigPath = path.join(__dirname, 'dev-app-update.yml');
     if (fs.existsSync(devUpdateConfigPath)) {
       log.info('Using development update config:', devUpdateConfigPath);
@@ -15884,32 +16091,19 @@ function setupAutoUpdater() {
   autoUpdater.on('checking-for-update', () => {
     log.info('Checking for updates...');
     sendUpdateStatus('checking');
-
-    // Show notification that we're checking
-    const { Notification } = require('electron');
-    if (Notification.isSupported()) {
-      const notification = new Notification({
-        title: 'Checking for Updates',
-        body: 'Looking for new versions...',
-        silent: true,
-      });
-      notification.show();
-    }
   });
 
   autoUpdater.on('update-available', (info) => {
-    log.info('Update available:', info);
+    log.info('Update available:', info.version);
     sendUpdateStatus('available', info);
     isCheckingForUpdates = false;
 
-    // Show dialog to user
-    const { dialog } = require('electron');
-    const focusedWindow = BrowserWindow.getFocusedWindow();
+    const parent = getDialogParent();
     dialog
-      .showMessageBox(focusedWindow, {
+      .showMessageBox(parent || undefined, {
         type: 'info',
-        title: 'Update Available!',
-        message: `A new version (${info.version}) is available!`,
+        title: 'Update Available',
+        message: `A new version (${info.version}) is available`,
         detail: `Current version: ${app.getVersion()}\nNew version: ${info.version}\n\nWould you like to download it now?`,
         buttons: ['Download', 'Later'],
         defaultId: 0,
@@ -15922,245 +16116,320 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-not-available', (info) => {
-    log.info('Update not available:', info);
+    log.info('No update available. Current version is latest.');
     sendUpdateStatus('not-available', info);
     isCheckingForUpdates = false;
 
-    // Show dialog to user
-    const { dialog } = require('electron');
-    const focusedWindow = BrowserWindow.getFocusedWindow();
-    dialog.showMessageBox(focusedWindow, {
-      type: 'info',
-      title: 'No Updates Available',
-      message: 'You are running the latest version!',
-      detail: `Current version: ${app.getVersion()}\n\nYour app is up to date.`,
-      buttons: ['OK'],
-    });
+    if (lastManualCheck) {
+      const parent = getDialogParent();
+      dialog.showMessageBox(parent || undefined, {
+        type: 'info',
+        title: 'No Updates Available',
+        message: 'You are running the latest version',
+        detail: `Current version: ${app.getVersion()}`,
+        buttons: ['OK'],
+      });
+    }
   });
 
   autoUpdater.on('error', (err) => {
     log.error('Error in auto-updater:', err);
 
-    // Provide more helpful error messages
-    let errorMessage = err.message;
-    if (err.message.includes('ERR_CONNECTION_REFUSED') || err.message.includes('ENOTFOUND')) {
+    let errorMessage = err.message || 'Unknown error';
+    if (errorMessage.includes('ERR_CONNECTION_REFUSED') || errorMessage.includes('ENOTFOUND')) {
       errorMessage = 'Cannot connect to update server. Please check your internet connection.';
-    } else if (err.message.includes('404')) {
-      errorMessage = 'Update information not found on server.';
-    } else if (err.message.includes('net::ERR_INTERNET_DISCONNECTED')) {
+    } else if (errorMessage.includes('net::ERR_INTERNET_DISCONNECTED')) {
       errorMessage = 'No internet connection available.';
+    } else if (errorMessage.includes('404') || errorMessage.includes('Not Found')) {
+      errorMessage = 'Update information not found on server.';
+    } else if (errorMessage.includes('sha512 checksum mismatch')) {
+      errorMessage = 'Downloaded update failed integrity check. Please try again.';
     }
 
     sendUpdateStatus('error', { error: errorMessage });
     isCheckingForUpdates = false;
+
+    if (lastManualCheck) {
+      const parent = getDialogParent();
+      dialog.showMessageBox(parent || undefined, {
+        type: 'warning',
+        title: 'Update Check Failed',
+        message: 'Could not check for updates',
+        detail: errorMessage,
+        buttons: ['Download Manually', 'Try Again Later'],
+        defaultId: 1,
+      }).then((result) => {
+        if (result.response === 0) {
+          shell.openExternal(RELEASES_URL);
+        }
+      });
+    }
   });
 
   autoUpdater.on('download-progress', (progressObj) => {
-    log.info(`Download progress: ${progressObj.percent}%`);
+    const pct = Math.round(progressObj.percent);
+    if (pct % 10 === 0) log.info(`Download progress: ${pct}%`);
     sendUpdateStatus('progress', progressObj);
 
-    // Show progress in the dock icon (macOS)
     if (process.platform === 'darwin') {
-      app.dock.setBadge(`${Math.round(progressObj.percent)}%`);
+      app.dock.setBadge(`${pct}%`);
     }
   });
 
   autoUpdater.on('update-downloaded', async (info) => {
-    log.info('Update downloaded:', info);
+    log.info('[AutoUpdate] Update downloaded:', info.version);
+    log.info('[AutoUpdate] Download info:', JSON.stringify({
+      version: info.version,
+      files: info.files?.map(f => f.url),
+      path: info.path,
+      sha512: info.sha512?.substring(0, 20) + '...',
+      releaseDate: info.releaseDate,
+    }));
 
-    // Clear the dock badge
     if (process.platform === 'darwin') {
       app.dock.setBadge('');
     }
 
-    // Create backup of current version before installing update
+    let backupCreated = false;
     try {
       const currentVersion = app.getVersion();
-      log.info(`Creating backup of current version v${currentVersion} before update...`);
-
-      const backupSuccess = await rollbackManager.createBackup(currentVersion);
-      if (backupSuccess) {
-        log.info('Backup created successfully');
-        sendUpdateStatus('downloaded', {
-          ...info,
-          backupCreated: true,
-          currentVersion: currentVersion,
-        });
-      } else {
-        log.warn('Failed to create backup, but update can still proceed');
-        sendUpdateStatus('downloaded', {
-          ...info,
-          backupCreated: false,
-          currentVersion: currentVersion,
-        });
-      }
+      log.info(`Creating backup of v${currentVersion} before update...`);
+      backupCreated = await rollbackManager.createBackup(currentVersion);
+      log.info(backupCreated ? 'Backup created successfully' : 'Backup failed, update can still proceed');
     } catch (error) {
       log.error('Error creating backup:', error);
-      // Still allow update to proceed even if backup fails
-      sendUpdateStatus('downloaded', info);
     }
 
-    // Show dialog to user
-    const focusedWindow = BrowserWindow.getFocusedWindow();
-    const dialogOptions = {
-      type: 'info',
-      title: 'Update Ready to Install',
-      message: `Version ${info.version} has been downloaded.`,
-      detail: 'The application will restart to apply the update. Your settings and data will be preserved.',
-      buttons: ['Install and Restart', 'Install Later'],
-      defaultId: 0,
-      cancelId: 1,
-    };
-
-    dialog.showMessageBox(focusedWindow, dialogOptions).then((result) => {
-      if (result.response === 0) {
-        // User chose to install and restart
-        log.info('User chose to install update and restart');
-        // Set flag to skip cleanup handlers during update install
-        global.isUpdatingApp = true;
-        // Use quitAndInstall with isForceRunAfter=true to ensure app relaunches on macOS
-        // Small delay to ensure the dialog closes cleanly
-        setTimeout(() => {
-          autoUpdater.quitAndInstall(false, true);
-        }, 100);
-      } else {
-        // User chose to install later
-        log.info('User chose to install update later');
-        dialog.showMessageBox(focusedWindow, {
-          type: 'info',
-          title: 'Update Postponed',
-          message: 'The update will be installed when you restart the application.',
-          buttons: ['OK'],
-        });
-      }
+    sendUpdateStatus('downloaded', {
+      ...info,
+      backupCreated,
+      currentVersion: app.getVersion(),
     });
+
+    const state = readUpdateState();
+    const prevFailures = state.lastAttemptVersion === info.version ? (state.failedAttempts || 0) : 0;
+
+    // If this version has failed before, offer manual download prominently
+    const detailText = prevFailures > 0
+      ? `A previous automatic install of v${info.version} did not succeed.\nYou can try again or download manually if the issue persists.`
+      : 'The application will restart to apply the update. Your settings and data will be preserved.';
+    const buttons = prevFailures > 0
+      ? ['Install and Restart', 'Download Manually', 'Later']
+      : ['Install and Restart', 'Install Later'];
+
+    const parent = getDialogParent();
+    dialog
+      .showMessageBox(parent || undefined, {
+        type: 'info',
+        title: 'Update Ready to Install',
+        message: `Version ${info.version} has been downloaded`,
+        detail: detailText,
+        buttons,
+        defaultId: 0,
+        cancelId: buttons.length - 1,
+      })
+      .then((result) => {
+        if (result.response === 0) {
+          log.info('[AutoUpdate] User chose to install update and restart');
+          performUpdateInstall(info.version);
+        } else if (prevFailures > 0 && result.response === 1) {
+          log.info('[AutoUpdate] User chose manual download');
+          shell.openExternal(RELEASES_URL);
+        } else {
+          log.info('[AutoUpdate] User chose to install update later (will install on quit)');
+        }
+      });
   });
+
+  // Periodic background checks
+  updateCheckInterval = setInterval(() => {
+    if (app.isPackaged && !isCheckingForUpdates) {
+      log.info('Periodic update check');
+      checkForUpdates(false);
+    }
+  }, UPDATE_CHECK_INTERVAL_MS);
 }
 
-// Function to send update status to renderer
 function sendUpdateStatus(status, info = {}) {
-  const mainWindow = browserWindow.getMainWindow();
-  if (mainWindow) {
-    mainWindow.webContents.send('update-status', { status, info });
+  try {
+    const mainWindow = browserWindow.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update-status', { status, info });
+    }
+  } catch (err) {
+    log.warn('Failed to send update status to renderer:', err.message);
   }
 }
 
-// Function to check for updates
-let isCheckingForUpdates = false;
-
-function checkForUpdates() {
-  if (isCheckingForUpdates) {
-    log.info('Update check already in progress, ignoring duplicate request');
+function checkForUpdates(manual = true) {
+  if (!autoUpdater) {
+    log.warn('Auto-updater not available');
+    if (manual) {
+      const parent = getDialogParent();
+      dialog.showMessageBox(parent || undefined, {
+        type: 'info',
+        title: 'Updates Not Available',
+        message: 'Auto-updater is not available in this build',
+        buttons: ['OK'],
+      });
+    }
     return;
   }
 
-  log.info('Manually checking for updates...');
-  isCheckingForUpdates = true;
-
-  try {
-    autoUpdater
-      .checkForUpdates()
-      .then(() => {
-        // TIMING: Brief delay so update-dialog flow can settle before allowing another check.
-        // Reset flag when check completes (success or failure)
-        setTimeout(() => {
-          isCheckingForUpdates = false;
-        }, 1000);
-      })
-      .catch((err) => {
-        log.error('Failed to check for updates:', err);
-
-        // Show user-friendly error if repository doesn't exist
-        const { dialog } = require('electron');
-        const focusedWindow = BrowserWindow.getFocusedWindow();
-        if (err.message && (err.message.includes('404') || err.message.includes('Not Found'))) {
-          dialog.showMessageBox(focusedWindow, {
-            type: 'info',
-            title: 'No Updates Available',
-            message: 'Could not check for updates',
-            detail:
-              'Unable to reach the update server. This could be due to:\n\n• No internet connection\n• GitHub is temporarily unavailable\n• No releases published yet\n\nPlease try again later.',
-            buttons: ['OK'],
-          });
-        }
-
-        sendUpdateStatus('error', { error: err.message });
-        isCheckingForUpdates = false;
-      });
-  } catch (err) {
-    log.error('Exception when checking for updates:', err);
-    sendUpdateStatus('error', { error: err.message });
-    isCheckingForUpdates = false;
+  if (isCheckingForUpdates) {
+    log.info('Update check already in progress, skipping');
+    return;
   }
+
+  lastManualCheck = manual;
+  isCheckingForUpdates = true;
+  log.info(`Checking for updates (${manual ? 'manual' : 'automatic'})...`);
+
+  const checkTimeout = setTimeout(() => {
+    if (isCheckingForUpdates) {
+      log.warn('Update check timed out after 30s');
+      isCheckingForUpdates = false;
+      sendUpdateStatus('error', { error: 'Update check timed out' });
+    }
+  }, 30000);
+
+  autoUpdater
+    .checkForUpdates()
+    .then(() => {
+      clearTimeout(checkTimeout);
+      setTimeout(() => {
+        isCheckingForUpdates = false;
+      }, 1000);
+    })
+    .catch((err) => {
+      clearTimeout(checkTimeout);
+      log.error('Failed to check for updates:', err);
+      sendUpdateStatus('error', { error: err.message });
+      isCheckingForUpdates = false;
+
+      if (manual) {
+        const parent = getDialogParent();
+        dialog.showMessageBox(parent || undefined, {
+          type: 'info',
+          title: 'Update Check Failed',
+          message: 'Could not check for updates',
+          detail: 'Unable to reach the update server. This could be due to:\n\n  - No internet connection\n  - GitHub is temporarily unavailable',
+          buttons: ['Download Manually', 'OK'],
+          defaultId: 1,
+        }).then((result) => {
+          if (result.response === 0) {
+            shell.openExternal(RELEASES_URL);
+          }
+        });
+      }
+    });
 }
 
-// Make function available globally for menu.js
 global.checkForUpdatesGlobal = checkForUpdates;
 
-// Function to download an available update
 function downloadUpdate() {
-  log.info('Starting update download...');
+  if (!autoUpdater) return;
 
-  // Show notification that download is starting
-  const focusedWindow = BrowserWindow.getFocusedWindow();
-  dialog.showMessageBox(focusedWindow, {
+  log.info('Starting update download...');
+  sendUpdateStatus('downloading');
+
+  const parent = getDialogParent();
+  dialog.showMessageBox(parent || undefined, {
     type: 'info',
     title: 'Downloading Update',
-    message: 'The update is now downloading in the background.',
-    detail:
-      "You can continue using the app. You'll be notified when the download is complete.\n\nProgress will be shown in the dock icon.",
+    message: 'The update is downloading in the background',
+    detail: "You can continue using the app. You'll be notified when the download is complete.",
     buttons: ['OK'],
   });
 
-  try {
-    autoUpdater.downloadUpdate().catch((err) => {
-      log.error('Failed to download update:', err);
-      sendUpdateStatus('error', { error: err.message });
-
-      // Clear dock badge on error
-      if (process.platform === 'darwin') {
-        app.dock.setBadge('');
-      }
-
-      // Show error dialog
-      dialog.showMessageBox(focusedWindow, {
-        type: 'error',
-        title: 'Download Failed',
-        message: 'Failed to download the update.',
-        detail: err.message,
-        buttons: ['OK'],
-      });
-    });
-  } catch (err) {
-    log.error('Exception when downloading update:', err);
+  autoUpdater.downloadUpdate().catch((err) => {
+    log.error('Failed to download update:', err);
     sendUpdateStatus('error', { error: err.message });
 
-    // Clear dock badge on error
     if (process.platform === 'darwin') {
       app.dock.setBadge('');
     }
 
-    // Show error dialog
-    dialog.showMessageBox(focusedWindow, {
+    const errParent = getDialogParent();
+    dialog.showMessageBox(errParent || undefined, {
       type: 'error',
       title: 'Download Failed',
-      message: 'Failed to download the update.',
-      detail: err.message,
-      buttons: ['OK'],
+      message: 'Failed to download the update automatically',
+      detail: `${err.message}\n\nYou can download the update manually from our releases page, or try again later from Help > Check for Updates.`,
+      buttons: ['Download Manually', 'Try Again Later'],
+      defaultId: 0,
+    }).then((result) => {
+      if (result.response === 0) {
+        shell.openExternal(RELEASES_URL);
+      }
     });
-  }
+  });
 }
 
-// Function to install a downloaded update
 function installUpdate() {
-  log.info('Installing update...');
+  if (!autoUpdater) return;
+  performUpdateInstall(null);
+}
 
-  try {
-    autoUpdater.quitAndInstall(false, true);
-  } catch (err) {
-    log.error('Exception when installing update:', err);
-    sendUpdateStatus('error', { error: err.message });
+/**
+ * Install a downloaded update. On macOS this delegates to Squirrel.Mac's
+ * ShipIt binary, which monitors our process, replaces the .app bundle,
+ * and relaunches.  We record the target version to disk so that on the
+ * next startup we can verify whether the install actually succeeded.
+ */
+function performUpdateInstall(targetVersion) {
+  if (!autoUpdater) return;
+
+  log.info(`[AutoUpdate] performUpdateInstall -- target version: ${targetVersion || 'unknown'}`);
+  global.isUpdatingApp = true;
+
+  // Record the attempt so startup verification can detect failures
+  if (targetVersion) {
+    const state = readUpdateState();
+    state.lastAttemptVersion = targetVersion;
+    state.lastAttemptTime = new Date().toISOString();
+    writeUpdateState(state);
   }
+
+  // Stop periodic update checks
+  if (updateCheckInterval) {
+    clearInterval(updateCheckInterval);
+    updateCheckInterval = null;
+  }
+
+  // Force-destroy every BrowserWindow so close handlers (which call
+  // event.preventDefault with a 1.5 s delay) don't race with Squirrel.
+  const allWindows = BrowserWindow.getAllWindows();
+  log.info(`[AutoUpdate] Destroying ${allWindows.length} window(s) before install`);
+  for (const win of allWindows) {
+    try {
+      if (!win.isDestroyed()) win.destroy();
+    } catch (e) {
+      log.warn('[AutoUpdate] Error destroying window:', e.message);
+    }
+  }
+
+  // MacUpdater.quitAndInstall() ignores arguments -- it delegates to
+  // Electron's native autoUpdater (Squirrel.Mac).  The call triggers:
+  //   1. Squirrel.Mac/ShipIt starts monitoring our PID
+  //   2. nativeUpdater.quitAndInstall() closes windows + app.quit()
+  //   3. After our process exits, ShipIt swaps the .app bundle
+  //   4. ShipIt relaunches the new version
+  try {
+    log.info('[AutoUpdate] Calling autoUpdater.quitAndInstall()');
+    autoUpdater.quitAndInstall();
+  } catch (err) {
+    log.error('[AutoUpdate] quitAndInstall threw:', err);
+  }
+
+  // Safety net: if the process is STILL alive after 10 s, the graceful
+  // quit path failed (a handler called preventDefault, window refused to
+  // close, etc.).  Force-exit so ShipIt can complete the replacement.
+  // 10 s is generous -- the normal path exits in < 1 s.
+  setTimeout(() => {
+    log.warn('[AutoUpdate] Safety-net: process still alive after 10 s -- force exiting');
+    process.exit(0);
+  }, 10000).unref();
 }
 
 // ============================================
@@ -20780,4 +21049,6 @@ module.exports = {
   createClaudeTerminalWindow,
   broadcastPlanSummary,
   relayVoiceToComposer,
+  // Auto-updater
+  checkForUpdates,
 };

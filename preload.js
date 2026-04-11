@@ -670,6 +670,27 @@ contextBridge.exposeInMainWorld('convert', {
 });
 
 // ---------------------------------------------------------------------------
+// Email Bridge
+// Expose email service to renderer processes (settings + future email UI).
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('email', {
+  getAccounts: () => ipcRenderer.invoke('email:get-accounts'),
+  addAccount: (config) => ipcRenderer.invoke('email:add-account', config),
+  updateAccount: (id, updates) => ipcRenderer.invoke('email:update-account', id, updates),
+  removeAccount: (id) => ipcRenderer.invoke('email:remove-account', id),
+  testConnection: (config) => ipcRenderer.invoke('email:test-connection', config),
+  connectAccount: (id) => ipcRenderer.invoke('email:connect-account', id),
+  connectAll: () => ipcRenderer.invoke('email:connect-all'),
+  disconnectAll: () => ipcRenderer.invoke('email:disconnect-all'),
+  getInbox: (accountId, opts) => ipcRenderer.invoke('email:get-inbox', accountId, opts),
+  getMessage: (accountId, uid) => ipcRenderer.invoke('email:get-message', accountId, uid),
+  search: (accountId, query, opts) => ipcRenderer.invoke('email:search', accountId, query, opts),
+  send: (accountId, message) => ipcRenderer.invoke('email:send', accountId, message),
+  getSummary: (accountId) => ipcRenderer.invoke('email:get-summary', accountId),
+  getProviderPresets: () => ipcRenderer.invoke('email:get-provider-presets'),
+});
+
+// ---------------------------------------------------------------------------
 // Browser Automation Bridge
 // Expose browser automation service to renderer processes.
 // ---------------------------------------------------------------------------
