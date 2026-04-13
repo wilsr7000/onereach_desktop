@@ -137,7 +137,7 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "notarize": true,
-      "x64ArchFiles": "Contents/Resources/claude-code/**/*",
+      "x64ArchFiles": "{Contents/Resources/claude-code/**/*,Contents/Resources/app.asar.unpacked/node_modules/7zip-bin/**/*}",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Onereach.ai uses the microphone for voice commands and speech recognition.",
         "NSCameraUsageDescription": "Onereach.ai uses the camera for video recording and screen capture."
