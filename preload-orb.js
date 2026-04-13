@@ -432,6 +432,13 @@ contextBridge.exposeInMainWorld('orbAPI', {
   },
 
   /**
+   * Resolve a learning system message/action item
+   * @param {string} itemId - Item ID from the user action queue
+   * @returns {Promise<boolean>}
+   */
+  resolveLearningItem: (itemId) => ipcRenderer.invoke('agent-learning:resolve-item', itemId),
+
+  /**
    * Relay voice input to Agent Composer
    * @param {string} transcript - Voice transcript to relay
    * @returns {Promise<boolean>} Whether relay was successful

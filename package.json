@@ -1,7 +1,7 @@
 {
   "name": "gsx-power-user",
   "productName": "Onereach.ai",
-  "version": "4.7.0",
+  "version": "4.7.2",
   "description": "GSX Power User Desktop Application",
   "main": "main.js",
   "icon": "assets/icon.icns",
@@ -86,6 +86,8 @@
     "dist": "electron-builder",
     "download-claude": "node scripts/download-claude-code.js",
     "download-claude:all": "node scripts/download-claude-code.js --all",
+    "update-claude": "node scripts/download-claude-code.js --all",
+    "update-claude:force": "node scripts/download-claude-code.js --all --force",
     "build:signed": "./scripts/build-signed.sh",
     "build:signed:skip-notarize": "./scripts/build-signed.sh --skip-notarize",
     "release": "./scripts/release-master.sh",
@@ -135,7 +137,11 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "notarize": true,
-      "x64ArchFiles": "Contents/Resources/claude-code/**/*"
+      "x64ArchFiles": "Contents/Resources/claude-code/**/*",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Onereach.ai uses the microphone for voice commands and speech recognition.",
+        "NSCameraUsageDescription": "Onereach.ai uses the camera for video recording and screen capture."
+      }
     },
     "afterSign": "scripts/notarize.js",
     "win": {

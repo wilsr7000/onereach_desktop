@@ -2987,6 +2987,15 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
             _logCapabilityGap(spacesApi, content, gapSummary, null).catch(() => {});
           } catch (_e) { /* non-fatal */ }
 
+          // Emit for agent learning system
+          try {
+            exchangeBus.emit('learning:capability-gap', {
+              userInput: content,
+              gapSummary,
+              timestamp: Date.now(),
+            });
+          } catch (_e) { /* non-critical */ }
+
           // Execute agent-builder-agent directly with gap context
           try {
             const builderAgent = agents.find((a) => a.id === 'agent-builder-agent');
@@ -3297,6 +3306,21 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
     } catch (e) {
       log.warn('voice', 'Stats tracking error', { data: e.message });
     }
+
+    // ── AGENT LEARNING: emit interaction data for self-improvement system ──
+    try {
+      exchangeBus.emit('learning:interaction', {
+        taskId: task.id,
+        agentId,
+        userInput: task.content || '',
+        success: result?.success !== false,
+        message: (safeResult.output || safeResult.message || '').slice(0, 500),
+        error: safeResult.error || null,
+        hasUI: !!safeResult.html,
+        durationMs: executionDurationMs || 0,
+        timestamp: Date.now(),
+      });
+    } catch (_) { /* learning event is non-critical */ }
 
     // ==================== MASTER ORCHESTRATOR FEEDBACK ====================
     // Provide feedback to help agents learn

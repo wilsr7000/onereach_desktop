@@ -1,7 +1,7 @@
 # Onereach.ai Punch List
 
 > Master list of bugs, fixes, and small features to address.
-> Updated: April 2026 | Current Version: 4.7.0
+> Updated: April 2026 | Current Version: 4.7.1
 
 ---
 
@@ -515,6 +515,33 @@
 ---
 
 ## Recently Completed
+
+- [x] **Microphone permission prompt loops on macOS (deployed app)** (v4.7.x)
+  - Built app was missing `NSMicrophoneUsageDescription` / `NSCameraUsageDescription` in Info.plist
+  - macOS couldn't persist the permission grant, so the dialog reappeared every time
+  - Fix: Added `extendInfo` to `mac` build config in `package.json`
+- [x] **Agent Self-Learning System** (v4.7.x)
+  - Fully automatic system that monitors agent interactions, detects improvement opportunities (frustration, capability gaps, proactive usefulness), and improves agents silently
+  - 7 new modules in `lib/agent-learning/`: interaction collector, opportunity evaluator, known-agent-issues registry, improvement engine, UI improver, quality verifier, playbook writer, orchestrator
+  - LLM-as-judge verification: never deploys if any test case degraded
+  - Silent testing: all verification bypasses exchange/TTS/HUD pipeline
+  - Three-layer budget control: app global limits + learning daily cap ($0.50 default) + per-operation count caps
+  - Audit trail via Agent Product Manager space (playbooks for every improvement)
+  - 42 unit tests across 4 test files
+  - Integration: `exchange-bridge.js` emits `learning:interaction` and `learning:capability-gap` events; `main.js` initializes after exchange bridge
+  - Files: `lib/agent-learning/*.js`, `src/voice-task-sdk/exchange-bridge.js`, `main.js`
+
+- [x] **Auto-upgrade bundled Claude Code on build** (v4.7.x)
+  - `scripts/download-claude-code.js` now checks installed version vs latest on npm; only re-downloads when a newer version exists
+  - `scripts/release-master.sh` runs the update automatically as a new step before building
+  - Added `--force` flag and `npm run update-claude` / `update-claude:force` scripts
+  - Files: `scripts/download-claude-code.js`, `scripts/release-master.sh`, `package.json`
+
+- [x] **Fix recursive situation snapshot crash** (v4.7.1)
+  - Situation logger snapshots recursively nested previous snapshots via recentLogs, causing single log entries to reach 300+ MB
+  - This triggered macOS disk-write termination and V8 OOM crashes after ~24 minutes of runtime
+  - Fix: Strip recentActivity from enqueued snapshots, filter situation entries from recentLogs, cap file-write data at 64 KB
+  - Files: `action-executor.js`, `lib/log-event-queue.js`
 
 - [x] **Mode Card Welcome Experience** (v4.6.x)
   - Replaced 5-slide intro wizard and changelog with single rotating mode card per launch

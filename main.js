@@ -17285,6 +17285,25 @@ async function initializeVoiceOrb() {
       console.error('[VoiceOrb] Full error:', exchangeError.stack);
     }
 
+    // Initialize Agent Self-Learning System
+    try {
+      const { initAgentLearning } = require('./lib/agent-learning');
+      await initAgentLearning();
+      console.log('[AgentLearning] Self-learning system initialized');
+
+      ipcMain.handle('agent-learning:resolve-item', async (_event, itemId) => {
+        try {
+          const userQueue = require('./lib/agent-learning/user-action-queue');
+          return userQueue.resolveItem(itemId);
+        } catch (err) {
+          console.warn('[AgentLearning] Resolve item error:', err.message);
+          return false;
+        }
+      });
+    } catch (learningError) {
+      console.warn('[AgentLearning] Init error (non-fatal):', learningError.message);
+    }
+
     // Initialize WebMCP consumer for bidirectional tool discovery
     try {
       const webmcpConsumer = require('./lib/webmcp-consumer');

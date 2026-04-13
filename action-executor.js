@@ -2501,14 +2501,26 @@ function _gatherRecentActivity() {
     const { getLogQueue } = require('./lib/log-event-queue');
     const queue = getLogQueue();
     if (queue && queue.query) {
-      activity.recentLogs = queue.query({ limit: 25 }).map(e => ({
-        level: e.level,
-        category: e.category,
-        message: e.message,
-        source: e.source || null,
-        data: e.data || null,
-        timestamp: e.timestamp,
-      }));
+      const MAX_DATA_BYTES = 2048;
+      activity.recentLogs = queue.query({ limit: 25 })
+        .filter(e => e.category !== 'situation')
+        .map(e => {
+          let data = e.data || null;
+          if (data) {
+            const serialized = JSON.stringify(data);
+            if (serialized.length > MAX_DATA_BYTES) {
+              data = { _truncated: true, _originalSize: serialized.length };
+            }
+          }
+          return {
+            level: e.level,
+            category: e.category,
+            message: e.message,
+            source: e.source || null,
+            data,
+            timestamp: e.timestamp,
+          };
+        });
     }
   } catch (_) { /* ignore */ }
   return activity;
@@ -2623,11 +2635,17 @@ function startSituationLogger(intervalMs = 60000) {
     try {
       const result = await executeAction('app-situation');
       if (result && result.success) {
+        const snapshot = { ...result.data };
+        // Strip recentActivity before enqueuing to prevent recursive nesting:
+        // each snapshot would otherwise embed previous snapshots (which embed
+        // even older ones), causing exponential size growth that can exceed
+        // 300 MB per entry and trigger macOS disk-write termination.
+        delete snapshot.recentActivity;
         queue.enqueue({
           level: 'info',
           category: 'situation',
           message: 'Periodic app situation snapshot',
-          data: result.data,
+          data: snapshot,
           source: 'situation-logger',
         });
       }

@@ -6,9 +6,13 @@
  * Downloads the Claude Code CLI binary for the current platform
  * or all platforms when building for release.
  *
+ * On every run, checks the installed version against the latest on npm.
+ * Only re-downloads when a newer version is available.
+ *
  * Usage:
- *   node scripts/download-claude-code.js           # Download for current platform
- *   node scripts/download-claude-code.js --all     # Download for all platforms
+ *   node scripts/download-claude-code.js           # Download/update for current platform
+ *   node scripts/download-claude-code.js --all     # Download/update for all platforms
+ *   node scripts/download-claude-code.js --force   # Force re-download even if up to date
  */
 
 const fs = require('fs');
@@ -16,7 +20,6 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 // Configuration
-const _CLAUDE_CODE_VERSION = 'latest'; // or specific version like 'v1.0.0'
 const RESOURCES_DIR = path.join(__dirname, '..', 'resources', 'claude-code');
 
 // Platform mapping
@@ -47,6 +50,39 @@ function getCurrentPlatform() {
   const platform = process.platform;
   const arch = process.arch;
   return `${platform}-${arch}`;
+}
+
+/**
+ * Get the installed version of Claude Code in a target directory.
+ * Returns the semver string or null if not installed.
+ */
+function getInstalledVersion(targetDir) {
+  try {
+    const pkgPath = path.join(targetDir, 'node_modules', '@anthropic-ai', 'claude-code', 'package.json');
+    if (!fs.existsSync(pkgPath)) return null;
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    return pkg.version || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get the latest published version of @anthropic-ai/claude-code from npm.
+ * Returns the semver string or null on failure.
+ */
+function getLatestNpmVersion() {
+  try {
+    const result = execSync('npm view @anthropic-ai/claude-code version', {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 30000,
+    });
+    return result.trim() || null;
+  } catch (error) {
+    console.warn('[download-claude-code] Could not fetch latest version from npm:', error.message);
+    return null;
+  }
 }
 
 /**
@@ -98,9 +134,10 @@ function setExecutable(filePath) {
 }
 
 /**
- * Download Claude Code binary for a specific platform
+ * Download or update Claude Code for a specific platform.
+ * Checks the installed version vs latest on npm and only re-installs when needed.
  */
-async function downloadForPlatform(platformKey) {
+async function downloadForPlatform(platformKey, { forceUpdate = false, latestVersion = null } = {}) {
   const platformInfo = PLATFORMS[platformKey];
   if (!platformInfo) {
     console.warn(`[download-claude-code] Unknown platform: ${platformKey}`);
@@ -110,22 +147,41 @@ async function downloadForPlatform(platformKey) {
   const destDir = path.join(RESOURCES_DIR, platformKey);
   const binaryPath = path.join(destDir, platformInfo.binaryName);
 
-  // Check if already downloaded
-  if (fs.existsSync(binaryPath)) {
-    console.log(`[download-claude-code] Binary already exists: ${binaryPath}`);
-    return true;
+  const installedVersion = getInstalledVersion(destDir);
+
+  if (installedVersion && !forceUpdate) {
+    if (latestVersion && installedVersion === latestVersion) {
+      console.log(`[download-claude-code] ${platformKey}: already at latest v${installedVersion} -- skipping`);
+      return true;
+    }
+    if (latestVersion) {
+      console.log(`[download-claude-code] ${platformKey}: upgrading v${installedVersion} -> v${latestVersion}`);
+    } else {
+      console.log(`[download-claude-code] ${platformKey}: installed v${installedVersion}, could not determine latest -- re-installing to be safe`);
+    }
+  } else if (installedVersion && forceUpdate) {
+    console.log(`[download-claude-code] ${platformKey}: force update requested (current v${installedVersion})`);
+  } else {
+    console.log(`[download-claude-code] ${platformKey}: not installed -- installing fresh`);
   }
 
-  // Create destination directory
+  // Clean out old install so npm gets the latest
+  if (fs.existsSync(destDir)) {
+    const nodeModulesDir = path.join(destDir, 'node_modules');
+    if (fs.existsSync(nodeModulesDir)) {
+      fs.rmSync(nodeModulesDir, { recursive: true, force: true });
+    }
+    // Also remove old wrapper and package files so we start clean
+    for (const f of ['package.json', 'package-lock.json', platformInfo.binaryName]) {
+      const p = path.join(destDir, f);
+      if (fs.existsSync(p)) fs.rmSync(p, { force: true });
+    }
+  }
+
   fs.mkdirSync(destDir, { recursive: true });
 
-  // For now, we'll use npm install as the primary method
-  // Binary download can be implemented when Anthropic provides direct binary downloads
   console.log(`[download-claude-code] Platform: ${platformKey}`);
-  console.log('[download-claude-code] Note: Direct binary download not yet available.');
-  console.log('[download-claude-code] Using npm install method instead.');
 
-  // Create a wrapper script that calls the npm-installed CLI
   const wrapperContent =
     process.platform === 'win32'
       ? `@echo off\nnode "%~dp0node_modules\\@anthropic-ai\\claude-code\\cli.js" %*`
@@ -133,13 +189,12 @@ async function downloadForPlatform(platformKey) {
 
   const wrapperPath = binaryPath;
 
-  // Install via npm
   const success = await installViaNpm(destDir);
   if (success) {
-    // Create wrapper script
     fs.writeFileSync(wrapperPath, wrapperContent);
     setExecutable(wrapperPath);
-    console.log(`[download-claude-code] Created wrapper: ${wrapperPath}`);
+    const newVersion = getInstalledVersion(destDir);
+    console.log(`[download-claude-code] Installed v${newVersion} -> ${wrapperPath}`);
     return true;
   }
 
@@ -152,34 +207,43 @@ async function downloadForPlatform(platformKey) {
 async function main() {
   const args = process.argv.slice(2);
   const downloadAll = args.includes('--all');
+  const forceUpdate = args.includes('--force');
 
-  console.log('[download-claude-code] Starting Claude Code download...');
+  console.log('[download-claude-code] Starting Claude Code download/update...');
   console.log(`[download-claude-code] Resources directory: ${RESOURCES_DIR}`);
 
-  // Check global install
   if (checkGlobalInstall()) {
     console.log('[download-claude-code] Global Claude Code found - development will use global install');
   }
 
+  // Fetch latest version once -- shared across all platforms
+  console.log('[download-claude-code] Checking latest version on npm...');
+  const latestVersion = getLatestNpmVersion();
+  if (latestVersion) {
+    console.log(`[download-claude-code] Latest npm version: ${latestVersion}`);
+  } else {
+    console.warn('[download-claude-code] Could not determine latest version -- will install/reinstall');
+  }
+
+  const opts = { forceUpdate, latestVersion };
+
   if (downloadAll) {
-    // Download for all platforms (for release builds)
-    console.log('[download-claude-code] Downloading for all platforms...');
+    console.log('[download-claude-code] Processing all platforms...');
 
     for (const platform of Object.keys(PLATFORMS)) {
       console.log(`\n[download-claude-code] === ${platform} ===`);
       try {
-        await downloadForPlatform(platform);
+        await downloadForPlatform(platform, opts);
       } catch (error) {
         console.error(`[download-claude-code] Failed for ${platform}:`, error.message);
       }
     }
   } else {
-    // Download for current platform only
     const currentPlatform = getCurrentPlatform();
     console.log(`[download-claude-code] Current platform: ${currentPlatform}`);
 
     try {
-      await downloadForPlatform(currentPlatform);
+      await downloadForPlatform(currentPlatform, opts);
     } catch (error) {
       console.error('[download-claude-code] Download failed:', error.message);
       process.exit(1);

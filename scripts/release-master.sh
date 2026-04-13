@@ -263,35 +263,40 @@ CURRENT_BRANCH=$(git branch --show-current)
 git push origin $CURRENT_BRANCH
 echo -e "${GREEN}Pushed to private repository (branch: $CURRENT_BRANCH)${NC}"
 
-# Step 3: Clean previous builds (preserve cache for faster rebuilds)
+# Step 3: Ensure Claude Code is at the latest version
 echo ""
-echo -e "${YELLOW}Step 3: Cleaning previous build artifacts...${NC}"
-# Only clean the output files, preserve unpacked directories for caching
+echo -e "${YELLOW}Step 3: Updating bundled Claude Code to latest version...${NC}"
+node scripts/download-claude-code.js --all
+echo -e "${GREEN}Claude Code update complete${NC}"
+
+# Step 4: Clean previous builds (preserve cache for faster rebuilds)
+echo ""
+echo -e "${YELLOW}Step 4: Cleaning previous build artifacts...${NC}"
 rm -rf dist/*.dmg dist/*.zip dist/*.yml dist/*.blockmap 2>/dev/null || true
 echo -e "${GREEN}Cleaned build artifacts (cache preserved)${NC}"
 
-# Step 4: Build based on mode
+# Step 5: Build based on mode
 echo ""
 BUILD_START_TIME=$(date +%s)
 
 case $BUILD_MODE in
     universal)
-        echo -e "${YELLOW}Step 4: Building Universal Binary (ARM64 + x64 combined)...${NC}"
+        echo -e "${YELLOW}Step 5: Building Universal Binary (ARM64 + x64 combined)...${NC}"
         npm run package:mac:universal
         echo -e "${GREEN}Universal build complete${NC}"
         ;;
     arm64-only)
-        echo -e "${YELLOW}Step 4: Building for Apple Silicon (ARM64 only)...${NC}"
+        echo -e "${YELLOW}Step 5: Building for Apple Silicon (ARM64 only)...${NC}"
         npm run package:mac
         echo -e "${GREEN}ARM64 build complete${NC}"
         ;;
     dual-arch)
-        echo -e "${YELLOW}Step 4a: Building for Apple Silicon (ARM64)...${NC}"
+        echo -e "${YELLOW}Step 5a: Building for Apple Silicon (ARM64)...${NC}"
         npm run package:mac
         echo -e "${GREEN}ARM64 build complete${NC}"
         
         echo ""
-        echo -e "${YELLOW}Step 4b: Building for Intel (x64)...${NC}"
+        echo -e "${YELLOW}Step 5b: Building for Intel (x64)...${NC}"
         npx electron-builder build --mac --x64 --publish never
         echo -e "${GREEN}x64 build complete${NC}"
         ;;
@@ -301,9 +306,9 @@ BUILD_END_TIME=$(date +%s)
 BUILD_DURATION=$((BUILD_END_TIME - BUILD_START_TIME))
 echo -e "${GREEN}Build completed in ${BUILD_DURATION} seconds${NC}"
 
-# Step 5: Verify all required files based on build mode
+# Step 6: Verify all required files based on build mode
 echo ""
-echo -e "${YELLOW}Step 5: Verifying build files...${NC}"
+echo -e "${YELLOW}Step 6: Verifying build files...${NC}"
 
 declare -a FILES
 
@@ -347,9 +352,9 @@ if [ "$ALL_FILES_EXIST" = false ]; then
     exit 1
 fi
 
-# Step 6: Generate fresh checksums from actual built files (CRITICAL for auto-updater)
+# Step 7: Generate fresh checksums from actual built files (CRITICAL for auto-updater)
 echo ""
-echo -e "${YELLOW}Step 6: Generating verified checksums for auto-updater...${NC}"
+echo -e "${YELLOW}Step 7: Generating verified checksums for auto-updater...${NC}"
 
 RELEASE_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
 
@@ -548,9 +553,10 @@ if [ $? -eq 0 ]; then
     echo -e "${BLUE}What happened:${NC}"
     echo "1. Updated version in package.json"
     echo "2. Committed and pushed to private repo"
-    echo "3. Built app ($BUILD_MODE mode) in ${BUILD_DURATION}s"
-    echo "4. Published to public repository"
-    echo "5. Auto-updater configured"
+    echo "3. Updated bundled Claude Code to latest version"
+    echo "4. Built app ($BUILD_MODE mode) in ${BUILD_DURATION}s"
+    echo "5. Published to public repository"
+    echo "6. Auto-updater configured"
     echo ""
     echo -e "${BLUE}Public Release URL:${NC}"
     echo -e "${YELLOW}https://github.com/${PUBLIC_REPO}/releases/tag/v${NEW_VERSION}${NC}"
