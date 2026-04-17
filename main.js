@@ -17,7 +17,13 @@ const { getLogQueue } = require('./lib/log-event-queue');
 const { getLogServer } = require('./lib/log-server');
 const { createConsoleInterceptor } = require('./console-interceptor');
 const { getGSXFileSync } = require('./gsx-file-sync');
-const { AiderBridgeClient } = require('./aider-bridge-client');
+// GSX Create now runs on bundled Claude Code instead of a Python Aider sidecar.
+// AiderBridgeClient was removed; GSXCreateEngine provides the same API surface.
+const { GSXCreateEngine } = require('./lib/gsx-create-engine');
+const { GSXBranchManager } = require('./lib/gsx-branch-manager');
+// Destroy-safe helper for all webContents.send callsites so races between
+// window teardown and IPC dispatch don't crash the main process.
+const { safeSend } = require('./lib/safe-send');
 // Use video editor module (note: src/video/ is the new modular architecture)
 const VideoEditor = require('./video-editor');
 const { getRecorder } = require('./recorder');
@@ -97,275 +103,19 @@ try {
   // electron-audio-loopback is optional; app works without it
 }
 
-// Global Aider Bridge instance (main/shared)
+// Global GSX Create engine instance (Claude Code-backed; replaces the old
+// Python Aider bridge). Variable kept as `aiderBridge` to avoid touching the
+// ~30 call sites that use it; callers see the same interface.
 let aiderBridge = null;
 
-// Branch Aider Manager - handles sandboxed Aider processes per branch
-class BranchAiderManager {
-  constructor() {
-    this.branches = new Map(); // branchId -> { aider: AiderBridgeClient, logFile: string, startTime: Date }
-    this.logsDir = null;
-    this.orchestrationLogFile = null;
-  }
+// Branch manager handles per-branch Claude Code sessions for GSX Create.
+// Class lives in lib/gsx-branch-manager.js; the historical inline class was
+// removed as part of the Aider -> Claude Code migration. The alias below
+// preserves the old name so existing `new BranchAiderManager()` call sites
+// continue to work during the transition.
+const BranchAiderManager = GSXBranchManager;
 
-  async initialize(spacePath) {
-    // Validate spacePath before any path operations
-    if (!spacePath || typeof spacePath !== 'string') {
-      throw new Error(`[BranchManager] Invalid spacePath: ${JSON.stringify(spacePath)} (type: ${typeof spacePath})`);
-    }
-
-    const fs = require('fs');
-    const path = require('path');
-
-    this.logsDir = path.join(spacePath, 'logs');
-    const branchLogsDir = path.join(this.logsDir, 'branches');
-
-    // Create log directories
-    if (!fs.existsSync(branchLogsDir)) {
-      fs.mkdirSync(branchLogsDir, { recursive: true });
-    }
-
-    this.orchestrationLogFile = path.join(this.logsDir, 'orchestration.log');
-    this.logOrchestration('SESSION', 'Branch Aider Manager initialized');
-  }
-
-  logOrchestration(level, message, data = {}) {
-    const fs = require('fs');
-    if (!this.orchestrationLogFile) return;
-
-    const timestamp = new Date().toISOString();
-    const logLine = `[${timestamp}] ${level}: ${message}${Object.keys(data).length ? ' ' + JSON.stringify(data) : ''}\n`;
-
-    try {
-      fs.appendFileSync(this.orchestrationLogFile, logLine);
-    } catch (e) {
-      console.error('[BranchManager] Failed to write orchestration log:', e);
-    }
-    console.log(`[BranchManager] ${level}: ${message}`);
-  }
-
-  logBranch(branchId, level, message, data = {}) {
-    const fs = require('fs');
-    const path = require('path');
-    if (!this.logsDir) return;
-
-    const logFile = path.join(this.logsDir, 'branches', `${branchId}.log`);
-    const timestamp = new Date().toISOString();
-    const logLine = `[${timestamp}] ${level}: ${message}${Object.keys(data).length ? ' ' + JSON.stringify(data) : ''}\n`;
-
-    try {
-      fs.appendFileSync(logFile, logLine);
-    } catch (e) {
-      console.error(`[BranchManager] Failed to write branch log ${branchId}:`, e);
-    }
-  }
-
-  async initBranch(branchPath, branchId, model, readOnlyFiles = []) {
-    // Validate required paths before any operations
-    if (!branchPath || typeof branchPath !== 'string') {
-      throw new Error(`[BranchManager] Invalid branchPath: ${JSON.stringify(branchPath)} (type: ${typeof branchPath})`);
-    }
-    if (!branchId || typeof branchId !== 'string') {
-      throw new Error(`[BranchManager] Invalid branchId: ${JSON.stringify(branchId)} (type: ${typeof branchId})`);
-    }
-    if (!this.logsDir) {
-      throw new Error('[BranchManager] logsDir is not set. Call initialize() first before initBranch().');
-    }
-
-    const { AiderBridgeClient } = require('./aider-bridge-client');
-    const { getSettingsManager } = require('./settings-manager');
-    const path = require('path');
-
-    this.logOrchestration('BRANCH', `Initializing ${branchId}`, { model, branchPath });
-
-    // Check if branch already has an Aider instance
-    if (this.branches.has(branchId)) {
-      this.logOrchestration('WARN', `Branch ${branchId} already initialized, cleaning up first`);
-      await this.cleanupBranch(branchId);
-    }
-
-    const settings = getSettingsManager();
-    const apiKey = settings.getLLMApiKey();
-    const provider = settings.getLLMProvider();
-
-    // Get Python path dynamically using DependencyManager
-    const { getDependencyManager } = require('./dependency-manager');
-    const depManager = getDependencyManager();
-    const aiderPythonPath = depManager.getAiderPythonPath();
-
-    this.logOrchestration('BRANCH', `Using Python path: ${aiderPythonPath}`);
-
-    const aider = new AiderBridgeClient(aiderPythonPath, apiKey, provider);
-    await aider.start();
-
-    // Initialize with branch path as root
-    const initResult = await aider.initialize(branchPath, model || 'claude-opus-4-5-20251101');
-
-    if (!initResult.success) {
-      throw new Error(`Failed to initialize branch Aider: ${initResult.error}`);
-    }
-
-    // Set sandbox restrictions
-    const sandboxResult = await aider.sendRequest('set_sandbox', {
-      sandbox_root: branchPath,
-      read_only_files: readOnlyFiles,
-      branch_id: branchId,
-    });
-
-    if (!sandboxResult.success) {
-      console.warn(`[BranchManager] Warning: Sandbox setup returned: ${JSON.stringify(sandboxResult)}`);
-    }
-
-    // Add branch files to Aider context
-    const fs = require('fs');
-    try {
-      const branchFiles = fs.readdirSync(branchPath);
-      const editableFiles = branchFiles
-        .filter((f) => {
-          const filePath = path.join(branchPath, f);
-          const stat = fs.statSync(filePath);
-          // Only include files (not directories), and exclude metadata files
-          return stat.isFile() && !f.startsWith('.') && !f.endsWith('.json');
-        })
-        .map((f) => path.join(branchPath, f));
-
-      if (editableFiles.length > 0) {
-        this.logOrchestration('BRANCH', `Adding ${editableFiles.length} files to ${branchId} context`, {
-          files: editableFiles.map((f) => path.basename(f)),
-        });
-        const addResult = await aider.sendRequest('add_files', { file_paths: editableFiles });
-
-        if (!addResult.success) {
-          console.warn(`[BranchManager] Warning: Failed to add files to branch context:`, addResult);
-        } else {
-          this.logBranch(branchId, 'FILES', `Added ${editableFiles.length} files to context`, {
-            files: editableFiles.map((f) => path.basename(f)),
-          });
-        }
-      }
-    } catch (fileError) {
-      console.warn(`[BranchManager] Warning: Could not list branch files:`, fileError.message);
-    }
-
-    // Store branch info
-    this.branches.set(branchId, {
-      aider,
-      branchPath,
-      logFile: path.join(this.logsDir, 'branches', `${branchId}.log`),
-      startTime: new Date(),
-      model,
-    });
-
-    this.logOrchestration('BRANCH', `${branchId} started`, { model });
-    this.logBranch(branchId, 'INIT', `Aider initialized`, { branchPath, model, sandbox: true });
-
-    return { success: true, branchId };
-  }
-
-  async runBranchPrompt(branchId, prompt, streamCallback = null) {
-    const branch = this.branches.get(branchId);
-    if (!branch) {
-      throw new Error(`Branch ${branchId} not initialized`);
-    }
-
-    this.logBranch(branchId, 'PROMPT', prompt.substring(0, 200) + '...');
-    this.logOrchestration('BRANCH', `${branchId} executing prompt`, { promptLength: prompt.length });
-
-    let result;
-    if (streamCallback) {
-      result = await branch.aider.runPromptStreaming(prompt, streamCallback);
-    } else {
-      result = await branch.aider.runPrompt(prompt);
-    }
-
-    this.logBranch(branchId, 'RESPONSE', `Success: ${result.success}`, {
-      modifiedFiles: result.modified_files?.length || 0,
-      newFiles: result.new_files?.length || 0,
-    });
-
-    if (result.file_details) {
-      for (const file of result.file_details) {
-        this.logBranch(branchId, 'EDIT', `${file.action}: ${file.name}`);
-      }
-    }
-
-    return result;
-  }
-
-  async cleanupBranch(branchId) {
-    const branch = this.branches.get(branchId);
-    if (!branch) {
-      return { success: true, message: 'Branch not found (already cleaned up)' };
-    }
-
-    this.logOrchestration('BRANCH', `${branchId} cleaning up`);
-    this.logBranch(branchId, 'CLEANUP', 'Shutting down Aider instance');
-
-    try {
-      await branch.aider.shutdown();
-    } catch (e) {
-      console.error(`[BranchManager] Error shutting down branch ${branchId}:`, e);
-    }
-
-    this.branches.delete(branchId);
-
-    this.logOrchestration('BRANCH', `${branchId} cleaned up`);
-    return { success: true };
-  }
-
-  async cleanupAll() {
-    this.logOrchestration('SESSION', 'Cleaning up all branches');
-
-    for (const branchId of this.branches.keys()) {
-      await this.cleanupBranch(branchId);
-    }
-
-    this.logOrchestration('SESSION', 'All branches cleaned up');
-  }
-
-  getBranchLog(branchId) {
-    const fs = require('fs');
-    const path = require('path');
-
-    if (!this.logsDir) return null;
-
-    const logFile = path.join(this.logsDir, 'branches', `${branchId}.log`);
-    try {
-      if (fs.existsSync(logFile)) {
-        return fs.readFileSync(logFile, 'utf-8');
-      }
-    } catch (e) {
-      console.error(`[BranchManager] Error reading branch log ${branchId}:`, e);
-    }
-    return null;
-  }
-
-  getOrchestrationLog() {
-    const fs = require('fs');
-
-    if (!this.orchestrationLogFile) return null;
-
-    try {
-      if (fs.existsSync(this.orchestrationLogFile)) {
-        return fs.readFileSync(this.orchestrationLogFile, 'utf-8');
-      }
-    } catch (e) {
-      console.error('[BranchManager] Error reading orchestration log:', e);
-    }
-    return null;
-  }
-
-  getActiveBranches() {
-    return Array.from(this.branches.entries()).map(([id, info]) => ({
-      branchId: id,
-      branchPath: info.branchPath,
-      model: info.model,
-      startTime: info.startTime.toISOString(),
-    }));
-  }
-}
-
-// Global Branch Aider Manager instance
+// Global Branch Manager instance (Claude Code-backed; see lib/gsx-branch-manager.js)
 let branchAiderManager = null;
 
 // Global Snapshot Storage instance (for state manager)
@@ -482,6 +232,47 @@ app.whenReady().then(() => {
   });
 });
 //-----------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Auth popup allow-list
+//
+// The old `url.includes('oauth') || url.includes('/auth/')` style was unsafe:
+// any URL whose path merely contained those substrings (e.g.
+// `https://evil.com/blog/oauth-trickery`) would be opened as a popup with
+// our session partition. We now parse the URL and check it against a
+// whitelist of real auth hostnames (exact match or suffix match on the host).
+// ---------------------------------------------------------------------------
+const AUTH_POPUP_HOST_SUFFIXES = [
+  'accounts.google.com',
+  'login.microsoftonline.com',
+  'sso.global.api.onereach.ai',
+  'auth.edison.onereach.ai',
+  'login.onereach.ai',
+  'login.edison.onereach.ai',
+  'firebaseauth.com',
+  'firebase.googleapis.com',
+  'firebase.com',
+  'elevenlabs.io',
+  'adobelogin.com',
+  'adobe.com',
+  'adobe.io',
+  'auth.services.adobe.com',
+  'firefly.adobe.com',
+];
+
+function isAllowedAuthPopup(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    // Only https/http popups; block file://, javascript:, data:, etc.
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+    const host = u.hostname.toLowerCase();
+    return AUTH_POPUP_HOST_SUFFIXES.some(
+      (suffix) => host === suffix || host.endsWith('.' + suffix)
+    );
+  } catch {
+    return false;
+  }
+}
 
 function createWindow() {
   // Create the main window using our browser window module
@@ -762,11 +553,29 @@ app.whenReady().then(() => {
   // Register Claude Terminal IPC handlers
   registerClaudeTerminalHandlers();
 
-  // Register general terminal:exec IPC handler (used by agent tools + renderer)
+  // Register general terminal:exec IPC handler (used by agent tools + renderer).
+  //
+  // Security: this handler runs arbitrary shell commands, so any renderer that
+  // can reach the preload can call into it. We apply the shared shell-command
+  // safety filter (`lib/agent-tools.js :: isShellCommandSafe`) here as a second
+  // line of defense -- the agent-middleware filter only covers the agent path.
+  // Commands matching the dangerous-pattern blocklist (rm -rf /, sudo, mkfs,
+  // dd if=, fork bombs, format c:, chmod 777 /, redirect to /dev/sd*) are
+  // rejected with a structured error instead of being executed.
   ipcMain.handle('terminal:exec', async (_event, command, cwd) => {
     const { execFile } = require('child_process');
     const { promisify } = require('util');
     const execFileAsync = promisify(execFile);
+    const { isShellCommandSafe } = require('./lib/agent-tools');
+
+    if (typeof command !== 'string' || !command.trim()) {
+      return { success: false, error: 'Invalid command', exitCode: 1 };
+    }
+    if (!isShellCommandSafe(command)) {
+      console.warn('[terminal:exec] Blocked unsafe command:', command.slice(0, 200));
+      return { success: false, error: 'Command blocked by safety filter', exitCode: 126 };
+    }
+
     try {
       const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', command], {
         cwd: cwd || process.cwd(),
@@ -1806,13 +1615,80 @@ app.on('will-quit', (_event) => {
     console.error('[App] Error cleaning up Spaces temp files:', err);
   }
 
-  // Shutdown Aider Bridge
+  // Close any active GSX Create file watchers (fs.watch handles leak otherwise)
+  try {
+    if (typeof global._closeGsxFileWatchers === 'function') {
+      global._closeGsxFileWatchers();
+    }
+  } catch (err) {
+    console.error('[App] Error closing GSX file watchers:', err.message);
+  }
+
+  // Stop long-running periodic timers in the budget manager
+  try {
+    const { getBudgetManager } = require('./budget-manager');
+    const bm = getBudgetManager();
+    if (bm && typeof bm.shutdown === 'function') bm.shutdown();
+  } catch (err) {
+    console.error('[App] Error shutting down budget-manager:', err.message);
+  }
+
+  // Stop local HTTP/WebSocket servers so ports release cleanly
+  try {
+    const logServer = require('./lib/log-server').getLogServer();
+    if (logServer && typeof logServer.stop === 'function') {
+      // Fire-and-forget; we're exiting anyway.
+      Promise.resolve(logServer.stop()).catch((e) => console.error('[App] log-server stop:', e.message));
+    }
+  } catch {
+    /* log-server module may not be loaded */
+  }
+
+  try {
+    if (global.spacesAPIServer && typeof global.spacesAPIServer.stop === 'function') {
+      Promise.resolve(global.spacesAPIServer.stop()).catch((e) =>
+        console.error('[App] spaces-api-server stop:', e.message)
+      );
+    }
+  } catch {
+    /* best effort */
+  }
+
+  // Shutdown the GSX Create engine (orphans a Claude Code session otherwise)
   if (aiderBridge) {
-    console.log('[App] Shutting down Aider Bridge...');
+    console.log('[App] Shutting down GSX Create engine...');
     try {
-      aiderBridge.shutdown().catch((err) => console.error('[App] Error shutting down Aider:', err));
+      aiderBridge.shutdown().catch((err) => console.error('[App] Error shutting down engine:', err));
     } catch (error) {
-      console.error('[App] Error in Aider shutdown:', error);
+      console.error('[App] Error in engine shutdown:', error);
+    }
+  }
+
+  // Kill any orphan Claude Code CLI processes from runClaudeCode calls.
+  // Without this, playbook executions and other non-GSX Create sessions
+  // can continue running after the app window is gone.
+  try {
+    const { cancelAll: cancelAllClaudeCode } = require('./lib/claude-code-runner');
+    if (typeof cancelAllClaudeCode === 'function') {
+      const killed = cancelAllClaudeCode();
+      if (killed) console.log(`[App] Cancelled ${killed} Claude Code session(s)`);
+    }
+  } catch (err) {
+    console.error('[App] Error cancelling Claude Code sessions:', err.message);
+  }
+
+  // Stop the Playwright browser automation service (leaves Chromium running)
+  try {
+    const browserAutomation = require('./lib/browser-automation');
+    if (browserAutomation && typeof browserAutomation.stop === 'function') {
+      Promise.resolve(browserAutomation.stop()).catch((err) =>
+        console.error('[App] browser-automation stop error:', err.message)
+      );
+    }
+  } catch (err) {
+    // Module may not be loaded if feature never used
+    if (err.code !== 'MODULE_NOT_FOUND') {
+      console.error('[App] Error stopping browser-automation:', err.message);
     }
   }
 
@@ -4156,18 +4032,35 @@ function setupSpacesAPI() {
     catch (err) { return { error: err.message }; }
   });
 
-  ipcMain.handle('browsing:list-tab-partitions', async () => {
+  // Tab-partition discovery uses a request/response pair over IPC.
+  // Previously this relied on `ipcMain.once('tab-partitions-response', ...)`,
+  // which meant two concurrent callers would both register a once-listener
+  // and race for the FIRST response. We now tag each request with a unique
+  // id and match the reply to the originating promise.
+  let _tabPartitionSeq = 0;
+  function _requestTabPartitions(timeoutMs = 3000) {
     const mainWindow = browserWindow.getMainWindow();
-    if (!mainWindow || mainWindow.isDestroyed()) return [];
+    if (!safeSend(mainWindow, 'get-tab-partitions', { requestId: ++_tabPartitionSeq })) return Promise.resolve([]);
+    const requestId = _tabPartitionSeq;
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve([]), 3000);
-      ipcMain.once('tab-partitions-response', (_event, tabInfo) => {
-        clearTimeout(timeout);
-        resolve(tabInfo || []);
-      });
-      mainWindow.webContents.send('get-tab-partitions');
+      const timer = setTimeout(() => {
+        ipcMain.removeListener('tab-partitions-response', handler);
+        resolve([]);
+      }, timeoutMs);
+      function handler(_event, payload) {
+        // Accept both legacy {payload: [...]} and new {requestId, tabs: [...]} shapes.
+        const tabs = Array.isArray(payload) ? payload : payload && payload.tabs;
+        const replyId = payload && payload.requestId;
+        if (replyId !== undefined && replyId !== requestId) return; // not our response
+        clearTimeout(timer);
+        ipcMain.removeListener('tab-partitions-response', handler);
+        resolve(tabs || []);
+      }
+      ipcMain.on('tab-partitions-response', handler);
     });
-  });
+  }
+
+  ipcMain.handle('browsing:list-tab-partitions', async () => _requestTabPartitions());
 
   ipcMain.handle('browsing:save-to-auth-pool', async (_event, sessionId) => {
     try { return await browsingAPI.saveToAuthPool(sessionId); }
@@ -4175,8 +4068,15 @@ function setupSpacesAPI() {
   });
 
   ipcMain.handle('browsing:get-auth-pool-domains', async () => {
-    try { return await browsingAPI.getAuthPoolDomains(); }
-    catch (_err) { return []; }
+    try {
+      const domains = await browsingAPI.getAuthPoolDomains();
+      // Normalize: callers expect an array. Also log the original error
+      // instead of silently swallowing, so we can diagnose production issues.
+      return Array.isArray(domains) ? domains : [];
+    } catch (err) {
+      console.warn('[browsing] getAuthPoolDomains failed:', err.message);
+      return [];
+    }
   });
 
   ipcMain.handle('browsing:import-chrome-cookies', async (_event, domain, sessionId) => {
@@ -4189,18 +4089,7 @@ function setupSpacesAPI() {
     } catch (err) { return { error: err.message }; }
   });
 
-  browsingAPI.setTabDiscoveryFn(async () => {
-    const mainWindow = browserWindow.getMainWindow();
-    if (!mainWindow || mainWindow.isDestroyed()) return [];
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve([]), 3000);
-      ipcMain.once('tab-partitions-response', (_event, tabInfo) => {
-        clearTimeout(timeout);
-        resolve(tabInfo || []);
-      });
-      mainWindow.webContents.send('get-tab-partitions');
-    });
-  });
+  browsingAPI.setTabDiscoveryFn(async () => _requestTabPartitions());
 
   // Test support - Only available in test mode
   if (process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'true') {
@@ -4984,17 +4873,6 @@ function setupDependencyIPC() {
     }
   });
 
-  // Get the aider Python path
-  ipcMain.handle('deps:get-aider-python', async () => {
-    try {
-      const depManager = getDependencyManager();
-      const pythonPath = depManager.getAiderPythonPath();
-      return { success: true, pythonPath };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
   console.log('[setupDependencyIPC] All handlers registered');
 }
 
@@ -5002,78 +4880,32 @@ function setupDependencyIPC() {
 function setupAiderIPC() {
   console.log('[setupAiderIPC] Setting up Aider Bridge handlers');
 
-  // Start Aider
+  // Start the GSX Create engine (bundled Claude Code; no Python required)
   ipcMain.handle('aider:start', async () => {
     try {
       if (!aiderBridge) {
-        // Get API key from settings
-        const { getSettingsManager } = require('./settings-manager');
-        const settings = getSettingsManager();
-        const apiKey = settings.getLLMApiKey();
-        const provider = settings.getLLMProvider();
-
-        console.log(`[Aider] Starting with provider: ${provider}, API key present: ${!!apiKey}`);
-
-        // Find the correct Python path - check pipx first, then system python
-        const { execSync } = require('child_process');
-        const os = require('os');
-        let pythonPath = 'python3';
-
-        // Check for pipx aider installation
-        const pipxAiderPython = path.join(os.homedir(), '.local', 'pipx', 'venvs', 'aider-chat', 'bin', 'python');
-        if (fs.existsSync(pipxAiderPython)) {
-          console.log('[Aider] Found pipx aider installation at:', pipxAiderPython);
-          pythonPath = pipxAiderPython;
-        } else {
-          // Check if system python has aider
-          try {
-            execSync('python3 -c "import aider"', { encoding: 'utf-8', stdio: 'pipe' });
-            console.log('[Aider] Using system python3 with aider');
-          } catch (_e) {
-            // Try to find aider command and extract its Python
-            try {
-              const aiderPath = execSync('which aider', { encoding: 'utf-8' }).trim();
-              if (aiderPath) {
-                const aiderScript = fs.readFileSync(aiderPath, 'utf-8');
-                const shebangMatch = aiderScript.match(/^#!(.+)$/m);
-                if (shebangMatch && shebangMatch[1]) {
-                  const extractedPython = shebangMatch[1].trim();
-                  if (fs.existsSync(extractedPython)) {
-                    console.log('[Aider] Extracted Python from aider shebang:', extractedPython);
-                    pythonPath = extractedPython;
-                  }
-                }
-              }
-            } catch (_e2) {
-              console.log('[Aider] Could not find aider command, using python3');
-            }
-          }
-        }
-
-        console.log('[Aider] Using Python path:', pythonPath);
-        aiderBridge = new AiderBridgeClient(pythonPath, apiKey, provider);
+        aiderBridge = new GSXCreateEngine({ feature: 'gsx-create' });
         await aiderBridge.start();
-        console.log('[Aider] Bridge started successfully');
+        console.log('[GSX Create] Claude Code engine started');
       }
       return { success: true };
     } catch (error) {
-      console.error('[Aider] Failed to start:', error);
+      console.error('[GSX Create] Failed to start engine:', error);
       return { success: false, error: error.message };
     }
   });
 
-  // Initialize with repo
+  // Initialize the engine against a repo / branch directory
   ipcMain.handle('aider:initialize', async (event, repoPath, modelName) => {
     try {
       if (!aiderBridge) {
-        throw new Error('Aider not started');
+        throw new Error('GSX Create engine not started');
       }
-      // GSX Create should honor the selected model; default to Claude Opus 4.5 if none provided.
-      const result = await aiderBridge.initialize(repoPath, modelName || 'claude-opus-4-5-20250929');
-      console.log('[Aider] Initialized:', result);
+      const result = await aiderBridge.initialize(repoPath, modelName || 'claude-opus-4-7');
+      console.log('[GSX Create] Initialized:', result);
       return result;
     } catch (error) {
-      console.error('[Aider] Initialize failed:', error);
+      console.error('[GSX Create] Initialize failed:', error);
       return { success: false, error: error.message };
     }
   });
@@ -6168,11 +6000,57 @@ function setupAiderIPC() {
     }
   });
 
-  // Read a file
+  // ---------------------------------------------------------------------------
+  // Path confinement for GSX Create file IPC handlers.
+  //
+  // Renderer-supplied paths must resolve inside one of the allow-listed roots:
+  //   - The Spaces directory (user content, primary)
+  //   - The app's userData dir (per-user app data)
+  //   - The system temp dir (scratch work by the assistant)
+  //
+  // Anything else (e.g. ~/.ssh, /etc, arbitrary home dirs) is rejected to
+  // prevent a compromised renderer from exfiltrating or corrupting user files
+  // via `window.aider.readFile(...)` / `writeFile(...)`.
+  // ---------------------------------------------------------------------------
+  function _gsxAllowedRoots() {
+    const roots = [];
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const spacesRoot = getSpacesAPI().storage.spacesDir;
+      if (spacesRoot) roots.push(path.resolve(spacesRoot));
+    } catch {
+      /* Spaces API may not be initialized yet; fall through */
+    }
+    try {
+      roots.push(path.resolve(app.getPath('userData')));
+    } catch {
+      /* ignore */
+    }
+    try {
+      roots.push(path.resolve(require('os').tmpdir()));
+    } catch {
+      /* ignore */
+    }
+    return roots;
+  }
+
+  function _isPathAllowed(filePath) {
+    if (!filePath || typeof filePath !== 'string') return false;
+    const resolved = path.resolve(filePath);
+    const roots = _gsxAllowedRoots();
+    // Use path.sep boundary to prevent '/Spaces-evil' matching '/Spaces'
+    return roots.some((root) => resolved === root || resolved.startsWith(root + path.sep));
+  }
+
+  // Read a file (path-confined to Spaces / userData / tmp)
   ipcMain.handle('aider:read-file', async (event, filePath) => {
     try {
       if (!filePath || typeof filePath !== 'string') {
         console.error('[GSX Create] Invalid file path:', filePath);
+        return null;
+      }
+      if (!_isPathAllowed(filePath)) {
+        console.error('[GSX Create] Security: read outside allowed roots rejected:', filePath);
         return null;
       }
       const fs = require('fs');
@@ -6188,12 +6066,14 @@ function setupAiderIPC() {
     }
   });
 
-  // Write a file
+  // Write a file (path-confined to Spaces / userData / tmp)
   ipcMain.handle('aider:write-file', async (event, filePath, content) => {
     try {
+      if (!_isPathAllowed(filePath)) {
+        console.error('[GSX Create] Security: write outside allowed roots rejected:', filePath);
+        return { success: false, error: 'Path outside allowed roots' };
+      }
       const fs = require('fs');
-      const path = require('path');
-      // Ensure directory exists
       const dir = path.dirname(filePath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -6211,16 +6091,10 @@ function setupAiderIPC() {
   ipcMain.handle('aider:delete-file', async (event, filePath) => {
     try {
       const fs = require('fs');
-      const path = require('path');
 
-      // Security check - only allow deletion within spaces directory (via Spaces API)
-      const { getSpacesAPI } = require('./spaces-api');
-      const spacesRoot = getSpacesAPI().storage.spacesDir;
-      const resolvedPath = path.resolve(filePath);
-
-      if (!resolvedPath.startsWith(spacesRoot)) {
-        console.error('[GSX Create] Security: Attempted to delete file outside spaces directory:', filePath);
-        return { success: false, error: 'Can only delete files within the project space' };
+      if (!_isPathAllowed(filePath)) {
+        console.error('[GSX Create] Security: delete outside allowed roots rejected:', filePath);
+        return { success: false, error: 'Path outside allowed roots' };
       }
 
       if (!fs.existsSync(filePath)) {
@@ -7471,28 +7345,59 @@ function setupAiderIPC() {
     }
   });
 
-  // Watch file for changes
+  // ---------------------------------------------------------------------------
+  // File watchers for GSX Create. Each watched path consumes an OS-level
+  // fs.watch handle; without a cap a buggy renderer could OOM the app by
+  // watching thousands of distinct paths. Watchers are also cleaned up
+  // en-masse on app quit so long-running inotify/kqueue handles don't leak.
+  // ---------------------------------------------------------------------------
   const fileWatchers = new Map();
+  const FILE_WATCHER_MAX = 100;
+
+  function _closeAllFileWatchers() {
+    for (const [p, w] of fileWatchers) {
+      try {
+        w.close();
+      } catch (e) {
+        console.warn('[Aider] Error closing watcher for', p, ':', e.message);
+      }
+    }
+    fileWatchers.clear();
+  }
+  // Expose to the will-quit sweep.
+  global._closeGsxFileWatchers = _closeAllFileWatchers;
+
   ipcMain.handle('aider:watch-file', async (event, filePath) => {
     try {
+      if (!_isPathAllowed(filePath)) {
+        console.warn('[Aider] Rejected watch for path outside allowed roots:', filePath);
+        return { success: false, error: 'Path outside allowed roots' };
+      }
       if (fileWatchers.has(filePath)) {
         return { success: true, message: 'Already watching' };
+      }
+      if (fileWatchers.size >= FILE_WATCHER_MAX) {
+        console.warn('[Aider] Watcher limit reached (' + FILE_WATCHER_MAX + '), refusing new watch:', filePath);
+        return { success: false, error: 'Watcher limit reached' };
       }
       const watcher = fs.watch(filePath, (eventType) => {
         if (eventType === 'change') {
           try {
             if (event.sender && !event.sender.isDestroyed()) {
               event.sender.send('aider:file-changed', filePath);
+            } else {
+              // Sender gone; clean up so the watcher doesn't linger
+              try { watcher.close(); } catch { /* ignore */ }
+              fileWatchers.delete(filePath);
             }
           } catch (_e) {
-            // Window closed, stop watching
-            watcher.close();
+            try { watcher.close(); } catch { /* ignore */ }
             fileWatchers.delete(filePath);
           }
         }
       });
       fileWatchers.set(filePath, watcher);
-      console.log('[Aider] Watching file:', filePath);
+      console.log('[Aider] Watching file:', filePath, '(' + fileWatchers.size + ' active)');
       return { success: true };
     } catch (error) {
       console.error('[Aider] Watch file error:', error);
@@ -7867,14 +7772,72 @@ function setupIPC() {
 
   console.log('[setupIPC] Window keep-alive handlers registered');
 
+  // Keys whose VALUES are redacted in the default `settings:get-all` response.
+  // The keys themselves remain present so callers that do `!!settings.apiKey`
+  // checks keep working, but the actual secret is replaced with a marker.
+  const SECRET_KEY_REGEX = /apikey|secret|token|password|credentials|privatekey/i;
+  const REDACTED_MARKER = '<redacted>';
+
+  function redactSecrets(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    const out = Array.isArray(obj) ? [] : {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (SECRET_KEY_REGEX.test(k) && typeof v === 'string' && v.length > 0) {
+        out[k] = REDACTED_MARKER;
+      } else if (v && typeof v === 'object') {
+        out[k] = redactSecrets(v);
+      } else {
+        out[k] = v;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Verify that an IPC request originates from a trusted app window (not a
+   * webview loading arbitrary content). Callers requesting secrets MUST
+   * come from a `file://` URL shipped with the app and match one of the
+   * allow-listed filenames.
+   */
+  function isTrustedSecretRequester(event, allowedFiles) {
+    try {
+      const url = event.sender && event.sender.getURL ? event.sender.getURL() : '';
+      if (!url.startsWith('file://')) return false;
+      return allowedFiles.some((name) => url.includes('/' + name));
+    } catch {
+      return false;
+    }
+  }
+
   ipcMain.handle('settings:get-all', async () => {
     const settingsManager = global.settingsManager;
     if (!settingsManager) {
       console.error('Settings manager not initialized');
       return {};
     }
-    const allSettings = settingsManager.getAll();
-    return allSettings;
+    return redactSecrets(settingsManager.getAll());
+  });
+
+  // Sensitive variant: returns un-redacted settings. Only the settings UI
+  // (settings.html) is permitted to call this channel -- any other window
+  // that tries to read it gets redacted output, identical to `get-all`.
+  ipcMain.handle('settings:get-all-sensitive', async (event) => {
+    const settingsManager = global.settingsManager;
+    if (!settingsManager) return {};
+    const all = settingsManager.getAll();
+    if (!isTrustedSecretRequester(event, ['settings.html'])) {
+      try {
+        const url = event.sender && event.sender.getURL ? event.sender.getURL() : 'unknown';
+        logger.warn('Blocked settings:get-all-sensitive from non-settings window', {
+          event: 'settings:get-all-sensitive:blocked',
+          url,
+        });
+      } catch {
+        /* logger missing during startup */
+      }
+      return redactSecrets(all);
+    }
+    return all;
   });
 
   ipcMain.handle('settings:save', async (event, settings) => {
@@ -10518,9 +10481,7 @@ Return ONLY valid JSON with this exact structure:
         const mainWindow = getMainWindow();
 
         // If we have a main window, let it know the menu was refreshed
-        if (mainWindow) {
-          mainWindow.webContents.send('menu-refreshed', { success, timestamp: new Date().toISOString() });
-        }
+        safeSend(mainWindow, 'menu-refreshed', { success, timestamp: new Date().toISOString() });
       } catch (error) {
         console.error('Error refreshing GSX links menu:', error);
       }
@@ -10572,13 +10533,7 @@ Return ONLY valid JSON with this exact structure:
 
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
-      if (mainWindow) {
-        // Send to main window to open in a new tab
-        mainWindow.webContents.send('open-in-new-tab', {
-          url: data.url,
-          label: data.label || 'IDW',
-        });
-      } else {
+      if (!safeSend(mainWindow, 'open-in-new-tab', { url: data.url, label: data.label || 'IDW' })) {
         console.error('Main window not found, cannot open IDW URL');
       }
       return;
@@ -10621,15 +10576,12 @@ Return ONLY valid JSON with this exact structure:
 
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
-      if (mainWindow) {
-        // Send to main window to open in a new tab
-        mainWindow.webContents.send('open-in-new-tab', {
-          url: data.url,
-          label: data.label || 'Audio Generator',
-          isAudioGenerator: true,
-          category: data.category,
-        });
-      } else {
+      if (!safeSend(mainWindow, 'open-in-new-tab', {
+        url: data.url,
+        label: data.label || 'Audio Generator',
+        isAudioGenerator: true,
+        category: data.category,
+      })) {
         console.error('Main window not found, cannot open audio generator URL');
       }
       return;
@@ -11480,10 +11432,7 @@ Return ONLY valid JSON with this exact structure:
     if (data.action === 'open-url') {
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
-      if (mainWindow) {
-        // Send the URL to the renderer to open in a new tab
-        mainWindow.webContents.send('open-in-new-tab', data.url);
-      }
+      safeSend(mainWindow, 'open-in-new-tab', data.url);
     }
   });
 
@@ -11857,18 +11806,11 @@ Return ONLY valid JSON with this exact structure:
       contents.setWindowOpenHandler(({ url, frameName: _frameName, features: _features, disposition }) => {
         console.log('WebContents window open handler intercepted URL:', url, 'disposition:', disposition);
 
-        // For authentication URLs, allow popup windows
-        if (
-          url.includes('accounts.google.com') ||
-          url.includes('sso.global.api.onereach.ai') ||
-          url.includes('auth.edison.onereach.ai') ||
-          url.includes('login.onereach.ai') ||
-          url.includes('login.edison.onereach.ai') ||
-          url.includes('oauth') ||
-          url.includes('/auth/') ||
-          url.includes('firebase') ||
-          url.includes('elevenlabs.io')
-        ) {
+        // Auth popups are restricted to an allow-listed set of real login
+        // hostnames to prevent `https://evil.com/blog/oauth-tricks` or any
+        // URL that merely contains the substring 'oauth' / '/auth/' from
+        // inheriting our session partition.
+        if (isAllowedAuthPopup(url)) {
           console.log('Auth URL detected in webContents, allowing popup window:', url);
           console.log('Using parent session partition:', contents.session.partition);
           return {
@@ -11998,13 +11940,11 @@ Return ONLY valid JSON with this exact structure:
               if (url.includes('/callback') && url.includes('sso.global.api.onereach.ai')) {
                 console.log('Detected SSO callback URL in popup:', url);
                 const mainWindow = browserWindow.getMainWindow();
-                if (mainWindow) {
-                  mainWindow.webContents.send('sso-success', {
-                    type: 'sso',
-                    action: 'success',
-                    redirectUrl: 'https://idw.edison.onereach.ai/idw-marvin-dev',
-                  });
-                }
+                safeSend(mainWindow, 'sso-success', {
+                  type: 'sso',
+                  action: 'success',
+                  redirectUrl: 'https://idw.edison.onereach.ai/idw-marvin-dev',
+                });
                 authWindow.close();
               }
             });
@@ -12016,13 +11956,11 @@ Return ONLY valid JSON with this exact structure:
             if (message.action === 'success') {
               // Send success message to renderer
               const mainWindow = browserWindow.getMainWindow();
-              if (mainWindow) {
-                mainWindow.webContents.send('sso-success', {
-                  type: 'sso',
-                  action: 'success',
-                  redirectUrl: 'https://my.onereach.ai/',
-                });
-              }
+              safeSend(mainWindow, 'sso-success', {
+                type: 'sso',
+                action: 'success',
+                redirectUrl: 'https://my.onereach.ai/',
+              });
             }
           }
         }
@@ -13215,13 +13153,10 @@ Return ONLY valid JSON with this exact structure:
 
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
-      if (mainWindow) {
-        // Send to main window to open in a new tab
-        mainWindow.webContents.send('open-in-new-tab', {
-          url: cleanUrl,
-          label: data.label || 'IDW',
-        });
-      } else {
+      if (!safeSend(mainWindow, 'open-in-new-tab', {
+        url: cleanUrl,
+        label: data.label || 'IDW',
+      })) {
         console.error('Main window not found, cannot open IDW URL');
       }
       return;
@@ -14347,18 +14282,7 @@ Return ONLY valid JSON with this exact structure:
     aiWindow.webContents.setWindowOpenHandler(({ url: newUrl, disposition }) => {
       console.log(`[${label}] Window open request:`, newUrl, disposition);
 
-      // Allow authentication popups
-      if (
-        newUrl.includes('accounts.google.com') ||
-        newUrl.includes('login.microsoftonline.com') ||
-        newUrl.includes('adobe.com/auth') ||
-        newUrl.includes('firefly.adobe.com') ||
-        newUrl.includes('auth.services.adobe.com') ||
-        newUrl.includes('ims-na1.adobelogin.com') ||
-        newUrl.includes('oauth') ||
-        newUrl.includes('/auth/') ||
-        newUrl.includes('/login')
-      ) {
+      if (isAllowedAuthPopup(newUrl)) {
         console.log(`[${label}] Allowing authentication popup`);
         return {
           action: 'allow',
@@ -18565,9 +18489,7 @@ function setupCommandHUDIPC() {
           } else {
             // Fallback: send IPC to open settings
             const mainWindow = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
-            if (mainWindow) {
-              mainWindow.webContents.send('menu-action', { action: 'settings' });
-            }
+            safeSend(mainWindow, 'menu-action', { action: 'settings' });
           }
         },
       },

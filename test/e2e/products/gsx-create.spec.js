@@ -34,7 +34,7 @@ test.describe('GSX Create', () => {
 
   // ── Window / File Existence ──────────────────────────────────────────────
   test('HTML file exists', async () => {
-    expect(fs.existsSync(path.join(__dirname, '../../../aider-ui.html'))).toBe(true);
+    expect(fs.existsSync(path.join(__dirname, '../../../gsx-create.html'))).toBe(true);
   });
 
   // ── Space Selector / Configuration ───────────────────────────────────────

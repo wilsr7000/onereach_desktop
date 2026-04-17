@@ -283,7 +283,7 @@ The new design system can be applied to:
 - ✅ spaces-picker.html (done)
 - ⏳ clipboard-viewer.html (main clipboard UI)
 - ⏳ video-editor.html (video editor)
-- ⏳ aider-ui.html (GSX Create)
+- ⏳ gsx-create.html (GSX Create)
 - ⏳ All other HTML interfaces
 
 ## Conclusion

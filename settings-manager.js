@@ -6,12 +6,28 @@ const log = getLogQueue();
 
 // Skip Keychain encryption in dev mode to avoid password prompts
 // Use function to defer check until app is ready
+// eslint-disable-next-line no-unused-vars
 function isDev() {
   try {
     return !app.isPackaged;
   } catch (_e) {
     return true; // Assume dev mode if can't determine
   }
+}
+
+// Single source of truth for "does this settings key hold a secret?"
+// Used by both save and load paths so encryption policy stays consistent.
+function _isSecretKey(key) {
+  if (typeof key !== 'string') return false;
+  return (
+    key.includes('apiKey') ||
+    key.includes('secret') ||
+    key.includes('Token') ||
+    key === 'credentials' ||
+    key === 'privateKey' ||
+    key.includes('password') ||
+    key.includes('Password')
+  );
 }
 
 class SettingsManager {
@@ -77,7 +93,7 @@ class SettingsManager {
 
         // Decrypt sensitive fields
         for (const [key, value] of Object.entries(encryptedData)) {
-          if (key.includes('apiKey') || key.includes('secret') || key.includes('Token')) {
+          if (_isSecretKey(key)) {
             // Decrypt sensitive data
             // Try to decrypt if encryption is available (even in dev mode)
             if (safeStorage.isEncryptionAvailable() && value && value.encrypted) {
@@ -197,27 +213,33 @@ class SettingsManager {
     try {
       const dataToSave = {};
 
-      // Encrypt sensitive fields (skip in dev mode to avoid Keychain prompts)
+      // Encrypt sensitive fields.
+      //
+      // As of v4.8.0, we ALWAYS encrypt secrets when Electron's safeStorage
+      // is available -- including in dev mode. Previously dev builds skipped
+      // encryption "to avoid Keychain prompts"; the actual effect was that
+      // app-settings-encrypted.json contained plaintext `sk-ant-...` keys,
+      // which leaks to anyone reading the user's Application Support dir
+      // (or a dev `.dotfile` backup).
+      //
+      // safeStorage is keyed to the user's login keychain on macOS and to
+      // the OS credential store on Windows/Linux, so encryption is
+      // transparent across runs for the same user and does not prompt on
+      // normal access after first grant.
+      const encryptionAvailable = safeStorage.isEncryptionAvailable();
       for (const [key, value] of Object.entries(this.settings)) {
-        if (
-          (key.includes('apiKey') || key.includes('secret') || key.includes('Token')) &&
-          value &&
-          typeof value === 'string'
-        ) {
-          // Encrypt sensitive data (only in production)
-          if (!isDev() && safeStorage.isEncryptionAvailable()) {
+        if (_isSecretKey(key) && value && typeof value === 'string') {
+          if (encryptionAvailable) {
             const encrypted = safeStorage.encryptString(value);
             dataToSave[key] = {
               encrypted: true,
               data: encrypted.toString('base64'),
             };
           } else {
-            // In dev mode or if encryption not available, store as plain text
-            if (isDev()) {
-              log.info('settings', 'Dev mode: storing API key without encryption');
-            } else {
-              log.warn('settings', 'Encryption not available, storing API key in plain text');
-            }
+            // safeStorage truly unavailable (e.g. headless Linux without a
+            // keyring). Fall back to plaintext with a loud warning so the
+            // user notices in the log server.
+            log.warn('settings', 'safeStorage unavailable; storing secret in plaintext', { key });
             dataToSave[key] = value;
           }
         } else {

@@ -12,5 +12,5 @@ Flipboard-IDW-Feed/
 *.min.css
 package-lock.json
 test/example-automated-tests.js
-aider-ui.html
+gsx-create.html
 templates/

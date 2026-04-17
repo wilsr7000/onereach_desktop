@@ -15,9 +15,19 @@ const log = getLogQueue();
 // Search window instance (reused across searches)
 let searchWindow = null;
 
-// Cache for recent searches (avoids duplicate requests)
+// Cache for recent searches (avoids duplicate requests).
+// Capped to prevent unbounded growth on unique bursty queries.
 const searchCache = new Map();
 const CACHE_TTL = 60000; // 1 minute cache
+const SEARCH_CACHE_MAX = 100;
+
+function _setSearchCache(key, entry) {
+  if (searchCache.size >= SEARCH_CACHE_MAX) {
+    const oldestKey = searchCache.keys().next().value;
+    if (oldestKey !== undefined) searchCache.delete(oldestKey);
+  }
+  searchCache.set(key, entry);
+}
 
 // Timeout for search operations
 const SEARCH_TIMEOUT = 12000; // 12 seconds
@@ -194,8 +204,8 @@ async function search(query) {
 
               log.info('agent', 'Found', { length: results.length, detail: 'results' });
 
-              // Cache results
-              searchCache.set(cacheKey, {
+              // Cache results (bounded map)
+              _setSearchCache(cacheKey, {
                 results,
                 timestamp: Date.now(),
               });

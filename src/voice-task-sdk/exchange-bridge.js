@@ -2684,6 +2684,44 @@ async function initializeExchangeBridge(config = {}) {
       }
     });
 
+    // ---------------------------------------------------------------------
+    // Agent-builder progress: surface "Designing the agent..." / "Writing..."
+    // status while Claude Code is building a new agent in the background.
+    // The current command HUD entry is updated in-place so the user sees
+    // real progress instead of a silent ~40-second gap.
+    // ---------------------------------------------------------------------
+    exchangeBus.on('agent-builder:progress', (evt) => {
+      try {
+        const stageToMessage = {
+          start: 'Building agent...',
+          plan: 'Designing the agent...',
+          generate: 'Writing the agent...',
+          save: 'Saving and registering...',
+          done: 'Agent ready.',
+          failed: 'Agent build failed',
+        };
+        const message = stageToMessage[evt && evt.stage] || (evt && evt.message) || null;
+        if (!message) return;
+        if (global.showCommandHUD) {
+          global.showCommandHUD({
+            id: `agent-builder:${Date.now()}`,
+            transcript: evt && evt.originalRequest ? evt.originalRequest : message,
+            status: 'processing',
+            message,
+          });
+        }
+        // Also publish as a lifecycle event so any tool listening can react.
+        hudApi.emitLifecycle({
+          type: 'agent-builder:progress',
+          stage: evt && evt.stage,
+          message,
+          originalRequest: evt && evt.originalRequest,
+        });
+      } catch (err) {
+        log.warn('voice', 'agent-builder:progress forwarding failed', { error: err.message });
+      }
+    });
+
     // Initialize centralized HUD API (uses event bus, no direct bridge reference needed)
     hudApi.initialize();
 
@@ -2902,6 +2940,31 @@ function setupExchangeEvents() {
         log.info('voice', 'No agents for task, routing to agent-builder-agent');
 
         const rephraseAttempts = task.metadata?.rephraseAttempts || 0;
+
+        // Loop guard: if this task was auto-retried after a just-built agent
+        // and STILL no one can handle it, don't offer to build yet another
+        // agent. Tell the user honestly that the build didn't produce a
+        // working match and let them try a different phrasing instead.
+        if (task.metadata?.retriedAfterBuild) {
+          const loopMsg =
+            "I built a new agent but it still couldn't match your request. " +
+            "Try rephrasing what you want, or open the Agent Manager to review the new agent.";
+          addToHistory('assistant', loopMsg, 'system');
+          hudApi.emitResult({
+            taskId: task.id,
+            success: false,
+            message: loopMsg,
+            agentId: 'system',
+            needsClarification: true,
+          });
+          try {
+            const { getVoiceSpeaker } = require('../../voice-speaker');
+            const speaker = getVoiceSpeaker();
+            if (speaker) await speaker.speak(loopMsg, { voice: 'sage' });
+          } catch (_e) { /* non-fatal */ }
+          clearTimeout(safetyTimer);
+          return;
+        }
 
         // Quick classification: is this a rephrase or a genuine capability gap?
         const { getAllAgents } = require('../../packages/agents/agent-registry');

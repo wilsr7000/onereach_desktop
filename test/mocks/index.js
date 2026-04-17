@@ -28,5 +28,5 @@ export default {
 
   mockClaudeClient: llmClients.mockClaudeClient,
   mockOpenAIClient: llmClients.mockOpenAIClient,
-  mockAiderBridge: llmClients.mockAiderBridge,
+  mockGSXCreateEngine: llmClients.mockGSXCreateEngine,
 };

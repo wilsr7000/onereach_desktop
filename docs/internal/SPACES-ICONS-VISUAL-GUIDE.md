@@ -154,7 +154,7 @@ The icons should be:
 
 These files still use emoji icons (not updated yet):
 - video-editor.html
-- aider-ui.html  
+- gsx-create.html  
 - Other HTML interfaces
 
 The update focused on the **main Spaces interface** (clipboard viewer) where you manage spaces and assets.

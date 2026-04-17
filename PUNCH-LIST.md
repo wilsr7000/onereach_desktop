@@ -1,7 +1,7 @@
 # Onereach.ai Punch List
 
 > Master list of bugs, fixes, and small features to address.
-> Updated: April 2026 | Current Version: 4.7.1
+> Updated: April 2026 | Current Version: 4.7.2
 
 ---
 
@@ -46,6 +46,19 @@
   - Files: `clipboard-manager-v2-adapter.js`
 
 ### GSX Create
+- [x] **Migrate GSX Create from Aider to Claude Code** (v4.8.0)
+  - New `lib/gsx-create-engine.js` (305 lines) -- Aider-compatible interface over `claude-code-runner`
+  - New `lib/gsx-branch-manager.js` (240 lines) -- replaces inline `BranchAiderManager` in main.js
+  - One Claude Code session per branch with `--resume` for conversation continuity
+  - Removed Python runtime: deleted `aider-bridge-client.{js,ts}`, `aider_bridge/`, `src/aider/`, `aider-bridge-integration-example.ts`, `test/fixtures/aider-responses.js`, `test/e2e/gsx-create.spec.js.legacy`
+  - Simplified `dependency-manager.js`: dropped `checkAider()`, `installAllMissing` for aider-chat, Python/pipx now optional (not required)
+  - Renamed `aider-ui.html` -> `gsx-create.html`
+  - Removed `deps:get-aider-python` IPC handler + `window.deps.getAiderPython` preload bridge
+  - Removed `aider_bridge/**/*` from `package.json` asarUnpack
+  - Replaced `createMockAiderBridge` with `createMockGSXCreateEngine` in test mocks
+  - 19 new unit tests in `test/unit/gsx-create-engine.test.js` (all pass)
+  - Live smoke test: engine spawns bundled Claude Code, round-trip in ~5s, cost tracking works
+  - IPC channel names kept as `aider:*` for renderer compatibility (internal detail)
 - [ ] **Task queue persistence** - Verify working across all edge cases
 - [x] **Graceful shutdown** - Fixed in v3.8.12 with app quit handlers and forced window close
 - [ ] **HUD position** - Sometimes resets after restart
@@ -516,6 +529,69 @@
 
 ## Recently Completed
 
+- [x] **Orb agent-builder follow-ups: auto-retry, budget precheck, live progress, 3-way voice response** (v4.8.0)
+  - **Auto-retry:** After a successful Claude Code build, the original request is re-submitted through the exchange so the newly-registered agent can bid on it. Loop-guarded via a `retriedAfterBuild` metadata flag so a second failed match doesn't trigger another build. Success message becomes *"Done. I built X in about 30 seconds. Running your original request now..."*
+  - **Budget precheck:** `buildAgentWithClaudeCode` now calls `budgetManager.checkBudget($0.08 estimate)` before spending any tokens. If blocked, it returns `{ success: false, budgetBlocked: true }` instantly with no LLM calls; agent-builder surfaces this as a Playbooks re-ask ("we're close to the daily budget cap").
+  - **Live progress on the orb:** New `onProgress` callback in the builder emits `{ stage, message }` events at every phase (start/plan/generate/save/done/failed). `agent-builder-agent` forwards these through the exchange event bus as `agent-builder:progress` events, which the exchange-bridge relays to `showCommandHUD` -- so the user sees *"Designing the agent..."* -> *"Writing the agent..."* -> *"Saving and registering..."* instead of a silent 30-45s gap.
+  - **3-way voice response:** When the build is offered, the user can now say *"yes"* (build with Claude Code), *"playbook"* (use Playbooks instead), or *"no"* (polite decline). The offer message now includes the escape hatch inline: *"Or say 'playbook' to plan it first."*
+  - 16 new unit tests (46 total for the feature) + 21-assertion live smoke test covering all four paths with real Claude Code
+  - Files: `lib/claude-code-agent-builder.js`, `packages/agents/agent-builder-agent.js`, `src/voice-task-sdk/exchange-bridge.js`, `test/unit/claude-code-agent-builder.test.js`, `test/unit/agent-builder-claude-code.test.js`
+
+- [x] **Orb offers to build new agents with Claude Code** (v4.8.0)
+  - When the orb can't match any agent and the request is `easy` or `medium` effort, `agent-builder-agent` now offers **"Want me to build it right now? It'll take about 30 seconds."** instead of defaulting to the external WISER Playbooks drafting tool
+  - New `lib/claude-code-agent-builder.js` orchestrates `planAgent` (via bundled Claude Code) -> `generateAgentFromDescription` -> `agentStore.createAgent` in one call
+  - On user confirmation, the agent is built and persisted in ~30-45s for ~$0.03
+  - Built agent is immediately available for bidding; success message tells the user "try your original request again"
+  - `hard` and `not_feasible` requests still route to WISER Playbooks (unchanged)
+  - Claude Code build failures fall back gracefully to the Playbooks path with a re-ask prompt
+  - Incidental fix: `BaseAgent.create()` now binds `this` to the agent when calling `onExecute`, so helper methods like `this._assessFeasibility(...)` actually work. Previously these threw TypeError and the wrapper's catch-all returned a generic error -- affecting `agent-builder-agent` and `sound-effects-agent`.
+  - 30 new unit tests in `test/unit/claude-code-agent-builder.test.js` and `test/unit/agent-builder-claude-code.test.js`
+  - Live smoke test verified: built a "Dad Joke Agent" end-to-end from a voice-style request, agent persisted to store with keywords
+  - Files: `lib/claude-code-agent-builder.js` (new), `packages/agents/agent-builder-agent.js`, `packages/agents/base-agent.js`, `test/unit/claude-code-agent-builder.test.js` (new), `test/unit/agent-builder-claude-code.test.js` (new)
+
+- [x] **App-wide security, reliability, and hardening pass** (v4.8.0)
+  - **Security:**
+    - Redacted secrets in `settings:get-all` IPC (new `settings:get-all-sensitive` for settings UI only)
+    - Path confinement on `aider:read-file` / `write-file` / `delete-file` / `watch-file` (Spaces/userData/tmp only)
+    - Allow-list for `terminal:exec` (blocks dangerous shell patterns at the IPC boundary)
+    - Dev mode now always uses `safeStorage` when available (previously stored API keys plaintext)
+    - Allow-list for MCP commands in playbook executor (`npx`, `node`, `uvx`, `bunx` only) + sanitizes env secrets
+    - Removed partial API key logging (was leaking 15-char prefix to log server)
+    - Tightened OAuth popup allow-list: hostname-suffix match instead of URL substring (blocks `evil.com/oauth`)
+    - Ran `npm audit fix` (30 -> 5 vulns; remaining 5 are in devDeps only)
+    - Removed unused `@anthropic-ai/sdk` dependency
+  - **Reliability:**
+    - Wired `activeRequestId` in `GSXCreateEngine` so `shutdown()` actually cancels in-flight Claude Code processes
+    - Serialized `runPrompt` / `runPromptStreaming` calls so concurrent invocations don't corrupt session state
+    - `cancelAll()` on Claude Code runner invoked on app quit (no more orphan CLI processes)
+    - Playwright browser-automation `stop()` called on app quit
+    - `safeSend()` helper in `lib/safe-send.js` replaces ~6 risky `webContents.send` callsites that lacked destroy checks
+    - `aider:watch-file` capped at 100 concurrent watchers, all closed on quit
+    - Fixed `triggerGraphSync` TOCTOU race (concurrent callers now share a single in-flight promise)
+    - Fixed `tab-partitions-response` race (request-id matching instead of `ipcMain.once`)
+    - Logged every per-item graph sync failure (was silent `catch (_) {}`)
+    - Unified `browsing:get-auth-pool-domains` error shape
+  - **Memory:**
+    - Capped `_jobs` Map in playbook-executor (100 terminal jobs, oldest evicted)
+    - Capped `_htmlCache` in url-to-html (200 entries, LRU)
+    - Capped `searchCache` in webview-search-service (100 entries, LRU)
+    - `budget-manager` `setInterval` handle stored + cleared on shutdown
+    - Log server + Spaces API server stopped on app quit for clean port release
+  - **Cleanup:**
+    - Deleted `_legacy/` folder (unused)
+    - Removed hardcoded `/Users/richardwilson/` paths from test files
+    - Added `engines: { node: ">=20.0.0" }` to package.json
+    - Fixed version drift (PUNCH-LIST was 4.7.1, package.json 4.7.2)
+    - Updated docs to reference `gsx-create.html` (renamed in v4.8.0)
+  - Files: `main.js`, `preload.js`, `settings-manager.js`, `settings.html`, `budget-manager.js`, `dependency-manager.js`, `lib/gsx-create-engine.js`, `lib/graph-library-sync.js`, `lib/playbook-executor.js`, `lib/converters/url-to-html.js`, `lib/safe-send.js` (new), `packages/agents/webview-search-service.js`, `clipboard-manager-v2-adapter.js`, `recorder.js`, `package.json`, `test/test-metadata-api-integration.js`, `test-elevenlabs-integration.js`, `test-file-count.js`, docs
+
+- [x] **Upgrade `powerful` profile to Claude Opus 4.7** (v4.7.x)
+  - Replaced `claude-opus-4-6` with `claude-opus-4-7` in `lib/ai-service.js` (both `powerful` primary and `large` fallback)
+  - Added Opus 4.7 + Opus 4.6 pricing entries in `pricing-config.js` (both at standard Opus tier: $15/$75 per 1M)
+  - Updated `opus` / `claude-opus` / `claude-4-opus` aliases and partial-match fallback to resolve to 4.7
+  - Added missing `claude-haiku-4-5-20251001` pricing entry (used by `fast` profile)
+  - Updated doc comments in `memory-agent.js`, `anthropic-adapter.js`, `.cursorrules`, test files
+  - Bundled Claude Code upgraded to v2.1.112 (from 2.1.104) via `scripts/download-claude-code.js`
 - [x] **Microphone permission prompt loops on macOS (deployed app)** (v4.7.x)
   - Built app was missing `NSMicrophoneUsageDescription` / `NSCameraUsageDescription` in Info.plist
   - macOS couldn't persist the permission grant, so the dialog reappeared every time

@@ -4,14 +4,16 @@
  */
 
 const fs = require('fs');
+const path = require('path');
 
 console.log('=== ElevenLabs Integration Test ===\n');
 
+const ROOT = path.resolve(__dirname);
 const files = {
-  'video-editor.html': '/Users/richardwilson/Onereach_app/video-editor.html',
-  'video-editor.js': '/Users/richardwilson/Onereach_app/src/video/index.js', // NEW: Modular architecture
-  'elevenlabs-service.js': '/Users/richardwilson/Onereach_app/src/video/audio/ElevenLabsService.js', // NEW: Dedicated service
-  'preload-video-editor.js': '/Users/richardwilson/Onereach_app/preload-video-editor.js',
+  'video-editor.html': path.join(ROOT, 'video-editor.html'),
+  'video-editor.js': path.join(ROOT, 'src/video/index.js'), // NEW: Modular architecture
+  'elevenlabs-service.js': path.join(ROOT, 'src/video/audio/ElevenLabsService.js'), // NEW: Dedicated service
+  'preload-video-editor.js': path.join(ROOT, 'preload-video-editor.js'),
 };
 
 // Test 1: Check files exist
@@ -73,7 +75,7 @@ for (const func of backendFunctions) {
 
 // Test 6: Check IPC handler (NEW: In dedicated IPC file)
 console.log('\nTest 6: IPC handlers');
-const ipcCode = fs.readFileSync('/Users/richardwilson/Onereach_app/src/video/ipc/VideoEditorIPC.js', 'utf8');
+const ipcCode = fs.readFileSync(path.join(ROOT, 'src/video/ipc/VideoEditorIPC.js'), 'utf8');
 const hasIPCHandler = ipcCode.includes('video-editor:replace-audio-elevenlabs');
 console.log(`  ${hasIPCHandler ? '✓' : '✗'} IPC handler registered in VideoEditorIPC.js`);
 if (!hasIPCHandler) {

@@ -51,8 +51,8 @@ GSX Create is a powerful AI coding assistant that leverages Aider to help develo
 | **Graceful Shutdown** | Automatic state save on exit |
 
 ### Technical Details
-- **File**: `aider-ui.html`, `app-manager-agent.js`, `aider-bridge-client.js`
-- **Python Bridge**: `aider_bridge/` directory
+- **Files**: `gsx-create.html`, `app-manager-agent.js`, `lib/gsx-create-engine.js`, `lib/gsx-branch-manager.js`
+- **Backend**: Bundled Claude Code (via `lib/claude-code-runner.js`). The legacy Python/Aider bridge was removed in v4.8.0.
 - **Models**: Claude Opus 4.5, GPT-5.2 (256K context)
 
 ### Workflow Phases
@@ -739,7 +739,7 @@ Onereach_app/
 ├── renderer.js                # Main renderer
 │
 ├── # Core Features
-├── aider-ui.html              # GSX Create UI
+├── gsx-create.html            # GSX Create UI
 ├── video-editor.html          # Video Editor
 ├── clipboard-viewer.html      # Spaces/Clipboard Manager
 ├── settings.html              # Settings

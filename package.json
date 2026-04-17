@@ -96,9 +96,6 @@
   "build": {
     "appId": "com.gsx.poweruser",
     "productName": "Onereach.ai",
-    "asarUnpack": [
-      "aider_bridge/**/*"
-    ],
     "files": [
       "**/*",
       "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
@@ -214,6 +211,9 @@
     "type": "git",
     "url": "https://github.com/wilsr7000/onereach_desktop.git"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "devDependencies": {
     "@electron/notarize": "^3.0.1",
     "@eslint/js": "^9.39.2",
@@ -231,7 +231,6 @@
     "vitest-evals": "^0.5.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.0",
     "@duckdb/node-api": "^1.4.2-r.1",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",

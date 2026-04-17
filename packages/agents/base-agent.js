@@ -112,7 +112,13 @@ function create(config) {
      */
     async execute(task) {
       try {
-        const result = await onExecute(task, { memory, log });
+        // Call onExecute with `this` bound to the agent object so handlers
+        // defined with method shorthand can reach their sibling methods via
+        // `this._helper(...)`. Prior to v4.8.0 `onExecute` was invoked as a
+        // free function and `this` was undefined -- that silently caused
+        // agent-builder-agent and sound-effects-agent to throw on every
+        // call, with BaseAgent's catch-all returning a generic error message.
+        const result = await onExecute.call(agent, task, { memory, log });
 
         // Normalize: ensure `message` is always present
         if (result && typeof result === 'object') {

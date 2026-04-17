@@ -148,7 +148,7 @@ const ACTION_REGISTRY = {
       const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
       createStandardWindow({
         width: Math.min(1800, sw - 100), height: Math.min(1100, sh - 100),
-        title: 'GSX Create', preload: 'preload.js', file: 'aider-ui.html',
+        title: 'GSX Create', preload: 'preload.js', file: 'gsx-create.html',
       });
       return { success: true, message: 'GSX Create opened' };
     },

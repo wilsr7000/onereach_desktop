@@ -1,5 +1,8 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+
+const HOME = os.homedir();
 
 async function countFiles(dirPath) {
   let count = 0;
@@ -25,13 +28,12 @@ async function countFiles(dirPath) {
 }
 
 (async () => {
-  const orSpacesCount = await countFiles('/Users/richardwilson/Documents/OR-Spaces');
-  const desktopCount = await countFiles('/Users/richardwilson/Desktop');
+  const orSpacesCount = await countFiles(path.join(HOME, 'Documents/OR-Spaces'));
+  const desktopCount = await countFiles(path.join(HOME, 'Desktop'));
 
   console.log('OR-Spaces file count:', orSpacesCount);
   console.log('Desktop file count:', desktopCount);
 
-  // Check if OR-Spaces might be scanning parent directory
-  const documentsCount = await countFiles('/Users/richardwilson/Documents');
+  const documentsCount = await countFiles(path.join(HOME, 'Documents'));
   console.log('Documents file count:', documentsCount);
 })();

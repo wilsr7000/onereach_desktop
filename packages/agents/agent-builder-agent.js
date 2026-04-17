@@ -6,9 +6,12 @@
  * requests, and also serves as the fallback when the exchange detects a
  * capability gap.
  *
- * Instead of a robotic "I can't do that" message, this agent has a real
- * conversation about feasibility, effort, required integrations, and then
- * offers to open WISER Playbooks to draft the agent.
+ * When the user asks for something no agent can handle and the request looks
+ * feasible (`easy` or `medium`), this agent offers to build the new agent
+ * RIGHT NOW using the bundled Claude Code CLI (see
+ * `lib/claude-code-agent-builder.js`). For harder requests or when the
+ * Claude Code path fails, it falls back to opening WISER Playbooks for a
+ * manual build plan.
  */
 
 'use strict';
@@ -19,6 +22,45 @@ const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 
 const SPACES_API = 'http://127.0.0.1:47291';
+
+// Effort levels for which we offer the in-app Claude Code build path.
+// `hard` requests usually benefit from human planning in Playbooks first;
+// `not_feasible` we never try.
+const CLAUDE_CODE_FEASIBLE_EFFORTS = new Set(['easy', 'medium']);
+
+// Lazy requires so tests can override via setters below.
+let _claudeCodeBuilder = null;
+let _exchangeBus = null;
+
+function _getClaudeCodeBuilder() {
+  if (_claudeCodeBuilder) return _claudeCodeBuilder;
+  return require('../../lib/claude-code-agent-builder').buildAgentWithClaudeCode;
+}
+
+function _getExchangeBus() {
+  if (_exchangeBus) return _exchangeBus;
+  try {
+    return require('../../lib/exchange/event-bus');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Test-only: inject a fake Claude Code builder. Pass null to reset.
+ * @param {Function|null} fn
+ */
+function _setClaudeCodeBuilder(fn) {
+  _claudeCodeBuilder = fn || null;
+}
+
+/**
+ * Test-only: inject a fake exchange bus. Pass null to reset.
+ * @param {Object|null} bus
+ */
+function _setExchangeBus(bus) {
+  _exchangeBus = bus || null;
+}
 
 // System context passed to the feasibility LLM call so it can make
 // realistic assessments about what's easy/hard to build.
@@ -108,12 +150,31 @@ LOW confidence when: the user is asking an existing agent to do its job (play mu
       };
     }
 
-    // Check if this is a follow-up confirmation from a previous feasibility assessment
-    const lower = content.toLowerCase();
-    const isConfirmation = /^(yes|yeah|yep|sure|go ahead|do it|let's do it|ok|okay|please|build it|draft it|start|go for it)/i.test(lower);
+    // Check if this is a follow-up confirmation from a previous feasibility assessment.
+    // Three possible responses:
+    //   affirmative -> proceed with the currently-pending buildMethod
+    //   playbook    -> user prefers drafting in Playbooks instead of Claude Code
+    //   negative    -> user declines, we bow out politely
+    if (task.context?.pendingBuild) {
+      const lower = content.toLowerCase();
+      const isNegative = /^(no|nope|not now|cancel|forget it|skip it|never mind|nah)\b/i.test(lower);
+      const prefersPlaybooks = /\b(playbook|playbooks|draft|step by step|plan it out|not now)\b/i.test(lower);
+      const isAffirmative = /^(yes|yeah|yep|sure|go ahead|do it|let's do it|ok|okay|please|build it|draft it|start|go for it)/i.test(lower);
 
-    if (isConfirmation && task.context?.pendingBuild) {
-      return this._handleConfirmation(task.context.pendingBuild);
+      if (isNegative) {
+        return {
+          success: true,
+          message: "OK, no worries. Let me know if you want to try again.",
+        };
+      }
+      if (prefersPlaybooks) {
+        return this._handleConfirmation({ ...task.context.pendingBuild, buildMethod: 'playbook' });
+      }
+      if (isAffirmative) {
+        return this._handleConfirmation(task.context.pendingBuild);
+      }
+      // Ambiguous follow-up -- fall through to a fresh feasibility pass on the
+      // new content (user probably moved on to a different request).
     }
 
     // Check if this is a capability-gap fallback (injected by exchange-bridge)
@@ -147,6 +208,7 @@ LOW confidence when: the user is asking an existing agent to do its job (play mu
           pendingBuild: {
             originalRequest,
             assessment,
+            buildMethod: this._chooseBuildMethod(assessment),
           },
         },
       },
@@ -236,64 +298,228 @@ Effort guide:
   },
 
   /**
+   * Pick the build method to offer: 'claude-code' for easy/medium requests
+   * (we can build it in ~30s using the bundled CLI), 'playbook' otherwise.
+   * @param {Object} assessment
+   * @returns {'claude-code' | 'playbook' | 'none'}
+   */
+  _chooseBuildMethod(assessment) {
+    if (assessment.effort === 'not_feasible') return 'none';
+    if (CLAUDE_CODE_FEASIBLE_EFFORTS.has(assessment.effort)) return 'claude-code';
+    return 'playbook';
+  },
+
+  /**
    * Build a natural conversational response based on the assessment.
-   * Falls back to a template if the LLM didn't produce a good spoken response.
+   * For feasible requests we offer to build NOW with Claude Code; for harder
+   * requests we offer Playbooks as before.
    */
   _buildConversationalResponse(assessment, request) {
-    // Prefer the LLM's spoken response if it's good
-    if (assessment.spokenResponse && assessment.spokenResponse.length > 20) {
-      // Append the offer to open Playbooks if not already mentioned
-      const resp = assessment.spokenResponse;
-      if (!/playbook|plan|draft/i.test(resp)) {
-        return resp + ' Want me to open WISER Playbooks and start drafting it?';
-      }
-      return resp;
+    const method = this._chooseBuildMethod(assessment);
+
+    // not_feasible: explain why, offer alternative, don't prompt to build
+    if (method === 'none') {
+      const alt = assessment.alternativeSuggestion
+        ? ` Here's what we could do instead: ${assessment.alternativeSuggestion}.`
+        : ' Let me know if you want to explore a different approach.';
+      return `That would be really tough with what we have right now. ${assessment.reasoning}${alt}`;
     }
 
-    // Fallback templates by effort level
+    // Prefer the LLM's spoken response if it's good -- but append the right
+    // call-to-action (Claude Code now vs Playbooks draft) for the chosen method.
+    if (assessment.spokenResponse && assessment.spokenResponse.length > 20) {
+      const resp = assessment.spokenResponse.trim();
+      const alreadyAsksToBuild = /playbook|draft|build it now|should i build|want me to build|create it now/i.test(resp);
+      if (alreadyAsksToBuild) return resp;
+      if (method === 'claude-code') {
+        return resp + ' Want me to build it right now? It\'ll take about 30 seconds.';
+      }
+      return resp + ' Want me to open WISER Playbooks and start drafting it?';
+    }
+
+    // Fallback templates keyed on effort + method
     const shortRequest = request.length > 50 ? request.slice(0, 50) + '...' : request;
 
+    if (method === 'claude-code') {
+      switch (assessment.effort) {
+        case 'easy': {
+          const integrations = assessment.requiredIntegrations.length
+            ? `, using ${assessment.requiredIntegrations.join(' and ')}`
+            : '';
+          return `Good news -- that's actually a straightforward one to build${integrations}. About ${assessment.estimatedCostPerUse} per use. Want me to build it right now? (About 30 seconds. Or say "playbook" to plan it first.)`;
+        }
+        case 'medium': {
+          const similar = assessment.similarAgent
+            ? ` It's similar to the ${assessment.similarAgent}, so we have a good starting point.`
+            : '';
+          const needs = assessment.missingAccess.length
+            ? ` Heads-up: you'd need ${assessment.missingAccess.join(', ')} for it to actually work.`
+            : '';
+          return `That's definitely doable.${similar}${needs} About ${assessment.estimatedCostPerUse} per use. Want me to build it right now? (Or say "playbook" to plan it first.)`;
+        }
+        default:
+          return `I think I can build that for you. Want me to create the agent right now?`;
+      }
+    }
+
+    // Playbook fallback (effort === 'hard')
     switch (assessment.effort) {
-      case 'easy': {
-        const integrations = assessment.requiredIntegrations.length
-          ? `, using ${assessment.requiredIntegrations.join(' and ')}`
-          : '';
-        return `Good news -- that's actually a straightforward one to build${integrations}. It would cost about ${assessment.estimatedCostPerUse} per use. Want me to open WISER Playbooks and draft it out?`;
-      }
-
-      case 'medium': {
-        const needs = assessment.missingAccess.length
-          ? ` You'd need access to ${assessment.missingAccess.join(', ')}.`
-          : '';
-        const similar = assessment.similarAgent
-          ? ` It's similar to the ${assessment.similarAgent}, so we have a good starting point.`
-          : '';
-        return `That's definitely doable.${similar}${needs} About ${assessment.estimatedCostPerUse} per use. Want me to plan it out step by step in WISER Playbooks?`;
-      }
-
       case 'hard': {
         const missing = assessment.missingAccess.length
           ? ` and it needs ${assessment.missingAccess.join(', ')} which we'd need to set up`
           : '';
-        return `That's a bigger project -- it involves ${assessment.requiredIntegrations.join(', ') || 'some complex orchestration'}${missing}. But it's doable. Let me create a detailed build playbook so we can tackle it piece by piece. Want me to open WISER Playbooks?`;
+        return `That's a bigger project -- it involves ${assessment.requiredIntegrations.join(', ') || 'some complex orchestration'}${missing}. Let me create a detailed build playbook so we can tackle it piece by piece. Want me to open WISER Playbooks?`;
       }
-
-      case 'not_feasible': {
-        const alt = assessment.alternativeSuggestion
-          ? ` Here's what we could do instead: ${assessment.alternativeSuggestion}.`
-          : ' Let me know if you want to explore a different approach.';
-        return `That would be really tough with what we have right now. ${assessment.reasoning}${alt}`;
-      }
-
       default:
         return `I can look into building that for you. Want me to open WISER Playbooks and start drafting a plan for "${shortRequest}"?`;
     }
   },
 
   /**
-   * Handle user confirmation -- open WISER Playbooks with the build context.
+   * Handle user confirmation. Routes to either the in-app Claude Code build
+   * path or the Playbooks-draft path based on which offer was made.
    */
   async _handleConfirmation(pendingBuild) {
+    const { buildMethod } = pendingBuild;
+
+    if (buildMethod === 'claude-code') {
+      return this._buildWithClaudeCode(pendingBuild);
+    }
+    return this._buildWithPlaybooks(pendingBuild);
+  },
+
+  /**
+   * Broadcast a build-progress event via the exchange event bus so the
+   * orb (and any other listeners) can surface the current stage in its HUD.
+   * @private
+   */
+  _emitBuildProgress(event) {
+    try {
+      const bus = _getExchangeBus();
+      if (bus && typeof bus.emit === 'function') {
+        bus.emit('agent-builder:progress', event);
+      }
+    } catch (_e) {
+      // Progress events are advisory -- never block a build on telemetry.
+    }
+  },
+
+  /**
+   * Build the agent in-app using the bundled Claude Code CLI.
+   * Falls back to the Playbooks flow if the build fails for any reason.
+   * Emits `agent-builder:progress` events throughout so the orb can show status.
+   */
+  async _buildWithClaudeCode(pendingBuild) {
+    const { originalRequest, assessment } = pendingBuild;
+
+    log.info('agent-builder', 'Building agent with Claude Code', {
+      request: originalRequest.slice(0, 120),
+      effort: assessment.effort,
+    });
+
+    let build;
+    try {
+      const builder = _getClaudeCodeBuilder();
+      build = await builder(originalRequest, {
+        onProgress: (evt) => this._emitBuildProgress({ ...evt, originalRequest }),
+        generatorOptions: {
+          // Let the generator choose an appropriate template based on capabilities
+        },
+      });
+    } catch (err) {
+      log.warn('agent-builder', 'Claude Code build threw; falling back to Playbooks', {
+        error: err.message,
+      });
+      return this._buildWithPlaybooks(pendingBuild);
+    }
+
+    if (!build.success) {
+      // Budget-blocked builds are a distinct failure we surface plainly
+      if (build.budgetBlocked) {
+        log.warn('agent-builder', 'Claude Code build refused by budget precheck', {
+          reason: build.error,
+        });
+        return {
+          success: true,
+          message:
+            `I can't build that right now -- we're close to the daily budget cap. ` +
+            `Want me to draft a plan in WISER Playbooks instead (no cost)?`,
+          needsInput: {
+            prompt: 'Would you like to try Playbooks instead?',
+            agentId: this.id,
+            context: {
+              pendingBuild: { ...pendingBuild, buildMethod: 'playbook' },
+            },
+          },
+        };
+      }
+
+      log.warn('agent-builder', 'Claude Code build failed; offering Playbooks fallback', {
+        stage: build.stage,
+        error: build.error,
+      });
+      return {
+        success: true,
+        message:
+          `I tried to build it directly but hit a snag (${build.error || 'unknown error'}). ` +
+          `Want me to open WISER Playbooks instead so we can work through it step by step?`,
+        needsInput: {
+          prompt: 'Would you like to try Playbooks instead?',
+          agentId: this.id,
+          context: {
+            pendingBuild: { ...pendingBuild, buildMethod: 'playbook' },
+          },
+        },
+      };
+    }
+
+    const agentName = (build.agent && (build.agent.name || build.agent.displayName)) || 'new agent';
+    const elapsedSec = Math.max(1, Math.round((build.elapsedMs || 0) / 1000));
+
+    // Auto-retry the original request. The new agent is already registered
+    // with the exchange (via agent-store's `agent:hot-connect` event) so it
+    // can bid on the re-submitted task. The `retriedAfterBuild` flag
+    // prevents an infinite build->retry->build loop if the new agent still
+    // can't handle it.
+    let retryScheduled = false;
+    try {
+      const bus = _getExchangeBus();
+      if (bus && typeof bus.processSubmit === 'function') {
+        // Fire-and-forget -- don't block the "Done" message on the re-run
+        Promise.resolve(
+          bus.processSubmit(originalRequest, {
+            toolId: 'orb',
+            skipFilter: true,
+            metadata: {
+              retriedAfterBuild: true,
+              builtAgentId: build.agent && build.agent.id,
+            },
+          })
+        ).catch((err) => {
+          log.warn('agent-builder', 'Auto-retry after build failed', { error: err.message });
+        });
+        retryScheduled = true;
+      }
+    } catch (err) {
+      log.warn('agent-builder', 'Could not schedule auto-retry', { error: err.message });
+    }
+
+    const followUp = retryScheduled
+      ? 'Running your original request now...'
+      : 'Try your original request again and it should pick up.';
+
+    return {
+      success: true,
+      message:
+        `Done. I built "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'}. ` +
+        followUp,
+    };
+  },
+
+  /**
+   * Open WISER Playbooks with the build context (original flow).
+   */
+  async _buildWithPlaybooks(pendingBuild) {
     const { originalRequest, assessment } = pendingBuild;
 
     // Build a rich prompt for WISER Playbooks
@@ -339,22 +565,26 @@ Effort guide:
    * Build a detailed prompt to pre-fill in WISER Playbooks.
    */
   _buildPlaybookPrompt(request, assessment) {
+    const a = assessment || {};
     const parts = [
       `Build an agent for: "${request}"`,
       '',
-      `Effort: ${assessment.effort}`,
-      `Reasoning: ${assessment.reasoning}`,
-      `Estimated cost per use: ${assessment.estimatedCostPerUse}`,
+      `Effort: ${a.effort || 'unknown'}`,
+      `Reasoning: ${a.reasoning || ''}`,
+      `Estimated cost per use: ${a.estimatedCostPerUse || '~$0.01'}`,
     ];
 
-    if (assessment.requiredIntegrations.length) {
-      parts.push(`Required integrations: ${assessment.requiredIntegrations.join(', ')}`);
+    const required = Array.isArray(a.requiredIntegrations) ? a.requiredIntegrations : [];
+    const missing = Array.isArray(a.missingAccess) ? a.missingAccess : [];
+
+    if (required.length) {
+      parts.push(`Required integrations: ${required.join(', ')}`);
     }
-    if (assessment.missingAccess.length) {
-      parts.push(`Needs setup: ${assessment.missingAccess.join(', ')}`);
+    if (missing.length) {
+      parts.push(`Needs setup: ${missing.join(', ')}`);
     }
-    if (assessment.similarAgent) {
-      parts.push(`Similar to: ${assessment.similarAgent} (use as reference)`);
+    if (a.similarAgent) {
+      parts.push(`Similar to: ${a.similarAgent} (use as reference)`);
     }
 
     parts.push('');
@@ -442,3 +672,8 @@ Return JSON: { "spaceId": "<id or null>", "confidence": <0-1> }`,
     return false;
   },
 });
+
+// Test-only helpers for injecting mock dependencies. Accessed via
+// `require('./agent-builder-agent')._setClaudeCodeBuilder(fn)` etc.
+module.exports._setClaudeCodeBuilder = _setClaudeCodeBuilder;
+module.exports._setExchangeBus = _setExchangeBus;

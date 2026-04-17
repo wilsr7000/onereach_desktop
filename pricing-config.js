@@ -16,9 +16,16 @@
 const PRICING = {
   // =========== ANTHROPIC CLAUDE MODELS ===========
 
-  // Claude 4.5 (Latest - 2025)
+  // Claude 4.7 (Latest - 2026)
+  'claude-opus-4-7': { input: 15.0, output: 75.0, provider: 'anthropic' },
+
+  // Claude 4.6 (2025)
+  'claude-opus-4-6': { input: 15.0, output: 75.0, provider: 'anthropic' },
+
+  // Claude 4.5 (2025)
   'claude-opus-4-5-20251101': { input: 15.0, output: 75.0, provider: 'anthropic' },
   'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0, provider: 'anthropic' },
+  'claude-haiku-4-5-20251001': { input: 1.0, output: 5.0, provider: 'anthropic' },
 
   // Claude 4 (2025)
   'claude-opus-4-20250514': { input: 15.0, output: 75.0, provider: 'anthropic' },
@@ -81,17 +88,17 @@ const PRICING = {
 
 const MODEL_ALIASES = {
   // Claude shortcuts
-  'claude-opus': 'claude-opus-4-5-20251101',
+  'claude-opus': 'claude-opus-4-7',
   'claude-sonnet': 'claude-sonnet-4-5-20250929',
-  'claude-4-opus': 'claude-opus-4-5-20251101',
+  'claude-4-opus': 'claude-opus-4-7',
   'claude-4-sonnet': 'claude-sonnet-4-5-20250929',
   'claude-3-opus': 'claude-3-opus-20240229',
   'claude-3-sonnet': 'claude-3-sonnet-20240229',
   'claude-3-haiku': 'claude-3-haiku-20240307',
   'claude-3.5-sonnet': 'claude-3-5-sonnet-20241022',
-  opus: 'claude-opus-4-5-20251101',
+  opus: 'claude-opus-4-7',
   sonnet: 'claude-sonnet-4-5-20250929',
-  haiku: 'claude-3-haiku-20240307',
+  haiku: 'claude-haiku-4-5-20251001',
 
   // OpenAI shortcuts
   gpt4: 'gpt-4',
@@ -128,7 +135,7 @@ function resolveModelName(model) {
   if (MODEL_ALIASES[lowerModel]) return MODEL_ALIASES[lowerModel];
 
   // Partial match for Claude models
-  if (model.includes('opus')) return 'claude-opus-4-5-20251101';
+  if (model.includes('opus')) return 'claude-opus-4-7';
   if (model.includes('sonnet')) return 'claude-sonnet-4-5-20250929';
   if (model.includes('haiku')) return 'claude-3-haiku-20240307';
 

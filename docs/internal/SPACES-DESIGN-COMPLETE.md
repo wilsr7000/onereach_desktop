@@ -253,7 +253,7 @@ const { getIcon, getTypeIcon } = require('./lib/icon-library.js');
 The icon library and design system can be extended to:
 - clipboard-viewer.html (main clipboard interface)
 - video-editor.html (video editor UI)
-- aider-ui.html (GSX Create interface)
+- gsx-create.html (GSX Create interface)
 - All other HTML interfaces in the app
 
 ## Tufte Quote

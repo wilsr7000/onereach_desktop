@@ -13,6 +13,10 @@
 
 const fs = require('fs');
 const https = require('https');
+const path = require('path');
+const os = require('os');
+
+const HOME = os.homedir();
 
 // ============================================
 // Configuration
@@ -98,7 +102,7 @@ const testSamples = {
     isVision: true,
     fileName: 'enterprise-architecture.png',
     // Will load from OR-Spaces
-    imagePath: '/Users/richardwilson/Documents/OR-Spaces/items/9c5d01ff77d510a4f8b3829456756de1/thumbnail.png',
+    imagePath: path.join(HOME, 'Documents/OR-Spaces/items/9c5d01ff77d510a4f8b3829456756de1/thumbnail.png'),
     // Full image schema validation
     expectedFields: [
       'title', // Clear, descriptive title

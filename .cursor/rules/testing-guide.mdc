@@ -72,7 +72,7 @@ POST   /api/spaces/:id/items    -- Add item to space
 | Agent Manager | agent-manager.html | Tools > Manage Agents | -- |
 | Voice Orb | orb.html | Tools > Toggle Voice Orb | Cmd+Shift+O |
 | Video Editor | video-editor.html | Tools > Video Editor | -- |
-| GSX Create | aider-ui.html | Tools > GSX Create | Cmd+Shift+A |
+| GSX Create | gsx-create.html | Tools > GSX Create | Cmd+Shift+A |
 | Health Dashboard | app-health-dashboard.html | Help > App Health Dashboard | Cmd+Shift+H |
 | Black Hole | black-hole.html | Tools > Black Hole | Cmd+Shift+B |
 | Recorder | recorder.html | (from Video Editor) | -- |

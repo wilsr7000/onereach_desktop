@@ -360,7 +360,12 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // Settings API
+  // `getSettings()` returns secrets REDACTED (apiKey/secret/token values are
+  // replaced with '<redacted>' but keys remain). For the settings UI only,
+  // `getSettingsWithSecrets()` returns the raw values -- the main process
+  // gates access by verifying the calling window is settings.html.
   getSettings: () => ipcRenderer.invoke('settings:get-all'),
+  getSettingsWithSecrets: () => ipcRenderer.invoke('settings:get-all-sensitive'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   testLLMConnection: (config) => ipcRenderer.invoke('settings:test-llm', config),
 
@@ -1149,9 +1154,6 @@ contextBridge.exposeInMainWorld('deps', {
 
   // Cancel an ongoing installation
   cancelInstall: (depName) => ipcRenderer.invoke('deps:cancel-install', depName),
-
-  // Get the aider Python path
-  getAiderPython: () => ipcRenderer.invoke('deps:get-aider-python'),
 
   // Listen for installation output (streaming)
   onInstallOutput: (callback) => {

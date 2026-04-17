@@ -4,7 +4,7 @@
 
 AI-powered code and content generation tool with multi-branch workspaces, Meta Learning Cycle, constitutional memory, task queue, episodic memory, budget tracking, branch comparison, and error analysis.
 
-**Key files:** `aider-ui.html`, `aider-bridge-client.js`, `app-manager-agent.js`, `preload.js`
+**Key files:** `gsx-create.html`, `lib/gsx-create-engine.js`, `lib/gsx-branch-manager.js`, `app-manager-agent.js`, `preload.js`
 
 ## Prerequisites
 

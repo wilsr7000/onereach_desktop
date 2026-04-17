@@ -2,14 +2,13 @@
  * LLM Client Mocks
  * Part of the Governed Self-Improving Agent Runtime Testing Infrastructure
  *
- * Mock implementations for Claude, OpenAI, and Aider
+ * Mock implementations for Claude, OpenAI, and the GSX Create engine.
  */
 
 import { vi } from 'vitest';
 
 // Default mock responses
 const DEFAULT_COMPLETION = 'This is a mock LLM response.';
-const DEFAULT_CODE = '// Generated code\nfunction example() {\n  return true;\n}';
 
 /**
  * Create a mock Claude/Anthropic client
@@ -71,26 +70,42 @@ export function createMockOpenAIClient(options = {}) {
 }
 
 /**
- * Create a mock Aider bridge
+ * Create a mock GSX Create engine (drop-in replacement for the old Aider bridge mock).
+ * Exposes the same methods as lib/gsx-create-engine.js.
  */
-export function createMockAiderBridge(options = {}) {
-  const defaultCode = options.defaultCode || DEFAULT_CODE;
+export function createMockGSXCreateEngine(options = {}) {
+  const defaultResponse = options.defaultResponse || 'mocked assistant reply';
 
   return {
-    sendPrompt: vi.fn().mockImplementation(async (_prompt) => ({
+    start: vi.fn().mockResolvedValue({ success: true, version: '2.1.112', type: 'bundled' }),
+    initialize: vi.fn().mockResolvedValue({ success: true, repo_path: '/mock/path' }),
+    runPrompt: vi.fn().mockImplementation(async (_message) => ({
       success: true,
-      response: defaultCode,
-      filesChanged: ['src/example.js'],
-      tokensUsed: { input: 200, output: 100 },
+      response: defaultResponse,
+      output: defaultResponse,
+      usage: { input_tokens: 100, output_tokens: 50 },
+      sessionId: 'mock-session',
     })),
-
-    addFile: vi.fn().mockResolvedValue({ success: true }),
-    removeFile: vi.fn().mockResolvedValue({ success: true }),
-    getStatus: vi.fn().mockResolvedValue({ running: true, model: 'claude-3-opus' }),
-
-    isConnected: vi.fn().mockReturnValue(true),
-    connect: vi.fn().mockResolvedValue(true),
-    disconnect: vi.fn().mockResolvedValue(true),
+    runPromptStreaming: vi.fn().mockImplementation(async (_message, onToken) => {
+      if (typeof onToken === 'function') {
+        onToken(defaultResponse);
+      }
+      return {
+        success: true,
+        response: defaultResponse,
+        output: defaultResponse,
+        usage: { input_tokens: 100, output_tokens: 50 },
+        sessionId: 'mock-session',
+      };
+    }),
+    addFiles: vi.fn().mockResolvedValue({ success: true, files: [] }),
+    removeFiles: vi.fn().mockResolvedValue({ success: true, files: [] }),
+    getRepoMap: vi.fn().mockResolvedValue({ success: true, files: [], count: 0 }),
+    setTestCmd: vi.fn().mockResolvedValue({ success: true }),
+    setLintCmd: vi.fn().mockResolvedValue({ success: true }),
+    shutdown: vi.fn().mockResolvedValue({ success: true }),
+    isRunning: vi.fn().mockReturnValue(true),
+    sendRequest: vi.fn().mockResolvedValue({ success: true }),
   };
 }
 
@@ -115,16 +130,16 @@ export function createMockLLMJudge() {
 // Pre-configured mock instances
 export const mockClaudeClient = createMockClaudeClient();
 export const mockOpenAIClient = createMockOpenAIClient();
-export const mockAiderBridge = createMockAiderBridge();
+export const mockGSXCreateEngine = createMockGSXCreateEngine();
 export const mockLLMJudge = createMockLLMJudge();
 
 export default {
   createMockClaudeClient,
   createMockOpenAIClient,
-  createMockAiderBridge,
+  createMockGSXCreateEngine,
   createMockLLMJudge,
   mockClaudeClient,
   mockOpenAIClient,
-  mockAiderBridge,
+  mockGSXCreateEngine,
   mockLLMJudge,
 };

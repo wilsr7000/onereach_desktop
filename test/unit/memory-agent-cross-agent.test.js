@@ -3,7 +3,7 @@
  *
  * Tests the memory-agent's ability to:
  *   - Load all agent memories + user profile (context gathering)
- *   - Use Claude 4.6 Opus with adaptive thinking
+ *   - Use Claude 4.7 Opus with adaptive thinking
  *   - Apply cross-agent changes (profile + per-agent memory updates)
  *   - Handle view, update, delete, and clear_all flows
  *

@@ -255,16 +255,33 @@ class BudgetManager {
   }
 
   _startDailyCleanup() {
-    // Clean up old usage records (keep last 90 days)
-    setInterval(
+    // Clean up old usage records (keep last 90 days).
+    // Store the handle so shutdown() can clear it.
+    this._cleanupInterval = setInterval(
       () => {
         this._cleanupOldRecords();
       },
       24 * 60 * 60 * 1000
     ); // Daily
+    if (this._cleanupInterval.unref) this._cleanupInterval.unref();
 
     // Run once on startup after a delay
-    setTimeout(() => this._cleanupOldRecords(), 60000);
+    this._startupCleanupTimer = setTimeout(() => this._cleanupOldRecords(), 60000);
+    if (this._startupCleanupTimer.unref) this._startupCleanupTimer.unref();
+  }
+
+  /**
+   * Release periodic timers held by this instance. Safe to call multiple times.
+   */
+  shutdown() {
+    if (this._cleanupInterval) {
+      clearInterval(this._cleanupInterval);
+      this._cleanupInterval = null;
+    }
+    if (this._startupCleanupTimer) {
+      clearTimeout(this._startupCleanupTimer);
+      this._startupCleanupTimer = null;
+    }
   }
 
   _cleanupOldRecords() {

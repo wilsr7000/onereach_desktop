@@ -120,8 +120,8 @@ const result = await window.ai.chat({ profile: 'fast', messages: [...] });
 **Profile mapping:**
 - `fast` = Claude 4.5 Haiku (fallback: gpt-4o-mini)
 - `standard` = Claude Sonnet (fallback: gpt-4o)
-- `powerful` = Claude 4.6 Opus with adaptive thinking (fallback: gpt-4o)
-- `large` = gpt-4o (fallback: Claude 4.6 Opus)
+- `powerful` = Claude 4.7 Opus with adaptive thinking (fallback: gpt-4o)
+- `large` = gpt-4o (fallback: Claude 4.7 Opus)
 - `vision` = Claude Sonnet (vision)
 - `realtime` = gpt-4o-realtime-preview
 - `embedding` = text-embedding-3-small
@@ -129,7 +129,7 @@ const result = await window.ai.chat({ profile: 'fast', messages: [...] });
 
 Profiles are configurable in settings. Change the model for the whole app by updating one profile.
 
-**Extended thinking:** The adapter supports both adaptive thinking (Opus 4.6) and manual `budget_tokens` (older models). Pass `thinking: true` or `thinking: { type: 'adaptive' }` in any `ai.chat()` call to enable it. **Note:** `calendar-agent` and `daily-brief-agent` use the `standard` profile (Sonnet) for queries and composition -- Opus with thinking caused empty-content failures and is overkill for data-lookup tasks. Reserve `powerful` + `thinking: true` for tasks that genuinely need deep multi-step reasoning.
+**Extended thinking:** The adapter supports both adaptive thinking (Opus 4.6 / 4.7) and manual `budget_tokens` (older models). Pass `thinking: true` or `thinking: { type: 'adaptive' }` in any `ai.chat()` call to enable it. **Note:** `calendar-agent` and `daily-brief-agent` use the `standard` profile (Sonnet) for queries and composition -- Opus with thinking caused empty-content failures and is overkill for data-lookup tasks. Reserve `powerful` + `thinking: true` for tasks that genuinely need deep multi-step reasoning.
 
 ### State Persistence
 - Use localStorage for UI state (positions, preferences)

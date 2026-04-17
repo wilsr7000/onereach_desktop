@@ -830,9 +830,6 @@ Respond with JSON:
         // #endregion
         if (global.settingsManager) {
           const openaiKey = global.settingsManager.get('openaiApiKey');
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:openaiApiKey-check',message:'openaiApiKey lookup result',data:{hasKey:!!openaiKey,keyLength:openaiKey?openaiKey.length:0,keyPrefix:openaiKey?openaiKey.substring(0,7):'(empty)',keyType:typeof openaiKey},timestamp:Date.now(),hypothesisId:'B,C'})}).catch(()=>{});
-          // #endregion
           if (openaiKey) return { success: true, key: openaiKey };
 
           const llmKey = global.settingsManager.get('llmApiKey');

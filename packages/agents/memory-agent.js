@@ -1,13 +1,13 @@
 /**
  * Memory Management Agent - Cross-Agent Memory Orchestrator
  *
- * Central authority for ALL agent memory in the system. Uses Claude 4.6 Opus
+ * Central authority for ALL agent memory in the system. Uses Claude 4.7 Opus
  * (powerful profile with adaptive thinking) to reason about what to update.
  *
  * On every request, this agent:
  *   1. Loads the global user profile (Identity, Locations, Preferences, Key Facts)
  *   2. Loads ALL agent memory files (weather, calendar, daily-brief, DJ, etc.)
- *   3. Sends everything to 4.6 Opus with the user's request
+ *   3. Sends everything to 4.7 Opus with the user's request
  *   4. Opus decides which memories need to change and what the changes are
  *   5. Applies targeted edits to each relevant agent memory + user profile
  *
@@ -255,7 +255,7 @@ This agent is the only agent that modifies the user profile store or agent memor
    *
    * Pipeline:
    *   1. Load user profile + all agent memories
-   *   2. Send to 4.6 Opus with adaptive thinking
+   *   2. Send to 4.7 Opus with adaptive thinking
    *   3. Opus returns a structured plan: profile changes + per-agent changes
    *   4. Apply all changes, save, and log
    */
@@ -283,7 +283,7 @@ This agent is the only agent that modifies the user profile store or agent memor
         .join('\n')
         .slice(-800);
 
-      // 2. Send to 4.6 Opus with adaptive thinking
+      // 2. Send to 4.7 Opus with adaptive thinking
       const interpretation = await _deps.aiJson(
         `You are the Memory Orchestrator for a personal assistant app. You have access to the user's global profile AND every agent's individual memory file. Your job is to analyze the user's request and determine what needs to change -- across the ENTIRE system, not just one place.
 

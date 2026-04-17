@@ -25,8 +25,6 @@ const mockInvoke = vi.fn(async (channel, ...args) => {
       return { success: true };
     case 'deps:cancel-install':
       return { cancelled: true, name: args[0] };
-    case 'deps:get-aider-python':
-      return '/usr/bin/python3';
     default:
       return null;
   }
@@ -38,7 +36,6 @@ const depsAPI = {
   install: (name) => mockInvoke('deps:install', name),
   installAll: () => mockInvoke('deps:install-all'),
   cancelInstall: (name) => mockInvoke('deps:cancel-install', name),
-  getAiderPython: () => mockInvoke('deps:get-aider-python'),
   onInstallOutput: (cb) => mockOn('deps:install-output', cb),
 };
 
@@ -85,12 +82,7 @@ describe('IPC Dependencies - Install Lifecycle', () => {
     expect(deps.every((d) => d.installed)).toBe(true);
   });
 
-  it('Step 7: Get aider python path', async () => {
-    const path = await depsAPI.getAiderPython();
-    expect(path).toBeTruthy();
-  });
-
-  it('Step 8: Register install output callback', () => {
+  it('Step 7: Register install output callback', () => {
     const cb = vi.fn();
     depsAPI.onInstallOutput(cb);
     expect(mockOn).toHaveBeenCalledWith('deps:install-output', cb);

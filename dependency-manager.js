@@ -139,81 +139,27 @@ class DependencyManager extends EventEmitter {
   }
 
   /**
-   * Check if aider-chat is installed
-   */
-  checkAider() {
-    const result = {
-      name: 'aider-chat',
-      displayName: 'Aider Chat',
-      installed: false,
-      version: null,
-      path: null,
-      required: true,
-    };
-
-    // Check pipx list first
-    const pipxCheck = this.execCommand('pipx list');
-    if (pipxCheck.success && pipxCheck.output.includes('aider-chat')) {
-      result.installed = true;
-
-      // Try to get version
-      const versionMatch = pipxCheck.output.match(/aider-chat\s+([\d.]+)/);
-      if (versionMatch) {
-        result.version = versionMatch[1];
-      }
-    }
-
-    // Also check the expected path
-    const aiderPythonPath = path.join(
-      this.homeDir,
-      '.local',
-      'pipx',
-      'venvs',
-      'aider-chat',
-      'bin',
-      this.platform === 'win32' ? 'python.exe' : 'python'
-    );
-
-    if (fs.existsSync(aiderPythonPath)) {
-      result.installed = true;
-      result.path = aiderPythonPath;
-    }
-
-    // Check if aider command is available
-    if (!result.installed) {
-      const whichCmd = this.platform === 'win32' ? 'where' : 'which';
-      const aiderCheck = this.execCommand(`${whichCmd} aider`);
-      if (aiderCheck.success) {
-        result.installed = true;
-        result.path = aiderCheck.output.split('\n')[0].trim();
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * Check all dependencies
+   * Check all dependencies.
+   *
+   * As of v4.8.0, GSX Create runs on bundled Claude Code and no longer
+   * requires Python, pipx, or aider-chat. The Python checks are kept
+   * only because they may be useful for *other* future integrations;
+   * none are flagged as required, so an empty-handed system reports
+   * allInstalled: true.
    */
   checkAllDependencies() {
-    const python = this.checkPython();
-    const homebrew = this.checkHomebrew();
-    const pipx = this.checkPipx();
-    const aider = this.checkAider();
+    const python = { ...this.checkPython(), required: false };
+    const pipx = { ...this.checkPipx(), required: false };
+    const dependencies = [python, pipx];
 
-    const dependencies = [python, pipx, aider];
-
-    // Only include homebrew on macOS if Python is missing
     if (this.platform === 'darwin' && !python.installed) {
+      const homebrew = { ...this.checkHomebrew(), required: false };
       dependencies.splice(1, 0, homebrew);
     }
 
-    const allInstalled = dependencies.filter((d) => d.required).every((d) => d.installed);
-    const missing = dependencies.filter((d) => d.required && !d.installed);
-
     return {
-      allInstalled,
-      missing,
+      allInstalled: true,
+      missing: [],
       dependencies,
       platform: this.platform,
     };
@@ -234,17 +180,12 @@ class DependencyManager extends EventEmitter {
         win32: null,
         linux: null,
       },
-      pipx: {
-        darwin: 'python3 -m pip install --user pipx && python3 -m pipx ensurepath',
-        win32: 'python -m pip install --user pipx && python -m pipx ensurepath',
-        linux: 'python3 -m pip install --user pipx && python3 -m pipx ensurepath',
-      },
-      'aider-chat': {
-        darwin: 'pipx install aider-chat',
-        win32: 'pipx install aider-chat',
-        linux: 'pipx install aider-chat',
-      },
-    };
+    pipx: {
+      darwin: 'python3 -m pip install --user pipx && python3 -m pipx ensurepath',
+      win32: 'python -m pip install --user pipx && python -m pipx ensurepath',
+      linux: 'python3 -m pip install --user pipx && python3 -m pipx ensurepath',
+    },
+  };
 
     const platformCommands = commands[depName];
     if (!platformCommands) {
@@ -431,34 +372,13 @@ class DependencyManager extends EventEmitter {
   }
 
   /**
-   * Get the Python path for aider (used by BranchAiderManager)
+   * Deprecated: GSX Create no longer uses Aider/Python.
+   * Kept as a no-op to avoid breaking any caller that still imports it;
+   * returns the system Python path for callers that genuinely need it.
    */
   getAiderPythonPath() {
-    const aider = this.checkAider();
-
-    if (aider.path) {
-      return aider.path;
-    }
-
-    // Check common locations
-    const possiblePaths = [
-      path.join(this.homeDir, '.local', 'pipx', 'venvs', 'aider-chat', 'bin', 'python3'),
-      path.join(this.homeDir, '.local', 'pipx', 'venvs', 'aider-chat', 'bin', 'python'),
-    ];
-
-    if (this.platform === 'win32') {
-      possiblePaths.push(path.join(this.homeDir, '.local', 'pipx', 'venvs', 'aider-chat', 'Scripts', 'python.exe'));
-    }
-
-    for (const p of possiblePaths) {
-      if (fs.existsSync(p)) {
-        return p;
-      }
-    }
-
-    // Fall back to system Python
     const python = this.checkPython();
-    return python.path || 'python3';
+    return python.path || (this.platform === 'win32' ? 'python' : 'python3');
   }
 }
 

@@ -5045,8 +5045,7 @@ Write the structured summary now:`;
         let claudeKey = anthropicApiKey && anthropicApiKey.startsWith('sk-ant-') ? anthropicApiKey : null;
         let openaiKey = openaiApiKey && openaiApiKey.startsWith('sk-') ? openaiApiKey : null;
 
-        log.info('clipboard', 'Key detection - Claude', { arg1: !!claudeKey, arg2: 'OpenAI:', arg3: !!openaiKey });
-        if (claudeKey) log.info('clipboard', 'Claude key prefix', { detail: claudeKey.substring(0, 15) + '...' });
+        log.info('clipboard', 'Key detection', { hasClaude: !!claudeKey, hasOpenAI: !!openaiKey });
 
         if (!claudeKey && !openaiKey) {
           return {
