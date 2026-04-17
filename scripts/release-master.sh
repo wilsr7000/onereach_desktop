@@ -72,6 +72,33 @@ case $BUILD_MODE in
 esac
 echo ""
 
+# ---------------------------------------------------------------------------
+# Source notarization credentials if available. Without these, every release
+# silently ships UNSIGNED-for-TCC (Developer ID signed but not notarized), and
+# macOS won't persist microphone/camera permissions across launches.
+# The file is gitignored; keys live in ~/.env.notarization-style format:
+#   export APPLE_ID="..."
+#   export APPLE_TEAM_ID="..."
+#   export APPLE_APP_SPECIFIC_PASSWORD="..."
+# ---------------------------------------------------------------------------
+if [ -f ".env.notarization" ]; then
+    # shellcheck disable=SC1091
+    source ".env.notarization"
+fi
+
+if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
+    echo -e "${GREEN}Notarization enabled (Apple ID: $APPLE_ID, Team: $APPLE_TEAM_ID)${NC}"
+else
+    echo -e "${YELLOW}WARNING: Notarization credentials missing -- build will be signed but NOT notarized.${NC}"
+    echo -e "${YELLOW}  macOS will NOT persist microphone/camera permissions on unnotarized builds.${NC}"
+    echo -e "${YELLOW}  Populate .env.notarization with APPLE_ID, APPLE_TEAM_ID, APPLE_APP_SPECIFIC_PASSWORD.${NC}"
+    read -p "Continue without notarization? (y/n) [n]: " SKIP_NOTARIZE_OK
+    if [ "$SKIP_NOTARIZE_OK" != "y" ]; then
+        echo -e "${RED}Aborting; set up notarization credentials first.${NC}"
+        exit 1
+    fi
+fi
+
 # Check prerequisites
 echo -e "${YELLOW}Checking prerequisites...${NC}"
 
