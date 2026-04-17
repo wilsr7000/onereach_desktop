@@ -8,11 +8,13 @@
 ## 🔴 Critical / Blocking
 
 ### App Distribution
-- [ ] **Notarization not working** - App requires users to bypass Gatekeeper
-  - Apple Developer account needed ($99/year)
-  - App-specific password required
-  - See: `NOTARIZATION-SETUP.md`
-  - Files: `notarize-setup.sh`, `build-notarized.sh`
+- [ ] **Notarization not producing valid signatures** - macOS won't persist mic/camera TCC permissions, so users see the same permission dialog on every launch (known user-visible bug)
+  - **Root cause**: electron-builder 26.8.1 + Electron 41.2.1 produces bundles with nested code signatures that fail `codesign --verify --deep --strict`. Current `package.json` has `strictVerify: false` and `gatekeeperAssess: false` to silently skip this check, but the underlying malformed signatures cause Apple's notarization service to reject the bundle and cause macOS TCC to never persist the grant (`TeamIdentifier=not set`).
+  - **Fixed in this release cycle**: `scripts/release-master.sh` now sources `.env.notarization` so notarization *can* run (previously silently skipped for months). Creds: `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD`. The `.env.notarization` file is gitignored.
+  - **Still needs**: investigation of the electron-builder/Electron signing bug. Possible paths: (1) downgrade electron-builder to a known-working version, (2) upgrade to a newer one with this fixed, (3) add custom afterPack script that re-signs consistently with `--deep` + notarize manually. Until this is fixed, every release will continue to have the mic-dialog-loop on fresh installs.
+  - Files: `scripts/notarize.js`, `scripts/notarize-manual.js`, `scripts/release-master.sh`, `package.json` (build.mac config), `.env.notarization` (local, gitignored)
+  - Apple Developer account: active ($99/year)
+  - See: `NOTARIZATION-SETUP.md`, `notarize-setup.sh`, `build-notarized.sh`
 
 ### Build & Release
 - [x] ~~Checksum mismatch on auto-update~~ - Fixed in release-master.sh
