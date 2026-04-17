@@ -17580,6 +17580,46 @@ function createOrbWindow() {
     },
   });
 
+  // ---------------------------------------------------------------------
+  // Grant microphone/media permission at the Electron session level for
+  // the orb window. Without this, every `navigator.mediaDevices.getUserMedia`
+  // call goes through Chromium's default permission flow, which in turn
+  // triggers a fresh macOS TCC dialog -- the "click Allow and it pops up
+  // again" bug users were seeing.
+  //
+  // The system-level grant from `systemPreferences.askForMediaAccess` only
+  // unlocks macOS's TCC; the renderer still needs explicit permission to
+  // actually invoke getUserMedia.
+  // ---------------------------------------------------------------------
+  try {
+    orbWindow.webContents.session.setPermissionRequestHandler(
+      (_webContents, permission, callback) => {
+        if (
+          permission === 'media' ||
+          permission === 'microphone' ||
+          permission === 'audioCapture' ||
+          permission === 'camera'
+        ) {
+          callback(true);
+          return;
+        }
+        callback(false);
+      }
+    );
+    orbWindow.webContents.session.setPermissionCheckHandler(
+      (_webContents, permission) => {
+        return (
+          permission === 'media' ||
+          permission === 'microphone' ||
+          permission === 'audioCapture' ||
+          permission === 'camera'
+        );
+      }
+    );
+  } catch (err) {
+    console.warn('[VoiceOrb] Failed to install permission handlers:', err.message);
+  }
+
   // Attach structured log forwarding
   browserWindow.attachLogForwarder(orbWindow, 'voice');
 
