@@ -221,7 +221,7 @@
     "@vitest/coverage-v8": "^4.0.16",
     "adm-zip": "^0.5.16",
     "electron": "^41.0.4",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^26.9.0",
     "eslint": "^9.39.2",
     "husky": "^9.1.7",
     "prettier": "^3.8.1",
