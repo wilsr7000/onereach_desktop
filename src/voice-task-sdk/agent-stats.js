@@ -22,9 +22,12 @@ class AgentStatsTracker {
     this.statsDir = null;
     this.statsFile = null;
     this.historyFile = null;
+    this.timelineFile = null;
     this.stats = {};
     this.bidHistory = [];
+    this.taskTimeline = []; // Ring buffer of lifecycle events across tasks
     this.maxHistorySize = 100; // Keep last 100 bid events
+    this.maxTimelineSize = 2000; // Keep last 2000 lifecycle events (~100 tasks * ~20 events)
     this.initialized = false;
   }
 
@@ -39,6 +42,7 @@ class AgentStatsTracker {
       this.statsDir = path.join(userDataPath, 'agents');
       this.statsFile = path.join(this.statsDir, 'agent-stats.json');
       this.historyFile = path.join(this.statsDir, 'bid-history.json');
+      this.timelineFile = path.join(this.statsDir, 'task-timeline.json');
 
       // Ensure directory exists
       if (!fs.existsSync(this.statsDir)) {
@@ -51,10 +55,23 @@ class AgentStatsTracker {
         this.stats = JSON.parse(data);
       }
 
-      // Load existing history
+      // Load existing bid history
       if (fs.existsSync(this.historyFile)) {
         const data = fs.readFileSync(this.historyFile, 'utf8');
         this.bidHistory = JSON.parse(data);
+      }
+
+      // Load existing task timeline (lifecycle events). Missing file is fine --
+      // this file was introduced in Phase 0 of the agent-system upgrade.
+      if (fs.existsSync(this.timelineFile)) {
+        try {
+          const data = fs.readFileSync(this.timelineFile, 'utf8');
+          const parsed = JSON.parse(data);
+          if (Array.isArray(parsed)) this.taskTimeline = parsed;
+        } catch (_err) {
+          log.warn('voice', '[AgentStats] Timeline file corrupted, starting fresh');
+          this.taskTimeline = [];
+        }
       }
 
       this.initialized = true;
@@ -63,6 +80,7 @@ class AgentStatsTracker {
       log.error('voice', '[AgentStats] Init error', { error: error });
       this.stats = {};
       this.bidHistory = [];
+      this.taskTimeline = [];
       this.initialized = true;
     }
   }
@@ -74,6 +92,9 @@ class AgentStatsTracker {
     try {
       fs.writeFileSync(this.statsFile, JSON.stringify(this.stats, null, 2));
       fs.writeFileSync(this.historyFile, JSON.stringify(this.bidHistory, null, 2));
+      if (this.timelineFile) {
+        fs.writeFileSync(this.timelineFile, JSON.stringify(this.taskTimeline, null, 2));
+      }
     } catch (error) {
       log.error('voice', '[AgentStats] Save error', { error: error });
     }
@@ -269,6 +290,95 @@ class AgentStatsTracker {
     return this.bidHistory.filter((event) => event.bids.some((b) => b.agentId === agentId)).slice(0, limit);
   }
 
+  // ==================== TASK TIMELINE (Phase 0) ====================
+  // Persisted ring buffer of per-task lifecycle events. Replaces the
+  // in-memory-only event bus for consumers that need history -- e.g. the
+  // HUD reconstructing a task's bidding trail, the flow-extraction
+  // gateway replaying past events for an SSE subscriber.
+  //
+  // Event shape: { taskId, type, at, data? }
+  //   type examples: 'queued' | 'bids-collected' | 'assigned' |
+  //     'progress' | 'needs-input' | 'disambiguation' |
+  //     'completed' | 'failed' | 'cancelled' | 'consolidation:conflicts'
+  //
+  // This is append-only; prunes when the buffer exceeds maxTimelineSize.
+  // Keep event payloads small -- large data belongs in agent-memory, not
+  // here.
+
+  /**
+   * Append a lifecycle event for a task.
+   *
+   * @param {Object} event
+   * @param {string} event.taskId - Required. Task id the event belongs to.
+   * @param {string} event.type   - Required. Event type (see list above).
+   * @param {number} [event.at]   - Timestamp (ms); defaults to Date.now().
+   * @param {Object} [event.data] - Optional small JSON-safe payload.
+   * @returns {Object|null} The recorded event, or null on validation failure.
+   */
+  recordTaskLifecycle(event) {
+    if (!event || typeof event !== 'object') return null;
+    const { taskId, type } = event;
+    if (!taskId || typeof taskId !== 'string') return null;
+    if (!type || typeof type !== 'string') return null;
+
+    const full = {
+      taskId,
+      type,
+      at: typeof event.at === 'number' ? event.at : Date.now(),
+    };
+    if (event.data !== undefined) full.data = event.data;
+
+    // Append most-recent-last. Readers typically want chronological order.
+    this.taskTimeline.push(full);
+
+    // Trim oldest entries once we exceed the cap.
+    if (this.taskTimeline.length > this.maxTimelineSize) {
+      const overflow = this.taskTimeline.length - this.maxTimelineSize;
+      this.taskTimeline.splice(0, overflow);
+    }
+
+    this.save();
+    return full;
+  }
+
+  /**
+   * Get all lifecycle events for a task, oldest-first.
+   *
+   * @param {string} taskId
+   * @returns {Array}
+   */
+  getTaskTimeline(taskId) {
+    if (!taskId) return [];
+    return this.taskTimeline.filter((e) => e.taskId === taskId);
+  }
+
+  /**
+   * Get the most recent lifecycle events across all tasks.
+   *
+   * @param {number} [limit=100]
+   * @returns {Array}
+   */
+  getRecentLifecycle(limit = 100) {
+    if (limit >= this.taskTimeline.length) return [...this.taskTimeline];
+    return this.taskTimeline.slice(this.taskTimeline.length - limit);
+  }
+
+  /**
+   * Clear timeline entries older than the given cutoff.
+   * Useful for periodic housekeeping. Returns number removed.
+   *
+   * @param {number} olderThanMs
+   * @returns {number}
+   */
+  pruneTaskTimeline(olderThanMs) {
+    const cutoff = Date.now() - olderThanMs;
+    const before = this.taskTimeline.length;
+    this.taskTimeline = this.taskTimeline.filter((e) => e.at >= cutoff);
+    const removed = before - this.taskTimeline.length;
+    if (removed > 0) this.save();
+    return removed;
+  }
+
   /**
    * Clear stats for an agent
    */
@@ -283,6 +393,7 @@ class AgentStatsTracker {
   clearAllStats() {
     this.stats = {};
     this.bidHistory = [];
+    this.taskTimeline = [];
     this.save();
   }
 }
@@ -297,7 +408,17 @@ function getAgentStats() {
   return statsInstance;
 }
 
+/**
+ * Test-only: reset the singleton so the next getAgentStats() call
+ * produces a fresh tracker that re-reads disk state. Avoids cross-test
+ * singleton leakage when tests mock electron's userData path.
+ */
+function _resetAgentStatsForTests() {
+  statsInstance = null;
+}
+
 module.exports = {
   AgentStatsTracker,
   getAgentStats,
+  _resetAgentStatsForTests,
 };

@@ -1,7 +1,7 @@
 # Onereach.ai Punch List
 
 > Master list of bugs, fixes, and small features to address.
-> Updated: April 2026 | Current Version: 4.7.2
+> Updated: April 2026 | Current Version: 4.9.0
 
 ---
 
@@ -18,6 +18,14 @@
 
 ### Build & Release
 - [x] ~~Checksum mismatch on auto-update~~ - Fixed in release-master.sh
+- [x] **Auto-update + graceful-shutdown hardening pass** (v4.8.2) - Full audit and fix of every code path where upgrade/reboot could fail:
+  - **Single-instance lock**: Prevents double-launch race during ShipIt install. Second launch brings existing window to front instead of spawning a rogue process that holds ports and corrupts the bundle swap. (`main.js` `requestSingleInstanceLock()` + `second-instance` handler)
+  - **State saved before update-triggered quit**: Previously `isUpdatingApp` caused both `before-quit` AND `will-quit` to skip all cleanup so ShipIt could proceed -- but that also meant tabs, orb position, conversation state were lost across every update. New `_saveStateBeforeUpdate()` runs inside `performUpdateInstall` with a 1.5 s total budget, per-save 500 ms cap, then windows are destroyed and ShipIt proceeds. (`main.js`)
+  - **Pre-flight writable check**: `/Applications/Onereach.ai.app` and its parent are checked for W_OK before `quitAndInstall`. If read-only (corporate ACLs, wrong ownership), the user sees "Download Manually" dialog instead of silently failing and entering the retry loop. (`main.js` `_checkAppBundleWritable`)
+  - **Renderer install path now tracks version**: The in-app update banner's `install` IPC used to call `performUpdateInstall(null)`, meaning `lastAttemptVersion` was never written and `verifyUpdateOnStartup` couldn't detect a failed install. Now tracks `_lastDownloadedUpdate.version` in the `update-downloaded` event handler and passes it through. (`main.js`)
+  - **Failure dialog shown on 1st failure** (was 2nd): User is informed after the very first failed update instead of after two full cycles. Same "Download Manually / Try Again / Skip" options, phrased less alarmingly for first occurrence. (`main.js` `verifyUpdateOnStartup`)
+  - **`shutdown-ready` actually shortens the timer**: Previously a 1.5 s fixed delay regardless of whether the renderer was done. Now `shutdown-ready` IPC from renderer destroys immediately; added new `shutdown-blocked` handler that extends the budget to 5 s for long saves. (`browserWindow.js`)
+  - **Full audit report**: read-only audits cover detection/download/verify/install/recovery + shutdown lifecycle, state preservation, crash recovery, multi-instance. Remaining Medium findings documented for future work (overlapping checks, partial-release recovery, `offerManualDownload` dead code).
 - [ ] **Windows code signing** - Not implemented
   - See: `WINDOWS-SIGNING-GUIDE.md`
   - Requires EV certificate for SmartScreen trust
@@ -25,6 +33,186 @@
 ---
 
 ## 🟠 High Priority
+
+### Self-learning + temporal awareness + memory grooming (v4.8.2)
+- **Problem**: Even with reflection in place, the learning signals were disappearing. Low-quality judgments didn't change anything. Agent memory grew unbounded with duplicates. Every conversation felt like turn 1 -- no awareness of "yesterday you were working on X" or "at this time you usually do Y". User asked for a "remarkable self-learning" system that feels smart, not narrow.
+
+- **Six-part fix that turns signals into behaviour**:
+
+  1. **Memory Curator** (`lib/agent-learning/memory-curator.js`) -- periodic background grooming of per-agent memory files:
+     - Dedupes fuzzy duplicate lines (Jaccard >= 0.75 on token set) so repeat reflections don't pile up.
+     - Ages out dated entries past each section's `maxAgeDays` cap (Learning Notes 90d, Recent History 60d, Change Log 60d, Deleted Facts 30d).
+     - Key-value sections (Learned Preferences) collapse by key; newest-first-wins so corrections take effect.
+     - Respects per-agent 6h cooldown; caps sweep at 25 agents so a cron tick can't pin the main loop.
+     - User-edited sections (User Notes, About) are never touched -- hand-added facts survive forever.
+     - Runs automatically every 6 hours via `lib/agent-learning/index.js` `_runCuratorSweep`; also invalidates the retriever cache for any agent whose memory changed.
+
+  2. **Temporal Context** (`lib/temporal-context.js`) -- rolling model of user activity, persisted to `userData/temporal/state.json`:
+     - **RECENT**: last 20 interactions with bucket classification -- powers "most recent activity N min ago" signal.
+     - **HOURLY**: per-hour buckets for last 7 days -- powers "at this hour you usually ask about X" signal (fires when sample >= 3).
+     - **DAILY**: per-day buckets for last 14 days -- powers "yesterday's top topics" signal for cross-session continuity.
+     - Prunes automatically; footprint is KB not MB because we store counts not transcripts.
+     - `classifyBucket()` recognises: local-search / weather / directions / news / time / calendar / email / tasks / factual / playbook / other (kept in sync with slow-success-tracker).
+     - Recorded from `exchange-bridge.js` on every successful interaction. Failures are excluded so timeouts don't become fake habits.
+     - `getPromptSummary()` produces a 3-5 line text block injected into every bid evaluation (see #6).
+
+  3. **Relevance Retriever** (`lib/agent-learning/memory-retriever.js`) -- top-K memory retrieval instead of load-everything:
+     - Score = relevance (Jaccard on content words) * 0.6 + recency (exp decay, 30-day half life) * 0.25 + density * 0.1 + pin boost * 0.05.
+     - `[pin]` marker in any line keeps it reliably floated to the top regardless of age.
+     - 30s cache per agent so repeated queries inside a conversation don't re-read Spaces.
+     - `retrieveText({ agentId, query, topK })` returns just the top K lines as strings -- meant for direct prompt splicing.
+
+  4. **Reflection -> Memory feedback loop** (`lib/agent-learning/index.js`) -- the main closure:
+     - Subscribes to `learning:low-quality-answer` and `learning:negative-feedback` events.
+     - When LLM-as-judge flags a low-quality answer, writes a dated entry to the producing agent's "Learning Notes": *"2026-04-15: Low-quality answer (reflector 0.42) on '...'. Issues: ungrounded; vague."*
+     - When user says "that was wrong", writes an even stronger entry: *"2026-04-15: User flagged answer as wrong. Prior response: '...'. Input was: '...'."*
+     - Master Orchestrator's `buildEvaluationPrompt` already reads these back via `_getAgentStatsSnapshot`. Quality history now has teeth -- next bid evaluation sees the track record.
+
+  5. **omni-data-agent integration** (`packages/agents/omni-data-agent.js`):
+     - `getRelevantContext()` now always attaches `temporal` (summary string) when the temporal-context module has any data.
+     - When an agent is specifically named, also attaches `relevantMemory` -- top 5 lines from that agent's memory scored against the task content.
+     - Preferences + location continue to come from the live services. Net result: any agent calling `omniData.getRelevantContext(task, agentInfo)` now gets location + units + temporal + top-5-memory + live context in one shot.
+
+  6. **unified-bidder integration** (`packages/agents/unified-bidder.js`):
+     - `buildEvaluationPrompt` now includes a new "TEMPORAL CONTEXT" section between session summaries and current situation.
+     - Bidders see: *"Most recent activity (3 min ago): 'coffee shops near me' [local-search]. At this hour you usually ask about: calendar (5 past times). Yesterday's top topics: email, tasks, local-search. Time of day: morning, tue"*.
+     - Makes every bid evaluation temporally aware -- picks change when the same question at 8am means "morning briefing" vs at 3pm means "ad-hoc lookup".
+
+- **Test coverage** (+39 tests, all passing):
+  - `test/unit/agent-learning/memory-curator.test.js` -- 14 tests: dedup (case + whitespace insensitive), age-out with dated lines, undated lines preserved, size capping, keyvalue newest-first merge, score ranking by recency + density.
+  - `test/unit/agent-learning/memory-retriever.test.js` -- 7 tests: relevance ranking, recency boost, pin marker, zero-relevance drop, density cap, cache invalidation.
+  - `test/unit/temporal-context.test.js` -- 18 tests: bucket classification (13 cases), recording, recent top 3, hour-pattern surfaces at sample >= 3, yesterday top, time-of-day labels, prompt summary content, 7-day pruning.
+  - 3,759 of 3,762 total tests pass (same 3 pre-existing `omnigraph-client` failures unrelated).
+
+- **What the user feels**:
+  - Ask "coffee shops nearby" at 8am: agent sees "morning, tuesday, yesterday you asked about email + tasks + local-search" + "you usually ask about calendar at this hour" and routes better than a fresh instance would.
+  - Ask a follow-up question 5 min later: agent sees "most recent activity 5 min ago: 'coffee shops nearby'" and can resolve pronouns correctly.
+  - After the same class of query fails 2 times over a week, the slow-success tracker fires the "want me to build a dedicated agent?" suggestion.
+  - After a low-quality answer, the next bid evaluation for a similar query sees *"Low-quality answer (reflector 0.42) on '...'"* in that agent's memory, and picks differently.
+  - Memory stays bounded: every 6 hours the curator runs, dedupes fuzzy duplicates, ages out anything older than the section's retention, and caps sections. Hand-edited User Notes survive untouched.
+
+- **Remaining for v4.8.3**:
+  - Cross-agent learning propagation: when memory-agent learns "user moved to Berkeley" it should atomically update every agent that mentions location, not just the one speaking.
+  - Auto-retry when reflector returns low-quality AND a more-reliable backup exists. Requires TTS hold-back.
+  - Vector embeddings for memory retrieval (current token-Jaccard is good enough for the 90th percentile; embeddings would catch paraphrase matches).
+  - A live-app eval runner for the golden-task corpus (drives the real exchange, not just schema checks).
+
+### Reflection + evals: agents now judge their own answers (v4.8.2)
+- **Problem**: Everything we shipped before v4.8.2 improved *plumbing* (routing, timeouts, listening, location) but nothing actually looked at an agent's output and asked *"was that a good answer?"*. Search Agent could synthesize hallucinated answers from empty search results and the system would report `success: true`. No self-critique. No eval harness in production use. User called this out directly: "I think what might be missing in our agents is reflection."
+- **Fixes (six pieces)**:
+
+  1. **LLM-as-judge reflection layer** (`lib/agent-learning/answer-reflector.js`) -- runs asynchronously after every task that returns a final answer. Scores the output 0-1 on four axes:
+     - `grounded` -- does the answer use the evidence actually available? Or fabricate?
+     - `relevant` -- does it address the user's actual question?
+     - `complete` -- actionable and sufficient, or a vague non-answer?
+     - `confident` -- tone matches the strength of evidence?
+
+     Overall < 0.55 flags as low-quality. Fire-and-forget so it never blocks the UI. Coalesces duplicate reflections. Sample-rate hooks (high-conf agents get spot-checked, not every task). Opt-out via `agent.skipReflection = true` (Docs Agent already has its own RAG judge). Uses `fast` profile with 400 max tokens.
+
+  2. **Exchange-bridge wiring** (`src/voice-task-sdk/exchange-bridge.js`) -- after task settles, reflector gets `{ agent, task, result, evidence }` and emits:
+     - `learning:reflection` (generic, always for reflected tasks)
+     - `learning:low-quality-answer` (only when overall < threshold)
+     Reflection scores are stamped on `task.metadata.reflectionOverall/Scores/Issues` so Master Orchestrator's next `provideFeedback` call sees quality, not just success. Low-quality outcomes also feed the slow-success tracker as a "soft bust" so the proactive "build an agent for this" suggestion fires on pure quality failures, not just latency ones.
+
+  3. **Search Agent grounding + evidence return** (`packages/agents/search-agent.js`) -- after synthesis, a cheap in-band grounding check (`_checkGrounding`) compares answer content-words to retrieved snippets:
+     - `grounded` (>=45% overlap) -- trust the answer
+     - `weak` (>=20%) -- treat with caution
+     - `ungrounded` (<20%) -- likely fabricated
+     - `no-evidence` -- search returned nothing
+     The grade is returned in `result.data.groundingHint` and `result.data.searchResults` is populated with the top 7 evidence items so the reflector can properly score groundedness against actual sources, not against a claimed URL list.
+
+  4. **Golden-task eval harness** (`test/evals/fixtures/golden-tasks.json` + `test/evals/golden-tasks.eval.js`) -- checked-in regression corpus of 9 production tasks. Each entry: userInput, expected winning agent, expected behavior (answer/clarify/route), forbidden strings we never want back, and a `why` field explaining the historical context. Includes the Berkeley-coffee case and the "find me a dentist" implicit-local case. Runs in two modes: fast schema/static validation (`npm run test:evals`), and `EVAL_LIVE=1` for full-pipeline runs against the actual agent runtime before release.
+
+  5. **Outcome-based bid audit** (`packages/agents/master-orchestrator.js`) -- when `provideFeedback` runs post-settle, it now sees `task.metadata.bustCount`, `bustedAgents`, and `reflectionOverall`:
+     - Busted primaries get a Learning Notes entry explaining what happened.
+     - The backup that actually rescued the task gets credit ("Consider bidding higher on this class next time.")
+     - Reflector-low-quality answers get recorded on the producing agent's memory even when it returned `success: true`.
+     Net effect: the next time the Master Orchestrator evaluates bids for a similar task, `_getAgentStatsSnapshot` has both quantitative (success-rate, latency) and qualitative (reflection scores) signals baked into agent memory.
+
+  6. **User negative-feedback channel** (`src/voice-task-sdk/exchange-bridge.js`) -- voice shortcuts like *"that was wrong"*, *"that didn't answer my question"*, *"no that's not it"*, *"wrong answer"* are intercepted in `processSubmit` *before* routing. Emits `learning:negative-feedback` with the targeted agent (from conversation history) and broadcasts to all renderer windows. `InteractionCollector._onNegativeFeedback` flips the last interaction's `success: false`, updates `error: 'user_negative_feedback'`, and recomputes the agent's failure-rate signal. The loop closes: one explicit user "wrong" has more weight than three silent successes.
+
+- **Test coverage**:
+  - `test/unit/agent-learning/answer-reflector.test.js` -- 13 tests covering shouldReflect gating, score normalisation (clamp), low-quality detection, coalescing duplicates, error resilience (never throws), agent stats aggregation.
+  - `test/unit/search-agent-grounding.test.js` -- 5 tests: grounded/weak/ungrounded/no-evidence grading, empty input.
+  - `test/unit/agent-learning/interaction-collector.test.js` -- 5 new tests: 2 new subscribers, negative-feedback flipping success, reflection marking low-quality, reflection leaving good answers alone, unknown-agent ignored.
+  - `test/evals/golden-tasks.eval.js` -- 14 fixture schema/semantic tests that run on `npm run test:evals`.
+  - Total: 37 new tests, all passing. 3,720 of 3,723 in full suite pass (the 3 failures are pre-existing `omnigraph-client` unrelated to this work).
+
+- **Still ahead for v4.8.3**:
+  - Live pipeline runner for the golden-task eval (boots the Electron runtime, runs each task end-to-end, asserts forbidden-string absence + behaviour + reflection scores).
+  - Reflection-driven auto-retry: when a task comes back low-quality and a reasonable alternative agent exists, silently retry before the user hears the answer. Requires streaming TTS hold-back so we don't speak twice.
+  - HUD thumbs-down UI (clicks as well as voice for the negative-feedback channel).
+
+### Production-readiness push -- remaining context + UX gaps (v4.8.2)
+- [x] **Search Agent asks when stuck, instead of saying "I don't know"** -- If a location-implicit query comes in without any location data, Search Agent returns `needsInput` with "What city are you in?" so the orb opens the mic (awaitingInput state, 30s timeout) instead of the old silent-failure path. Same handling for post-search empty results: offers to let the user narrow it down. (`packages/agents/search-agent.js`)
+- [x] **Proactive "I could build an agent for this"** -- New `lib/agent-learning/slow-success-tracker.js` classifies slow-successes into coarse buckets (local-search / weather / directions / news / time / factual / other). After 2+ slow-successes in the same bucket, speaks a one-time offer to build a dedicated agent. Throttled per-bucket (24h) and globally (5 min) so it never nags. The suggestion is spoken via the existing `voice-speaker` 2.5s after the primary response, so the user hears it as a natural follow-up; the orb extends its listening window to 12s so the user can say "yes" / "build that" without tapping anything. (`lib/agent-learning/slow-success-tracker.js`, `src/voice-task-sdk/exchange-bridge.js`, `orb.html`, `preload-orb.js`)
+- [x] **OS-locale preferences** -- New `lib/system-preferences.js` derives intelligent defaults for units (°F/°C, mi/km, lb/kg), time format (12h/24h), date format (MDY/DMY/YMD), and week start (Sunday/Monday) from `app.getLocale()` + `app.getLocaleCountryCode()`. A Japanese user now gets metric + 24h + YMD + Sunday week-start out of the box; the old path assumed US defaults globally. `omni-data-agent.js` layers OS defaults under any user-overrides from `main.md`, so agents always have a full preference snapshot without asking. Always injected for Search Agent and Weather Agent. (`lib/system-preferences.js`, `packages/agents/omni-data-agent.js`, `main.js`)
+- **Test coverage**:
+  - `test/unit/system-preferences.test.js` -- 8 tests: US/UK/Japan/Germany/unknown-locale defaults, user overrides beat locale, cache invalidates on override.
+  - `test/unit/agent-learning/slow-success-tracker.test.js` -- 15 tests: bucket classification (local-search groups coffee/cafe/pharmacy/nearby/closest; weather groups forecast/rain/temperature), threshold logic, per-class cooldown, global cooldown, input validation.
+  - Updated `test/unit/agent-learning/interaction-collector.test.js` for new `learning:slow-success` subscription.
+- **Remaining gaps** (out of scope for this pass, candidate for v4.8.3):
+  - Deep active-app content (URL of active tab, selection, document text) for "summarize this" use cases. `situationContext` in the exchange-bridge provides window-level focus; content requires a separate per-product extractor.
+  - Agent-builder integration with `orb:proactive-suggestion` acceptance: today the user has to say "build that agent" explicitly. Natural-language acceptance ("yes", "sure", "okay do it") should auto-route to `agent-builder-agent` with the tracked `queryClass` and `agentIdea` as `capabilityGap` metadata.
+  - Memory of user preference overrides across sessions (today: in-memory only).
+
+### Live location for agents (v4.8.2)
+- [x] **Agents used a stale value from memory for location, not the user's actual current location** -- User complaint: "location should check my precise location not some saved location in memory unless precise is not available." This was the root cause of the coffee-shop-in-Berkeley incident.
+- **Before**: `omni-data-agent.js` was the only location source. It read `location` from `gsx-agent/main.md` -- a static markdown file the user edits manually. If you moved cities and didn't update the file, every agent answered as if you were still in the old one.
+- **After**: New `lib/location-service.js` main-process module maintains a live, source-ranked location:
+  1. **PRECISE** -- GPS/WiFi-assisted coords from `navigator.geolocation` (CoreLocation on macOS), pushed by the orb renderer on startup via `location:report-precise` IPC. Typical accuracy: 10-100m. TTL 10 min.
+  2. **IP** -- ipapi.co lookup at service boot and on demand. Accuracy: ~5-50km (city level). TTL 30 min.
+  3. **STORED** -- Last known value persisted to `userData/location/last-known.json` so the app has something usable on first launch when offline.
+  4. **DEFAULT** -- Value from `main.md` via omni-data-agent. Only used when everything else has failed.
+- **Freshness guarantees**: `getLocation({ freshMs })` lets callers force a refresh. `getSnapshot()` is synchronous (no network) for agents that need cheap prompt injection. Concurrent IP fetches are coalesced.
+- **Integration**:
+  - `packages/agents/omni-data-agent.js` `_mergeLocation()` layers the live snapshot over stored values so `query('location')`, `getAll()`, and `getRelevantContext()` all return the freshest precise data -- stored fields like home address are preserved but city/region/coords/timezone come from the live source.
+  - Location keyword list widened from 9 terms to 30+ covering nearby/around here/local/restaurant/cafe/pharmacy/directions/etc. Previous list missed "coffee" entirely -- the exact trigger for the Berkeley incident.
+  - `packages/agents/search-agent.js` `_isImplicitlyLocal()` detects queries about "here" that don't name a city ("coffee shops nearby", "find a pharmacy", "closest gym") and auto-enhances with the live city before hitting the Serper API.
+- **Permissions**: Orb session permits `geolocation`. macOS `Info.plist` gets `NSLocationUsageDescription` / `NSLocationWhenInUseUsageDescription` so the system prompt is clear about why we need it.
+- **Preload**: `window.api.getLocation(opts)` and `window.api.reportLocation(payload)` expose the service to any renderer.
+- **Renderer hook**: `orb.html` opportunistically calls `navigator.geolocation.getCurrentPosition()` on load and pushes the result. If denied, falls through to IP silently -- agents never see "unknown" unless the user is fully offline.
+- **Test coverage**:
+  - `test/unit/location-service.test.js` -- 9 tests: reportPrecise validation, source priority (precise > IP > stored > unknown), IP backfill, staleness fallback, sync snapshot purity.
+  - `test/unit/search-agent-local-detection.test.js` -- 16 tests: implicit-local phrases ("nearby", "around here", "closest"), local-noun + local-intent patterns, negative cases ("weather in Tokyo", "latest iPhone news", "capital of France").
+
+### Orb: asks follow-up questions but doesn't listen (v4.8.2)
+- [x] **Orb asks a question but immediately goes idle instead of waiting for your answer** -- User complaint: "System asks follow up questions which is great but is not listening for the answer."
+  - **Root cause**: Two paths exist for multi-turn conversation:
+    1. **Explicit `needsInput` protocol**: agent returns `{ needsInput: { prompt: '...' } }` -> orb transitions to `awaitingInput` with a 30s timeout. Works correctly.
+    2. **Implicit question in response text**: agent returns a message like *"Want me to open directions?"* or *"Would you like the full list?"* without setting `needsInput`. The response-router only looked at the `needsInput` flag, so these went through the standard dwell-listen path (5-6s minus a 2.5s TTS echo-suppression cooldown = ~3s effective listening). The user couldn't possibly answer in that window.
+  - **Most agents don't set `needsInput`** -- they just speak conversational questions. That's the path that was broken.
+- [x] **Fix**: `lib/orb/orb-response-router.js` now detects implicit questions from the response text:
+  - Trailing `?` (most reliable signal)
+  - Interrogative leads (`who`, `what`, `when`, `would you like`, `do you want`, `should i`, etc.)
+  - Follow-up offer phrases (`anything else`, `want me to`, `which one`, etc.)
+  - Only applied to short messages (<= 25 words) to avoid false positives in long paragraphs that just happen to contain "how".
+  - When detected, the route is flagged with `awaitAnswer: true` and uses `DWELL.IMPLICIT_QUESTION = 25000ms` (5x longer than the old `SHORT_INFO` dwell).
+  - `orb.html` sees `route.awaitAnswer` and sets `_pendingNeedsInput = true`, which routes through the same `awaitingInput` state as the explicit protocol: TTS speaks the question, a ready chime plays, the mic re-opens, and a 30s `AWAIT_TIMEOUT_MS` auto-idles if the user doesn't speak.
+  - Wired in both renderer paths: `agentHUD.onResult` (built-in agents) and the function-call / `respondToFunction` path.
+  - **Files changed**: `lib/orb/orb-response-router.js`, `orb.html`
+  - **Test coverage**: `test/unit/orb-response-router.test.js` -- 12 new tests covering trailing `?`, interrogative leads, follow-up offers, false-positive negatives, and priority over explicit `needsInput`.
+
+### Orb resilience (v4.8.2)
+- [x] **Orb hung for 2+ minutes on "find a coffee shop nearby"** - Root cause analysis from logs (incident 2026-04-17 17:07-17:09):
+  - User asked "Where is a good place around here to get coffee?" -- webview Google search returned ERR_ABORTED, DuckDuckGo returned 0 results -> agent answered empty (the "knew I was in Berkeley then didn't" moment -- Google's URL hinted at geolocation, but the agent couldn't use it)
+  - User re-asked "Find a good coffee shop nearby in Berkeley"
+  - 3 agents bid with identical confidence (0.92): Browser Agent, Browsing Agent, Search Agent. Master Orchestrator LLM said *"functionally equivalent, pick first qualified"* and picked Browser Agent
+  - Browser Agent (Desktop Autopilot Tier 2, Playwright) timed out after 60s
+  - Exchange cascaded sequentially -> Browsing Agent also timed out after 60s
+  - Exchange cascaded -> Search Agent (Serper API) succeeded in 6s
+  - Total user wait: 2m 10s
+- [x] **Fixes:**
+  - **Master Orchestrator now receives agent history in the bid prompt**: success rate, avg latency, failure count injected per bid. Prompt explicitly forbids the "functionally equivalent, pick first" tie-break and requires use of History data (prefer higher success rate, lower latency; API-based beats browser-automation for equivalent capability). (`packages/agents/master-orchestrator.js` `_getAgentStatsSnapshot` + updated prompt)
+  - **Default bid execution timeout dropped 60s -> 30s** (`src/voice-task-sdk/exchange-bridge.js` line 1183). Halves the user-perceived wait when an agent hangs. Agents that legitimately need more time set `executionTimeoutMs` explicitly.
+  - **Browser Agent + Browsing Agent pinned at 45s** via explicit `executionTimeoutMs` so they still get time for real automation but can't burn the full 60s before the cascade moves on.
+  - **Bust tracking per task**: `task.metadata.bustCount` and `bustedAgents[]` now accumulate across fallback attempts, so the learning loop can distinguish "fast success" from "succeeded after 2 timeouts". (`exchange-bridge.js` task:busted handler)
+  - **New `learning:slow-success` event**: When a task succeeds only after one or more busts, the exchange bus emits a signal that captures the winning agent, busted agents, and total wait time. The `InteractionCollector` records it as a partial capability gap so the opportunity evaluator can propose either (a) re-weighting bids for this task class or (b) a purpose-built agent. (`lib/agent-learning/interaction-collector.js` `_onSlowSuccess`)
+  - **`learning:interaction` now includes `bustCount` and `bustedAgents`**: downstream consumers have the full retry picture, not just the final winner.
+- [ ] **Still needs (future work)**:
+  - Location-aware fallback: when the agent encounters "around here" / "nearby" and has no location context, it should use IP geolocation or `navigator.geolocation` instead of returning empty results (the trigger for this incident). Wire `src/voice-task-sdk/context/providers/location.ts` into the unified-bidder context injection.
+  - Proactive agent-builder suggestion after N slow-successes for the same task class (e.g. "I've had trouble with coffee-shop queries a few times -- want me to build a location-aware agent?"). Hook into `agent-builder-agent` via `learning:slow-success` aggregation threshold.
+  - Fast-fail path in `search-agent` when both webview Google AND DuckDuckGo return 0 results: should escalate to "need more info from user" (e.g. "I couldn't find coffee shops -- what city are you in?") rather than returning empty to synthesis.
 
 ### Email Agent (IMAP)
 - [ ] **Email Agent IMAP Integration** - Replace stubbed email-agent with real IMAP/SMTP connectivity
@@ -530,6 +718,131 @@
 ---
 
 ## Recently Completed
+
+- [x] **Agent System v2 -- complete multi-phase upgrade** (v4.9.0)
+  - **Summary**: 8 flag-gated phases (0, 1, 1.5, 2, 3, 4, 5, 6) landed together under one version bump. Default behavior is unchanged; flip `AGENT_SYS_AGENT_SYS_V2=1` (or per-phase flags) to enable. 269 new unit tests, 637 in the aggregate regression suite, zero lint errors, zero behavioral regressions. Full per-phase details below.
+  - **What it delivers**:
+    - **Council aggregation** (`variant: 'council'`) -- multi-agent weighted scoring with conflict detection, consuming the existing `lib/evaluation/consolidator` that was previously only reachable via IPC.
+    - **Learned weights** in `unified-bidder.selectWinner` -- 0.5-1.5 multiplier from `lib/meta-learning/agent-memory` so overconfident agents must clear a weighted threshold.
+    - **Role/space voter pool** + **auto variant selector** -- tasks scoped to `meeting-agents` no longer solicit bids from `sound-effects-agent`; callers can omit `variant` and let a cheap classifier pick.
+    - **Per-criterion expertise** + **bid-time clarification** -- agents declare `expertise: { criterionId: 0.0-1.0 }` and may emit `needsClarification` to pause the auction for a user answer.
+    - **Adequacy loop** -- `needsInput.adequacy.maxTurns` bounds multi-turn elicitation so agents can probe until the answer is usable, not just until the user spoke once.
+    - **HTTP Gateway** on 127.0.0.1:47293 -- `POST /submit-task`, `GET /events/:taskId` (SSE with past-timeline replay), `POST /respond-input`, `POST /select-disambiguation`, `POST /cancel-task`, `GET /health`. CLI tools and future flow-runtime integration call the same auction the orb uses.
+    - **Named rubrics** -- `task.rubric: 'plan_review' | 'plan_proposal' | 'decision_record' | 'meeting_outcome'` auto-expands into `criteria[]`. Seven built-in rubrics in `lib/task-rubrics/` (pre-existing `code_generation`, `code_refactor`, `bug_fix`, `test_generation`, `documentation`, plus the four new planning/decision rubrics).
+    - **Seeded expertise** on `decision-agent`, `meeting-notes-agent`, `action-item-agent` so council mode against `meeting_outcome` / `decision_record` rubrics produces differentiated per-criterion scores out of the box.
+    - **Adoption guide** at [docs/internal/AGENT-SYSTEM-V2.md](docs/internal/AGENT-SYSTEM-V2.md) + learning-subsystem boundary doc at [docs/internal/LEARNING-SUBSYSTEMS.md](docs/internal/LEARNING-SUBSYSTEMS.md).
+  - **Principles preserved**:
+    - Every new code path is flag-gated and fail-open. No flag change, no behavior change.
+    - No new keyword classification. Per .cursorrules "Classification Approach", all routing stays LLM-based.
+    - Dependency injection over monkey-patching: council runner, bidder, and variant selector accept override hooks so tests run deterministic-millisecond without fighting CommonJS module resolution.
+    - One facade for learning: all outcome writes go through `lib/learning/index.js` `recordBidOutcome`. Meta-learning and agent-learning cannot drift apart again.
+    - Backups remain wired via the exchange's `task:busted` path; the learned-weight multiplier does NOT disrupt backup fallback.
+  - **Rollout recommendation**: enable in this order with a day between each -- `typedTaskContract` (observability), `roleBasedVoterPool` (cost savings), `councilMode` (new capability), `learnedWeights` (calibration), `variantSelector` (auto-dispatch), `perCriterionBidding` + `bidTimeClarification` (richer councils), `adequacyLoop`, `httpGateway` (when a remote caller exists).
+  - Files (new): `lib/agent-system-flags.js`, `lib/task.js`, `lib/learning/index.js`, `lib/agent-gateway.js`, `lib/exchange/task-store.js`, `lib/exchange/council-adapter.js`, `lib/exchange/council-runner.js`, `lib/exchange/voter-pool.js`, `lib/exchange/variant-selector.js`, `lib/exchange/adequacy-tracker.js`, `lib/task-rubrics/planning.js`, `docs/internal/LEARNING-SUBSYSTEMS.md`, `docs/internal/AGENT-SYSTEM-V2.md`, plus 11 new unit-test files.
+  - Files (edited): `src/voice-task-sdk/core/types.ts`, `src/voice-task-sdk/agent-stats.js`, `src/voice-task-sdk/exchange-bridge.js`, `lib/hud-api.js`, `lib/agent-ui-renderer.js`, `lib/orb/orb-response-router.js`, `lib/task-rubrics/index.js`, `packages/agents/unified-bidder.js`, `packages/agents/agent-registry.js`, `packages/agents/decision-agent.js`, `packages/agents/meeting-notes-agent.js`, `packages/agents/action-item-agent.js`, `package.json`.
+
+- [x] **Agent-system upgrade, Phase 6 -- HTTP Gateway + SSE shell for flow extraction** (v4.9.0)
+  - **Why:** The agent system should be callable by non-Electron tools (CLI, web dashboard, future flow runtime) without reinventing the pipeline. Phase 6 adds a thin HTTP shim that delegates every route to the same main-process functions the in-app orb and command HUD already use. Purely additive.
+  - **Routes** in [lib/agent-gateway.js](lib/agent-gateway.js): `POST /submit-task`, `POST /respond-input`, `POST /select-disambiguation`, `POST /cancel-task`, `GET /events/:taskId` (SSE with past-timeline replay then live broadcast), `GET /health`, CORS preflight.
+  - **SSE replay uses Phase 0's durable timeline**: on subscribe, the past `getTaskTimeline(taskId)` events are re-emitted, then the stream stays open for live `broadcastLifecycle` calls. Keep-alive heartbeat every 25s. Clean unsubscribe on client `close`.
+  - **Flag-gated + loopback-only**: disabled by default; only bound to 127.0.0.1 when `startAgentGateway()` is invoked. Default port 47293 (follows the log-server/Spaces-API pattern).
+  - **Verification**: 19 new tests in [test/unit/agent-gateway.test.js](test/unit/agent-gateway.test.js) covering the flag gate, all four POST routes with delegation + validation, CORS preflight, unknown-route 404, SSE replay ordering, live broadcast, cross-task isolation, and unsubscribe cleanup.
+  - **Unlocks**: a browser tab or CLI can now `curl -X POST /submit-task` and `curl -N /events/:taskId` to interact with the exact same auction the orb uses. Flow-runtime integration becomes a transport hookup, not a rewrite.
+  - Files: `lib/agent-gateway.js`, `test/unit/agent-gateway.test.js`
+
+- [x] **Agent-system upgrade, Phase 5 -- probeUntilAdequate multi-turn elicitation loop** (v4.9.0)
+  - **Why:** The existing `needsInput` protocol was single-shot: whatever the user said next got accepted regardless of whether it actually answered the question. Agents that needed a specific shape of answer (a number, a date range, a concrete example) had to reinvent the loop every time.
+  - **Adequacy tracker** ([lib/exchange/adequacy-tracker.js](lib/exchange/adequacy-tracker.js)): pure in-memory state module that tracks turn counts and history per task with a 5-minute TTL matching the existing needs-input expiry. Exposes `open`, `increment`, `shouldContinue`, `exhausted`, `clear`, `getEntry`, `getHistory`, `buildExhaustedResult`. Hard-caps loops at a task-defined `maxTurns` (defaults to 3).
+  - **Protocol additions** (agent-returned):
+    ```
+    needsInput: {
+      prompt: 'What's the target audience?',
+      adequacy: {
+        requires: 'a specific demographic',   // human-readable, surfaces in fallback
+        maxTurns: 3,
+        retryPrompt: 'Could you be more specific?'
+      }
+    }
+    ```
+  - **routePendingInput** in [src/voice-task-sdk/exchange-bridge.js](src/voice-task-sdk/exchange-bridge.js) now, when `adequacyLoop` flag is on AND the chained `needsInput` carries an adequacy block, increments the tracker, checks `shouldContinue`, and on max-turns exhaustion emits a graceful `adequacy-exhausted` result ("I couldn't get a clear answer..."). Agent voice and conversation history are preserved through the loop so the user doesn't notice the scaffolding.
+  - **Orb dwell constant**: new `DWELL.ADEQUACY_RETRY = 8000` in [lib/orb/orb-response-router.js](lib/orb/orb-response-router.js) -- longer than CONFIRMATION (3500) so the user can rephrase, shorter than IMPLICIT_QUESTION (25000) because the system is actively listening.
+  - **Verification**: 20 new tests in [test/unit/adequacy-tracker.test.js](test/unit/adequacy-tracker.test.js) covering open / increment / shouldContinue / exhausted / clear / maxTurns defaulting / history immutability / end-to-end loop.
+  - **Unlocks**: deeper conversational agents (interviewers, tutors, plan critics) can loop reliably without each reinventing the state machine. Phase 4's bid-time clarification + Phase 5's execution-time adequacy loop together give the system two complementary elicitation protocols.
+  - Files: `lib/exchange/adequacy-tracker.js`, `src/voice-task-sdk/exchange-bridge.js`, `lib/orb/orb-response-router.js`, `test/unit/adequacy-tracker.test.js`
+
+- [x] **Agent-system upgrade, Phase 4 -- Per-criterion expertise + bid-time clarification** (v4.9.0)
+  - **Why:** The biggest greenfield of the plan and the direct enabler for real plan-evaluation. Agents could previously only emit a single-scalar confidence per task; a rubric-style evaluation (Q1-Q22 in your original use case) had no contract for per-criterion judgment, and an agent with critical context missing had no way to ask for it before committing a score.
+  - **Agent registry additions** ([packages/agents/agent-registry.js](packages/agents/agent-registry.js)): two new optional properties -- `expertise: { criterionId: 0.0-1.0 }` (self-declared per-criterion confidence) and `canProbeAtBidTime: boolean` (opt-in to the bid-time clarification protocol). Validator enforces shape and numeric range so typos fail loudly.
+  - **Bid prompt enrichment** ([packages/agents/unified-bidder.js](packages/agents/unified-bidder.js)): when `perCriterionBidding` flag is on AND the task carries `criteria[]`, the bid prompt grows a CRITERIA block that surfaces each criterion and the agent's self-declared expertise percentage. Response shape grows `criteria: [{ id, score, rationale }]`. When `bidTimeClarification` flag is on AND the agent opted in via `canProbeAtBidTime`, the prompt adds a CLARIFICATION section and the response may include `needsClarification: { question, blocks }`. Parser preserves both new fields; old bids still work.
+  - **Council adapter per-criterion pass-through** ([lib/exchange/council-adapter.js](lib/exchange/council-adapter.js)): `bidToEvaluation` now consumes per-criterion scores from the bid when present, falling back to fanning the overall confidence when absent. Each criterion's comment carries the bid's per-criterion rationale instead of the generic overall reasoning. Phase 1's backward-compatible behavior is preserved for bids that don't opt in.
+  - **Council-runner bid-time clarification loop** ([lib/exchange/council-runner.js](lib/exchange/council-runner.js)): new `askUser` and `maxClarifyRounds` options. When any bid returns `needsClarification`, the runner emits a `bid:needs-clarification` lifecycle event, awaits the user's answer via the injected `askUser` handler, appends it to the task's `metadata.clarifications[]` and `conversationText`, and re-polls the SAME agents with the enriched task. Bounded loop (default 1 round) so a misbehaving agent can't stall the auction. Empty answers, askUser throwing, or maxRounds exhausted all cleanly break out.
+  - **Verification**: 20 new tests in [test/unit/per-criterion-bidding.test.js](test/unit/per-criterion-bidding.test.js) covering registry validation (9 tests), adapter per-criterion consumption + clamping + backward-compat (5), and the clarification loop with/without askUser, max-rounds guard, empty-answer early-break, thrown-error tolerance, and execution-task propagation (6).
+  - **Unlocks**: genuine rubric-style plan evaluation. An agent can now say "I'd bid 0.9 on clarity and 0.4 on risk, but I need to know X before I score feasibility" -- the auction pauses, asks the user, resumes. The council mode's weighted aggregate and conflict detection become meaningful.
+  - Files: `packages/agents/agent-registry.js`, `packages/agents/unified-bidder.js`, `lib/exchange/council-adapter.js`, `lib/exchange/council-runner.js`, `test/unit/per-criterion-bidding.test.js`
+
+- [x] **Agent-system upgrade, Phase 3 -- Role/space-based voter pool + auto variant selector** (v4.9.0)
+  - **Why:** Every enabled agent bid on every task, burning tokens when obvious specialists should have been the only bidders (a task into `meeting-agents` was pulling sound-effects-agent into the auction). Also, the caller had to know whether a task was winner-style or council-style -- that burden belonged to the system.
+  - **Voter pool** ([lib/exchange/voter-pool.js](lib/exchange/voter-pool.js)): `isAgentEligible`, `filterEligibleAgents`, `buildAgentFilter`. Policy: generalist agents (no declared `defaultSpaces`) always bid; specialist agents (with `defaultSpaces`) bid only when the task's `spaceId` is one of their declared spaces. `bidExcluded` still dominates. Cost-avoidance short-circuit: if filtering would drop nobody, return `null` so the exchange skips the filter path entirely.
+  - **Variant selector** ([lib/exchange/variant-selector.js](lib/exchange/variant-selector.js)): small cached LLM micro-call (~80 tokens, fast profile) classifies a task into `winner | council | lead_plus_probers`. 60s cache keyed on normalized task text. Falls back to `winner` on any error. Supports dependency injection via `options.classifier` so tests run instantly with zero LLM calls.
+  - **hud-api.submitTask wiring**: in [lib/hud-api.js](lib/hud-api.js), when `variantSelector` flag is on and caller didn't specify `variant`, the micro-classifier fills it in. When the resolved variant is `council` and `councilMode` flag is on, the council path fires. When `roleBasedVoterPool` flag is on and the task has a `spaceId`, the submit pipeline now pre-computes `metadata.agentFilter` from the voter pool so the exchange receives a scoped bidder list. The Phase 1 `_runCouncilSubmission` also filters its agent list via `filterEligibleAgents` when the flag is on.
+  - **Verification**: 29 new tests in [test/unit/voter-pool.test.js](test/unit/voter-pool.test.js) (13) and [test/unit/variant-selector.test.js](test/unit/variant-selector.test.js) (16) covering specialist/generalist policy, bidExcluded dominance, no-mutation, cache hits / TTL, invalid-variant fallback, classifier-throw fallback, and empty-content short-circuit.
+  - **Unlocks**: callers stop needing to predeclare the variant for normal use, and space-scoped tools (meeting recorder, GSX project editor) stop soliciting irrelevant bids.
+  - Files: `lib/exchange/voter-pool.js`, `lib/exchange/variant-selector.js`, `lib/hud-api.js`, `test/unit/voter-pool.test.js`, `test/unit/variant-selector.test.js`
+
+- [x] **Agent-system upgrade, Phase 2 -- Learned-weight consumer in unified-bidder.selectWinner** (v4.9.0)
+  - **Why:** The app had a full weighting model in `lib/meta-learning/agent-memory.js` (`getRecommendedWeight`, 0.5-1.5 range from win/success history) that was never consumed by the live auction. Every agent's 0.85 was taken at face value regardless of historical accuracy. Phase 2 closes that loop with a single hook in `selectWinner`.
+  - **selectWinner multiplier**: in [packages/agents/unified-bidder.js](packages/agents/unified-bidder.js) `selectWinner(bids)`, when the `learnedWeights` flag is on, each bid's raw confidence is multiplied by `getLearnedWeight(agentId)` from the Phase 1.5 facade. The effective confidence is clamped to `[0,1]` and used for both the 0.5 threshold check and re-sorting. Raw and effective values plus the weight are annotated onto the bid for HUD / A-B logging.
+  - **Fail-open**: any exception in the weighting branch (facade throws, flag module missing, etc.) falls back to the pre-Phase-2 raw-confidence path so learning glue can never break winner selection.
+  - **No data? No change**: for agents without enough historical samples, `getLearnedWeight` returns 1.0 and the behavior is identical to before.
+  - **Phase 1.5 facade glue**: [lib/learning/index.js](lib/learning/index.js) exposes `getLearnedWeight(agentId, context?)` which reads `lib/meta-learning/agent-memory.js` via its lazy singleton. The facade is the ONLY place the bidder or council path calls into learning, so later phases can swap the weighting store without touching the bidder.
+  - **Back-compat bid shape**: hook also handles the old-style exchange bids where the id lives on `bid.agent.id` instead of `bid.agentId`.
+  - **Verification**: 12 new unit tests (`test/unit/unified-bidder-learned-weights.test.js`) covering baseline-off, weighting-on, re-sort, threshold promotion/demotion, clamping, facade error fallback, and legacy bid shape. All 546 combined tests pass; zero regressions.
+  - **Unlocks**: real calibration of the auction. Agents that historically overconfident-bid on tasks they fail now need to actually clear the weighted 0.5 floor before winning.
+  - Files: `packages/agents/unified-bidder.js`, `test/unit/unified-bidder-learned-weights.test.js`
+
+- [x] **Agent-system upgrade, Phase 1.5 -- Learning subsystem consolidation + facade** (v4.9.0)
+  - **Why:** The repo has two overlapping learning stacks: `lib/meta-learning/` (weighting, governance, conflict resolution) keyed on agentType, and `lib/agent-learning/` (improvement loop, memory curation, interaction collection, playbook writer) keyed on agentId. Without a documented boundary, Phase 2 could have picked the wrong one, and future phases would keep drifting the two apart.
+  - **Authoritative boundary doc**: [docs/internal/LEARNING-SUBSYSTEMS.md](docs/internal/LEARNING-SUBSYSTEMS.md) defines each subsystem's job, keying convention, read/write surface, consumers, the one-way dependency rule (agent-learning may read meta-learning, not vice versa), and a decision table for "which subsystem for which question".
+  - **Single facade for every call site**: [lib/learning/index.js](lib/learning/index.js) exposes `recordBidOutcome({ agentId, taskId, confidence, won, success, durationMs, error, evaluationId? })` which fans out best-effort to agent-stats (raw counters), meta-learning (accuracy memory, only when an evaluationId is supplied), and agent-learning (interaction collector). An error in any one store cannot prevent the others from recording.
+  - **`getLearnedWeight(agentId)`** surfaces the meta-learning weight with a 1.0 fallback for missing data, clamped to `[0.5, 1.5]`. Consumed by Phase 2.
+  - **`getAgentSnapshot(agentId)`** composes stats + weight + memory for diagnostics / HUD.
+  - **Dependency injection over monkey-patching**: the council-runner (Phase 1) and the bidder (Phase 2) accept override hooks (`getBids`, `getLearnedWeight`) so tests can swap learning paths without fighting Vitest module resolution. Used throughout the new test suite.
+  - **Verification**: 18 new unit tests (`test/unit/learning-facade.test.js`) covering fan-out success, partial failure isolation, evaluationId gating, accuracy derivation, out-of-range weight clamping, and snapshot composition.
+  - **Unlocks**: Phase 2's hook lands on a stable facade; future phases (4, 5) write through the same entry point; a decision is recorded so the two stacks cannot keep diverging.
+  - Files: `lib/learning/index.js`, `docs/internal/LEARNING-SUBSYSTEMS.md`, `test/unit/learning-facade.test.js`
+
+- [x] **Agent-system upgrade, Phase 1 -- Council aggregation wired to the live auction** (v4.9.0)
+  - **Why:** `lib/evaluation/consolidator.js` already implemented weighted scoring, conflict detection (20-point spread threshold), per-criterion consolidation, and epistemic framing, but it only reached dynamically-generated EvalAgents via IPC -- never the 27 built-in agents that actually run. Phase 1 closes that split-brain with an adapter + a variant switch in the live submission path. Zero reconstruction.
+  - **Bid -> evaluation adapter**: [lib/exchange/council-adapter.js](lib/exchange/council-adapter.js) translates a `unified-bidder` bid (`{ confidence, reasoning, plan, hallucinationRisk, result }`) into the consolidator's evaluation shape (`{ agentType, agentId, overallScore, criteria[], strengths, concerns, suggestions }`). Pure data transformation -- no LLM calls. High-confidence reasoning becomes a strength, low-confidence becomes a concern, high hallucination risk is flagged. Task criteria are expanded per-bidder (Phase 4 will replace the fan-out with real per-criterion scores).
+  - **Council orchestration**: [lib/exchange/council-runner.js](lib/exchange/council-runner.js) exposes `runCouncil(task, agents, options)` -- it collects bids via the existing bidder, filters to qualifying bidders by a confidence floor (default 0.5), optionally executes informational agents in parallel with `maxParallel` + `executionTimeoutMs` guards, feeds evaluations to `EvaluationConsolidator.consolidate(...)`, and returns `{ aggregateScore, confidence, agentScores, consolidatedCriteria, conflicts, suggestions, weightingMode, epistemicFraming }`. Informational-only by default so side-effectful action agents don't fan out writes. Lifecycle callback emits `bids-collected`, `execution:started|done`, `consolidation:done|conflicts`.
+  - **hud-api.submitTask dispatch**: when `variant: 'council'` is set AND the `councilMode` flag is on, [lib/hud-api.js](lib/hud-api.js) short-circuits the normal transcript-filter / router / exchange.submit pipeline and calls the runner. Council lifecycle events are mirrored into the Phase 0 task timeline (`council:submitted`, `council:bids-collected`, `council:consolidation:done`, ...). Result is emitted via the normal `emitResult` channel so every tool (orb, recorder, command-HUD) renders it for free.
+  - **HUD renderer**: new `consolidatedEvaluation` spec type in [lib/agent-ui-renderer.js](lib/agent-ui-renderer.js) renders aggregate score, per-agent rows with weight bars and trend arrows, a conflict block with high/low scorers and resolution, up to 3 suggestions, primary drivers, and a "Review recommended" badge when the consolidator's uncertainty is high. HTML-escaped throughout.
+  - **Dependency injection in the runner**: `getBids` and `executeAgent` options let tests and alternative bidders (Phase 4 per-criterion) plug in without mocking. Side-effect: Phase 1 tests run deterministically against the real consolidator in milliseconds.
+  - **Verification**: 64 new unit tests across `test/unit/council-adapter.test.js` (36), `test/unit/council-runner.test.js` (17), `test/unit/agent-ui-consolidated-evaluation.test.js` (11). Every existing test (hud-api, consolidator, agent-registry-crud, agent-execute-contract, agent-conformance) still passes.
+  - **Behavior today**: identical to before. Everything is flag-gated. Set `AGENT_SYS_COUNCIL_MODE=1` and pass `variant: 'council'` in `submitTask` options to activate council aggregation.
+  - **Unlocks**: plan evaluation, multi-agent judgments, any task that genuinely benefits from multiple perspectives. Later phases (3 auto-variant-selector, 4 per-criterion bidding) layer on top without changing this contract.
+  - Files: `lib/exchange/council-adapter.js`, `lib/exchange/council-runner.js`, `lib/agent-ui-renderer.js`, `lib/hud-api.js`, `test/unit/council-adapter.test.js`, `test/unit/council-runner.test.js`, `test/unit/agent-ui-consolidated-evaluation.test.js`
+
+- [x] **Agent-system upgrade, Phase 0 -- Live-path Task contract, state consolidation, feature flags** (v4.9.0)
+  - **Why:** Foundation for the multi-phase agent-system upgrade (`.cursor/plans/agent-system-upgrade-phases_*`). Walkthrough of the code showed most "new work" was really integration of already-built subsystems (`lib/evaluation/consolidator.js`, `lib/meta-learning/*`, `lib/agent-learning/*`, bid-history persistence in `src/voice-task-sdk/agent-stats.js`) that weren't reaching the live auction path. Phase 0 lays the pins needed by every subsequent phase.
+  - **Feature flags (`lib/agent-system-flags.js`)**: mirrors the `lib/naturalness-flags.js` pattern -- env var -> settings store -> default OFF. Per-phase flags plus an umbrella `agentSysV2` for dogfooding. Explicit per-flag overrides win over the umbrella. 22 new unit tests (`test/unit/agent-system-flags.test.js`).
+  - **Typed Task contract**: extended `src/voice-task-sdk/core/types.ts` with optional `description`, `criteria[]`, `rubric`, `variant` ('winner' | 'council' | 'lead_plus_probers'), `toolId`, `spaceId`, `targetAgentId`, `parentTaskId`, `metadata`. Added `lib/task.js` with `buildTask` / `normalizeTask` / `toSubmitPayload` so main-process JS can depend on the shape without a TS build. 27 new unit tests (`test/unit/task-builder.test.js`).
+  - **Task store (`lib/exchange/task-store.js`)**: single home for the six state Maps spread across `lib/hud-api.js` (`_taskToolMap`, `_taskSpaceMap`, `_taskTimestamps`, `_hudItems`, `_disambiguationStates`, `_needsInputRequests`). Exposes CRUD for routing, bucketed HUD items with merge-update, disambiguation + needs-input with independent TTLs, and `sweep(now)` that reproduces the legacy stale-entry cleanup verbatim. 29 new unit tests (`test/unit/task-store.test.js`).
+  - **Durable task timeline**: extended `src/voice-task-sdk/agent-stats.js` (the existing on-disk agent stats store) with `recordTaskLifecycle`, `getTaskTimeline`, `getRecentLifecycle`, `pruneTaskTimeline`. Persists to `userData/agents/task-timeline.json` with a 2000-event ring buffer. Reused the bid-history persistence pattern rather than building a new event-log module. 12 new unit tests (`test/unit/agent-stats-lifecycle.test.js`).
+  - **Live-path wiring (dual-write, flag-gated)**: when `typedTaskContract` is on, `lib/hud-api.js` mirrors every routing mutation into the new task store and records lifecycle events via the timeline. Exchange-bridge's main auction submit also emits a `queued` lifecycle event. All writes are best-effort wrapped in try/catch so the new code can never break the auction.
+  - **Verification**: Phase 0 unit tests (87 new) all green; broader sweep across `hud-api`, `consolidator`, `agent-registry-crud`, `agent-execute-contract`, `agent-conformance` = 452 tests passing with zero regressions. No lint errors on any edited file.
+  - **Unlocks**: Phase 1 can wire the existing `EvaluationConsolidator` to the live auction via `task.variant`. Phase 2's learned-weight consumer has the bid-event log to read from. Phase 6's HTTP Gateway has the task-timeline for SSE replay. Nothing behaves differently yet -- all flags default off.
+  - Files: `lib/agent-system-flags.js`, `lib/task.js`, `lib/exchange/task-store.js`, `src/voice-task-sdk/agent-stats.js`, `src/voice-task-sdk/core/types.ts`, `lib/hud-api.js`, `src/voice-task-sdk/exchange-bridge.js`, `test/unit/agent-system-flags.test.js`, `test/unit/task-builder.test.js`, `test/unit/task-store.test.js`, `test/unit/agent-stats-lifecycle.test.js`
+
+- [x] **IDW opens to account picker instead of forwarding to the right account** (v4.8.2)
+  - Symptom: clicking an IDW in the menu sometimes landed on the OneReach account picker instead of the IDW; a second click on the same IDW usually worked.
+  - Root cause: every IDW click minted a fresh random session partition (`persist:tab-{ts}-{random}`) in `browser-renderer.js`. The multi-tenant store injected whatever `mult` cookie it had cached for that environment -- which, for users with multiple accounts, was often for a different account than the clicked IDW. OneReach then showed the account picker. The "second click works" behavior came from `multi-tenant-store.js` capturing the updated `mult` cookie after first-click login and serving it to the next click. This mirrored the earlier GSX bug fixed in v4.5.x ("GSX Menu Logs Into Wrong Account"); IDW tabs never got the per-identity partition treatment.
+  - Fix 1: menu click now forwards `idwId` and `environment` through `menu-action` -> `open-in-new-tab` (`lib/menu-sections/idw-gsx-builder.js`, `main.js` both `open-idw-url` handlers).
+  - Fix 2: renderer uses a stable partition `persist:idw-{idwId}` when `idwId` is present, so each IDW has its own persistent session across clicks and app restarts (`browser-renderer.js`).
+  - Fix 3: if a tab is already open on that IDW partition, focus it instead of spawning a duplicate.
+  - Fix 4: added `validIdwPattern` (`/^persist:idw-[a-zA-Z0-9_-]{1,64}$/`) to the partition allow-list in `multi-tenant:inject-token` so token injection into the new partition isn't rejected as an invalid format (`main.js`).
+  - Net behavior: first login in an IDW now persists in that IDW's partition; every subsequent click lands straight in the correct account, even after app restart (via existing `saveTabState` / `loadSavedTabs`).
+  - Files: `lib/menu-sections/idw-gsx-builder.js`, `main.js`, `browser-renderer.js`
 
 - [x] **Orb agent-builder follow-ups: auto-retry, budget precheck, live progress, 3-way voice response** (v4.8.0)
   - **Auto-retry:** After a successful Claude Code build, the original request is re-submitted through the exchange so the newly-registered agent can bid on it. Loop-guarded via a `retriedAfterBuild` metadata flag so a second failed match doesn't trigger another build. Success message becomes *"Done. I built X in about 30 seconds. Running your original request now..."*

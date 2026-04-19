@@ -31,6 +31,16 @@ const actionItemAgent = {
   estimatedExecutionMs: 2000,
   defaultSpaces: ['meeting-agents'],
 
+  // ── Per-criterion expertise (agent-system v2, Phase 4) ─────────────────
+  // Scores used by council mode when task.rubric === 'meeting_outcome'.
+  expertise: {
+    notes_quality: 0.4,      // sees notes as context, doesn't author them
+    decisions_captured: 0.3, // decisions are someone else's job
+    action_items: 0.95,      // this agent's core job -- highest confidence
+    unresolved: 0.5,         // captures "X needs follow-up" well
+    priority: 0.7,           // deadlines + owners give strong priority signal
+  },
+
   /**
    * Briefing contribution: pending/overdue action items.
    * Priority 5 = appears after email in the daily brief.

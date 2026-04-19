@@ -92,6 +92,25 @@ export type RoutingRuleInput = Omit<RoutingRule, 'id'> & { id?: string }
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'deadletter'
 
+/**
+ * Auction variant -- selects how the exchange consolidates bids.
+ * See plan Phase 1 / Phase 3.
+ *   - 'winner'            : single highest-confidence bidder (default, current behavior)
+ *   - 'council'           : multi-agent weighted consolidation via EvaluationConsolidator
+ *   - 'lead_plus_probers' : top bid leads, losing bidders attach probe suggestions
+ */
+export type TaskVariant = 'winner' | 'council' | 'lead_plus_probers'
+
+/**
+ * Per-criterion rubric entry used by council + per-criterion bidding.
+ */
+export interface TaskCriterion {
+  id: string
+  label: string
+  description?: string
+  weight?: number
+}
+
 export interface Task {
   id: string
   action: string
@@ -109,6 +128,26 @@ export interface Task {
   lastError?: string
   result?: TaskResult
   error?: string
+
+  // ── Agent-system upgrade additions (optional, additive; see plan) ─────────
+  /** Human-readable task description, distinct from raw `content`. */
+  description?: string
+  /** Per-criterion rubric for council / per-criterion bidding. */
+  criteria?: TaskCriterion[]
+  /** Named rubric id (looked up in lib/task-rubrics/) overridden by `criteria`. */
+  rubric?: string
+  /** Auction variant; undefined -> 'winner'. */
+  variant?: TaskVariant
+  /** Originating tool id (orb, command-hud, recorder, etc.). */
+  toolId?: string
+  /** Agent-space scope for role-based voter-pool filtering (Phase 3). */
+  spaceId?: string
+  /** Direct-dispatch target agent id (skips auction when set). */
+  targetAgentId?: string
+  /** Parent task id when this task is a subtask spawned during execution. */
+  parentTaskId?: string
+  /** Free-form metadata bag carried end-to-end. */
+  metadata?: Record<string, unknown>
 }
 
 export interface TaskResult {

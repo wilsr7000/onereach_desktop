@@ -258,6 +258,21 @@ function recordSuccessfulRoute(text, agentId, agentName, confidence) {
  * If the last exchange was with agent X and the new query is plausibly a follow-up,
  * agent X gets priority.
  */
+/**
+ * Lowercase + punctuation-strip + collapse whitespace for similarity
+ * checks (e.g., detecting a user repeating themselves).
+ * @param {string} s
+ * @returns {string}
+ */
+function _normalizeAffectInput(s) {
+  return (s || '')
+    .toString()
+    .toLowerCase()
+    .replace(/[.,!?;:'"()\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function _getConversationContinuityAgent() {
   // Find the most recent winning agent from history
   let lastAgent = null;
@@ -404,23 +419,35 @@ async function normalizeIntent(rawTranscript, conversationText, userProfileConte
   }
 
   try {
+    // DESIGN NOTE: We deliberately do NOT pass userProfileContext to this
+    // prompt. Previous versions did, and the LLM would "helpfully" inject
+    // profile facts (Home City, preferences) into the user's query --
+    // rewriting "coffee shops in the area" to "coffee shops in the
+    // Las Vegas area" based on a Home City field the user never mentioned.
+    //
+    // Location enrichment is the SEARCH AGENT's job (via the live
+    // location service + hasLocation check), not NormalizeIntent's. The
+    // normalizer should only fix speech-to-text errors and resolve
+    // pronouns -- nothing more. Keeping its scope narrow prevents a
+    // whole class of "system thinks I live somewhere I don't" bugs.
     const result = await ai.json(
       `You are a voice-command interpreter cleaning up speech-to-text output. Your ONLY jobs:
 1. Fix obvious speech-to-text errors (homophones, missing words, run-on phrases).
-2. Resolve pronouns ("it", "that", "this") using the conversation history.
+2. Resolve pronouns ("it", "that", "this", "they") using the conversation history.
 3. Output a clean, actionable version of what the user meant.
 
-CRITICAL: Almost NEVER set needsClarification=true. The system has specialized agents that handle ambiguity through competitive bidding. Commands like "start a meeting", "check my calendar", "play some music" are perfectly clear -- pass them through even if multiple interpretations exist.
+STRICT RULES:
+- DO NOT add any information the user did not say. Do not insert city names, times, dates, preferences, or any context not present in the raw transcript.
+- DO NOT expand "here", "nearby", "around here", "my area" into a specific place. Leave those words unchanged. Downstream agents have live location data and will handle geo-resolution themselves.
+- Almost NEVER set needsClarification=true. The system has specialized agents that handle ambiguity through competitive bidding. Commands like "start a meeting", "check my calendar", "play some music" are perfectly clear -- pass them through.
+- Only set needsClarification=true if the transcript is genuinely unintelligible gibberish (e.g., "the uh thing with the um").
 
-Only set needsClarification=true if the transcript is genuinely unintelligible gibberish (e.g., "the uh thing with the um") where no reasonable interpretation exists. If you can guess what the user meant, just clean it up and pass it through with your best interpretation.
-
-${conversationText ? `RECENT CONVERSATION:\n${conversationText.slice(-800)}\n` : ''}
-${userProfileContext ? `USER PROFILE:\n${userProfileContext}\n` : ''}
+${conversationText ? `RECENT CONVERSATION (for pronoun resolution only):\n${conversationText.slice(-800)}\n` : ''}
 RAW TRANSCRIPT: "${trimmed}"
 
 Return JSON:
 {
-  "intent": "clean version of what the user wants",
+  "intent": "clean version of what the user said, with NOTHING added",
   "needsClarification": false,
   "clarificationQuestion": null,
   "confidence": 0.0-1.0
@@ -558,6 +585,51 @@ async function routePendingInput(text, metadata) {
 
     // Agent needs MORE input (chained multi-turn)
     if (result.needsInput) {
+      // Phase 5 adequacy loop: when the agent declared an adequacy
+      // block, the tracker counts the user's latest answer and decides
+      // whether to keep looping. If maxTurns is reached we stop even
+      // if the agent keeps asking -- the agent's own agent-selected
+      // prompt will still surface so the user sees why the loop ended.
+      let adequacyExhausted = false;
+      try {
+        const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
+        if (isAgentFlagEnabled('adequacyLoop') && result.needsInput.adequacy) {
+          const { getAdequacyTracker } = require('../../lib/exchange/adequacy-tracker');
+          const tracker = getAdequacyTracker();
+          // Record this turn (the user just answered `text`).
+          tracker.increment(followUpTask.id, result.needsInput.prompt, text);
+          const decision = tracker.shouldContinue(followUpTask.id, result.needsInput.adequacy.maxTurns);
+          if (!decision.ok) {
+            adequacyExhausted = true;
+            tracker.exhausted(followUpTask.id);
+            const fallback = tracker.buildExhaustedResult(followUpTask.id);
+            hudApi.emitResult({
+              taskId: followUpTask.id,
+              success: false,
+              message: fallback.message,
+              agentId,
+              data: { adequacyExhausted: true, turns: fallback.turns, maxTurns: fallback.maxTurns },
+            });
+            tracker.clear(followUpTask.id);
+            return {
+              transcript: text,
+              queued: false,
+              handled: true,
+              classified: true,
+              action: 'adequacy-exhausted',
+              message: fallback.message,
+              suppressAIResponse: false,
+            };
+          }
+        }
+      } catch (_err) {
+        // Adequacy tracking must never break the existing needs-input path
+      }
+
+      if (adequacyExhausted) {
+        // Covered above; kept for explicit flow clarity.
+      }
+
       await handleNeedsInput(result, agentId, followUpTask.id, { html: result.html });
       return {
         transcript: text,
@@ -1178,22 +1250,38 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
               };
             }
 
-            // Execute through middleware: input normalization + error boundary + output normalization
+            // Execute through middleware: input normalization + error boundary + output normalization.
+            // Default dropped from 60s -> 30s: when an agent hangs, the exchange cascades to the
+            // backup bid, so a long timeout forces the user to wait for the first agent AND the
+            // backup. 30s is plenty for API/fast-path agents; slow agents (browser automation,
+            // Claude Code, etc.) set executionTimeoutMs explicitly.
             const result = await safeExecuteAgent(originalAgent, msg.task, {
-              timeoutMs: originalAgent.executionTimeoutMs || 60000,
+              timeoutMs: originalAgent.executionTimeoutMs || 30000,
               executeFn: (agent, safeTask, ctx) => executeWithInputSchema(agent, safeTask, ctx),
               executionContext,
             });
 
             clearInterval(heartbeatTimer);
 
+            // Invariant: when an agent returns `needsInput`, whatever text
+            // the user HEARS (TTS via `needsInput.prompt`) must match
+            // what the user SEES (`output` in the HUD text panel, chat
+            // bubble, etc.). Agents occasionally return a short
+            // `message` and a longer `needsInput.prompt`, causing the
+            // audio and text to diverge. Force them equal here so the
+            // guarantee holds system-wide, regardless of whether an
+            // individual agent remembered to unify them.
+            const finalOutput =
+              result && result.needsInput && result.needsInput.prompt
+                ? result.needsInput.prompt
+                : result.message || result.result;
             ws.send(
               JSON.stringify({
                 type: 'task_result',
                 taskId: msg.taskId,
                 result: {
                   success: result.success,
-                  output: result.message || result.result,
+                  output: finalOutput,
                   data: result.data,
                   html: result.html,
                   error: result.success ? undefined : result.error,
@@ -1495,13 +1583,19 @@ async function connectLocalAgent(agent, port) {
             v1: execTime,
           });
 
+          // Same invariant as the built-in path above: displayed text
+          // must match spoken text when needsInput is set.
+          const localOutput =
+            result && result.needsInput && result.needsInput.prompt
+              ? result.needsInput.prompt
+              : result.message || result.result || result.error;
           ws.send(
             JSON.stringify({
               type: 'task_result',
               taskId: msg.taskId,
               result: {
                 success: result.success,
-                output: result.message || result.result || result.error,
+                output: localOutput,
                 html: result.html,
                 error: result.success ? undefined : result.error,
                 needsInput: result.needsInput,
@@ -3171,6 +3265,119 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
     // Track execution start time for duration calculation
     taskExecutionStartTimes.set(task.id, Date.now());
 
+    // ==================== HANDOFF BRIDGE ====================
+    // Built for multi-voice mode (bridge phrase in outgoing agent's
+    // voice before the incoming agent speaks). With single Cap Chew
+    // voice now the default, buildHandoffPhrase() always returns null
+    // (same voice throughout -> no bridge needed). The tracker record
+    // call below still runs so the handoff-phrase module keeps a
+    // usable context if multi-voice is ever reintroduced.
+    try {
+      const {
+        getSharedTracker,
+      } = require('../../lib/naturalness/agent-transition-tracker');
+      const { buildHandoffPhrase } = require('../../lib/naturalness/handoff-phrases');
+      const { getAgent: _getAgentForBridge } = require('../../packages/agents/agent-registry');
+
+      const bridgeToolId = (task.metadata && task.metadata.source) || 'voice';
+      const tracker = getSharedTracker();
+      const fromAgentId = tracker.getLastAgent(bridgeToolId);
+      const toAgentForBridge = _getAgentForBridge(winner.agentId);
+      const fromAgentForBridge = fromAgentId ? _getAgentForBridge(fromAgentId) : null;
+
+      const bridgePhrase = buildHandoffPhrase({
+        fromAgentId,
+        toAgentId: winner.agentId,
+        fromAgent: fromAgentForBridge,
+        toAgent: toAgentForBridge,
+      });
+
+      if (bridgePhrase) {
+        const { getVoiceSpeaker } = require('../../voice-speaker');
+        const speaker = getVoiceSpeaker();
+        if (speaker) {
+          const outgoingVoice = getAgentVoice(fromAgentId, fromAgentForBridge);
+          log.info('voice', '[HandoffBridge]', {
+            fromAgentId,
+            toAgentId: winner.agentId,
+            phrase: bridgePhrase,
+            outgoingVoice,
+          });
+          await speaker.speak(bridgePhrase, { voice: outgoingVoice });
+          task.metadata = task.metadata || {};
+          task.metadata._handoffBridgeSpoke = true;
+        }
+      }
+
+      tracker.recordAgent(bridgeToolId, winner.agentId);
+    } catch (err) {
+      log.warn('voice', '[HandoffBridge] error', { error: err.message });
+    }
+
+    // ==================== CONFIRMATION GATE ====================
+    // Always on. Runs before agent execution and decides to:
+    //   - dispatch silently            (informational / confident low-risk)
+    //   - speak a short pre-action ack ("got it")   (confident actions)
+    //   - speak a confirmation question              (high-stakes / low-conf)
+    //
+    // The confirm-first decision narrates the warning and proceeds;
+    // real yes/no suspension is a future enhancement.
+    //
+    // If a handoff bridge spoke in the same turn AND the gate's
+    // decision is a lightweight ACK, the ACK is skipped so the user
+    // doesn't hear "passing you to X" + "got it" back-to-back. A
+    // CONFIRM decision always fires (safety).
+    try {
+      const {
+        evaluateConfirmationGate,
+        applyGateEffects,
+        DECISIONS: GATE_DECISIONS,
+      } = require('../../lib/naturalness/confirmation-gate');
+      const { getAgent } = require('../../packages/agents/agent-registry');
+      const gateAgent = getAgent(winner.agentId);
+
+      const gate = evaluateConfirmationGate({
+        task,
+        agent: gateAgent,
+        winnerConfidence: winner.confidence ?? 1.0,
+        intentConfidence: (task.metadata && task.metadata.intentConfidence) ?? 1.0,
+        hasPriorContext: typeof getRecentHistory === 'function' && getRecentHistory().length > 0,
+        planSummary: winner.plan || winner.reasoning || '',
+      });
+
+      const skipAckAfterHandoff =
+        task.metadata &&
+        task.metadata._handoffBridgeSpoke &&
+        gate.decision === GATE_DECISIONS.ACK;
+
+      log.info('voice', '[ConfirmationGate] decision', {
+        taskId: task.id,
+        agentId: winner.agentId,
+        decision: gate.decision,
+        stakes: gate.stakes,
+        reason: gate.reason,
+        willSpeak: Boolean(gate.phrase) && !skipAckAfterHandoff,
+        skippedForHandoff: Boolean(skipAckAfterHandoff),
+      });
+
+      if (gate.phrase && !skipAckAfterHandoff) {
+        const { getVoiceSpeaker } = require('../../voice-speaker');
+        const speaker = getVoiceSpeaker();
+        if (speaker) {
+          const gateVoice = getAgentVoice(winner.agentId, gateAgent);
+          await applyGateEffects(gate, {
+            speak: (text, opts) => speaker.speak(text, { ...opts, voice: gateVoice }),
+            logWarn: (msg, meta) =>
+              log.warn('voice', `[ConfirmationGate] ${msg}`, meta),
+          });
+          task.metadata = task.metadata || {};
+          task.metadata._confirmationGateSpoke = true;
+        }
+      }
+    } catch (err) {
+      log.warn('voice', '[ConfirmationGate] error', { error: err.message });
+    }
+
     // DEFERRED ACK - only speak if the task doesn't complete quickly.
     // For fast tasks (pause, time, spelling), the result arrives in <2s
     // and speaking an ack + result feels like a double response.
@@ -3184,6 +3391,17 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
         ackMessage = agent.acks[Math.floor(Math.random() * agent.acks.length)];
       } else if (agent?.ack) {
         ackMessage = agent.ack;
+      }
+
+      // Suppress the deferred ack if the confirmation gate OR the
+      // handoff bridge already spoke a pre-action phrase. Hearing
+      // "got it" then "let me check..." (or "passing you to X" then
+      // "let me check...") reads as a double response.
+      if (
+        task.metadata &&
+        (task.metadata._confirmationGateSpoke || task.metadata._handoffBridgeSpoke)
+      ) {
+        ackMessage = null;
       }
 
       if (ackMessage) {
@@ -3372,6 +3590,8 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
 
     // ── AGENT LEARNING: emit interaction data for self-improvement system ──
     try {
+      const bustCount = task.metadata?.bustCount || 0;
+      const bustedAgents = task.metadata?.bustedAgents || [];
       exchangeBus.emit('learning:interaction', {
         taskId: task.id,
         agentId,
@@ -3381,8 +3601,95 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
         error: safeResult.error || null,
         hasUI: !!safeResult.html,
         durationMs: executionDurationMs || 0,
+        bustCount,
+        bustedAgents: bustedAgents.map((b) => b.agentId),
         timestamp: Date.now(),
       });
+
+      // Temporal model: record every successful interaction so agents
+      // can later say "you usually ask about X at this time" and
+      // "yesterday you were working on Y". Failed tasks are excluded
+      // because we don't want a timeout on Tuesday at 3pm to look like
+      // a habit.
+      if (result?.success !== false) {
+        try {
+          const { getTemporalContext } = require('../../lib/temporal-context');
+          getTemporalContext().recordInteraction({
+            userInput: task.content || '',
+            agentId,
+            timestamp: Date.now(),
+          });
+        } catch (_) { /* temporal context is non-critical */ }
+      }
+
+      // If a task succeeded only after one or more busts, emit a stronger
+      // signal so the opportunity evaluator / agent-builder can consider
+      // proposing a better-suited agent for this class of request. This is
+      // the difference between "worked eventually" and "resilient". Without
+      // this, repeated slow tasks look identical to fast tasks to the
+      // learning loop.
+      if (bustCount > 0 && result?.success !== false) {
+        const slowEvent = {
+          taskId: task.id,
+          userInput: task.content || '',
+          winningAgentId: agentId,
+          bustCount,
+          bustedAgents: bustedAgents.map((b) => ({
+            agentId: b.agentId,
+            error: b.error,
+          })),
+          totalDurationMs: bustedAgents.length > 0
+            ? Date.now() - (bustedAgents[0].ts || Date.now())
+            : executionDurationMs || 0,
+          timestamp: Date.now(),
+        };
+        exchangeBus.emit('learning:slow-success', slowEvent);
+
+        // Ask the slow-success tracker whether this is the Nth time a
+        // similar query has been slow. If so, tack a one-time "I could
+        // build an agent for this" follow-up onto the orb's response so
+        // the user actually hears the offer instead of it disappearing
+        // into the learning pipeline. Respects cooldowns to avoid nagging.
+        try {
+          const { getSlowSuccessTracker } = require('../../lib/agent-learning/slow-success-tracker');
+          const suggestion = getSlowSuccessTracker().shouldSuggestBuild(slowEvent);
+          if (suggestion) {
+            log.info('voice', '[SlowSuccess] Emitting proactive build suggestion', {
+              classKey: suggestion.queryClass,
+              agentIdea: suggestion.agentIdea,
+            });
+            const suggestionPayload = {
+              taskId: task.id,
+              prompt: suggestion.suggestedPrompt,
+              reason: suggestion.reason,
+              agentIdea: suggestion.agentIdea,
+              queryClass: suggestion.queryClass,
+              detail: suggestion.detail,
+            };
+            // Internal bus (for learning-loop / metrics consumers)
+            exchangeBus.emit('orb:proactive-suggestion', suggestionPayload);
+            // Broadcast to all renderer windows so the orb can surface
+            // the suggestion visually (tooltip / transcript) and so
+            // "build that agent" shortcut phrases can be recognised.
+            broadcastToWindows('orb:proactive-suggestion', suggestionPayload);
+            // Speak the suggestion after a short delay so it lands AFTER
+            // the main response finishes. Non-blocking; best-effort.
+            setTimeout(() => {
+              try {
+                const { getVoiceSpeaker } = require('../../voice-speaker');
+                const speaker = getVoiceSpeaker();
+                if (speaker && speaker.speak) {
+                  speaker.speak(suggestion.suggestedPrompt, { voice: 'echo' });
+                }
+              } catch (err) {
+                log.warn('voice', '[SlowSuccess] TTS failed', { error: err.message });
+              }
+            }, 2500);
+          }
+        } catch (err) {
+          log.warn('voice', '[SlowSuccess] Tracker failed', { error: err.message });
+        }
+      }
     } catch (_) { /* learning event is non-critical */ }
 
     // ==================== MASTER ORCHESTRATOR FEEDBACK ====================
@@ -3418,6 +3725,93 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
           log.warn('voice', '[LearningPipeline] Error', { data: e2.message })
         );
       }
+    }
+
+    // ==================== ANSWER REFLECTION (LLM-as-judge) ====================
+    // After the user has already heard the answer, quietly run a judge
+    // over it to catch cases the agent marked success=true but the
+    // answer is actually ungrounded, irrelevant, or non-actionable.
+    // Fire-and-forget: reflection never blocks the UI. Low scores emit
+    // `learning:low-quality-answer` so the learning loop + slow-success
+    // tracker can act on persistent quality issues.
+    try {
+      const { getAnswerReflector } = require('../../lib/agent-learning/answer-reflector');
+      const reflector = getAnswerReflector();
+      const originalAgent = allBuiltInAgentMap?.[agentId] || { id: agentId };
+      if (reflector.shouldReflect({ agent: originalAgent, result, userInput: task.content })) {
+        // Evidence heuristics: if the agent returned `sources` or `data.searchResults`,
+        // hand those to the judge so groundedness can be checked properly.
+        const evidence =
+          result?.data?.searchResults ||
+          result?.data?.sources ||
+          result?.sources ||
+          null;
+        reflector
+          .reflect({ agent: originalAgent, task, result, evidence })
+          .then((record) => {
+            if (!record || record.skipped) return;
+            // Stamp the reflection onto task metadata so downstream
+            // consumers (Master Orchestrator feedback, learning loop)
+            // can factor quality into their decisions instead of just
+            // success/failure booleans.
+            if (task && task.metadata) {
+              task.metadata.reflectionOverall = record.overall;
+              task.metadata.reflectionScores = record.scores;
+              task.metadata.reflectionIssues = record.issues;
+            }
+            // Emit generic reflection event for any listener
+            exchangeBus.emit('learning:reflection', {
+              taskId: task.id,
+              agentId,
+              userInput: task.content || '',
+              ...record,
+            });
+            if (record.lowQuality) {
+              log.warn('voice', '[Reflector] Low-quality answer detected', {
+                agent: agentId,
+                overall: Number(record.overall?.toFixed(2)),
+                issues: record.issues,
+              });
+              const lowEvent = {
+                taskId: task.id,
+                agentId,
+                userInput: task.content || '',
+                overall: record.overall,
+                scores: record.scores,
+                issues: record.issues,
+                timestamp: Date.now(),
+              };
+              exchangeBus.emit('learning:low-quality-answer', lowEvent);
+              // A persistently low-quality bucket is itself a slow-success
+              // signal -- feed the tracker so the "build a better agent"
+              // suggestion can fire on pure-quality failures, not just
+              // latency failures.
+              try {
+                const { getSlowSuccessTracker } = require('../../lib/agent-learning/slow-success-tracker');
+                const suggestion = getSlowSuccessTracker().shouldSuggestBuild({
+                  userInput: task.content || '',
+                  winningAgentId: agentId,
+                  bustCount: 1, // treat low-quality as a soft bust
+                  bustedAgents: [{ agentId, error: 'low-quality' }],
+                  totalDurationMs: 0,
+                });
+                if (suggestion) {
+                  broadcastToWindows('orb:proactive-suggestion', {
+                    taskId: task.id,
+                    prompt: suggestion.suggestedPrompt,
+                    reason: 'low-quality-threshold',
+                    agentIdea: suggestion.agentIdea,
+                    queryClass: suggestion.queryClass,
+                    detail: suggestion.detail,
+                  });
+                }
+              } catch (_e) { /* tracker optional */ }
+            }
+          })
+          .catch(() => { /* reflection is non-critical */ });
+      }
+    } catch (err) {
+      log.warn('voice', '[Reflector] Setup error', { error: err.message });
     }
 
     // Phase 1: Check if this task was cancelled (late result suppression)
@@ -3861,6 +4255,17 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
     // Track the last agent that attempted execution (assignedAgent is cleared on re-auction)
     task.metadata = task.metadata || {};
     task.metadata.lastAgentId = agentId;
+
+    // Track cumulative bust count on the task so downstream consumers
+    // (learning loop, agent-builder) know this task required retries and
+    // can propose improvements.
+    task.metadata.bustCount = (task.metadata.bustCount || 0) + 1;
+    task.metadata.bustedAgents = task.metadata.bustedAgents || [];
+    task.metadata.bustedAgents.push({
+      agentId,
+      error: typeof error === 'string' ? error : error?.message || 'unknown',
+      ts: Date.now(),
+    });
 
     if (global.showCommandHUD) {
       global.showCommandHUD({
@@ -4312,6 +4717,220 @@ async function processSubmit(transcript, options = {}) {
   }
 
   let text = transcript.trim();
+
+  // ==================== REPAIR MEMORY (Phase 5) ====================
+  // Two shortcuts, both running before identity correction:
+  //
+  //   1. Undo intent ("forget that fix", "never mind that correction"):
+  //      rolls back the most recent learn, speaks a short ack, and
+  //      SHORT-CIRCUITS the pipeline (the utterance is not a task).
+  //
+  //   2. Correction learn ("I meant jazz", "I said alice not ellis"):
+  //      extracts heard/meant and stores a fix. The utterance still
+  //      flows through to normal routing so any implied task ("play
+  //      jazz" in the corrected form) can still execute.
+  try {
+    const {
+      detectCorrection,
+      detectUndoCorrection,
+    } = require('../../lib/naturalness/correction-detector');
+    const {
+      getSharedRepairMemory,
+    } = require('../../lib/naturalness/repair-memory-singleton');
+
+    // Shortcut 1: undo the most recent learn.
+    const undo = detectUndoCorrection(text);
+    if (undo) {
+      const repair = getSharedRepairMemory();
+      const result = repair.unlearnLast();
+      let ack;
+      if (result.removed) {
+        ack = `OK, I'll forget that "${result.entry.heard}" meant "${result.entry.meant}".`;
+      } else {
+        ack = "I don't have a recent fix to forget.";
+      }
+      log.info('voice', '[RepairMemory] undo', { pattern: undo.pattern, result });
+      try {
+        const { getVoiceSpeaker } = require('../../voice-speaker');
+        const speaker = getVoiceSpeaker();
+        if (speaker) await speaker.speak(ack, { skipAffectMatching: true });
+      } catch (_err) { /* speech optional */ }
+      return { queued: false, handled: true, message: 'Repair memory undo applied' };
+    }
+
+    // Shortcut 2: learn a phonetic fix (does not short-circuit).
+    const priorUserTurns = (typeof getRecentHistory === 'function'
+      ? getRecentHistory()
+      : []
+    ).filter((t) => t && t.role === 'user');
+    const priorUser = priorUserTurns.length
+      ? priorUserTurns[priorUserTurns.length - 1].content || ''
+      : '';
+    const correction = detectCorrection(text, priorUser);
+    if (correction) {
+      const repair = getSharedRepairMemory();
+      const outcome = repair.learnFix(correction.heard, correction.meant);
+      log.info('voice', '[RepairMemory] correction detected', {
+        pattern: correction.pattern,
+        heard: correction.heard,
+        meant: correction.meant,
+        outcome,
+      });
+    }
+  } catch (err) {
+    log.warn('voice', '[RepairMemory] error', { error: err.message });
+  }
+
+  // ==================== AFFECT DETECTION (Phase 6) ====================
+  // Classify the current user utterance and record non-neutral
+  // affect in the shared tracker so outgoing TTS can tone-match.
+  // Does not short-circuit; this is purely observational from here.
+  try {
+    const { isFlagEnabled } = require('../../lib/naturalness-flags');
+    if (isFlagEnabled('affectMatching')) {
+      const {
+        classifyAffect,
+      } = require('../../lib/naturalness/affect-classifier');
+      const {
+        getSharedAffectTracker,
+      } = require('../../lib/naturalness/affect-tracker');
+
+      const history = typeof getRecentHistory === 'function' ? getRecentHistory() : [];
+      const priorUserTurns = history.filter((t) => t && t.role === 'user');
+      const lastUser = priorUserTurns.length
+        ? priorUserTurns[priorUserTurns.length - 1].content || ''
+        : '';
+      const recentRepeat =
+        lastUser && _normalizeAffectInput(lastUser) === _normalizeAffectInput(text);
+      const recentErrors = history.filter(
+        (t) =>
+          t &&
+          t.role !== 'user' &&
+          typeof t.content === 'string' &&
+          /\b(error|failed|couldn't|can't complete|problem)\b/i.test(t.content)
+      ).length;
+
+      const affect = classifyAffect({ text, recentErrors, recentRepeat });
+      if (affect.label !== 'neutral') {
+        getSharedAffectTracker().record(affect);
+        log.info('voice', '[Affect] detected', {
+          label: affect.label,
+          confidence: affect.confidence,
+          signals: affect.signals,
+        });
+      }
+    }
+  } catch (err) {
+    log.warn('voice', '[Affect] classify error', { error: err.message });
+  }
+
+  // ==================== IDENTITY CORRECTION SHORTCUT ====================
+  // Handle "I don't live in X", "I'm not in Y right now", "Not X I'm
+  // actually in Y" before normal routing. Clears the stored profile
+  // value, consults the live location service (precise > IP > stored),
+  // and speaks back an acknowledgement. Without this, a stale profile
+  // value (e.g. Home City = Las Vegas) would continue to bias agents
+  // even after the user explicitly told us it's wrong.
+  try {
+    const { detectIdentityCorrection, applyIdentityCorrection } = require('../../lib/identity-correction');
+    const detection = detectIdentityCorrection(text);
+    if (detection) {
+      log.info('voice', '[IdentityCorrection] Detected', {
+        type: detection.type,
+        retracted: detection.retractedValue,
+        asserted: detection.assertedValue,
+      });
+      const { getUserProfile } = require('../../lib/user-profile-store');
+      const profile = getUserProfile();
+      let locationService = null;
+      try {
+        const mod = require('../../lib/location-service');
+        locationService = mod.getLocationService();
+      } catch (_e) { /* location service optional */ }
+
+      const applied = await applyIdentityCorrection(detection, {
+        userProfile: profile,
+        locationService,
+      });
+
+      // Speak the acknowledgement via the same channel other shortcuts
+      // use so the user actually hears it.
+      try {
+        const { getVoiceSpeaker } = require('../../voice-speaker');
+        const speaker = getVoiceSpeaker();
+        if (speaker && speaker.speak && applied.spokenResponse) {
+          speaker.speak(applied.spokenResponse, { voice: 'echo' });
+        }
+      } catch (_e) { /* speaker optional */ }
+
+      // Broadcast to windows so a HUD/toast can echo the correction.
+      broadcastToWindows('voice-task:identity-correction', {
+        retractedValue: detection.retractedValue,
+        assertedValue: applied.finalValue,
+        source: applied.liveCityUsed ? 'live-location' : (detection.assertedValue ? 'user' : 'cleared'),
+        spokenResponse: applied.spokenResponse,
+      });
+
+      return {
+        transcript: text,
+        queued: false,
+        handled: true,
+        classified: true,
+        action: 'identity-correction',
+        message: applied.spokenResponse,
+        suppressAIResponse: false,
+      };
+    }
+  } catch (err) {
+    log.warn('voice', '[IdentityCorrection] Handler error', { error: err.message });
+  }
+
+  // ==================== NEGATIVE FEEDBACK SHORTCUT ====================
+  // Catch the user telling us the last answer was wrong. Early intercept
+  // so it doesn't get routed to some agent as a regular task. Emits a
+  // `learning:negative-feedback` event the learning loop consumes. We
+  // still hand control back to the normal flow so the orb can also
+  // respond (e.g. "Got it, I'll try a different approach.").
+  const lowered = text.toLowerCase().replace(/[.?!,]/g, '').trim();
+  const NEGATIVE_FEEDBACK_PATTERNS = [
+    /^(that|this)\s+(was|is)\s+(wrong|not right|incorrect|bad)$/i,
+    /^(that|this)\s+didn[''']?t\s+(answer|help|work)/i,
+    /^(thats|that[''']?s)\s+(wrong|not it|not what i|not helpful)/i,
+    /^(no|nope)\s+(thats|that[''']?s)\s+(wrong|not it)/i,
+    /^(wrong answer|bad answer|not what i asked|missed the point)$/i,
+    /^(thumbs\s*down|not helpful|didn[''']?t help)$/i,
+  ];
+  if (NEGATIVE_FEEDBACK_PATTERNS.some((p) => p.test(lowered))) {
+    try {
+      const lastTurn = getRecentHistory()
+        .filter((h) => h.role === 'assistant')
+        .slice(-1)[0];
+      exchangeBus.emit('learning:negative-feedback', {
+        source: 'voice-shortcut',
+        userInput: text,
+        targetedAgentId: lastTurn?.agentId || null,
+        targetedMessage: lastTurn?.content || null,
+        timestamp: Date.now(),
+      });
+      broadcastToWindows('learning:negative-feedback', {
+        targetedAgentId: lastTurn?.agentId || null,
+      });
+      log.info('voice', '[NegFeedback] Received user negative signal', {
+        agent: lastTurn?.agentId,
+      });
+    } catch (err) {
+      log.warn('voice', '[NegFeedback] Emit failed', { error: err.message });
+    }
+    return {
+      transcript: text,
+      queued: false,
+      handled: true,
+      classified: true,
+      action: 'negative-feedback',
+      message: "Got it -- I'll try a different approach next time.",
+      suppressAIResponse: false,
+    };
+  }
 
   // ==================== DUPLICATE SUBMISSION CHECK ====================
   const normalizedTranscript = text
@@ -4849,6 +5468,25 @@ async function processSubmit(transcript, options = {}) {
     });
 
     log.info('voice', 'Task submitted', { taskId, toolId });
+
+    // Phase 0: record queued lifecycle event to durable timeline. Behind
+    // the `typedTaskContract` flag so behavior is unchanged until opted
+    // in. Recording is best-effort -- never block the submit on it.
+    try {
+      const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
+      if (isAgentFlagEnabled('typedTaskContract')) {
+        const { getAgentStats } = require('./agent-stats');
+        const stats = getAgentStats();
+        if (stats && typeof stats.recordTaskLifecycle === 'function') {
+          stats.recordTaskLifecycle({
+            taskId,
+            type: 'queued',
+            at: Date.now(),
+            data: { toolId, spaceId: spaceId || null, rawLen: (rawTranscript || '').length },
+          });
+        }
+      }
+    } catch (_err) { /* lifecycle recording is best-effort */ }
 
     // Set processing lock -- prevents overlapping submissions
     activeTaskLock = { taskId, transcript: text.slice(0, 80), startedAt: Date.now() };

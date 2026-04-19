@@ -149,6 +149,20 @@ const REQUIRED_PROPERTIES = ['id', 'name', 'description', 'categories', 'keyword
  *   'weather-api', 'calendar-store']). Action agents without dataSources get a
  *   warning during registration -- they should declare what they access for
  *   grounding enforcement and auditing.
+ *
+ * @property {Object<string,number>} expertise
+ *   Per-criterion self-declared expertise in [0.0, 1.0]. Introduced in Phase 4
+ *   of the agent-system upgrade. Used by the per-criterion bidder prompt and
+ *   the council adapter to weight this agent's score on specific criteria.
+ *   Keys are criterion ids matching task.criteria[i].id. Example:
+ *     expertise: { clarity: 0.9, risk: 0.4, feasibility: 0.7 }
+ *
+ * @property {boolean} canProbeAtBidTime
+ *   Opts the agent into the Phase 4 bid-time clarification protocol. When
+ *   true, the agent may return `needsClarification` from its bid response,
+ *   which suspends the auction, prompts the user, and resumes the same agents
+ *   rebidding with the enriched context. Agents without this opt-in cannot
+ *   suspend the auction -- keeps the contract additive. Default: false.
  */
 const OPTIONAL_PROPERTIES = [
   'prompt',
@@ -166,6 +180,8 @@ const OPTIONAL_PROPERTIES = [
   'getBriefing',
   'estimatedExecutionMs',
   'dataSources',
+  'expertise',
+  'canProbeAtBidTime',
 ];
 // NOTE: 'bid' is intentionally NOT in OPTIONAL_PROPERTIES. Agents must not have bid() methods.
 // All routing is LLM-based via unified-bidder.js. See .cursorrules "Classification Approach".
@@ -229,6 +245,26 @@ function validateAgent(agent, filename) {
         'All routing must be LLM-based via unified-bidder.js. ' +
         'Remove the bid() method. See .cursorrules "Classification Approach".'
     );
+  }
+
+  // Phase 4: validate expertise shape so typos fail loudly.
+  if (agent.expertise !== undefined) {
+    if (typeof agent.expertise !== 'object' || agent.expertise === null || Array.isArray(agent.expertise)) {
+      errors.push('expertise must be an object mapping criterionId -> 0.0-1.0');
+    } else {
+      for (const [critId, score] of Object.entries(agent.expertise)) {
+        if (typeof critId !== 'string' || !critId.trim()) {
+          errors.push(`expertise key must be a non-empty string (got "${critId}")`);
+          continue;
+        }
+        if (typeof score !== 'number' || !isFinite(score) || score < 0 || score > 1) {
+          errors.push(`expertise["${critId}"] must be a number in [0.0, 1.0] (got ${score})`);
+        }
+      }
+    }
+  }
+  if (agent.canProbeAtBidTime !== undefined && typeof agent.canProbeAtBidTime !== 'boolean') {
+    errors.push('canProbeAtBidTime must be a boolean');
   }
 
   // WARN: Action agents should declare their data sources for grounding enforcement.

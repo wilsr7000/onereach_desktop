@@ -150,6 +150,18 @@ ${agent.prompt || agent.description || 'No description provided'}
     if (parts.length > 0) situationText = parts.join('\n');
   }
 
+  // Temporal patterns: "you usually ask about X at this time",
+  // "yesterday you were working on Y", "3 min ago you asked ...".
+  // Helps agents pick up on routines instead of treating every turn
+  // as brand new. Cheap -- synchronous snapshot, no network.
+  let temporalText = '';
+  try {
+    const { getTemporalContext } = require('../../lib/temporal-context');
+    temporalText = getTemporalContext().getPromptSummary() || '';
+  } catch (_e) {
+    // Temporal context not loaded in this environment
+  }
+
   const conversationSection = conversationText
     ? `\nRECENT CONVERSATION:\n${conversationText}\n`
     : '';
@@ -166,6 +178,17 @@ ${agent.prompt || agent.description || 'No description provided'}
     ? `\nCURRENT SITUATION (what the user is doing right now):\n${situationText}\n`
     : '';
 
+  const temporalSection = temporalText
+    ? `\nTEMPORAL CONTEXT (recent behaviour and time-of-day patterns):\n${temporalText}\n`
+    : '';
+
+  // ── Phase 4: per-criterion bidding + bid-time clarification ──────────
+  // When the task carries a `criteria[]` rubric AND the perCriterionBidding
+  // flag is on, enrich the prompt so the agent scores each criterion and
+  // may opt in to a bid-time clarification request.
+  const criteriaBlock = _buildCriteriaBlock(task, agent);
+  const clarifyBlock = _buildClarifyBlock(agent);
+
   return `You are evaluating whether a specific agent can handle a user's request.
 
 Read the agent's description and capabilities below. Then read the user's request.
@@ -175,9 +198,9 @@ Use the current situation to understand context -- for example, if the user says
 "this" or "here", consider what window or tool they are currently using.
 
 ${agentInfo}
-${userProfileSection}${sessionSummarySection}${situationSection}${conversationSection}
+${userProfileSection}${sessionSummarySection}${temporalSection}${situationSection}${conversationSection}
 USER REQUEST: "${userRequest}"
-
+${criteriaBlock}
 Use conversation history to resolve pronouns ("it", "that", "this", etc.).
 
 Rate confidence 0.0-1.0 based on whether this agent can complete the request:
@@ -191,15 +214,75 @@ You MAY include a "result" field with a direct answer ONLY if:
 - The request does NOT require any side effect (playing music, sending email, etc.)
 - The request does NOT need live data (time, weather, calendar, search results)
 If any of those conditions fail, set result to null.
-
+${clarifyBlock}
 Respond with JSON:
 {
   "confidence": 0.0-1.0,
   "plan": "Brief execution plan if confidence > 0.3",
   "reasoning": "Why does/doesn't this agent match?",
   "hallucinationRisk": "none | low | high",
-  "result": "Direct answer from prompt context only, or null"
+  "result": "Direct answer from prompt context only, or null"${criteriaBlock ? ',\n  "criteria": [{ "id": "criterion-id", "score": 0-100, "rationale": "brief" }]' : ''}${clarifyBlock ? ',\n  "needsClarification": { "question": "short question", "blocks": "criterion-id or null" } | null' : ''}
 }`;
+}
+
+/**
+ * Build the CRITERIA section of the bid prompt when Phase 4 is on AND
+ * the task has a rubric. Surfaces the agent's self-declared expertise
+ * so the LLM can calibrate its scores (higher self-expertise = more
+ * willing to score high with rationale).
+ *
+ * @param {Object} task
+ * @param {Object} agent
+ * @returns {string}
+ */
+function _buildCriteriaBlock(task, agent) {
+  if (!Array.isArray(task.criteria) || task.criteria.length === 0) return '';
+  let enabled = false;
+  try {
+    const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
+    enabled = isAgentFlagEnabled('perCriterionBidding');
+  } catch (_err) { /* flag module optional */ }
+  if (!enabled) return '';
+
+  const expertise = (agent && typeof agent.expertise === 'object' && agent.expertise) || {};
+  const rows = task.criteria
+    .filter((c) => c && c.id)
+    .map((c) => {
+      const weight = typeof c.weight === 'number' ? ` (weight ${c.weight})` : '';
+      const selfExp = typeof expertise[c.id] === 'number'
+        ? ` [your expertise: ${Math.round(expertise[c.id] * 100)}%]`
+        : '';
+      const desc = c.description ? ` -- ${c.description}` : '';
+      return `- ${c.id}: ${c.label || c.id}${weight}${selfExp}${desc}`;
+    })
+    .join('\n');
+  if (!rows) return '';
+
+  return `
+EVALUATION CRITERIA (score each 0-100 with a brief rationale):
+${rows}
+`;
+}
+
+/**
+ * Build the CLARIFICATION section of the prompt when Phase 4 is on AND
+ * this agent opted into bid-time probing.
+ *
+ * @param {Object} agent
+ * @returns {string}
+ */
+function _buildClarifyBlock(agent) {
+  if (!agent || agent.canProbeAtBidTime !== true) return '';
+  let enabled = false;
+  try {
+    const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
+    enabled = isAgentFlagEnabled('bidTimeClarification');
+  } catch (_err) { /* flag module optional */ }
+  if (!enabled) return '';
+
+  return `
+CLARIFICATION (optional): If you cannot reliably bid without a single piece of missing context, set "needsClarification": { "question": "...", "blocks": "criterion-id or null" } and leave "confidence" at your best guess. The auction will pause, ask the user your question, and re-poll the same agents with the answer. Use this sparingly -- only when a clarifying question would materially change your score.
+`;
 }
 
 /**
@@ -322,6 +405,30 @@ async function evaluateAgentBid(agent, task) {
       result: fastPathResult, // Fast-path: only if hallucination risk is acceptable
     };
 
+    // Phase 4: preserve per-criterion scores and bid-time clarification.
+    // Pass through only when well-formed so downstream consumers can
+    // trust the shape.
+    if (Array.isArray(evaluation.criteria) && evaluation.criteria.length > 0) {
+      normalized.criteria = evaluation.criteria
+        .filter((c) => c && typeof c.id === 'string' && c.id.trim())
+        .map((c) => ({
+          id: c.id,
+          score: Math.max(0, Math.min(100, Number(c.score) || 0)),
+          rationale: typeof c.rationale === 'string' ? c.rationale : '',
+        }));
+    }
+    if (evaluation.needsClarification && typeof evaluation.needsClarification === 'object') {
+      const q = evaluation.needsClarification.question;
+      if (typeof q === 'string' && q.trim()) {
+        normalized.needsClarification = {
+          question: q.trim(),
+          blocks: typeof evaluation.needsClarification.blocks === 'string'
+            ? evaluation.needsClarification.blocks
+            : null,
+        };
+      }
+    }
+
     if (normalized.result) {
       log.info(
         'agent',
@@ -387,8 +494,20 @@ async function getBidsFromAgents(agents, task) {
 }
 
 /**
- * Select the winning bid
- * @param {Array} bids - Sorted array of bids
+ * Select the winning bid.
+ *
+ * Phase 2 of the agent-system upgrade introduces an optional
+ * learned-weight multiplier. When the `learnedWeights` flag is on, each
+ * raw bid confidence is multiplied by the agent's historical weight
+ * (from meta-learning, range 0.5-1.5) to produce an EFFECTIVE
+ * confidence used only for ranking + threshold checks. The raw
+ * confidence and the effective confidence are both surfaced on the
+ * returned bid so downstream consumers (HUD, A/B log) can compare.
+ *
+ * With no historical data the weight is 1.0 and behavior is identical
+ * to today.
+ *
+ * @param {Array} bids - Sorted array of bids (highest confidence first)
  * @returns {{ winner: Object|null, backups: Array }}
  */
 function selectWinner(bids) {
@@ -396,11 +515,39 @@ function selectWinner(bids) {
     return { winner: null, backups: [] };
   }
 
-  // Winner must have confidence >= 0.5
-  const winner = bids[0].confidence >= 0.5 ? bids[0] : null;
+  // Apply learned weights if enabled. This is a one-hook change; the
+  // facade returns 1.0 when the flag is off or the subsystem is missing,
+  // so skipping the flag check is still safe but saves the cache lookup.
+  let ranked = bids;
+  try {
+    const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
+    if (isAgentFlagEnabled('learnedWeights')) {
+      const { getLearnedWeight } = require('../../lib/learning');
+      ranked = bids.map((b) => {
+        const weight = getLearnedWeight(b.agentId || (b.agent && b.agent.id));
+        const rawConfidence = Number(b.confidence) || 0;
+        const effectiveConfidence = Math.max(0, Math.min(1, rawConfidence * weight));
+        return {
+          ...b,
+          _rawConfidence: rawConfidence,
+          _learnedWeight: weight,
+          _effectiveConfidence: effectiveConfidence,
+          confidence: effectiveConfidence, // so downstream threshold check uses it
+        };
+      });
+      // Re-sort after weighting since the relative order may change.
+      ranked.sort((a, b) => b.confidence - a.confidence);
+    }
+  } catch (_err) {
+    // Fail open -- never break winner selection because of learning glue.
+    ranked = bids;
+  }
+
+  // Winner must have effective confidence >= 0.5
+  const winner = ranked[0].confidence >= 0.5 ? ranked[0] : null;
 
   // Backups are other viable bids
-  const backups = bids.slice(1).filter((b) => b.confidence >= 0.5);
+  const backups = ranked.slice(1).filter((b) => b.confidence >= 0.5);
 
   return { winner, backups };
 }

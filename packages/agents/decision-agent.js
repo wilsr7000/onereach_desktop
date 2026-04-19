@@ -29,6 +29,19 @@ const decisionAgent = {
   executionType: 'action',
   defaultSpaces: ['meeting-agents'],
 
+  // ── Per-criterion expertise (agent-system v2, Phase 4) ─────────────────
+  // Used by council mode when task.rubric === 'decision_record' or any
+  // task whose criteria include these ids. Values in [0, 1] represent
+  // this agent's self-declared confidence on each criterion relative
+  // to other agents that might also bid.
+  expertise: {
+    rationale: 0.92,       // decision-agent captures decision reasoning as its core job
+    alternatives: 0.65,    // records them when supplied, but doesn't generate them
+    reversibility: 0.55,   // usually implicit rather than called out
+    stakeholders: 0.6,     // extracted when mentioned in conversation
+    followup: 0.5,         // logs follow-up only when explicitly stated
+  },
+
   /**
    * Briefing contribution: recent decisions logged.
    * Priority 7 = appears near end of daily brief.

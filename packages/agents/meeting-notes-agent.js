@@ -28,6 +28,16 @@ const meetingNotesAgent = {
   executionType: 'action',
   defaultSpaces: ['meeting-agents'],
 
+  // ── Per-criterion expertise (agent-system v2, Phase 4) ─────────────────
+  // Scores used by council mode when task.rubric === 'meeting_outcome'.
+  expertise: {
+    notes_quality: 0.9,      // dedicated notes captor -- highest confidence
+    decisions_captured: 0.6, // spots them but doesn't own the decision record
+    action_items: 0.55,      // overlaps with action-item-agent -- lower priority
+    unresolved: 0.75,        // good at parking-lot capture
+    priority: 0.45,          // context clues only
+  },
+
   /**
    * Briefing contribution: recent meeting notes summary.
    * Priority 6 = appears near end of daily brief.
