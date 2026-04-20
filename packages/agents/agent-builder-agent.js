@@ -198,9 +198,33 @@ LOW confidence when: the user is asking an existing agent to do its job (play mu
       } catch (_e) { /* non-fatal */ }
     }
 
+    const buildMethod = this._chooseBuildMethod(assessment);
+
+    // Rich HUD card that lets the user click Build / Playbook / Not now
+    // instead of (or in addition to) replying by voice. The existing
+    // delegated data-value click handler in command-hud.html routes the
+    // value back through submitTask with metadata.targetAgentId set, so
+    // a click reaches this same agent's pending-input handler.
+    const ui = {
+      type: 'buildProposal',
+      request: originalRequest,
+      effort: assessment.effort,
+      reasoning: assessment.reasoning || '',
+      estimatedCostPerUse: assessment.estimatedCostPerUse,
+      requiredIntegrations: assessment.requiredIntegrations || [],
+      missingAccess: assessment.missingAccess || [],
+      buildMethod,
+      alternativeSuggestion: assessment.alternativeSuggestion,
+      message: response,
+    };
+
     return {
       success: true,
       message: response,
+      ui,
+      // Keep voice path alive so users can also say yes/playbook/no.
+      // The command-HUD panel will render `ui` above; the orb will
+      // continue listening for the spoken response.
       needsInput: {
         prompt: response,
         agentId: this.id,
@@ -208,7 +232,7 @@ LOW confidence when: the user is asking an existing agent to do its job (play mu
           pendingBuild: {
             originalRequest,
             assessment,
-            buildMethod: this._chooseBuildMethod(assessment),
+            buildMethod,
           },
         },
       },
