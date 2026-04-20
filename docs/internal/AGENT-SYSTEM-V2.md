@@ -4,55 +4,58 @@
 > multi-phase plan at `.cursor/plans/agent-system-upgrade-phases_*.plan.md`.
 > Released v4.9.0.
 
-This document is the short version: "how do I actually use the new
-capabilities, and when should I?"
+This document is the short version: "what is Agent System v2, and how
+do I use it?"
 
 ---
 
 ## What's new
 
-Seven additive phases, each behind a feature flag, default OFF.
+Seven additive capabilities, **all on by default in v4.9.0**. The
+system is one system -- there is no "legacy path" running in parallel.
+The feature-flag module survives solely as a runtime opt-out in case a
+deployment needs to disable one specific capability without a code
+change.
 
-| Phase | Flag | What it does |
+| Capability | Flag (all default ON) | What it does |
 |---|---|---|
-| 0 Foundation | `typedTaskContract` | Enables dual-write of task state into `lib/exchange/task-store` + durable lifecycle timeline via `agent-stats.recordTaskLifecycle`. |
-| 1 Council | `councilMode` | When `task.variant === 'council'`, dispatches to `lib/exchange/council-runner` instead of the single-winner auction. Weighted aggregation + conflict detection via `lib/evaluation/consolidator`. |
-| 2 Learned weights | `learnedWeights` | In `unified-bidder.selectWinner`, multiplies raw confidence by `getLearnedWeight(agentId)` before the 0.5 threshold check. |
-| 3 Role/variant | `roleBasedVoterPool`, `variantSelector` | Filters the voter pool by `agent.defaultSpaces` when `task.spaceId` is set; optionally auto-picks `variant` via a tiny LLM classifier when the caller didn't supply one. |
-| 4 Per-criterion + bid-time clarification | `perCriterionBidding`, `bidTimeClarification` | Bid prompt grows a CRITERIA block when `task.criteria` is set; agents with `canProbeAtBidTime: true` may emit `needsClarification` to pause the auction for a user answer. |
-| 5 Adequacy loop | `adequacyLoop` | Agents can declare `needsInput.adequacy.maxTurns` so `routePendingInput` tracks turn counts and falls back gracefully when the loop doesn't converge. |
-| 6 HTTP Gateway | `httpGateway` | Exposes `POST /submit-task`, `GET /events/:taskId` (SSE), `POST /respond-input`, `POST /select-disambiguation`, `POST /cancel-task`, `GET /health` on 127.0.0.1:47293. |
+| Foundation | `typedTaskContract` | Task state lives in `lib/exchange/task-store` with a durable lifecycle timeline via `agent-stats.recordTaskLifecycle`. |
+| Council | `councilMode` | When `task.variant === 'council'`, dispatches to `lib/exchange/council-runner` instead of the single-winner auction. Weighted aggregation + conflict detection via `lib/evaluation/consolidator`. |
+| Learned weights | `learnedWeights` | In `unified-bidder.selectWinner`, raw confidence is multiplied by `getLearnedWeight(agentId)` (0.5 - 1.5, or 1.0 for cold-start agents) before the 0.5 threshold check. |
+| Role-based voter pool | `roleBasedVoterPool` | When `task.spaceId` is set, only agents whose `defaultSpaces` include the space AND generalists (no declared `defaultSpaces`) bid. |
+| Variant selector | `variantSelector` | When the caller doesn't set `task.variant`, a cheap cached LLM micro-call classifies the task as `winner` / `council` / `lead_plus_probers`. |
+| Per-criterion bidding | `perCriterionBidding` | Bid prompt grows a CRITERIA block when `task.criteria` is set; agents return per-criterion scores alongside the overall confidence. |
+| Bid-time clarification | `bidTimeClarification` | Agents with `canProbeAtBidTime: true` may emit `needsClarification` in a bid to pause the auction for a single user answer. |
+| Adequacy loop | `adequacyLoop` | Agents can declare `needsInput.adequacy.maxTurns` so `routePendingInput` tracks turn counts and falls back gracefully when the loop doesn't converge. |
+| HTTP Gateway | `httpGateway` | Exposes `POST /submit-task`, `GET /events/:taskId` (SSE), `POST /respond-input`, `POST /select-disambiguation`, `POST /cancel-task`, `GET /health` on 127.0.0.1:47293. Started from `main.js` at app boot. |
 
 ---
 
-## Turning it on
+## Opting OUT of a specific capability
 
-Env var (one flag at a time):
+Only needed if something in your environment misbehaves. Three ways:
 
-```bash
-AGENT_SYS_COUNCIL_MODE=1 npm start
-```
-
-Env var (everything at once, for dogfooding):
+Env var (takes precedence over everything):
 
 ```bash
-AGENT_SYS_AGENT_SYS_V2=1 npm start
+AGENT_SYS_COUNCIL_MODE=0 npm start
 ```
 
 Settings store (persisted across restarts):
 
 ```js
 // in the renderer console
-await window.api.setAgentSystemFlags({
-  councilMode: true,
-  learnedWeights: true,
-  roleBasedVoterPool: true,
-});
+global.settingsManager.set('agentSystemFlags', { councilMode: false });
 ```
 
-The umbrella flag `agentSysV2` enables every phase, but an explicit
-per-flag `false` overrides it. So you can "enable everything EXCEPT
-httpGateway" by setting `{ agentSysV2: true, httpGateway: false }`.
+Umbrella off (kills everything new at once -- emergency only):
+
+```bash
+AGENT_SYS_AGENT_SYS_V2=0 npm start
+```
+
+The umbrella off wins over per-flag settings, so a user who wants
+vanilla behavior can set it in one place and not think about the rest.
 
 ---
 

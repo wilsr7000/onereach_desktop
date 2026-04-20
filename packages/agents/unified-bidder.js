@@ -237,12 +237,6 @@ Respond with JSON:
  */
 function _buildCriteriaBlock(task, agent) {
   if (!Array.isArray(task.criteria) || task.criteria.length === 0) return '';
-  let enabled = false;
-  try {
-    const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
-    enabled = isAgentFlagEnabled('perCriterionBidding');
-  } catch (_err) { /* flag module optional */ }
-  if (!enabled) return '';
 
   const expertise = (agent && typeof agent.expertise === 'object' && agent.expertise) || {};
   const rows = task.criteria
@@ -273,13 +267,6 @@ ${rows}
  */
 function _buildClarifyBlock(agent) {
   if (!agent || agent.canProbeAtBidTime !== true) return '';
-  let enabled = false;
-  try {
-    const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
-    enabled = isAgentFlagEnabled('bidTimeClarification');
-  } catch (_err) { /* flag module optional */ }
-  if (!enabled) return '';
-
   return `
 CLARIFICATION (optional): If you cannot reliably bid without a single piece of missing context, set "needsClarification": { "question": "...", "blocks": "criterion-id or null" } and leave "confidence" at your best guess. The auction will pause, ask the user your question, and re-poll the same agents with the answer. Use this sparingly -- only when a clarifying question would materially change your score.
 `;
@@ -515,29 +502,27 @@ function selectWinner(bids) {
     return { winner: null, backups: [] };
   }
 
-  // Apply learned weights if enabled. This is a one-hook change; the
-  // facade returns 1.0 when the flag is off or the subsystem is missing,
-  // so skipping the flag check is still safe but saves the cache lookup.
+  // Apply learned weights. The learning facade returns 1.0 for any
+  // agent below the cold-start threshold or when meta-learning isn't
+  // available, so this is safe to run unconditionally; wrapped in
+  // try/catch so learning-glue failures never break winner selection.
   let ranked = bids;
   try {
-    const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
-    if (isAgentFlagEnabled('learnedWeights')) {
-      const { getLearnedWeight } = require('../../lib/learning');
-      ranked = bids.map((b) => {
-        const weight = getLearnedWeight(b.agentId || (b.agent && b.agent.id));
-        const rawConfidence = Number(b.confidence) || 0;
-        const effectiveConfidence = Math.max(0, Math.min(1, rawConfidence * weight));
-        return {
-          ...b,
-          _rawConfidence: rawConfidence,
-          _learnedWeight: weight,
-          _effectiveConfidence: effectiveConfidence,
-          confidence: effectiveConfidence, // so downstream threshold check uses it
-        };
-      });
-      // Re-sort after weighting since the relative order may change.
-      ranked.sort((a, b) => b.confidence - a.confidence);
-    }
+    const { getLearnedWeight } = require('../../lib/learning');
+    ranked = bids.map((b) => {
+      const weight = getLearnedWeight(b.agentId || (b.agent && b.agent.id));
+      const rawConfidence = Number(b.confidence) || 0;
+      const effectiveConfidence = Math.max(0, Math.min(1, rawConfidence * weight));
+      return {
+        ...b,
+        _rawConfidence: rawConfidence,
+        _learnedWeight: weight,
+        _effectiveConfidence: effectiveConfidence,
+        confidence: effectiveConfidence,
+      };
+    });
+    // Re-sort after weighting since the relative order may change.
+    ranked.sort((a, b) => b.confidence - a.confidence);
   } catch (_err) {
     // Fail open -- never break winner selection because of learning glue.
     ranked = bids;

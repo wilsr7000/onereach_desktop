@@ -274,21 +274,19 @@ function _normalizeAffectInput(s) {
 }
 
 function _getConversationContinuityAgent() {
-  // Find the most recent winning agent from history
-  let lastAgent = null;
-  let lastTime = 0;
+  // Storage still lives here (the `agentWinStats` Map is tightly
+  // wound with the routing cache update path). The DECISION is
+  // extracted to `lib/hud-core/conversation-continuity.js` so the
+  // same rule runs in GSX / WISER / CLI consumers. We flatten the
+  // Map into the portable `wins` shape and delegate.
+  const { pickContinuityAgent } = require('../../lib/hud-core');
+  const wins = [];
   for (const [agentId, stats] of agentWinStats) {
     const latest = stats.recentQueries[stats.recentQueries.length - 1];
-    if (latest && latest.time > lastTime) {
-      lastTime = latest.time;
-      lastAgent = agentId;
-    }
+    if (latest) wins.push({ agentId, timestamp: latest.time });
   }
-  // Only return if the last interaction was within 2 minutes (conversation window)
-  if (lastAgent && Date.now() - lastTime < 120000) {
-    return lastAgent;
-  }
-  return null;
+  const result = pickContinuityAgent({ wins, windowMs: 120_000 });
+  return result ? result.agentId : null;
 }
 
 // Clean up expired cache entries every 2 minutes
@@ -585,22 +583,19 @@ async function routePendingInput(text, metadata) {
 
     // Agent needs MORE input (chained multi-turn)
     if (result.needsInput) {
-      // Phase 5 adequacy loop: when the agent declared an adequacy
-      // block, the tracker counts the user's latest answer and decides
-      // whether to keep looping. If maxTurns is reached we stop even
-      // if the agent keeps asking -- the agent's own agent-selected
-      // prompt will still surface so the user sees why the loop ended.
-      let adequacyExhausted = false;
+      // Adequacy loop: when the agent declared an adequacy block, the
+      // tracker counts the user's latest answer and decides whether to
+      // keep looping. If maxTurns is reached we stop even if the agent
+      // keeps asking -- the tracker's fallback message surfaces so the
+      // user sees why the loop ended. Wrapped in try/catch so tracker
+      // failures never break the existing needs-input path.
       try {
-        const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
-        if (isAgentFlagEnabled('adequacyLoop') && result.needsInput.adequacy) {
+        if (result.needsInput.adequacy) {
           const { getAdequacyTracker } = require('../../lib/exchange/adequacy-tracker');
           const tracker = getAdequacyTracker();
-          // Record this turn (the user just answered `text`).
           tracker.increment(followUpTask.id, result.needsInput.prompt, text);
           const decision = tracker.shouldContinue(followUpTask.id, result.needsInput.adequacy.maxTurns);
           if (!decision.ok) {
-            adequacyExhausted = true;
             tracker.exhausted(followUpTask.id);
             const fallback = tracker.buildExhaustedResult(followUpTask.id);
             hudApi.emitResult({
@@ -624,10 +619,6 @@ async function routePendingInput(text, metadata) {
         }
       } catch (_err) {
         // Adequacy tracking must never break the existing needs-input path
-      }
-
-      if (adequacyExhausted) {
-        // Covered above; kept for explicit flow clarity.
       }
 
       await handleNeedsInput(result, agentId, followUpTask.id, { html: result.html });
@@ -5048,31 +5039,15 @@ async function processSubmit(transcript, options = {}) {
   }
 
   if (routerInstance) {
-    const lowerText = text.toLowerCase().trim();
-
     // Critical commands -- only intercept TRUE system commands, not agent
     // intents like "cancel the meeting" or "stop the recording".
-    // Match the Router's logic: bare word OR word + pronoun (it/that/this/everything/all/now)
-    const exactCritical = [
-      'cancel',
-      'stop',
-      'nevermind',
-      'never mind',
-      'repeat',
-      'say that again',
-      'undo',
-      'undo that',
-      'take that back',
-    ];
-    const pronounFollowers = ['it', 'that', 'this', 'everything', 'all', 'now'];
-    const isTrueCritical =
-      exactCritical.includes(lowerText) ||
-      ['cancel', 'stop'].some((c) => {
-        if (!lowerText.startsWith(c + ' ')) return false;
-        const rest = lowerText.slice(c.length + 1).trim();
-        return pronounFollowers.includes(rest);
-      });
-    if (isTrueCritical) {
+    //
+    // Extracted to the portable `lib/hud-core` layer so the same
+    // classifier runs in the desktop app, GSX flows, and WISER
+    // Playbooks without divergence. See docs/hud-core/ for the
+    // portability contract.
+    const { isCriticalCommand } = require('../../lib/hud-core');
+    if (isCriticalCommand(text)) {
       log.info('voice', 'Routing critical command to Router');
       const result = await routerInstance.handle(text);
       if (result.handled) {
@@ -5088,9 +5063,13 @@ async function processSubmit(transcript, options = {}) {
       }
     }
 
-    // Pending question / confirmation
+    // Pending question / confirmation.
+    // Decision extracted to `lib/hud-core/pending-state.js` so the
+    // same classifier runs in any consumer; the local
+    // conversationState singleton still owns the STATE.
     const routingContext = conversationState.getRoutingContext();
-    if (routingContext.hasPendingQuestion || routingContext.hasPendingConfirmation) {
+    const { shouldRouteToPendingStateHandler } = require('../../lib/hud-core');
+    if (shouldRouteToPendingStateHandler(routingContext)) {
       log.info('voice', 'Routing to Router for pending state resolution');
       const result = await routerInstance.handle(text);
       if (result.handled) {
@@ -5469,22 +5448,18 @@ async function processSubmit(transcript, options = {}) {
 
     log.info('voice', 'Task submitted', { taskId, toolId });
 
-    // Phase 0: record queued lifecycle event to durable timeline. Behind
-    // the `typedTaskContract` flag so behavior is unchanged until opted
-    // in. Recording is best-effort -- never block the submit on it.
+    // Record queued lifecycle event to the durable timeline. Best-effort
+    // -- never block the submit on recording failures.
     try {
-      const { isAgentFlagEnabled } = require('../../lib/agent-system-flags');
-      if (isAgentFlagEnabled('typedTaskContract')) {
-        const { getAgentStats } = require('./agent-stats');
-        const stats = getAgentStats();
-        if (stats && typeof stats.recordTaskLifecycle === 'function') {
-          stats.recordTaskLifecycle({
-            taskId,
-            type: 'queued',
-            at: Date.now(),
-            data: { toolId, spaceId: spaceId || null, rawLen: (rawTranscript || '').length },
-          });
-        }
+      const { getAgentStats } = require('./agent-stats');
+      const stats = getAgentStats();
+      if (stats && typeof stats.recordTaskLifecycle === 'function') {
+        stats.recordTaskLifecycle({
+          taskId,
+          type: 'queued',
+          at: Date.now(),
+          data: { toolId, spaceId: spaceId || null, rawLen: (rawTranscript || '').length },
+        });
       }
     } catch (_err) { /* lifecycle recording is best-effort */ }
 

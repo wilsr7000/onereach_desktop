@@ -47,9 +47,9 @@ afterEach(() => {
 });
 
 describe('DEFAULT_FLAGS', () => {
-  it('all defaults are off', () => {
+  it('all defaults are on (Agent System v2 is the system)', () => {
     for (const [name, value] of Object.entries(DEFAULT_FLAGS)) {
-      expect(value, `${name} should default to false`).toBe(false);
+      expect(value, `${name} should default to true`).toBe(true);
     }
   });
 
@@ -105,51 +105,68 @@ describe('isAgentFlagEnabled', () => {
     expect(isAgentFlagEnabled('httpGateway')).toBe(true);
   });
 
-  it('settingsManager errors do not throw', () => {
+  it('settingsManager errors do not throw and fall through to the default', () => {
     global.settingsManager = {
       get: () => { throw new Error('boom'); },
       set: () => {},
     };
     expect(() => isAgentFlagEnabled('councilMode')).not.toThrow();
-    expect(isAgentFlagEnabled('councilMode')).toBe(false);
+    // default for councilMode is true
+    expect(isAgentFlagEnabled('councilMode')).toBe(true);
   });
 });
 
 describe('umbrella flag behavior', () => {
-  it('agentSysV2=true via env turns on all phase flags', () => {
-    process.env.AGENT_SYS_AGENT_SYS_V2 = '1';
+  it('phase flags are on by default (v4.9.0 default behavior)', () => {
     expect(isAgentFlagEnabled('typedTaskContract')).toBe(true);
     expect(isAgentFlagEnabled('councilMode')).toBe(true);
     expect(isAgentFlagEnabled('httpGateway')).toBe(true);
   });
 
-  it('agentSysV2=true via settings turns on phase flags', () => {
-    global.settingsManager = {
-      get: (key) => (key === 'agentSystemFlags' ? { agentSysV2: true } : null),
-      set: () => {},
-    };
-    expect(isAgentFlagEnabled('typedTaskContract')).toBe(true);
-    expect(isAgentFlagEnabled('councilMode')).toBe(true);
+  it('umbrella=off via env disables every phase flag', () => {
+    process.env.AGENT_SYS_AGENT_SYS_V2 = '0';
+    expect(isAgentFlagEnabled('typedTaskContract')).toBe(false);
+    expect(isAgentFlagEnabled('councilMode')).toBe(false);
+    expect(isAgentFlagEnabled('learnedWeights')).toBe(false);
+    expect(isAgentFlagEnabled('httpGateway')).toBe(false);
   });
 
-  it('explicit per-flag setting overrides umbrella', () => {
+  it('umbrella=off via settings disables every phase flag', () => {
+    global.settingsManager = {
+      get: (key) => (key === 'agentSystemFlags' ? { agentSysV2: false } : null),
+      set: () => {},
+    };
+    expect(isAgentFlagEnabled('typedTaskContract')).toBe(false);
+    expect(isAgentFlagEnabled('councilMode')).toBe(false);
+  });
+
+  it('explicit per-flag env wins over umbrella-off', () => {
+    process.env.AGENT_SYS_AGENT_SYS_V2 = '0';
+    process.env.AGENT_SYS_COUNCIL_MODE = '1';
+    // Umbrella off, but council explicitly on -> on
+    expect(isAgentFlagEnabled('councilMode')).toBe(true);
+    // Others still disabled via umbrella
+    expect(isAgentFlagEnabled('learnedWeights')).toBe(false);
+  });
+
+  it('explicit per-flag setting wins over umbrella-off', () => {
     global.settingsManager = {
       get: (key) => (
         key === 'agentSystemFlags'
-          ? { agentSysV2: true, councilMode: false }
+          ? { agentSysV2: false, councilMode: true }
           : null
       ),
       set: () => {},
     };
-    // Umbrella on, but council explicitly off -> off
-    expect(isAgentFlagEnabled('councilMode')).toBe(false);
-    // Another phase flag still on via umbrella
-    expect(isAgentFlagEnabled('learnedWeights')).toBe(true);
+    expect(isAgentFlagEnabled('councilMode')).toBe(true);
+    expect(isAgentFlagEnabled('learnedWeights')).toBe(false);
   });
 
   it('agentSysV2 itself is evaluated normally (no recursion)', () => {
+    expect(isAgentFlagEnabled('agentSysV2')).toBe(true);
+    process.env.AGENT_SYS_AGENT_SYS_V2 = '0';
     expect(isAgentFlagEnabled('agentSysV2')).toBe(false);
-    process.env.AGENT_SYS_AGENT_SYS_V2 = '1';
+    delete process.env.AGENT_SYS_AGENT_SYS_V2;
     expect(isAgentFlagEnabled('agentSysV2')).toBe(true);
   });
 });

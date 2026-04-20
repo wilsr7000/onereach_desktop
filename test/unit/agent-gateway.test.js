@@ -10,21 +10,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 const http = require('http');
 const path = require('path');
 
-const FLAGS_ABS = path.resolve(__dirname, '../../lib/agent-system-flags.js');
 const HUDAPI_ABS = path.resolve(__dirname, '../../lib/hud-api.js');
 const STATS_ABS = path.resolve(__dirname, '../../src/voice-task-sdk/agent-stats.js');
 const GATEWAY_ABS = path.resolve(__dirname, '../../lib/agent-gateway.js');
-
-function _setFlag(enabled) {
-  require.cache[FLAGS_ABS] = {
-    id: FLAGS_ABS,
-    filename: FLAGS_ABS,
-    loaded: true,
-    exports: {
-      isAgentFlagEnabled: (name) => (name === 'httpGateway' ? enabled : false),
-    },
-  };
-}
 
 function _setHudApi(fake) {
   require.cache[HUDAPI_ABS] = {
@@ -97,7 +85,6 @@ let gatewayMod;
 let server;
 
 beforeEach(() => {
-  _setFlag(true);
   _setHudApi({
     submitTask: async (text, opts) => ({ taskId: 't1', queued: true, text, opts }),
     respondToInput: async (taskId, response) => ({ success: true, taskId, response }),
@@ -119,7 +106,6 @@ afterEach(async () => {
     await new Promise((r) => server.close(() => r()));
     server = null;
   }
-  delete require.cache[FLAGS_ABS];
   delete require.cache[HUDAPI_ABS];
   delete require.cache[STATS_ABS];
   delete require.cache[GATEWAY_ABS];
@@ -131,18 +117,10 @@ async function _bindRouter() {
   return server;
 }
 
-// ---- Flag gate --------------------------------------------------------
-
-describe('feature flag gate', () => {
-  it('returns 503 when httpGateway is off', async () => {
-    _setFlag(false);
-    gatewayMod = _reloadGateway();
-    await _bindRouter();
-    const r = await _post(server, '/submit-task', { text: 'x' });
-    expect(r.status).toBe(503);
-    expect(r.body.error).toMatch(/disabled/);
-  });
-});
+// ---- Boot-time gate --------------------------------------------------
+// The gateway is gated at startup (main.js skips startAgentGateway when
+// the httpGateway flag is off). Once the server is listening the router
+// accepts all requests -- there is no runtime opt-out.
 
 // ---- POST /submit-task ------------------------------------------------
 

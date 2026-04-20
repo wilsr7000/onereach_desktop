@@ -719,6 +719,18 @@
 
 ## Recently Completed
 
+- [x] **Agent System v2 -- default all phases ON, retire flag guards from production code** (v4.9.0)
+  - **Why:** The flag-gated rollout was appropriate during development but left two parallel systems running side-by-side in production. Every task path had an `if (isAgentFlagEnabled(...))` branch that chose between "legacy" and "v2" behavior. User feedback: "I don't want duplicate systems. More code, more confusion." This commit resolves that by making v2 the only system.
+  - **Flag defaults flipped to TRUE** in [lib/agent-system-flags.js](lib/agent-system-flags.js). Every phase (typedTaskContract, councilMode, learnedWeights, roleBasedVoterPool, variantSelector, perCriterionBidding, bidTimeClarification, adequacyLoop, httpGateway) is on by default. The flag module survives solely as a runtime opt-out.
+  - **Flag guards removed** from production call sites: `lib/hud-api.js` (7 guards), `packages/agents/unified-bidder.js` (3 guards), `src/voice-task-sdk/exchange-bridge.js` (2 guards), `lib/agent-gateway.js` (1 guard). The v2 code paths now run unconditionally; the fail-open try/catch wrappers remain as safety nets.
+  - **HTTP Gateway wired into [main.js](main.js)** so it binds at app boot (loopback 127.0.0.1:47293) and stops cleanly on app shutdown. Respects `httpGateway` at boot time only (router-level check removed).
+  - **Umbrella flag semantics corrected**: `AGENT_SYS_AGENT_SYS_V2=0` (env) or `{ agentSysV2: false }` (settings) now actually disables every phase flag, matching what the doc promised. Per-flag overrides still win over the umbrella, so a user can disable everything but explicitly re-enable one capability if needed.
+  - **Tests updated**: `DEFAULT_FLAGS all defaults are on` replaces `all off`; `flag-off baseline` suite in `unified-bidder-learned-weights.test.js` retired (weights now unconditional; fresh agents return 1.0 via cold-start guard so baseline behavior is preserved); `agent-gateway.test.js` router-level flag test removed.
+  - **Adoption doc** ([docs/internal/AGENT-SYSTEM-V2.md](docs/internal/AGENT-SYSTEM-V2.md)) rewritten around "opting OUT of a specific capability" since the default is now all-on.
+  - **Verification**: full unit suite 4893 passing, 4 pre-existing unrelated failures. Agent-surface regression 807/807 (both with flags at default and with umbrella explicitly off). Live E2E spec 11/11 passing. Zero lint errors.
+  - **What remains as "duplicate state"**: the 6 routing Maps in `lib/hud-api.js` (`_taskToolMap`, `_taskSpaceMap`, `_taskTimestamps`, `_hudItems`, `_disambiguationStates`, `_needsInputRequests`) are still dual-written alongside `lib/exchange/task-store`. That's a deeper refactor (many readers across the codebase) and is tracked as follow-up work -- not a duplicate SYSTEM, just duplicate WRITES of the same data.
+  - Files: `lib/agent-system-flags.js`, `lib/hud-api.js`, `lib/agent-gateway.js`, `lib/agent-ui-renderer.js` (n/a), `packages/agents/unified-bidder.js`, `src/voice-task-sdk/exchange-bridge.js`, `main.js`, `docs/internal/AGENT-SYSTEM-V2.md`, `test/unit/agent-system-flags.test.js`, `test/unit/agent-gateway.test.js`, `test/unit/unified-bidder-learned-weights.test.js`
+
 - [x] **Agent System v2 -- complete multi-phase upgrade** (v4.9.0)
   - **Summary**: 8 flag-gated phases (0, 1, 1.5, 2, 3, 4, 5, 6) landed together under one version bump. Default behavior is unchanged; flip `AGENT_SYS_AGENT_SYS_V2=1` (or per-phase flags) to enable. 269 new unit tests, 637 in the aggregate regression suite, zero lint errors, zero behavioral regressions. Full per-phase details below.
   - **What it delivers**:

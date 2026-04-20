@@ -1052,6 +1052,24 @@ app.whenReady().then(() => {
     console.error('[Main] Error setting up Evaluation IPC:', error);
   }
 
+  // Agent System v2 HTTP Gateway (loopback only, 127.0.0.1:47293).
+  // Exposes the agent auction + council mode + SSE task-timeline stream
+  // to CLI tools, web dashboards, and future flow-runtime integrations.
+  // Respects the `httpGateway` feature flag (default on).
+  try {
+    const { isAgentFlagEnabled } = require('./lib/agent-system-flags');
+    if (isAgentFlagEnabled('httpGateway')) {
+      const { startAgentGateway } = require('./lib/agent-gateway');
+      startAgentGateway()
+        .then(() => console.log('[Main] Agent Gateway listening on 127.0.0.1:47293'))
+        .catch((err) => console.error('[Main] Agent Gateway failed to start:', err.message));
+    } else {
+      console.log('[Main] Agent Gateway disabled by flag');
+    }
+  } catch (error) {
+    console.error('[Main] Error starting Agent Gateway:', error);
+  }
+
   // --- Email Service IPC Handlers ---
   try {
     const { getEmailService } = require('./lib/email-service');
@@ -1652,6 +1670,17 @@ app.on('will-quit', (_event) => {
     }
   } catch {
     /* best effort */
+  }
+
+  // Stop the Agent System v2 HTTP Gateway. Fire-and-forget; the
+  // underlying http.Server.close() resolves when open sockets drain.
+  try {
+    const { stopAgentGateway } = require('./lib/agent-gateway');
+    Promise.resolve(stopAgentGateway()).catch((e) =>
+      console.error('[App] agent-gateway stop:', e.message)
+    );
+  } catch {
+    /* module may not be loaded */
   }
 
   // Shutdown the GSX Create engine (orphans a Claude Code session otherwise)
