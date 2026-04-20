@@ -719,6 +719,16 @@
 
 ## Recently Completed
 
+- [x] **Daily Brief dayView UI restored: variant selector now opt-in (v4.9.0)**
+  - **Symptom reported**: "daily brief had an awesome UI for showing graphics. this is gone."
+  - **Root cause**: the Phase 3 auto variant-selector in [lib/hud-api.js](lib/hud-api.js) was firing on every task that didn't carry an explicit `variant`. For a voice command like "give me my daily brief", the LLM classifier could misclassify as `council`, which dispatched the task to `lib/exchange/council-runner.js` INSTEAD of the normal single-winner auction. Council mode bypasses `daily-brief-agent.execute()` (and its rich `buildDayViewSpec` output) in favor of a multi-agent aggregate, so the dayView HTML (timeline, insight cards, smart actions, focus window, right-now block) never reached the command HUD.
+  - **Fix**: variant selection is now explicit opt-in. The LLM classifier only fires when the caller passes `variant: 'auto'`. When no variant is supplied, the auction defaults to `winner` (the pre-v2 behavior). Callers who WANT auto-classification (CLI tools, HTTP gateway clients, future flow-runtime) can still opt in per task.
+  - **Why opt-in over a smarter classifier**: voice commands don't fit neatly into one classifier category. The LLM would sometimes hedge ("looks like a judgment task"). Explicit control is cheaper (no extra LLM call per voice command), faster (~200ms saved), and deterministic.
+  - **Daily-brief pipeline verified end-to-end**: `daily-brief-agent.execute()` returns `{ success, message, ui: buildDayViewSpec(...) }` → `agent-middleware.normalizeResult()` converts `ui` to `html` via `renderAgentUI({ type: 'dayView', ... })` → `_renderDayView(spec)` produces the rich HTML → command-HUD renders via `addAgentUIPanel()`.
+  - **New regression guard**: [test/unit/daily-brief-dayview-survives-v2.test.js](test/unit/daily-brief-dayview-survives-v2.test.js) asserts `buildDayViewSpec` → `renderAgentUI` → `normalizeResult` produces HTML containing the signature visual elements (AI Day View header, Timeline, Right now, briefing text, event titles). If any v2 change breaks this pipeline, this test fails loudly.
+  - **Verification**: 308 targeted unit tests pass, 11/11 v2 E2E pass, no lint errors.
+  - Files: `lib/hud-api.js`, `test/unit/daily-brief-dayview-survives-v2.test.js`
+
 - [x] **Agent System v2 -- default all phases ON, retire flag guards from production code** (v4.9.0)
   - **Why:** The flag-gated rollout was appropriate during development but left two parallel systems running side-by-side in production. Every task path had an `if (isAgentFlagEnabled(...))` branch that chose between "legacy" and "v2" behavior. User feedback: "I don't want duplicate systems. More code, more confusion." This commit resolves that by making v2 the only system.
   - **Flag defaults flipped to TRUE** in [lib/agent-system-flags.js](lib/agent-system-flags.js). Every phase (typedTaskContract, councilMode, learnedWeights, roleBasedVoterPool, variantSelector, perCriterionBidding, bidTimeClarification, adequacyLoop, httpGateway) is on by default. The flag module survives solely as a runtime opt-out.
