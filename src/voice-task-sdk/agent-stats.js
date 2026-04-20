@@ -86,9 +86,18 @@ class AgentStatsTracker {
   }
 
   /**
-   * Save stats to disk
+   * Save stats to disk. No-op when the tracker hasn't been initialized
+   * yet (statsFile is null) -- this avoids throwing "path must be a
+   * string" every time a caller happens to record before init. In
+   * practice init() is awaited during app boot, but tests or library
+   * callers that skip it still behave cleanly.
    */
   save() {
+    if (!this.statsFile || !this.historyFile) {
+      // Not initialized yet -- caller is responsible for calling init()
+      // before expecting persistence. In-memory state is still valid.
+      return;
+    }
     try {
       fs.writeFileSync(this.statsFile, JSON.stringify(this.stats, null, 2));
       fs.writeFileSync(this.historyFile, JSON.stringify(this.bidHistory, null, 2));
