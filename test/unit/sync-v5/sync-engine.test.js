@@ -297,13 +297,62 @@ describe('sync-v5 / sync-engine', () => {
       expect(CYPHER_OP_TX).toContain('ackedByDevice: false');
     });
 
-    it('includes a Phase 3 placeholder for vc bump', () => {
-      expect(CYPHER_OP_TX).toContain('PHASE 3');
-      expect(CYPHER_OP_TX).toMatch(/vector clock|vc/);
+    it('bumps the vector clock atomically using apoc.map.setKey (Phase 3)', () => {
+      expect(CYPHER_OP_TX).toContain('apoc.map.setKey');
+      expect(CYPHER_OP_TX).toContain('coalesce(a.vc[$deviceId], 0) + 1');
+      expect(CYPHER_OP_TX).not.toContain('PHASE 3');
+    });
+
+    it('persists the post-bump vc in :OperationLog.vcAfter for ack roundtrip', () => {
+      expect(CYPHER_OP_TX).toContain('vcAfter: apoc.convert.toJson(a.vc)');
     });
 
     it('relates the OperationLog to the Asset (APPLIED_TO)', () => {
       expect(CYPHER_OP_TX).toContain('MERGE (op)-[:APPLIED_TO]->(a)');
+    });
+  });
+
+  describe('CYPHER_DELETE_TX (Phase 3)', () => {
+    const { CYPHER_DELETE_TX, OP_TYPE } = require('../../../lib/sync-v5/sync-engine');
+
+    it('writes :Tombstone, soft-deletes :Asset, links them, all atomic', () => {
+      expect(CYPHER_DELETE_TX).toContain('CREATE (t:Tombstone');
+      expect(CYPHER_DELETE_TX).toContain('a.active = false');
+      expect(CYPHER_DELETE_TX).toContain('MERGE (t)-[:TOMBSTONES]->(a)');
+    });
+
+    it('bumps vc and stores it as the tombstone finalVc', () => {
+      expect(CYPHER_DELETE_TX).toContain('apoc.map.setKey');
+      expect(CYPHER_DELETE_TX).toContain('finalVc: apoc.convert.toJson(a.vc)');
+    });
+
+    it('writes :OperationLog for the delete (audit trail)', () => {
+      expect(CYPHER_DELETE_TX).toContain('CREATE (op:OperationLog');
+      expect(CYPHER_DELETE_TX).toContain('vcAfter: apoc.convert.toJson(a.vc)');
+    });
+
+    it('engine routes asset.delete to CYPHER_DELETE_TX, asset.upsert to CYPHER_OP_TX', async () => {
+      const { queue, omniClient, engine, blobStore } = makeFixture();
+      queue.enqueue({
+        opType: OP_TYPE.ASSET_UPSERT,
+        entityType: 'asset',
+        entityId: 'a1',
+        payload: { content: 'hello' },
+      });
+      queue.enqueue({
+        opType: OP_TYPE.ASSET_DELETE,
+        entityType: 'asset',
+        entityId: 'a2',
+        payload: {},
+      });
+      await engine.drainOnce();
+      expect(omniClient.executeQuery).toHaveBeenCalledTimes(2);
+      const cyphers = omniClient.executeQuery.mock.calls.map(([c]) => c);
+      // One should be CYPHER_OP_TX (no Tombstone) and one CYPHER_DELETE_TX.
+      expect(cyphers.some((c) => c.includes('CREATE (t:Tombstone'))).toBe(true);
+      expect(cyphers.some((c) => !c.includes('CREATE (t:Tombstone') && c.includes('CREATE (op:OperationLog'))).toBe(true);
+      // The delete op did NOT upload a blob.
+      expect(blobStore.inspect().blobCount).toBe(1); // only the upsert's content
     });
   });
 });
