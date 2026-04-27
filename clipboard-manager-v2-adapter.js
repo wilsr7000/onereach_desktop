@@ -616,11 +616,42 @@ class ClipboardManagerV2 {
 
     this.history.unshift(historyItem);
 
-    // Maintain max history size
-    if (this.history.length > this.maxHistorySize) {
-      const toRemove = this.history[this.history.length - 1];
-      this.history.pop();
+    // Maintain max history size.
+    //
+    // PREVIOUS BEHAVIOUR (caused user data loss): blind FIFO -- pop the oldest
+    // item every time the history exceeds maxHistorySize. This silently
+    // deleted pinned items, items the user had moved into named spaces (e.g.
+    // a "KEYS" space holding an Anthropic API key), and AI-conversation
+    // captures the user expected to keep. No prompt, no audit log.
+    //
+    // NEW BEHAVIOUR: walk back from the tail and only evict items that are
+    // BOTH unpinned AND in the 'unclassified' catch-all. Items the user has
+    // organized -- pinned or space-classified -- are kept regardless. If the
+    // history is past the limit but every old item is "protected", the
+    // history is allowed to grow past the limit rather than delete user
+    // content. Every eviction is logged so there's a paper trail.
+    while (this.history.length > this.maxHistorySize) {
+      const evictIndex = this._findEvictableIndex();
+      if (evictIndex === -1) {
+        // Nothing safe to evict -- everything older is pinned or organized.
+        // Better to grow the history past the cap than to silently delete
+        // user-curated content.
+        log.info('clipboard', 'History over limit but no evictable items; preserving user content', {
+          historySize: this.history.length,
+          maxHistorySize: this.maxHistorySize,
+          pinned: this.pinnedItems.size,
+        });
+        break;
+      }
+      const toRemove = this.history[evictIndex];
+      this.history.splice(evictIndex, 1);
       this.storage.deleteItem(toRemove.id);
+      log.info('clipboard', 'Evicted unclassified item to enforce maxHistorySize', {
+        id: toRemove.id,
+        type: toRemove.type,
+        spaceId: toRemove.spaceId,
+        historySize: this.history.length,
+      });
     }
 
     // Update pinned items set
@@ -686,6 +717,29 @@ class ClipboardManagerV2 {
     // Auto-generate AI metadata if enabled (run async, don't block)
     // Pass fileType for proper categorization of image files
     this.maybeAutoGenerateMetadata(indexEntry.id, item.type, item.isScreenshot, item.fileType);
+  }
+
+  /**
+   * Walk the history from oldest to newest and return the index of the first
+   * item that's safe to evict. An item is "safe to evict" only when it is:
+   *   - NOT pinned, AND
+   *   - in the 'unclassified' catch-all space (or has no spaceId set)
+   *
+   * Items the user has organized into a named space stay forever -- the
+   * clipboard-history cap is meant to bound the unclassified noise stream,
+   * not delete deliberate captures. Returns -1 if nothing is evictable
+   * (history will then grow past the cap rather than nuke user content).
+   */
+  _findEvictableIndex() {
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      const candidate = this.history[i];
+      if (!candidate) continue;
+      if (this.pinnedItems.has(candidate.id)) continue;
+      const space = candidate.spaceId;
+      if (space && space !== 'unclassified') continue;
+      return i;
+    }
+    return -1;
   }
 
   /**
