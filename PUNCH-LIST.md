@@ -719,6 +719,46 @@
 
 ## Recently Completed
 
+- [x] **Spaces v5 architecture -- Phase 4 scaffold landed (v4.9.0)**
+  - **Context**: Phases 1-3 shipped the observability + write-protocol + causality layers. Phase 4 lands point-in-time reconstruction (snapshots), retention compaction (sliding-window with compliance safety checks), and the pull engine that closes the cross-device sync loop. Per the v5 plan, Phase 4 has the highest payoff once Phase 3 is in -- it activates v5 invariant 8 (point-in-time queries), bounds graph storage cost via compaction, and lets remote ops actually flow back to the device. Existing `spaces-sync-manager` write path stays untouched -- parallel-mode discipline preserved through Phase 4.
+  - **What ships**:
+    - [lib/sync-v5/snapshot.js](lib/sync-v5/snapshot.js) -- `:Snapshot` writer + retention compactor + point-in-time materialiser:
+      - **`shouldSnapshot({ opsSinceLastSnapshot, lastSnapshotAt })`** -- pure trigger algorithm. Fires on `opsSinceLastSnapshot >= 100` (threshold) OR `now - lastSnapshotAt >= 24h` (staleness), per v5 4.3 trigger spec. Configurable thresholds for tenant override.
+      - **`writeSnapshot({ spaceId, reason, preserveUntil })`** -- computes the high-water-mark vc across every active `:Asset` in the space (`computeSpaceVc`), creates a `:Snapshot` node tied to the space via `[:OF_SPACE]`. Carries the operator forensic flag `preserveUntil`.
+      - **`computeCollapseDecisions(snapshots, { now, preTombstoneTraceIds })`** -- pure sliding-window compactor. Per v5 4.3:
+        - 0-7 days: keep all (native cadence)
+        - 7-30 days: collapse to one per day
+        - 30-365 days: collapse to one per ISO week
+        - 1+ year: collapse to one per calendar month
+      - **Compaction safety checks** (the load-bearing compliance correctness rules):
+        - Snapshots with `preserveUntil > now` are always kept (operator forensic preservation).
+        - Snapshots in `preTombstoneTraceIds` are always kept regardless of age (compliance: each `:Tombstone`'s most-recent-before snapshot is the only way to reconstruct pre-deletion state).
+      - **`compactSpace(spaceId)`** -- runs the full compactor: lists snapshots, fetches the pre-tombstone safety set via `CYPHER_PRE_TOMBSTONE_SNAPSHOTS`, computes collapse decisions, **collapses the op-log between every collapsed snapshot and the next surviving one** (v5 op-log retention rule: ops between snapshot N and N+1 retained as long as N is retained; on collapse, truncated to cumulative effect via `CYPHER_COLLAPSE_OP_LOG` which keeps the latest op per entityId in the span), then collapses the snapshots themselves. State reconstruction is possible at any point within retention horizon.
+      - **`materialise(spaceId, at)`** -- v5 invariant 8 building block. Returns the most recent `:Snapshot` at-or-before the requested instant + the op-log span to replay forward. Phase 5+ tooling does the actual replay against its local replica; Phase 4 ships the graph-side support.
+    - [lib/sync-v5/pull-engine.js](lib/sync-v5/pull-engine.js) -- `PullEngine` class implementing the v5 4.7 pull pipeline:
+      - Periodic graph poll (5s default; CDC-ready API via `subscribeToChangeFeed` reserved for when Aura exposes Neo4j 5 CDC).
+      - Cursor persistence: `userData/sync-v5/pull-cursor.json`, atomic via tmp + rename. Survives restarts.
+      - Per-op pipeline: read `:OperationLog` rows since cursor -> skip ops authored by self -> tombstone gate via `tombstone.shouldAllowWrite` (no-resurrection invariant) -> `conflict.applyRemoteOp` to detect APPLY / IGNORE / EQUAL / CONFLICT -> dispatch to `localApplyFn` (APPLY) or surface in `ConflictStore` (CONFLICT).
+      - Exponential backoff on consecutive errors (capped at 5 minutes).
+      - Counters on `inspect()`: applied, ignored, conflicts, tombstoneRefused, ownOpsSkipped, lastError, lastPollAt -- all surfaced through the diagnostics endpoints from Phase 1.
+      - **Decoupled from the materialised replica**: takes `localLookupFn` and `localApplyFn` as injected callbacks. Phase 5+ tooling backs them with the SQLite-materialised replica; Phase 4 callers (and tests) can pass stubs and validate the protocol end-to-end without the replica.
+  - **What does NOT ship in Phase 4** (per the v5 rollout plan):
+    - The materialised local replica itself (Phase 5+ tooling) -- pull engine takes lookup/apply callbacks; tests pass stubs.
+    - Neo4j 5 CDC subscription -- API surface reserved (`subscribeToChangeFeed`); default impl polls. CDC support lands when we confirm the Aura instance has it enabled.
+    - Schema migration tooling -- Phase 5.
+    - Periodic compactor scheduler -- the pure functions and the per-space `compactSpace` helper are testable; the cron-style "run compactor once per day per tenant" loop is a follow-up boot wiring.
+    - Any modification to today's `spaces-sync-manager` write path.
+  - **Verification**: 280/280 across 15 sync-v5 suites in [test/unit/sync-v5/](test/unit/sync-v5/), including 2 new test files (`snapshot.test.js`, `pull-engine.test.js`) covering: trigger algebra (threshold + staleness + custom thresholds + no-prior-snapshot edge case), compaction sliding-window across all four bands (native / daily / weekly / monthly), preserveUntil flag respect, pre-tombstone safety preservation regardless of age, snapshot writer + computeSpaceVc merge-max, point-in-time materialise returning snapshot + op-log span, pull engine constructor validation + own-op skip + apply/ignore/conflict routing + tombstone refusal + cursor advance + cursor persistence across instances + malformed-vc fail-closed. 344/344 across 20 suites in the wider regression run.
+  - **What this user does today**: nothing user-visible -- still parallel-mode. After app restart:
+    - The Phase 1 `/sync/queue` endpoint already worked; Phase 4 doesn't extend it (snapshot/pull-engine surfaces will be wired through diagnostics in a follow-up boot patch).
+    - From devtools: `await globalThis.__syncV5.snapshot?.writeSnapshot({ spaceId: '<existing>' })` would write a `:Snapshot` once Phase 4 is wired into main.js (which is a separate boot-wiring commit alongside other in-flight work).
+  - **What's ready for Phase 5 to consume**:
+    - `pullEngine.PullEngine` -- instantiate with the materialised SQLite replica's lookup/apply functions, `engine.start()` and remote ops flow into the replica.
+    - `snapshot.materialise(spaceId, at)` -- given the Phase 5 replica's op-log replay capability, this is the entire "show me this space as of date X" query.
+    - `snapshot.compactSpace(spaceId)` -- callable from a Phase 5 cron loop or a manual operator command. Self-contained: handles snapshots + op-log retention together.
+  - **Files**: 2 new modules in `lib/sync-v5/` (~700 lines), 2 new test files in `test/unit/sync-v5/` (~600 lines).
+  - **Documentation**: see [/Users/richardwilson/.cursor/plans/spaces_+_neo4j_(neon)_source-of-truth_architecture_review_(v5)_*.plan.md](.) for the full target architecture.
+
 - [x] **Spaces v5 architecture -- Phase 3 scaffold landed (v4.9.0)**
   - **Context**: Phases 1-2 shipped the observability + write-protocol substrate. Phase 3 lands the causality + conflict layer: vector clocks, permanent tombstones, device rebind ops (Path A signed handoff and Path B user-attested), and the N-way conflict-resolution data model. Per the v5 rollout plan, vc + conflict UI ship together to avoid the detect-without-resolve interim state. The conflict UI's renderer integration is downstream; this scaffold ships the data model + IPC-ready API + ConflictStore the UI consumes. The existing `spaces-sync-manager` write path stays untouched -- parallel-mode discipline preserved.
   - **What ships**:
