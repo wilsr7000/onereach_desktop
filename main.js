@@ -699,6 +699,155 @@ app.whenReady().then(() => {
     console.warn('[Neo4j] Failed to load credentials at boot:', neo4jErr.message);
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // Sync v5 boot wiring (parallel to existing spaces-sync-manager).
+  //
+  // Instantiates the local op queue, DLQ, content-addressed blob store,
+  // heartbeat reporter, and sync engine. Registers diagnostics providers
+  // so /sync/queue, /sync/dlq, /sync/trace/:id return real data instead
+  // of `wired: false` placeholders.
+  //
+  // The HEARTBEAT REPORTER is auto-started -- it reports device state to
+  // the graph even when the sync engine is idle. The SYNC ENGINE is NOT
+  // auto-started: nothing produces ops in the queue yet because v5 doesn't
+  // replace the existing spaces-sync-manager write path until a later
+  // phase. The engine starts only when explicitly invoked via
+  // `globalThis.__syncV5Demo()` or `__syncV5Engine.start()` from devtools,
+  // which is how a developer validates the protocol end-to-end without
+  // coupling the v5 sync to today's sync.
+  // ──────────────────────────────────────────────────────────────────────────
+  try {
+    const v5 = require('./lib/sync-v5');
+    const { getOmniGraphClient } = require('./omnigraph-client');
+
+    const queue = new v5.OpQueue();
+    const dlq = new v5.DeadLetterQueue();
+    const blobStore = new v5.LocalBlobStore();
+    const heartbeatReporter = new v5.HeartbeatReporter({
+      dlqStateProvider: () => dlq.toHeartbeatState(),
+      queueDepthProvider: () => queue.getDepth(),
+      // Phase 3+ will populate with the materialised replica's space count.
+      replicaSpaceCountProvider: () => 0,
+      // Operator-set forensic preservation flag is a future feature; null today.
+      preserveUntilProvider: () => null,
+    });
+    const syncEngine = new v5.SyncEngine({
+      queue,
+      dlq,
+      blobStore,
+      omniClient: getOmniGraphClient(),
+      heartbeatReporter,
+      deviceId: v5.getDeviceId(),
+      handshakeFn: () => v5.handshake(),
+    });
+
+    // Register diagnostics providers so the Phase 1 endpoints stop
+    // reporting `wired: false`.
+    v5.setProviders({
+      queueProvider: () => queue.inspect(),
+      dlqProvider: () => dlq.inspect(),
+      heartbeatReporter,
+      traceLookupProvider: async (traceId) => {
+        const inQueue = queue.get(traceId);
+        const inDlq = dlq.get(traceId);
+        return {
+          queue: inQueue
+            ? {
+                status: inQueue.status,
+                opType: inQueue.opType,
+                entityId: inQueue.entityId,
+                createdAt: inQueue.createdAt,
+                retryCount: inQueue.retryCount,
+                lastError: inQueue.lastError,
+              }
+            : null,
+          dlq: inDlq
+            ? {
+                cause: inDlq.cause,
+                parkedAt: inDlq.parkedAt,
+                retryCount: inDlq.retryCount,
+              }
+            : null,
+        };
+      },
+    });
+
+    // Auto-start the heartbeat reporter so the graph immediately knows the
+    // device is alive. Sync engine is opt-in (see __syncV5Demo below).
+    heartbeatReporter.start();
+
+    // Expose for devtools / future-phase wiring.
+    globalThis.__syncV5 = { queue, dlq, blobStore, heartbeatReporter, syncEngine };
+    globalThis.__syncV5Engine = syncEngine;
+    console.log('[sync-v5] wired (heartbeat started; engine idle until __syncV5Demo runs)');
+  } catch (v5Err) {
+    console.warn('[sync-v5] boot wiring failed:', v5Err.message);
+  }
+
+  /**
+   * Dev/test helper: validate the v5 write protocol end-to-end without
+   * touching the existing sync path.
+   *
+   * Usage from devtools console:
+   *   await globalThis.__syncV5Demo({ content: 'hello world', entityId: 'demo-1' })
+   *
+   * Refuses to run if Neo4j isn't configured (the engine would just retry
+   * forever otherwise -- explicit error is friendlier).
+   */
+  globalThis.__syncV5Demo = async function __syncV5Demo(opts = {}) {
+    const { entityId = `demo-${Date.now()}`, content = 'sync-v5 demo' } = opts;
+    if (!globalThis.__syncV5) {
+      return { success: false, error: 'sync-v5 boot wiring failed; restart and check logs' };
+    }
+    try {
+      const { getOmniGraphClient } = require('./omnigraph-client');
+      const omni = getOmniGraphClient();
+      if (!omni || typeof omni.isReady !== 'function' || !omni.isReady()) {
+        return { success: false, error: 'Neo4j not configured -- nothing to push to' };
+      }
+      const { queue, dlq, syncEngine } = globalThis.__syncV5;
+      const traceId = queue.enqueue({
+        opType: 'asset.upsert',
+        entityType: 'asset',
+        entityId,
+        payload: { content, demo: true },
+      });
+      console.log(`[__syncV5Demo] Enqueued traceId=${traceId} entityId=${entityId}`);
+
+      const start = Date.now();
+      let processed = 0;
+      // Drain a few times so backoff doesn't starve us on the first failure.
+      for (let i = 0; i < 5; i++) {
+        processed += await syncEngine.drainOnce();
+        if (queue.get(traceId) == null && dlq.get(traceId) == null) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const ms = Date.now() - start;
+
+      const inQueue = queue.get(traceId);
+      const inDlq = dlq.get(traceId);
+      const status = inQueue
+        ? `still in queue (status=${inQueue.status}, retries=${inQueue.retryCount}, error=${inQueue.lastError})`
+        : inDlq
+          ? `parked to DLQ (cause=${inDlq.cause})`
+          : 'acked';
+      console.log(`[__syncV5Demo] ${status} after ${ms}ms (${processed} drains)`);
+      return {
+        success: !inQueue && !inDlq,
+        traceId,
+        entityId,
+        durationMs: ms,
+        processed,
+        inQueue: inQueue ? { status: inQueue.status, retryCount: inQueue.retryCount } : null,
+        inDlq: inDlq ? { cause: inDlq.cause } : null,
+        engineStats: syncEngine.inspect(),
+      };
+    } catch (err) {
+      console.error('[__syncV5Demo] Fatal:', err);
+      return { success: false, error: err.message };
+    }
+  };
+
   // Initialize Menu Data Manager - SINGLE SOURCE OF TRUTH for all menu data
   // This handles: IDW environments, external bots, creators, GSX links, etc.
   // It provides: atomic saves, validation, debounced updates, event-driven architecture
