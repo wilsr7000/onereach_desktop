@@ -683,6 +683,22 @@ app.whenReady().then(() => {
   global.settingsManager = getSettingsManager();
   console.log('Settings manager initialized');
 
+  // Hydrate the OmniGraph client from persisted Neo4j credentials so the
+  // sync layer is ready as soon as it's needed. No-op when the password is
+  // unset -- _isGraphAvailable() correctly refuses to push in that case.
+  // (Endpoint comes from gsxRefreshUrl elsewhere; this just adds the auth.)
+  try {
+    const { loadFromSettings } = require('./lib/neo4j-credentials');
+    const r = loadFromSettings();
+    if (r.configured) {
+      console.log('[Neo4j] Credentials loaded from settings; graph sync enabled');
+    } else {
+      console.log('[Neo4j] No password in settings; graph sync disabled until configured in Settings');
+    }
+  } catch (neo4jErr) {
+    console.warn('[Neo4j] Failed to load credentials at boot:', neo4jErr.message);
+  }
+
   // Initialize Menu Data Manager - SINGLE SOURCE OF TRUTH for all menu data
   // This handles: IDW environments, external bots, creators, GSX links, etc.
   // It provides: atomic saves, validation, debounced updates, event-driven architecture

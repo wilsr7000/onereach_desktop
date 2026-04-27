@@ -344,6 +344,18 @@ class SettingsManager {
       // Diagnostic logging level: 'off', 'error', 'warn', 'info', 'debug'
       // Controls log queue min level, log server, and renderer console capture
       diagnosticLogging: 'info',
+
+      // ── Neo4j / OmniGraph credentials ────────────────────────────────
+      // The Neo4j Aura instance is the canonical source of truth for
+      // Spaces (cross-device, cross-app). Without these, the OmniGraph
+      // client can't authenticate, push/pull silently fail, and local
+      // FIFO eviction has no graph backstop. The endpoint is auto-derived
+      // from `gsxRefreshUrl` at boot; the password must be set explicitly.
+      neo4jPassword: '',
+      neo4jUri: '', // optional override; default follows endpoint
+      neo4jUser: 'neo4j',
+      neo4jDatabase: 'neo4j',
+
       // Desktop Autopilot — off by default; users must opt in
       desktopAutopilotEnabled: false,
       desktopAutopilotBrowser: true,

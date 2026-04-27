@@ -2059,7 +2059,13 @@ class SpacesAPIServer {
       const client = api.gsx.getClient();
       if (!client) throw new Error('not initialized');
 
-      // Auto-initialize OmniGraph endpoint from settings if not yet configured
+      // Auto-initialize OmniGraph endpoint + Neo4j credentials from settings
+      // if not yet configured. The endpoint is derived from the GSX refresh
+      // URL; the Neo4j password/URI/user/database come from the dedicated
+      // settings keys persisted via lib/neo4j-credentials.js (file picker
+      // in Settings UI, or direct setting). Without all of those, isReady()
+      // returns false and the sync layer's _isGraphAvailable() correctly
+      // refuses to push.
       const { getOmniGraphClient } = require('./omnigraph-client');
       const omniClient = getOmniGraphClient();
       if (!omniClient.isReady()) {
@@ -2070,7 +2076,21 @@ class SpacesAPIServer {
           if (refreshUrl) {
             const endpoint = refreshUrl.replace('/refresh_token', '/omnigraph');
             api.gsx.initialize(endpoint, null, settings.get('userEmail') || 'system');
-            log.info('spaces', 'Auto-initialized OmniGraph from settings', { endpoint });
+            log.info('spaces', 'Auto-initialized OmniGraph endpoint from settings', { endpoint });
+          }
+          // Pull Neo4j auth out of settings and apply it to the live client.
+          // No-op (with a non-throwing log) if the password isn't set yet --
+          // the Settings UI's Neo4j panel is the place to configure it.
+          try {
+            const { loadFromSettings } = require('./lib/neo4j-credentials');
+            const result = loadFromSettings({ settingsManager: settings, omniClient });
+            if (!result.configured) {
+              log.info('spaces', 'OmniGraph endpoint set but Neo4j password missing; graph push/pull disabled', {
+                hint: 'Settings -> Neo4j: import the Aura credentials .txt or paste the password',
+              });
+            }
+          } catch (credsErr) {
+            log.warn('spaces', 'Could not load Neo4j credentials from settings', { error: credsErr.message });
           }
         } catch (initErr) {
           log.warn('spaces', 'Could not auto-initialize OmniGraph', { error: initErr.message });
