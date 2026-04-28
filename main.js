@@ -17209,6 +17209,21 @@ ipcMain.handle('budget:getStatsByModel', async () => {
   return budgetManager.getStatsByModel();
 });
 
+// Get stats by agent -- who spent what.
+ipcMain.handle('budget:getStatsByAgent', async (_event, period = 'all') => {
+  return budgetManager.getStatsByAgent(period);
+});
+
+// Ranked agent leaderboard for dashboards / voice queries.
+ipcMain.handle('budget:getAgentLeaderboard', async (_event, opts = {}) => {
+  return budgetManager.getAgentLeaderboard(opts);
+});
+
+// Full detail for a single agent.
+ipcMain.handle('budget:getAgentCosts', async (_event, agentId, period = 'all') => {
+  return budgetManager.getAgentCosts(agentId, period);
+});
+
 // Get daily costs chart data
 ipcMain.handle('budget:getDailyCosts', async (event, days = 30) => {
   return budgetManager.getDailyCosts(days);

@@ -17,6 +17,107 @@ const path = require('path');
 const { app } = require('electron');
 const { calculateCost, _getPricingForModel, getPricingSummary, formatCost } = require('./pricing-config');
 
+// ---------------------------------------------------------------------------
+// Agent identity derivation
+//
+// Usage entries want an explicit `agentId`/`agentName`, but many historic
+// records and some callers only supply a `feature` string. This module
+// derives a best-effort agent identity from the tracker params so
+// reporting always has an agent dimension.
+// ---------------------------------------------------------------------------
+
+const FEATURE_TO_AGENT = {
+  // Built-in agents that call ai.chat directly.
+  'app-manager-agent': { agentId: 'app-manager-agent', agentName: 'App Manager Agent' },
+  'memory-agent-orchestrator': { agentId: 'memory-agent', agentName: 'Memory Agent' },
+  'memory-agent-observer': { agentId: 'memory-agent', agentName: 'Memory Agent' },
+  'memory-agent': { agentId: 'memory-agent', agentName: 'Memory Agent' },
+  'dj-agent': { agentId: 'dj-agent', agentName: 'DJ Agent' },
+  'calendar-agent': { agentId: 'calendar-agent', agentName: 'Calendar Agent' },
+  'email-agent': { agentId: 'email-agent', agentName: 'Email Agent' },
+  'search-agent': { agentId: 'search-agent', agentName: 'Search Agent' },
+  'weather-agent': { agentId: 'weather-agent', agentName: 'Weather Agent' },
+  'time-agent': { agentId: 'time-agent', agentName: 'Time Agent' },
+  'help-agent': { agentId: 'help-agent', agentName: 'Help Agent' },
+  'tickets-agent': { agentId: 'tickets-agent', agentName: 'Tickets Agent' },
+  'playbook-agent': { agentId: 'playbook-agent', agentName: 'Playbook Agent' },
+  'playbook-executor': { agentId: 'playbook-agent', agentName: 'Playbook Agent' },
+  'playbooks-launch-agent': { agentId: 'playbooks-launch-agent', agentName: 'Playbooks Launcher' },
+  'playbooks-launch-space-match': { agentId: 'playbooks-launch-agent', agentName: 'Playbooks Launcher' },
+  'daily-brief-agent': { agentId: 'daily-brief-agent', agentName: 'Daily Brief Agent' },
+  'daily-brief-compose': { agentId: 'daily-brief-agent', agentName: 'Daily Brief Agent' },
+  'browsing-agent': { agentId: 'browsing-agent', agentName: 'Browsing Agent' },
+  'browser-agent': { agentId: 'browser-agent', agentName: 'Browser Agent' },
+  'master-orchestrator': { agentId: 'master-orchestrator', agentName: 'Master Orchestrator' },
+  'unified-bidder': { agentId: 'unified-bidder', agentName: 'Unified Bidder' },
+  'agent-bidding': { agentId: 'unified-bidder', agentName: 'Unified Bidder' },
+  'agent-prescreen': { agentId: 'unified-bidder', agentName: 'Unified Bidder' },
+
+  // System-level (non-agent) work we still want grouped.
+  'metadata-generation': { agentId: 'system:metadata-generator', agentName: 'Metadata Generator' },
+  'agent-diagnosis': { agentId: 'app-manager-agent', agentName: 'App Manager Agent' },
+  'realtime-voice': { agentId: 'system:voice', agentName: 'Voice System' },
+  'voice-speaker': { agentId: 'system:voice', agentName: 'Voice System' },
+  'voice-transcription': { agentId: 'system:voice', agentName: 'Voice System' },
+  'transcript-filter': { agentId: 'system:voice', agentName: 'Voice System' },
+  'intent-normalize': { agentId: 'system:orchestrator', agentName: 'Orchestrator' },
+  'routing-cache': { agentId: 'system:orchestrator', agentName: 'Orchestrator' },
+  'variant-selector': { agentId: 'system:orchestrator', agentName: 'Orchestrator' },
+  'exchange-bridge': { agentId: 'system:orchestrator', agentName: 'Orchestrator' },
+  'answer-reflector': { agentId: 'system:agent-learning', agentName: 'Agent Learning' },
+  'agent-learning': { agentId: 'system:agent-learning', agentName: 'Agent Learning' },
+  'assumption-extraction': { agentId: 'system:agent-learning', agentName: 'Agent Learning' },
+  'generative-search': { agentId: 'search-agent', agentName: 'Search Agent' },
+  'flow-log-analysis': { agentId: 'system:flow-analyzer', agentName: 'Flow Analyzer' },
+  'desktop-autopilot': { agentId: 'system:desktop-autopilot', agentName: 'Desktop Autopilot' },
+
+  // Web tools (renderer-side) -- external apps. These won't typically
+  // hit this map because the IPC handler stamps a `webtool:*` agentId
+  // directly, but they remain here as a backstop for historic records.
+  'playbooks': { agentId: 'webtool:playbooks', agentName: 'WISER Playbooks (web tool)' },
+};
+
+/**
+ * Best-effort derive an { agentId, agentName } from a usage-tracker params object.
+ * Explicit agentId always wins. Falls back to feature-based lookup, then to
+ * pattern matching (`exchange-bridge` sets feature='agent:<id>', generic
+ * `*-agent` suffix).
+ *
+ * @param {object} params - Track-usage params (may include agentId, agentName, feature, operation)
+ * @returns {{agentId: string|null, agentName: string|null}}
+ */
+function deriveAgent(params = {}) {
+  const rawId = (params.agentId || '').trim();
+  const rawName = (params.agentName || '').trim();
+  if (rawId) return { agentId: rawId, agentName: rawName || rawId };
+
+  const feature = (params.feature || '').trim();
+  if (!feature) return { agentId: null, agentName: null };
+
+  // exchange-bridge convention: feature = 'agent:<id>'
+  if (feature.startsWith('agent:')) {
+    const id = feature.slice('agent:'.length).trim();
+    if (id) return { agentId: id, agentName: id };
+  }
+
+  // Tests / auditor convention: feature = 'test:<id>'
+  if (feature.startsWith('test:')) {
+    const id = feature.slice('test:'.length).trim();
+    if (id) return { agentId: `test:${id}`, agentName: `Test: ${id}` };
+  }
+
+  if (Object.prototype.hasOwnProperty.call(FEATURE_TO_AGENT, feature)) {
+    return { ...FEATURE_TO_AGENT[feature] };
+  }
+
+  // Generic *-agent suffix.
+  if (/-agent$/.test(feature)) {
+    return { agentId: feature, agentName: feature };
+  }
+
+  return { agentId: null, agentName: null };
+}
+
 // Singleton instance
 let instance = null;
 
@@ -71,7 +172,7 @@ class BudgetManager {
     this.ensureDirectories();
 
     const defaultData = {
-      version: 2, // Schema version for migrations
+      version: 3, // Schema version for migrations (3: added byAgent stats + per-entry agentId/agentName)
       configured: false,
 
       // Budget configuration
@@ -97,6 +198,7 @@ class BudgetManager {
         byFeature: {},
         byProject: {},
         byModel: {},
+        byAgent: {}, // { [agentId]: { cost, calls, inputTokens, outputTokens, name, byModel: { ... } } }
         dailyCosts: {},
       },
 
@@ -150,7 +252,15 @@ class BudgetManager {
       }
     }
 
-    data.version = 2;
+    // v3: byAgent stats + per-entry agentId/agentName. Older data needs a
+    // one-time rebuild so historical spending gets attributed to agents.
+    const fromVersion = typeof oldData.version === 'number' ? oldData.version : 1;
+    if (fromVersion < 3 || !data.stats.byAgent) {
+      console.log(`[BudgetManager] Upgrading schema v${fromVersion} -> v3: backfilling byAgent stats from ${data.usage?.length || 0} records`);
+      this._rebuildStats(data);
+    }
+
+    data.version = 3;
     return data;
   }
 
@@ -164,10 +274,19 @@ class BudgetManager {
       byFeature: {},
       byProject: {},
       byModel: {},
+      byAgent: {},
       dailyCosts: {},
     };
 
     for (const entry of data.usage || []) {
+      // Backfill agent identity on legacy entries lacking it.
+      if (!entry.agentId && !entry.agentName) {
+        const derived = deriveAgent(entry);
+        if (derived.agentId) {
+          entry.agentId = derived.agentId;
+          entry.agentName = derived.agentName;
+        }
+      }
       this._updateStatsFromEntry(data.stats, entry);
     }
   }
@@ -219,6 +338,40 @@ class BudgetManager {
     }
     stats.byModel[model].cost += cost;
     stats.byModel[model].calls += 1;
+
+    // By agent (critical for accountability -- which agent spent the money)
+    const agentId = entry.agentId || deriveAgent(entry).agentId || 'unattributed';
+    const agentName = entry.agentName || (agentId === 'unattributed' ? 'Unattributed' : agentId);
+    if (!stats.byAgent) stats.byAgent = {};
+    if (!stats.byAgent[agentId]) {
+      stats.byAgent[agentId] = {
+        agentId,
+        name: agentName,
+        cost: 0,
+        calls: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        byModel: {},
+        byFeature: {},
+      };
+    }
+    const agentBucket = stats.byAgent[agentId];
+    agentBucket.cost += cost;
+    agentBucket.calls += 1;
+    agentBucket.inputTokens += inputTokens;
+    agentBucket.outputTokens += outputTokens;
+    if (agentName && agentName !== agentId) agentBucket.name = agentName;
+
+    // Agent x Model breakdown so we can see "memory-agent spent $40 on Opus"
+    if (!agentBucket.byModel[model]) agentBucket.byModel[model] = { cost: 0, calls: 0 };
+    agentBucket.byModel[model].cost += cost;
+    agentBucket.byModel[model].calls += 1;
+
+    // Agent x Feature breakdown so we can see which code path drove the spend.
+    const featureKey = entry.feature || 'other';
+    if (!agentBucket.byFeature[featureKey]) agentBucket.byFeature[featureKey] = { cost: 0, calls: 0 };
+    agentBucket.byFeature[featureKey].cost += cost;
+    agentBucket.byFeature[featureKey].calls += 1;
 
     // Daily costs
     if (!stats.dailyCosts[date]) {
@@ -332,6 +485,10 @@ class BudgetManager {
       success = true,
     } = params;
 
+    // Resolve agent identity. Explicit agentId wins; otherwise derive from
+    // the feature string so every entry has accountability metadata.
+    const { agentId, agentName } = deriveAgent(params);
+
     // Calculate cost using unified pricing
     const costResult = calculateCost(model, inputTokens, outputTokens, options);
 
@@ -348,6 +505,8 @@ class BudgetManager {
       spaceId: spaceId || projectId || null,
       feature,
       operation,
+      agentId: agentId || null,
+      agentName: agentName || null,
       success,
       costBreakdown: costResult,
     };
@@ -538,29 +697,7 @@ class BudgetManager {
   // ==========================================================================
 
   getCostSummary(period = 'daily') {
-    const now = new Date();
-    let startDate;
-
-    switch (period) {
-      case 'daily':
-        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        break;
-      case 'weekly':
-        const dayOfWeek = now.getDay();
-        startDate = new Date(now);
-        startDate.setDate(now.getDate() - dayOfWeek);
-        startDate.setHours(0, 0, 0, 0);
-        break;
-      case 'monthly':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        break;
-      case 'yearly':
-        startDate = new Date(now.getFullYear(), 0, 1);
-        break;
-      default:
-        startDate = new Date(0);
-    }
-
+    const startDate = this._periodStart(period);
     const startStr = startDate.toISOString();
     const periodUsage = this.data.usage.filter((u) => u.timestamp >= startStr);
 
@@ -655,6 +792,114 @@ class BudgetManager {
 
   getStatsByModel() {
     return { ...this.data.stats.byModel };
+  }
+
+  /**
+   * Agent-level cost accountability. Returns a map of agentId -> bucket,
+   * with totals, per-model, and per-feature breakdowns. `period` narrows
+   * results to the current daily/weekly/monthly/yearly window.
+   *
+   * @param {string} [period] - 'all' (default), 'daily', 'weekly', 'monthly', 'yearly'
+   * @returns {object} { [agentId]: { agentId, name, cost, calls, inputTokens, outputTokens, byModel, byFeature } }
+   */
+  getStatsByAgent(period = 'all') {
+    if (period === 'all' || !period) {
+      // Fast path -- return the pre-aggregated stats.
+      return JSON.parse(JSON.stringify(this.data.stats.byAgent || {}));
+    }
+    const startDate = this._periodStart(period);
+    const startStr = startDate.toISOString();
+    const result = {};
+    for (const entry of this.data.usage) {
+      if (entry.timestamp < startStr) continue;
+      const agentId = entry.agentId || deriveAgent(entry).agentId || 'unattributed';
+      const name = entry.agentName || (agentId === 'unattributed' ? 'Unattributed' : agentId);
+      if (!result[agentId]) {
+        result[agentId] = {
+          agentId,
+          name,
+          cost: 0,
+          calls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          byModel: {},
+          byFeature: {},
+        };
+      }
+      const bucket = result[agentId];
+      bucket.cost += entry.cost || 0;
+      bucket.calls += 1;
+      bucket.inputTokens += entry.inputTokens || 0;
+      bucket.outputTokens += entry.outputTokens || 0;
+
+      const model = entry.model || 'unknown';
+      if (!bucket.byModel[model]) bucket.byModel[model] = { cost: 0, calls: 0 };
+      bucket.byModel[model].cost += entry.cost || 0;
+      bucket.byModel[model].calls += 1;
+
+      const feat = entry.feature || 'other';
+      if (!bucket.byFeature[feat]) bucket.byFeature[feat] = { cost: 0, calls: 0 };
+      bucket.byFeature[feat].cost += entry.cost || 0;
+      bucket.byFeature[feat].calls += 1;
+    }
+    return result;
+  }
+
+  /**
+   * Ranked list of agents by spend for the given period, highest first.
+   * Handy for dashboards and voice-query answers.
+   *
+   * @param {object} [opts]
+   * @param {string} [opts.period='all']
+   * @param {number} [opts.limit=50]
+   * @returns {Array<object>} Array of agent buckets (see getStatsByAgent shape)
+   */
+  getAgentLeaderboard({ period = 'all', limit = 50 } = {}) {
+    const stats = this.getStatsByAgent(period);
+    return Object.values(stats)
+      .sort((a, b) => (b.cost || 0) - (a.cost || 0))
+      .slice(0, limit)
+      .map((bucket) => ({
+        ...bucket,
+        cost: Math.round((bucket.cost || 0) * 10000) / 10000,
+      }));
+  }
+
+  /**
+   * Full detail for one agent.
+   * @param {string} agentId
+   * @param {string} [period='all']
+   */
+  getAgentCosts(agentId, period = 'all') {
+    if (!agentId) return null;
+    const all = this.getStatsByAgent(period);
+    return all[agentId] || null;
+  }
+
+  /**
+   * Compute the start date for a named period. Shared by getCostSummary
+   * and the agent stat helpers.
+   * @private
+   */
+  _periodStart(period) {
+    const now = new Date();
+    switch (period) {
+      case 'daily':
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      case 'weekly': {
+        const dayOfWeek = now.getDay();
+        const start = new Date(now);
+        start.setDate(now.getDate() - dayOfWeek);
+        start.setHours(0, 0, 0, 0);
+        return start;
+      }
+      case 'monthly':
+        return new Date(now.getFullYear(), now.getMonth(), 1);
+      case 'yearly':
+        return new Date(now.getFullYear(), 0, 1);
+      default:
+        return new Date(0);
+    }
   }
 
   getDailyCosts(days = 30) {
@@ -965,4 +1210,4 @@ function getBudgetManager() {
   return instance;
 }
 
-module.exports = { getBudgetManager, FEATURE_CATEGORIES };
+module.exports = { getBudgetManager, FEATURE_CATEGORIES, deriveAgent };
