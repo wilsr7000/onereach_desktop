@@ -336,6 +336,10 @@ class SpacesAPI {
             }));
           }
 
+          // Phase 5 / commit D: emit a read event so the v5 shadow-
+          // reader can observe + diff against the materialised replica.
+          // Additive only -- consumers without a listener are unaffected.
+          this._emit('items:listed', { spaceId, options, items });
           return items;
         } catch (error) {
           log.error('spaces', 'Error listing items', { error: error.message || error });
@@ -362,11 +366,12 @@ class SpacesAPI {
             const tagsFromFile = this._getItemTags(itemId);
             const finalTags = tagsFromMetadata || tagsFromFile;
 
-            return {
-              ...item,
-              tags: finalTags,
-            };
+            const result = { ...item, tags: finalTags };
+            // Phase 5 / commit D: read-side emit for shadow-reader.
+            this._emit('item:fetched', { spaceId, itemId, item: result });
+            return result;
           }
+          this._emit('item:fetched', { spaceId, itemId, item });
           return item;
         } catch (error) {
           const msg = error.message || String(error);
@@ -925,6 +930,8 @@ class SpacesAPI {
             items = items.slice(0, options.limit);
           }
 
+          // Phase 5 / commit D: read-side emit for shadow-reader.
+          this._emit('items:findByTags', { tags, options, items });
           return items;
         } catch (error) {
           log.error('spaces', 'Error finding items by tags', { error: error.message || error });
@@ -1020,7 +1027,10 @@ class SpacesAPI {
       list: async () => {
         try {
           const data = this._loadSmartFolders();
-          return data.folders || [];
+          const folders = data.folders || [];
+          // Phase 5 / commit D: read-side emit for shadow-reader.
+          this._emit('smartFolders:listed', { folders });
+          return folders;
         } catch (error) {
           log.error('spaces', 'Error listing smart folders', { error: error.message || error });
           return [];
@@ -1374,11 +1384,21 @@ class SpacesAPI {
       });
 
       // Apply limit
-      if (options.limit && options.limit > 0) {
-        return scoredItems.slice(0, options.limit);
-      }
+      const results = (options.limit && options.limit > 0)
+        ? scoredItems.slice(0, options.limit)
+        : scoredItems;
 
-      return scoredItems;
+      // Phase 5 / commit D: read-side emit for shadow-reader. The
+      // shadow-reader counts search invocations toward the §6.6 gate
+      // but does NOT compare results in commit D (FTS5 query parity
+      // ships in a follow-up commit).
+      this._emit('search:completed', {
+        query,
+        options,
+        resultCount: results.length,
+      });
+
+      return results;
     } catch (error) {
       log.error('spaces', 'Error searching', { error: error.message || error });
       throw error;

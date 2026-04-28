@@ -850,9 +850,12 @@ app.whenReady().then(() => {
     // use clipboard-storage-v2 / spaces-api until commit E flips them).
     let replica = null;
     let replicaShadowWriter = null;
+    let replicaShadowReader = null;
+    let replicaValidationGate = null;
     try {
       const settings = global.settingsManager;
       const replicaEnabled = settings && settings.get('syncV5.replica.enabled') === true;
+      const shadowReadEnabled = settings && settings.get('syncV5.replica.shadowReadEnabled') === true;
       if (replicaEnabled) {
         const path = require('path');
         const replicaPath = path.join(app.getPath('userData'), 'sync-v5', 'replica.sqlite');
@@ -884,11 +887,59 @@ app.whenReady().then(() => {
           replicaShadowWriter = null;
         }
 
+        // ── Shadow-reader + validation gate (commit D) ──
+        // Only wire when the operator explicitly opts in via
+        // syncV5.replica.shadowReadEnabled. The gate counts
+        // invocations toward the §6.6 cutover thresholds; the reader
+        // does set/field comparisons and records divergences. Both
+        // are read-only with respect to spaces-api -- no behavioural
+        // change for the primary read path. Gate counters persist
+        // to replica_meta so a restart during the validation window
+        // doesn't reset progress.
+        if (shadowReadEnabled) {
+          try {
+            replicaValidationGate = new v5.replica.ValidationGate({
+              replica,
+              tagMutationsProvider: () => {
+                if (!replicaShadowWriter) return 0;
+                const snap = replicaShadowWriter.inspect();
+                const e = snap.perEvent || {};
+                return ((e['item:tags:updated'] || {}).writes || 0)
+                  + ((e['tags:renamed'] || {}).writes || 0)
+                  + ((e['tags:deleted'] || {}).writes || 0);
+              },
+            }).init();
+
+            const { getSpacesAPI } = require('./spaces-api');
+            replicaShadowReader = v5.replica.attachShadowReader({
+              spacesApi: getSpacesAPI(),
+              replica,
+              gate: replicaValidationGate,
+              hotPathSampleRate: 10,
+            });
+            console.log(
+              '[sync-v5/replica] shadow-reader + validation gate attached (sample 1-in-10 hot paths)'
+            );
+          } catch (srErr) {
+            console.warn(
+              '[sync-v5/replica] shadow-reader attach failed (gate disabled until next boot):',
+              srErr.message
+            );
+            replicaShadowReader = null;
+            if (replicaValidationGate) {
+              try { replicaValidationGate.close(); } catch (_e) { /* ok */ }
+              replicaValidationGate = null;
+            }
+          }
+        } else {
+          console.log('[sync-v5/replica] shadow-read disabled (syncV5.replica.shadowReadEnabled=false)');
+        }
+
         // Compose the diagnostics provider so /sync/queue.replica
-        // surfaces both the replica state and the shadow-writer
-        // counters. The provider is deliberately constructed inline
-        // rather than baking shadow-writer awareness into the Replica
-        // class -- the two have separate lifecycles.
+        // surfaces the replica state, shadow-writer counters, and
+        // shadow-reader counters together. Validation gate is
+        // exposed at /sync/replica/validation as its own endpoint
+        // (the cutover flag in commit E reads from it).
         v5.setProviders({
           replica: {
             inspect: () => ({
@@ -896,8 +947,12 @@ app.whenReady().then(() => {
               shadowWriter: replicaShadowWriter
                 ? replicaShadowWriter.inspect()
                 : { wired: false, note: 'shadow-writer not attached' },
+              shadowReader: replicaShadowReader
+                ? replicaShadowReader.inspect()
+                : { wired: false, note: 'shadow-reader not attached (syncV5.replica.shadowReadEnabled=false)' },
             }),
           },
+          validationGate: replicaValidationGate || null,
         });
         console.log('[sync-v5/replica] initialised at', replicaPath, '(schemaVersion', replica.schemaVersion + ')');
 
@@ -998,11 +1053,16 @@ app.whenReady().then(() => {
       compactorInterval,
       replica,
       replicaShadowWriter,
+      replicaShadowReader,
+      replicaValidationGate,
     };
     globalThis.__syncV5Engine = syncEngine;
+    const _replicaState = !replica
+      ? 'disabled'
+      : (replicaShadowReader ? 'live + shadow-write + shadow-read' : 'live + shadow-write');
     console.log(
       '[sync-v5] wired (heartbeat started; sync engine + pull engine idle; compactor scheduled off-peak; replica',
-      replica ? (replicaShadowWriter ? 'live + shadow-write' : 'live') : 'disabled',
+      _replicaState,
       ')'
     );
   } catch (v5Err) {

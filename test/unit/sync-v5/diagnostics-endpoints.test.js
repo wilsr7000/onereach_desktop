@@ -19,6 +19,7 @@ const {
   handleSyncTrace,
   handleSyncHealth,
   handleSyncHealthOne,
+  handleSyncReplicaValidation,
   setProviders,
   _resetProviders,
 } = require('../../../lib/sync-v5/diagnostics-endpoints');
@@ -291,6 +292,56 @@ describe('sync-v5 / diagnostics-endpoints', () => {
       expect([200, 500]).toContain(r.status);
       expect(r.body.name).toBe('activeConflicts');
       expect(typeof r.body.count).toBe('number');
+    });
+  });
+
+  describe('handleSyncReplicaValidation', () => {
+    it('returns wired:false when no validationGate provider is registered', async () => {
+      const r = await handleSyncReplicaValidation();
+      expect(r.status).toBe(200);
+      expect(r.body.wired).toBe(false);
+      expect(r.body.cutoverAllowed).toBe(false);
+      expect(r.body.note).toMatch(/not wired/i);
+    });
+
+    it('returns the gate evaluation when a validationGate is registered', async () => {
+      setProviders({
+        validationGate: {
+          evaluate: () => ({
+            shadowReadEnabled: true,
+            startedAt: '2026-04-27T00:00:00Z',
+            wallClockDaysElapsed: 8.5,
+            wallClockGate: { required: 7, actual: 8.5, met: true },
+            invocationGates: {
+              itemsList: { required: 100, actual: 247, met: true },
+              itemsGet: { required: 100, actual: 312, met: true },
+              search: { required: 50, actual: 68, met: true },
+              tagMutations: { required: 20, actual: 21, met: true },
+              smartFoldersList: { required: 10, actual: 3, met: false },
+            },
+            divergences: { total: 0, byMethod: {} },
+            cutoverAllowed: false,
+            blockers: ['smartFoldersList invocations below threshold (3/10)'],
+          }),
+        },
+      });
+      const r = await handleSyncReplicaValidation();
+      expect(r.status).toBe(200);
+      expect(r.body.wired).toBe(true);
+      expect(r.body.cutoverAllowed).toBe(false);
+      expect(r.body.invocationGates.itemsList.actual).toBe(247);
+      expect(r.body.blockers).toHaveLength(1);
+    });
+
+    it('surfaces gate.evaluate() errors as 500', async () => {
+      setProviders({
+        validationGate: {
+          evaluate: () => { throw new Error('replica meta corruption'); },
+        },
+      });
+      const r = await handleSyncReplicaValidation();
+      expect(r.status).toBe(500);
+      expect(r.body.error).toMatch(/replica meta corruption/);
     });
   });
 
