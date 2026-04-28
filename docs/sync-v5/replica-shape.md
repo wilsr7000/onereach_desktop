@@ -612,26 +612,8 @@ Concrete tests to write (~150-250 lines):
 - Test suite: ~10 new equivalence cases passing.
 
 **Scope estimate**: ~2-3 days focused. The code change is ~50 lines;
-the tests + manual smoke is most of the time.
-
-### 6A.3 Done criteria
-
-- 100% of search calls in the codebase go through
-  `spaces-api.search`.
-- `clipboard-manager-v2-adapter.search` either calls
-  `spaces-api.search` or is removed.
-- Test suite passes including 5-10 new equivalence cases.
-- Manual smoke: type a query in clipboard-viewer.js, observe results
-  match what spaces-agent would return for the same query.
-
-### 6A.4 Scope
-
-- Code change: ~50-100 lines (adapter + renderer adapt).
-- Tests: ~150-250 lines (equivalence cases + renderer regression).
-- Total: ~2-3 days of focused work, mostly tests.
-
-This is its own commit. After it lands, commit A starts with a clean
-single-API target.
+the tests + manual smoke is most of the time. After unification
+lands, commit A starts with a clean single-API target.
 
 ---
 
@@ -652,17 +634,48 @@ require an explicit operator command (`__syncV5.replica.repopulate()`)?
 "why is this thing empty?" question, which is the kind of state we
 want operators to notice.
 
-### 6B.2 Single-device vs multi-tenant deployment
+### 6B.2 Tenant-id schema column — locked: required-but-fixed-today ✓
 
-The schema uses `space_id TEXT` not `(tenant_id, space_id)`. This is
-correct for the user's single-tenant single-device deployment, but
-sync-v5 is theoretically tenant-aware (the v5 plan §5 imagines fleet-
-scale operator queries). If multi-tenant is on the roadmap, the
-replica needs `tenant_id` everywhere.
+The schema initially used `space_id TEXT` not `(tenant_id, space_id)`.
+This was correct for the user's single-tenant single-device
+deployment, but sync-v5 is tenant-aware in the v5 plan §5 (fleet-scale
+operator queries assume tenancy). Adding `tenant_id` later is the
+most expensive thing to change in the replica because primary keys
+and every composite index depend on it -- a Phase 5 migration that
+touches every row.
 
-**Tentative**: ship single-tenant; add `tenant_id` as a Phase 5
-schema migration when the second tenant arrives. The migration tooling
-that Phase 5 ships is exactly what this decision exercises.
+**Cost asymmetry**:
+- Today: `tenant_id TEXT NOT NULL DEFAULT 'default'` adds ~8 bytes per
+  row, one column to every WHERE clause, one column in every composite
+  primary key. Negligible at this user's scale (1019 items × 8 bytes
+  = 8 KB).
+- If added later: a Phase 5 migration that touches every row in every
+  table, rebuilds every composite index, and ships a graph-side
+  equivalent for `:Asset.tenantId`. The kind of migration that's
+  correct in code and still takes a weekend to land safely.
+
+**Decision**: include `tenant_id` from commit A.
+
+```sql
+-- Every table gets tenant_id with default 'default'.
+ALTER TABLE spaces ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE items ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE smart_folders ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+
+-- Composite primary keys on the tables where it matters.
+-- (Note: these change PRIMARY KEY to (tenant_id, id); SQLite requires
+-- table rebuild but commit A creates these from scratch so it's fine.)
+PRIMARY KEY (tenant_id, id) -- on items, spaces, smart_folders, item_tags.
+```
+
+The `tenant_id` value is settable via `syncV5.replica.tenantId`
+setting (default `'default'`); changing it after rows exist requires
+the Phase 5 migration tooling because every existing row carries the
+old value. The single-tenant deployment never sets it; the schema is
+ready for multi-tenant whenever it ships.
+
+**Action for commit A**: add `tenant_id` columns + composite primary
+keys to the schema; default the value to `settings.get('syncV5.replica.tenantId') || 'default'` everywhere the replica writes.
 
 ---
 
