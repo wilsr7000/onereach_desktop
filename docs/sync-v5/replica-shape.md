@@ -400,92 +400,269 @@ suite roughly doubles that.
 
 ---
 
-## 6. Open questions
+## 6. Decisions (locked)
 
-These are decisions I deliberately don't make in this document.
+Recorded 2026-04-27, signed off by reviewer. Implementation work
+proceeds against these answers.
 
-### 6.1 Library choice: `better-sqlite3` vs. `@duckdb/node-api`
+### 6.1 Library choice — `better-sqlite3` ✓
 
-**Recommendation**: `better-sqlite3`. Real SQL OLTP semantics, FTS5,
-synchronous API, mature Electron-rebuild story.
+**Decision**: `better-sqlite3`. The replica explicitly displaces
+DuckDB per v5 §4.1 ("Replaces DuckDB and index.json"); SQLite is the
+right-tool-for-the-job (real SQL OLTP, FTS5, synchronous API).
+Electron-build story is mature.
 
-**Concern**: new native dep. The repo currently has `@duckdb/node-api`
-and could reuse it. DuckDB does support transactions and indexes, just
-not optimised for the queue-shaped workload. For the replica
-specifically (which is read-heavy with low-concurrency writes), DuckDB
-would actually be fine. Trade-off: stick-with-what-works (DuckDB) vs.
-right-tool-for-the-job (SQLite).
+**Action for commit A**: add to `dependencies` in `package.json`,
+verify the postinstall rebuild story for both `arm64` and `x64`
+electron builds (existing `package.json` scripts already cover this
+for other native deps).
 
-**Decision needed before commit A.**
+### 6.2 Two-path unification — before cutover ✓
 
-### 6.2 Two-path unification: before or during cutover?
+**Decision**: unify `clipboard-viewer.js`'s `window.clipboard.search()`
+with `spaces-api.search()` in a dedicated commit before commit A
+starts. The replica targets only `spaces-api`'s surface. The
+unification is its own ~2-3 day effort, mostly tests.
 
-**Recommendation**: before. Unify `clipboard-viewer.js`'s
-`window.clipboard.search()` with `spaces-api.search()` first, in a
-separate commit. The replica then targets a single API surface. This
-adds one commit's worth of work but eliminates an entire class of
-"works in agents but UI shows different results" bugs.
+**Action for pre-A commit**: see §A (Two-path unification
+implementation plan) below.
 
-**Alternative**: the replica supports both paths via parallel-queryable
-methods. More complex, higher rollback risk. Not recommended.
+### 6.3 No-shadow filesystem paths ✓
 
-**Decision needed before commit A.**
+**Decision**: the replica does not model arbitrary
+`OR-Spaces/spaces/<spaceId>/<path>` files. The implicit contract is:
+**replica owns the catalog (items + tags + smart folders); filesystem
+owns raw markdown / files**. Specific no-shadow patterns:
 
-### 6.3 Migration of `gsx-agent` markdown files
+- `gsx-agent/conversation-history.md`
+- `gsx-agent/session-summaries.md`
+- Any other `gsx-agent/*.md` files (`unified-bidder` and
+  `omni-data-agent` read here)
 
-`unified-bidder` reads `gsx-agent/conversation-history.md` and
-`gsx-agent/session-summaries.md` via `files.read()`. These are not
-items in the index — they're filesystem artefacts under
-`OR-Spaces/spaces/gsx-agent/`. They survive the cutover untouched
-because the replica doesn't model them; they remain on disk.
+**Action for commit A**: introduce
+`syncV5.replica.noShadowPaths: string[]` setting (default
+`['gsx-agent/*.md']`). Replica's read path checks the pattern before
+querying SQLite; matches fall through to filesystem.
 
-**Implicit contract**: the `OR-Spaces/spaces/<spaceId>/` directory
-structure stays. Replica owns the catalog (items + tags + smart
-folders); filesystem owns the raw markdown / files. This split is
-called out in v5 §4.1 ("OR-Spaces folder becomes a write-only export
-view"); the unified-bidder use case shows it's actually
-read-and-write for this specific space.
+### 6.4 Search backend — FTS5 + document the score shift ✓
 
-**Refinement needed**: explicit list of "filesystem read paths the
-replica must NOT shadow" — at minimum, `gsx-agent/*.md`.
+**Decision**: ship FTS5. The current ad-hoc fuzzy match is replaced by
+FTS5's BM25 scoring, which is ranking-better but changes the
+numerical scores. UI-visible: an item that ranked #3 today may rank
+#1 tomorrow.
 
-### 6.4 Search backend semantics
+**Action for cutover release notes**: explicit "search ranking
+changes; we believe the new ranking is strictly better but if a
+specific query result feels worse, file an issue with before/after
+screenshots." Shadow-read window (commit D) logs divergent ranking
+explicitly so any user-affecting cases surface before cutover.
 
-`spaces-api.search` and `clipboard-storage-v2.search` produce
-slightly different result shapes, and `clipboard-viewer.js`'s search
-input is wired to the latter. FTS5's BM25 scoring is ranking-better
-than the current ad-hoc fuzzy match but **changes scores**. UI-visible
-behaviour will shift slightly — items that ranked #3 may now rank #1.
-This is a behaviour change we should call out, not hide.
+### 6.5 Tombstone retention — default permanent + opt-in purge ✓
 
-**Recommendation**: ship FTS5; document the change; let the
-shadow-read window expose any user-affecting cases before cutover.
+**Decision**: replica `active=0` rows are permanent by default
+(mirrors graph `:Tombstone` semantics in v5 §4.3). For
+storage-conscious tenants, opt-in purge via
+`syncV5.replica.tombstoneRetentionDays` setting (default unset = keep
+forever; if set, the periodic compactor purges `active=0` rows older
+than the retention plus their content-cache blobs if no live `:Asset`
+references the same hash).
 
-### 6.5 Tombstone retention vs. replica row retention
+**Action for commit A**: add the setting to `settings-manager.js`
+defaults; wire into the existing daily compactor scheduler from
+`f8a6c58` (the schedule's already in place; just add a per-row
+purge step).
 
-Per v5 §4.3, tombstones in the graph are permanent. The replica's
-`active=0` rows mirror this permanence by default. But this user
-hasn't expressed a preference — they may want the option to truly
-purge soft-deleted rows after some retention window for storage
-hygiene.
+### 6.6 Cutover validation gate — N invocations + 7-day floor ✓
 
-**Default**: keep tombstone rows forever, mirroring graph. The graph
-is the authority; the replica conforms.
+**Decision**: cutover (commit E) requires both:
 
-**Configurable**: `syncV5.replica.tombstoneRetentionDays` (default
-unset = keep forever; if set, the periodic compactor purges
-`active=0` rows older than the retention).
+- **Invocation thresholds met**: ≥100 `items.list` calls, ≥100
+  `items.get` calls, ≥50 `search` calls, ≥20 tag mutations
+  (`addTag` / `removeTag` / `setTags`), ≥10 `smartFolders.getItems`
+  calls — counted from when shadow-read started (commit D), with
+  zero divergence logs in the same window.
+- **AND ≥7 days elapsed** since shadow-read started. The wall-clock
+  floor prevents a single-burst day (e.g. user does a one-time data
+  cleanup) from satisfying the count threshold without sustained
+  multi-day traffic to validate against.
 
-### 6.6 What's the right cutover validation duration?
+**Action for commit D**: instrument the shadow-read counters per
+method; add a `/sync/replica/validation` diagnostics endpoint that
+reports current counts vs thresholds + divergence summary. Cutover
+flag refuses to flip if either gate is unmet.
 
-Recommendation in §5.3 says "14 days of clean shadow-read logs."
-That's a guess. Real answer depends on how often this user hits the
-edge cases — search, tag operations, smart folders. If they don't use
-smart folders for 14 days, the validation isn't validating.
+---
 
-**Refinement**: validation gates on **N invocations of each public API
-method**, not wall-clock duration. E.g. 100 list, 100 get, 50 search,
-20 tag mutations. Whichever ships first.
+## 6A. Two-path unification implementation plan
+
+(Added as the §6.2 decision lands. This is the contract for the
+pre-A unification commit.)
+
+### 6A.1 What "unify" means concretely
+
+The clipboard-viewer.js UI calls `window.clipboard.search(query)`
+which routes through `clipboard-manager-v2-adapter.js`'s search
+method, which produces results in a different shape than
+`spaces-api.search(query, options)`. Unification means:
+
+**Make `window.clipboard.search(query)` call `spaces-api.search()`
+under the hood**, returning results in the same shape, with the same
+ranking algorithm (FTS5-bound after the replica lands; today's fuzzy
+matcher in the interim). The clipboard-viewer.js renderer adapts to
+the new result shape.
+
+After unification: one search backend, one result shape, one set of
+behaviours. The replica work then targets only `spaces-api.search`.
+
+### 6A.2 Specific code changes (with line citations)
+
+The actual divergence between the two search backends, found by
+reading both implementations:
+
+**Path A — `clipboard-storage-v2.search(query)`** at
+[clipboard-storage-v2.js:3119-3220](clipboard-storage-v2.js):
+- Synchronous, single-arg `(query: string)`.
+- Stop-words filter (`a, an, the, is, ...`) + boolean-AND across
+  preview / fileName / metadata fields.
+- No scoring, no fuzzy matching.
+- Reads `metadata.json` from disk inline per item (slow but
+  comprehensive against rich metadata).
+- Returns plain item array.
+
+**Path B — `SpacesAPI.search(query, options)`** at
+[spaces-api.js:1312-1386](spaces-api.js):
+- Async, takes options: `{spaceId, type, searchTags, searchMetadata,
+  searchContent, fuzzy, fuzzyThreshold, limit, includeHighlights}`.
+- Scoring via `_scoreItem` with fuzzy matching.
+- Reads from `storage.getAllItems()` (in-memory index, no disk reads).
+- Returns items extended with
+  `_search: { score, matches, highlights? }`.
+- Sorts by score, then timestamp.
+- Honors `limit`.
+
+These are genuinely different implementations. Unification means
+**option 1** (per §6.2 decision): make Path A call Path B under the
+hood. Path A's caller (`clipboard-viewer.js` UI) stays working
+because it consumes the same item fields (preview, fileName,
+metadata, etc.), it just additionally gets `_search` it can ignore.
+
+**Specific code changes**:
+
+1. [clipboard-manager-v2-adapter.js:1079-1092](clipboard-manager-v2-adapter.js)
+   `searchHistory(query)`: replace `this.storage.search(query)` with
+   `await getSpacesAPI().search(query, options)`. Make method async.
+   Pass `options` through if any caller passes them (none today).
+   Strip `content` field from results to match the
+   `_needsContent: true` contract. ~20 lines change.
+
+2. `window.clipboard.search` IPC bridge in
+   [preload.js](preload.js): no signature change today (still takes
+   `query`); options can be passed through if needed later.
+   `searchHistory` is already returned; no change needed unless we
+   want to expose options.
+
+3. [clipboard-viewer.js](clipboard-viewer.js) search-result
+   rendering: today consumes `item.preview, item.fileName, item.tags,
+   item.metadata`. Path B returns the same fields plus `_search`.
+   No change required for the basic case; an enhancement to show
+   `_search.score` or highlight-ranges in the UI is a separate
+   improvement.
+
+4. **Optional but recommended**: remove
+   `ClipboardStorageV2.search()` entirely after the migration is
+   verified. Today's only caller becomes a thin wrapper through
+   `SpacesAPI.search`; the underlying implementation can move into
+   `SpacesAPI._scoreItem`. ~80 lines deletion.
+
+### 6A.3 Test surface
+
+The two algorithms produce different results for the same query
+(boolean-AND vs. scored fuzzy) so equivalence isn't strict equality.
+The right invariant is **non-regression**:
+
+- Every item that `clipboard-storage-v2.search(q)` returns for a
+  query `q` must also appear in `SpacesAPI.search(q, {})`'s results
+  for the same query (Path B may return more, due to fuzzy matching).
+- Result ordering may differ — Path B sorts by score, Path A by
+  whatever order `index.items` happened to be in.
+- Scoring metadata (`_search`) is additive and shouldn't break Path A
+  consumers.
+
+Concrete tests to write (~150-250 lines):
+
+- `test/unit/spaces-search-unification.test.js`:
+  - Empty query → both return `[]`.
+  - Exact-phrase preview match → Path A's hit appears in Path B.
+  - Multi-word query with stop-words → Path A's hit appears in Path B.
+  - Tag match → Path A's hit appears in Path B.
+  - Fuzzy match (typo) → Path B may match where Path A doesn't (and
+    that's acceptable; the goal is "Path A's hits ⊆ Path B's hits",
+    not equality).
+- `test/unit/clipboard-manager-search-routes-through-spaces-api.test.js`:
+  - Mock `getSpacesAPI()`, call `searchHistory()`, assert it
+    delegates.
+- `test/e2e/spaces-flow.spec.js` (existing): no regression.
+
+### 6A.4 Done criteria + scope
+
+- 100% of `search` calls go through `SpacesAPI.search`.
+- `ClipboardStorageV2.search` is either a thin wrapper or removed.
+- `clipboard-viewer.js` renderer search input still works
+  (manual smoke + e2e).
+- Test suite: ~10 new equivalence cases passing.
+
+**Scope estimate**: ~2-3 days focused. The code change is ~50 lines;
+the tests + manual smoke is most of the time.
+
+### 6A.3 Done criteria
+
+- 100% of search calls in the codebase go through
+  `spaces-api.search`.
+- `clipboard-manager-v2-adapter.search` either calls
+  `spaces-api.search` or is removed.
+- Test suite passes including 5-10 new equivalence cases.
+- Manual smoke: type a query in clipboard-viewer.js, observe results
+  match what spaces-agent would return for the same query.
+
+### 6A.4 Scope
+
+- Code change: ~50-100 lines (adapter + renderer adapt).
+- Tests: ~150-250 lines (equivalence cases + renderer regression).
+- Total: ~2-3 days of focused work, mostly tests.
+
+This is its own commit. After it lands, commit A starts with a clean
+single-API target.
+
+---
+
+## 6B. Open questions still deferred
+
+(These weren't part of the locked §6 decisions; they're newer or
+were never in scope for the planning round.)
+
+### 6B.1 Cold-replica fallback to graph reads
+
+§4 specifies cold-device migration from existing `clipboard-storage-v2`
+data when present, otherwise pull-from-graph. Edge case: replica is
+present but EMPTY (e.g. user wiped it manually for debugging) and
+graph is reachable. Should the replica auto-repopulate from graph, or
+require an explicit operator command (`__syncV5.replica.repopulate()`)?
+
+**Tentative**: explicit operator command. Auto-repopulate hides the
+"why is this thing empty?" question, which is the kind of state we
+want operators to notice.
+
+### 6B.2 Single-device vs multi-tenant deployment
+
+The schema uses `space_id TEXT` not `(tenant_id, space_id)`. This is
+correct for the user's single-tenant single-device deployment, but
+sync-v5 is theoretically tenant-aware (the v5 plan §5 imagines fleet-
+scale operator queries). If multi-tenant is on the roadmap, the
+replica needs `tenant_id` everywhere.
+
+**Tentative**: ship single-tenant; add `tenant_id` as a Phase 5
+schema migration when the second tenant arrives. The migration tooling
+that Phase 5 ships is exactly what this decision exercises.
 
 ---
 
