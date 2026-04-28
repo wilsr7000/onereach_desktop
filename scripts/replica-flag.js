@@ -50,15 +50,75 @@ const os = require('os');
 const http = require('http');
 
 // ---------------------------------------------------------------------------
-// Settings file location -- mirrors settings-manager.js
+// Settings file location -- auto-detect the active userData dir.
+//
+// Electron picks the userData folder from the app name at FIRST launch and
+// never renames it if the productName changes later. This app's history:
+//   2025-01: name was "GSX Power User" -> Application Support/GSX Power User/
+//   later  : productName changed to "Onereach.ai" but userData stayed put
+// We search the known candidates and pick the one with the most recently
+// touched settings file (encrypted preferred since saveSettings deletes
+// the plain file after the first save).
 // ---------------------------------------------------------------------------
 
-const USERDATA = process.env.SETTINGS_DIR || path.join(
-  os.homedir(),
-  'Library', 'Application Support', 'onereach-ai'
-);
-const SETTINGS_PATH = path.join(USERDATA, 'app-settings.json');
-const BACKUP_PATH = path.join(USERDATA, 'app-settings.bak.json');
+const SETTINGS_DIR_CANDIDATES = [
+  'GSX Power User',
+  'Onereach.ai',
+  'onereach-ai',
+  'Onereach',
+];
+
+function detectSettingsDir() {
+  if (process.env.SETTINGS_DIR) return process.env.SETTINGS_DIR;
+  const base = path.join(os.homedir(), 'Library', 'Application Support');
+  let best = null;
+  let bestMtime = 0;
+  for (const d of SETTINGS_DIR_CANDIDATES) {
+    const dir = path.join(base, d);
+    const enc = path.join(dir, 'app-settings-encrypted.json');
+    const plain = path.join(dir, 'app-settings.json');
+    let mtime = 0;
+    let chose = null;
+    if (fs.existsSync(enc)) {
+      mtime = fs.statSync(enc).mtimeMs;
+      chose = enc;
+    } else if (fs.existsSync(plain)) {
+      mtime = fs.statSync(plain).mtimeMs;
+      chose = plain;
+    } else {
+      continue;
+    }
+    if (mtime > bestMtime) {
+      bestMtime = mtime;
+      best = { dir, settingsPath: chose, isEncrypted: chose === enc };
+    }
+  }
+  if (!best) {
+    throw new Error(
+      'Could not locate the app\'s settings file. Tried: ' +
+      SETTINGS_DIR_CANDIDATES.map((d) => path.join(base, d)).join(', ') +
+      '. Set SETTINGS_DIR env var to override.'
+    );
+  }
+  return best;
+}
+
+const detected = (() => {
+  if (process.env.SETTINGS_DIR) {
+    const dir = process.env.SETTINGS_DIR;
+    const enc = path.join(dir, 'app-settings-encrypted.json');
+    const plain = path.join(dir, 'app-settings.json');
+    if (fs.existsSync(enc)) return { dir, settingsPath: enc, isEncrypted: true };
+    if (fs.existsSync(plain)) return { dir, settingsPath: plain, isEncrypted: false };
+    return { dir, settingsPath: plain, isEncrypted: false };
+  }
+  return detectSettingsDir();
+})();
+
+const USERDATA = detected.dir;
+const SETTINGS_PATH = detected.settingsPath;
+const IS_ENCRYPTED_FILE = detected.isEncrypted;
+const BACKUP_PATH = SETTINGS_PATH.replace(/\.json$/, '.bak.json');
 
 // ---------------------------------------------------------------------------
 // CLI parsing
@@ -183,7 +243,9 @@ function printStatus(settings) {
     console.log(JSON.stringify(out, null, 2));
     return;
   }
-  console.log(`\nReplica settings @ ${SETTINGS_PATH}:\n`);
+  const fileLabel = IS_ENCRYPTED_FILE ? 'encrypted (active)' : 'plain (cold-install fallback)';
+  console.log(`\nReplica settings @ ${SETTINGS_PATH}`);
+  console.log(`  (${fileLabel})\n`);
   for (const k of REPLICA_KEYS) {
     const v = settings[k];
     const display = v === undefined
