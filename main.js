@@ -834,6 +834,76 @@ app.whenReady().then(() => {
     // __syncV5Demo and __syncV5.pullEngine.start()).
     heartbeatReporter.start();
 
+    // ── Phase 5 (commit B): materialised SQLite replica + cold-device migration ──
+    // The replica is gated by the syncV5.replica.enabled setting (default
+    // false). When the flag is true:
+    //   1. Open / create userData/sync-v5/replica.sqlite via better-sqlite3.
+    //   2. Apply schema (idempotent; safe to run on every boot).
+    //   3. Register as a diagnostics provider so /sync/queue surfaces
+    //      counts + schemaVersion + FTS5 availability.
+    //   4. Kick off the cold-device migration on a setImmediate so boot
+    //      time is unaffected. The migration is itself idempotent --
+    //      replica_meta.migratedFromClipboardStorageAt gates a re-run.
+    // Failures here are intentionally non-fatal: the rest of v5 still
+    // works without the replica (this is the cutover-phase pattern --
+    // the replica is wired in parallel; production reads/writes still
+    // use clipboard-storage-v2 / spaces-api until commit E flips them).
+    let replica = null;
+    try {
+      const settings = global.settingsManager;
+      const replicaEnabled = settings && settings.get('syncV5.replica.enabled') === true;
+      if (replicaEnabled) {
+        const path = require('path');
+        const replicaPath = path.join(app.getPath('userData'), 'sync-v5', 'replica.sqlite');
+        replica = new v5.replica.Replica({
+          dbPath: replicaPath,
+          tenantId: settings.get('syncV5.replica.tenantId') || 'default',
+          deviceId: v5.getDeviceId(),
+          noShadowPaths: settings.get('syncV5.replica.noShadowPaths') || ['gsx-agent/*.md', 'gsx-agent/**/*.md'],
+          tombstoneRetentionDays: settings.get('syncV5.replica.tombstoneRetentionDays') || null,
+        });
+        replica.init();
+        v5.setProviders({ replica });
+        console.log('[sync-v5/replica] initialised at', replicaPath, '(schemaVersion', replica.schemaVersion + ')');
+
+        // Cold-device migration: non-blocking, idempotent. Runs once on
+        // first boot after the flag flipped to true. Re-runs no-op via
+        // replica_meta.migratedFromClipboardStorageAt.
+        setImmediate(async () => {
+          try {
+            const { getSharedStorage } = require('./clipboard-storage-v2');
+            const storage = getSharedStorage();
+            const result = await v5.replica.migrateFromClipboardStorage({
+              replica,
+              storage,
+              deviceId: v5.getDeviceId(),
+              blobStore,
+            });
+            if (result.ran) {
+              console.log(
+                '[sync-v5/replica] migration complete:',
+                'spaces=' + result.spacesMigrated,
+                'items=' + result.itemsMigrated,
+                'hashed=' + result.contentHashed,
+                'skipped=' + result.contentSkipped,
+                'errors=' + result.errors.length,
+                'duration=' + result.durationMs + 'ms'
+              );
+            } else {
+              console.log('[sync-v5/replica] migration already complete (' + result.previousMigratedAt + ')');
+            }
+          } catch (mErr) {
+            console.warn('[sync-v5/replica] migration failed (non-fatal):', mErr.message);
+          }
+        });
+      } else {
+        console.log('[sync-v5/replica] disabled (syncV5.replica.enabled=false); skipping init');
+      }
+    } catch (replicaErr) {
+      console.warn('[sync-v5/replica] init failed (non-fatal; rest of v5 still works):', replicaErr.message);
+      replica = null;
+    }
+
     // ── Phase 4: periodic compactor scheduler ─────────────────────────────
     // Runs once per off-peak window per day. Walks all spaces, calls
     // v5.snapshot.compactSpace(spaceId) for each. Bounded compute (one
@@ -891,10 +961,13 @@ app.whenReady().then(() => {
       conflictStore,
       pullEngine,
       compactorInterval,
+      replica,
     };
     globalThis.__syncV5Engine = syncEngine;
     console.log(
-      '[sync-v5] wired (heartbeat started; sync engine + pull engine idle; compactor scheduled off-peak)'
+      '[sync-v5] wired (heartbeat started; sync engine + pull engine idle; compactor scheduled off-peak; replica',
+      replica ? 'live' : 'disabled',
+      ')'
     );
   } catch (v5Err) {
     console.warn('[sync-v5] boot wiring failed:', v5Err.message);

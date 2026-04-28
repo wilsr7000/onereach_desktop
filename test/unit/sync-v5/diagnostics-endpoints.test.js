@@ -137,6 +137,45 @@ describe('sync-v5 / diagnostics-endpoints', () => {
       expect(r.body.pullEngine.applied).toBe(5);
     });
 
+    it('reports replica wired:false when no replica provider is registered', async () => {
+      const r = await handleSyncQueue();
+      expect(r.body.replica.wired).toBe(false);
+      expect(r.body.replica.note).toMatch(/replica/i);
+    });
+
+    it('captures Replica inspect output when registered (Phase 5 / commit B)', async () => {
+      setProviders({
+        replica: {
+          inspect: () => ({
+            dbPath: '/tmp/replica.sqlite',
+            tenantId: 'default',
+            schemaVersion: 1,
+            counts: { spaces: 3, items: 1019 },
+            fts5Available: true,
+            meta: { cursor: '', lastFullPullAt: '' },
+          }),
+        },
+      });
+      const r = await handleSyncQueue();
+      expect(r.body.replica).toMatchObject({
+        dbPath: '/tmp/replica.sqlite',
+        tenantId: 'default',
+        schemaVersion: 1,
+        counts: { spaces: 3, items: 1019 },
+        fts5Available: true,
+      });
+    });
+
+    it('replica provider that throws is surfaced as { error: ... }', async () => {
+      setProviders({
+        replica: {
+          inspect: () => { throw new Error('replica oom'); },
+        },
+      });
+      const r = await handleSyncQueue();
+      expect(r.body.replica).toEqual({ error: 'replica oom' });
+    });
+
     it('does not crash if provider throws', async () => {
       setProviders({
         queueProvider: () => {
