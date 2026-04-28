@@ -27,6 +27,8 @@
     "test:watch": "vitest",
     "test:unit": "vitest run --exclude='**/*.eval.*'",
     "test:evals": "vitest run --include='**/*.eval.*'",
+    "replica:status": "node scripts/replica-status.js",
+    "replica:status:watch": "node scripts/replica-status.js --watch=10",
     "test:e2e": "playwright test",
     "test:e2e:products": "playwright test test/e2e/products/",
     "test:e2e:quick": "playwright test test/e2e/window-smoke.spec.js test/e2e/api-integration.spec.js",
