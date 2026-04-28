@@ -661,6 +661,46 @@ contextBridge.exposeInMainWorld('ai', {
 });
 
 // ---------------------------------------------------------------------------
+// Error Diagnostics Bridge
+// Turns raw error messages into plain-English, copiable recommendations.
+// Use window.diagnostics.diagnose({ message, category, source, agentId, data })
+// wherever you surface an error to a user. Also includes the universal
+// overlay popup() / onAutoPopup() / isBenignMessage() factory committed in
+// db2a614 (lib/diagnostics-overlay-preload.js).
+// ---------------------------------------------------------------------------
+const { makeDiagnosticsOverlayAPI } = require('./lib/diagnostics-overlay-preload');
+const _diagOverlayAPI = makeDiagnosticsOverlayAPI({ ipcRenderer });
+
+contextBridge.exposeInMainWorld('diagnostics', {
+  /**
+   * Diagnose an error. Returns { summary, rootCause, steps, copyable, source, cached, degraded? }.
+   * Safe to call from any renderer -- results are cached and rate-limited.
+   */
+  diagnose: (errorContext, options) => ipcRenderer.invoke('diagnostics:diagnose', errorContext, options),
+
+  /**
+   * Fetch recent log entries relevant to an error category (main-process side pull).
+   * Useful for rendering a "what else happened around the same time" strip.
+   */
+  getRecentLogs: (opts) => ipcRenderer.invoke('diagnostics:get-recent-logs', opts),
+
+  /**
+   * Universal error overlay. Pops a floating card in the top-right of this
+   * window with the error text + a "What's wrong?" button. LLM runs only when
+   * the user explicitly clicks, so calling this is free by default.
+   * Automatically filters known-benign patterns and dedups identical errors
+   * within a 5-minute window.
+   */
+  popup: _diagOverlayAPI.popup,
+
+  /** Subscribe to main-process auto-popup broadcasts. */
+  onAutoPopup: _diagOverlayAPI.onAutoPopup,
+
+  /** Exposed for callers that want to pre-filter before calling popup(). */
+  isBenignMessage: _diagOverlayAPI.isBenignMessage,
+});
+
+// ---------------------------------------------------------------------------
 // Conversion API Bridge
 // All renderer processes should use window.convert for format conversions.
 // ---------------------------------------------------------------------------

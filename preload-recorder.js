@@ -155,3 +155,20 @@ try {
   });
   console.log('[Recorder Preload] APIs exposed (agentHUD stubbed)');
 }
+
+// ==========================================
+// ERROR DIAGNOSTICS + universal popup overlay
+// ==========================================
+try {
+  const { makeDiagnosticsOverlayAPI } = require('./lib/diagnostics-overlay-preload');
+  const overlay = makeDiagnosticsOverlayAPI({ ipcRenderer });
+  contextBridge.exposeInMainWorld('diagnostics', {
+    diagnose: (errorContext, options) => ipcRenderer.invoke('diagnostics:diagnose', errorContext, options),
+    getRecentLogs: (opts) => ipcRenderer.invoke('diagnostics:get-recent-logs', opts),
+    popup: overlay.popup,
+    onAutoPopup: overlay.onAutoPopup,
+    isBenignMessage: overlay.isBenignMessage,
+  });
+} catch (e) {
+  console.warn('[Recorder Preload] diagnostics overlay not available:', e.message);
+}

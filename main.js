@@ -4095,6 +4095,66 @@ function setupSpacesAPI() {
     }
   });
 
+  // ==========================================================================
+  // ERROR DIAGNOSTICS
+  // Plain-English, copiable recommendations for end users when something breaks.
+  // Tries the built-in hint table first, then Claude Code, then the AI service,
+  // then a structured fallback. See lib/error-diagnostics.js for details.
+  // ==========================================================================
+
+  // Pull recent log entries relevant to an error from the in-process log queue.
+  // Used to prefill the diagnosis prompt with context the LLM would otherwise
+  // have to guess at (prior warnings, related errors in the same category).
+  function _collectRecentDiagnosticsLogs(errorContext = {}, opts = {}) {
+    try {
+      const { getLogQueue } = require('./lib/log-event-queue');
+      const queue = getLogQueue();
+      if (!queue || typeof queue.query !== 'function') return [];
+      const sinceMs = opts.since ? new Date(opts.since).getTime() : Date.now() - 5 * 60 * 1000;
+      const results = queue.query({
+        category: errorContext?.category || undefined,
+        since: new Date(sinceMs).toISOString(),
+        limit: Math.min(opts.limit || 20, 50),
+      });
+      return Array.isArray(results) ? results : [];
+    } catch {
+      return [];
+    }
+  }
+
+  ipcMain.handle('diagnostics:diagnose', async (_event, errorContext, options = {}) => {
+    try {
+      const diagnostics = require('./lib/error-diagnostics');
+      const opts = { ...(options || {}) };
+      if (!opts.appVersion) {
+        try {
+          opts.appVersion = app.getVersion();
+        } catch {
+          /* non-fatal */
+        }
+      }
+      if (!Array.isArray(opts.recentLogs)) {
+        opts.recentLogs = _collectRecentDiagnosticsLogs(errorContext);
+      }
+      return await diagnostics.diagnoseError(errorContext, opts);
+    } catch (error) {
+      return { error: error.message || String(error), code: 'DIAGNOSTICS_ERROR' };
+    }
+  });
+
+  // Lightweight helper that returns the most recent log entries relevant to an
+  // error context. Used by the renderer to prefill the diagnosis request and by
+  // the "Copy" bundle in the HUD.
+  ipcMain.handle('diagnostics:get-recent-logs', async (_event, { category, since, limit } = {}) => {
+    try {
+      return {
+        logs: _collectRecentDiagnosticsLogs({ category }, { since, limit }),
+      };
+    } catch (error) {
+      return { logs: [], error: error.message };
+    }
+  });
+
   // ---------------------------------------------------------------------------
   // Browsing API IPC Handlers
   // ---------------------------------------------------------------------------

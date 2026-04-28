@@ -254,3 +254,17 @@ try {
     /* already exposed or sandbox issue */
   }
 }
+
+// ==========================================
+// ERROR DIAGNOSTICS (plain-English, copiable)
+// Exposes window.diagnostics for the HUD's diagnose/popup affordances.
+// ==========================================
+const { makeDiagnosticsOverlayAPI } = require('./lib/diagnostics-overlay-preload');
+const _diagOverlayAPI = makeDiagnosticsOverlayAPI({ ipcRenderer });
+contextBridge.exposeInMainWorld('diagnostics', {
+  diagnose: (errorContext, options) => ipcRenderer.invoke('diagnostics:diagnose', errorContext, options),
+  getRecentLogs: (opts) => ipcRenderer.invoke('diagnostics:get-recent-logs', opts),
+  popup: _diagOverlayAPI.popup,
+  onAutoPopup: _diagOverlayAPI.onAutoPopup,
+  isBenignMessage: _diagOverlayAPI.isBenignMessage,
+});
