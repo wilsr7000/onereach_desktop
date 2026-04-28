@@ -36,6 +36,68 @@ class SpacesAPI {
   constructor() {
     this.storage = getStorage();
     this._eventListeners = new Map();
+    // Cutover provider (commit E): when set, read methods route
+    // through it instead of clipboard-storage-v2. Default null =
+    // primary path. Wired by main.js boot when both
+    // syncV5.replica.cutoverEnabled AND validationGate
+    // .cutoverAllowed() are true. Holding this on the SpacesAPI
+    // instance (not via prototype monkey-patch) is required because
+    // `get items()` returns a fresh closure object per access.
+    this._cutoverProvider = null;
+    this._cutoverFallback = true;
+  }
+
+  /**
+   * Wire a cutover provider. When set, the read methods documented
+   * in lib/sync-v5/replica/cutover-provider.js route through it
+   * instead of the primary path. Pass null to detach (e.g. when
+   * the validation gate detects a divergence and the operator
+   * toggles syncV5.replica.cutoverEnabled back off).
+   *
+   * @param {object|null} provider -- CutoverProvider from
+   *   v5.replica.buildCutoverProvider, or null to detach.
+   * @param {object} [opts]
+   * @param {boolean} [opts.fallbackEnabled=true] -- when true and
+   *   the provider throws, log + fall through to the primary path.
+   *   When false, errors propagate (used in commit F's "old path
+   *   removed" cleanup).
+   */
+  setCutoverProvider(provider, opts = {}) {
+    this._cutoverProvider = provider || null;
+    this._cutoverFallback = opts.fallbackEnabled !== false;
+    if (provider) {
+      log.info('spaces', 'Cutover provider attached -- reads now route through replica', {
+        fallbackEnabled: this._cutoverFallback,
+      });
+    } else {
+      log.info('spaces', 'Cutover provider detached -- reads route through primary path');
+    }
+  }
+
+  /**
+   * Try the cutover provider's `method` with `args`. Returns the
+   * result on success, returns null on miss (provider not wired) or
+   * fall-open (provider threw and fallback is enabled), or throws
+   * when fallback is disabled.
+   *
+   * Each read method calls this at the top; null means "fall through
+   * to the primary implementation".
+   */
+  async _tryReplicaRead(method, args) {
+    const cp = this._cutoverProvider;
+    if (!cp || typeof cp[method] !== 'function') return { hit: false, value: null };
+    try {
+      const value = await cp[method](...args);
+      return { hit: true, value };
+    } catch (err) {
+      if (this._cutoverFallback) {
+        log.warn('spaces', `replica ${method} failed; falling back to primary`, {
+          error: err.message,
+        });
+        return { hit: false, value: null };
+      }
+      throw err;
+    }
   }
 
   /**
@@ -281,6 +343,17 @@ class SpacesAPI {
        */
       list: async (spaceId, options = {}) => {
         try {
+          // Phase 5 / commit E: cutover gate. When the replica is
+          // configured AND the validation window has passed, route
+          // the read through the materialised SQLite replica.
+          // Falls through to the primary path on a miss / error
+          // (per syncV5.replica.fallbackToOldPath).
+          const cutover = await this._tryReplicaRead('list', [spaceId, options]);
+          if (cutover.hit) {
+            this._emit('items:listed', { spaceId, options, items: cutover.value });
+            return cutover.value;
+          }
+
           let items = this.storage.getSpaceItems(spaceId);
 
           // Apply filters
@@ -355,6 +428,13 @@ class SpacesAPI {
        */
       get: async (spaceId, itemId) => {
         try {
+          // Phase 5 / commit E: cutover gate (see items.list for rationale).
+          const cutover = await this._tryReplicaRead('get', [spaceId, itemId]);
+          if (cutover.hit) {
+            this._emit('item:fetched', { spaceId, itemId, item: cutover.value });
+            return cutover.value;
+          }
+
           const item = this.storage.loadItem(itemId);
           if (item && item.spaceId !== spaceId) {
             log.warn('spaces', 'Item found but in different space', { itemId, spaceId });
@@ -904,6 +984,13 @@ class SpacesAPI {
        */
       findItems: async (tags, options = {}) => {
         try {
+          // Phase 5 / commit E: cutover gate.
+          const cutover = await this._tryReplicaRead('findItems', [tags, options]);
+          if (cutover.hit) {
+            this._emit('items:findByTags', { tags, options, items: cutover.value });
+            return cutover.value;
+          }
+
           let items = options.spaceId ? this.storage.getSpaceItems(options.spaceId) : this.storage.getAllItems();
 
           const searchTags = tags.map((t) => t.toLowerCase());
@@ -1026,6 +1113,13 @@ class SpacesAPI {
        */
       list: async () => {
         try {
+          // Phase 5 / commit E: cutover gate.
+          const cutover = await this._tryReplicaRead('listSmartFolders', []);
+          if (cutover.hit) {
+            this._emit('smartFolders:listed', { folders: cutover.value });
+            return cutover.value;
+          }
+
           const data = this._loadSmartFolders();
           const folders = data.folders || [];
           // Phase 5 / commit D: read-side emit for shadow-reader.

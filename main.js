@@ -935,11 +935,51 @@ app.whenReady().then(() => {
           console.log('[sync-v5/replica] shadow-read disabled (syncV5.replica.shadowReadEnabled=false)');
         }
 
+        // ── Cutover provider (commit E) ──
+        // The read-path flip. When syncV5.replica.cutoverEnabled is
+        // true AND validationGate.cutoverAllowed() is true (per
+        // §6.6: thresholds + ≥7-day floor + zero divergences),
+        // spaces-api reads route through the replica via
+        // setCutoverProvider. Falls through to the primary path on
+        // miss/error per syncV5.replica.fallbackToOldPath.
+        //
+        // Default: BOTH gates default off. The code path is wired
+        // here so flipping cutoverEnabled at runtime activates the
+        // route on the next boot; the live flip path (no restart
+        // required) is part of a follow-up commit.
+        let replicaCutoverActive = false;
+        try {
+          const cutoverEnabled = settings && settings.get('syncV5.replica.cutoverEnabled') === true;
+          const fallbackToOldPath = !settings || settings.get('syncV5.replica.fallbackToOldPath') !== false;
+          if (cutoverEnabled) {
+            const gateAllows = !replicaValidationGate || replicaValidationGate.cutoverAllowed();
+            if (gateAllows) {
+              const provider = v5.replica.buildCutoverProvider({ replica });
+              const { getSpacesAPI } = require('./spaces-api');
+              getSpacesAPI().setCutoverProvider(provider, { fallbackEnabled: fallbackToOldPath });
+              replicaCutoverActive = true;
+              console.log(
+                '[sync-v5/replica] CUTOVER ACTIVE -- spaces-api reads now route through replica',
+                fallbackToOldPath ? '(fallback enabled)' : '(strict mode, no fallback)'
+              );
+            } else {
+              console.log(
+                '[sync-v5/replica] cutoverEnabled=true BUT validation gate refuses (cutoverAllowed=false); reads stay on primary. See /sync/replica/validation for blockers.'
+              );
+            }
+          } else {
+            console.log('[sync-v5/replica] cutover disabled; reads stay on primary path');
+          }
+        } catch (cutoverErr) {
+          console.warn('[sync-v5/replica] cutover wiring failed (replica still works for shadow-write):', cutoverErr.message);
+        }
+
         // Compose the diagnostics provider so /sync/queue.replica
-        // surfaces the replica state, shadow-writer counters, and
-        // shadow-reader counters together. Validation gate is
-        // exposed at /sync/replica/validation as its own endpoint
-        // (the cutover flag in commit E reads from it).
+        // surfaces the replica state, shadow-writer counters,
+        // shadow-reader counters, and cutover state together.
+        // Validation gate is exposed at /sync/replica/validation
+        // as its own endpoint (the cutover flag check above reads
+        // from it in real time).
         v5.setProviders({
           replica: {
             inspect: () => ({
@@ -950,6 +990,11 @@ app.whenReady().then(() => {
               shadowReader: replicaShadowReader
                 ? replicaShadowReader.inspect()
                 : { wired: false, note: 'shadow-reader not attached (syncV5.replica.shadowReadEnabled=false)' },
+              cutover: {
+                enabled: !!(settings && settings.get('syncV5.replica.cutoverEnabled') === true),
+                active: replicaCutoverActive,
+                fallbackToOldPath: !settings || settings.get('syncV5.replica.fallbackToOldPath') !== false,
+              },
             }),
           },
           validationGate: replicaValidationGate || null,
