@@ -19,6 +19,139 @@
 
 const crypto = require('crypto');
 
+// ===========================================================================
+// DIRECT-AURA FALLBACK (added to bypass broken GSX proxy)
+// ===========================================================================
+//
+// The GSX OmniGraph proxy (this.endpoint) is the canonical path for queries,
+// but tonight's diagnosis showed every POST returns `no handler` from the
+// server-side flow. Until that's fixed, app graph writes are dead.
+//
+// When the user configures `neo4jUri` + `neo4jPassword` (the standard Aura
+// credentials), this client connects DIRECTLY to Aura via the official
+// neo4j-driver npm package. Direct path is preferred when configured;
+// GSX endpoint becomes a fallback for callers that haven't set the URI.
+//
+// Lazy-require so the driver isn't loaded until needed (and so this module
+// keeps loading in non-Aura environments where neo4j-driver might be absent).
+//
+// Result-shape parity: the existing GSX path returns records as plain objects
+// keyed by Cypher RETURN aliases, with Node values shaped as
+// `{ id, labels, properties }`. The direct path normalises neo4j-driver's
+// Record + Node + Relationship + Integer + DateTime types into the same
+// shape so callers don't need to know which path was used.
+// ===========================================================================
+
+let _neo4jDriverModule = null;
+function _loadNeo4jDriver() {
+  if (_neo4jDriverModule) return _neo4jDriverModule;
+  try {
+    _neo4jDriverModule = require('neo4j-driver');
+    return _neo4jDriverModule;
+  } catch (err) {
+    const e = new Error('neo4j-driver not available; run npm install neo4j-driver. Original: ' + err.message);
+    e.code = 'NEO4J_DRIVER_MISSING';
+    throw e;
+  }
+}
+
+/**
+ * Convert a neo4j-driver Record into a plain GSX-compatible object.
+ * Keys are the Cypher RETURN aliases; values are recursively normalised.
+ */
+function _recordToPlain(record) {
+  const out = {};
+  for (const key of record.keys) {
+    out[key] = _normaliseDriverValue(record.get(key));
+  }
+  return out;
+}
+
+/**
+ * Recursively convert neo4j-driver values into plain JS suitable for the
+ * GSX-compatible result shape.
+ *
+ * Mappings:
+ *   Integer        -> Number (lossy for >2^53; acceptable for our use)
+ *   Node           -> { id, labels, properties }
+ *   Relationship   -> { id, type, start, end, properties }
+ *   Path           -> { segments: [{ start, relationship, end }, ...] }
+ *   Date / DateTime / LocalDateTime / Time / Duration -> ISO string
+ *   Point          -> { srid, x, y, z? }
+ *   Buffer-like    -> base64 string
+ *   Array          -> mapped recursively
+ *   Plain object   -> mapped recursively
+ *   primitive      -> as-is
+ */
+function _normaliseDriverValue(v) {
+  if (v === null || v === undefined) return v;
+  const driver = _neo4jDriverModule;
+  if (!driver) return v;
+
+  // neo4j Integer
+  if (driver.isInt && driver.isInt(v)) {
+    // Use toNumber() when in safe range; toString() otherwise so callers
+    // can choose how to handle big values without losing them silently.
+    return v.inSafeRange() ? v.toNumber() : v.toString();
+  }
+  // Node / Relationship / Path -- detect via duck-typing because the
+  // direct `instanceof` checks against driver.types vary by version.
+  if (v && v.constructor && v.constructor.name === 'Node') {
+    return {
+      id: v.identity && driver.isInt(v.identity) ? v.identity.toString() : (v.elementId || String(v.identity)),
+      labels: Array.isArray(v.labels) ? v.labels.slice() : [],
+      properties: _normaliseDriverValue(v.properties || {}),
+    };
+  }
+  if (v && v.constructor && v.constructor.name === 'Relationship') {
+    return {
+      id: v.identity && driver.isInt(v.identity) ? v.identity.toString() : String(v.identity),
+      type: v.type,
+      start: v.start && driver.isInt(v.start) ? v.start.toString() : String(v.start),
+      end: v.end && driver.isInt(v.end) ? v.end.toString() : String(v.end),
+      properties: _normaliseDriverValue(v.properties || {}),
+    };
+  }
+  if (v && v.constructor && v.constructor.name === 'Path') {
+    return {
+      segments: (v.segments || []).map((s) => ({
+        start: _normaliseDriverValue(s.start),
+        relationship: _normaliseDriverValue(s.relationship),
+        end: _normaliseDriverValue(s.end),
+      })),
+    };
+  }
+  // Temporal types -- they all expose .toString() that returns ISO
+  if (v && typeof v === 'object') {
+    const cn = v.constructor && v.constructor.name;
+    if (cn === 'Date' || cn === 'DateTime' || cn === 'LocalDateTime'
+        || cn === 'Time' || cn === 'LocalTime' || cn === 'Duration') {
+      return v.toString();
+    }
+    if (cn === 'Point') {
+      return {
+        srid: v.srid && driver.isInt(v.srid) ? v.srid.toNumber() : v.srid,
+        x: v.x, y: v.y,
+        ...(typeof v.z !== 'undefined' ? { z: v.z } : {}),
+      };
+    }
+  }
+  // Buffer / Uint8Array
+  if (Buffer.isBuffer && Buffer.isBuffer(v)) return v.toString('base64');
+  if (v && v.buffer && typeof v.byteLength === 'number' && typeof v.length === 'number') {
+    return Buffer.from(v).toString('base64');
+  }
+  // Array
+  if (Array.isArray(v)) return v.map(_normaliseDriverValue);
+  // Plain object (including .properties from a Node/Relationship)
+  if (typeof v === 'object') {
+    const out = {};
+    for (const k of Object.keys(v)) out[k] = _normaliseDriverValue(v[k]);
+    return out;
+  }
+  return v;
+}
+
 // ============================================
 // APP IDENTITY (Honor System Requirement)
 // ============================================
@@ -141,6 +274,93 @@ class OmniGraphClient {
     this.timeout = options.timeout || 60000;
     this.pollInterval = options.pollInterval || 1500;
     this.currentUser = options.currentUser || 'system'; // For provenance tracking
+
+    // Direct-Aura driver instance (lazy, created on first executeQuery if
+    // neo4jUri + neo4jPassword are set). Survives across queries.
+    this._directDriver = null;
+    // Counter so /sync/queue diagnostics can see which path is actually
+    // being used.
+    this._counters = { directQueries: 0, gsxQueries: 0, directErrors: 0, gsxErrors: 0 };
+  }
+
+  /**
+   * Should we prefer the direct-Aura driver path over GSX?
+   * True when the standard Aura credentials (uri + password) are set.
+   * The GSX endpoint is then optional fallback.
+   */
+  _hasDirectCreds() {
+    return !!(this.neo4jUri && this.neo4jPassword);
+  }
+
+  /**
+   * Lazy-construct the neo4j-driver Driver. Cached on this instance.
+   * Returns null when credentials are missing.
+   */
+  _getDirectDriver() {
+    if (this._directDriver) return this._directDriver;
+    if (!this._hasDirectCreds()) return null;
+    const neo4j = _loadNeo4jDriver();
+    this._directDriver = neo4j.driver(
+      this.neo4jUri,
+      neo4j.auth.basic(this.neo4jUser || 'neo4j', this.neo4jPassword),
+      {
+        // Reasonable defaults for an Aura instance over public internet.
+        maxConnectionLifetime: 60 * 60 * 1000,
+        connectionAcquisitionTimeout: 30 * 1000,
+        // Aura uses neo4j+s:// (TLS); driver picks scheme from URI.
+        userAgent: 'gsx-power-user/4.9.0 (direct-aura)',
+      },
+    );
+    console.log('[OmniGraph] Direct Aura driver initialised:', this.neo4jUri, '(user:', this.neo4jUser + ', db:', this.database + ')');
+    return this._directDriver;
+  }
+
+  /**
+   * Cleanly close the direct driver. Safe to call from app shutdown handlers.
+   * After close(), a subsequent _getDirectDriver() will create a fresh driver.
+   */
+  async closeDirectDriver() {
+    const d = this._directDriver;
+    this._directDriver = null;
+    if (d) {
+      try { await d.close(); } catch (_e) { /* ignore */ }
+    }
+  }
+
+  /**
+   * Execute a Cypher query against Aura DIRECTLY (bypasses GSX).
+   * Same return shape as the GSX path: array of record objects keyed by
+   * Cypher RETURN aliases, with Node/Relationship values shaped as
+   * { id, labels, properties } / { id, type, start, end, properties }.
+   *
+   * Throws when credentials are missing or the driver/network errors.
+   */
+  async _executeDirect(cypher, parameters = {}) {
+    const driver = this._getDirectDriver();
+    if (!driver) {
+      throw new Error('Direct Aura: neo4jUri / neo4jPassword not configured');
+    }
+    const startTime = Date.now();
+    const session = driver.session({ database: this.database || 'neo4j' });
+    try {
+      const result = await session.run(cypher, parameters);
+      const records = result.records.map(_recordToPlain);
+      const ms = Date.now() - startTime;
+      console.log(`[OmniGraph/direct] Query returned ${records.length} records in ${ms}ms`);
+      this._counters.directQueries++;
+      return records;
+    } catch (err) {
+      this._counters.directErrors++;
+      // Wrap with a clearer message; preserve the original cause for callers.
+      const msg = err && err.message ? err.message : String(err);
+      console.error('[OmniGraph/direct] Query failed:', msg);
+      const wrapped = new Error('Direct Aura query failed: ' + msg);
+      wrapped.cause = err;
+      wrapped.directAura = true;
+      throw wrapped;
+    } finally {
+      try { await session.close(); } catch (_e) { /* ignore close noise */ }
+    }
   }
 
   /**
@@ -206,10 +426,17 @@ class OmniGraphClient {
   }
 
   /**
-   * Check if client is configured and ready
-   * @returns {boolean} Whether client can make requests
+   * Check if client is configured and ready.
+   *
+   * Returns true when EITHER:
+   *   - the GSX proxy is fully configured (endpoint + neo4jPassword), OR
+   *   - direct-Aura credentials are set (neo4jUri + neo4jPassword).
+   *
+   * Either path produces a working executeQuery. Callers that want to know
+   * which path is in effect can inspect _hasDirectCreds() / endpoint.
    */
   isReady() {
+    if (this._hasDirectCreds()) return true;
     return !!(this.endpoint && this.neo4jPassword);
   }
 
@@ -589,8 +816,33 @@ class OmniGraphClient {
    * @throws {Error} On network, query, or timeout error
    */
   async executeQuery(cypher, parameters = {}) {
+    // Prefer the direct-Aura path when standard credentials are
+    // configured. The GSX proxy was the original path but is currently
+    // returning `POST error: no handler` for every query; direct-Aura
+    // bypasses it entirely. See top-of-file comment for rationale.
+    //
+    // If the direct path errors with what looks like a network/auth issue
+    // and the GSX endpoint is configured, fall back to GSX as a last
+    // resort. App-level errors (Cypher syntax, constraint violations)
+    // bubble up directly without fallback because GSX wouldn't fix them.
+    if (this._hasDirectCreds()) {
+      try {
+        return await this._executeDirect(cypher, parameters);
+      } catch (err) {
+        const msg = (err && err.message) || '';
+        const isNetworkish =
+          /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|getaddrinfo|ServiceUnavailable|SessionExpired|connection.*closed/i.test(msg);
+        if (isNetworkish && this.endpoint && this.neo4jPassword) {
+          console.warn('[OmniGraph] Direct Aura unavailable; falling back to GSX endpoint:', msg);
+        } else {
+          // Non-network error -- propagate; GSX wouldn't fix it.
+          throw err;
+        }
+      }
+    }
+
     if (!this.endpoint) {
-      throw new Error('OmniGraph endpoint not configured');
+      throw new Error('OmniGraph endpoint not configured (and direct-Aura not available)');
     }
     if (!this.neo4jPassword) {
       throw new Error('Neo4j password not configured');
@@ -671,6 +923,7 @@ class OmniGraphClient {
         if (pollData.result?.status === 'ok') {
           const records = pollData.result.records || [];
           console.log(`[OmniGraph] Query returned ${records.length} records in ${Date.now() - startTime}ms`);
+          this._counters.gsxQueries++;
           return records;
         }
 
@@ -694,11 +947,30 @@ class OmniGraphClient {
 
       throw new Error(`Neo4j query polling timed out after ${maxAttempts} attempts`);
     } catch (error) {
+      this._counters.gsxErrors++;
       if (error.name === 'AbortError') {
         throw new Error('Neo4j query aborted');
       }
       throw error;
     }
+  }
+
+  /**
+   * Diagnostic snapshot for /sync/queue or operator queries.
+   * Indicates which path(s) are wired and how each is being used.
+   */
+  inspect() {
+    return {
+      endpoint: this.endpoint || null,
+      neo4jUri: this.neo4jUri || null,
+      neo4jUser: this.neo4jUser,
+      database: this.database,
+      hasPassword: !!this.neo4jPassword,
+      hasDirectCreds: this._hasDirectCreds(),
+      directDriverActive: !!this._directDriver,
+      preferredPath: this._hasDirectCreds() ? 'direct' : (this.endpoint && this.neo4jPassword ? 'gsx' : 'none'),
+      counters: { ...this._counters },
+    };
   }
 
   // ============================================
