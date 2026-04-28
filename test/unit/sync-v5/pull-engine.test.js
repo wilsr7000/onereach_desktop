@@ -14,7 +14,7 @@ vi.mock('../../../lib/log-event-queue', () => ({
   getLogQueue: () => ({ info: () => {}, warn: () => {}, error: () => {}, debug: () => {} }),
 }));
 
-const { PullEngine, CYPHER_READ_OPLOG_SINCE } = require('../../../lib/sync-v5/pull-engine');
+const { PullEngine, APPLY_MODE, CYPHER_READ_OPLOG_SINCE } = require('../../../lib/sync-v5/pull-engine');
 const { ConflictStore, VERDICT } = require('../../../lib/sync-v5/conflict');
 const vc = require('../../../lib/sync-v5/vector-clock');
 
@@ -320,6 +320,68 @@ describe('sync-v5 / pull-engine', () => {
       expect(CYPHER_READ_OPLOG_SINCE).toContain('$sinceAt IS NULL OR op.at > datetime($sinceAt)');
       expect(CYPHER_READ_OPLOG_SINCE).toContain('vcAfter');
       expect(CYPHER_READ_OPLOG_SINCE).toContain('ORDER BY op.at ASC');
+    });
+  });
+
+  describe('applyMode (operator-visible label for APPLY-verdict behaviour)', () => {
+    it('exports the documented modes', () => {
+      expect(APPLY_MODE.NOOP).toBe('noop');
+      expect(APPLY_MODE.SQLITE).toBe('sqlite');
+      expect(APPLY_MODE.CUSTOM).toBe('custom');
+    });
+
+    it('defaults to "custom" when not specified', () => {
+      const { engine } = makeFixture();
+      expect(engine.inspect().applyMode).toBe('custom');
+      expect(engine.inspect().applyModeNote).toBe(null);
+    });
+
+    it('"noop" surfaces the explanatory note in inspect()', () => {
+      const conflictStore = new ConflictStore();
+      const engine = new PullEngine({
+        omniClient: makeOmni(),
+        deviceId: SELF,
+        conflictStore,
+        localApplyFn: async () => {},
+        localLookupFn: async () => null,
+        applyMode: 'noop',
+        cursorPath: tempCursorPath(),
+      });
+      const r = engine.inspect();
+      expect(r.applyMode).toBe('noop');
+      expect(r.applyModeNote).toMatch(/discarded/);
+      expect(r.applyModeNote).toMatch(/CONFLICT/);
+    });
+
+    it('"sqlite" does not surface the noop note', () => {
+      const conflictStore = new ConflictStore();
+      const engine = new PullEngine({
+        omniClient: makeOmni(),
+        deviceId: SELF,
+        conflictStore,
+        localApplyFn: async () => {},
+        localLookupFn: async () => null,
+        applyMode: 'sqlite',
+        cursorPath: tempCursorPath(),
+      });
+      expect(engine.inspect().applyMode).toBe('sqlite');
+      expect(engine.inspect().applyModeNote).toBe(null);
+    });
+
+    it('rejects an invalid applyMode at construction time', () => {
+      const conflictStore = new ConflictStore();
+      expect(
+        () =>
+          new PullEngine({
+            omniClient: makeOmni(),
+            deviceId: SELF,
+            conflictStore,
+            localApplyFn: async () => {},
+            localLookupFn: async () => null,
+            applyMode: 'bogus',
+            cursorPath: tempCursorPath(),
+          })
+      ).toThrow(/applyMode must be one of/);
     });
   });
 });

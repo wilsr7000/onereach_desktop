@@ -763,6 +763,10 @@ app.whenReady().then(() => {
       localApplyFn: async (_args) => {
         /* no-op stub; Phase 5+ wires the materialised replica */
       },
+      // applyMode='noop' makes the engine's idle/discard state explicit in
+      // /sync/queue diagnostics so operators don't mistake "pulling" for
+      // "applying." Flips to 'sqlite' when the materialised replica lands.
+      applyMode: v5.pullEngine.APPLY_MODE.NOOP,
     });
 
     // Register diagnostics providers so the Phase 1+ endpoints stop

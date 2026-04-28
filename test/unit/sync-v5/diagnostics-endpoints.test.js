@@ -47,6 +47,15 @@ describe('sync-v5 / diagnostics-endpoints', () => {
       expect(typeof r.body.schemaVersion.device).toBe('number');
     });
 
+    it('schemaVersion includes apocAvailable + apocVersion fields (operator gate visibility)', async () => {
+      const r = await handleSyncQueue();
+      expect(r.body.schemaVersion).toHaveProperty('apocAvailable');
+      expect(r.body.schemaVersion).toHaveProperty('apocVersion');
+      // No live graph in tests, so these are false / null -- the SHAPE is the
+      // assertion, the values are runtime-dependent.
+      expect(typeof r.body.schemaVersion.apocAvailable).toBe('boolean');
+    });
+
     it('reports queue.wired=false when no provider registered', async () => {
       const r = await handleSyncQueue();
       expect(r.body.queue.wired).toBe(false);

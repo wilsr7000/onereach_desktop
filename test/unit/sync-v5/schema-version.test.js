@@ -16,18 +16,27 @@ const {
   COMPAT_STATES,
   CYPHER_READ_SCHEMA_VERSION,
   CYPHER_UPSERT_SCHEMA_VERSION,
+  CYPHER_PROBE_APOC,
   getCompiledInVersion,
   readGraphSchemaVersion,
   checkCompatibility,
   isWriteAllowed,
+  probeApoc,
   handshake,
   adminUpsertSchemaVersion,
 } = require('../../../lib/sync-v5/schema-version');
 
-function makeFakeOmni({ ready = true, queryResult = [], throwOnQuery = null } = {}) {
+function makeFakeOmni({ ready = true, queryResult = [], throwOnQuery = null, apocAvailable = true } = {}) {
   return {
     isReady: () => ready,
     executeQuery: vi.fn(async (cypher, params) => {
+      // APOC probe: fail or succeed based on apocAvailable flag.
+      if (cypher.includes('apoc.version()')) {
+        if (!apocAvailable) {
+          throw new Error("Unknown function 'apoc.version'");
+        }
+        return [{ version: '5.13.0' }];
+      }
       if (throwOnQuery) throw throwOnQuery;
       return typeof queryResult === 'function' ? queryResult(cypher, params) : queryResult;
     }),
@@ -196,6 +205,76 @@ describe('sync-v5 / schema-version', () => {
       expect(CYPHER_UPSERT_SCHEMA_VERSION).toContain('MERGE (sv:SchemaVersion)');
       expect(CYPHER_UPSERT_SCHEMA_VERSION).toContain('ON CREATE');
       expect(CYPHER_UPSERT_SCHEMA_VERSION).toContain('ON MATCH');
+    });
+
+    it('CYPHER_PROBE_APOC calls apoc.version()', () => {
+      expect(CYPHER_PROBE_APOC).toContain('apoc.version()');
+    });
+  });
+
+  describe('probeApoc', () => {
+    it('returns available=true and version when APOC is installed', async () => {
+      const omni = makeFakeOmni({ apocAvailable: true });
+      const r = await probeApoc({ omniClient: omni });
+      expect(r.available).toBe(true);
+      expect(r.version).toBe('5.13.0');
+      expect(r.error).toBe(null);
+    });
+
+    it('returns available=false when APOC is not installed (Unknown function error)', async () => {
+      const omni = makeFakeOmni({ apocAvailable: false });
+      const r = await probeApoc({ omniClient: omni });
+      expect(r.available).toBe(false);
+      expect(r.version).toBe(null);
+      expect(r.error).toMatch(/Unknown function/);
+    });
+
+    it('returns available=false when graph not ready', async () => {
+      const r = await probeApoc({ omniClient: makeFakeOmni({ ready: false }) });
+      expect(r.available).toBe(false);
+      expect(r.error).toMatch(/not ready/);
+    });
+
+    it('returns available=false when omniClient missing', async () => {
+      const r = await probeApoc({ omniClient: null });
+      expect(r.available).toBe(false);
+    });
+  });
+
+  describe('handshake (load-bearing APOC gate)', () => {
+    it('writeAllowed=true requires both schema-compatibility AND apocAvailable', async () => {
+      const omni = makeFakeOmni({
+        queryResult: [{ version: COMPILED_IN_SCHEMA_VERSION, deployedAt: 'x', migrationsRequired: [] }],
+        apocAvailable: true,
+      });
+      const r = await handshake({ omniClient: omni });
+      expect(r.writeAllowed).toBe(true);
+      expect(r.apocAvailable).toBe(true);
+      expect(r.apocVersion).toBe('5.13.0');
+      expect(r.banner).toBe(null);
+    });
+
+    it('writeAllowed=false when APOC missing (even if schema is compatible)', async () => {
+      const omni = makeFakeOmni({
+        queryResult: [{ version: COMPILED_IN_SCHEMA_VERSION, deployedAt: 'x', migrationsRequired: [] }],
+        apocAvailable: false,
+      });
+      const r = await handshake({ omniClient: omni });
+      expect(r.state).toBe(COMPAT_STATES.COMPATIBLE);
+      expect(r.apocAvailable).toBe(false);
+      expect(r.writeAllowed).toBe(false);
+      expect(r.banner).toMatch(/APOC plugin/);
+    });
+
+    it('APOC banner takes precedence over schema-compat banners', async () => {
+      // graph-newer-compat-mode would normally show a "compat mode" banner;
+      // APOC missing should override.
+      const omni = makeFakeOmni({
+        queryResult: [{ version: COMPILED_IN_SCHEMA_VERSION + 1, deployedAt: 'x', migrationsRequired: [] }],
+        apocAvailable: false,
+      });
+      const r = await handshake({ omniClient: omni });
+      expect(r.banner).toMatch(/APOC plugin/);
     });
   });
 
