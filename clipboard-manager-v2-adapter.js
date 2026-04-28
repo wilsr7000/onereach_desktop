@@ -1076,11 +1076,53 @@ class ClipboardManagerV2 {
     return { success: true, pinned };
   }
 
-  searchHistory(query) {
-    const log = require('./lib/logger');
+  /**
+   * Search the clipboard / Spaces stack for items matching a query.
+   *
+   * Per docs/sync-v5/replica-shape.md §6A (two-path unification): this
+   * method now routes through SpacesAPI.search instead of calling
+   * ClipboardStorageV2.search directly. Reasons:
+   *   - Single canonical search backend across the app (agents and the
+   *     Spaces Manager UI now use the same scoring + result shape).
+   *   - SpacesAPI.search has richer options (spaceId, type, fuzzy,
+   *     searchTags, searchMetadata, etc.) that the old path didn't
+   *     expose; opts is forwarded so renderers can opt into them.
+   *   - When the materialised SQLite replica lands, swapping the
+   *     backend is a single change in spaces-api.js -- no
+   *     clipboard-manager / clipboard-viewer code change needed.
+   *
+   * Result shape: same as before (items with content stripped,
+   * `_needsContent: true` set) PLUS the new `_search: { score,
+   * matches, highlights }` field that consumers can ignore safely.
+   *
+   * Backward-compat: signature kept as (query) for existing callers
+   * (clipboard-viewer.js's window.clipboard.search). Optional second
+   * arg (options) is forwarded to SpacesAPI.search; defaults match
+   * the previous behaviour (no spaceId filter, no type filter,
+   * fuzzy matching enabled).
+   *
+   * Non-regression invariant tested in test/unit/spaces-search-
+   * unification.test.js: every item Path A (the old
+   * ClipboardStorageV2.search) returned for a query also appears in
+   * Path B (SpacesAPI.search) results for the same query. Path B
+   * may return more (fuzzy matching), which is the expected
+   * improvement.
+   */
+  async searchHistory(query, options = {}) {
     log.debug('clipboard', 'Search query received', { query, historySize: this.history.length, indexSize: this.storage?.index?.items?.length });
 
-    const results = this.storage.search(query);
+    let results;
+    try {
+      // Route through SpacesAPI.search -- single canonical backend.
+      const { getSpacesAPI } = require('./spaces-api');
+      results = await getSpacesAPI().search(query, options);
+    } catch (err) {
+      // Fail-open to legacy backend so search never goes silently dark.
+      // The fallback should be removed when the replica cutover is
+      // complete (commit F per the rollout plan).
+      log.warn('clipboard', 'SpacesAPI.search failed; falling back to legacy storage.search', { error: err.message });
+      results = this.storage.search(query);
+    }
     log.info('clipboard', 'Search completed', { query, resultCount: results.length });
 
     return results.map((item) => ({
