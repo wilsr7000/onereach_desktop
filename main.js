@@ -208,6 +208,23 @@ app.whenReady().then(() => {
     log.warn('[TemporalContext] Init failed:', e.message);
   }
 
+  // Initialize ai-pause: emergency kill switch for ALL LLM traffic. Loaded
+  // early so the paused state is restored across restarts and any
+  // subsequent AI handler that opts in via aiPause.isPaused() picks up the
+  // current state immediately. The /ai/{status,pause,resume} HTTP endpoints
+  // and ai:pause-status / ai:pause / ai:resume IPC handlers expose the
+  // surface; per-handler isPaused() guards on AI IPC handlers ship in a
+  // follow-up integration commit.
+  try {
+    const aiPause = require('./lib/ai-pause');
+    aiPause.init(app.getPath('userData'));
+    if (aiPause.isPaused()) {
+      log.warn('[ai-pause] AI traffic is PAUSED at startup', aiPause.getStatus());
+    }
+  } catch (err) {
+    console.warn('[ai-pause] init error:', err.message);
+  }
+
   // Load and configure autoUpdater (must be done after app is ready)
   try {
     autoUpdater = require('electron-updater').autoUpdater;
@@ -4103,6 +4120,22 @@ function setupSpacesAPI() {
       console.error('[AI IPC] imageGenerate error:', error.message);
       throw error;
     }
+  });
+
+  // Emergency kill switch for ALL LLM traffic (see lib/ai-pause.js).
+  // /ai/pause + /ai/resume + /ai/status HTTP endpoints in lib/log-server.js
+  // expose the same surface for external tools (curl, browser DevTools, CI).
+  ipcMain.handle('ai:pause', async (_event, reason) => {
+    const aiPause = require('./lib/ai-pause');
+    return await aiPause.pause(reason || 'ipc');
+  });
+  ipcMain.handle('ai:resume', async () => {
+    const aiPause = require('./lib/ai-pause');
+    return await aiPause.resume();
+  });
+  ipcMain.handle('ai:pause-status', async () => {
+    const aiPause = require('./lib/ai-pause');
+    return aiPause.getStatus();
   });
 
   // ==========================================================================
