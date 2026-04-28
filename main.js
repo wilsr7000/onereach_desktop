@@ -775,25 +775,42 @@ app.whenReady().then(() => {
     // PullEngine periodically reads remote :OperationLog rows and applies
     // them to the local replica through tombstone gating + conflict
     // detection (Phase 3 building blocks). It stays OFF by default in
-    // boot wiring -- nothing in this build has a materialised replica
-    // yet, so the localApplyFn is a no-op stub. Start it from devtools
-    // when validating end-to-end: __syncV5.pullEngine.start()
+    // boot wiring -- start it from devtools when validating end-to-end:
+    // __syncV5.pullEngine.start()
+    //
+    // Phase 5 / commit F: localLookupFn + localApplyFn are deferred
+    // closures that look up the replica adapter at call time. The
+    // pull engine constructor runs BEFORE the replica boot block; the
+    // adapter is assigned later (line ~890 area). Because the pull
+    // engine isn't started until devtools opt-in, the closures
+    // execute well after the adapter assignment, so the deferred
+    // pattern is safe. applyMode flips to 'sqlite' when the replica
+    // is enabled, so /sync/queue.pullEngine.applyMode reflects
+    // reality even when the engine is idle.
+    let replica = null;
+    let replicaPullAdapter = null;
     const conflictStore = new v5.conflict.ConflictStore();
+    const replicaEnabledAtBoot = (global.settingsManager
+      && global.settingsManager.get('syncV5.replica.enabled') === true);
     const pullEngine = new v5.pullEngine.PullEngine({
       omniClient: getOmniGraphClient(),
       deviceId: v5.getDeviceId(),
       conflictStore,
-      // Phase 5+ tooling will back these with a SQLite-materialised replica.
-      // Until then the pull engine can run but applied ops have no local
-      // sink; that's why it stays opt-in.
-      localLookupFn: async (_entityId) => null,
-      localApplyFn: async (_args) => {
-        /* no-op stub; Phase 5+ wires the materialised replica */
+      localLookupFn: async (entityId) => {
+        if (!replicaPullAdapter) return null;
+        return replicaPullAdapter.localLookupFn(entityId);
       },
-      // applyMode='noop' makes the engine's idle/discard state explicit in
-      // /sync/queue diagnostics so operators don't mistake "pulling" for
-      // "applying." Flips to 'sqlite' when the materialised replica lands.
-      applyMode: v5.pullEngine.APPLY_MODE.NOOP,
+      localApplyFn: async (args) => {
+        if (!replicaPullAdapter) return; // noop until adapter wired
+        return replicaPullAdapter.localApplyFn(args);
+      },
+      // sqlite when the replica is enabled (commit F); noop otherwise.
+      // The diagnostics surface (/sync/queue.pullEngine.applyMode)
+      // reads this so operators see the truth even when the engine
+      // is idle.
+      applyMode: replicaEnabledAtBoot
+        ? v5.pullEngine.APPLY_MODE.SQLITE
+        : v5.pullEngine.APPLY_MODE.NOOP,
     });
 
     // Register diagnostics providers so the Phase 1+ endpoints stop
@@ -848,7 +865,9 @@ app.whenReady().then(() => {
     // works without the replica (this is the cutover-phase pattern --
     // the replica is wired in parallel; production reads/writes still
     // use clipboard-storage-v2 / spaces-api until commit E flips them).
-    let replica = null;
+    // `replica` and `replicaPullAdapter` are hoisted to before the
+    // pull engine constructor (commit F deferred-closure pattern).
+    // The remaining replica state variables are scoped to this block.
     let replicaShadowWriter = null;
     let replicaShadowReader = null;
     let replicaValidationGate = null;
@@ -867,6 +886,28 @@ app.whenReady().then(() => {
           tombstoneRetentionDays: settings.get('syncV5.replica.tombstoneRetentionDays') || null,
         });
         replica.init();
+
+        // ── Pull-engine adapter (commit F) ──
+        // The deferred closures we passed to PullEngine above look up
+        // this adapter at call time. Assigning it here (after replica
+        // is open) means a subsequent `__syncV5.pullEngine.start()`
+        // from devtools writes remote ops directly into the replica
+        // via upsertItem / softDeleteItem. applyMode='sqlite' is
+        // already set on the engine (see the pull engine
+        // construction above) so /sync/queue.pullEngine.applyMode
+        // reflects "remote ops will land in SQLite."
+        try {
+          replicaPullAdapter = v5.replica.buildPullEngineAdapter({ replica });
+          console.log(
+            '[sync-v5/replica] pull-engine adapter wired -- pull engine\'s localApplyFn now writes through replica'
+          );
+        } catch (paErr) {
+          console.warn(
+            '[sync-v5/replica] pull-engine adapter wire failed (replica still works for shadow-write/-read):',
+            paErr.message
+          );
+          replicaPullAdapter = null;
+        }
 
         // ── Shadow-writer (commit C) ──
         // Subscribe to spaces-api's existing event surface so every
@@ -995,6 +1036,9 @@ app.whenReady().then(() => {
                 active: replicaCutoverActive,
                 fallbackToOldPath: !settings || settings.get('syncV5.replica.fallbackToOldPath') !== false,
               },
+              pullAdapter: replicaPullAdapter
+                ? replicaPullAdapter.inspect()
+                : { wired: false, note: 'pull-engine adapter not attached (replica disabled)' },
             }),
           },
           validationGate: replicaValidationGate || null,
@@ -1100,6 +1144,7 @@ app.whenReady().then(() => {
       replicaShadowWriter,
       replicaShadowReader,
       replicaValidationGate,
+      replicaPullAdapter,
     };
     globalThis.__syncV5Engine = syncEngine;
     const _replicaState = !replica
