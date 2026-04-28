@@ -198,6 +198,16 @@ app.whenReady().then(() => {
   // Set up shell.openExternal override
   setupShellOverride();
 
+  // Initialize temporal-context: per-hour / per-day usage patterns that
+  // let agents say "you usually ask about X at this time" and "yesterday
+  // you were working on Y". Persists to userData/temporal/state.json.
+  try {
+    const { getTemporalContext } = require('./lib/temporal-context');
+    getTemporalContext().init(app.getPath('userData'));
+  } catch (e) {
+    log.warn('[TemporalContext] Init failed:', e.message);
+  }
+
   // Load and configure autoUpdater (must be done after app is ready)
   try {
     autoUpdater = require('electron-updater').autoUpdater;
