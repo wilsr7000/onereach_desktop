@@ -365,6 +365,34 @@ class SettingsManager {
       // default; the operator can flip it off without code changes.
       'syncV5.compactorEnabled': true,
 
+      // ── Sync v5 -- materialised SQLite replica (commit A scaffold) ────
+      // Per docs/sync-v5/replica-shape.md §5 / §6. The replica is built
+      // in parallel; flags ladder is enabled -> shadowReadEnabled ->
+      // cutoverEnabled -> fallbackToOldPath=false. Each step requires
+      // the validation gate (§6.6) to pass before the next flips.
+      //
+      // tenantId is locked at first replica init; changing it later
+      // requires the Phase 5 migration tooling because every existing
+      // row carries the old value (§6B.2).
+      //
+      // noShadowPaths: filesystem-relative globs that the replica will
+      // NOT answer; reads fall through to disk. gsx-agent/*.md is the
+      // canonical example (unified-bidder + omni-data-agent read these
+      // directly; the replica must not cache stale copies).
+      //
+      // tombstoneRetentionDays: null = keep tombstoned rows forever
+      // (default; mirrors graph :Tombstone semantics). Set an integer
+      // for storage-conscious tenants; the daily compactor purges
+      // active=0 rows older than the retention plus their content-cache
+      // blobs if no live :Asset references the same content_hash.
+      'syncV5.replica.enabled': false,
+      'syncV5.replica.shadowReadEnabled': false,
+      'syncV5.replica.cutoverEnabled': false,
+      'syncV5.replica.fallbackToOldPath': true,
+      'syncV5.replica.tenantId': 'default',
+      'syncV5.replica.noShadowPaths': ['gsx-agent/*.md', 'gsx-agent/**/*.md'],
+      'syncV5.replica.tombstoneRetentionDays': null,
+
       // Desktop Autopilot — off by default; users must opt in
       desktopAutopilotEnabled: false,
       desktopAutopilotBrowser: true,
