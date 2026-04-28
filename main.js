@@ -849,6 +849,7 @@ app.whenReady().then(() => {
     // the replica is wired in parallel; production reads/writes still
     // use clipboard-storage-v2 / spaces-api until commit E flips them).
     let replica = null;
+    let replicaShadowWriter = null;
     try {
       const settings = global.settingsManager;
       const replicaEnabled = settings && settings.get('syncV5.replica.enabled') === true;
@@ -863,7 +864,41 @@ app.whenReady().then(() => {
           tombstoneRetentionDays: settings.get('syncV5.replica.tombstoneRetentionDays') || null,
         });
         replica.init();
-        v5.setProviders({ replica });
+
+        // ── Shadow-writer (commit C) ──
+        // Subscribe to spaces-api's existing event surface so every
+        // successful write through the primary path also writes the
+        // replica. Failures are isolated -- shadow-write counters tick
+        // up, but the primary write has already succeeded and the rest
+        // of the app is unaffected.
+        try {
+          const { getSpacesAPI } = require('./spaces-api');
+          replicaShadowWriter = v5.replica.attachShadowWriter({
+            spacesApi: getSpacesAPI(),
+            replica,
+            deviceId: v5.getDeviceId(),
+          });
+          console.log('[sync-v5/replica] shadow-writer attached (15 events subscribed)');
+        } catch (swErr) {
+          console.warn('[sync-v5/replica] shadow-writer attach failed (replica still works for reads/migration):', swErr.message);
+          replicaShadowWriter = null;
+        }
+
+        // Compose the diagnostics provider so /sync/queue.replica
+        // surfaces both the replica state and the shadow-writer
+        // counters. The provider is deliberately constructed inline
+        // rather than baking shadow-writer awareness into the Replica
+        // class -- the two have separate lifecycles.
+        v5.setProviders({
+          replica: {
+            inspect: () => ({
+              ...replica.inspect(),
+              shadowWriter: replicaShadowWriter
+                ? replicaShadowWriter.inspect()
+                : { wired: false, note: 'shadow-writer not attached' },
+            }),
+          },
+        });
         console.log('[sync-v5/replica] initialised at', replicaPath, '(schemaVersion', replica.schemaVersion + ')');
 
         // Cold-device migration: non-blocking, idempotent. Runs once on
@@ -962,11 +997,12 @@ app.whenReady().then(() => {
       pullEngine,
       compactorInterval,
       replica,
+      replicaShadowWriter,
     };
     globalThis.__syncV5Engine = syncEngine;
     console.log(
       '[sync-v5] wired (heartbeat started; sync engine + pull engine idle; compactor scheduled off-peak; replica',
-      replica ? 'live' : 'disabled',
+      replica ? (replicaShadowWriter ? 'live + shadow-write' : 'live') : 'disabled',
       ')'
     );
   } catch (v5Err) {
