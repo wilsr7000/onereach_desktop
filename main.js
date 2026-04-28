@@ -741,12 +741,38 @@ app.whenReady().then(() => {
       handshakeFn: () => v5.handshake(),
     });
 
-    // Register diagnostics providers so the Phase 1 endpoints stop
+    // ── Phase 4: causal conflict resolution + pull engine ─────────────────
+    // ConflictStore is the device-side singleton that tracks unresolved
+    // N-way conflicts (Phase 3 algebra) and exposes the subscribe() event
+    // surface the renderer-side conflict UI (downstream effort) consumes.
+    // PullEngine periodically reads remote :OperationLog rows and applies
+    // them to the local replica through tombstone gating + conflict
+    // detection (Phase 3 building blocks). It stays OFF by default in
+    // boot wiring -- nothing in this build has a materialised replica
+    // yet, so the localApplyFn is a no-op stub. Start it from devtools
+    // when validating end-to-end: __syncV5.pullEngine.start()
+    const conflictStore = new v5.conflict.ConflictStore();
+    const pullEngine = new v5.pullEngine.PullEngine({
+      omniClient: getOmniGraphClient(),
+      deviceId: v5.getDeviceId(),
+      conflictStore,
+      // Phase 5+ tooling will back these with a SQLite-materialised replica.
+      // Until then the pull engine can run but applied ops have no local
+      // sink; that's why it stays opt-in.
+      localLookupFn: async (_entityId) => null,
+      localApplyFn: async (_args) => {
+        /* no-op stub; Phase 5+ wires the materialised replica */
+      },
+    });
+
+    // Register diagnostics providers so the Phase 1+ endpoints stop
     // reporting `wired: false`.
     v5.setProviders({
       queueProvider: () => queue.inspect(),
       dlqProvider: () => dlq.inspect(),
       heartbeatReporter,
+      conflictStore,
+      pullEngine,
       traceLookupProvider: async (traceId) => {
         const inQueue = queue.get(traceId);
         const inDlq = dlq.get(traceId);
@@ -773,13 +799,72 @@ app.whenReady().then(() => {
     });
 
     // Auto-start the heartbeat reporter so the graph immediately knows the
-    // device is alive. Sync engine is opt-in (see __syncV5Demo below).
+    // device is alive. Sync engine + pull engine are opt-in (see
+    // __syncV5Demo and __syncV5.pullEngine.start()).
     heartbeatReporter.start();
 
+    // ── Phase 4: periodic compactor scheduler ─────────────────────────────
+    // Runs once per off-peak window per day. Walks all spaces, calls
+    // v5.snapshot.compactSpace(spaceId) for each. Bounded compute (one
+    // cypher tx per space, sub-second on Aura) and operator-disable
+    // via syncV5.compactorEnabled setting (default true). Compactor
+    // does nothing for spaces with <1 snapshot, so empty graphs are
+    // free.
+    let _compactorLastRun = 0;
+    const compactorInterval = setInterval(async () => {
+      try {
+        const settings = global.settingsManager;
+        if (settings && settings.get('syncV5.compactorEnabled') === false) return;
+        const hour = new Date().getHours();
+        // Off-peak window: 2am - 4am local. Skip otherwise.
+        if (hour < 2 || hour > 4) return;
+        // At most once per 24h (the off-peak gate fires on every interval
+        // tick during the 2-4am window; this prevents multiple runs per day).
+        const now = Date.now();
+        if (now - _compactorLastRun < 23 * 60 * 60 * 1000) return;
+        _compactorLastRun = now;
+
+        const { getSpacesAPI } = require('./spaces-api');
+        const spaces = (await getSpacesAPI().list()) || [];
+        let kept = 0;
+        let collapsed = 0;
+        let opLogCollapsed = 0;
+        for (const space of spaces) {
+          try {
+            const r = await v5.snapshot.compactSpace(space.id);
+            kept += r.kept || 0;
+            collapsed += r.collapsed || 0;
+            opLogCollapsed += r.opLogCollapsed || 0;
+          } catch (spaceErr) {
+            console.warn('[sync-v5/compactor] space failed:', space.id, spaceErr.message);
+          }
+        }
+        console.log(
+          `[sync-v5/compactor] daily run: ${spaces.length} spaces, kept=${kept}, collapsed=${collapsed}, opLogCollapsed=${opLogCollapsed}`
+        );
+      } catch (err) {
+        console.warn('[sync-v5/compactor] error:', err.message);
+      }
+    }, 60 * 60 * 1000); // hourly check; off-peak window gates actual run
+    if (compactorInterval && typeof compactorInterval.unref === 'function') {
+      compactorInterval.unref();
+    }
+
     // Expose for devtools / future-phase wiring.
-    globalThis.__syncV5 = { queue, dlq, blobStore, heartbeatReporter, syncEngine };
+    globalThis.__syncV5 = {
+      queue,
+      dlq,
+      blobStore,
+      heartbeatReporter,
+      syncEngine,
+      conflictStore,
+      pullEngine,
+      compactorInterval,
+    };
     globalThis.__syncV5Engine = syncEngine;
-    console.log('[sync-v5] wired (heartbeat started; engine idle until __syncV5Demo runs)');
+    console.log(
+      '[sync-v5] wired (heartbeat started; sync engine + pull engine idle; compactor scheduled off-peak)'
+    );
   } catch (v5Err) {
     console.warn('[sync-v5] boot wiring failed:', v5Err.message);
   }

@@ -81,6 +81,53 @@ describe('sync-v5 / diagnostics-endpoints', () => {
       expect(r.body.heartbeat.pendingAckCount).toBe(3);
     });
 
+    it('reports conflicts.wired=false when no ConflictStore registered', async () => {
+      const r = await handleSyncQueue();
+      expect(r.body.conflicts.wired).toBe(false);
+      expect(r.body.conflicts.note).toMatch(/Phase 4/);
+    });
+
+    it('captures ConflictStore inspect output when registered (Phase 4)', async () => {
+      setProviders({
+        conflictStore: {
+          inspect: () => ({
+            count: 2,
+            groups: [
+              { entityId: 'a1', entityType: 'asset', createdAt: 'x', versionCount: 2 },
+              { entityId: 'a2', entityType: 'asset', createdAt: 'y', versionCount: 3 },
+            ],
+          }),
+        },
+      });
+      const r = await handleSyncQueue();
+      expect(r.body.conflicts.count).toBe(2);
+      expect(r.body.conflicts.groups).toHaveLength(2);
+    });
+
+    it('reports pullEngine.wired=false when no PullEngine registered', async () => {
+      const r = await handleSyncQueue();
+      expect(r.body.pullEngine.wired).toBe(false);
+      expect(r.body.pullEngine.note).toMatch(/Phase 4/);
+    });
+
+    it('captures PullEngine inspect output when registered (Phase 4)', async () => {
+      setProviders({
+        pullEngine: {
+          inspect: () => ({
+            started: false,
+            cursor: '2026-04-27T12:00:00Z',
+            applied: 5,
+            ignored: 1,
+            conflicts: 0,
+            tombstoneRefused: 0,
+          }),
+        },
+      });
+      const r = await handleSyncQueue();
+      expect(r.body.pullEngine.cursor).toBe('2026-04-27T12:00:00Z');
+      expect(r.body.pullEngine.applied).toBe(5);
+    });
+
     it('does not crash if provider throws', async () => {
       setProviders({
         queueProvider: () => {

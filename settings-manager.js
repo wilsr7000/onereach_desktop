@@ -356,6 +356,15 @@ class SettingsManager {
       neo4jUser: 'neo4j',
       neo4jDatabase: 'neo4j',
 
+      // ── Sync v5 (parallel-mode scaffold) ──────────────────────────────
+      // The Phase 4 compactor runs once per day at 2-4am local time,
+      // walking all spaces and trimming :Snapshot + :OperationLog rows
+      // per the sliding-window retention policy (v5 4.3). Disable here
+      // if a tenant needs to keep raw native cadence indefinitely (e.g.
+      // a regulated tenant with bespoke retention requirements). On by
+      // default; the operator can flip it off without code changes.
+      'syncV5.compactorEnabled': true,
+
       // Desktop Autopilot — off by default; users must opt in
       desktopAutopilotEnabled: false,
       desktopAutopilotBrowser: true,
