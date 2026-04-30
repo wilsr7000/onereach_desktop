@@ -3434,6 +3434,23 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
       reasoning: b.reasoning,
     }));
 
+    // Stash the full bid roster onto task metadata so the task:settled
+    // handler can include it in the learning:interaction payload. This is
+    // the data substrate the self-learning arbitration loop tunes against
+    // (see decision-recorder + arbitration-decisions Space). Captures
+    // `score` and `won` in addition to the HUD's bidsSummary fields.
+    try {
+      task.metadata = task.metadata || {};
+      task.metadata.allBids = allBids.map((b) => ({
+        agentId: b.agentId,
+        agentName: b.agentName || b.agentId,
+        confidence: typeof b.confidence === 'number' ? b.confidence : 0,
+        score: typeof b.score === 'number' ? b.score : (typeof b.confidence === 'number' ? b.confidence : 0),
+        reasoning: typeof b.reasoning === 'string' ? b.reasoning : '',
+        won: b.agentId === winner.agentId,
+      }));
+    } catch (_e) { /* metadata stash is best-effort */ }
+
     // Record stats
     try {
       const { getAgentStats } = require('./agent-stats');
@@ -3583,10 +3600,39 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
     try {
       const bustCount = task.metadata?.bustCount || 0;
       const bustedAgents = task.metadata?.bustedAgents || [];
+
+      // Bid roster + decision metadata for the self-learning arbitration
+      // loop (Phase 1: bid-level instrumentation). The decision-recorder
+      // joins this with later quality signals (reflector, negative
+      // feedback, counterfactual judge) into the arbitration-decisions
+      // Space. Mark the actual settling agent's bid as won=true even if
+      // the original assignment differed (cascade/bust case).
+      const allBidsRaw = Array.isArray(task.metadata?.allBids) ? task.metadata.allBids : [];
+      const bids = allBidsRaw.map((b) => ({
+        agentId: b.agentId,
+        agentName: b.agentName,
+        confidence: b.confidence,
+        score: b.score,
+        reasoning: b.reasoning,
+        won: b.agentId === agentId,
+        busted: bustedAgents.some((ba) => ba.agentId === b.agentId),
+      }));
+      const masterEval = task.metadata?.masterEvaluation || null;
+      const decisionPath = (() => {
+        if (!masterEval) return 'no-evaluator';
+        const reasoning = (masterEval.reasoning || '').toString();
+        if (reasoning === 'No bids received') return 'no-bids';
+        if (reasoning === 'Only one agent bid') return 'fast-path-single';
+        if (reasoning.startsWith('Clear winner by')) return 'fast-path-dominant';
+        if (reasoning === 'Fallback: selected highest scoring bid') return 'fallback';
+        return 'llm-evaluator';
+      })();
+
       exchangeBus.emit('learning:interaction', {
         taskId: task.id,
         agentId,
         userInput: task.content || '',
+        situationContext: task.metadata?.situationContext || null,
         success: result?.success !== false,
         message: (safeResult.output || safeResult.message || '').slice(0, 500),
         error: safeResult.error || null,
@@ -3594,6 +3640,9 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
         durationMs: executionDurationMs || 0,
         bustCount,
         bustedAgents: bustedAgents.map((b) => b.agentId),
+        bids,
+        executionMode: task.executionMode || 'single',
+        decisionPath,
         timestamp: Date.now(),
       });
 
@@ -3803,6 +3852,50 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
       }
     } catch (err) {
       log.warn('voice', '[Reflector] Setup error', { error: err.message });
+    }
+
+    // ── Counterfactual outcome judge (Phase 2 self-learning arbitration) ──
+    // Sample-rated LLM judge that compares the chosen agent's answer
+    // against the runner-up's bid reasoning. Output feeds the Phase 4
+    // overlap tuner via the arbitration-decisions Space (joined by
+    // taskId). Fire-and-forget; never blocks the user. Skipped
+    // automatically when only one bidder, on budget exhaustion, or
+    // when the answer is too short to judge.
+    try {
+      const allBids = task.metadata?.allBids;
+      if (Array.isArray(allBids) && allBids.length >= 2 && result?.success !== false) {
+        const winnerAnswer = (safeResult.output || safeResult.message || '').toString();
+        if (winnerAnswer.length >= 3) {
+          const { getCounterfactualJudge } = require('../../lib/agent-learning/counterfactual-judge');
+          const judge = getCounterfactualJudge();
+          if (judge.shouldJudge({
+            task: { id: task.id, content: task.content },
+            bids: allBids,
+            winnerAgentId: agentId,
+            winnerAnswer,
+          })) {
+            judge.judge({
+              task: { id: task.id, content: task.content || '' },
+              bids: allBids,
+              winnerAgentId: agentId,
+              winnerAnswer,
+            }).then((record) => {
+              if (!record || record.skipped) return;
+              exchangeBus.emit('learning:counterfactual-judgment', {
+                taskId: record.taskId,
+                judgment: record.judgment,
+                confidence: record.confidence,
+                rationale: record.rationale,
+                winnerAgentId: record.winnerAgentId,
+                runnerUpAgentId: record.runnerUpAgentId,
+                timestamp: record.at,
+              });
+            }).catch(() => { /* judging is non-critical */ });
+          }
+        }
+      }
+    } catch (err) {
+      log.warn('voice', '[CounterfactualJudge] Setup error', { error: err.message });
     }
 
     // Phase 1: Check if this task was cancelled (late result suppression)

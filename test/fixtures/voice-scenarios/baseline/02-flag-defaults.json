@@ -1,0 +1,11 @@
+{
+  "name": "baseline-flag-defaults",
+  "description": "Phase 5 (repair memory) and Phase 6 (affect matching) both default ON under the always-on naturalness posture; Phase 7 (backchanneling) stays OFF pending design.",
+  "phase": "baseline",
+  "flags": {},
+  "steps": [
+    { "type": "assert", "flagEnabled": "repairMemory" },
+    { "type": "assert", "flagEnabled": "affectMatching" },
+    { "type": "assert", "flagDisabled": "backchanneling" }
+  ]
+}

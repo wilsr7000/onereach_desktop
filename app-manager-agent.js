@@ -15,9 +15,28 @@
 const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const ai = require('./lib/ai-service');
+let ai = require('./lib/ai-service');
 const { getLogQueue } = require('./lib/log-event-queue');
 const log = getLogQueue();
+
+// Test-only injection hooks. Lets unit tests swap the AI service or settings
+// manager without wrestling with vi.mock / CJS require-cache (vitest's module
+// mocks don't reliably intercept require() calls made inside the SUT in this
+// repo). Production code never calls these.
+let _testSettingsOverride = null;
+function _setAiServiceForTesting(svc) {
+  if (svc && typeof svc.complete === 'function') {
+    ai = svc;
+  }
+}
+function _setSettingsManagerForTesting(svc) {
+  _testSettingsOverride = svc && typeof svc.get === 'function' ? svc : null;
+}
+function _resolveSettingsManager() {
+  if (_testSettingsOverride) return _testSettingsOverride;
+  const { getSettingsManager } = require('./settings-manager');
+  return getSettingsManager();
+}
 
 // Agent configuration
 const CONFIG = {
@@ -28,6 +47,25 @@ const CONFIG = {
   escalationThreshold: 3, // Escalate after N failed fix attempts
   diagnosisTimeout: 30000, // 30s timeout for LLM diagnosis
   fixRetryDelay: 5000, // 5s delay between fix retries
+
+  // ── AI Summary (cosmetic HUD chatter) ────────────────────────────────
+  // Generates a one-sentence "🤖 ..." status line in the chat HUD after
+  // each scan that did something. This is purely cosmetic -- it does NOT
+  // gate the scan, the auto-fix, or any other feature.
+  //
+  // History: was running every 30s with the 'standard' (Sonnet) profile,
+  // costing ~$1.50-2/day of pure idle drain. Now off by default; when on,
+  // hard-throttled to once per 24 hours AND deduped by activity hash, on
+  // the 'fast' (Haiku) profile. Worst case if a user opts in and never
+  // touches the throttle: 1 Haiku call/day, ~$0.0005/day, ~$0.18/year.
+  // Power users can lower the throttle via settings if they actually want
+  // a chatty HUD.
+  aiSummary: {
+    enabled: false, // OFF by default. Override via settings.appManagerAgent.aiSummary.enabled
+    profile: 'fast', // Haiku is plenty for a one-sentence status line
+    maxTokens: 80,
+    minIntervalMs: 24 * 60 * 60 * 1000, // No more than once per 24 hours
+  },
 
   // LLM Context Management
   llmModel: 'claude-opus-4-5-20251101', // Use most powerful model for diagnosis
@@ -97,6 +135,12 @@ class AppManagerAgent {
     this.startTime = null;
     this.consecutiveCleanScans = 0;
     this.currentScanIntervalMs = CONFIG.scanIntervalMs;
+
+    // AI Summary throttle/dedup state. _lastAISummaryAt is the epoch ms of
+    // the last LLM-summary call; _lastAISummaryHash is the activity-hash of
+    // that call. Both feed _generateActivitySummary's three-guard chain.
+    this._lastAISummaryAt = 0;
+    this._lastAISummaryHash = null;
 
     // Statistics
     this.stats = {
@@ -661,16 +705,30 @@ class AppManagerAgent {
   }
 
   /**
-   * Generate AI summary of recent activity
-   * Called after each scan cycle to provide human-readable status
+   * Generate AI summary of recent activity (cosmetic HUD chatter only).
+   *
+   * Three independent guards prevent this from burning tokens while idle:
+   *   1. Master enabled flag (default OFF)
+   *   2. Min-interval throttle (default 5 min)
+   *   3. Activity-hash dedup -- repeat states never re-call the LLM
+   *
+   * The user opts in via settings.appManagerAgent.aiSummary.enabled = true.
+   * When on, runs on the 'fast' (Haiku) profile -- ~10x cheaper than the
+   * old 'standard' (Sonnet) profile that was costing ~$1.50-2/day idle.
    */
   async _generateActivitySummary(scanResult) {
     try {
-      const { getSettingsManager } = require('./settings-manager');
-      const settingsManager = getSettingsManager();
+      const settingsManager = _resolveSettingsManager();
+
+      // ── Guard 1: master enabled flag (default OFF) ─────────────────
+      const enabled =
+        settingsManager.get('appManagerAgent.aiSummary.enabled') === true || CONFIG.aiSummary.enabled === true;
+      if (!enabled) {
+        return;
+      }
+
       // Prefer anthropicApiKey for Claude API calls
       const apiKey = settingsManager.get('anthropicApiKey') || settingsManager.get('llmApiKey');
-
       if (!apiKey) {
         log.info('agent', 'No API key for activity summary');
         return;
@@ -681,6 +739,28 @@ class AppManagerAgent {
 
       // Skip if nothing interesting to summarize
       if (!context.hasActivity) {
+        return;
+      }
+
+      // ── Guard 2: min-interval throttle ─────────────────────────────
+      // Use ?? (not ||) so explicit-zero from settings means "no throttle"
+      // rather than falling back to the default. Useful for tests + advanced
+      // users who want to bypass the throttle.
+      const settingThrottle = settingsManager.get('appManagerAgent.aiSummary.minIntervalMs');
+      const minIntervalMs =
+        settingThrottle === undefined || settingThrottle === null || settingThrottle === ''
+          ? CONFIG.aiSummary.minIntervalMs
+          : Number(settingThrottle);
+      const now = Date.now();
+      if (this._lastAISummaryAt && now - this._lastAISummaryAt < minIntervalMs) {
+        return;
+      }
+
+      // ── Guard 3: activity-hash dedup ───────────────────────────────
+      // If the appState + activity payload is byte-identical to the last
+      // call, the LLM would just repeat the same sentence. Skip.
+      const activityHash = this._hashString((context.appState || '') + '||' + (context.activity || ''));
+      if (this._lastAISummaryHash === activityHash) {
         return;
       }
 
@@ -702,14 +782,21 @@ Examples:
 
 Summary:`;
 
+      const profile = CONFIG.aiSummary.profile || 'fast';
+      const maxTokens = CONFIG.aiSummary.maxTokens || 80;
       const startTime = Date.now();
       const response = await ai.complete(prompt, {
-        profile: 'standard',
-        maxTokens: 150,
+        profile,
+        maxTokens,
         system: 'You are a concise status summarizer. Respond with only the summary, nothing else.',
         feature: 'app-manager-agent',
       });
       const elapsed = Date.now() - startTime;
+
+      // Mark fired regardless of response shape so a transient failure
+      // can't bypass the throttle on the next tick.
+      this._lastAISummaryAt = now;
+      this._lastAISummaryHash = activityHash;
 
       if (response) {
         const summary = response
@@ -717,7 +804,7 @@ Summary:`;
           .replace(/^["']|["']$/g, '')
           .substring(0, 100);
 
-        log.info('agent', 'AI Summary (...ms): ...', { elapsed, summary });
+        log.info('agent', 'AI Summary (...ms): ...', { elapsed, summary, profile });
 
         // Broadcast summary to HUD
         this._broadcastHUD({
@@ -734,14 +821,14 @@ Summary:`;
           aiGenerated: true,
         });
 
-        // Track cost
+        // Track cost (Haiku pricing -- the budget manager records actual)
         const inputTokens = Math.ceil(prompt.length / 4);
         const outputTokens = Math.ceil(response.length / 4);
-        const estimatedCost = (inputTokens * 0.003 + outputTokens * 0.015) / 1000; // Sonnet pricing
+        const estimatedCost = (inputTokens * 0.0008 + outputTokens * 0.004) / 1000; // Haiku pricing
 
         this._broadcastHUD({
           type: 'cost',
-          model: 'claude-sonnet-4-5-20250929',
+          model: 'claude-haiku-4-5',
           inputTokens,
           outputTokens,
           cost: estimatedCost,
@@ -751,6 +838,17 @@ Summary:`;
     } catch (error) {
       log.error('agent', 'Activity summary error', { error: error.message });
     }
+  }
+
+  // Tiny non-cryptographic string hash (djb2). Used to detect identical
+  // activity payloads without pulling in crypto / external deps.
+  _hashString(s) {
+    let h = 5381;
+    const str = String(s || '');
+    for (let i = 0; i < str.length; i++) {
+      h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    }
+    return h >>> 0;
   }
 
   /**
@@ -2670,4 +2768,6 @@ module.exports = {
   resetAppManagerAgent,
   FIX_STRATEGIES,
   CONFIG,
+  _setAiServiceForTesting,
+  _setSettingsManagerForTesting,
 };

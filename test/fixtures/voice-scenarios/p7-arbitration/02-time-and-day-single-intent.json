@@ -1,0 +1,31 @@
+{
+  "name": "What time / what day single-intent",
+  "description": "Two agents bidding on the same time-of-day interpretation. The pre-Phase-4 regex saw 'and' and let multi-winner through; the bid-overlap penalty notices the heavy reasoning overlap (both agents talk about 'current time') and shrinks calendar-agent's confidence. The dominance gap opens and the fast path picks time-agent.",
+  "task": {
+    "id": "fixture-time-and-day",
+    "content": "what time is it and what day is it"
+  },
+  "bids": [
+    {
+      "agentId": "time-agent",
+      "agentName": "Time Agent",
+      "confidence": 0.85,
+      "score": 0.85,
+      "reasoning": "I report the current time and current day from the system clock"
+    },
+    {
+      "agentId": "calendar-agent",
+      "agentName": "Calendar Agent",
+      "confidence": 0.7,
+      "score": 0.7,
+      "reasoning": "I report the current time and day plus calendar events scheduled around now"
+    }
+  ],
+  "expected": {
+    "winners": ["time-agent"],
+    "executionMode": "single",
+    "rationale": "Both bids carry identical-intent reasoning (current time/day); calendar-agent shrinks; dominance gap opens past 0.3; fast path picks time-agent.",
+    "preOverlapWouldRun": "LLM evaluator (gap 0.15 < 0.3)",
+    "postOverlapBehavior": "Fast path fires; LLM not consulted."
+  }
+}

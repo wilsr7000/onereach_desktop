@@ -344,6 +344,55 @@ class SettingsManager {
       // Diagnostic logging level: 'off', 'error', 'warn', 'info', 'debug'
       // Controls log queue min level, log server, and renderer console capture
       diagnosticLogging: 'info',
+      // App Manager Agent -- "AI Summary" cosmetic HUD chatter.
+      // Off by default to avoid idle LLM spend (~$1.50-2/day at the old 30s
+      // Sonnet cadence). When on, runs on the 'fast' (Haiku) profile,
+      // hard-throttled to once per 24 hours, and skipped when the underlying
+      // activity hash hasn't changed. Power users can lower the throttle
+      // (or set it to 0 to disable entirely) via Settings if they want
+      // a chattier HUD.
+      'appManagerAgent.aiSummary.enabled': false,
+      'appManagerAgent.aiSummary.minIntervalMs': 24 * 60 * 60 * 1000,
+
+      // ── Self-learning arbitration (Phase 1: bid-level instrumentation) ──
+      // Every settled task is recorded as an item in the
+      // `arbitration-decisions` Space along with the full bid roster +
+      // outcome signals (reflector score, user feedback, counterfactual
+      // judgment from Phase 2). Phases 4 and 5 read this Space offline
+      // to learn the constants of the overlap penalty and per-agent
+      // calibration.
+      //
+      // - enabled: master toggle. When false, the recorder no-ops and
+      //   downstream learning modules degrade gracefully (already
+      //   handled -- they treat empty windows as "not enough data yet").
+      // - retentionDays: pruning sweep horizon, enforced by the same
+      //   6-hour curator interval that grooms agent memory files.
+      //   Confirm against deployment compliance ceiling during rollout.
+      // - redactedRecording: regex-based PII strip on task content +
+      //   bid reasoning before persistence. Default is false in dev
+      //   so test data is readable; deployments in regulated
+      //   industries should flip this to true. Structural metadata
+      //   (bid count, confidences, agent IDs, outcome scores) is
+      //   always preserved -- the Phase 4 tuner only needs structural
+      //   data to function.
+      'arbitrationDecisions.enabled': true,
+      'arbitrationDecisions.retentionDays': 90,
+      'arbitrationDecisions.redactedRecording': false,
+
+      // ── Self-learning arbitration (Phase 4: bid overlap penalty) ──
+      // Three-state mode for the bid-overlap arbitration:
+      //   'off'    -- no adjustments applied (default, until shadow data)
+      //   'shadow' -- compute adjustments + log "would have changed",
+      //               but selection uses unmodified bids
+      //   'on'     -- adjustments are applied to the auction
+      // Env override: ARBITRATION_OVERLAP_MODE=shadow|on
+      // Tuned constants (threshold/maxPenalty) are written by the
+      // weekly overlap-tuner cron under arbitrationOverlap.tuned.
+      'arbitrationOverlap.mode': 'off',
+      'arbitrationOverlap.tuned': null,
+      // Adaptive auto-detection of window length is a documented
+      // follow-up; the manual knob below is the only setting today.
+      'arbitrationOverlap.tunerWindowDays': 30,
 
       // ── Neo4j / OmniGraph credentials ────────────────────────────────
       // The Neo4j Aura instance is the canonical source of truth for
@@ -357,12 +406,8 @@ class SettingsManager {
       neo4jDatabase: 'neo4j',
 
       // ── Sync v5 (parallel-mode scaffold) ──────────────────────────────
-      // The Phase 4 compactor runs once per day at 2-4am local time,
-      // walking all spaces and trimming :Snapshot + :OperationLog rows
-      // per the sliding-window retention policy (v5 4.3). Disable here
-      // if a tenant needs to keep raw native cadence indefinitely (e.g.
-      // a regulated tenant with bespoke retention requirements). On by
-      // default; the operator can flip it off without code changes.
+      // The Phase 4 compactor runs once per day at 2-4am local time.
+      // Disable here if a tenant needs to keep raw native cadence.
       'syncV5.compactorEnabled': true,
 
       // ── Sync v5 -- materialised SQLite replica (commit A scaffold) ────
@@ -392,7 +437,6 @@ class SettingsManager {
       'syncV5.replica.tenantId': 'default',
       'syncV5.replica.noShadowPaths': ['gsx-agent/*.md', 'gsx-agent/**/*.md'],
       'syncV5.replica.tombstoneRetentionDays': null,
-
       // Desktop Autopilot — off by default; users must opt in
       desktopAutopilotEnabled: false,
       desktopAutopilotBrowser: true,

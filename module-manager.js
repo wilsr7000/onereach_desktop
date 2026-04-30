@@ -281,6 +281,17 @@ class ModuleManager {
     // Store window reference
     this.moduleWindows.set(moduleId, window);
 
+    // Attribute AI calls from this module to its id for cost tracking.
+    try {
+      const callerIdentity = require('./lib/caller-identity');
+      callerIdentity.register(window.webContents, {
+        agentId: `module:${moduleId}`,
+        agentName: module.name ? `${module.name} (module)` : `module:${moduleId}`,
+      });
+    } catch (err) {
+      console.warn('[Module] caller-identity register failed:', err.message);
+    }
+
     // Clean up reference when window is closed
     window.on('closed', () => {
       this.moduleWindows.delete(moduleId);
@@ -479,6 +490,18 @@ class ModuleManager {
     console.log(`[WebTool] Created window for: ${tool.name} (${tool.id})`);
     console.log(`[WebTool] Window ID: ${window.id}`);
     console.log(`[WebTool] Setting up keyboard event handlers...`);
+
+    // Register this renderer's identity so cost tracking can attribute
+    // every ai:* IPC call back to the specific web tool.
+    try {
+      const callerIdentity = require('./lib/caller-identity');
+      callerIdentity.register(window.webContents, {
+        agentId: `webtool:${tool.id}`,
+        agentName: tool.name ? `${tool.name} (web tool)` : `webtool:${tool.id}`,
+      });
+    } catch (err) {
+      console.warn('[WebTool] caller-identity register failed:', err.message);
+    }
 
     // Test clipboard access
     const testClipboard = clipboard.readText();

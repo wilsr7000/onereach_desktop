@@ -1,0 +1,15 @@
+{
+  "name": "baseline-tts-capture",
+  "description": "TTS mock captures spoken text, voice, and event count when the system speaks.",
+  "phase": "baseline",
+  "flags": {},
+  "ttsWpm": 170,
+  "steps": [
+    { "type": "userSays", "text": "what time is it" },
+    { "type": "systemSpeaks", "text": "it is three in the afternoon", "voice": "coral" },
+    { "type": "systemPlaythrough" },
+    { "type": "assert", "ttsContains": "three in the afternoon" },
+    { "type": "assert", "ttsSpokenCount": 1 },
+    { "type": "assert", "ttsIsSpeaking": false }
+  ]
+}

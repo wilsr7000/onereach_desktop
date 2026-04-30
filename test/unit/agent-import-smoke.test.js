@@ -19,9 +19,7 @@ const AGENTS_DIR = path.join(__dirname, '../../packages/agents');
 
 const TIER1_AGENTS = [
   'calendar-query-agent',
-  'calendar-create-agent',
-  'calendar-edit-agent',
-  'calendar-delete-agent',
+  'calendar-mutate-agent',
   'weather-agent',
   'smalltalk-agent',
   'daily-brief-agent',

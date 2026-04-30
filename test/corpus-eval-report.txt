@@ -10,10 +10,10 @@
 
   FAILURES:
     [FAIL] Weather: no city triggers follow-up / "What's the weather?" -> Expected needsInput but agent returned a final response
-    [FAIL] Calendar: create with full details / "Schedule a meeting with Bob at 2pm tomorrow" -> Expected needsInput but agent returned a final response
-    [FAIL] Calendar: create with missing details / "Add a dentist appointment" -> Expected needsInput but agent returned a final response
-    [FAIL] Calendar: reschedule / "Move my 3pm meeting to 4pm" -> Expected needsInput but agent returned a final response
-    [FAIL] Calendar: cancel event / "Cancel my meeting tomorrow at noon" -> Expected needsInput but agent returned a final response
+    [FAIL] Calendar mutate: create with full details / "Schedule a meeting with Bob at 2pm tomorrow" -> Expected needsInput but agent returned a final response
+    [FAIL] Calendar mutate: create with missing details / "Add a dentist appointment" -> Expected needsInput but agent returned a final response
+    [FAIL] Calendar mutate: reschedule / "Move my 3pm meeting to 4pm" -> Expected needsInput but agent returned a final response
+    [FAIL] Calendar mutate: cancel event / "Cancel my meeting tomorrow at noon" -> Expected needsInput but agent returned a final response
     [FAIL] Email: compose flow / "Send an email to John about the meeting tomorrow" -> Expected needsInput but agent returned a final response
 
   PARTIAL:
@@ -23,8 +23,8 @@
     [PARTIAL] Calendar: schedule queries / "What meetings do I have today?" -> success: false but has message: "I had trouble checking your calendar: Both anthropic and fal"
     [PARTIAL] Calendar: schedule queries / "Am I free at 3pm?" -> success: false but has message: "I had trouble checking your calendar: Both anthropic and fal"
     [PARTIAL] Calendar: schedule queries / "Show my schedule for this week" -> success: false but has message: "I had trouble checking your calendar: Both anthropic and fal"
-    [PARTIAL] Calendar: create with full details / "One hour, in the conference room" -> success: false but has message: "I couldn't create the event: Both anthropic and fallback ope"
-    [PARTIAL] Calendar: create with missing details / "Next Monday at 10am" -> success: false but has message: "I couldn't create the event: anthropic circuit is open"
+    [PARTIAL] Calendar mutate: create with full details / "One hour, in the conference room" -> success: false but has message: "I couldn't update your calendar: Both anthropic and fallback"
+    [PARTIAL] Calendar mutate: create with missing details / "Next Monday at 10am" -> success: false but has message: "I couldn't update your calendar: anthropic circuit is open"
     [PARTIAL] Recorder: start recording / "Start recording the meeting" -> success: false but has message: "Sorry, I could not open the recorder right now. Please try a"
     [PARTIAL] Docs: product questions / "How do I configure the AI service?" -> success: false but has message: "I had trouble searching the documentation. Please try again."
     [PARTIAL] Docs: product questions / "What are the keyboard shortcuts?" -> success: false but has message: "I had trouble searching the documentation. Please try again."
@@ -32,7 +32,7 @@
     [PARTIAL] Memory: store and recall preferences / "My favorite programming language is Rust" -> success: false but has message: "Sorry, I had trouble managing your memory. Please try again."
     [PARTIAL] Memory: store and recall preferences / "What do you know about me?" -> success: false but has message: "Sorry, I had trouble managing your memory. Please try again."
     [PARTIAL] Playbook: execute a playbook / "Run the onboarding playbook" -> success: false but has message: "Playbook execution failed: spaces.find is not a function"
-    [PARTIAL] Browser: web navigation / "Go to google.com and search for weather" -> success: false but has message: "Could not start the browser: browserType.launchPersistentCon"
+    [PARTIAL] Browser: web navigation / "Go to google.com and search for weather" -> success: false but has message: "Could not read the page: Cannot read properties of undefined"
     [PARTIAL] Spaces: content management / "What spaces do I have?" -> success: false but has message: "Spaces is not available right now."
     [PARTIAL] Spaces: content management / "Create a new space called project notes" -> success: false but has message: "Spaces is not available right now."
     [PARTIAL] Orchestrator: composite request / "Check the weather and my calendar for today" -> success: false but has message: "I'm not sure how to help with that."
@@ -41,19 +41,19 @@
   PER-CONVERSATION RESULTS
 ----------------------------------------------------------------------
   [PASS] Time: basic queries (time-agent)
-    + "What time is it?" -> "It's 8:52 PM"
-    + "And what day is it today?" -> "It's Thursday, April 16, 2026"
-    + "What is the date?" -> "It's Thursday, April 16, 2026"
+    + "What time is it?" -> "It's 5:12 PM"
+    + "And what day is it today?" -> "It's Wednesday, April 29, 2026"
+    + "What is the date?" -> "It's Wednesday, April 29, 2026"
   [PASS] Time: timezone awareness (time-agent)
     + "What time is it in Tokyo?" -> "Which timezone would you like? Your saved timezones are"
-    + "And in London?" -> "It's 8:52 PM"
+    + "And in London?" -> "It's 5:12 PM"
   [PASS] Weather: city provided (weather-agent)
-    + "What is the weather in Denver?" -> "It's 69°F and partly cloudy in Denver"
+    + "What is the weather in Denver?" -> "It's 53°F and partly cloudy in Denver"
   [FAIL] Weather: no city triggers follow-up (weather-agent)
-    - "What's the weather?" -> "It's 67°F and clear in Berkeley"
-    + "San Francisco" -> "It's 67°F and clear in Berkeley"
+    - "What's the weather?" -> "It's 66°F and sunny in San Francisco"
+    + "San Francisco" -> "It's 66°F and sunny in San Francisco"
   [PASS] Weather: forecast request (weather-agent)
-    + "Will it rain tomorrow in Seattle?" -> "It's 67°F and clear in Berkeley"
+    + "Will it rain tomorrow in Seattle?" -> "It's 66°F and sunny in San Francisco"
   [PARTIAL] Spelling: common words (spelling-agent)
     ~ "How do you spell necessary?" -> "NECESSARY: N - E - C - E - S - S - A - R - Y"
     ~ "And accommodation?" -> "ACCOMMODATION: A - C - C - O - M - M - O - D - A - T - "
@@ -62,10 +62,10 @@
     + "Is recieve spelled correctly?" -> ""recieve" is misspelled. The correct spelling is "recei"
     + "How about definately?" -> "Note: "definately" is commonly misspelled. The correct "
   [PASS] Smalltalk: greeting flow (smalltalk-agent)
-    + "Hello there" -> "What can I do for you?"
+    + "Hello there" -> "I'm here to help! Just let me know what you need."
     + "How are you doing?" -> "I'm doing well, Robb! How can I help you?"
-    + "Thanks for your help" -> "Anytime!"
-    + "Goodbye" -> "Goodbye, Robb! Have a great evening!"
+    + "Thanks for your help" -> "You're welcome!"
+    + "Goodbye" -> "Take care, Robb!"
   [PASS] Smalltalk: casual greetings (smalltalk-agent)
     + "Hey" -> "Hey Robb! How can I help you?"
     + "Good morning" -> "Good morning, Robb! How can I help you today?"
@@ -80,19 +80,19 @@
     ~ "What meetings do I have today?" -> "I had trouble checking your calendar: Both anthropic an"
     ~ "Am I free at 3pm?" -> "I had trouble checking your calendar: Both anthropic an"
     ~ "Show my schedule for this week" -> "I had trouble checking your calendar: Both anthropic an"
-  [FAIL] Calendar: create with full details (calendar-create-agent)
-    - "Schedule a meeting with Bob at 2pm tomorrow" -> "I couldn't create the event: Both anthropic and fallbac"
-    ~ "One hour, in the conference room" -> "I couldn't create the event: Both anthropic and fallbac"
-  [FAIL] Calendar: create with missing details (calendar-create-agent)
-    - "Add a dentist appointment" -> "I couldn't create the event: anthropic circuit is open"
-    ~ "Next Monday at 10am" -> "I couldn't create the event: anthropic circuit is open"
-  [FAIL] Calendar: reschedule (calendar-edit-agent)
-    - "Move my 3pm meeting to 4pm" -> "I couldn't update the event: anthropic circuit is open"
-  [FAIL] Calendar: cancel event (calendar-delete-agent)
-    - "Cancel my meeting tomorrow at noon" -> "I couldn't delete the event: anthropic circuit is open"
+  [FAIL] Calendar mutate: create with full details (calendar-mutate-agent)
+    - "Schedule a meeting with Bob at 2pm tomorrow" -> "I couldn't update your calendar: Both anthropic and fal"
+    ~ "One hour, in the conference room" -> "I couldn't update your calendar: Both anthropic and fal"
+  [FAIL] Calendar mutate: create with missing details (calendar-mutate-agent)
+    - "Add a dentist appointment" -> "I couldn't update your calendar: anthropic circuit is o"
+    ~ "Next Monday at 10am" -> "I couldn't update your calendar: anthropic circuit is o"
+  [FAIL] Calendar mutate: reschedule (calendar-mutate-agent)
+    - "Move my 3pm meeting to 4pm" -> "I couldn't update your calendar: anthropic circuit is o"
+  [FAIL] Calendar mutate: cancel event (calendar-mutate-agent)
+    - "Cancel my meeting tomorrow at noon" -> "I couldn't update your calendar: anthropic circuit is o"
   [PASS] Search: document queries (search-agent)
-    + "Search for quarterly revenue reports" -> "I couldn't complete the search right now. Please try ag"
-    + "Find documents about project alpha" -> "I couldn't complete the search right now. Please try ag"
+    + "Search for quarterly revenue reports" -> "Here's what I found: Earnings Calendar. Access detailed"
+    + "Find documents about project alpha" -> "Here's what I found: The Project Alpha Papers. Welcome "
   [FAIL] Email: compose flow (email-agent)
     - "Send an email to John about the meeting tomorrow" -> "No email account connected. Go to Settings > Email Acco"
   [PASS] DJ: music requests (dj-agent)
@@ -113,7 +113,7 @@
     ~ "How do I configure the AI service?" -> "I had trouble searching the documentation. Please try a"
     ~ "What are the keyboard shortcuts?" -> "I had trouble searching the documentation. Please try a"
   [PASS] Daily brief: morning briefing (daily-brief-agent)
-    + "Give me my morning briefing" -> "Good evening, Robb. Current time: 8:53 PM. Date: Thursd"
+    + "Give me my morning briefing" -> "Good evening, Robb. Current time: 5:13 PM. Date: Wednes"
   [PARTIAL] Memory: store and recall preferences (memory-agent)
     ~ "Remember that I prefer dark mode" -> "Sorry, I had trouble managing your memory. Please try a"
     ~ "My favorite programming language is Rust" -> "Sorry, I had trouble managing your memory. Please try a"
@@ -121,7 +121,7 @@
   [PARTIAL] Playbook: execute a playbook (playbook-agent)
     ~ "Run the onboarding playbook" -> "Playbook execution failed: spaces.find is not a functio"
   [PARTIAL] Browser: web navigation (browser-agent)
-    ~ "Go to google.com and search for weather" -> "Could not start the browser: browserType.launchPersiste"
+    ~ "Go to google.com and search for weather" -> "Could not read the page: Cannot read properties of unde"
   [PASS] App: navigation commands (app-agent)
     + "Open settings" -> "Opening Settings for you."
     + "Open the video editor" -> "Opening Video Editor for you."
@@ -133,7 +133,7 @@
   [PARTIAL] Orchestrator: composite request (orchestrator-agent)
     ~ "Check the weather and my calendar for today" -> "I'm not sure how to help with that."
   [PASS] Edge: garbled input (smalltalk-agent)
-    + "asdfghjkl" -> "Come again?"
+    + "asdfghjkl" -> "Hmm?"
   [PASS] Edge: single word (help-agent)
     + "help" -> "What would you like help with? I can tell you about sch"
   [PASS] Edge: very long input (help-agent)

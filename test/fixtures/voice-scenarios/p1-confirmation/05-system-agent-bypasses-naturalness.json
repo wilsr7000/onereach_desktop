@@ -1,0 +1,21 @@
+{
+  "name": "p1-system-agent-bypasses-naturalness",
+  "description": "Error-agent and meeting-monitor run as system executionType and never ack/confirm.",
+  "phase": "p1-confirmation",
+  "flags": {},
+  "steps": [
+    {
+      "type": "hook",
+      "name": "pipelineSim",
+      "args": {
+        "intent": "handle task failure",
+        "executionType": "system",
+        "intentConfidence": 0.3,
+        "winnerConfidence": 0.3,
+        "agent": { "id": "error-agent" }
+      }
+    },
+    { "type": "assert", "metaEquals": { "decision": "dispatch" } },
+    { "type": "assert", "ttsSpokenCount": 0 }
+  ]
+}

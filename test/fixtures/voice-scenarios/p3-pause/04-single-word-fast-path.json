@@ -1,0 +1,12 @@
+{
+  "name": "p3-single-word-fast-path",
+  "description": "A single fast-path word (cancel) commits quickly with no LLM consultation.",
+  "phase": "p3-pause",
+  "flags": {},
+  "steps": [
+    { "type": "hook", "name": "voicePartial", "args": { "text": "cancel" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 400 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "committed": true, "commitText": "cancel", "commitClassification": "complete" } }
+  ]
+}

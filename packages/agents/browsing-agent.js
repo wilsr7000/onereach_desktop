@@ -192,6 +192,10 @@ module.exports = BaseAgent.create({
   ],
   executionType: 'action',
   estimatedExecutionMs: 10000,
+  // Fast-path HTTP usually returns in < 10s; full browser fallback adds up to
+  // ~30s. 45s gives the slow path room without burning through the exchange's
+  // default 30s bid-execution budget.
+  executionTimeoutMs: 45000,
 
   prompt: `Browsing Agent performs web research and content extraction by visiting websites.
 

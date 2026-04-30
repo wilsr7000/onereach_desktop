@@ -259,13 +259,50 @@ This agent searches the internet. It provides information but does not control a
         return this.answerUserInfoQuery(query, allContext, profile);
       }
 
-      // Enhance weather queries with location from context
-      if (this.isWeatherQuery(query) && !this.hasLocation(query) && relevantContext.location?.city) {
-        const locationStr = relevantContext.location.state
-          ? `${relevantContext.location.city}, ${relevantContext.location.state}`
-          : relevantContext.location.city;
+      // Enhance location-sensitive queries with the user's live location.
+      // Previously this only applied to weather; now any "nearby/near me/
+      // around here/local" query that doesn't already name a place gets
+      // the user's current city appended. This is exactly the class of
+      // question ("where's good coffee around here?") that used to return
+      // empty results because the agent didn't know where the user was.
+      const locCtx = relevantContext.location;
+      const needsLocation =
+        !this.hasLocation(query) &&
+        (this.isWeatherQuery(query) || this._isImplicitlyLocal(query));
+
+      if (needsLocation && locCtx?.city) {
+        const locationStr = locCtx.region || locCtx.state
+          ? `${locCtx.city}, ${locCtx.region || locCtx.state}`
+          : locCtx.city;
         query = `${query} in ${locationStr}`;
-        log.info('agent', `Enhanced query with location: "${query}"`);
+        log.info('agent', `Enhanced query with live location: "${query}"`, {
+          source: locCtx._locationSource,
+          ageMs: locCtx._locationAgeMs,
+        });
+      } else if (needsLocation && !locCtx?.city) {
+        // Implicitly-local query, but we have no location at all. Instead
+        // of returning "I don't know" after an empty search -- the old
+        // behavior that caused the coffee-shop-in-Berkeley incident -- ask
+        // the user where they are. The orb will hear the question, open
+        // the mic via the awaitingInput state, and the Search Agent will
+        // re-run with the city supplied.
+        //
+        // IMPORTANT: `message` and `needsInput.prompt` must be identical.
+        // Different strings cause the text-chat panel (reads `message`)
+        // and the TTS (speaks `needsInput.prompt`) to diverge -- user
+        // reads one thing and hears another.
+        log.info('agent', 'Implicit-local query without location; asking user');
+        const askCityPrompt = 'What city are you in? I can find results near you once I know.';
+        return {
+          success: true,
+          message: askCityPrompt,
+          needsInput: {
+            agentId: this.id,
+            prompt: askCityPrompt,
+            field: 'city',
+            context: { originalQuery: task.content || query, savedQuery: query },
+          },
+        };
       }
 
       // Step 1: Try web search first
@@ -278,9 +315,42 @@ This agent searches the internet. It provides information but does not control a
         log.info('agent', `Web search failed: ${e.message}`);
       }
 
+      // If the search returned nothing AND this is a local query that was
+      // already enhanced with a city, there's a deeper problem (bad city,
+      // search API down). Ask the user to clarify rather than synthesizing
+      // a fake answer from nothing.
+      if (
+        searchResults.length === 0 &&
+        (this._isImplicitlyLocal(task.content) || this.isWeatherQuery(task.content))
+      ) {
+        // Same invariant: keep `message` and `needsInput.prompt` identical
+        // so the text panel and the spoken prompt match verbatim.
+        log.info('agent', 'Local query returned empty search; asking user to rephrase');
+        const narrowPrompt = "I couldn't find anything specific for that. Could you name a city or area?";
+        return {
+          success: true,
+          message: narrowPrompt,
+          needsInput: {
+            agentId: this.id,
+            prompt: narrowPrompt,
+            field: 'query',
+            context: { originalQuery: task.content || query },
+          },
+        };
+      }
+
       // Step 2: Synthesize answer (with or without search results)
       onProgress(searchResults.length > 0 ? 'Analyzing results...' : 'Generating answer...');
       const answer = await this.synthesizeAnswer(query, searchResults);
+
+      // Step 3: Lightweight in-band grounding check. Previously the
+      // synthesis prompt allowed "general knowledge" answers when search
+      // returned nothing or when the model ignored the snippets, which
+      // opened a direct path to hallucination. Here we verify that the
+      // synthesised answer overlaps meaningfully with the retrieved
+      // content. If it doesn't, we flag the answer as possibly-ungrounded
+      // so downstream (reflector + UI) can show appropriate uncertainty.
+      const groundingHint = this._checkGrounding(answer, searchResults);
 
       return {
         success: true,
@@ -289,6 +359,16 @@ This agent searches the internet. It provides information but does not control a
           .slice(0, 3)
           .map((r) => r.url)
           .filter((u) => u),
+        // Data block is passed to the reflector so it can judge
+        // groundedness against the actual evidence.
+        data: {
+          searchResults: searchResults.slice(0, 7).map((r) => ({
+            title: r.title,
+            snippet: r.snippet,
+            url: r.url || r.link,
+          })),
+          groundingHint,
+        },
       };
     } catch (error) {
       log.error('agent', 'Error', { error: error.message });
@@ -456,6 +536,107 @@ This agent searches the internet. It provides information but does not control a
       /,\s*[A-Z]{2}\b/, // State abbreviation ", CO"
     ];
     return locationPatterns.some((p) => p.test(query));
+  },
+
+  /**
+   * Cheap heuristic grounding check. Compares the synthesised answer's
+   * content-word set against the union of search-result title+snippet
+   * content words. Returns one of:
+   *   'grounded'    -- enough overlap to trust the answer is result-backed
+   *   'weak'        -- some overlap; treat with caution
+   *   'ungrounded'  -- very little overlap; the answer may be fabricated
+   *   'no-evidence' -- search returned nothing; answer comes from model prior
+   *
+   * Not a hard gate -- the reflector runs a proper LLM judge after the
+   * user has already heard the answer. This hint is surfaced in the
+   * result's `data` block and logs so downstream consumers can react
+   * (e.g. the reflector can weight grounded-score lower).
+   */
+  _checkGrounding(answer, searchResults) {
+    if (!answer) return 'no-evidence';
+    if (!Array.isArray(searchResults) || searchResults.length === 0) {
+      return 'no-evidence';
+    }
+    const STOPWORDS = new Set([
+      'the','a','an','is','are','was','were','be','been','being','to','of','in',
+      'on','at','by','for','with','and','or','but','if','then','so','that','this',
+      'it','its','as','from','you','your','i','my','me','we','our','they','their',
+      'here','there','what','which','who','how','why','when','where','can','will',
+      'would','should','could','may','might','do','does','did','have','has','had',
+      'not','no','yes','also','just','very','more','most','some','any','all','one',
+      'two','three','also',
+    ]);
+    const tokens = (text) =>
+      String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+
+    const answerTokens = new Set(tokens(answer));
+    if (answerTokens.size === 0) return 'weak';
+
+    const evidenceTokens = new Set();
+    for (const r of searchResults) {
+      tokens(`${r.title || ''} ${r.snippet || ''}`).forEach((w) => evidenceTokens.add(w));
+    }
+    if (evidenceTokens.size === 0) return 'no-evidence';
+
+    let overlap = 0;
+    for (const w of answerTokens) if (evidenceTokens.has(w)) overlap += 1;
+    const ratio = overlap / answerTokens.size;
+    // Thresholds chosen so short factual answers ("14 degrees") aren't
+    // unfairly penalised -- they have few tokens but should mostly overlap.
+    if (ratio >= 0.45) return 'grounded';
+    if (ratio >= 0.2) return 'weak';
+    return 'ungrounded';
+  },
+
+  /**
+   * Detect queries that implicitly refer to "here" -- the user's current
+   * location -- without naming a place. These benefit from being rewritten
+   * with the live city so search returns results relevant to where the
+   * user actually is, not to the agent's training data or a stale default.
+   *
+   * Examples that match:
+   *   "coffee shops nearby"
+   *   "find a good place for lunch around here"
+   *   "closest pharmacy"
+   *   "restaurants near me"
+   *   "gyms in this area"
+   *
+   * Examples that do NOT match (already have a place, or aren't local):
+   *   "coffee shops in Paris"
+   *   "capital of France"
+   *   "latest iPhone news"
+   */
+  _isImplicitlyLocal(query) {
+    const lower = String(query || '').toLowerCase();
+    const implicitPhrases = [
+      'near me',
+      'nearby',
+      'near here',
+      'around here',
+      'around me',
+      'in this area',
+      'close by',
+      'closest',
+      'nearest',
+      'local',
+      'walk to',
+      'walking distance',
+      'drive to',
+      'get to',
+    ];
+    if (implicitPhrases.some((p) => lower.includes(p))) return true;
+
+    // "find/where/what/best ... <place-noun>" with no explicit city.
+    const localNouns =
+      /\b(restaurant|cafe|coffee|espresso|bar|pub|brewery|store|shop|grocery|market|pharmacy|drugstore|hospital|urgent care|clinic|dentist|doctor|gas station|hotel|motel|airbnb|park|playground|gym|yoga|pilates|laundry|dry cleaner|atm|bank|barber|salon|movie theater|cinema|bookstore)\b/;
+    const localIntent = /\b(find|where|which|best|good|cheap|nearest|closest|top)\b/;
+    if (localNouns.test(lower) && localIntent.test(lower)) return true;
+
+    return false;
   },
 
   /**

@@ -42,8 +42,12 @@ class SpeechQueue extends EventEmitter {
     // Is speech currently in progress?
     this.isSpeaking = false;
 
-    // Timeout for speech completion (prevent hanging)
-    this.speechTimeout = options.speechTimeout || 30000; // 30 seconds max
+    // Timeout for speech completion (prevent hanging).
+    // 180s: long-form daily briefs can produce 45-90s of audio; the
+    // prior 30s cap forced completion mid-playback, which resolved
+    // the item's promise early and prematurely released downstream
+    // locks. Callers can still override via options.speechTimeout.
+    this.speechTimeout = options.speechTimeout || 180000;
 
     // Current timeout handle
     this.timeoutHandle = null;

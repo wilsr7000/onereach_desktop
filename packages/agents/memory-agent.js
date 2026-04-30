@@ -43,6 +43,54 @@ let _deps = {
   aiJson: (prompt, opts) => ai.json(prompt, opts),
 };
 
+// Identity facts the memory-agent must never mutate casually. The only
+// way these fields change is if the user *explicitly* asserts them in
+// first person (checked by _userAssertedValue). See `IDENTITY GUARD`
+// note in the observer apply-changes loop.
+const PROTECTED_IDENTITY_KEYS = new Set([
+  'name', 'home city', 'home location', 'home', 'work city', 'work location',
+  'work', 'home address', 'work address', 'age', 'birthday', 'pronouns',
+  'phone', 'phone number', 'email', 'email address',
+]);
+
+function _isProtectedIdentityKey(key) {
+  if (!key) return false;
+  return PROTECTED_IDENTITY_KEYS.has(String(key).toLowerCase().trim());
+}
+
+/**
+ * Does the user's message contain an explicit first-person assertion
+ * of the given key=value? Returns true only when the message clearly
+ * states the user is asserting this as a fact about themselves. A
+ * sentence like "coffee shops in Vegas" is NOT an assertion that the
+ * user lives in Vegas; "I live in Vegas" IS.
+ *
+ * Keeps the check deterministic -- no LLM call, no ambiguity. When in
+ * doubt, returns false and the mutation is blocked.
+ */
+function _userAssertedValue(userMessage, key, value) {
+  if (!userMessage || !value) return false;
+  const msg = String(userMessage).toLowerCase();
+  const val = String(value).toLowerCase().trim();
+  if (!val) return false;
+  // Must at least mention the value somewhere in the user's message.
+  if (!msg.includes(val)) return false;
+  // First-person assertion patterns. Intentionally narrow: we would
+  // rather miss a real assertion than accept a false positive.
+  const assertionPatterns = [
+    /\b(i'm|i\s+am)\s+[^.?!]*/,
+    /\bi\s+live\s+(in|at)\s+/,
+    // "I moved to X", "I just moved there", "I moved here" -- relocation signals
+    /\bi\s+(just\s+|recently\s+)?moved\b/,
+    /\b(i'm|i\s+am|i\s+was)\s+(living|staying|based)\s+(in|at|out of)\s+/,
+    /\bmy\s+(name|home|city|work|address|phone|email|birthday|age|pronouns)\s+(is|are)\s+/,
+    /\bcall\s+me\s+/,
+    /\bi\s+work\s+(at|for|in|out of|from)\s+/,
+    /\bi\s+was\s+born\s+(in|on)\s+/,
+  ];
+  return assertionPatterns.some((p) => p.test(msg));
+}
+
 const memoryAgent = {
   id: 'memory-agent',
   name: 'Memory Manager',
@@ -650,17 +698,19 @@ Agent responded: "${agentResponse.slice(0, 500)}"
 ═══════════════════════════════════════
 
 Analyze this conversation. Is there anything worth remembering? Consider:
-- Did the user reveal personal info? (name, location, preferences, schedule patterns)
-- Did the user express a preference that an agent should remember? (brief style, music genre, weather location, time format)
-- Did the user correct something? (wrong name, wrong city, wrong assumption)
+- Did the user express a preference that an agent should remember? (brief style, music genre, time format, units)
+- Did the user correct something the agent got wrong? (wrong name, wrong preference)
 - Is there a pattern emerging? (always asks for weather in morning, prefers short answers)
 - Did the agent learn something that OTHER agents should also know?
 
-IMPORTANT:
-- Only extract facts that are CLEARLY stated or STRONGLY implied. Do NOT guess.
+IMPORTANT - be EXTREMELY conservative:
+- Only extract facts the user EXPLICITLY stated in FIRST PERSON. Phrases like "I live in X", "my home is X", "I prefer X", "call me X", "I'm a Y". First-person explicit assertions only.
+- NEVER infer identity facts from topics the user asked ABOUT. If the user asks "what's the weather in Miami" that is NOT evidence they live in Miami -- they are asking a question. Same for "coffee shops in Vegas", "flights to Tokyo", etc.
+- NEVER change an IDENTITY fact (Name, Home City, Home Location, Work Location, Age, anything under "## Identity" or "## Locations") unless the user used an explicit first-person assertion like "I moved to X" or "I live in X". Casual mentions of place names in questions DO NOT count.
+- If the conversation involves testing, debugging, or discussing hypothetical examples (like "imagine a user in Berkeley..."), extract NOTHING. These are not real user assertions about themselves.
 - Do NOT repeat facts already in the user profile or agent memories above.
-- If the conversation is routine (weather check, time check, simple Q&A with no personal info), return shouldUpdate: false.
-- Be conservative. It's better to miss a fact than to store wrong information.
+- If the conversation is routine (weather check, time check, simple Q&A, task execution), return shouldUpdate: false.
+- Rule of thumb: if you're not 95% sure the user is asserting this as a fact about themselves, DO NOT extract it.
 
 Return JSON:
 {
@@ -714,11 +764,32 @@ If nothing new to learn, return: { "shouldUpdate": false, "reasoning": "...", "p
               const oldValue = currentFacts[key] || '(not set)';
               // Skip if identical to existing
               if (currentFacts[key] === value) continue;
+
+              // Identity guard: never change high-stakes identity facts
+              // unless the user explicitly asserted them in first person.
+              // The LLM prompt already warns about this, but we enforce
+              // it at the code level too so a prompt regression can't
+              // corrupt the user's profile. "Home City: Las Vegas" can
+              // only be set if the user said "I live in Las Vegas" or
+              // similar -- not from a side-mention in a query.
+              if (_isProtectedIdentityKey(key)) {
+                const asserted = _userAssertedValue(userMessage, key, String(value));
+                if (!asserted) {
+                  log.warn('agent', `[MemoryAgent:Observer] Blocked identity mutation`, {
+                    key, oldValue, newValue: value,
+                    reason: 'No explicit first-person assertion in user message',
+                    userMessage: String(userMessage).slice(0, 120),
+                  });
+                  allChanges.push(`[profile] BLOCKED update to protected key "${key}" -- user did not explicitly assert in first person`);
+                  continue;
+                }
+              }
+
               profile.updateFact(key, String(value));
               allChanges.push(`[profile] ${key}: "${oldValue}" -> "${value}"`);
             }
           }
-          if (allChanges.length > 0) {
+          if (allChanges.some((c) => c.startsWith('[profile] ') && !c.includes('BLOCKED'))) {
             await profile.save();
           }
         }

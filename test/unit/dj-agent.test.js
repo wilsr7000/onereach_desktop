@@ -403,4 +403,130 @@ describe('DJ Agent', () => {
       expect(djAgent.getPromotionCandidates()).toEqual([]);
     });
   });
+
+  describe('_gatherEventContext', () => {
+    beforeEach(() => {
+      djAgent.memory = null;
+    });
+
+    it('always returns a dayOfWeek label even with no other signals', async () => {
+      const ctx = await djAgent._gatherEventContext({
+        getTemporalContext: () => null,
+        getCalendarStore: () => null,
+      });
+      expect(['sun','mon','tue','wed','thu','fri','sat']).toContain(ctx.dayOfWeek);
+      expect(ctx.temporalSummary).toBeNull();
+      expect(ctx.calendarPressure).toBeNull();
+    });
+
+    it('returns temporalSummary when the injected temporal-context has data', async () => {
+      const ctx = await djAgent._gatherEventContext({
+        getTemporalContext: () => ({
+          getPromptSummary: () => 'Time of day: afternoon, tue\nAt this hour you usually ask about: calendar (5 past times)',
+        }),
+        getCalendarStore: () => null,
+      });
+      expect(ctx.temporalSummary).toContain('afternoon');
+      expect(ctx.temporalSummary).toContain('calendar');
+    });
+
+    it('surfaces Learned Preferences and User Notes when memory has them', async () => {
+      djAgent.memory = {
+        getSection: (name) => {
+          if (name === 'Learned Preferences') return '- Prefers low-BPM in the evening';
+          if (name === 'User Notes') return 'No rap after 9pm.';
+          return '';
+        },
+      };
+      const ctx = await djAgent._gatherEventContext({
+        getTemporalContext: () => null,
+        getCalendarStore: () => null,
+      });
+      expect(ctx.learnedPreferences).toContain('low-BPM');
+      expect(ctx.userNotes).toContain('No rap after 9pm');
+    });
+
+    it('filters out placeholder template sections', async () => {
+      djAgent.memory = {
+        getSection: (name) => {
+          if (name === 'Learned Preferences') return '*No preferences learned yet.*';
+          if (name === 'User Notes') return 'Add any custom preferences or notes here. The agent will respect these.';
+          return '';
+        },
+      };
+      const ctx = await djAgent._gatherEventContext({
+        getTemporalContext: () => null,
+        getCalendarStore: () => null,
+      });
+      expect(ctx.learnedPreferences).toBeNull();
+      expect(ctx.userNotes).toBeNull();
+    });
+
+    it('builds calendarPressure from brief fields', async () => {
+      const ctx = await djAgent._gatherEventContext({
+        getTemporalContext: () => null,
+        getCalendarStore: () => ({
+          generateMorningBrief: async () => ({
+            currentMeeting: { summary: 'Design Sync', minutesRemaining: 15 },
+            nextMeeting: { summary: '1:1 with Alex', minutesUntil: 45 },
+            freeTime: { busyPercent: 72, remainingFreeHours: 1.4 },
+            summary: { totalEvents: 6, inProgressCount: 1, upcomingCount: 4 },
+          }),
+        }),
+      });
+      expect(ctx.calendarPressure).toContain('Design Sync');
+      expect(ctx.calendarPressure).toContain('1:1 with Alex');
+      expect(ctx.calendarPressure).toMatch(/72% booked/);
+      expect(ctx.calendarPressure).toMatch(/1\.4 free hours/);
+      expect(ctx.calendarPressure).toMatch(/6 events today/);
+    });
+
+    it('calendarPressure is null when brief has no events', async () => {
+      const ctx = await djAgent._gatherEventContext({
+        getTemporalContext: () => null,
+        getCalendarStore: () => ({
+          generateMorningBrief: async () => ({}),
+        }),
+      });
+      expect(ctx.calendarPressure).toBeNull();
+    });
+
+    it('gracefully returns null fields when sources throw', async () => {
+      const ctx = await djAgent._gatherEventContext({
+        getTemporalContext: () => { throw new Error('temporal down'); },
+        getCalendarStore: () => ({
+          generateMorningBrief: () => { throw new Error('store down'); },
+        }),
+      });
+      expect(ctx.temporalSummary).toBeNull();
+      expect(ctx.calendarPressure).toBeNull();
+      // Still returns the stable fields
+      expect(['sun','mon','tue','wed','thu','fri','sat']).toContain(ctx.dayOfWeek);
+    });
+
+    it('returns all signals when everything is available', async () => {
+      djAgent.memory = {
+        getSection: (name) => {
+          if (name === 'Learned Preferences') return '- No rap at bedtime';
+          if (name === 'User Notes') return 'Quiet mornings preferred';
+          return '';
+        },
+      };
+      const ctx = await djAgent._gatherEventContext({
+        getTemporalContext: () => ({
+          getPromptSummary: () => 'Time of day: morning, mon\nYesterday\'s top topics: email, tasks',
+        }),
+        getCalendarStore: () => ({
+          generateMorningBrief: async () => ({
+            summary: { totalEvents: 3, inProgressCount: 0, upcomingCount: 3 },
+            freeTime: { busyPercent: 40, remainingFreeHours: 4.8 },
+          }),
+        }),
+      });
+      expect(ctx.temporalSummary).toContain('morning');
+      expect(ctx.calendarPressure).toContain('40% booked');
+      expect(ctx.learnedPreferences).toContain('No rap');
+      expect(ctx.userNotes).toContain('Quiet mornings');
+    });
+  });
 });

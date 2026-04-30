@@ -42,6 +42,13 @@ class VoiceSpeaker {
       priority: options.priority ?? PRIORITY.NORMAL,
       metadata: {
         voice: options.voice || 'alloy',
+        // Proactive speech (from the agent message queue, e.g. the critical
+        // meeting alarm agent) carries an agentId and the `proactive` flag
+        // so the orb's idle-audio guard lets it through. Task-driven speech
+        // leaves these undefined and behaves exactly as before.
+        agentId: options.agentId,
+        proactive: !!options.proactive,
+        skipAffectMatching: options.skipAffectMatching,
       },
     });
   }
@@ -88,6 +95,39 @@ class VoiceSpeaker {
     // speech from other flows (NormalizeIntent clarification) would be routed
     // back to an orb that had explicitly ended its session.
 
+    // Phase 6: affect-match the outgoing text. The tracker holds the
+    // user's last detected non-neutral affect (if any, TTL-bounded).
+    // The modifier is a no-op when the tracker is empty or the affect
+    // doesn't warrant a change. Callers can opt out by setting
+    // `metadata.skipAffectMatching = true` (e.g., for fixed safety
+    // prompts that must be spoken verbatim).
+    //
+    // Imports through the public naturalness barrel so this file
+    // stays on the stable surface instead of reaching into
+    // per-phase internals.
+    try {
+      const {
+        flags,
+        affectTracker,
+        responseModifier,
+      } = require('./lib/naturalness');
+      if (flags.isFlagEnabled('affectMatching') && !metadata?.skipAffectMatching) {
+        const affect = affectTracker.getSharedAffectTracker().get();
+        if (affect) {
+          const adjusted = responseModifier.adjustResponse({ text, affect });
+          if (adjusted.modified) {
+            log.info('voice', '[Affect] adjusted response', {
+              label: affect.label,
+              transforms: adjusted.transforms,
+              before: text.slice(0, 60),
+              after: adjusted.text.slice(0, 60),
+            });
+            text = adjusted.text;
+          }
+        }
+      }
+    } catch (_err) { /* affect layer must never block TTS */ }
+
     // Clear any currently playing audio
     if (this.isSpeaking) {
       this.broadcast({ type: 'clear_audio_buffer' });
@@ -102,6 +142,11 @@ class VoiceSpeaker {
 
       // Signal HUD API so voice listener can mute during playback
       hudApi.speechStarted();
+
+      // Phase 4.5: notify the barge detector that TTS has begun so it
+      // can consider subsequent user partials as potential interrupts.
+      // Lazy-load to avoid paying the cost when the flag is off.
+      this._notifyBargeDetector('onTtsStart', text);
 
       // Call TTS via centralized AI service
       const ai = getAIService();
@@ -128,8 +173,15 @@ class VoiceSpeaker {
       // Estimate duration (48000 bytes/sec for 24kHz 16-bit mono + 44 byte header)
       const estimatedDurationMs = Math.max(500, ((audioBuffer.byteLength - 44) / 48000) * 1000);
 
+      // Re-arm HUD speech-state safety timeout with the known duration
+      // so long-form briefs (40s+) don't get auto-cleared mid-playback.
+      hudApi.speechStarted(estimatedDurationMs);
+
       // Stream text word-by-word synced to audio
       this._streamTextWithTiming(text, estimatedDurationMs, ttsResponseId);
+
+      const proactive = !!metadata?.proactive;
+      const agentId = metadata?.agentId;
 
       // Send WAV audio to renderer
       this.broadcast({
@@ -137,18 +189,28 @@ class VoiceSpeaker {
         audio: base64Audio,
         responseId: ttsResponseId,
         format: 'wav',
+        proactive,
+        agentId,
       });
 
       // Mark complete after estimated duration
       setTimeout(() => {
-        this.broadcast({ type: 'audio_done', responseId: ttsResponseId });
+        this.broadcast({
+          type: 'audio_done',
+          responseId: ttsResponseId,
+          proactive,
+          agentId,
+        });
         this.speechQueue.markComplete();
         this.isSpeaking = false;
         hudApi.speechEnded();
+        // Phase 4.5: TTS naturally finished; the barge detector no
+        // longer considers this turn a candidate for interruption.
+        this._notifyBargeDetector('onTtsEnd');
       }, estimatedDurationMs + 100);
 
       // Also broadcast full text
-      this.broadcast({ type: 'speech_text', text: text });
+      this.broadcast({ type: 'speech_text', text: text, proactive, agentId });
 
       return true;
     } catch (err) {
@@ -158,6 +220,8 @@ class VoiceSpeaker {
       });
       this.isSpeaking = false;
       hudApi.speechEnded();
+      // Phase 4.5: TTS errored out -- clear barge-detector state.
+      this._notifyBargeDetector('onTtsEnd');
       return false;
     }
   }
@@ -170,6 +234,33 @@ class VoiceSpeaker {
     this.isSpeaking = false;
     this.broadcast({ type: 'clear_audio_buffer' });
     hudApi.speechEnded();
+    // Phase 4.5: cancelled (e.g. by a barge or explicit cancel()).
+    // Idempotent on the detector -- onTtsEnd just stamps endedAt.
+    this._notifyBargeDetector('onTtsEnd');
+  }
+
+  /**
+   * Forward a TTS lifecycle event to the shared barge detector so
+   * interrupts can be detected. Lazy requires keep this module free
+   * of naturalness imports at boot.
+   * @private
+   */
+  _notifyBargeDetector(method, text) {
+    try {
+      const {
+        getSharedBargeDetector,
+      } = require('./lib/naturalness/barge-detector-singleton');
+      const detector = getSharedBargeDetector();
+      if (detector && typeof detector[method] === 'function') {
+        if (method === 'onTtsStart' || method === 'onTtsUpdate') {
+          detector[method](text || '');
+        } else {
+          detector[method]();
+        }
+      }
+    } catch (_err) {
+      // Barge layer must never block TTS.
+    }
   }
 
   /**

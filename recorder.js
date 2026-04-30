@@ -25,6 +25,82 @@ function getClipboardManager() {
   return null;
 }
 
+// Extract the Edison account id that owns a refresh URL.
+// Refresh URLs follow the pattern:
+//   https://em.edison.api.onereach.ai/http/<accountId>/refresh_token
+// The account id in that path is authoritative -- the token returned
+// by the endpoint is scoped to that account, and Edison's Files API
+// rejects any write that targets a different account ("Cross account
+// requests allowed to SUPER_ADMIN only"). Trust the URL over any
+// separately-stored settings.gsxAccountId, which can drift when a
+// user signs into a different GSX account without updating settings.
+function accountIdFromRefreshUrl(refreshUrl) {
+  if (!refreshUrl || typeof refreshUrl !== 'string') return '';
+  const m = refreshUrl.match(/\/http\/([0-9a-fA-F-]{8,})\/refresh_token/);
+  return m ? m[1] : '';
+}
+
+// Reconcile settings.gsxAccountId with the account id embedded in
+// settings.gsxRefreshUrl, which is the only source of truth (the
+// Edison token is scoped to that account). Returns either
+//   { ok: false, error: <user-facing message> }
+// or
+//   { ok: true, accountId: <url-derived id>, reconciled: <bool> }
+// When reconciled=true the caller should reset gsxFileSync so the SDK
+// re-initializes with the correct account id before its next write.
+//
+// Side effect: writes back to settings.gsxAccountId if it was absent
+// or stale. Pass { warn } to receive a human-readable log line when
+// a stale id is replaced (tests inject a spy here).
+function reconcileGsxAccount({ settings, fileSync, warn } = {}) {
+  const refreshUrl = settings?.get ? settings.get('gsxRefreshUrl') : undefined;
+  const storedAccountId = settings?.get ? settings.get('gsxAccountId') : undefined;
+
+  if (!refreshUrl) {
+    return {
+      ok: false,
+      error:
+        'GSX account not configured. Sign in to GSX in Settings to host a WISER Meeting.',
+      reason: 'missing-refresh-url',
+      storedAccountId,
+    };
+  }
+
+  const urlAccountId = accountIdFromRefreshUrl(refreshUrl);
+  if (!urlAccountId) {
+    return {
+      ok: false,
+      error:
+        'GSX Refresh URL is malformed (no account id). Re-sign in to GSX in Settings.',
+      reason: 'malformed-refresh-url',
+      refreshUrl,
+    };
+  }
+
+  let reconciled = false;
+  if (storedAccountId && storedAccountId !== urlAccountId) {
+    reconciled = true;
+    if (typeof warn === 'function') {
+      warn('Reconciling stale gsxAccountId with refresh URL', {
+        storedAccountId,
+        urlAccountId,
+      });
+    }
+    settings.set('gsxAccountId', urlAccountId);
+    // Force the Files SDK to re-init so it binds to the right account
+    // before the next write. Leave the mutation to the caller-owned
+    // object so tests can observe the reset.
+    if (fileSync) {
+      fileSync.isInitialized = false;
+      fileSync.client = null;
+    }
+  } else if (!storedAccountId) {
+    settings.set('gsxAccountId', urlAccountId);
+  }
+
+  return { ok: true, accountId: urlAccountId, reconciled, refreshUrl };
+}
+
 class Recorder {
   constructor() {
     this.window = null;
@@ -78,6 +154,12 @@ class Recorder {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
+        // sandbox:false lets preload-recorder.js require('./preload-hud-api')
+        // so the full agentHUD surface is exposed instead of no-op stubs.
+        // contextIsolation stays on, so the renderer remains isolated from
+        // the preload; the recorder is already a privileged renderer
+        // (AudioWorklet, MediaRecorder, setDisplayMediaRequestHandler).
+        sandbox: false,
         devTools: true,
         preload: path.join(__dirname, 'preload-recorder.js'),
         // Enable media features (including AudioWorklet + WebAudio for PiP audio mixing)
@@ -1067,23 +1149,31 @@ Respond with JSON:
     // Publish (or re-publish) the permanent guest page to GSX Files.
     // The page is static — tokens are fetched at join time from GSX KeyValue.
     // Only needs to be called once; subsequent sessions reuse the same URL.
+    //
+    // Publishes to the *authenticated user's own* GSX account. There is no
+    // hardcoded fallback account: the Edison Files API rejects cross-account
+    // writes ("Cross account requests allowed to SUPER_ADMIN only"), so any
+    // attempt to publish to a shared account fails for non-admin users.
     ipcMain.handle('recorder:publish-guest-page', async () => {
-      const FALLBACK_ACCOUNT = '35254342-4a2e-475b-aec1-18547e517e29';
-      const FALLBACK_REFRESH = `https://em.edison.api.onereach.ai/http/${FALLBACK_ACCOUNT}/refresh_token`;
-
       try {
         const settings = global.settingsManager;
-        const refreshUrl = settings?.get('gsxRefreshUrl') || FALLBACK_REFRESH;
-        const accountId = settings?.get('gsxAccountId') || FALLBACK_ACCOUNT;
-        // 1. Ensure GSX File Sync is ready
+        const reconcile = reconcileGsxAccount({
+          settings,
+          fileSync: global.gsxFileSync,
+          warn: (msg, meta) => log.warn('recorder', msg, meta),
+        });
+        if (!reconcile.ok) {
+          log.warn('recorder', 'Publish guest page aborted', {
+            reason: reconcile.reason,
+          });
+          return { success: false, error: reconcile.error };
+        }
+        const accountId = reconcile.accountId;
+        const refreshUrl = reconcile.refreshUrl;
+
+        // 1. Ensure GSX File Sync is ready (uses the authenticated user's account)
         if (!global.gsxFileSync || !global.gsxFileSync.isInitialized) {
           if (global.gsxFileSync && typeof global.gsxFileSync.initialize === 'function') {
-            if (!settings.get('gsxRefreshUrl')) {
-              log.info('recorder', 'GSX not configured, using hardcoded account for guest page publish');
-              settings.set('gsxRefreshUrl', FALLBACK_REFRESH);
-              settings.set('gsxAccountId', FALLBACK_ACCOUNT);
-              settings.set('gsxEnvironment', 'edison');
-            }
             const initResult = await global.gsxFileSync.initialize();
             if (!initResult?.success && !global.gsxFileSync.isInitialized) {
               return { success: false, error: 'GSX File Sync init failed: ' + (initResult?.error || 'unknown') };
@@ -1142,14 +1232,18 @@ Respond with JSON:
 
     // Store meeting tokens in GSX KeyValue so the guest page can fetch them by room name.
     // Key: wiser-room:{roomName}  Value: { tokens: [...], livekitUrl: "wss://..." }
+    // Writes to the authenticated user's own KV store -- no hardcoded fallback account.
     ipcMain.handle('recorder:store-meeting-tokens', async (event, { roomName, guestTokens, livekitUrl }) => {
-      const FALLBACK_ACCOUNT = '35254342-4a2e-475b-aec1-18547e517e29';
-      const FALLBACK_REFRESH = `https://em.edison.api.onereach.ai/http/${FALLBACK_ACCOUNT}/refresh_token`;
       const KV_COLLECTION = 'wiser:meeting:tokens';
 
       try {
         const settings = global.settingsManager;
-        const refreshUrl = settings?.get('gsxRefreshUrl') || FALLBACK_REFRESH;
+        const refreshUrl = settings?.get('gsxRefreshUrl');
+        if (!refreshUrl) {
+          const msg = 'GSX account not configured. Sign in to GSX in Settings to host a WISER Meeting.';
+          log.warn('recorder', 'Store meeting tokens aborted: GSX not configured');
+          return { success: false, error: msg };
+        }
         const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
         const key = `wiser-room:${roomName}`;
 
@@ -1172,14 +1266,17 @@ Respond with JSON:
     });
 
     // Clear meeting tokens from KV when host ends meeting.
+    // Uses the authenticated user's own KV store -- no hardcoded fallback account.
     ipcMain.handle('recorder:clear-meeting-tokens', async (event, roomName) => {
-      const FALLBACK_ACCOUNT = '35254342-4a2e-475b-aec1-18547e517e29';
-      const FALLBACK_REFRESH = `https://em.edison.api.onereach.ai/http/${FALLBACK_ACCOUNT}/refresh_token`;
       const KV_COLLECTION = 'wiser:meeting:tokens';
 
       try {
         const settings = global.settingsManager;
-        const refreshUrl = settings?.get('gsxRefreshUrl') || FALLBACK_REFRESH;
+        const refreshUrl = settings?.get('gsxRefreshUrl');
+        if (!refreshUrl) {
+          log.warn('recorder', 'Clear meeting tokens aborted: GSX not configured', { roomName });
+          return { success: false, error: 'GSX account not configured.' };
+        }
         const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
         const key = `wiser-room:${roomName}`;
 
@@ -1579,4 +1676,7 @@ function getRecorder() {
 module.exports = {
   Recorder,
   getRecorder,
+  // Exported for unit tests
+  _accountIdFromRefreshUrl: accountIdFromRefreshUrl,
+  _reconcileGsxAccount: reconcileGsxAccount,
 };

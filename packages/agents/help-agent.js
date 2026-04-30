@@ -27,9 +27,7 @@ const CATEGORY_LABELS = {
 
 const CATEGORY_MAP = {
   'calendar-query-agent': 'productivity',
-  'calendar-create-agent': 'productivity',
-  'calendar-edit-agent': 'productivity',
-  'calendar-delete-agent': 'productivity',
+  'calendar-mutate-agent': 'productivity',
   'action-item-agent': 'productivity',
   'email-agent': 'productivity',
   'daily-brief-agent': 'productivity',

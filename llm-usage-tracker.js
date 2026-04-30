@@ -47,6 +47,8 @@ class LLMUsageTracker {
       duration = 0,
       projectId = null,
       spaceId = null,
+      agentId = null,
+      agentName = null,
     } = data;
 
     // Calculate cost
@@ -70,6 +72,8 @@ class LLMUsageTracker {
       cost: costResult.totalCost,
       feature,
       purpose,
+      agentId,
+      agentName,
       success,
       duration,
     };
@@ -90,6 +94,8 @@ class LLMUsageTracker {
       spaceId: spaceId || projectId,
       feature,
       operation: purpose || feature,
+      agentId,
+      agentName,
       success,
     });
 
@@ -114,6 +120,8 @@ class LLMUsageTracker {
       duration = 0,
       projectId = null,
       spaceId = null,
+      agentId = null,
+      agentName = null,
     } = data;
 
     // Calculate cost
@@ -137,6 +145,8 @@ class LLMUsageTracker {
       cost: costResult.totalCost,
       feature,
       purpose,
+      agentId,
+      agentName,
       success,
       duration,
     };
@@ -157,6 +167,8 @@ class LLMUsageTracker {
       spaceId: spaceId || projectId,
       feature,
       operation: purpose || feature,
+      agentId,
+      agentName,
       success,
     });
 

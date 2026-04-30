@@ -1,0 +1,15 @@
+{
+  "name": "p3-fast-commit-complete-utterance",
+  "description": "A clear complete question commits at the fast-finalize 400ms window; no LLM consulted.",
+  "phase": "p3-pause",
+  "flags": {},
+  "steps": [
+    { "type": "hook", "name": "voicePartial", "args": { "text": "what time is it" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 100 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "lastDecision": "keep-waiting" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 400 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "committed": true, "commitText": "what time is it", "commitClassification": "complete" } }
+  ]
+}

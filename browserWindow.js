@@ -902,10 +902,34 @@ function createMainWindow(app) {
   if (!shutdownHandlersRegistered) {
     shutdownHandlersRegistered = true;
 
-    // Optional: renderer can signal early if ready
+    // Renderer signals it has finished saving state -- destroy immediately
+    // instead of waiting for the 1.5 s safety timeout. Makes quits feel
+    // snappy and avoids the updater-install path feeling laggy.
     ipcMain.on('shutdown-ready', () => {
-      log.info('window', 'Renderer signaled shutdown-ready (early)');
-      // Window will be destroyed by the timeout anyway
+      log.info('window', 'Renderer signaled shutdown-ready -- closing now');
+      if (shutdownTimeout) {
+        clearTimeout(shutdownTimeout);
+        shutdownTimeout = null;
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.destroy();
+      }
+    });
+
+    // Renderer signals it needs more time (unsaved work, long save, etc.).
+    // Extend the shutdown budget once to 5 s total.
+    ipcMain.on('shutdown-blocked', (_event, reason) => {
+      log.info('window', 'Renderer signaled shutdown-blocked', { reason });
+      if (shutdownTimeout) {
+        clearTimeout(shutdownTimeout);
+        shutdownTimeout = setTimeout(() => {
+          log.warn('window', 'Extended shutdown timeout expired -- forcing destroy');
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.destroy();
+          }
+          shutdownTimeout = null;
+        }, 5000);
+      }
     });
   }
 

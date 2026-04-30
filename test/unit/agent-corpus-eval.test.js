@@ -429,35 +429,31 @@ const CORPUS = [
     ],
   },
 
-  // ── Calendar create ─────────────────────────────────────────
+  // ── Calendar mutate (create/edit/delete merged in Phase 2a) ──
   {
-    name: 'Calendar: create with full details',
-    agentId: 'calendar-create-agent',
+    name: 'Calendar mutate: create with full details',
+    agentId: 'calendar-mutate-agent',
     turns: [
       { user: 'Schedule a meeting with Bob at 2pm tomorrow', expect: { needsInput: true } },
       { user: 'One hour, in the conference room', expect: { success: true } },
     ],
   },
   {
-    name: 'Calendar: create with missing details',
-    agentId: 'calendar-create-agent',
+    name: 'Calendar mutate: create with missing details',
+    agentId: 'calendar-mutate-agent',
     turns: [
       { user: 'Add a dentist appointment', expect: { needsInput: true } },
       { user: 'Next Monday at 10am', expect: { success: true } },
     ],
   },
-
-  // ── Calendar edit ───────────────────────────────────────────
   {
-    name: 'Calendar: reschedule',
-    agentId: 'calendar-edit-agent',
+    name: 'Calendar mutate: reschedule',
+    agentId: 'calendar-mutate-agent',
     turns: [{ user: 'Move my 3pm meeting to 4pm', expect: { needsInput: true } }],
   },
-
-  // ── Calendar delete ─────────────────────────────────────────
   {
-    name: 'Calendar: cancel event',
-    agentId: 'calendar-delete-agent',
+    name: 'Calendar mutate: cancel event',
+    agentId: 'calendar-mutate-agent',
     turns: [{ user: 'Cancel my meeting tomorrow at noon', expect: { needsInput: true } }],
   },
 

@@ -1,0 +1,113 @@
+{
+  "description": "Golden production tasks. Each entry is a real user request with expectations for the agent's behaviour. Used by test/evals/golden-tasks.eval.js to catch regressions.",
+  "tasks": [
+    {
+      "id": "search-local-no-location",
+      "userInput": "Where is a good place around here to get coffee?",
+      "expect": {
+        "winningAgent": "search-agent",
+        "behavior": "clarify-or-answer",
+        "clarifyFieldContains": "city",
+        "noDeadEnd": true
+      },
+      "forbidden": [
+        "I don't know",
+        "I cannot help",
+        "unable to"
+      ],
+      "why": "Historical failure: returned empty instead of asking for a city. Fix: needsInput fires when local query has no location."
+    },
+    {
+      "id": "search-local-with-city",
+      "userInput": "coffee shops in Berkeley",
+      "expect": {
+        "winningAgent": "search-agent",
+        "behavior": "answer",
+        "groundedHintMin": "weak",
+        "sourcesMin": 1
+      },
+      "forbidden": [
+        "I don't know",
+        "unable to find"
+      ],
+      "why": "Must return sourced local results when city is given. Previously timed out via browser-agent due to tie-break bug."
+    },
+    {
+      "id": "weather-live-location",
+      "userInput": "what's the weather",
+      "expect": {
+        "winningAgent": "search-agent",
+        "behavior": "answer",
+        "usesContext": ["location"]
+      },
+      "forbidden": [
+        "I don't know where you are"
+      ],
+      "why": "Weather query should auto-enhance with live location, not refuse."
+    },
+    {
+      "id": "time-simple",
+      "userInput": "what time is it",
+      "expect": {
+        "winningAgent": "time-agent",
+        "behavior": "answer",
+        "responseWordsMax": 20
+      },
+      "why": "Simple time queries route to time-agent, not search-agent."
+    },
+    {
+      "id": "confirmation-short",
+      "userInput": "delete that note",
+      "expect": {
+        "behavior": "answer",
+        "responseWordsMax": 10
+      },
+      "why": "Confirmation-class responses should be terse, not a paragraph."
+    },
+    {
+      "id": "orb-implicit-followup",
+      "userInput": "find me a dentist",
+      "expect": {
+        "winningAgent": "search-agent",
+        "behavior": "clarify-or-answer",
+        "followUpListens": true
+      },
+      "why": "Implicit-local queries that end up needing clarification must open the mic (awaitingInput state)."
+    },
+    {
+      "id": "search-grounded",
+      "userInput": "what time does the San Francisco Ferry Building close today",
+      "expect": {
+        "winningAgent": "search-agent",
+        "behavior": "answer",
+        "groundedHintMin": "weak",
+        "sourcesMin": 1
+      },
+      "forbidden": [
+        "I don't have access",
+        "I cannot browse"
+      ],
+      "why": "Factual lookup with clear named entity must be sourced, not hand-waved."
+    },
+    {
+      "id": "user-info-from-context",
+      "userInput": "what's my name",
+      "expect": {
+        "behavior": "answer-or-clarify"
+      },
+      "forbidden": [
+        "I don't have internet access"
+      ],
+      "why": "Personal info queries should answer from context, not fail to reach the web."
+    },
+    {
+      "id": "reflection-low-quality-signal",
+      "userInput": "explain quantum computing in one word",
+      "expect": {
+        "behavior": "answer",
+        "reflectionLowQualityAllowed": true
+      },
+      "why": "Adversarial prompt that should often produce low-quality answer; used to validate that reflector detects and emits learning:low-quality-answer."
+    }
+  ]
+}

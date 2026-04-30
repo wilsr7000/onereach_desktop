@@ -122,6 +122,10 @@ const browserAgent = {
     'Automates web browser tasks -- navigates to websites, fills forms, clicks buttons, extracts information, takes screenshots, and completes multi-step web workflows autonomously',
   voice: 'echo',
   acks: ['Opening the browser.', 'Working on that now.', 'Let me handle that.'],
+  // Browser automation legitimately needs time (Playwright boot, page loads, etc.)
+  // but capped at 45s so a hung run doesn't eat the full 60s before the exchange
+  // cascades to a backup bid.
+  executionTimeoutMs: 45000,
   categories: ['browser', 'automation', 'web', 'scraping'],
   keywords: [
     'browser',

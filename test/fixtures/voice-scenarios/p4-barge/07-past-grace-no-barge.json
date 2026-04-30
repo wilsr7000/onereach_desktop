@@ -1,0 +1,13 @@
+{
+  "name": "p4-past-grace-no-barge",
+  "description": "User speech arriving well after TTS ends (past the grace window) is not a barge; it's a new turn.",
+  "phase": "p4-barge",
+  "flags": { "bargeIn": true },
+  "steps": [
+    { "type": "hook", "name": "ttsStart", "args": { "text": "playing some jazz for you now" } },
+    { "type": "hook", "name": "ttsEnd" },
+    { "type": "wait", "ms": 500 },
+    { "type": "hook", "name": "userSay", "args": { "text": "stop" } },
+    { "type": "assert", "metaEquals": { "bargeCount": 0, "ignoreCount": 1, "lastIgnoreKind": "no-tts" } }
+  ]
+}

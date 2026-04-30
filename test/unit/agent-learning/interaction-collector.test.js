@@ -32,6 +32,9 @@ describe('InteractionCollector', () => {
       collector.start(bus);
       expect(bus.listenerCount('learning:interaction')).toBe(1);
       expect(bus.listenerCount('learning:capability-gap')).toBe(1);
+      expect(bus.listenerCount('learning:slow-success')).toBe(1);
+      expect(bus.listenerCount('learning:negative-feedback')).toBe(1);
+      expect(bus.listenerCount('learning:reflection')).toBe(1);
     });
 
     it('unsubscribes on stop', () => {
@@ -39,10 +42,125 @@ describe('InteractionCollector', () => {
       collector.stop();
       expect(bus.listenerCount('learning:interaction')).toBe(0);
       expect(bus.listenerCount('learning:capability-gap')).toBe(0);
+      expect(bus.listenerCount('learning:slow-success')).toBe(0);
+      expect(bus.listenerCount('learning:negative-feedback')).toBe(0);
+      expect(bus.listenerCount('learning:reflection')).toBe(0);
     });
 
     it('handles missing exchangeBus gracefully', () => {
       expect(() => collector.start(null)).not.toThrow();
+    });
+  });
+
+  describe('negative-feedback handling', () => {
+    beforeEach(() => collector.start(bus));
+
+    it('flips the most recent interaction of the targeted agent to failure', () => {
+      bus.emit('learning:interaction', {
+        agentId: 'search-agent',
+        taskId: 'abc',
+        userInput: 'coffee shops nearby',
+        success: true,
+        message: 'Here are shops.',
+        durationMs: 500,
+        timestamp: Date.now() - 1000,
+      });
+      bus.emit('learning:negative-feedback', {
+        targetedAgentId: 'search-agent',
+        userInput: 'that was wrong',
+      });
+      const win = collector.getWindow('search-agent');
+      const last = win.interactions[win.interactions.length - 1];
+      expect(last.success).toBe(false);
+      expect(last.error).toBe('user_negative_feedback');
+      expect(last.followUpAction).toBe('negative-feedback');
+    });
+
+    it('ignores when there are no prior interactions for the agent', () => {
+      expect(() => bus.emit('learning:negative-feedback', {
+        targetedAgentId: 'nobody',
+      })).not.toThrow();
+    });
+  });
+
+  describe('reflection handling', () => {
+    beforeEach(() => collector.start(bus));
+
+    it('low-quality reflection marks matching interaction as failed', () => {
+      bus.emit('learning:interaction', {
+        agentId: 'search-agent',
+        taskId: 'xyz',
+        userInput: 'test',
+        success: true,
+        message: 'fake answer',
+        durationMs: 100,
+      });
+      bus.emit('learning:reflection', {
+        agentId: 'search-agent',
+        taskId: 'xyz',
+        overall: 0.3,
+        scores: { grounded: 0.2, relevant: 0.3, complete: 0.4, confident: 0.3 },
+        issues: ['ungrounded'],
+        lowQuality: true,
+      });
+      const win = collector.getWindow('search-agent');
+      const entry = win.interactions.find((i) => i.taskId === 'xyz');
+      expect(entry.success).toBe(false);
+      expect(entry.error).toBe('low_quality_answer');
+      expect(entry.reflectionOverall).toBe(0.3);
+    });
+
+    it('high-quality reflection records score but does not flip success', () => {
+      bus.emit('learning:interaction', {
+        agentId: 'search-agent',
+        taskId: 'good',
+        userInput: 'q',
+        success: true,
+        message: 'good answer',
+        durationMs: 200,
+      });
+      bus.emit('learning:reflection', {
+        agentId: 'search-agent',
+        taskId: 'good',
+        overall: 0.9,
+        scores: { grounded: 0.9, relevant: 0.9, complete: 0.9, confident: 0.9 },
+        issues: [],
+        lowQuality: false,
+      });
+      const win = collector.getWindow('search-agent');
+      const entry = win.interactions.find((i) => i.taskId === 'good');
+      expect(entry.success).toBe(true);
+      expect(entry.reflectionOverall).toBe(0.9);
+    });
+
+    it('ignores reflection for unknown agent / taskId', () => {
+      expect(() => bus.emit('learning:reflection', {
+        agentId: 'ghost', taskId: 't', overall: 0.1, lowQuality: true,
+      })).not.toThrow();
+    });
+  });
+
+  describe('slow-success handling', () => {
+    beforeEach(() => collector.start(bus));
+
+    it('records slow-success events in unmet requests', () => {
+      bus.emit('learning:slow-success', {
+        taskId: 't-1',
+        userInput: 'Where can I get coffee around here?',
+        winningAgentId: 'search-agent',
+        bustCount: 2,
+        bustedAgents: [
+          { agentId: 'browser-agent', error: 'timeout' },
+          { agentId: 'browsing-agent', error: 'timeout' },
+        ],
+        totalDurationMs: 130000,
+      });
+      const unmet = collector.getUnmetRequests();
+      expect(unmet).toHaveLength(1);
+      expect(unmet[0].slowSuccess).toBe(true);
+      expect(unmet[0].winningAgentId).toBe('search-agent');
+      expect(unmet[0].bustCount).toBe(2);
+      expect(unmet[0].gapSummary).toContain('Slow success');
     });
   });
 

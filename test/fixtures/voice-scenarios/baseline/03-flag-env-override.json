@@ -1,0 +1,14 @@
+{
+  "name": "baseline-flag-env-override",
+  "description": "Scenario-level flags object flips naturalness flags on for the duration of the scenario without leaking. Uses phase-5 repairMemory flag since Phase 1-4 flags were removed at the always-on cutover.",
+  "phase": "baseline",
+  "flags": {
+    "repairMemory": true,
+    "affectMatching": true
+  },
+  "steps": [
+    { "type": "assert", "flagEnabled": "repairMemory" },
+    { "type": "assert", "flagEnabled": "affectMatching" },
+    { "type": "assert", "flagDisabled": "backchanneling" }
+  ]
+}

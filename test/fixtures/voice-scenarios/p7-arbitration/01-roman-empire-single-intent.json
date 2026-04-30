@@ -1,0 +1,31 @@
+{
+  "name": "Roman Empire single-intent (the 'and' trap)",
+  "description": "Long single-intent question that contains the word 'and'. The pre-Phase-4 regex override saw 'and' and allowed multi-winner; the new bid-overlap penalty looks at reasoning text, finds heavy overlap between search-agent and history-agent, and shrinks history-agent's confidence so the dominance gap opens. This is the demo case where the old system was actively wrong.",
+  "task": {
+    "id": "fixture-roman-empire",
+    "content": "tell me about the Roman Empire and how it fell"
+  },
+  "bids": [
+    {
+      "agentId": "search-agent",
+      "agentName": "Search Agent",
+      "confidence": 0.85,
+      "score": 0.85,
+      "reasoning": "I will search the web and find authoritative information about the Roman Empire including its founding rise and eventual fall"
+    },
+    {
+      "agentId": "history-agent",
+      "agentName": "History Agent",
+      "confidence": 0.8,
+      "score": 0.8,
+      "reasoning": "I will explain the Roman Empire including its rise growth and the various factors that led to its eventual fall"
+    }
+  ],
+  "expected": {
+    "winners": ["search-agent"],
+    "executionMode": "single",
+    "rationale": "Heavy reasoning overlap between search and history; history-agent shrinks via overlap penalty; dominance gap opens; fast path picks search.",
+    "preOverlapWouldRun": "LLM evaluator (gap 0.05 < 0.3 dominance threshold)",
+    "postOverlapBehavior": "Fast path fires; LLM not consulted; single winner."
+  }
+}

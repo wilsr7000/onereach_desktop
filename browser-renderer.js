@@ -2198,6 +2198,24 @@ document.addEventListener('DOMContentLoaded', () => {
         // Handle image and video creators
         console.log(`Creating tab for ${data.isVideoCreator ? 'video' : 'image'} creator:`, data.url);
         createNewTab(data.url);
+      } else if (data.idwId && /^[a-zA-Z0-9_-]{1,64}$/.test(data.idwId)) {
+        // IDW tabs use a stable partition keyed by IDW id so that once the
+        // user picks the right account on the first visit, subsequent clicks
+        // land straight in the IDW. Random-per-click partitions were causing
+        // the OneReach account picker to appear whenever the multi-tenant
+        // store still held a cookie for a different account. If a tab is
+        // already open on this IDW, focus it instead of opening a duplicate.
+        const idwPartition = `persist:idw-${data.idwId}`;
+        const existing = tabs.find(
+          (t) => (t.partition || (t.webview && t.webview.dataset.partition)) === idwPartition
+        );
+        if (existing) {
+          console.log(`[IDW] Focusing existing tab ${existing.id} for IDW ${data.idwId}`);
+          activateTab(existing.id);
+        } else {
+          console.log(`[IDW] Opening ${data.label || data.idwId} with stable partition ${idwPartition}`);
+          createNewTabWithPartition(data.url, idwPartition);
+        }
       } else {
         createNewTab(data.url);
       }

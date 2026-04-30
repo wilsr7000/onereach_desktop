@@ -1390,6 +1390,39 @@
         }, { once: true });
       }
 
+      // Opportunistically push a precise location to the main process so
+      // location-aware agents have the freshest data instead of relying on
+      // IP geolocation (city-level) or stale values in main.md. This runs
+      // on orb load; Chromium will cache the grant on subsequent launches
+      // and macOS will delegate to CoreLocation. Falls back silently if
+      // permission is denied or unavailable -- main process still has IP
+      // geolocation as a backstop.
+      (function capturePreciseLocation() {
+        if (!navigator.geolocation || !window.api || !window.api.reportLocation) return;
+        try {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              try {
+                const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                window.api.reportLocation({
+                  latitude: pos.coords.latitude,
+                  longitude: pos.coords.longitude,
+                  accuracy: pos.coords.accuracy,
+                  timezone: tz,
+                }).catch(() => { /* non-fatal */ });
+                console.log('[Orb] Precise location reported', {
+                  accuracy: Math.round(pos.coords.accuracy) + 'm',
+                });
+              } catch (_e) { /* non-fatal */ }
+            },
+            (err) => {
+              console.log('[Orb] Precise location unavailable:', err.message);
+            },
+            { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 }
+          );
+        } catch (_e) { /* non-fatal */ }
+      })();
+
       // Listen for sound cue IPC from agents (via main process)
       if (window.orbAPI?.onSoundCue) {
         window.orbAPI.onSoundCue((cue) => {
@@ -1409,6 +1442,23 @@
             if (window.OrbSoundEngine) window.OrbSoundEngine.init();
             window.OrbAmbient.setScene(cmd.scene);
           }
+        });
+      }
+
+      // Proactive suggestions from the slow-success tracker. The main
+      // process speaks the suggestion via its own voice-speaker a couple
+      // of seconds after the primary response settles. We only need to
+      // surface it visually here and extend the listen dwell window so
+      // the user has time to say "yes" / "build that agent" without
+      // having to tap the orb.
+      if (window.orbAPI?.onProactiveSuggestion) {
+        window.orbAPI.onProactiveSuggestion((suggestion) => {
+          if (!suggestion || !suggestion.prompt) return;
+          console.log('[Orb] Proactive suggestion surfaced:', suggestion.agentIdea);
+          showTranscript(suggestion.prompt, false);
+          setTimeout(hideTranscript, 10000);
+          // Keep the mic open a bit longer so the user can respond.
+          _pendingDwellMs = Math.max(_pendingDwellMs || 0, 12000);
         });
       }
 
@@ -1657,6 +1707,9 @@
           mediaStream.getTracks().forEach((track) => track.stop());
           mediaStream = null;
         }
+        // Keep _micCaptureReady in sync so a subsequent listening transition
+        // doesn't believe the mic is live when it's actually been torn down.
+        _micCaptureReady = false;
       }
 
       // ==================== DISAMBIGUATION STATE ====================
@@ -2032,6 +2085,20 @@
             if (event.taskId) _activeTaskId = event.taskId;
           }
 
+          // Cascade-to-backup: the primary agent timed out or failed,
+          // exchange is now trying a backup. Reset the orb's own 30s
+          // processing timer so we don't force idle while the backup
+          // is still working. Without this, the exchange's cascade
+          // (primary 30s -> backup 30s) would always exceed the orb's
+          // 30s single-attempt budget and the user never hears the
+          // backup's answer.
+          if (event.type === 'task:busted' || event.type === 'task:retry') {
+            console.log('[Orb] Backup cascade starting; resetting processing timer', {
+              backupsRemaining: event.backupsRemaining,
+            });
+            if (S.resetProcessingTimeout) S.resetProcessingTimeout();
+          }
+
           // Handle task completion -- clear active task
           // NOTE: Do NOT clear _pendingNeedsInput here. task:settled races with
           // onNeedsInput via IPC delivery order. The needsInput flag is correctly
@@ -2069,6 +2136,24 @@
           // Route through the response router for tone + color flash
           const route = routeResult(result);
           if (route) {
+            // Implicit question: agent spoke a question without setting
+            // needsInput. Treat it the same as needsInput so the orb
+            // re-opens the mic after TTS for the user to actually
+            // answer. We set BOTH _pendingNeedsInput and a long dwellMs
+            // so if either the awaitingInput branch OR the dwell-listen
+            // fallback fires in setOnSpeakingEnd, the mic actually opens.
+            // Previously we set dwellMs=0 and relied on awaitingInput --
+            // but if the _pendingNeedsInput flag got cleared first (race
+            // with HUD API ordering), the fallback path went idle
+            // immediately. Belt-and-suspenders.
+            if (route.awaitAnswer && !_pendingNeedsInput) {
+              _pendingNeedsInput = true;
+              const safetyDwell = typeof route.dwellMs === 'number' && route.dwellMs > 0
+                ? route.dwellMs
+                : 25000;
+              _pendingDwellMs = safetyDwell;
+              console.log('[Orb] Implicit question detected, flagging for follow-up listen', { safetyDwell });
+            }
             const Audio = window.OrbAudio;
             if (Audio) window.OrbResponseRouter.dispatch(route, Audio, {
               showTooltip: (text) => { showTranscript(text, false); setTimeout(hideTranscript, 3000); },
@@ -2916,6 +3001,23 @@
           setTimeout(hideTranscript, 4000);
         }
 
+        // Pop the universal diagnostics overlay so the user can tap "What's wrong?"
+        // to get a plain-English explanation. The overlay filters benign patterns
+        // and dedups, so this is safe to fire unconditionally. Pass the RAW error
+        // message (not the friendly fallback) so the hint table can match it.
+        try {
+          if (msg && window.diagnostics?.popup) {
+            window.diagnostics.popup({
+              message: msg,
+              category: 'voice',
+              source: `orb:${source || 'unknown'}`,
+              data: context,
+            });
+          }
+        } catch (_) {
+          /* overlay must never block error display */
+        }
+
         // Respond to pending function call if applicable
         if (context.callId && window.orbAPI?.respondToFunction) {
           window.orbAPI.respondToFunction(context.callId, userMessage).catch(() => {});
@@ -3289,6 +3391,18 @@
             _earlyAudioBuffer = [];
           }
           startNoSpeechTimeout();
+          // Defensive: if mic was somehow torn down mid-session (e.g. by a
+          // disconnected event that didn't end the session), the orb would
+          // appear to be listening but capture no audio. Log loudly so this
+          // regression is visible. The mic should be re-acquired by the
+          // surrounding flow (e.g. user clicks orb -> startSession ->
+          // connecting -> mic setup).
+          if (!_micCaptureReady || !processor) {
+            console.warn(
+              '[Orb] Entered listening without an active mic',
+              { _micCaptureReady, hasProcessor: !!processor, from }
+            );
+          }
           if (_micCaptureReady) {
             updateUI('listening');
             if (from === 'connecting' || from === 'awaitingInput') {
@@ -3300,9 +3414,15 @@
           S.set('hasSpokenThisSession', false);
         }
 
-        // --- Leaving listening: stop mic + timers ---
+        // --- Leaving listening: clear listen-timers but KEEP the mic alive ---
+        // The processor's onaudioprocess callback already gates audio sending
+        // on S.isListening, so audio isn't transmitted during processing /
+        // speaking / awaitingInput. Tearing down mediaStream + audioContext
+        // here used to break the multi-turn flow: when the orb came back to
+        // listening for a follow-up answer, dwell-listen, or click barge-in,
+        // there was no live mic and the user could not be heard. The mic is
+        // properly torn down on idle (full session end) and on disconnected.
         if (from === 'listening' && to !== 'listening') {
-          stopAudioCapture();
           clearAllSpeechTimers();
         }
 
@@ -3480,6 +3600,14 @@
             let responseText = result.message || "I'm not sure how to help with that.";
             const route = routeResult(result);
 
+            // Implicit question: agent's message is phrased as a question but
+            // didn't set needsInput. Flag for follow-up listen so the orb
+            // actually waits for the user's answer instead of going idle.
+            if (route && route.awaitAnswer) {
+              _pendingNeedsInput = true;
+              console.log('[Orb] Implicit question in function-call path, flagging for follow-up');
+            }
+
             // Capture dwell duration for post-response listening
             _pendingDwellMs = (route && typeof route.dwellMs === 'number') ? route.dwellMs : 0;
 
@@ -3597,20 +3725,25 @@
               }
             },
             audio_wav: (e) => {
-              if (S.phase === 'idle' && !_activeTaskId) {
+              // Phantom-audio guard: block stray TTS when idle and no task.
+              // Proactive agent speech (e.g. critical-meeting-alarm-agent
+              // enqueued via global.agentMessageQueue) carries e.proactive
+              // and is allowed through because it has no task to attach to
+              // by design -- the orb is the delivery surface for those.
+              if (S.phase === 'idle' && !_activeTaskId && !e.proactive) {
                 console.log('[Orb] Ignoring audio_wav while idle (phantom audio blocked)');
                 return;
               }
               if (e.audio) {
                 if (!S.isSpeaking) {
-                  S.transition('speaking', 'audio_wav');
+                  S.transition('speaking', e.proactive ? `audio_wav:${e.agentId || 'proactive'}` : 'audio_wav');
                 }
                 window._agentResponseText = '';
                 playWAVAudio(e.audio);
               }
             },
             audio_done: (e) => {
-              if (S.phase === 'idle' && !_activeTaskId) {
+              if (S.phase === 'idle' && !_activeTaskId && !e.proactive) {
                 console.log('[Orb] Ignoring audio_done while idle (phantom audio blocked)');
                 return;
               }
@@ -3620,6 +3753,17 @@
               const chunkCount = window.OrbAudio?.getChunkCount() || 0;
               if (chunkCount > 0) {
                 playTTSAudio();
+              }
+
+              // Proactive agent speech (alarms, etc) is one-shot -- no task
+              // to continue, no follow-up expected. Drop straight back to
+              // idle rather than dwell-listening for a command that isn't
+              // coming.
+              if (e.proactive && !_activeTaskId) {
+                if (S.isSpeaking) {
+                  S.transition('idle', `proactive-done:${e.agentId || ''}`);
+                }
+                return;
               }
 
               // Check if this was a follow-up question (agent needs more input)
@@ -3746,10 +3890,26 @@
             disconnected: (e) => {
               console.warn('[Orb] Disconnected, code:', e.code);
               stopAudioCapture();
+              // Only show the error flash if the disconnect looks abnormal.
+              // A normal user-stop has code 1000; anything else is a
+              // server-side drop and deserves a visible cue.
+              const isNormalClose = e && (e.code === 1000 || e.code === 1005);
+              if (!isNormalClose) {
+                try {
+                  handleOrbError('ws-disconnected',
+                    'Voice connection dropped. Click the orb to reconnect.');
+                } catch (_) { /* best effort */ }
+              }
               S.endSession('ws-disconnected');
             },
             error: (e) => {
               console.error('[Orb] Speech error:', e.message || e);
+              // Surface the failure so the user sees why the orb went
+              // quiet instead of a silent transition back to idle.
+              const msg = (e && (e.message || e.error)) || 'Voice session error. Click the orb to reconnect.';
+              try {
+                handleOrbError('speech-error', msg);
+              } catch (_) { /* best effort */ }
               S.endSession('speech-error');
             },
           },

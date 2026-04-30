@@ -34,6 +34,44 @@ function loadOrbState() {
   return _window.OrbState;
 }
 
+describe('OrbState v2 -- resetProcessingTimeout', () => {
+  let S2;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    S2 = loadOrbState();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('resets the 30s processing timer so cascade-to-backup has room', () => {
+    // Enter processing phase
+    S2.transition('connecting', 't');
+    S2.transition('listening', 't');
+    S2.transition('processing', 't');
+    expect(S2.phase).toBe('processing');
+
+    // Burn 20s (close to the original 30s limit)
+    vi.advanceTimersByTime(20000);
+    expect(S2.phase).toBe('processing');
+
+    // Cascade to backup -- reset the timer
+    expect(S2.resetProcessingTimeout()).toBe(true);
+
+    // Burn another 20s. Without reset, the orb would force-idle after
+    // the original 10s remaining. With reset, it still has 10s to go.
+    vi.advanceTimersByTime(20000);
+    expect(S2.phase).toBe('processing');
+
+    // Now burn the reset budget to completion
+    vi.advanceTimersByTime(15000);
+    expect(S2.phase).toBe('idle');
+  });
+
+  it('is a no-op when not in processing phase', () => {
+    S2.transition('connecting', 't');
+    expect(S2.resetProcessingTimeout()).toBe(false);
+  });
+});
+
 describe('OrbState v2', () => {
   let S;
 

@@ -1,0 +1,10 @@
+{
+  "name": "p4-no-tts-ignored",
+  "description": "User speech when no TTS is playing is not a barge; detector ignores it entirely.",
+  "phase": "p4-barge",
+  "flags": { "bargeIn": true },
+  "steps": [
+    { "type": "hook", "name": "userSay", "args": { "text": "stop" } },
+    { "type": "assert", "metaEquals": { "bargeCount": 0, "ignoreCount": 1, "lastIgnoreKind": "no-tts" } }
+  ]
+}

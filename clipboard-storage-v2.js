@@ -1904,9 +1904,39 @@ proactive_suggestions: true
 
   // Delete item (transactional)
   deleteItem(itemId) {
+    // #region debug-d305ab log A -- deleteItem entry/exit summary (H2,H3,H4)
+    const __dbg = {
+      itemId,
+      foundInIndex: false,
+      jsonIndexRemoved: false,
+      duckDBDeleteAttempted: false,
+      fsDirExisted: false,
+      fsDirRemoved: false,
+      cacheRemoved: false,
+      returnValue: null,
+      error: null,
+    };
+    const __dbgLog = () => {
+      try {
+        fetch('http://127.0.0.1:7557/ingest/c7b128b0-d867-47e1-86f3-945c0c400ce1', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd305ab' },
+          body: JSON.stringify({
+            sessionId: 'd305ab', runId: 'delete-bug', hypothesisId: 'H2,H3,H4',
+            location: 'clipboard-storage-v2.js:deleteItem',
+            message: 'storage.deleteItem summary',
+            data: __dbg,
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      } catch (_e) { /* debug log */ }
+    };
+    // #endregion
+
     // Protect system context files
     if (PROTECTED_ITEM_IDS.includes(itemId)) {
       log.warn('clipboard', 'Cannot delete protected system item', { itemId });
+      __dbg.error = 'protected'; __dbgLog();
       throw new Error('Cannot delete protected system file');
     }
 
@@ -1916,37 +1946,47 @@ proactive_suggestions: true
       // Also check DuckDB if available
       if (this.dbReady) {
         this._deleteItemFromDBSync(itemId);
+        __dbg.duckDBDeleteAttempted = true;
       }
+      __dbg.returnValue = false; __dbgLog();
       return false;
     }
+    __dbg.foundInIndex = true;
 
     const item = this.index.items[itemIndex];
     const itemDir = path.join(this.itemsDir, itemId);
+    __dbg.fsDirExisted = fs.existsSync(itemDir);
 
     try {
       // 1. Delete from DuckDB first (if ready)
       if (this.dbReady) {
         this._deleteItemFromDBSync(itemId, item.spaceId);
+        __dbg.duckDBDeleteAttempted = true;
       }
 
       // 2. Remove from legacy JSON index
       this.index.items.splice(itemIndex, 1);
       this.updateSpaceCount(item.spaceId, -1);
       this.saveIndexSync(); // Use sync save for delete
+      __dbg.jsonIndexRemoved = true;
 
       // 3. Remove from file system (after index is updated)
       if (fs.existsSync(itemDir)) {
         fs.rmSync(itemDir, { recursive: true, force: true });
+        __dbg.fsDirRemoved = !fs.existsSync(itemDir);
       }
 
       // 4. Remove from cache
       this.cache.delete(itemId);
+      __dbg.cacheRemoved = true;
 
+      __dbg.returnValue = true; __dbgLog();
       return true;
     } catch (error) {
       log.error('clipboard', 'Error deleting item', { error: error.message || error });
       // Reload index to ensure consistency
       this.reloadIndex();
+      __dbg.error = error.message; __dbgLog();
       throw error;
     }
   }

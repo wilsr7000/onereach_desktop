@@ -1087,6 +1087,30 @@ function renderSpaces() {
   setupSpaceDragAndDrop();
 }
 
+// Coalesce rapid-fire renderSpaces() calls into one paint per animation frame.
+// Bursts of `clipboard:spaces-updated` events (e.g. cross-space moves, batch
+// imports, sync catch-up) previously triggered N full-tree innerHTML rewrites
+// back-to-back and showed up as visible sidebar flicker. With coalescing we
+// pay for exactly one rebuild per frame regardless of how many events arrive.
+let _renderSpacesPending = false;
+let _renderSpacesWantsCounts = false;
+function scheduleRenderSpaces({ updateCounts = false } = {}) {
+  if (updateCounts) _renderSpacesWantsCounts = true;
+  if (_renderSpacesPending) return;
+  _renderSpacesPending = true;
+  requestAnimationFrame(async () => {
+    _renderSpacesPending = false;
+    const wantsCounts = _renderSpacesWantsCounts;
+    _renderSpacesWantsCounts = false;
+    try {
+      renderSpaces();
+      if (wantsCounts) await updateItemCounts();
+    } catch (err) {
+      console.error('[renderSpaces] scheduled render failed:', err);
+    }
+  });
+}
+
 // Render history list
 // PERFORMANCE: Batch size for chunked rendering
 const RENDER_BATCH_SIZE = 50;
@@ -3438,6 +3462,23 @@ function showNotification(options) {
   // Handle string input (simple message)
   if (typeof options === 'string') {
     options = { message: options, type: 'info' };
+  }
+
+  // Pop the universal diagnostics overlay for error notifications. The overlay
+  // filters benign patterns + dedups on its own, so this is safe to call.
+  try {
+    if (options?.type === 'error' && window.diagnostics?.popup) {
+      const msg = `${options.title ? options.title + ': ' : ''}${options.message || ''}`.trim();
+      if (msg) {
+        window.diagnostics.popup({
+          message: msg,
+          category: options.category || 'spaces',
+          source: 'clipboard-viewer',
+        });
+      }
+    }
+  } catch (_) {
+    /* overlay must never block the toast */
   }
 
   // Determine colors based on type
@@ -6975,13 +7016,11 @@ function setupEventListeners() {
     await updateItemCounts();
   });
 
-  // Listen for spaces updates - set up the listener directly
-  window.electron.on('clipboard:spaces-updated', async (event, updatedSpaces) => {
-    console.log('Spaces updated:', updatedSpaces);
-    spacesData = updatedSpaces;
-    renderSpaces();
-    await updateItemCounts();
-  });
+  // Spaces updates are handled by the single `window.clipboard.onSpacesUpdate`
+  // subscription below. A second `window.electron.on('clipboard:spaces-updated')`
+  // listener used to live here and caused visible sidebar flicker because both
+  // listeners fire on the same IPC channel, each doing a full `innerHTML =`
+  // teardown of #spacesList back-to-back.
 
   // Keyboard shortcuts
   document.addEventListener('keydown', async (e) => {
@@ -7061,14 +7100,19 @@ function setupEventListeners() {
     updateScreenshotIndicator(); // Update screenshot indicator too
   });
 
-  // Initialize spaces update listener with proper callback
-  window.clipboard.onSpacesUpdate((spaces) => {
-    // Update local spaces list when it changes
-    if (spaces) {
+  // Single spaces-update subscription. The `__spacesSubscribed` flag guards
+  // against double-registration if this init block ever runs twice (e.g. hot
+  // reload). `scheduleRenderSpaces` coalesces rapid-fire updates into a single
+  // paint per frame so a burst from the main process does not flicker the
+  // sidebar.
+  if (!window.__spacesSubscribed) {
+    window.__spacesSubscribed = true;
+    window.clipboard.onSpacesUpdate((spaces) => {
+      if (!spaces) return;
       spacesData = spaces;
-      renderSpaces();
-    }
-  });
+      scheduleRenderSpaces({ updateCounts: true });
+    });
+  }
 
   // Listen for screenshot capture toggle events
   window.electron.on('clipboard:screenshot-capture-toggled', (event, enabled) => {
@@ -11929,6 +11973,19 @@ async function handleGsxContextAction(action, itemId) {
  * Simple toast notification (fallback if not already defined)
  */
 function showToast(message, type = 'success') {
+  // Pop the universal diagnostics overlay for error toasts. Safe to call
+  // unconditionally; the overlay filters benign patterns + dedups.
+  try {
+    if (type === 'error' && message && window.diagnostics?.popup) {
+      window.diagnostics.popup({
+        message: String(message),
+        category: 'spaces',
+        source: 'clipboard-viewer:toast',
+      });
+    }
+  } catch (_) {
+    /* overlay must never block the toast */
+  }
   // Check if toast already exists
   let toast = document.querySelector('.toast-notification');
   if (!toast) {

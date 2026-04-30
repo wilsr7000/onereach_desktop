@@ -183,6 +183,19 @@ contextBridge.exposeInMainWorld('orbAPI', {
     };
   },
 
+  /**
+   * Listen for proactive suggestions (e.g. "this kind of question has
+   * been slow -- want me to build a dedicated agent?"). Triggered after
+   * N slow-successes for the same query class, respecting cooldowns.
+   * @param {(suggestion: { prompt, agentIdea, queryClass, reason, detail, taskId }) => void} callback
+   * @returns {Function} unsubscribe
+   */
+  onProactiveSuggestion: (callback) => {
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.on('orb:proactive-suggestion', handler);
+    return () => ipcRenderer.removeListener('orb:proactive-suggestion', handler);
+  },
+
   // ==========================================================================
   // WINDOW CONTROLS
   // ==========================================================================

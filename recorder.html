@@ -2809,6 +2809,107 @@
           inset 0 0 0 2px rgba(77, 124, 255, 0.4);
       }
 
+      /* ---- Camera-off placeholder ----
+         Shown by default on every participant tile and hidden only when a
+         video track attaches. Gives the host an obvious "camera is off" cue
+         instead of a pitch-black rectangle. */
+      .participant-placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        pointer-events: none;
+        background: linear-gradient(135deg, #1a1a24 0%, #0f0f17 100%);
+        color: #8a8a9a;
+      }
+      .session-participant:has(video):not(:has(video[data-audio-only])) .participant-placeholder {
+        display: none;
+      }
+      .session-participant.has-video .participant-placeholder {
+        display: none;
+      }
+      .participant-placeholder .avatar-circle {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: rgba(77, 124, 255, 0.18);
+        border: 1.5px solid rgba(77, 124, 255, 0.35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        font-weight: 600;
+        color: #a3b8ff;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+      .participant-placeholder .placeholder-note {
+        font-size: 11px;
+        color: #888;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      /* Shrink the avatar + hide the note in thumbnail-sized tiles */
+      .session-participant.in-thumbnails .participant-placeholder .avatar-circle,
+      .preview-container.layout-presentation .session-participant .participant-placeholder .avatar-circle {
+        width: 34px;
+        height: 34px;
+        font-size: 13px;
+      }
+      .session-participant.in-thumbnails .participant-placeholder .placeholder-note,
+      .preview-container.layout-presentation .session-participant .participant-placeholder .placeholder-note {
+        display: none;
+      }
+
+      /* ---- State badges (top-right mic + cam indicators) ---- */
+      .participant-state {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        display: flex;
+        gap: 4px;
+        z-index: 3;
+        pointer-events: none;
+      }
+      .participant-state .state-icon {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(6px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255, 255, 255, 0.9);
+      }
+      .participant-state .state-icon.off {
+        background: rgba(239, 68, 68, 0.72);
+        color: #fff;
+      }
+      .participant-state .state-icon svg {
+        width: 12px;
+        height: 12px;
+      }
+      .session-participant.in-thumbnails .participant-state,
+      .preview-container.layout-presentation .session-participant .participant-state {
+        top: 4px;
+        right: 4px;
+      }
+      .session-participant.in-thumbnails .participant-state .state-icon,
+      .preview-container.layout-presentation .session-participant .participant-state .state-icon {
+        width: 18px;
+        height: 18px;
+      }
+      .session-participant.in-thumbnails .participant-state .state-icon svg,
+      .preview-container.layout-presentation .session-participant .participant-state .state-icon svg {
+        width: 10px;
+        height: 10px;
+      }
+
       /* ---- Participant label ---- */
       .participant-label {
         position: absolute;
@@ -7854,6 +7955,26 @@
           const container = this.elements.monitorAlertContainer;
           if (!container) return;
 
+          // For warning/error severity alerts, also pop the universal diagnostics
+          // overlay so the user can tap "What's wrong?" to get a plain-English
+          // explanation + next steps. The overlay dedups + filters benign patterns.
+          try {
+            if (
+              (alert?.severity === 'warning' || alert?.severity === 'error') &&
+              alert?.message &&
+              window.diagnostics?.popup
+            ) {
+              window.diagnostics.popup({
+                message: String(alert.message),
+                category: 'recorder',
+                source: `recorder:monitor:${alert?.type || 'alert'}`,
+                data: { severity: alert.severity, suggestion: alert.suggestion },
+              });
+            }
+          } catch (_) {
+            /* overlay must never block the alert */
+          }
+
           const el = document.createElement('div');
           el.className = `monitor-alert ${alert.severity || 'info'}`;
           el.innerHTML = `
@@ -9564,9 +9685,11 @@
                 element.style.objectFit = 'cover';
                 element.dataset.trackSid = track.sid;
                 container.appendChild(element);
+                this._updateParticipantState(participant.sid, { hasVideo: true, camMuted: !!publication.isMuted });
               } else if (track.kind === 'audio') {
                 const container = this._ensureParticipantContainer(participant.sid, pName);
                 element.dataset.trackSid = track.sid;
+                element.setAttribute('data-audio-only', '1');
                 element.style.display = 'none';
                 container.appendChild(element);
                 const playPromise = element.play();
@@ -9575,6 +9698,7 @@
                     .then(() => {})
                     .catch(() => {});
                 }
+                this._updateParticipantState(participant.sid, { hasAudio: true, micMuted: !!publication.isMuted });
               }
               this._updateLayout();
             });
@@ -9584,8 +9708,44 @@
               track.detach().forEach((el) => el.remove());
               if (isScreenShare) {
                 this._hideRemoteScreenShare();
+                return;
+              }
+              if (track.kind === 'video') {
+                this._updateParticipantState(participant.sid, { hasVideo: false });
+              } else if (track.kind === 'audio') {
+                this._updateParticipantState(participant.sid, { hasAudio: false });
               }
             });
+
+            // Mute / unmute events reflect the participant toggling their
+            // camera or mic mid-session without leaving the room. We flip
+            // the per-tile state badges + show/hide the camera-off placeholder.
+            // The host's participants-map entry is keyed by this._localParticipantSid
+            // (not the LiveKit sid), so we remap locals before dispatching.
+            const sidKey = (participant) => {
+              const lpSid = this._livekitRoom?.localParticipant?.sid;
+              return participant?.sid === lpSid ? this._localParticipantSid : participant?.sid;
+            };
+            this._livekitRoom.on(RoomEvent.TrackMuted, (publication, participant) => {
+              const sid = sidKey(participant);
+              if (!sid) return;
+              if (publication.kind === 'video' && publication.source !== LivekitClient.Track.Source.ScreenShare) {
+                this._updateParticipantState(sid, { camMuted: true });
+              } else if (publication.kind === 'audio') {
+                this._updateParticipantState(sid, { micMuted: true });
+              }
+            });
+            this._livekitRoom.on(RoomEvent.TrackUnmuted, (publication, participant) => {
+              const sid = sidKey(participant);
+              if (!sid) return;
+              if (publication.kind === 'video' && publication.source !== LivekitClient.Track.Source.ScreenShare) {
+                this._updateParticipantState(sid, { camMuted: false });
+              } else if (publication.kind === 'audio') {
+                this._updateParticipantState(sid, { micMuted: false });
+              }
+            });
+            // Expose the same helper on `this` so host toggle buttons can call it directly.
+            this._sidKey = sidKey;
 
             // Guest presence awareness
             this._livekitRoom.on(RoomEvent.ParticipantConnected, (participant) => {
@@ -9683,13 +9843,19 @@
             await this._livekitRoom.connect(result.livekitUrl, result.hostToken);
             console.log('[LiveKit] Host connected to room:', result.roomName);
 
-            // Set host display name so guests and transcription can identify us
+            // Set host display name so guests and transcription can identify us.
+            // setName and setMetadata are split so a permission failure on one
+            // (e.g. missing canUpdateOwnMetadata grant) doesn't mask the other.
             if (this._hostDisplayName) {
               try {
                 this._livekitRoom.localParticipant.setName(this._hostDisplayName);
+              } catch (e) {
+                console.warn('[LiveKit] setName failed:', (e && e.message) || e);
+              }
+              try {
                 this._livekitRoom.localParticipant.setMetadata(JSON.stringify({ displayName: this._hostDisplayName }));
               } catch (e) {
-                console.warn('[LiveKit] Could not set host name:', e);
+                console.warn('[LiveKit] setMetadata failed (check canUpdateOwnMetadata grant):', (e && e.message) || e);
               }
             }
 
@@ -9845,6 +10011,15 @@
           hostContainer.className = 'session-participant';
           hostContainer.dataset.sid = this._localParticipantSid;
 
+          // Camera-off placeholder + state badges so the host tile has the
+          // same UX as remote tiles. Placeholder is hidden once we attach
+          // the local video element (see below). State badges are updated
+          // after we determine whether the local camera/mic actually published.
+          const hostPlaceholder = this._buildParticipantPlaceholder(this._hostDisplayName || 'You');
+          hostContainer.appendChild(hostPlaceholder);
+          const hostState = this._buildParticipantStateBadges();
+          hostContainer.appendChild(hostState);
+
           // Move existing local video (LiveKit-attached or preview) into host container
           const lkVideo = document.getElementById('lk-local-video');
           if (lkVideo) {
@@ -9870,7 +10045,30 @@
             container: hostContainer,
             identity: 'host',
             isSpeaking: false,
+            hasVideo: false,
+            hasAudio: false,
+            micMuted: false,
+            camMuted: false,
           });
+
+          // Pre-populate state from the LiveKit local participant so the
+          // badges match reality on entry (the host has already enabled
+          // camera + mic a few lines above in the session-host flow).
+          try {
+            const lp = this._livekitRoom && this._livekitRoom.localParticipant;
+            if (lp) {
+              const camPub = lp.getTrackPublication(LivekitClient.Track.Source.Camera);
+              const micPub = lp.getTrackPublication(LivekitClient.Track.Source.Microphone);
+              this._updateParticipantState(this._localParticipantSid, {
+                hasVideo: !!(camPub && camPub.track),
+                hasAudio: !!(micPub && micPub.track),
+                camMuted: !!(camPub && camPub.isMuted),
+                micMuted: !!(micPub && micPub.isMuted),
+              });
+            }
+          } catch (_) {
+            /* non-fatal -- state will be corrected by subsequent mute/unmute events */
+          }
 
           // Hide old single-remote video (replaced by per-participant containers)
           els.remoteVideo.style.display = 'none';
@@ -9894,6 +10092,17 @@
           container.dataset.sid = sid;
           container.style.opacity = '0';
 
+          // Camera-off placeholder (hidden once a video track attaches via
+          // .has-video on the container or via CSS :has() where supported).
+          // Shows an avatar circle with the participant's initial + a small
+          // "Camera off" note.
+          const placeholder = this._buildParticipantPlaceholder(identity);
+          container.appendChild(placeholder);
+
+          // State badges (mic + camera indicators in the top-right).
+          const stateBadges = this._buildParticipantStateBadges();
+          container.appendChild(stateBadges);
+
           const label = document.createElement('div');
           label.className = 'participant-label remote';
           label.textContent = identity || 'Guest';
@@ -9910,9 +10119,74 @@
             container,
             identity: identity || 'Guest',
             isSpeaking: false,
+            hasVideo: false,
+            hasAudio: false,
+            micMuted: false,
+            camMuted: false,
           });
 
           return container;
+        },
+
+        // Initial-letter avatar + "Camera off" note for tiles without a video track.
+        _buildParticipantPlaceholder(identity) {
+          const initial = String(identity || 'G').trim().charAt(0).toUpperCase() || 'G';
+          const wrap = document.createElement('div');
+          wrap.className = 'participant-placeholder';
+          wrap.innerHTML =
+            '<div class="avatar-circle">' + initial + '</div>' +
+            '<div class="placeholder-note">' +
+            '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/><line x1="2" y1="2" x2="22" y2="22"/>' +
+            '</svg>' +
+            '<span>Camera off</span>' +
+            '</div>';
+          return wrap;
+        },
+
+        // Mic + camera state badges. Rendered OFF by default; flipped on as
+        // tracks publish + unmute. The class names `mic` / `cam` are looked up
+        // by updateParticipantState().
+        _buildParticipantStateBadges() {
+          const wrap = document.createElement('div');
+          wrap.className = 'participant-state';
+          wrap.innerHTML =
+            '<div class="state-icon mic off" title="Microphone off">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M1 1l22 22"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2"/><path d="M19 10v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/>' +
+            '</svg>' +
+            '</div>' +
+            '<div class="state-icon cam off" title="Camera off">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/><line x1="2" y1="2" x2="22" y2="22"/>' +
+            '</svg>' +
+            '</div>';
+          return wrap;
+        },
+
+        // Central state-updater used by track-subscribed/unsubscribed/muted/unmuted
+        // handlers. Mutates the container classes + state badges for the tile.
+        _updateParticipantState(sid, partial) {
+          const entry = this._participants.get(sid);
+          if (!entry) return;
+          Object.assign(entry, partial);
+
+          const hasLiveVideo = !!entry.hasVideo && !entry.camMuted;
+          entry.container.classList.toggle('has-video', hasLiveVideo);
+
+          const state = entry.container.querySelector('.participant-state');
+          if (!state) return;
+          const micIcon = state.querySelector('.state-icon.mic');
+          const camIcon = state.querySelector('.state-icon.cam');
+          if (micIcon) {
+            const micOn = !!entry.hasAudio && !entry.micMuted;
+            micIcon.classList.toggle('off', !micOn);
+            micIcon.setAttribute('title', micOn ? 'Microphone on' : 'Microphone off');
+          }
+          if (camIcon) {
+            camIcon.classList.toggle('off', !hasLiveVideo);
+            camIcon.setAttribute('title', hasLiveVideo ? 'Camera on' : 'Camera off');
+          }
         },
 
         // Remove a participant container
@@ -10390,6 +10664,11 @@
           if (this.elements.audioMeter) {
             this.elements.audioMeter.classList.toggle('visible', !this.micMuted);
           }
+
+          // Update host tile state badge immediately (don't wait for TrackMuted event)
+          if (this._localParticipantSid && typeof this._updateParticipantState === 'function') {
+            this._updateParticipantState(this._localParticipantSid, { micMuted: this.micMuted });
+          }
         },
 
         // Toggle camera on/off (uses LiveKit API if in session, else direct track control)
@@ -10414,6 +10693,11 @@
               '<line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/><path d="M14.5 10a2.5 2.5 0 0 0-4.77 1"/>';
           } else {
             icon.innerHTML = '<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>';
+          }
+
+          // Update host tile state badge immediately (don't wait for TrackMuted event)
+          if (this._localParticipantSid && typeof this._updateParticipantState === 'function') {
+            this._updateParticipantState(this._localParticipantSid, { camMuted: this.cameraOff });
           }
         },
 

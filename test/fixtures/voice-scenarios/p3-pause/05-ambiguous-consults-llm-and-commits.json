@@ -1,0 +1,13 @@
+{
+  "name": "p3-ambiguous-consults-llm-and-commits",
+  "description": "An ambiguous partial (no clear complete/incomplete signal) past waitMs triggers the LLM classifier; when the LLM says complete with confidence, the turn commits.",
+  "phase": "p3-pause",
+  "flags": {},
+  "llm": [{ "complete": true, "confidence": 0.9, "reasoning": "clear command" }],
+  "steps": [
+    { "type": "hook", "name": "voicePartial", "args": { "text": "morning brief please" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 700 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "committed": true, "llmConsulted": 1 } }
+  ]
+}

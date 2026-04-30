@@ -1,0 +1,18 @@
+{
+  "name": "baseline-cancel-timing",
+  "description": "TTS started speaking, user interrupts 300ms in, cancel records partial playback time.",
+  "phase": "baseline",
+  "flags": {},
+  "ttsWpm": 120,
+  "steps": [
+    { "type": "systemSpeaks", "text": "let me look that up and get back to you in a moment" },
+    { "type": "assert", "ttsIsSpeaking": true },
+    { "type": "wait", "ms": 300 },
+    { "type": "userSays", "text": "wait, stop" },
+    { "type": "systemCancels" },
+    { "type": "assert", "lastTtsCancelled": true },
+    { "type": "assert", "lastTtsPlayedMsGt": 250 },
+    { "type": "assert", "lastTtsPlayedMsLt": 350 },
+    { "type": "assert", "ttsIsSpeaking": false }
+  ]
+}

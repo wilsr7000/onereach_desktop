@@ -1,0 +1,24 @@
+{
+  "name": "p1-high-stakes-always-confirms",
+  "description": "Bulk deletion is high stakes; policy forces a confirmation regardless of high confidence.",
+  "phase": "p1-confirmation",
+  "flags": {},
+  "steps": [
+    { "type": "userSays", "text": "delete all my emails" },
+    {
+      "type": "hook",
+      "name": "pipelineSim",
+      "args": {
+        "intent": "delete all my emails",
+        "content": "delete all my emails",
+        "executionType": "action",
+        "intentConfidence": 1.0,
+        "winnerConfidence": 0.98,
+        "agent": { "id": "email-agent" }
+      }
+    },
+    { "type": "assert", "metaEquals": { "decision": "confirm-first", "stakes": "high" } },
+    { "type": "assert", "ttsSpokenCount": 1 },
+    { "type": "assert", "ttsContains": "cannot be undone" }
+  ]
+}

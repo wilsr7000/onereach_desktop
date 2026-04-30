@@ -1,0 +1,11 @@
+{
+  "name": "p4-ack-suppressed",
+  "description": "Short affirmation (\"yeah\") during TTS is recognized as a backchannel and NOT treated as a barge; TTS continues.",
+  "phase": "p4-barge",
+  "flags": { "bargeIn": true },
+  "steps": [
+    { "type": "hook", "name": "ttsStart", "args": { "text": "playing some jazz for you now" } },
+    { "type": "hook", "name": "userSay", "args": { "text": "yeah" } },
+    { "type": "assert", "metaEquals": { "bargeCount": 0, "ignoreCount": 1, "lastIgnoreKind": "ack" } }
+  ]
+}

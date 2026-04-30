@@ -1,0 +1,13 @@
+{
+  "name": "p4-cooldown-expires-second-barge-fires",
+  "description": "After the 500ms cooldown lapses, a second barge fires normally.",
+  "phase": "p4-barge",
+  "flags": { "bargeIn": true },
+  "steps": [
+    { "type": "hook", "name": "ttsStart", "args": { "text": "playing music for you now" } },
+    { "type": "hook", "name": "userSay", "args": { "text": "stop" } },
+    { "type": "wait", "ms": 600 },
+    { "type": "hook", "name": "userSay", "args": { "text": "what about jazz" } },
+    { "type": "assert", "metaEquals": { "bargeCount": 2, "lastBargeKind": "command" } }
+  ]
+}

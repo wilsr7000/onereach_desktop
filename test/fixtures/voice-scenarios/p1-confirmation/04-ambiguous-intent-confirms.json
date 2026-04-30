@@ -1,0 +1,24 @@
+{
+  "name": "p1-ambiguous-intent-confirms",
+  "description": "Low intent confidence with no prior context triggers a confirmation question on an action task.",
+  "phase": "p1-confirmation",
+  "flags": {},
+  "steps": [
+    { "type": "userSays", "text": "set it to four" },
+    {
+      "type": "hook",
+      "name": "pipelineSim",
+      "args": {
+        "intent": "set it to four",
+        "content": "set it to four",
+        "executionType": "action",
+        "intentConfidence": 0.5,
+        "winnerConfidence": 0.85,
+        "hasPriorContext": false,
+        "agent": { "id": "timer-agent" }
+      }
+    },
+    { "type": "assert", "metaEquals": { "decision": "confirm-first", "stakes": "low" } },
+    { "type": "assert", "ttsContains": "I think you want to set it to four" }
+  ]
+}

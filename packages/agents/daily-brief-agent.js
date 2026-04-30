@@ -153,6 +153,26 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
   // No bid() method. Routing is 100% LLM-based via unified-bidder.js.
 
   /**
+   * Compute the HUD panelHeight for a dayView UI spec.
+   *
+   * The dayView is a stack of cards (right-now, insights, timeline,
+   * AI briefing, smart actions, focus window). On a typical day the
+   * fixed cards add up to ~540px and each timeline event adds another
+   * ~70px. We ask the HUD to grow tall enough to show everything, but
+   * cap at 900px so we never pre-empt the HUD's own viewport ceiling.
+   *
+   * @param {Object} ui - dayView spec from buildDayViewSpec()
+   * @returns {number} panelHeight in pixels (540..900)
+   */
+  computePanelHeight(ui) {
+    const BASE = 540;
+    const PER_EVENT = 70;
+    const MAX = 900;
+    const eventCount = (ui && Array.isArray(ui.events)) ? ui.events.length : 0;
+    return Math.min(MAX, BASE + eventCount * PER_EVENT);
+  },
+
+  /**
    * Execute the daily brief pipeline:
    * 1. Initialize memory
    * 2. Discover all briefing-capable agents
@@ -293,11 +313,20 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
       }
     }
 
+    // The dayView card stack (right-now, insights, timeline, briefing,
+    // smart actions, focus window) wants ~700px of vertical room before
+    // it has to scroll internally. The HUD caps panelHeight to the
+    // available screen height (viewport - 80px), so on small displays
+    // the panel scrolls -- but on anything 13"+ the whole brief fits.
+    const isDayView = ui?.type === 'dayView';
+    const panelHeight = isDayView ? this.computePanelHeight(ui) : undefined;
+
     return {
       success: true,
       message: fullSpeech,
       ui,
-      panelWidth: ui?.type === 'dayView' ? 480 : undefined,
+      panelWidth: isDayView ? 480 : undefined,
+      panelHeight,
       soundCue: { type: 'one-shot', name: 'morning-motif', volume: 0.4 },
       data: {
         type: 'morning_brief',

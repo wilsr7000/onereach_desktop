@@ -1,0 +1,59 @@
+{
+  "name": "Play jazz and check calendar (genuine composite)",
+  "description": "Genuinely composite request that the decomposer fans out into two subtasks. Each subtask runs its own auction. In subtask 1 (play jazz) only DJ-agent has plausible bid reasoning; in subtask 2 (check calendar) only calendar-agent does. Reasoning is disjoint by construction so overlap penalty does not fire. Both subtasks resolve to distinct winners. This fixture verifies the overlap penalty does NOT over-suppress legitimate composites.",
+  "subtasks": [
+    {
+      "task": { "id": "fixture-jazz-1", "content": "play some jazz" },
+      "bids": [
+        {
+          "agentId": "dj-agent",
+          "agentName": "DJ Agent",
+          "confidence": 0.9,
+          "score": 0.9,
+          "reasoning": "I play jazz music from the streaming service"
+        },
+        {
+          "agentId": "calendar-agent",
+          "agentName": "Calendar Agent",
+          "confidence": 0.3,
+          "score": 0.3,
+          "reasoning": "I check calendar events"
+        }
+      ],
+      "expected": {
+        "winners": ["dj-agent"],
+        "executionMode": "single",
+        "rationale": "Dominance gap > 0.3 even before overlap; fast path picks DJ. Disjoint reasoning means overlap penalty would not fire even at the gap threshold."
+      }
+    },
+    {
+      "task": { "id": "fixture-jazz-2", "content": "check my calendar" },
+      "bids": [
+        {
+          "agentId": "calendar-agent",
+          "agentName": "Calendar Agent",
+          "confidence": 0.9,
+          "score": 0.9,
+          "reasoning": "I list calendar events for today and the next few days"
+        },
+        {
+          "agentId": "dj-agent",
+          "agentName": "DJ Agent",
+          "confidence": 0.3,
+          "score": 0.3,
+          "reasoning": "I play music"
+        }
+      ],
+      "expected": {
+        "winners": ["calendar-agent"],
+        "executionMode": "single",
+        "rationale": "Dominance gap > 0.3; fast path picks calendar."
+      }
+    }
+  ],
+  "expected": {
+    "totalDistinctWinners": 2,
+    "winners": ["dj-agent", "calendar-agent"],
+    "rationale": "Composite is preserved through decomposer fan-out; each subtask resolves independently; no over-suppression."
+  }
+}

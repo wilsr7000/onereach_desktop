@@ -1,0 +1,13 @@
+{
+  "name": "p3-ambiguous-llm-says-incomplete-holds",
+  "description": "LLM classifier says the ambiguous partial is not complete; the detector holds the turn.",
+  "phase": "p3-pause",
+  "flags": {},
+  "llm": [{ "complete": false, "confidence": 0.8, "reasoning": "hanging phrase" }],
+  "steps": [
+    { "type": "hook", "name": "voicePartial", "args": { "text": "morning brief please" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 700 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "lastDecision": "keep-waiting", "llmConsulted": 1 } }
+  ]
+}

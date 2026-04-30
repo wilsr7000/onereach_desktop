@@ -1,0 +1,19 @@
+{
+  "name": "p3-speech-resume-clears-silence",
+  "description": "User pauses, then resumes speaking. The silence-reset brings the detector back to keep-waiting instead of committing the half-uttered partial.",
+  "phase": "p3-pause",
+  "flags": {},
+  "steps": [
+    { "type": "hook", "name": "voicePartial", "args": { "text": "what time" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 300 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "lastDecision": "keep-waiting" } },
+
+    { "type": "hook", "name": "voiceSpeechResume" },
+    { "type": "hook", "name": "voicePartial", "args": { "text": "what time is it in tokyo" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 400 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+
+    { "type": "assert", "metaEquals": { "committed": true, "commitText": "what time is it in tokyo" } }
+  ]
+}

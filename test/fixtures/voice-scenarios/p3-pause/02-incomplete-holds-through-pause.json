@@ -1,0 +1,18 @@
+{
+  "name": "p3-incomplete-holds-through-pause",
+  "description": "Trailing conjunction (\"call alice and\") holds the turn through a long pause, only committing at the max-wait ceiling.",
+  "phase": "p3-pause",
+  "flags": {},
+  "steps": [
+    { "type": "hook", "name": "voicePartial", "args": { "text": "call alice and" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 500 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "lastDecision": "keep-waiting", "lastClassification": "incomplete" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 900 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "lastDecision": "keep-waiting" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 1100 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "committed": true, "commitHitMaxWait": true } }
+  ]
+}

@@ -369,6 +369,10 @@ contextBridge.exposeInMainWorld('api', {
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   testLLMConnection: (config) => ipcRenderer.invoke('settings:test-llm', config),
 
+  // Live location: precise GPS (reported by renderer) > IP geolocation > stored.
+  getLocation: (opts) => ipcRenderer.invoke('location:get', opts || {}),
+  reportLocation: (payload) => ipcRenderer.invoke('location:report-precise', payload),
+
   // Context Provider API
   getCustomFacts: () => ipcRenderer.invoke('voice-task-sdk:get-facts'),
   addCustomFact: (key, value, category) => ipcRenderer.invoke('voice-task-sdk:add-fact', key, value, category),
@@ -533,6 +537,11 @@ contextBridge.exposeInMainWorld('api', {
       'module:uninstall',
       'module:open-web-tool',
       'module:delete-web-tool',
+      // Neo4j / Graph credentials (used by Settings UI panel)
+      'settings:neo4j:pick-and-import',
+      'settings:neo4j:test-connection',
+      // One-shot bulk push of all local spaces to the freshly-configured graph
+      'app:seed-graph',
     ];
     if (validChannels.includes(channel)) {
       return ipcRenderer.invoke(channel, ...args);
@@ -664,10 +673,9 @@ contextBridge.exposeInMainWorld('ai', {
 // Error Diagnostics Bridge
 // Turns raw error messages into plain-English, copiable recommendations.
 // Use window.diagnostics.diagnose({ message, category, source, agentId, data })
-// wherever you surface an error to a user. Also includes the universal
-// overlay popup() / onAutoPopup() / isBenignMessage() factory committed in
-// db2a614 (lib/diagnostics-overlay-preload.js).
+// wherever you surface an error to a user.
 // ---------------------------------------------------------------------------
+// Build the overlay popup API once; merged into window.diagnostics below.
 const { makeDiagnosticsOverlayAPI } = require('./lib/diagnostics-overlay-preload');
 const _diagOverlayAPI = makeDiagnosticsOverlayAPI({ ipcRenderer });
 
@@ -690,6 +698,10 @@ contextBridge.exposeInMainWorld('diagnostics', {
    * the user explicitly clicks, so calling this is free by default.
    * Automatically filters known-benign patterns and dedups identical errors
    * within a 5-minute window.
+   *
+   * @param {Object} errorContext  { message, category?, source?, agentId?, data? }
+   * @param {Object} [options]     { force?: boolean }
+   * @returns {string|null} The card id if shown, null if filtered.
    */
   popup: _diagOverlayAPI.popup,
 
@@ -698,6 +710,43 @@ contextBridge.exposeInMainWorld('diagnostics', {
 
   /** Exposed for callers that want to pre-filter before calling popup(). */
   isBenignMessage: _diagOverlayAPI.isBenignMessage,
+});
+
+// ---------------------------------------------------------------------------
+// App Issue Agent Bridge
+// Two-agent pipeline. Stage A (diagnose) is safe to call anywhere. Stage B
+// (propose a fix as a unified-diff patch) requires dev mode or ONEREACH_AUTOFIX=1.
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('issueAgent', {
+  /** Returns { available, fixStageEnabled, claudeCodeInstalled, devMode, repoRoot }. */
+  getStatus: () => ipcRenderer.invoke('issue-agent:status'),
+
+  /**
+   * High-level entry point. Any part of the app can call this.
+   * Input:  { userMessage, errorContext? }
+   * Options: { proposeFix?: bool, savePatch?: bool, forceFix?: bool }
+   * Returns: { status, diagnosis?, fix?, patchPath?, error?, degraded? }
+   */
+  report: (input, options) => ipcRenderer.invoke('issue-agent:report', input, options),
+
+  /** Save a fix proposal's patch to .cursor/patches/ and return the file path. */
+  savePatch: (fix, options) => ipcRenderer.invoke('issue-agent:save-patch', fix, options),
+});
+
+// ---------------------------------------------------------------------------
+// Critical Meeting Alarm Bridge
+// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld('criticalAlarms', {
+  onFire: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('critical-alarms:fire', handler);
+    return () => ipcRenderer.removeListener('critical-alarms:fire', handler);
+  },
+  getStatus: () => ipcRenderer.invoke('critical-alarms:status'),
+  snooze: (eventId, minutes) => ipcRenderer.invoke('critical-alarms:snooze', eventId, minutes),
+  dismiss: (eventId) => ipcRenderer.invoke('critical-alarms:dismiss', eventId),
+  reloadRules: () => ipcRenderer.invoke('critical-alarms:reload-rules'),
+  test: (overrides) => ipcRenderer.invoke('critical-alarms:test', overrides),
 });
 
 // ---------------------------------------------------------------------------

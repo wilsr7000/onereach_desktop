@@ -206,9 +206,13 @@ function getHudApiMethods() {
 
     /**
      * Notify that TTS playback has started (for mic gating).
+     * @param {number} [expectedDurationMs] Optional estimated TTS
+     *   length; scales the safety timeout so long briefs aren't
+     *   auto-cleared mid-playback.
      * @returns {Promise<{ success }>}
      */
-    speechStarted: () => ipcRenderer.invoke('hud-api:speech-started'),
+    speechStarted: (expectedDurationMs) =>
+      ipcRenderer.invoke('hud-api:speech-started', expectedDurationMs),
 
     /**
      * Notify that TTS playback has ended.

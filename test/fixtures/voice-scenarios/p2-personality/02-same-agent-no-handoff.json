@@ -1,0 +1,30 @@
+{
+  "name": "p2-same-agent-no-handoff",
+  "description": "Same agent speaks twice in a row -- no handoff bridge emitted (ever, under single-voice mode).",
+  "phase": "p2-personality",
+  "flags": {},
+  "steps": [
+    {
+      "type": "hook",
+      "name": "agentTurn",
+      "args": {
+        "agentId": "time-agent",
+        "agentName": "Time Agent",
+        "utterance": "it's three in the afternoon",
+        "contextKey": "voice"
+      }
+    },
+    {
+      "type": "hook",
+      "name": "agentTurn",
+      "args": {
+        "agentId": "time-agent",
+        "agentName": "Time Agent",
+        "utterance": "and it's Tuesday",
+        "contextKey": "voice"
+      }
+    },
+    { "type": "assert", "metaEquals": { "handoff": false, "voiceSource": "cap-chew" } },
+    { "type": "assert", "ttsSpokenCount": 2 }
+  ]
+}

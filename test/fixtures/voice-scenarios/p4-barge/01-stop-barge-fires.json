@@ -1,0 +1,11 @@
+{
+  "name": "p4-stop-barge-fires",
+  "description": "User says \"stop\" during TTS; the detector fires a stop-kind barge.",
+  "phase": "p4-barge",
+  "flags": { "bargeIn": true },
+  "steps": [
+    { "type": "hook", "name": "ttsStart", "args": { "text": "here is the weather forecast for today, it's sunny and seventy-two" } },
+    { "type": "hook", "name": "userSay", "args": { "text": "stop" } },
+    { "type": "assert", "metaEquals": { "bargeCount": 1, "lastBargeKind": "stop", "lastBargeText": "stop" } }
+  ]
+}

@@ -86,6 +86,34 @@ process.on('uncaughtException', (error, origin) => {
   // Don't exit -- let the watchdog handle truly fatal states
 });
 
+// ============================================================================
+// SINGLE INSTANCE LOCK -- critical for safe auto-update. If the user
+// double-clicks the app while an update is installing, a second instance
+// can race ShipIt's bundle replacement (corrupted install) or spawn orphan
+// processes that hold ports and file handles. Claim the lock immediately.
+// ============================================================================
+if (!app.requestSingleInstanceLock()) {
+  console.log('[SingleInstance] Another instance is already running. Exiting.');
+  app.quit();
+  // Use exit to ensure the second process actually terminates and doesn't
+  // keep running alongside the first.
+  process.exit(0);
+}
+
+app.on('second-instance', (_event, _argv, _workingDirectory) => {
+  // A second launch just brings the existing window to the front.
+  try {
+    const mainWindow = browserWindow.getMainWindow && browserWindow.getMainWindow();
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  } catch (err) {
+    console.warn('[SingleInstance] Failed to focus main window:', err.message);
+  }
+});
+
 // Enable Speech Recognition API in Electron
 // These must be set before app.whenReady()
 app.commandLine.appendSwitch('enable-speech-dispatcher');
@@ -193,10 +221,86 @@ global.openSetupWizardGlobal = () => {
   openSetupWizard();
 };
 
+/**
+ * One-shot bulk-push of every local space to the Neo4j graph.
+ *
+ * Usage (from devtools console of any window):
+ *   await window.api.invoke('app:seed-graph')
+ * Or from main-process REPL:
+ *   await globalThis.__seedGraph()
+ *
+ * Walks every local space in `getSpacesAPI().list()`, calls
+ * `spaces-sync-manager.forcePush(spaceId)` for each, and reports counts.
+ * Useful right after first-time Neo4j configuration to seed the freshly-
+ * created Aura instance with the user's existing local content. Refuses
+ * to run if the graph isn't configured (so the user sees a clear error
+ * rather than a silent no-op).
+ */
+globalThis.__seedGraph = async function __seedGraph() {
+  const start = Date.now();
+  try {
+    const { getOmniGraphClient } = require('./omnigraph-client');
+    const omniClient = getOmniGraphClient();
+    if (!omniClient || typeof omniClient.isReady !== 'function' || !omniClient.isReady()) {
+      const msg = 'Cannot seed graph: Neo4j not configured. Settings -> Neo4j -> Import .txt or paste password, then retry.';
+      console.warn('[__seedGraph]', msg);
+      return { success: false, error: msg };
+    }
+    const { getSpacesSyncManager } = require('./lib/spaces-sync-manager');
+    const sync = getSpacesSyncManager();
+    if (!sync || typeof sync.forcePush !== 'function') {
+      return { success: false, error: 'spaces-sync-manager not initialized' };
+    }
+    const { getSpacesAPI } = require('./spaces-api');
+    const api = getSpacesAPI();
+    const spaces = (await api.list()) || [];
+    console.log(`[__seedGraph] Pushing ${spaces.length} spaces to Neo4j...`);
+    let pushed = 0;
+    let failed = 0;
+    const errors = [];
+    for (const space of spaces) {
+      try {
+        await sync.forcePush(space.id);
+        pushed++;
+      } catch (e) {
+        failed++;
+        errors.push({ spaceId: space.id, error: e.message });
+      }
+    }
+    const ms = Date.now() - start;
+    console.log(`[__seedGraph] Done in ${ms}ms. pushed=${pushed} failed=${failed}`);
+    if (failed) console.warn('[__seedGraph] Errors:', errors.slice(0, 10));
+    return { success: failed === 0, pushed, failed, errors, durationMs: ms };
+  } catch (error) {
+    console.error('[__seedGraph] Fatal:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Renderer-side entry: window.api.invoke('app:seed-graph') for the Settings UI.
+ipcMain.handle('app:seed-graph', async () => {
+  return await globalThis.__seedGraph();
+});
+
 // Configure default session for better OAuth support
 app.whenReady().then(() => {
   // Set up shell.openExternal override
   setupShellOverride();
+
+  // Initialize system preferences from the OS locale. Agents ask us
+  // things like "should I show 68°F or 20°C?" -- these defaults were
+  // previously US-only assumptions living in main.md. Now we derive
+  // intelligent defaults the moment the app boots and they override
+  // the stored values unless the user has set an explicit preference.
+  try {
+    const { getSystemPreferences } = require('./lib/system-preferences');
+    getSystemPreferences().init({
+      appGetLocale: () => app.getLocale(),
+      appGetLocaleCountryCode: () => app.getLocaleCountryCode(),
+    });
+  } catch (e) {
+    log.warn('[SystemPrefs] Init failed:', e.message);
+  }
 
   // Initialize temporal-context: per-hour / per-day usage patterns that
   // let agents say "you usually ask about X at this time" and "yesterday
@@ -208,21 +312,33 @@ app.whenReady().then(() => {
     log.warn('[TemporalContext] Init failed:', e.message);
   }
 
-  // Initialize ai-pause: emergency kill switch for ALL LLM traffic. Loaded
-  // early so the paused state is restored across restarts and any
-  // subsequent AI handler that opts in via aiPause.isPaused() picks up the
-  // current state immediately. The /ai/{status,pause,resume} HTTP endpoints
-  // and ai:pause-status / ai:pause / ai:resume IPC handlers expose the
-  // surface; per-handler isPaused() guards on AI IPC handlers ship in a
-  // follow-up integration commit.
+  // Initialize the live location service. IP geolocation is kicked off
+  // immediately so the first location-aware agent request has fresh data
+  // to work with instead of stale main.md values.
   try {
-    const aiPause = require('./lib/ai-pause');
-    aiPause.init(app.getPath('userData'));
-    if (aiPause.isPaused()) {
-      log.warn('[ai-pause] AI traffic is PAUSED at startup', aiPause.getStatus());
-    }
-  } catch (err) {
-    console.warn('[ai-pause] init error:', err.message);
+    const { getLocationService } = require('./lib/location-service');
+    const locSvc = getLocationService();
+    locSvc.init(app.getPath('userData'));
+
+    // Handlers: renderer pushes precise coords from navigator.geolocation.
+    ipcMain.handle('location:report-precise', (_ev, payload) => {
+      try {
+        return { ok: locSvc.reportPrecise(payload || {}) };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+    // Handler: any renderer can fetch the current best-known location.
+    ipcMain.handle('location:get', async (_ev, opts) => {
+      try {
+        return await locSvc.getLocation(opts || {});
+      } catch (err) {
+        return { source: 'unknown', error: err.message };
+      }
+    });
+    log.info('[Location] Service initialized');
+  } catch (e) {
+    log.warn('[Location] Service failed to initialize:', e.message);
   }
 
   // Load and configure autoUpdater (must be done after app is ready)
@@ -486,6 +602,18 @@ app.whenReady().then(() => {
   logger.logAppReady();
   logQueue.info('app', 'App is ready', { loggerIsStub: logger._isStub, diagnosticLevel });
 
+  // AI Pause kill switch: load persisted state + honor AI_PAUSE env var.
+  // All ai:* IPC handlers and registered subsystem hooks observe this.
+  try {
+    const aiPause = require('./lib/ai-pause');
+    aiPause.init(app.getPath('userData'));
+    if (aiPause.isPaused()) {
+      logQueue.warn('app', 'AI traffic is PAUSED at startup', aiPause.getStatus());
+    }
+  } catch (err) {
+    console.warn('[ai-pause] init error:', err.message);
+  }
+
   // STARTUP RECOVERY: Check for and restore any missing config files from backups
   const userDataPath = app.getPath('userData');
   const protectedFiles = [
@@ -727,21 +855,20 @@ app.whenReady().then(() => {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Sync v5 boot wiring (parallel to existing spaces-sync-manager).
+  // Sync v5 Phase 2 boot wiring (parallel to existing spaces-sync-manager).
   //
   // Instantiates the local op queue, DLQ, content-addressed blob store,
   // heartbeat reporter, and sync engine. Registers diagnostics providers
-  // so /sync/queue, /sync/dlq, /sync/trace/:id return real data instead
-  // of `wired: false` placeholders.
+  // so /sync/queue and /sync/dlq return real data (Phase 1 endpoints
+  // returned `wired: false` placeholders).
   //
-  // The HEARTBEAT REPORTER is auto-started -- it reports device state to
-  // the graph even when the sync engine is idle. The SYNC ENGINE is NOT
-  // auto-started: nothing produces ops in the queue yet because v5 doesn't
-  // replace the existing spaces-sync-manager write path until a later
-  // phase. The engine starts only when explicitly invoked via
-  // `globalThis.__syncV5Demo()` or `__syncV5Engine.start()` from devtools,
-  // which is how a developer validates the protocol end-to-end without
-  // coupling the v5 sync to today's sync.
+  // The HEARTBEAT REPORTER is auto-started -- it reports device state
+  // even when the engine is idle. The SYNC ENGINE is NOT auto-started in
+  // Phase 2: nothing produces ops in the queue yet (Phase 3 wires the
+  // existing write path). The engine starts only when explicitly invoked
+  // via `globalThis.__syncV5Demo()` or `__syncV5Engine.start()` from
+  // devtools, which is how a developer validates the protocol end-to-end
+  // without coupling Phase 2 to today's sync.
   // ──────────────────────────────────────────────────────────────────────────
   try {
     const v5 = require('./lib/sync-v5');
@@ -753,7 +880,7 @@ app.whenReady().then(() => {
     const heartbeatReporter = new v5.HeartbeatReporter({
       dlqStateProvider: () => dlq.toHeartbeatState(),
       queueDepthProvider: () => queue.getDepth(),
-      // Phase 3+ will populate with the materialised replica's space count.
+      // Phase 3 will populate with the materialized replica's space count.
       replicaSpaceCountProvider: () => 0,
       // Operator-set forensic preservation flag is a future feature; null today.
       preserveUntilProvider: () => null,
@@ -769,52 +896,23 @@ app.whenReady().then(() => {
     });
 
     // ── Phase 4: causal conflict resolution + pull engine ─────────────────
-    // ConflictStore is the device-side singleton that tracks unresolved
-    // N-way conflicts (Phase 3 algebra) and exposes the subscribe() event
-    // surface the renderer-side conflict UI (downstream effort) consumes.
-    // PullEngine periodically reads remote :OperationLog rows and applies
-    // them to the local replica through tombstone gating + conflict
-    // detection (Phase 3 building blocks). It stays OFF by default in
-    // boot wiring -- start it from devtools when validating end-to-end:
-    // __syncV5.pullEngine.start()
-    //
-    // Phase 5 / commit F: localLookupFn + localApplyFn are deferred
-    // closures that look up the replica adapter at call time. The
-    // pull engine constructor runs BEFORE the replica boot block; the
-    // adapter is assigned later (line ~890 area). Because the pull
-    // engine isn't started until devtools opt-in, the closures
-    // execute well after the adapter assignment, so the deferred
-    // pattern is safe. applyMode flips to 'sqlite' when the replica
-    // is enabled, so /sync/queue.pullEngine.applyMode reflects
-    // reality even when the engine is idle.
-    let replica = null;
-    let replicaPullAdapter = null;
     const conflictStore = new v5.conflict.ConflictStore();
-    const replicaEnabledAtBoot = (global.settingsManager
-      && global.settingsManager.get('syncV5.replica.enabled') === true);
     const pullEngine = new v5.pullEngine.PullEngine({
       omniClient: getOmniGraphClient(),
       deviceId: v5.getDeviceId(),
       conflictStore,
-      localLookupFn: async (entityId) => {
-        if (!replicaPullAdapter) return null;
-        return replicaPullAdapter.localLookupFn(entityId);
+      localLookupFn: async (_entityId) => null,
+      localApplyFn: async (_args) => {
+        /* no-op stub; Phase 5+ wires the materialised replica */
       },
-      localApplyFn: async (args) => {
-        if (!replicaPullAdapter) return; // noop until adapter wired
-        return replicaPullAdapter.localApplyFn(args);
-      },
-      // sqlite when the replica is enabled (commit F); noop otherwise.
-      // The diagnostics surface (/sync/queue.pullEngine.applyMode)
-      // reads this so operators see the truth even when the engine
-      // is idle.
-      applyMode: replicaEnabledAtBoot
-        ? v5.pullEngine.APPLY_MODE.SQLITE
-        : v5.pullEngine.APPLY_MODE.NOOP,
+      // applyMode='noop' makes the engine's idle/discard state explicit in
+      // /sync/queue diagnostics so operators don't mistake "pulling" for
+      // "applying." Flips to 'sqlite' when the materialised replica lands.
+      applyMode: v5.pullEngine.APPLY_MODE.NOOP,
     });
 
-    // Register diagnostics providers so the Phase 1+ endpoints stop
-    // reporting `wired: false`.
+    // Register diagnostics providers so Phase 1+ endpoints stop reporting
+    // `wired: false`.
     v5.setProviders({
       queueProvider: () => queue.inspect(),
       dlqProvider: () => dlq.inspect(),
@@ -847,263 +945,20 @@ app.whenReady().then(() => {
     });
 
     // Auto-start the heartbeat reporter so the graph immediately knows the
-    // device is alive. Sync engine + pull engine are opt-in (see
-    // __syncV5Demo and __syncV5.pullEngine.start()).
+    // device is alive. Sync engine + pull engine are opt-in.
     heartbeatReporter.start();
 
-    // ── Phase 5 (commit B): materialised SQLite replica + cold-device migration ──
-    // The replica is gated by the syncV5.replica.enabled setting (default
-    // false). When the flag is true:
-    //   1. Open / create userData/sync-v5/replica.sqlite via better-sqlite3.
-    //   2. Apply schema (idempotent; safe to run on every boot).
-    //   3. Register as a diagnostics provider so /sync/queue surfaces
-    //      counts + schemaVersion + FTS5 availability.
-    //   4. Kick off the cold-device migration on a setImmediate so boot
-    //      time is unaffected. The migration is itself idempotent --
-    //      replica_meta.migratedFromClipboardStorageAt gates a re-run.
-    // Failures here are intentionally non-fatal: the rest of v5 still
-    // works without the replica (this is the cutover-phase pattern --
-    // the replica is wired in parallel; production reads/writes still
-    // use clipboard-storage-v2 / spaces-api until commit E flips them).
-    // `replica` and `replicaPullAdapter` are hoisted to before the
-    // pull engine constructor (commit F deferred-closure pattern).
-    // The remaining replica state variables are scoped to this block.
-    let replicaShadowWriter = null;
-    let replicaShadowReader = null;
-    let replicaValidationGate = null;
-    try {
-      const settings = global.settingsManager;
-      const replicaEnabled = settings && settings.get('syncV5.replica.enabled') === true;
-      const shadowReadEnabled = settings && settings.get('syncV5.replica.shadowReadEnabled') === true;
-      if (replicaEnabled) {
-        const path = require('path');
-        const replicaPath = path.join(app.getPath('userData'), 'sync-v5', 'replica.sqlite');
-        replica = new v5.replica.Replica({
-          dbPath: replicaPath,
-          tenantId: settings.get('syncV5.replica.tenantId') || 'default',
-          deviceId: v5.getDeviceId(),
-          noShadowPaths: settings.get('syncV5.replica.noShadowPaths') || ['gsx-agent/*.md', 'gsx-agent/**/*.md'],
-          tombstoneRetentionDays: settings.get('syncV5.replica.tombstoneRetentionDays') || null,
-        });
-        replica.init();
-
-        // ── Pull-engine adapter (commit F) ──
-        // The deferred closures we passed to PullEngine above look up
-        // this adapter at call time. Assigning it here (after replica
-        // is open) means a subsequent `__syncV5.pullEngine.start()`
-        // from devtools writes remote ops directly into the replica
-        // via upsertItem / softDeleteItem. applyMode='sqlite' is
-        // already set on the engine (see the pull engine
-        // construction above) so /sync/queue.pullEngine.applyMode
-        // reflects "remote ops will land in SQLite."
-        try {
-          replicaPullAdapter = v5.replica.buildPullEngineAdapter({ replica });
-          console.log(
-            '[sync-v5/replica] pull-engine adapter wired -- pull engine\'s localApplyFn now writes through replica'
-          );
-        } catch (paErr) {
-          console.warn(
-            '[sync-v5/replica] pull-engine adapter wire failed (replica still works for shadow-write/-read):',
-            paErr.message
-          );
-          replicaPullAdapter = null;
-        }
-
-        // ── Shadow-writer (commit C) ──
-        // Subscribe to spaces-api's existing event surface so every
-        // successful write through the primary path also writes the
-        // replica. Failures are isolated -- shadow-write counters tick
-        // up, but the primary write has already succeeded and the rest
-        // of the app is unaffected.
-        try {
-          const { getSpacesAPI } = require('./spaces-api');
-          replicaShadowWriter = v5.replica.attachShadowWriter({
-            spacesApi: getSpacesAPI(),
-            replica,
-            deviceId: v5.getDeviceId(),
-          });
-          console.log('[sync-v5/replica] shadow-writer attached (15 events subscribed)');
-        } catch (swErr) {
-          console.warn('[sync-v5/replica] shadow-writer attach failed (replica still works for reads/migration):', swErr.message);
-          replicaShadowWriter = null;
-        }
-
-        // ── Shadow-reader + validation gate (commit D) ──
-        // Only wire when the operator explicitly opts in via
-        // syncV5.replica.shadowReadEnabled. The gate counts
-        // invocations toward the §6.6 cutover thresholds; the reader
-        // does set/field comparisons and records divergences. Both
-        // are read-only with respect to spaces-api -- no behavioural
-        // change for the primary read path. Gate counters persist
-        // to replica_meta so a restart during the validation window
-        // doesn't reset progress.
-        if (shadowReadEnabled) {
-          try {
-            replicaValidationGate = new v5.replica.ValidationGate({
-              replica,
-              tagMutationsProvider: () => {
-                if (!replicaShadowWriter) return 0;
-                const snap = replicaShadowWriter.inspect();
-                const e = snap.perEvent || {};
-                return ((e['item:tags:updated'] || {}).writes || 0)
-                  + ((e['tags:renamed'] || {}).writes || 0)
-                  + ((e['tags:deleted'] || {}).writes || 0);
-              },
-            }).init();
-
-            const { getSpacesAPI } = require('./spaces-api');
-            replicaShadowReader = v5.replica.attachShadowReader({
-              spacesApi: getSpacesAPI(),
-              replica,
-              gate: replicaValidationGate,
-              hotPathSampleRate: 10,
-            });
-            console.log(
-              '[sync-v5/replica] shadow-reader + validation gate attached (sample 1-in-10 hot paths)'
-            );
-          } catch (srErr) {
-            console.warn(
-              '[sync-v5/replica] shadow-reader attach failed (gate disabled until next boot):',
-              srErr.message
-            );
-            replicaShadowReader = null;
-            if (replicaValidationGate) {
-              try { replicaValidationGate.close(); } catch (_e) { /* ok */ }
-              replicaValidationGate = null;
-            }
-          }
-        } else {
-          console.log('[sync-v5/replica] shadow-read disabled (syncV5.replica.shadowReadEnabled=false)');
-        }
-
-        // ── Cutover provider (commit E) ──
-        // The read-path flip. When syncV5.replica.cutoverEnabled is
-        // true AND validationGate.cutoverAllowed() is true (per
-        // §6.6: thresholds + ≥7-day floor + zero divergences),
-        // spaces-api reads route through the replica via
-        // setCutoverProvider. Falls through to the primary path on
-        // miss/error per syncV5.replica.fallbackToOldPath.
-        //
-        // Default: BOTH gates default off. The code path is wired
-        // here so flipping cutoverEnabled at runtime activates the
-        // route on the next boot; the live flip path (no restart
-        // required) is part of a follow-up commit.
-        let replicaCutoverActive = false;
-        try {
-          const cutoverEnabled = settings && settings.get('syncV5.replica.cutoverEnabled') === true;
-          const fallbackToOldPath = !settings || settings.get('syncV5.replica.fallbackToOldPath') !== false;
-          if (cutoverEnabled) {
-            const gateAllows = !replicaValidationGate || replicaValidationGate.cutoverAllowed();
-            if (gateAllows) {
-              const provider = v5.replica.buildCutoverProvider({ replica });
-              const { getSpacesAPI } = require('./spaces-api');
-              getSpacesAPI().setCutoverProvider(provider, { fallbackEnabled: fallbackToOldPath });
-              replicaCutoverActive = true;
-              console.log(
-                '[sync-v5/replica] CUTOVER ACTIVE -- spaces-api reads now route through replica',
-                fallbackToOldPath ? '(fallback enabled)' : '(strict mode, no fallback)'
-              );
-            } else {
-              console.log(
-                '[sync-v5/replica] cutoverEnabled=true BUT validation gate refuses (cutoverAllowed=false); reads stay on primary. See /sync/replica/validation for blockers.'
-              );
-            }
-          } else {
-            console.log('[sync-v5/replica] cutover disabled; reads stay on primary path');
-          }
-        } catch (cutoverErr) {
-          console.warn('[sync-v5/replica] cutover wiring failed (replica still works for shadow-write):', cutoverErr.message);
-        }
-
-        // Compose the diagnostics provider so /sync/queue.replica
-        // surfaces the replica state, shadow-writer counters,
-        // shadow-reader counters, and cutover state together.
-        // Validation gate is exposed at /sync/replica/validation
-        // as its own endpoint (the cutover flag check above reads
-        // from it in real time).
-        v5.setProviders({
-          replica: {
-            inspect: () => ({
-              ...replica.inspect(),
-              shadowWriter: replicaShadowWriter
-                ? replicaShadowWriter.inspect()
-                : { wired: false, note: 'shadow-writer not attached' },
-              shadowReader: replicaShadowReader
-                ? replicaShadowReader.inspect()
-                : { wired: false, note: 'shadow-reader not attached (syncV5.replica.shadowReadEnabled=false)' },
-              cutover: {
-                enabled: !!(settings && settings.get('syncV5.replica.cutoverEnabled') === true),
-                active: replicaCutoverActive,
-                fallbackToOldPath: !settings || settings.get('syncV5.replica.fallbackToOldPath') !== false,
-              },
-              pullAdapter: replicaPullAdapter
-                ? replicaPullAdapter.inspect()
-                : { wired: false, note: 'pull-engine adapter not attached (replica disabled)' },
-            }),
-          },
-          validationGate: replicaValidationGate || null,
-        });
-        console.log('[sync-v5/replica] initialised at', replicaPath, '(schemaVersion', replica.schemaVersion + ')');
-
-        // Cold-device migration: non-blocking, idempotent. Runs once on
-        // first boot after the flag flipped to true. Re-runs no-op via
-        // replica_meta.migratedFromClipboardStorageAt.
-        setImmediate(async () => {
-          try {
-            const { getSharedStorage } = require('./clipboard-storage-v2');
-            const storage = getSharedStorage();
-            const result = await v5.replica.migrateFromClipboardStorage({
-              replica,
-              storage,
-              deviceId: v5.getDeviceId(),
-              blobStore,
-            });
-            if (result.ran) {
-              console.log(
-                '[sync-v5/replica] migration complete:',
-                'spaces=' + result.spacesMigrated,
-                'items=' + result.itemsMigrated,
-                'hashed=' + result.contentHashed,
-                'skipped=' + result.contentSkipped,
-                'errors=' + result.errors.length,
-                'duration=' + result.durationMs + 'ms'
-              );
-            } else {
-              console.log('[sync-v5/replica] migration already complete (' + result.previousMigratedAt + ')');
-            }
-          } catch (mErr) {
-            console.warn('[sync-v5/replica] migration failed (non-fatal):', mErr.message);
-          }
-        });
-      } else {
-        console.log('[sync-v5/replica] disabled (syncV5.replica.enabled=false); skipping init');
-      }
-    } catch (replicaErr) {
-      console.warn('[sync-v5/replica] init failed (non-fatal; rest of v5 still works):', replicaErr.message);
-      replica = null;
-    }
-
-    // ── Phase 4: periodic compactor scheduler ─────────────────────────────
-    // Runs once per off-peak window per day. Walks all spaces, calls
-    // v5.snapshot.compactSpace(spaceId) for each. Bounded compute (one
-    // cypher tx per space, sub-second on Aura) and operator-disable
-    // via syncV5.compactorEnabled setting (default true). Compactor
-    // does nothing for spaces with <1 snapshot, so empty graphs are
-    // free.
+    // ── Phase 4: periodic compactor scheduler (off-peak; kill-switch via setting) ──
     let _compactorLastRun = 0;
     const compactorInterval = setInterval(async () => {
       try {
         const settings = global.settingsManager;
         if (settings && settings.get('syncV5.compactorEnabled') === false) return;
         const hour = new Date().getHours();
-        // Off-peak window: 2am - 4am local. Skip otherwise.
         if (hour < 2 || hour > 4) return;
-        // At most once per 24h (the off-peak gate fires on every interval
-        // tick during the 2-4am window; this prevents multiple runs per day).
         const now = Date.now();
         if (now - _compactorLastRun < 23 * 60 * 60 * 1000) return;
         _compactorLastRun = now;
-
         const { getSpacesAPI } = require('./spaces-api');
         const spaces = (await getSpacesAPI().list()) || [];
         let kept = 0;
@@ -1119,44 +974,21 @@ app.whenReady().then(() => {
             console.warn('[sync-v5/compactor] space failed:', space.id, spaceErr.message);
           }
         }
-        console.log(
-          `[sync-v5/compactor] daily run: ${spaces.length} spaces, kept=${kept}, collapsed=${collapsed}, opLogCollapsed=${opLogCollapsed}`
-        );
+        console.log(`[sync-v5/compactor] daily run: ${spaces.length} spaces, kept=${kept}, collapsed=${collapsed}, opLogCollapsed=${opLogCollapsed}`);
       } catch (err) {
         console.warn('[sync-v5/compactor] error:', err.message);
       }
-    }, 60 * 60 * 1000); // hourly check; off-peak window gates actual run
+    }, 60 * 60 * 1000);
     if (compactorInterval && typeof compactorInterval.unref === 'function') {
       compactorInterval.unref();
     }
 
     // Expose for devtools / future-phase wiring.
-    globalThis.__syncV5 = {
-      queue,
-      dlq,
-      blobStore,
-      heartbeatReporter,
-      syncEngine,
-      conflictStore,
-      pullEngine,
-      compactorInterval,
-      replica,
-      replicaShadowWriter,
-      replicaShadowReader,
-      replicaValidationGate,
-      replicaPullAdapter,
-    };
+    globalThis.__syncV5 = { queue, dlq, blobStore, heartbeatReporter, syncEngine, conflictStore, pullEngine, compactorInterval };
     globalThis.__syncV5Engine = syncEngine;
-    const _replicaState = !replica
-      ? 'disabled'
-      : (replicaShadowReader ? 'live + shadow-write + shadow-read' : 'live + shadow-write');
-    console.log(
-      '[sync-v5] wired (heartbeat started; sync engine + pull engine idle; compactor scheduled off-peak; replica',
-      _replicaState,
-      ')'
-    );
+    console.log('[sync-v5] Phase 2 wired (heartbeat started; engine idle until __syncV5Demo runs)');
   } catch (v5Err) {
-    console.warn('[sync-v5] boot wiring failed:', v5Err.message);
+    console.warn('[sync-v5] Phase 2 boot wiring failed:', v5Err.message);
   }
 
   /**
@@ -1166,13 +998,19 @@ app.whenReady().then(() => {
    * Usage from devtools console:
    *   await globalThis.__syncV5Demo({ content: 'hello world', entityId: 'demo-1' })
    *
+   * What it does:
+   *   1. Enqueues a fake `asset.upsert` op carrying `content` as the payload.
+   *   2. Starts the sync engine if not already running.
+   *   3. Drains once (or polls until the op acks / parks).
+   *   4. Returns the result so the caller can verify graph + heartbeat state.
+   *
    * Refuses to run if Neo4j isn't configured (the engine would just retry
    * forever otherwise -- explicit error is friendlier).
    */
   globalThis.__syncV5Demo = async function __syncV5Demo(opts = {}) {
     const { entityId = `demo-${Date.now()}`, content = 'sync-v5 demo' } = opts;
     if (!globalThis.__syncV5) {
-      return { success: false, error: 'sync-v5 boot wiring failed; restart and check logs' };
+      return { success: false, error: 'Phase 2 wiring failed at boot; restart and check logs' };
     }
     try {
       const { getOmniGraphClient } = require('./omnigraph-client');
@@ -1400,10 +1238,41 @@ app.whenReady().then(() => {
           agent,
         });
 
-        // Start agent (delayed to allow app to fully initialize)
+        // Start agent (delayed to allow app to fully initialize).
+        // Honor the AI pause kill switch so we don't start the scan loop
+        // while paused, and register a hook so future pause/resume toggles
+        // stop/start the scan loop without an app restart.
         setTimeout(() => {
-          agent.start();
-          console.log('[App] App Manager Agent started');
+          try {
+            const aiPause = require('./lib/ai-pause');
+            if (aiPause.isPaused()) {
+              agent.start();
+              agent.pause();
+              console.warn('[App] App Manager Agent started in PAUSED state (AI pause active)');
+            } else {
+              agent.start();
+              console.log('[App] App Manager Agent started');
+            }
+            aiPause.registerHook({
+              name: 'app-manager-agent',
+              onPause: () => {
+                try {
+                  agent.pause();
+                } catch (err) {
+                  console.warn('[App] app-manager-agent pause hook error:', err.message);
+                }
+              },
+              onResume: () => {
+                try {
+                  agent.resume();
+                } catch (err) {
+                  console.warn('[App] app-manager-agent resume hook error:', err.message);
+                }
+              },
+            });
+          } catch (err) {
+            console.warn('[App] App Manager Agent startup error:', err.message);
+          }
         }, 5000);
 
         // Set up Agent Escalation IPC handlers
@@ -1573,6 +1442,35 @@ app.whenReady().then(() => {
     console.log('[Main] Spaces API initialized');
   } catch (error) {
     console.error('[Main] Error setting up Spaces API:', error);
+  }
+
+  // ── Graph-as-source-of-truth cutover ──
+  // When syncV5.replica.cutoverEnabled is true AND direct-Aura is configured,
+  // install a CutoverProvider on the SpacesAPI so reads route through Aura
+  // instead of clipboard-storage-v2. Skips the §6.6 validation gate
+  // deliberately. Fallback to local on graph error is enabled by default.
+  try {
+    const settings = global.settingsManager;
+    const cutoverEnabled = settings && settings.get('syncV5.replica.cutoverEnabled') === true;
+    if (cutoverEnabled) {
+      const { getOmniGraphClient } = require('./omnigraph-client');
+      const omni = getOmniGraphClient();
+      if (omni && typeof omni.isReady === 'function' && omni.isReady()) {
+        const { buildDirectGraphCutoverProvider } = require('./lib/sync-v5/replica/direct-graph-cutover-provider');
+        const provider = buildDirectGraphCutoverProvider({ omniClient: omni });
+        const fallback = !settings || settings.get('syncV5.replica.fallbackToOldPath') !== false;
+        const { getSpacesAPI } = require('./spaces-api');
+        getSpacesAPI().setCutoverProvider(provider, { fallbackEnabled: fallback });
+        console.log(
+          '[Main] CUTOVER ACTIVE: spaces-api reads now route through direct-Aura',
+          fallback ? '(fallback to local on error)' : '(strict: no fallback)'
+        );
+      } else {
+        console.log('[Main] cutoverEnabled=true but OmniGraph not ready; reads stay local');
+      }
+    }
+  } catch (cutoverErr) {
+    console.warn('[Main] Cutover wiring failed (reads stay local):', cutoverErr.message);
   }
 
   // Setup App Actions IPC (for voice-controlled app navigation)
@@ -3489,8 +3387,13 @@ function setupSpacesAPI() {
     // SECURITY: Validate partition format
     const validTabPattern = /^persist:tab-\d+-[a-z0-9]+$/;
     const validGsxPattern = /^persist:gsx-(edison|staging|production|dev)(-[a-f0-9-]+)?$/;
+    const validIdwPattern = /^persist:idw-[a-zA-Z0-9_-]{1,64}$/;
 
-    if (!validTabPattern.test(partition) && !validGsxPattern.test(partition)) {
+    if (
+      !validTabPattern.test(partition) &&
+      !validGsxPattern.test(partition) &&
+      !validIdwPattern.test(partition)
+    ) {
       console.warn(`[MultiTenant] Rejected invalid partition: ${partition}`);
       return { success: false, error: 'Invalid partition format' };
     }
@@ -4229,19 +4132,40 @@ function setupSpacesAPI() {
   // All renderer processes use these instead of direct API calls.
   // =========================================================================
 
+  const aiPause = require('./lib/ai-pause');
+  const callerIdentity = require('./lib/caller-identity');
+
+  /**
+   * Stamp an `opts` object with the caller's agent identity for billing
+   * attribution. Explicit opts.agentId wins; otherwise we derive from the
+   * sending webContents (web tools, main windows).
+   */
+  function _attributeOpts(event, opts) {
+    if (!opts || typeof opts !== 'object') opts = {};
+    if (!opts.agentId) {
+      const who = callerIdentity.identifyEvent(event);
+      if (who.agentId) {
+        opts = { ...opts, agentId: who.agentId, agentName: who.agentName };
+      }
+    }
+    return opts;
+  }
+
   ipcMain.handle('ai:chat', async (event, opts) => {
+    if (aiPause.isPaused()) return aiPause.pausedError();
     try {
       const ai = require('./lib/ai-service');
-      return await ai.chat(opts);
+      return await ai.chat(_attributeOpts(event, opts));
     } catch (error) {
       return { error: error.message, code: error.code || 'AI_ERROR' };
     }
   });
 
   ipcMain.handle('ai:complete', async (event, prompt, opts = {}) => {
+    if (aiPause.isPaused()) return aiPause.pausedError();
     try {
       const ai = require('./lib/ai-service');
-      const text = await ai.complete(prompt, opts);
+      const text = await ai.complete(prompt, _attributeOpts(event, opts));
       return { content: text };
     } catch (error) {
       return { error: error.message, code: error.code || 'AI_ERROR' };
@@ -4249,9 +4173,10 @@ function setupSpacesAPI() {
   });
 
   ipcMain.handle('ai:json', async (event, prompt, opts = {}) => {
+    if (aiPause.isPaused()) return aiPause.pausedError();
     try {
       const ai = require('./lib/ai-service');
-      const data = await ai.json(prompt, opts);
+      const data = await ai.json(prompt, _attributeOpts(event, opts));
       return { data };
     } catch (error) {
       return { error: error.message, code: error.code || 'AI_ERROR' };
@@ -4259,36 +4184,210 @@ function setupSpacesAPI() {
   });
 
   ipcMain.handle('ai:vision', async (event, imageData, prompt, opts = {}) => {
+    if (aiPause.isPaused()) return aiPause.pausedError();
     try {
       const ai = require('./lib/ai-service');
-      return await ai.vision(imageData, prompt, opts);
+      return await ai.vision(imageData, prompt, _attributeOpts(event, opts));
     } catch (error) {
       return { error: error.message, code: error.code || 'AI_ERROR' };
     }
   });
 
   ipcMain.handle('ai:embed', async (event, input, opts = {}) => {
+    if (aiPause.isPaused()) return aiPause.pausedError();
     try {
       const ai = require('./lib/ai-service');
-      return await ai.embed(input, opts);
+      return await ai.embed(input, _attributeOpts(event, opts));
     } catch (error) {
       return { error: error.message, code: error.code || 'AI_ERROR' };
     }
   });
 
   ipcMain.handle('ai:transcribe', async (event, audioBufferArray, opts = {}) => {
+    if (aiPause.isPaused()) return aiPause.pausedError();
     try {
       const ai = require('./lib/ai-service');
       // audioBufferArray comes from renderer as an ArrayBuffer - convert to Node Buffer
       const audioBuffer = Buffer.from(audioBufferArray);
-      return await ai.transcribe(audioBuffer, opts);
+      return await ai.transcribe(audioBuffer, _attributeOpts(event, opts));
     } catch (error) {
       return { error: error.message, code: error.code || 'AI_ERROR' };
     }
   });
 
+  // ==========================================================================
+  // ERROR DIAGNOSTICS
+  // Plain-English, copiable recommendations for end users when something breaks.
+  // Tries the built-in hint table first, then Claude Code, then the AI service,
+  // then a structured fallback. See lib/error-diagnostics.js for details.
+  // ==========================================================================
+
+  // Pull recent log entries relevant to an error from the in-process log queue.
+  // Used to prefill the diagnosis prompt with context the LLM would otherwise
+  // have to guess at (prior warnings, related errors in the same category).
+  function _collectRecentDiagnosticsLogs(errorContext = {}, opts = {}) {
+    try {
+      const { getLogQueue } = require('./lib/log-event-queue');
+      const queue = getLogQueue();
+      if (!queue || typeof queue.query !== 'function') return [];
+      const sinceMs = opts.since ? new Date(opts.since).getTime() : Date.now() - 5 * 60 * 1000;
+      const results = queue.query({
+        category: errorContext?.category || undefined,
+        since: new Date(sinceMs).toISOString(),
+        limit: Math.min(opts.limit || 20, 50),
+      });
+      return Array.isArray(results) ? results : [];
+    } catch {
+      return [];
+    }
+  }
+
+  ipcMain.handle('diagnostics:diagnose', async (_event, errorContext, options = {}) => {
+    try {
+      const diagnostics = require('./lib/error-diagnostics');
+      const opts = { ...(options || {}) };
+      if (!opts.appVersion) {
+        try {
+          opts.appVersion = app.getVersion();
+        } catch {
+          /* non-fatal */
+        }
+      }
+      if (!Array.isArray(opts.recentLogs)) {
+        opts.recentLogs = _collectRecentDiagnosticsLogs(errorContext);
+      }
+      return await diagnostics.diagnoseError(errorContext, opts);
+    } catch (error) {
+      return { error: error.message || String(error), code: 'DIAGNOSTICS_ERROR' };
+    }
+  });
+
+  // Lightweight helper that returns the most recent log entries relevant to an
+  // error context. Used by the renderer to prefill the diagnosis request and by
+  // the "Copy" bundle in the HUD.
+  ipcMain.handle('diagnostics:get-recent-logs', async (_event, { category, since, limit } = {}) => {
+    try {
+      return {
+        logs: _collectRecentDiagnosticsLogs({ category }, { since, limit }),
+      };
+    } catch (error) {
+      return { logs: [], error: error.message };
+    }
+  });
+
+  // ==========================================================================
+  // APP ISSUE AGENT
+  // Two-agent triage: Agent A diagnoses, Agent B (opt-in, dev-mode) proposes
+  // a fix as a unified-diff patch. Any function in the app can call
+  // window.issueAgent.report({...}) or from main use require('./lib/app-issue-agent').
+  // See lib/app-issue-agent.js for the full contract.
+  // ==========================================================================
+  ipcMain.handle('issue-agent:status', async () => {
+    try {
+      const agent = require('./lib/app-issue-agent');
+      return await agent.getStatus();
+    } catch (error) {
+      return { available: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('issue-agent:report', async (_event, input = {}, options = {}) => {
+    try {
+      const agent = require('./lib/app-issue-agent');
+      const opts = { ...(options || {}) };
+      if (!Array.isArray(opts.recentLogs)) {
+        opts.recentLogs = _collectRecentDiagnosticsLogs(input.errorContext || {}, {});
+      }
+      return await agent.reportIssue(input, opts);
+    } catch (error) {
+      return { status: 'error', error: error.message || String(error) };
+    }
+  });
+
+  ipcMain.handle('issue-agent:save-patch', async (_event, fix, options = {}) => {
+    try {
+      const agent = require('./lib/app-issue-agent');
+      const saved = await agent.savePatch(fix, options || {});
+      return { success: true, ...saved };
+    } catch (error) {
+      return { success: false, error: error.message || String(error) };
+    }
+  });
+
+  // ==========================================================================
+  // CRITICAL MEETING ALARM AGENT
+  // Background system agent: polls the calendar + user-authored rules file,
+  // fires alarms via voice / HUD / OS notifications at configured lead times.
+  // See packages/agents/critical-meeting-alarm-agent.js + lib/critical-meeting-rules.js.
+  // ==========================================================================
+  function _criticalAlarmAgent() {
+    try {
+      return require('./packages/agents/critical-meeting-alarm-agent');
+    } catch (err) {
+      log.warn('agent', 'critical-meeting-alarm-agent unavailable', { error: err.message });
+      return null;
+    }
+  }
+
+  ipcMain.handle('critical-alarms:status', async () => {
+    try {
+      const agent = _criticalAlarmAgent();
+      if (!agent) return { isMonitoring: false, upcomingAlarms: [], error: 'agent not loaded' };
+      return agent.getStatus();
+    } catch (error) {
+      return { isMonitoring: false, upcomingAlarms: [], error: error.message };
+    }
+  });
+
+  ipcMain.handle('critical-alarms:snooze', async (_event, eventId, minutes) => {
+    try {
+      const agent = _criticalAlarmAgent();
+      if (!agent) return { success: false, error: 'agent not loaded' };
+      const mins = Number.isFinite(minutes) && minutes > 0 ? minutes : 5;
+      const until = Date.now() + mins * 60 * 1000;
+      const ok = await agent.snooze(eventId, until);
+      return { success: ok, untilEpochMs: until };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('critical-alarms:dismiss', async (_event, eventId) => {
+    try {
+      const agent = _criticalAlarmAgent();
+      if (!agent) return { success: false, cancelled: 0 };
+      const cancelled = await agent.dismiss(eventId);
+      return { success: true, cancelled };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('critical-alarms:reload-rules', async () => {
+    try {
+      const agent = _criticalAlarmAgent();
+      if (!agent) return { success: false };
+      await agent.reloadRules();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('critical-alarms:test', async (_event, overrides) => {
+    try {
+      const agent = _criticalAlarmAgent();
+      if (!agent) return { success: false, error: 'agent not loaded' };
+      return await agent.test(overrides || {});
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Streaming chat via IPC event channels
   ipcMain.handle('ai:chatStream', async (event, opts) => {
+    if (aiPause.isPaused()) return aiPause.pausedError();
+    opts = _attributeOpts(event, opts);
     const requestId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
     try {
@@ -4371,89 +4470,27 @@ function setupSpacesAPI() {
     }
   });
 
-  ipcMain.handle('ai:imageGenerate', async (event, prompt, options = {}) => {
-    try {
-      const ai = require('./lib/ai-service');
-      return await ai.imageGenerate(prompt, options);
-    } catch (error) {
-      console.error('[AI IPC] imageGenerate error:', error.message);
-      throw error;
-    }
-  });
-
   // Emergency kill switch for ALL LLM traffic (see lib/ai-pause.js).
-  // /ai/pause + /ai/resume + /ai/status HTTP endpoints in lib/log-server.js
-  // expose the same surface for external tools (curl, browser DevTools, CI).
   ipcMain.handle('ai:pause', async (_event, reason) => {
-    const aiPause = require('./lib/ai-pause');
     return await aiPause.pause(reason || 'ipc');
   });
+
   ipcMain.handle('ai:resume', async () => {
-    const aiPause = require('./lib/ai-pause');
     return await aiPause.resume();
   });
+
   ipcMain.handle('ai:pause-status', async () => {
-    const aiPause = require('./lib/ai-pause');
     return aiPause.getStatus();
   });
 
-  // ==========================================================================
-  // ERROR DIAGNOSTICS
-  // Plain-English, copiable recommendations for end users when something breaks.
-  // Tries the built-in hint table first, then Claude Code, then the AI service,
-  // then a structured fallback. See lib/error-diagnostics.js for details.
-  // ==========================================================================
-
-  // Pull recent log entries relevant to an error from the in-process log queue.
-  // Used to prefill the diagnosis prompt with context the LLM would otherwise
-  // have to guess at (prior warnings, related errors in the same category).
-  function _collectRecentDiagnosticsLogs(errorContext = {}, opts = {}) {
+  ipcMain.handle('ai:imageGenerate', async (event, prompt, options = {}) => {
+    if (aiPause.isPaused()) return aiPause.pausedError();
     try {
-      const { getLogQueue } = require('./lib/log-event-queue');
-      const queue = getLogQueue();
-      if (!queue || typeof queue.query !== 'function') return [];
-      const sinceMs = opts.since ? new Date(opts.since).getTime() : Date.now() - 5 * 60 * 1000;
-      const results = queue.query({
-        category: errorContext?.category || undefined,
-        since: new Date(sinceMs).toISOString(),
-        limit: Math.min(opts.limit || 20, 50),
-      });
-      return Array.isArray(results) ? results : [];
-    } catch {
-      return [];
-    }
-  }
-
-  ipcMain.handle('diagnostics:diagnose', async (_event, errorContext, options = {}) => {
-    try {
-      const diagnostics = require('./lib/error-diagnostics');
-      const opts = { ...(options || {}) };
-      if (!opts.appVersion) {
-        try {
-          opts.appVersion = app.getVersion();
-        } catch {
-          /* non-fatal */
-        }
-      }
-      if (!Array.isArray(opts.recentLogs)) {
-        opts.recentLogs = _collectRecentDiagnosticsLogs(errorContext);
-      }
-      return await diagnostics.diagnoseError(errorContext, opts);
+      const ai = require('./lib/ai-service');
+      return await ai.imageGenerate(prompt, _attributeOpts(event, options));
     } catch (error) {
-      return { error: error.message || String(error), code: 'DIAGNOSTICS_ERROR' };
-    }
-  });
-
-  // Lightweight helper that returns the most recent log entries relevant to an
-  // error context. Used by the renderer to prefill the diagnosis request and by
-  // the "Copy" bundle in the HUD.
-  ipcMain.handle('diagnostics:get-recent-logs', async (_event, { category, since, limit } = {}) => {
-    try {
-      return {
-        logs: _collectRecentDiagnosticsLogs({ category }, { since, limit }),
-      };
-    } catch (error) {
-      return { logs: [], error: error.message };
+      console.error('[AI IPC] imageGenerate error:', error.message);
+      throw error;
     }
   });
 
@@ -8525,6 +8562,100 @@ function setupIPC() {
     return saved;
   });
 
+  // ==========================================================================
+  // NEO4J / GRAPH credentials -- file picker + test connection
+  // The Neo4j Aura instance is the canonical source of truth for Spaces.
+  // The Settings UI calls these handlers to import the canonical Aura .txt
+  // file or to verify auth without leaving the panel.
+  // ==========================================================================
+  ipcMain.handle('settings:neo4j:pick-and-import', async (event) => {
+    try {
+      const sender = event?.sender;
+      const win =
+        (sender && BrowserWindow.fromWebContents(sender)) ||
+        BrowserWindow.getFocusedWindow() ||
+        BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+      const result = await dialog.showOpenDialog(win || undefined, {
+        title: 'Import Neo4j Aura credentials',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Neo4j Aura credentials', extensions: ['txt'] },
+          { name: 'All files', extensions: ['*'] },
+        ],
+        defaultPath: app.getPath('desktop'),
+      });
+      if (!result || result.canceled || !result.filePaths || !result.filePaths[0]) {
+        return { cancelled: true };
+      }
+      const { parseAuraCredentialsFile, applyToSettings } = require('./lib/neo4j-credentials');
+      const creds = parseAuraCredentialsFile(result.filePaths[0]);
+      // Apply immediately so the live OmniGraph client picks them up; the
+      // renderer will also call save() right after to persist the values it
+      // displays in the form.
+      applyToSettings(creds);
+      // Never return the password to the renderer in plain text -- the form
+      // already has it (the user pasted/imported it). Return a redacted echo
+      // for the status line.
+      return {
+        success: true,
+        creds: {
+          uri: creds.uri,
+          username: creds.username,
+          password: creds.password, // The renderer needs to fill the form field
+          database: creds.database,
+          instanceId: creds.instanceId,
+          instanceName: creds.instanceName,
+        },
+      };
+    } catch (error) {
+      log.warn('app', 'Neo4j import failed', { error: error.message });
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('settings:neo4j:test-connection', async (_event, creds) => {
+    try {
+      if (!creds || !creds.password) {
+        return { success: false, error: 'Password is required' };
+      }
+      // Apply temporarily to the live client so we can run a real query.
+      // Snapshot existing config so we can restore on failure (rollback) --
+      // we don't want a failed test to overwrite the user's good settings.
+      const { getOmniGraphClient } = require('./omnigraph-client');
+      const omniClient = getOmniGraphClient();
+      const snapshot = {
+        neo4jPassword: omniClient.neo4jPassword,
+        neo4jUri: omniClient.neo4jUri,
+        neo4jUser: omniClient.neo4jUser,
+        database: omniClient.database,
+      };
+      omniClient.setNeo4jConfig({
+        neo4jPassword: creds.password,
+        ...(creds.uri ? { neo4jUri: creds.uri } : {}),
+        ...(creds.username ? { neo4jUser: creds.username } : {}),
+        ...(creds.database ? { database: creds.database } : {}),
+      });
+      try {
+        const records = await omniClient.executeQuery('MATCH (n) RETURN count(n) AS c');
+        let nodeCount = null;
+        if (Array.isArray(records) && records[0]) {
+          const c = records[0].c;
+          if (typeof c === 'number') nodeCount = c;
+          else if (c && typeof c.low === 'number') nodeCount = c.low; // neo4j Integer
+          else if (typeof c === 'string') nodeCount = parseInt(c, 10);
+        }
+        return { success: true, nodeCount };
+      } catch (err) {
+        // Restore snapshot so a failed test doesn't break a previously-working
+        // configuration.
+        omniClient.setNeo4jConfig(snapshot);
+        return { success: false, error: err.message || String(err) };
+      }
+    } catch (error) {
+      return { success: false, error: error.message || String(error) };
+    }
+  });
+
   ipcMain.handle('settings:test-llm', async (event, config) => {
     // Test LLM connection
     try {
@@ -11178,7 +11309,12 @@ Return ONLY valid JSON with this exact structure:
 
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
-      if (!safeSend(mainWindow, 'open-in-new-tab', { url: data.url, label: data.label || 'IDW' })) {
+      if (!safeSend(mainWindow, 'open-in-new-tab', {
+        url: data.url,
+        label: data.label || 'IDW',
+        idwId: data.idwId,
+        environment: data.environment || environment,
+      })) {
         console.error('Main window not found, cannot open IDW URL');
       }
       return;
@@ -13794,13 +13930,15 @@ Return ONLY valid JSON with this exact structure:
         }
       }
 
-      console.log(`Opening IDW URL in new tab: ${data.label} (${cleanUrl})`);
+      console.log(`Opening IDW URL in new tab: ${data.label} (${cleanUrl}) [id=${data.idwId || 'n/a'}]`);
 
       // Get the main window
       const mainWindow = browserWindow.getMainWindow();
       if (!safeSend(mainWindow, 'open-in-new-tab', {
         url: cleanUrl,
         label: data.label || 'IDW',
+        idwId: data.idwId,
+        environment: data.environment,
       })) {
         console.error('Main window not found, cannot open IDW URL');
       }
@@ -16590,32 +16728,42 @@ function verifyUpdateOnStartup() {
 
   log.warn(`[AutoUpdate] Startup: expected v${state.lastAttemptVersion} but running v${currentVersion} -- install failed (attempt ${state.failedAttempts})`);
 
-  // After 2+ failures, proactively offer manual download
-  if (state.failedAttempts >= 2) {
-    app.whenReady().then(() => {
-      setTimeout(() => {
-        const parent = getDialogParent();
-        dialog.showMessageBox(parent || undefined, {
-          type: 'warning',
-          title: 'Update Could Not Be Applied',
-          message: `Automatic update to v${state.lastAttemptVersion} has failed ${state.failedAttempts} times`,
-          detail: 'This can happen due to macOS security settings or file permissions.\n\nYou can download the latest version manually from our releases page. Your settings and data will be preserved.',
-          buttons: ['Download Manually', 'Try Auto-Update Again', 'Skip'],
-          defaultId: 0,
-        }).then((result) => {
-          if (result.response === 0) {
-            shell.openExternal(RELEASES_URL);
-            clearUpdateState();
-          } else if (result.response === 1) {
-            clearUpdateState();
-            checkForUpdates(true);
-          } else {
-            // Skip -- don't clear state, will prompt again next restart
-          }
-        });
-      }, 3000);
-    });
-  }
+  // On the very first failure, warn and offer manual download straight away.
+  // Waiting for a second failure (as the old code did) means the user
+  // experiences two full "install and restart" cycles before being told
+  // something is wrong.
+  const isRepeat = state.failedAttempts >= 2;
+  const title = isRepeat ? 'Update Could Not Be Applied' : 'Update Didn\'t Install';
+  const message = isRepeat
+    ? `Automatic update to v${state.lastAttemptVersion} has failed ${state.failedAttempts} times`
+    : `The update to v${state.lastAttemptVersion} didn\'t apply`;
+  const detail = isRepeat
+    ? 'This can happen due to macOS security settings, file permissions, or unsigned builds.\n\nYou can download the latest version manually from our releases page. Your settings and data will be preserved.'
+    : 'The auto-updater ran but the new version didn\'t take effect. You can try again automatically, or download it manually.\n\nYour settings and data are safe.';
+
+  app.whenReady().then(() => {
+    setTimeout(() => {
+      const parent = getDialogParent();
+      dialog.showMessageBox(parent || undefined, {
+        type: 'warning',
+        title,
+        message,
+        detail,
+        buttons: ['Download Manually', 'Try Auto-Update Again', 'Skip'],
+        defaultId: 0,
+      }).then((result) => {
+        if (result.response === 0) {
+          shell.openExternal(RELEASES_URL);
+          clearUpdateState();
+        } else if (result.response === 1) {
+          clearUpdateState();
+          checkForUpdates(true);
+        } else {
+          // Skip -- don't clear state, will prompt again next restart
+        }
+      });
+    }, 3000);
+  });
 }
 
 function getDialogParent() {
@@ -16754,6 +16902,10 @@ function setupAutoUpdater() {
       sha512: info.sha512?.substring(0, 20) + '...',
       releaseDate: info.releaseDate,
     }));
+
+    // Remember the most recent download so renderer-initiated installs
+    // (via the in-app banner IPC) can still tag their attempt with a version.
+    _lastDownloadedUpdate = { version: info.version, info };
 
     if (process.platform === 'darwin') {
       app.dock.setBadge('');
@@ -16935,9 +17087,124 @@ function downloadUpdate() {
   });
 }
 
+/**
+ * Track the most recently downloaded update so renderer-initiated installs
+ * (via the `install` IPC from the update banner) can still tag their attempt
+ * with the target version -- otherwise verifyUpdateOnStartup has no way to
+ * know we tried to install anything.
+ */
+let _lastDownloadedUpdate = null;
+
 function installUpdate() {
   if (!autoUpdater) return;
-  performUpdateInstall(null);
+  const targetVersion = (_lastDownloadedUpdate && _lastDownloadedUpdate.version) || null;
+  performUpdateInstall(targetVersion);
+}
+
+/**
+ * Pre-flight: verify we can actually write to the installed .app bundle.
+ * If /Applications/Onereach.ai.app is read-only (corporate policy, ACLs,
+ * wrong ownership, etc.) the install will silently fail. Better to surface
+ * that now with a clear dialog than to loop through "update failed".
+ *
+ * Returns true if we should proceed, false if we bailed.
+ */
+function _checkAppBundleWritable() {
+  if (process.platform !== 'darwin' || !app.isPackaged) return true;
+  try {
+    const appPath = path.dirname(path.dirname(process.execPath)); // .../Onereach.ai.app
+    fs.accessSync(appPath, fs.constants.W_OK);
+    // Also verify the parent (/Applications) is writable
+    const parent = path.dirname(appPath);
+    fs.accessSync(parent, fs.constants.W_OK);
+    return true;
+  } catch (err) {
+    log.warn('[AutoUpdate] App bundle not writable:', err.message);
+    const parent = getDialogParent();
+    dialog
+      .showMessageBox(parent || undefined, {
+        type: 'error',
+        title: 'Cannot Install Update',
+        message: 'The app can\'t write to its own location',
+        detail:
+          'The auto-updater needs to replace the app bundle in /Applications, but it\'s not writable by your user account.\n\n' +
+          'Please download and install the update manually.',
+        buttons: ['Download Manually', 'Cancel'],
+        defaultId: 0,
+      })
+      .then((result) => {
+        if (result.response === 0) shell.openExternal(RELEASES_URL);
+      });
+    return false;
+  }
+}
+
+/**
+ * Save all critical user state before an update-triggered quit.
+ * Called from performUpdateInstall. Bounded at 1.5 s total so we don't
+ * hang ShipIt if a save is slow; each individual save has its own
+ * ~500 ms budget.
+ */
+async function _saveStateBeforeUpdate() {
+  const start = Date.now();
+  const budget = (ms) => Math.max(0, 1500 - (Date.now() - start) > ms);
+  const timed = (p, ms) =>
+    Promise.race([
+      p,
+      new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), ms)),
+    ]);
+
+  // Tabs: renderer-side persistence (localStorage) -- ask main browser to save
+  try {
+    const mainWindow = browserWindow.getMainWindow && browserWindow.getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('save-tabs-state');
+    }
+    // Give the renderer a brief moment to write localStorage.
+    await new Promise((r) => setTimeout(r, 150));
+  } catch (err) {
+    log.warn('[AutoUpdate] save-tabs-state failed:', err.message);
+  }
+
+  // Orb position (synchronous, fast)
+  try {
+    if (typeof saveOrbPosition === 'function') saveOrbPosition();
+  } catch (err) {
+    log.warn('[AutoUpdate] saveOrbPosition failed:', err.message);
+  }
+
+  // Conversation state (can be slow, time-box it)
+  if (budget(500)) {
+    try {
+      const { saveConversationState } = require('./lib/exchange/conversation-history');
+      if (typeof saveConversationState === 'function') {
+        await timed(saveConversationState(), 500);
+      }
+    } catch (err) {
+      log.warn('[AutoUpdate] saveConversationState failed:', err.message);
+    }
+  }
+
+  // Budget manager is already persisted continuously; still trigger shutdown
+  // to clear its interval handle (doesn't persist anything new).
+  try {
+    const { getBudgetManager } = require('./budget-manager');
+    const bm = getBudgetManager();
+    if (bm && typeof bm.shutdown === 'function') bm.shutdown();
+  } catch (err) {
+    log.warn('[AutoUpdate] budget-manager shutdown failed:', err.message);
+  }
+
+  // Close active file watchers so the new install starts clean.
+  try {
+    if (typeof global._closeGsxFileWatchers === 'function') {
+      global._closeGsxFileWatchers();
+    }
+  } catch (err) {
+    log.warn('[AutoUpdate] file watcher cleanup failed:', err.message);
+  }
+
+  log.info(`[AutoUpdate] _saveStateBeforeUpdate completed in ${Date.now() - start}ms`);
 }
 
 /**
@@ -16946,10 +17213,17 @@ function installUpdate() {
  * and relaunches.  We record the target version to disk so that on the
  * next startup we can verify whether the install actually succeeded.
  */
-function performUpdateInstall(targetVersion) {
+async function performUpdateInstall(targetVersion) {
   if (!autoUpdater) return;
 
   log.info(`[AutoUpdate] performUpdateInstall -- target version: ${targetVersion || 'unknown'}`);
+
+  // Pre-flight: can we actually replace the bundle?
+  if (!_checkAppBundleWritable()) {
+    log.warn('[AutoUpdate] Aborting install -- bundle not writable');
+    return;
+  }
+
   global.isUpdatingApp = true;
 
   // Record the attempt so startup verification can detect failures
@@ -16964,6 +17238,16 @@ function performUpdateInstall(targetVersion) {
   if (updateCheckInterval) {
     clearInterval(updateCheckInterval);
     updateCheckInterval = null;
+  }
+
+  // Save user state BEFORE destroying windows. The normal before-quit /
+  // will-quit cleanup is skipped when isUpdatingApp is true (to avoid
+  // blocking ShipIt), so if we don't save here, tabs / orb position /
+  // conversation state are lost across the update.
+  try {
+    await _saveStateBeforeUpdate();
+  } catch (err) {
+    log.warn('[AutoUpdate] state save threw:', err.message);
   }
 
   // Force-destroy every BrowserWindow so close handlers (which call
@@ -17869,11 +18153,51 @@ async function initializeVoiceOrb() {
       console.error('[VoiceOrb] Full error:', exchangeError.stack);
     }
 
+    // Start the Critical Meeting Alarm Agent. Runs in the background -- polls
+    // the calendar once a minute, evaluates user-authored rules in its own
+    // memory .md file, and fires alarms via voice / HUD / OS at the configured
+    // lead times. Safe to start after the exchange is up so global.agentMessageQueue
+    // is available for the voice channel.
+    try {
+      const criticalAlarmAgent = require('./packages/agents/critical-meeting-alarm-agent');
+      await criticalAlarmAgent.startMonitoring();
+      console.log('[CriticalMeetingAlarm] Agent started');
+    } catch (alarmError) {
+      console.warn('[CriticalMeetingAlarm] Failed to start agent:', alarmError.message);
+    }
+
     // Initialize Agent Self-Learning System
     try {
-      const { initAgentLearning } = require('./lib/agent-learning');
-      await initAgentLearning();
-      console.log('[AgentLearning] Self-learning system initialized');
+      const aiPause = require('./lib/ai-pause');
+      const learning = require('./lib/agent-learning');
+
+      if (!aiPause.isPaused()) {
+        await learning.initAgentLearning();
+        console.log('[AgentLearning] Self-learning system initialized');
+      } else {
+        console.warn('[AgentLearning] Skipped init (AI pause active)');
+      }
+
+      // Pause hook: stop eval/curator intervals on pause, restart on resume.
+      aiPause.registerHook({
+        name: 'agent-learning',
+        onPause: () => {
+          try {
+            if (typeof learning.shutdownAgentLearning === 'function') {
+              learning.shutdownAgentLearning();
+            }
+          } catch (err) {
+            console.warn('[AgentLearning] pause hook error:', err.message);
+          }
+        },
+        onResume: async () => {
+          try {
+            await learning.initAgentLearning();
+          } catch (err) {
+            console.warn('[AgentLearning] resume hook error:', err.message);
+          }
+        },
+      });
 
       ipcMain.handle('agent-learning:resolve-item', async (_event, itemId) => {
         try {
@@ -18258,7 +18582,11 @@ function createOrbWindow() {
           permission === 'media' ||
           permission === 'microphone' ||
           permission === 'audioCapture' ||
-          permission === 'camera'
+          permission === 'camera' ||
+          // Geolocation is required for navigator.geolocation inside the
+          // orb so the main-process location service gets precise coords
+          // (CoreLocation on macOS) instead of falling back to IP geo.
+          permission === 'geolocation'
         ) {
           callback(true);
           return;
@@ -18272,7 +18600,8 @@ function createOrbWindow() {
           permission === 'media' ||
           permission === 'microphone' ||
           permission === 'audioCapture' ||
-          permission === 'camera'
+          permission === 'camera' ||
+          permission === 'geolocation'
         );
       }
     );

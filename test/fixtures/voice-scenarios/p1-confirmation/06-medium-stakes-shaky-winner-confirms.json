@@ -1,0 +1,23 @@
+{
+  "name": "p1-medium-stakes-with-shaky-winner-confirms",
+  "description": "A medium-stakes action (schedule a meeting) with a winner below the high-confidence band gets confirmed.",
+  "phase": "p1-confirmation",
+  "flags": {},
+  "steps": [
+    { "type": "userSays", "text": "schedule a meeting with alice tomorrow at 3" },
+    {
+      "type": "hook",
+      "name": "pipelineSim",
+      "args": {
+        "intent": "schedule a meeting with alice tomorrow at three",
+        "content": "schedule a meeting with alice tomorrow at 3",
+        "executionType": "action",
+        "intentConfidence": 1.0,
+        "winnerConfidence": 0.7,
+        "agent": { "id": "calendar-mutate-agent" }
+      }
+    },
+    { "type": "assert", "metaEquals": { "decision": "confirm-first", "stakes": "medium" } },
+    { "type": "assert", "ttsContains": "Want me to schedule" }
+  ]
+}

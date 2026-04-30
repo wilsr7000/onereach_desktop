@@ -1,0 +1,23 @@
+{
+  "name": "p1-confident-action-gets-ack",
+  "description": "A confident low-stakes action (play jazz) gets a short pre-dispatch ack via the ack pool.",
+  "phase": "p1-confirmation",
+  "flags": {},
+  "steps": [
+    { "type": "userSays", "text": "play some jazz" },
+    {
+      "type": "hook",
+      "name": "pipelineSim",
+      "args": {
+        "intent": "play some jazz",
+        "executionType": "action",
+        "intentConfidence": 1.0,
+        "winnerConfidence": 0.92,
+        "agent": { "id": "dj-agent" },
+        "rngSeed": 1
+      }
+    },
+    { "type": "assert", "metaEquals": { "decision": "ack-and-dispatch", "stakes": "low" } },
+    { "type": "assert", "ttsSpokenCount": 1 }
+  ]
+}

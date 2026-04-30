@@ -1,0 +1,17 @@
+{
+  "name": "p3-commit-is-idempotent",
+  "description": "Once a turn commits, subsequent evaluate calls do not re-fire the commit callback.",
+  "phase": "p3-pause",
+  "flags": {},
+  "steps": [
+    { "type": "hook", "name": "voicePartial", "args": { "text": "what time is it" } },
+    { "type": "hook", "name": "voiceSilence", "args": { "ms": 500 } },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "ttsSpokenCount": 1 },
+
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "hook", "name": "voiceEvaluate" },
+    { "type": "assert", "metaEquals": { "lastDecision": "already-committed" } },
+    { "type": "assert", "ttsSpokenCount": 1 }
+  ]
+}

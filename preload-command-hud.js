@@ -233,6 +233,52 @@ contextBridge.exposeInMainWorld('commandHUD', {
 });
 
 // ==========================================
+// ERROR DIAGNOSTICS (plain-English, copiable)
+// ==========================================
+const { makeDiagnosticsOverlayAPI } = require('./lib/diagnostics-overlay-preload');
+const _diagOverlayAPI = makeDiagnosticsOverlayAPI({ ipcRenderer });
+contextBridge.exposeInMainWorld('diagnostics', {
+  diagnose: (errorContext, options) => ipcRenderer.invoke('diagnostics:diagnose', errorContext, options),
+  getRecentLogs: (opts) => ipcRenderer.invoke('diagnostics:get-recent-logs', opts),
+  popup: _diagOverlayAPI.popup,
+  onAutoPopup: _diagOverlayAPI.onAutoPopup,
+  isBenignMessage: _diagOverlayAPI.isBenignMessage,
+});
+
+// ==========================================
+// APP ISSUE AGENT (diagnose + propose fix patch)
+// ==========================================
+contextBridge.exposeInMainWorld('issueAgent', {
+  getStatus: () => ipcRenderer.invoke('issue-agent:status'),
+  report: (input, options) => ipcRenderer.invoke('issue-agent:report', input, options),
+  savePatch: (fix, options) => ipcRenderer.invoke('issue-agent:save-patch', fix, options),
+});
+
+// ==========================================
+// CRITICAL MEETING ALARM AGENT
+// ==========================================
+contextBridge.exposeInMainWorld('criticalAlarms', {
+  /** Subscribe to live alarm fires. Callback receives the alarm payload. */
+  onFire: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('critical-alarms:fire', handler);
+    return () => ipcRenderer.removeListener('critical-alarms:fire', handler);
+  },
+  /** Current scheduled alarms + active rule set (for a dashboard or debug panel). */
+  getStatus: () => ipcRenderer.invoke('critical-alarms:status'),
+  /** Snooze an event's alarms for N minutes. */
+  snooze: (eventId, minutes) => ipcRenderer.invoke('critical-alarms:snooze', eventId, minutes),
+  /** Cancel all pending alarms for an event. */
+  dismiss: (eventId) => ipcRenderer.invoke('critical-alarms:dismiss', eventId),
+  /** Force a re-parse of the rules memory file. */
+  reloadRules: () => ipcRenderer.invoke('critical-alarms:reload-rules'),
+  /** Fire a synthetic alarm for testing. */
+  test: (overrides) => ipcRenderer.invoke('critical-alarms:test', overrides),
+  /** Open a URL in the default browser (for the Join button). */
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+});
+
+// ==========================================
 // CENTRALIZED HUD API (shared across tools)
 // ==========================================
 try {
@@ -254,17 +300,3 @@ try {
     /* already exposed or sandbox issue */
   }
 }
-
-// ==========================================
-// ERROR DIAGNOSTICS (plain-English, copiable)
-// Exposes window.diagnostics for the HUD's diagnose/popup affordances.
-// ==========================================
-const { makeDiagnosticsOverlayAPI } = require('./lib/diagnostics-overlay-preload');
-const _diagOverlayAPI = makeDiagnosticsOverlayAPI({ ipcRenderer });
-contextBridge.exposeInMainWorld('diagnostics', {
-  diagnose: (errorContext, options) => ipcRenderer.invoke('diagnostics:diagnose', errorContext, options),
-  getRecentLogs: (opts) => ipcRenderer.invoke('diagnostics:get-recent-logs', opts),
-  popup: _diagOverlayAPI.popup,
-  onAutoPopup: _diagOverlayAPI.onAutoPopup,
-  isBenignMessage: _diagOverlayAPI.isBenignMessage,
-});

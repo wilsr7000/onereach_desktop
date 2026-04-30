@@ -1,0 +1,22 @@
+{
+  "name": "p1-informational-dispatches-silently",
+  "description": "An informational read (what time is it) dispatches with no ack and no confirmation.",
+  "phase": "p1-confirmation",
+  "flags": {},
+  "steps": [
+    { "type": "userSays", "text": "what time is it" },
+    {
+      "type": "hook",
+      "name": "pipelineSim",
+      "args": {
+        "intent": "what time is it",
+        "executionType": "informational",
+        "intentConfidence": 1.0,
+        "winnerConfidence": 0.95,
+        "agent": { "id": "time-agent" }
+      }
+    },
+    { "type": "assert", "metaEquals": { "decision": "dispatch" } },
+    { "type": "assert", "ttsSpokenCount": 0 }
+  ]
+}

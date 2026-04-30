@@ -1194,6 +1194,68 @@
               </div>
             </div>
           </div>
+
+          <!-- ==================== Neo4j / Graph (canonical source of truth) ==================== -->
+          <div class="section" style="margin-top: 24px">
+            <h2 class="section-title">
+              Neo4j / Graph
+              <span id="neo4jStatus" class="api-key-status" style="margin-left: 8px">(checking...)</span>
+            </h2>
+            <p class="section-subtitle">
+              The Neo4j Aura instance is the canonical source of truth for Spaces -- cross-device,
+              cross-app. Without these credentials, sync push/pull is disabled and Spaces stays local-only.
+              Paste the values from the Aura "Created" .txt file or click <strong>Import from .txt</strong>.
+            </p>
+
+            <div class="form-group">
+              <button class="btn-primary" onclick="neo4jImportFromFile()" style="padding: 10px 20px">
+                Import from .txt...
+              </button>
+              <button class="btn-secondary" onclick="neo4jTestConnection()" style="margin-left: 10px">
+                Test connection
+              </button>
+              <div class="info-text" style="margin-top: 6px">
+                The .txt file is the one Neo4j Aura emails / shows you when you create an instance
+                (filename pattern: <code>Neo4j-XXXXX-Created-YYYY-MM-DD.txt</code>).
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="neo4jUri">Neo4j URI</label>
+              <input
+                type="text"
+                id="neo4jUri"
+                placeholder="neo4j+s://40c812ef.databases.neo4j.io"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="neo4jUser">Neo4j Username</label>
+              <input type="text" id="neo4jUser" placeholder="neo4j" />
+            </div>
+
+            <div class="form-group">
+              <label for="neo4jPassword">
+                Neo4j Password
+                <span id="neo4jPasswordStatus" class="api-key-status"></span>
+              </label>
+              <div style="position: relative">
+                <input
+                  type="password"
+                  id="neo4jPassword"
+                  placeholder="(paste the NEO4J_PASSWORD value from your Aura .txt)"
+                  autocomplete="new-password"
+                />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="neo4jDatabase">Neo4j Database</label>
+              <input type="text" id="neo4jDatabase" placeholder="neo4j" />
+            </div>
+
+            <div id="neo4jTestResult" class="info-text" style="margin-top: 8px"></div>
+          </div>
         </div>
 
         <!-- ==================== TAB 5: Budget ==================== -->
@@ -1701,6 +1763,13 @@
             document.getElementById('gsxTokenStatus').className = 'api-key-status status-valid';
           }
 
+          // Neo4j / Graph credentials
+          document.getElementById('neo4jUri').value = settings.neo4jUri || '';
+          document.getElementById('neo4jUser').value = settings.neo4jUser || 'neo4j';
+          document.getElementById('neo4jPassword').value = settings.neo4jPassword || '';
+          document.getElementById('neo4jDatabase').value = settings.neo4jDatabase || 'neo4j';
+          updateNeo4jStatusBadge(!!settings.neo4jPassword);
+
           // Budget
           document.getElementById('budgetEnabled').checked = settings.budgetEnabled !== false;
           document.getElementById('budgetShowEstimates').checked = settings.budgetShowEstimates !== false;
@@ -1813,6 +1882,11 @@
           gsxAccountId: document.getElementById('gsxAccountId').value,
           gsxAutoSync: document.getElementById('gsxAutoSync').checked,
           gsxSyncInterval: document.getElementById('gsxSyncInterval').value,
+          // Neo4j / Graph (canonical source of truth)
+          neo4jUri: document.getElementById('neo4jUri').value.trim(),
+          neo4jUser: document.getElementById('neo4jUser').value.trim() || 'neo4j',
+          neo4jPassword: document.getElementById('neo4jPassword').value,
+          neo4jDatabase: document.getElementById('neo4jDatabase').value.trim() || 'neo4j',
           // Budget
           budgetEnabled: document.getElementById('budgetEnabled').checked,
           budgetShowEstimates: document.getElementById('budgetShowEstimates').checked,
@@ -2092,6 +2166,92 @@
         gsxTokenVisible = !gsxTokenVisible;
         input.type = gsxTokenVisible ? 'text' : 'password';
         event.target.textContent = gsxTokenVisible ? 'Hide' : 'Show';
+      }
+
+      // ==================== Neo4j / Graph credentials ====================
+      function updateNeo4jStatusBadge(hasPassword) {
+        const badge = document.getElementById('neo4jStatus');
+        if (!badge) return;
+        if (hasPassword) {
+          badge.textContent = '(Connected)';
+          badge.className = 'api-key-status status-valid';
+        } else {
+          badge.textContent = '(Not configured)';
+          badge.className = 'api-key-status';
+        }
+      }
+
+      async function neo4jImportFromFile() {
+        const resultEl = document.getElementById('neo4jTestResult');
+        try {
+          // Use the Electron file picker via the existing settings IPC bridge.
+          // showOpenDialog handler returns the chosen file path; we then call
+          // a main-process IPC to parse it (so the .txt file never has to
+          // round-trip through the renderer).
+          if (!window.api || typeof window.api.invoke !== 'function') {
+            resultEl.textContent = 'IPC bridge unavailable; paste the values manually instead.';
+            return;
+          }
+          const picked = await window.api.invoke('settings:neo4j:pick-and-import');
+          if (!picked || picked.cancelled) {
+            return;
+          }
+          if (picked.error) {
+            resultEl.style.color = '#fca5a5';
+            resultEl.textContent = 'Import failed: ' + picked.error;
+            return;
+          }
+          // Refill the UI from the parsed values.
+          if (picked.creds) {
+            document.getElementById('neo4jUri').value = picked.creds.uri || '';
+            document.getElementById('neo4jUser').value = picked.creds.username || 'neo4j';
+            document.getElementById('neo4jPassword').value = picked.creds.password || '';
+            document.getElementById('neo4jDatabase').value = picked.creds.database || 'neo4j';
+            updateNeo4jStatusBadge(!!picked.creds.password);
+            resultEl.style.color = '#86efac';
+            resultEl.textContent =
+              'Imported credentials for ' +
+              (picked.creds.instanceName || picked.creds.instanceId || 'Neo4j Aura') +
+              '. Click Save to persist + activate.';
+          }
+        } catch (err) {
+          resultEl.style.color = '#fca5a5';
+          resultEl.textContent = 'Import failed: ' + (err && err.message ? err.message : err);
+        }
+      }
+
+      async function neo4jTestConnection() {
+        const resultEl = document.getElementById('neo4jTestResult');
+        resultEl.style.color = '#aaa';
+        resultEl.textContent = 'Testing connection...';
+        try {
+          if (!window.api || typeof window.api.invoke !== 'function') {
+            resultEl.textContent = 'IPC bridge unavailable.';
+            return;
+          }
+          // Pull the current form values (not the persisted settings) so the
+          // user can test before clicking Save.
+          const creds = {
+            uri: document.getElementById('neo4jUri').value.trim(),
+            username: document.getElementById('neo4jUser').value.trim() || 'neo4j',
+            password: document.getElementById('neo4jPassword').value,
+            database: document.getElementById('neo4jDatabase').value.trim() || 'neo4j',
+          };
+          const r = await window.api.invoke('settings:neo4j:test-connection', creds);
+          if (r && r.success) {
+            resultEl.style.color = '#86efac';
+            resultEl.textContent =
+              'Connected. ' +
+              (typeof r.nodeCount === 'number' ? r.nodeCount + ' nodes in the graph.' : '');
+            updateNeo4jStatusBadge(true);
+          } else {
+            resultEl.style.color = '#fca5a5';
+            resultEl.textContent = 'Connection failed: ' + ((r && r.error) || 'unknown error');
+          }
+        } catch (err) {
+          resultEl.style.color = '#fca5a5';
+          resultEl.textContent = 'Connection failed: ' + (err && err.message ? err.message : err);
+        }
       }
 
       async function fetchGSXToken() {

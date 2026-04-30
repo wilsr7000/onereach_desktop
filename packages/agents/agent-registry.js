@@ -45,9 +45,7 @@ const BUILT_IN_AGENT_IDS = [
   'time-agent',
   'weather-agent',
   'calendar-query-agent',
-  'calendar-create-agent',
-  'calendar-edit-agent',
-  'calendar-delete-agent',
+  'calendar-mutate-agent', // Phase 2a: merger of create/edit/delete
   'help-agent',
   'search-agent',
   'smalltalk-agent',
@@ -56,6 +54,8 @@ const BUILT_IN_AGENT_IDS = [
   'email-agent', // Email assistant - data-aware bidding for email communications
   'recorder-agent', // Video recorder - launches WISER Meeting to record video to Spaces
   'meeting-monitor-agent', // Meeting monitor - watches live transcript + health, alerts on issues (bidExcluded)
+  'critical-meeting-alarm-agent', // Critical meeting alarms - watches calendar + user rules, fires alarms (bidExcluded, auto-start)
+  'task-queue-agent', // Task/alarm writer - adds TaskItems to the graph TaskQueue (voice-triggered)
   'error-agent', // System agent - handles failed/timed-out tasks (bidExcluded)
   // Meeting agents (default space: meeting-agents)
   'action-item-agent', // Captures action items with owner/deadline from meeting context

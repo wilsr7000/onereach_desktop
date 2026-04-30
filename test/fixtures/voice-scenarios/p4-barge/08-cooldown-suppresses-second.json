@@ -1,0 +1,14 @@
+{
+  "name": "p4-cooldown-suppresses-second-barge",
+  "description": "After a barge fires, a second barge attempt within the 500ms cooldown is suppressed to avoid storms.",
+  "phase": "p4-barge",
+  "flags": { "bargeIn": true },
+  "steps": [
+    { "type": "hook", "name": "ttsStart", "args": { "text": "playing music for you now" } },
+    { "type": "hook", "name": "userSay", "args": { "text": "stop" } },
+    { "type": "assert", "metaEquals": { "bargeCount": 1 } },
+    { "type": "wait", "ms": 100 },
+    { "type": "hook", "name": "userSay", "args": { "text": "what about jazz" } },
+    { "type": "assert", "metaEquals": { "bargeCount": 1, "lastIgnoreKind": "cooldown" } }
+  ]
+}

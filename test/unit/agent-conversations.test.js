@@ -277,15 +277,11 @@ const CONVERSATIONS = {
     { text: 'Am I free at 3pm tomorrow?', expectation: 'either' },
     { text: 'Show me my schedule for this week', expectation: 'either' },
   ],
-  'calendar-create-agent': [
+  'calendar-mutate-agent': [
     { text: 'Schedule a meeting with Bob at 2pm tomorrow', expectation: 'either' },
     { text: 'Add a dentist appointment next Monday at 10am', expectation: 'either' },
-  ],
-  'calendar-edit-agent': [
     { text: 'Move my 3pm meeting to 4pm', expectation: 'either' },
     { text: 'Change the location of the team standup to room 301', expectation: 'either' },
-  ],
-  'calendar-delete-agent': [
     { text: 'Cancel my meeting tomorrow at noon', expectation: 'either' },
     { text: 'Delete the dentist appointment', expectation: 'either' },
   ],

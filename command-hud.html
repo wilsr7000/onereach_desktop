@@ -566,6 +566,209 @@
         background: rgba(239, 68, 68, 0.25);
       }
 
+      /* Diagnostics panel (error recommendations) */
+      .diagnostics-panel {
+        margin-top: 12px;
+        padding: 12px;
+        background: rgba(239, 68, 68, 0.06);
+        border: 1px solid rgba(239, 68, 68, 0.18);
+        border-radius: 8px;
+        color: #e5e5e5;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .diagnostics-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #fca5a5;
+      }
+      .diagnostics-source {
+        font-size: 10px;
+        color: #888;
+        text-transform: none;
+        letter-spacing: normal;
+      }
+      .diagnostics-loading {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #aaa;
+        font-size: 12px;
+      }
+      .diagnostics-summary {
+        font-weight: 600;
+        color: #fafafa;
+        margin-bottom: 6px;
+      }
+      .diagnostics-cause {
+        color: #bbb;
+        margin-bottom: 10px;
+      }
+      .diagnostics-steps-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #a78bfa;
+        margin-bottom: 4px;
+      }
+      .diagnostics-steps {
+        margin: 0 0 10px 20px;
+        padding: 0;
+      }
+      .diagnostics-steps li {
+        margin-bottom: 4px;
+        color: #d4d4d4;
+      }
+      .diagnostics-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 4px;
+      }
+      .diagnostics-actions .hud-btn {
+        flex: 1;
+        padding: 6px 10px;
+        font-size: 11px;
+      }
+      .diagnostics-error {
+        color: #fca5a5;
+        font-size: 11px;
+        font-style: italic;
+      }
+
+      /* Deep diagnosis + fix-proposal sub-panel */
+      .deep-panel {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed rgba(239, 68, 68, 0.25);
+      }
+      .deep-loading {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #aaa;
+        font-size: 11px;
+      }
+      .deep-section {
+        margin-bottom: 10px;
+      }
+      .deep-section-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #a78bfa;
+        margin-bottom: 4px;
+      }
+      .deep-summary {
+        font-weight: 600;
+        color: #fafafa;
+        margin-bottom: 4px;
+        font-size: 12px;
+      }
+      .deep-cause,
+      .deep-fix-summary {
+        color: #bbb;
+        font-size: 11px;
+        margin-bottom: 6px;
+      }
+      .deep-file-list {
+        margin: 0 0 0 16px;
+        padding: 0;
+      }
+      .deep-file-list li {
+        font-size: 11px;
+        color: #d4d4d4;
+        margin-bottom: 3px;
+      }
+      .deep-file-list code {
+        background: rgba(255, 255, 255, 0.05);
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10px;
+      }
+      .deep-branch {
+        font-size: 11px;
+        color: #a78bfa;
+        margin-bottom: 6px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .deep-diff {
+        max-height: 240px;
+        overflow: auto;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 4px;
+        padding: 8px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10px;
+        color: #d4d4d4;
+        white-space: pre;
+        margin: 4px 0 8px;
+      }
+      .deep-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 4px;
+      }
+      .deep-actions .hud-btn {
+        flex: 1;
+        padding: 6px 10px;
+        font-size: 11px;
+      }
+      .deep-error {
+        color: #fca5a5;
+        font-size: 11px;
+        font-style: italic;
+        margin-top: 6px;
+      }
+
+      /* Critical meeting alarm card */
+      .alarm-card {
+        padding: 4px 2px;
+      }
+      .alarm-card-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 4px;
+      }
+      .alarm-card-when {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #fca5a5;
+      }
+      .alarm-card-time {
+        font-size: 11px;
+        color: #a78bfa;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .alarm-card-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #fafafa;
+        margin-bottom: 6px;
+      }
+      .alarm-location {
+        font-size: 11px;
+        color: #aaa;
+        margin-bottom: 6px;
+      }
+      .alarm-reasons {
+        margin: 4px 0 2px 16px;
+        padding: 0;
+        font-size: 11px;
+        color: #bbb;
+      }
+      .alarm-reasons li {
+        margin-bottom: 2px;
+      }
+
       /* Loading spinner */
       .spinner {
         width: 24px;
@@ -1006,12 +1209,16 @@
       }
 
       /* ==================== AGENT UI PANELS ==================== */
+      /* Rich agent UIs (e.g. daily-brief dayView) ask the HUD to grow via
+         result.panelWidth/panelHeight so the whole panel fits. The inner
+         scroll cap is generous (calc against viewport) so the HUD itself --
+         not this container -- decides when content gets clipped. */
       .agent-ui-panels {
         display: none;
         flex-direction: column;
         gap: 8px;
         margin-top: 12px;
-        max-height: 320px;
+        max-height: calc(100vh - 200px);
         overflow-y: auto;
         scrollbar-width: thin;
         scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
@@ -1263,8 +1470,64 @@
           <!-- Agent UI Panels (multi-agent interactive content) -->
           <div class="agent-ui-panels" id="agentUIPanels"></div>
 
+          <!-- Error diagnostics panel: shown after user clicks "What's wrong?" -->
+          <div class="diagnostics-panel" id="diagnosticsPanel" style="display: none">
+            <div class="diagnostics-header">
+              <span class="diagnostics-label">Diagnosis</span>
+              <span class="diagnostics-source" id="diagnosticsSource"></span>
+            </div>
+            <div class="diagnostics-loading" id="diagnosticsLoading" style="display: none">
+              <span class="spinner" style="width: 14px; height: 14px; border-width: 2px"></span>
+              <span>Looking this up...</span>
+            </div>
+            <div class="diagnostics-body" id="diagnosticsBody" style="display: none">
+              <div class="diagnostics-summary" id="diagnosticsSummary"></div>
+              <div class="diagnostics-cause" id="diagnosticsCause"></div>
+              <div class="diagnostics-steps-label">Try this</div>
+              <ol class="diagnostics-steps" id="diagnosticsSteps"></ol>
+              <div class="diagnostics-actions">
+                <button class="hud-btn" id="btnCopyDiagnosis">Copy report</button>
+                <button class="hud-btn" id="btnGoDeeper" style="display: none">Go deeper</button>
+                <button class="hud-btn" id="btnCloseDiagnosis">Close</button>
+              </div>
+            </div>
+            <div class="diagnostics-error" id="diagnosticsError" style="display: none"></div>
+
+            <!-- Deep-diagnosis + fix-proposal sub-panel (dev-mode only) -->
+            <div class="deep-panel" id="deepPanel" style="display: none">
+              <div class="deep-loading" id="deepLoading" style="display: none">
+                <span class="spinner" style="width: 14px; height: 14px; border-width: 2px"></span>
+                <span id="deepLoadingLabel">Running deep diagnosis...</span>
+              </div>
+              <div class="deep-body" id="deepBody" style="display: none">
+                <div class="deep-section">
+                  <div class="deep-section-label">Deep diagnosis</div>
+                  <div class="deep-summary" id="deepSummary"></div>
+                  <div class="deep-cause" id="deepCause"></div>
+                </div>
+                <div class="deep-section" id="deepFilesSection" style="display: none">
+                  <div class="deep-section-label">Affected files</div>
+                  <ul class="deep-file-list" id="deepFileList"></ul>
+                </div>
+                <div class="deep-section" id="deepFixSection" style="display: none">
+                  <div class="deep-section-label">Proposed fix</div>
+                  <div class="deep-fix-summary" id="deepFixSummary"></div>
+                  <div class="deep-branch" id="deepBranch"></div>
+                  <pre class="deep-diff" id="deepDiff"></pre>
+                </div>
+                <div class="deep-actions">
+                  <button class="hud-btn" id="btnProposeFix" style="display: none">Propose fix</button>
+                  <button class="hud-btn" id="btnSavePatch" style="display: none">Save patch</button>
+                  <button class="hud-btn" id="btnCopyDeep">Copy</button>
+                </div>
+              </div>
+              <div class="deep-error" id="deepError" style="display: none"></div>
+            </div>
+          </div>
+
           <div class="hud-actions" id="hudActions" style="display: none">
             <button class="hud-btn" id="btnDismiss">Dismiss</button>
+            <button class="hud-btn" id="btnDiagnose" style="display: none">What's wrong?</button>
             <button class="hud-btn primary" id="btnRetry" style="display: none">Retry</button>
           </div>
         </div>
@@ -1387,6 +1650,47 @@
       const btnDismiss = document.getElementById('btnDismiss');
       const btnRetry = document.getElementById('btnRetry');
 
+      // Diagnostics panel elements
+      const btnDiagnose = document.getElementById('btnDiagnose');
+      const diagnosticsPanel = document.getElementById('diagnosticsPanel');
+      const diagnosticsSource = document.getElementById('diagnosticsSource');
+      const diagnosticsLoading = document.getElementById('diagnosticsLoading');
+      const diagnosticsBody = document.getElementById('diagnosticsBody');
+      const diagnosticsSummary = document.getElementById('diagnosticsSummary');
+      const diagnosticsCause = document.getElementById('diagnosticsCause');
+      const diagnosticsSteps = document.getElementById('diagnosticsSteps');
+      const diagnosticsError = document.getElementById('diagnosticsError');
+      const btnCopyDiagnosis = document.getElementById('btnCopyDiagnosis');
+      const btnCloseDiagnosis = document.getElementById('btnCloseDiagnosis');
+
+      // Deep-diagnosis + fix-proposal sub-panel
+      const btnGoDeeper = document.getElementById('btnGoDeeper');
+      const deepPanel = document.getElementById('deepPanel');
+      const deepLoading = document.getElementById('deepLoading');
+      const deepLoadingLabel = document.getElementById('deepLoadingLabel');
+      const deepBody = document.getElementById('deepBody');
+      const deepSummary = document.getElementById('deepSummary');
+      const deepCause = document.getElementById('deepCause');
+      const deepFilesSection = document.getElementById('deepFilesSection');
+      const deepFileList = document.getElementById('deepFileList');
+      const deepFixSection = document.getElementById('deepFixSection');
+      const deepFixSummary = document.getElementById('deepFixSummary');
+      const deepBranch = document.getElementById('deepBranch');
+      const deepDiff = document.getElementById('deepDiff');
+      const deepError = document.getElementById('deepError');
+      const btnProposeFix = document.getElementById('btnProposeFix');
+      const btnSavePatch = document.getElementById('btnSavePatch');
+      const btnCopyDeep = document.getElementById('btnCopyDeep');
+
+      // The raw error context captured from the most recent displayResult() call
+      // so the Diagnose button can act on it without re-parsing the UI.
+      let _lastErrorContext = null;
+      // The diagnosis result for the current error, cached so "Copy" works after close/reopen.
+      let _lastDiagnosis = null;
+      // Deep diagnosis + fix state
+      let _lastDeepResult = null;
+      let _issueAgentStatus = null;
+
       // New context elements
       const agentInfoSection = document.getElementById('agentInfoSection');
       const agentNameEl = document.getElementById('agentName');
@@ -1498,6 +1802,10 @@
           resultSection.className = 'result-section';
         }
         hudActions.style.display = 'none';
+        if (typeof btnDiagnose !== 'undefined') btnDiagnose.style.display = 'none';
+        if (typeof _hideDiagnostics === 'function') _hideDiagnostics();
+        _lastErrorContext = null;
+        _lastDiagnosis = null;
         clearAutoHide();
         clearErrorFade();
       }
@@ -1657,16 +1965,18 @@
         // of the generic success/fail card. The agent keeps its panel alive
         // when needsInput is set (multi-turn conversation).
         if (result.html) {
-          // Expand HUD width for agents that request more room (e.g. daily brief dayView)
-          if (result.panelWidth && typeof result.panelWidth === 'number' && window.commandHUD?.resizeWindow) {
-            const container = document.getElementById('hud-container');
-            const curHeight = container ? container.offsetHeight : 420;
-            window.commandHUD.resizeWindow(result.panelWidth, Math.max(curHeight, 520));
-          }
-
+          // Rich agent UIs (e.g. daily-brief dayView) ask the HUD to grow
+          // via panelWidth/panelHeight. Pass them through to the panel
+          // manager so recalculateHUDSize() honors them. Doing the resize
+          // directly here would race with the panel manager, which calls
+          // resizeWindow(340, ...) unconditionally at the end of
+          // addAgentUIPanel and would clobber the wider window.
           const agentId = result.agentId || result.metadata?.agentId || 'unknown';
           const agentName = result.agentName || result.metadata?.agentName || agentId;
-          addAgentUIPanel(agentId, agentName, result.html);
+          addAgentUIPanel(agentId, agentName, result.html, {
+            width: result.panelWidth,
+            height: result.panelHeight,
+          });
 
           // Graphical panels ARE the result -- don't show text underneath.
           // The agent panel handles its own display; showing text alongside
@@ -1733,6 +2043,27 @@
         // Show actions
         hudActions.style.display = 'flex';
         btnRetry.style.display = isSuccess ? 'none' : 'block';
+
+        // Capture error context for the Diagnose button (only on failure).
+        // The button stays hidden on success and resets each cycle.
+        _hideDiagnostics();
+        if (!isSuccess) {
+          _lastErrorContext = {
+            message:
+              result.error ||
+              result.message ||
+              (result.data && result.data.error) ||
+              'Unknown error',
+            category: result.category || result.metadata?.category || 'agent',
+            source: result.source || result.metadata?.source || 'command-hud',
+            agentId: result.agentId || result.metadata?.agentId || null,
+            data: result.data || null,
+          };
+          btnDiagnose.style.display = 'block';
+        } else {
+          _lastErrorContext = null;
+          btnDiagnose.style.display = 'none';
+        }
 
         // Auto-hide on success, fade error after longer delay
         if (isSuccess && !(result.data?.type === 'meeting_link')) {
@@ -1955,6 +2286,302 @@
         }
       });
 
+      // ==================== DIAGNOSTICS ====================
+
+      function _hideDiagnostics() {
+        diagnosticsPanel.style.display = 'none';
+        diagnosticsLoading.style.display = 'none';
+        diagnosticsBody.style.display = 'none';
+        diagnosticsError.style.display = 'none';
+        diagnosticsSteps.innerHTML = '';
+        diagnosticsSummary.textContent = '';
+        diagnosticsCause.textContent = '';
+        diagnosticsSource.textContent = '';
+        diagnosticsError.textContent = '';
+        btnGoDeeper.style.display = 'none';
+        _hideDeepPanel();
+      }
+
+      function _hideDeepPanel() {
+        deepPanel.style.display = 'none';
+        deepLoading.style.display = 'none';
+        deepBody.style.display = 'none';
+        deepError.style.display = 'none';
+        deepError.textContent = '';
+        deepSummary.textContent = '';
+        deepCause.textContent = '';
+        deepFileList.innerHTML = '';
+        deepFilesSection.style.display = 'none';
+        deepFixSection.style.display = 'none';
+        deepFixSummary.textContent = '';
+        deepBranch.textContent = '';
+        deepDiff.textContent = '';
+        btnProposeFix.style.display = 'none';
+        btnSavePatch.style.display = 'none';
+        _lastDeepResult = null;
+      }
+
+      function _renderDiagnosis(d) {
+        diagnosticsLoading.style.display = 'none';
+        diagnosticsError.style.display = 'none';
+        diagnosticsBody.style.display = 'block';
+        diagnosticsSummary.textContent = d.summary || 'Diagnosis unavailable.';
+        diagnosticsCause.textContent = d.rootCause || '';
+        diagnosticsSteps.innerHTML = '';
+        const steps = Array.isArray(d.steps) ? d.steps : [];
+        for (const step of steps) {
+          const li = document.createElement('li');
+          li.textContent = String(step);
+          diagnosticsSteps.appendChild(li);
+        }
+        const parts = [];
+        if (d.source) parts.push(d.source);
+        if (d.cached) parts.push('cached');
+        if (d.degraded) parts.push(d.degraded);
+        diagnosticsSource.textContent = parts.length ? parts.join(' | ') : '';
+
+        // Show "Go deeper" if the issue-agent is available. Status is async;
+        // fetch once and cache for the session. The button stays hidden until
+        // we confirm Claude Code is installed.
+        _maybeShowGoDeeper();
+      }
+
+      async function _maybeShowGoDeeper() {
+        try {
+          if (!window.issueAgent || typeof window.issueAgent.getStatus !== 'function') return;
+          if (!_issueAgentStatus) {
+            _issueAgentStatus = await window.issueAgent.getStatus();
+          }
+          if (_issueAgentStatus?.available) {
+            btnGoDeeper.style.display = 'block';
+          }
+        } catch {
+          /* non-fatal */
+        }
+      }
+
+      async function _runDiagnosis() {
+        if (!_lastErrorContext) return;
+        if (!window.diagnostics || typeof window.diagnostics.diagnose !== 'function') {
+          diagnosticsPanel.style.display = 'block';
+          diagnosticsLoading.style.display = 'none';
+          diagnosticsBody.style.display = 'none';
+          diagnosticsError.style.display = 'block';
+          diagnosticsError.textContent = 'Diagnostics are not available in this window.';
+          return;
+        }
+
+        diagnosticsPanel.style.display = 'block';
+        diagnosticsLoading.style.display = 'flex';
+        diagnosticsBody.style.display = 'none';
+        diagnosticsError.style.display = 'none';
+
+        try {
+          const result = await window.diagnostics.diagnose(_lastErrorContext, {});
+          if (!result || result.error) {
+            throw new Error((result && result.error) || 'Diagnosis failed');
+          }
+          _lastDiagnosis = result;
+          _renderDiagnosis(result);
+        } catch (err) {
+          diagnosticsLoading.style.display = 'none';
+          diagnosticsBody.style.display = 'none';
+          diagnosticsError.style.display = 'block';
+          diagnosticsError.textContent = 'Could not run diagnosis: ' + (err?.message || err);
+        }
+      }
+
+      btnDiagnose.addEventListener('click', () => {
+        _runDiagnosis();
+      });
+
+      btnCopyDiagnosis.addEventListener('click', async () => {
+        const text = _lastDiagnosis?.copyable || diagnosticsSummary.textContent || '';
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          const original = btnCopyDiagnosis.textContent;
+          btnCopyDiagnosis.textContent = 'Copied';
+          setTimeout(() => {
+            btnCopyDiagnosis.textContent = original;
+          }, 1400);
+        } catch {
+          // Clipboard may be unavailable in some sandboxes -- surface to user
+          diagnosticsError.style.display = 'block';
+          diagnosticsError.textContent = 'Copy failed. Select the text above and copy manually.';
+        }
+      });
+
+      btnCloseDiagnosis.addEventListener('click', () => {
+        _hideDiagnostics();
+      });
+
+      // ==================== DEEP DIAGNOSIS + FIX PROPOSAL ====================
+
+      function _renderDeepResult(res) {
+        _lastDeepResult = res;
+        deepLoading.style.display = 'none';
+        deepError.style.display = 'none';
+        deepBody.style.display = 'block';
+
+        const dx = res?.diagnosis || {};
+        deepSummary.textContent = dx.summary || 'No deep summary available.';
+        deepCause.textContent = dx.rootCause || '';
+
+        // Affected files
+        deepFileList.innerHTML = '';
+        const affected = Array.isArray(dx.affectedFiles) ? dx.affectedFiles : [];
+        if (affected.length) {
+          for (const f of affected) {
+            const li = document.createElement('li');
+            const code = document.createElement('code');
+            code.textContent = f.path + (f.lines ? `:${f.lines}` : '');
+            li.appendChild(code);
+            if (f.why) {
+              li.appendChild(document.createTextNode(' — ' + f.why));
+            }
+            deepFileList.appendChild(li);
+          }
+          deepFilesSection.style.display = 'block';
+        } else {
+          deepFilesSection.style.display = 'none';
+        }
+
+        // Fix details (only when propose-fix ran)
+        const fix = res?.fix;
+        if (fix && Array.isArray(fix.changes) && fix.changes.length) {
+          deepFixSummary.textContent = fix.summary || '';
+          deepBranch.textContent = fix.branchSuggestion
+            ? `Branch: ${fix.branchSuggestion}`
+            : '';
+          deepDiff.textContent = fix.patch || '';
+          deepFixSection.style.display = 'block';
+          btnSavePatch.style.display = 'block';
+        } else {
+          deepFixSection.style.display = 'none';
+          btnSavePatch.style.display = 'none';
+        }
+
+        // Decide whether to offer the "Propose fix" button. Only when the
+        // diagnosis flagged canAutoFix AND we haven't already proposed a fix
+        // in this session.
+        if (dx.canAutoFix && !fix && _issueAgentStatus?.fixStageEnabled) {
+          btnProposeFix.style.display = 'block';
+        } else {
+          btnProposeFix.style.display = 'none';
+        }
+
+        if (res?.error) {
+          deepError.style.display = 'block';
+          deepError.textContent = res.error;
+        }
+      }
+
+      async function _runDeepDiagnose(proposeFixToo = false) {
+        if (!_lastErrorContext) return;
+        if (!window.issueAgent || typeof window.issueAgent.report !== 'function') {
+          deepPanel.style.display = 'block';
+          deepError.style.display = 'block';
+          deepError.textContent = 'Issue agent is not available in this window.';
+          return;
+        }
+
+        deepPanel.style.display = 'block';
+        deepBody.style.display = 'none';
+        deepError.style.display = 'none';
+        deepLoading.style.display = 'flex';
+        deepLoadingLabel.textContent = proposeFixToo
+          ? 'Running deep diagnosis + proposing fix (may take a minute)...'
+          : 'Running deep diagnosis...';
+
+        const input = {
+          userMessage: diagnosticsSummary.textContent || _lastErrorContext.message,
+          errorContext: _lastErrorContext,
+        };
+        const options = { proposeFix: !!proposeFixToo };
+
+        try {
+          const res = await window.issueAgent.report(input, options);
+          if (res?.status === 'error' || !res?.diagnosis) {
+            deepLoading.style.display = 'none';
+            deepError.style.display = 'block';
+            deepError.textContent = res?.error || 'Deep diagnosis failed.';
+            return;
+          }
+          _renderDeepResult(res);
+        } catch (err) {
+          deepLoading.style.display = 'none';
+          deepError.style.display = 'block';
+          deepError.textContent = 'Deep diagnosis error: ' + (err?.message || err);
+        }
+      }
+
+      btnGoDeeper.addEventListener('click', () => {
+        _runDeepDiagnose(false);
+      });
+
+      btnProposeFix.addEventListener('click', () => {
+        _runDeepDiagnose(true);
+      });
+
+      btnSavePatch.addEventListener('click', async () => {
+        if (!_lastDeepResult?.fix) return;
+        const originalLabel = btnSavePatch.textContent;
+        btnSavePatch.textContent = 'Saving...';
+        btnSavePatch.disabled = true;
+        try {
+          const res = await window.issueAgent.savePatch(_lastDeepResult.fix, {});
+          if (res?.success && res.path) {
+            btnSavePatch.textContent = 'Saved';
+            deepBranch.textContent = `Branch: ${res.branch}  —  ${res.path}`;
+            setTimeout(() => {
+              btnSavePatch.textContent = originalLabel;
+              btnSavePatch.disabled = false;
+            }, 1800);
+          } else {
+            deepError.style.display = 'block';
+            deepError.textContent = res?.error || 'Save failed.';
+            btnSavePatch.textContent = originalLabel;
+            btnSavePatch.disabled = false;
+          }
+        } catch (err) {
+          deepError.style.display = 'block';
+          deepError.textContent = 'Save failed: ' + (err?.message || err);
+          btnSavePatch.textContent = originalLabel;
+          btnSavePatch.disabled = false;
+        }
+      });
+
+      btnCopyDeep.addEventListener('click', async () => {
+        const res = _lastDeepResult;
+        if (!res) return;
+        const lines = [];
+        lines.push('# Deep diagnosis');
+        if (res.diagnosis?.summary) lines.push(res.diagnosis.summary);
+        if (res.diagnosis?.rootCause) lines.push('', res.diagnosis.rootCause);
+        if (Array.isArray(res.diagnosis?.affectedFiles) && res.diagnosis.affectedFiles.length) {
+          lines.push('', '## Affected files');
+          for (const f of res.diagnosis.affectedFiles) {
+            lines.push(`- ${f.path}${f.lines ? ':' + f.lines : ''} — ${f.why || ''}`);
+          }
+        }
+        if (res.fix?.patch) {
+          lines.push('', '## Proposed patch');
+          lines.push('```diff', res.fix.patch, '```');
+        }
+        try {
+          await navigator.clipboard.writeText(lines.join('\n'));
+          const original = btnCopyDeep.textContent;
+          btnCopyDeep.textContent = 'Copied';
+          setTimeout(() => {
+            btnCopyDeep.textContent = original;
+          }, 1400);
+        } catch {
+          deepError.style.display = 'block';
+          deepError.textContent = 'Copy failed. Select the content above and copy manually.';
+        }
+      });
+
       // Listen for HUD events from main process
       if (window.commandHUD) {
         window.commandHUD.onShow(() => {
@@ -1976,6 +2603,96 @@
         window.commandHUD.onReset(() => {
           reset();
         });
+
+        // ==================== CRITICAL MEETING ALARMS ====================
+        // Subscribe to alarm fires pushed by the main-process
+        // critical-meeting-alarm-agent. Each fire renders an agent UI panel
+        // via the existing addAgentUIPanel() path (same as dayView) so
+        // snooze/dismiss/join buttons sit in the familiar card chrome.
+        if (window.criticalAlarms && typeof window.criticalAlarms.onFire === 'function') {
+          window.criticalAlarms.onFire((payload) => {
+            try {
+              const html = renderCriticalAlarmCard(payload);
+              addAgentUIPanel('critical-meeting-alarm-agent', 'Critical Meeting', html);
+              show();
+              // Wire up the card's buttons right after it's injected.
+              setTimeout(() => _bindCriticalAlarmCardButtons(payload), 50);
+            } catch (err) {
+              console.error('[CommandHUD] Failed to render alarm card:', err);
+            }
+          });
+        }
+
+        function renderCriticalAlarmCard(p) {
+          const lead = Number.isFinite(p?.leadMinutes) ? Math.max(0, Math.round(p.leadMinutes)) : null;
+          const startLabel = Number.isFinite(p?.startEpochMs)
+            ? new Date(p.startEpochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+            : '';
+          const headline = lead === null ? 'Upcoming' : lead <= 1 ? 'Starting now' : `In ${lead} min`;
+          const reasons = Array.isArray(p?.reasons) ? p.reasons.slice(0, 3) : [];
+          const esc = (s) => escapeHtml(String(s || ''));
+          const joinBtn = p?.joinLink
+            ? `<button class="hud-action-btn success" data-alarm-action="join" data-alarm-href="${esc(
+                p.joinLink
+              )}">Join</button>`
+            : '';
+          const reasonsHtml = reasons.length
+            ? `<ul class="alarm-reasons">${reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>`
+            : '';
+          const locationHtml = p?.location ? `<div class="alarm-location">${esc(p.location)}</div>` : '';
+          return [
+            '<div class="alarm-card" data-alarm-id="' + esc(p?.id) + '" data-event-id="' + esc(p?.eventId) + '">',
+            '<div class="alarm-card-header">',
+            '<div class="alarm-card-when">' + esc(headline) + '</div>',
+            startLabel ? '<div class="alarm-card-time">' + esc(startLabel) + '</div>' : '',
+            '</div>',
+            '<div class="alarm-card-title">' + esc(p?.title || 'Meeting') + '</div>',
+            locationHtml,
+            reasonsHtml,
+            '<div class="alarm-card-actions" style="display:flex;gap:6px;margin-top:10px">',
+            joinBtn,
+            '<button class="hud-action-btn" data-alarm-action="snooze">Snooze 5m</button>',
+            '<button class="hud-action-btn danger" data-alarm-action="dismiss">Dismiss</button>',
+            '</div>',
+            '</div>',
+          ].join('');
+        }
+
+        function _bindCriticalAlarmCardButtons(payload) {
+          const panel = activeAgentPanels.get('critical-meeting-alarm-agent');
+          if (!panel) return;
+          const card = panel.querySelector('.alarm-card');
+          if (!card) return;
+          const eventId = payload?.eventId || card.dataset.eventId || '';
+
+          card.querySelectorAll('[data-alarm-action]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+              const action = btn.getAttribute('data-alarm-action');
+              try {
+                if (action === 'join') {
+                  const href = btn.getAttribute('data-alarm-href');
+                  if (href && window.criticalAlarms?.openExternal) {
+                    await window.criticalAlarms.openExternal(href);
+                  } else if (href && window.commandHUD?.openExternal) {
+                    await window.commandHUD.openExternal(href);
+                  }
+                } else if (action === 'snooze') {
+                  if (eventId && window.criticalAlarms?.snooze) {
+                    await window.criticalAlarms.snooze(eventId, 5);
+                  }
+                  removeAgentUIPanel('critical-meeting-alarm-agent');
+                } else if (action === 'dismiss') {
+                  if (eventId && window.criticalAlarms?.dismiss) {
+                    await window.criticalAlarms.dismiss(eventId);
+                  }
+                  removeAgentUIPanel('critical-meeting-alarm-agent');
+                }
+              } catch (err) {
+                console.warn('[CommandHUD] alarm action failed:', err);
+              }
+            });
+          });
+        }
 
         // Listen for SDK task lifecycle events (automatic queue updates)
         window.commandHUD.onTaskLifecycle((event) => {
@@ -2138,11 +2855,30 @@
 
       const agentUIPanels = document.getElementById('agentUIPanels');
       const activeAgentPanels = new Map(); // agentId -> DOM element
+      // Tracks the per-agent width/height an agent asked the HUD to grow to
+      // (via result.panelWidth / result.panelHeight). Without this, every
+      // call to recalculateHUDSize() would clobber the wider/taller window
+      // back to 340x420 on the next agent-panel render.
+      const agentPanelDims = new Map(); // agentId -> { width, height }
 
+      const DEFAULT_HUD_WIDTH = 340;
       const BASE_HUD_HEIGHT = 420;
       const PANEL_HEIGHT_ESTIMATE = 120;
+      // Hard cap so a misbehaving agent can't request a HUD taller than
+      // the screen. The actual screen height is read at runtime.
+      const HUD_MAX_HEIGHT_FALLBACK = 900;
 
-      function addAgentUIPanel(agentId, agentName, html) {
+      function _viewportMaxHeight() {
+        try {
+          const avail = (window.screen && window.screen.availHeight) || 0;
+          // Leave 80px margin so the HUD doesn't hug the menu bar / dock.
+          return avail > 200 ? avail - 80 : HUD_MAX_HEIGHT_FALLBACK;
+        } catch (_) {
+          return HUD_MAX_HEIGHT_FALLBACK;
+        }
+      }
+
+      function addAgentUIPanel(agentId, agentName, html, opts = {}) {
         if (!agentId || !html) return;
 
         // Sanitize agent-generated HTML to prevent XSS.
@@ -2150,11 +2886,19 @@
         // while preserving layout/styling markup that agents produce.
         const safeHtml = window.commandHUD.sanitizeHTML(html);
 
+        // Record the agent's requested HUD size so recalculateHUDSize() can
+        // honor it (rich panels like the daily-brief dayView ask for ~480x720).
+        const dims = {};
+        if (typeof opts.width === 'number' && opts.width > 0) dims.width = opts.width;
+        if (typeof opts.height === 'number' && opts.height > 0) dims.height = opts.height;
+        if (dims.width || dims.height) agentPanelDims.set(agentId, dims);
+
         // If panel already exists for this agent, update it
         if (activeAgentPanels.has(agentId)) {
           const existing = activeAgentPanels.get(agentId);
           const body = existing.querySelector('.agent-ui-card-body');
           if (body) body.innerHTML = safeHtml;
+          recalculateHUDSize();
           return;
         }
 
@@ -2173,7 +2917,7 @@
 
         agentUIPanels.classList.add('visible');
         recalculateHUDSize();
-        console.log('[CommandHUD] Added agent UI panel:', agentId);
+        console.log('[CommandHUD] Added agent UI panel:', agentId, dims);
       }
 
       function removeAgentUIPanel(agentId) {
@@ -2185,6 +2929,7 @@
           setTimeout(() => {
             card.remove();
             activeAgentPanels.delete(agentId);
+            agentPanelDims.delete(agentId);
             if (activeAgentPanels.size === 0) {
               agentUIPanels.classList.remove('visible');
             }
@@ -2197,21 +2942,39 @@
       function clearAllAgentUIPanels() {
         agentUIPanels.innerHTML = '';
         activeAgentPanels.clear();
+        agentPanelDims.clear();
         agentUIPanels.classList.remove('visible');
         recalculateHUDSize();
       }
 
       function recalculateHUDSize() {
         const panelCount = activeAgentPanels.size;
-        if (window.commandHUD && window.commandHUD.resizeWindow) {
-          if (panelCount === 0) {
-            window.commandHUD.resizeWindow(340, BASE_HUD_HEIGHT);
-          } else {
-            const needed = BASE_HUD_HEIGHT + panelCount * PANEL_HEIGHT_ESTIMATE;
-            const maxHeight = 700;
-            window.commandHUD.resizeWindow(340, Math.min(needed, maxHeight));
-          }
+        if (!window.commandHUD || !window.commandHUD.resizeWindow) return;
+
+        if (panelCount === 0) {
+          window.commandHUD.resizeWindow(DEFAULT_HUD_WIDTH, BASE_HUD_HEIGHT);
+          return;
         }
+
+        // Take the largest requested width/height across all live panels so
+        // a wide rich panel (dayView, 480) and a narrow status panel coexist
+        // at the rich panel's width without snapping back to default 340.
+        let maxRequestedWidth = 0;
+        let maxRequestedHeight = 0;
+        for (const dims of agentPanelDims.values()) {
+          if (dims.width && dims.width > maxRequestedWidth) maxRequestedWidth = dims.width;
+          if (dims.height && dims.height > maxRequestedHeight) maxRequestedHeight = dims.height;
+        }
+
+        const width = maxRequestedWidth > 0 ? maxRequestedWidth : DEFAULT_HUD_WIDTH;
+
+        // Height: prefer the explicit request when given; otherwise estimate
+        // from panel count. Cap to viewport so we never spill off-screen.
+        const estimatedHeight = BASE_HUD_HEIGHT + panelCount * PANEL_HEIGHT_ESTIMATE;
+        const requested = Math.max(maxRequestedHeight, estimatedHeight);
+        const height = Math.min(requested, _viewportMaxHeight());
+
+        window.commandHUD.resizeWindow(width, height);
       }
 
       // Delegated click handler for agent UI panels

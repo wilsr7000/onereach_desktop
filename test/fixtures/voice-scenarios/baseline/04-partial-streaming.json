@@ -1,0 +1,14 @@
+{
+  "name": "baseline-partial-streaming",
+  "description": "Mic injector emits interim partials and a final when userStreams is used, and the events accumulate on the injector.",
+  "phase": "baseline",
+  "flags": {},
+  "steps": [
+    {
+      "type": "userStreams",
+      "partials": ["set", "set a", "set a timer", "set a timer for five minutes"],
+      "partialIntervalMs": 100
+    },
+    { "type": "assert", "micEventCount": 4 }
+  ]
+}

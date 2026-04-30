@@ -1020,6 +1020,28 @@ class ClipboardManagerV2 {
     this.updateSpaceCounts();
     this.notifyHistoryUpdate();
     log.info('clipboard', 'Delete completed successfully for', { id });
+
+    // #region debug-d305ab log B -- adapter.deleteItem end-to-end (H3)
+    try {
+      fetch('http://127.0.0.1:7557/ingest/c7b128b0-d867-47e1-86f3-945c0c400ce1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd305ab' },
+        body: JSON.stringify({
+          sessionId: 'd305ab', runId: 'delete-bug', hypothesisId: 'H3',
+          location: 'clipboard-manager-v2-adapter.js:deleteItem.exit',
+          message: 'adapter.deleteItem complete',
+          data: {
+            itemId: id,
+            spaceId,
+            storageDeleteSuccess: success,
+            historyLengthAfter: this.history.length,
+            stillInHistory: this.history.some((h) => h.id === id),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    } catch (_e) { /* debug log */ }
+    // #endregion
   }
 
   async clearHistory() {
@@ -2832,8 +2854,28 @@ Respond ONLY with valid JSON, no other text.`;
     });
 
     // History management
-    safeHandle('clipboard:get-history', () => {
-      return this.getHistory();
+    safeHandle('clipboard:get-history', async () => {
+      // Route through SpacesAPI when cutover is active. SpacesAPI.items.list
+      // per space hits the cutover provider; we fan-out across all spaces
+      // in parallel so the UI's initial load isn't 58× sequential RPCs.
+      // Falls through to local getHistory() on any error.
+      try {
+        const { getSpacesAPI } = require('./spaces-api');
+        const api = getSpacesAPI();
+        const spaces = await api.list();
+        const arrays = await Promise.all(
+          (spaces || []).map((sp) =>
+            api.items.list(sp.id, {}).catch((err) => {
+              log.warn('clipboard', `[get-history] items.list failed for space ${sp.id}; skipping`, { error: err.message });
+              return [];
+            })
+          )
+        );
+        return arrays.flat();
+      } catch (err) {
+        log.warn('clipboard', '[get-history] SpacesAPI route failed; falling back to local getHistory', { error: err.message });
+        return this.getHistory();
+      }
     });
 
     safeHandle('clipboard:clear-history', async () => {
@@ -2842,6 +2884,21 @@ Respond ONLY with valid JSON, no other text.`;
     });
 
     safeHandle('clipboard:delete-item', async (event, id) => {
+      // #region debug-d305ab log C -- IPC entry (renderer reached main)
+      try {
+        fetch('http://127.0.0.1:7557/ingest/c7b128b0-d867-47e1-86f3-945c0c400ce1', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd305ab' },
+          body: JSON.stringify({
+            sessionId: 'd305ab', runId: 'delete-bug', hypothesisId: 'baseline',
+            location: 'clipboard-manager-v2-adapter.js:ipc.clipboard:delete-item',
+            message: 'IPC delete request received',
+            data: { id },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      } catch (_e) { /* debug log */ }
+      // #endregion
       try {
         await this.deleteItem(id);
         log.info('clipboard', 'Deleted item', { id });
@@ -3066,9 +3123,20 @@ Respond ONLY with valid JSON, no other text.`;
       return this.moveItemToSpace(itemId, spaceId);
     });
 
-    safeHandle('clipboard:get-space-items', (event, spaceId) => {
-      const items = this.getSpaceItems(spaceId);
-      return { success: true, items: items || [] };
+    safeHandle('clipboard:get-space-items', async (event, spaceId) => {
+      // Route through SpacesAPI so the cutover provider (when attached)
+      // can serve graph-backed reads. Falls through to local storage on
+      // any error -- matches the existing fail-open semantics of the
+      // cutover provider's fallbackToOldPath flag.
+      try {
+        const { getSpacesAPI } = require('./spaces-api');
+        const items = await getSpacesAPI().items.list(spaceId, {});
+        return { success: true, items: items || [] };
+      } catch (err) {
+        log.warn('clipboard', '[get-space-items] SpacesAPI route failed; falling back to local storage', { error: err.message });
+        const items = this.getSpaceItems(spaceId);
+        return { success: true, items: items || [] };
+      }
     });
 
     safeHandle('clipboard:load-item-content', (event, itemId) => {

@@ -1,0 +1,11 @@
+{
+  "name": "p4-command-barge-fires",
+  "description": "User speaks a new command mid-TTS; the detector fires a command-kind barge so the caller can cancel TTS and submit the new task.",
+  "phase": "p4-barge",
+  "flags": { "bargeIn": true },
+  "steps": [
+    { "type": "hook", "name": "ttsStart", "args": { "text": "here is the weather forecast for today" } },
+    { "type": "hook", "name": "userSay", "args": { "text": "what about tomorrow" } },
+    { "type": "assert", "metaEquals": { "bargeCount": 1, "lastBargeKind": "command", "lastBargeText": "what about tomorrow" } }
+  ]
+}

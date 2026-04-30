@@ -226,7 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Only show if we have at least some content
     if (title || body) {
-      showNotification(title, body);
+      showNotification(title, body, data || {});
     } else {
       console.warn('[Notification] Received empty notification:', data);
     }
@@ -244,8 +244,38 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize UI
   updateUIState({ status: 'ready' });
 
+  /**
+   * Heuristically classify a notification as an "error" so the universal
+   * diagnostics overlay can pop up next to it. Explicit signals win; we fall
+   * back to looking at the text only when nothing is set.
+   */
+  function _looksLikeError(title, message, data) {
+    const type = String((data && (data.type || data.severity || data.level)) || '').toLowerCase();
+    if (type === 'error' || type === 'fail' || type === 'failed' || type === 'critical') return true;
+    if (type === 'info' || type === 'success' || type === 'warning' || type === 'warn') return false;
+    const combined = `${title || ''} ${message || ''}`.toLowerCase();
+    return /\b(error|failed|failure|cannot|could ?n'?t|unable to|exception|crashed)\b/.test(combined);
+  }
+
   // Function to show a notification
-  function showNotification(title, message) {
+  function showNotification(title, message, data = {}) {
+    // If it's an error-shaped notification AND the diagnostics overlay is
+    // available, trigger the universal popup alongside the toast. The popup
+    // dedups + filters benign patterns on its own, so this is safe to call
+    // unconditionally for every error.
+    try {
+      if (_looksLikeError(title, message, data) && window.diagnostics?.popup) {
+        window.diagnostics.popup({
+          message: `${title ? title + ': ' : ''}${message || ''}`.trim(),
+          category: data?.category || 'app',
+          source: data?.source || 'renderer',
+          data,
+        });
+      }
+    } catch (_) {
+      /* overlay must never block the toast */
+    }
+
     // Create notification element if it doesn't exist
     let notificationContainer = document.getElementById('notification-container');
 

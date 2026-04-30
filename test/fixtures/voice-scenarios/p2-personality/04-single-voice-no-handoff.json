@@ -1,0 +1,28 @@
+{
+  "name": "p2-single-voice-across-agents",
+  "description": "Every agent speaks with the same Cap Chew voice, so voice changes never happen and the handoff bridge is always suppressed.",
+  "phase": "p2-personality",
+  "flags": {},
+  "steps": [
+    {
+      "type": "hook",
+      "name": "agentTurn",
+      "args": {
+        "agentId": "time-agent",
+        "utterance": "it's three in the afternoon",
+        "contextKey": "voice"
+      }
+    },
+    {
+      "type": "hook",
+      "name": "agentTurn",
+      "args": {
+        "agentId": "weather-agent",
+        "utterance": "seventy-two and clear",
+        "contextKey": "voice"
+      }
+    },
+    { "type": "assert", "metaEquals": { "handoff": false, "voice": "coral", "voiceSource": "cap-chew" } },
+    { "type": "assert", "ttsSpokenCount": 2 }
+  ]
+}
