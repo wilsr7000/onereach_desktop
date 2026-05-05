@@ -21,6 +21,7 @@
 import { TabStore } from './store.js';
 import { MainWindowError, MAIN_WINDOW_ERROR_CODES } from './errors.js';
 import { getLoggingApi } from '../logging/api.js';
+import { getAuthApi } from '../auth/api.js';
 
 // Re-export the public types consumers need to typecheck calls.
 export type {
@@ -183,6 +184,12 @@ function buildDefaultApi(): MainWindowApi {
       log[level]('main-window', message, data);
     },
     spanEmitter: (name, data) => getLoggingApi().start(name, data),
+    // Multi-user isolation: scope tab persistence by signed-in
+    // OneReach accountId. The KV endpoint is anonymous and globally
+    // shared, so a single 'default' key meant every install saw every
+    // other user's tabs. Returns null when signed-out, which the
+    // store treats as empty + refuse-to-write.
+    getActiveAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
   });
   return {
     listTabs: () => store.list(),

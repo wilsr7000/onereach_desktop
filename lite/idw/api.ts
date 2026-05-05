@@ -21,6 +21,7 @@ import { IdwStore } from './store.js';
 import type { AddResult } from './store.js';
 import { IdwError, IDW_ERROR_CODES } from './errors.js';
 import { getLoggingApi } from '../logging/api.js';
+import { getAuthApi } from '../auth/api.js';
 
 // Re-export the public types consumers need to typecheck calls.
 export type {
@@ -187,6 +188,12 @@ function buildDefaultApi(): IdwApi {
       log[level]('idw', message, data);
     },
     spanEmitter: (name, data) => getLoggingApi().start(name, data),
+    // Multi-user isolation: scope KV by the signed-in OneReach
+    // accountId so two installs sharing the global anonymous KV
+    // namespace don't see each other's IDWs. Returns null when
+    // signed-out, which makes the store return an empty list and
+    // refuse writes.
+    getActiveAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
   });
   return {
     list: () => store.list(),

@@ -794,7 +794,12 @@ describe('AuthStore.hydrate -- token rehydration from auth partition', () => {
     expect(store.getSession('edison')?.accountId).toBe(SAMPLE_ACCOUNT_ID);
   });
 
-  it('leaves tokenBundle null when the auth partition has no mult cookie', async () => {
+  it('hydrates NOTHING when the auth partition is empty -- even if KV has stale records', async () => {
+    // PRE-2026-05-05 behavior would have loaded the KV record. NEW
+    // behavior (multi-user leak fix) ignores KV entirely on hydrate
+    // and trusts only this install's persistent partition cookies.
+    // A stale KV record from another user must NOT manifest as a
+    // local "you are signed in" state.
     const kv = new FakeKV();
     await kv.set('lite-auth-sessions', `edison:${SAMPLE_ACCOUNT_ID}`, {
       environment: 'edison',
@@ -809,8 +814,9 @@ describe('AuthStore.hydrate -- token rehydration from auth partition', () => {
 
     await store.hydrate();
 
-    expect(store.getSession('edison')?.accountId).toBe(SAMPLE_ACCOUNT_ID);
+    expect(store.getSession('edison')).toBeNull();
     expect(store.getTokenBundle('edison')).toBeNull();
+    expect(store.getToken('edison')).toBeNull();
   });
 });
 
