@@ -558,18 +558,26 @@ async function playArticle(article: LiteAiRunTimesArticle): Promise<void> {
   }
   currentAudioChunks = [];
   currentChunkIndex = 0;
+  // Per ADR-045: route TTS through the cached-tts IPC so replays of
+  // articles we've already listened to don't burn OpenAI credits.
+  // The main process checks Files first by deterministic key
+  // (articleId + voice + sha1(text)) and only generates on miss.
+  const artBridge = window.lite?.aiRunTimes;
+  if (artBridge === undefined) {
+    showToast('AI Run Times bridge unavailable.', 'error');
+    return;
+  }
   // Generate first chunk before playing; subsequent chunks generate while playing.
   try {
-    const firstResp = await aiBridge.tts({
+    const firstResp = await artBridge.cachedTts({
+      articleId: article.id,
       text: chunks[0] ?? '',
       voice: status.defaultTtsVoice as LiteAiTtsVoice,
-      format: 'mp3',
-      feature: 'ai-run-times',
     });
     const firstBytes = base64ToBytes(firstResp.audioBase64);
     currentAudioChunks.push(toArrayBuffer(firstBytes));
   } catch (err) {
-    const parsed = aiBridge.parseError(err);
+    const parsed = aiBridge.parseError(err) ?? artBridge.parseError(err);
     const msg = parsed !== null ? `${parsed.message} ${parsed.remediation}`.trim() : (err as Error).message;
     showToast(`TTS failed: ${msg}`, 'error');
     return;
@@ -585,16 +593,15 @@ async function preloadRemainingChunks(
   voice: LiteAiTtsVoice,
   articleId: string
 ): Promise<void> {
-  const aiBridge = window.lite?.ai;
-  if (aiBridge === undefined) return;
+  const artBridge = window.lite?.aiRunTimes;
+  if (artBridge === undefined) return;
   for (let i = 1; i < chunks.length; i += 1) {
     if (currentArticleId !== articleId) return; // user moved on
     try {
-      const resp = await aiBridge.tts({
+      const resp = await artBridge.cachedTts({
+        articleId,
         text: chunks[i] ?? '',
         voice,
-        format: 'mp3',
-        feature: 'ai-run-times',
       });
       currentAudioChunks.push(toArrayBuffer(base64ToBytes(resp.audioBase64)));
     } catch {

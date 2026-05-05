@@ -47,6 +47,13 @@
           autocomplete="off"
         ></textarea>
 
+        <div class="attachments-row">
+          <button type="button" id="attach-btn" class="ghost">Attach files</button>
+          <span class="attachments-hint">Screenshots or logs (max 10 MB each, 10 per report). Stored in your OneReach Files bucket.</span>
+          <input type="file" id="file-picker" multiple hidden />
+        </div>
+        <ul id="attachments-list" class="attachments-list" aria-live="polite"></ul>
+
         <div class="redaction-info">
           Redaction status: <span id="redaction-status">scanning...</span>
         </div>

@@ -24,6 +24,8 @@ const BUG_REPORT_LIST = 'lite:bug-report:list';
 const BUG_REPORT_READ = 'lite:bug-report:read';
 const BUG_REPORT_UPDATE = 'lite:bug-report:update';
 const BUG_REPORT_DELETE = 'lite:bug-report:delete';
+const BUG_REPORT_ATTACH = 'lite:bug-report:attach';
+const BUG_REPORT_DOWNLOAD_ATTACHMENT = 'lite:bug-report:download-attachment';
 
 const LOGGING_ENQUEUE = 'lite:logging:enqueue';
 const LOGGING_EVENT = 'lite:logging:event';
@@ -112,6 +114,7 @@ const ART_RECORD_READ = 'lite:ai-run-times:record-read';
 const ART_CLEAR_READING_LOG = 'lite:ai-run-times:clear-reading-log';
 const ART_EXPORT_READING_LOG = 'lite:ai-run-times:export-reading-log';
 const ART_OPEN_WINDOW = 'lite:ai-run-times:open-window';
+const ART_CACHED_TTS = 'lite:ai-run-times:cached-tts';
 
 interface LiteMetadata {
   version: string;
@@ -713,6 +716,15 @@ interface ArtErrorJSON {
   cause?: string;
 }
 
+interface ArtCachedTtsResultView {
+  /** Base64-encoded MP3 bytes. */
+  audioBase64: string;
+  /** Always 'audio/mpeg' for v1 (which only supports mp3). */
+  contentType: string;
+  /** True when the chunk was served from the Files cache (no OpenAI cost). */
+  cached: boolean;
+}
+
 interface AiRunTimesBridge {
   listArticles(): Promise<ArtArticleView[]>;
   getArticle(id: string): Promise<ArtArticleView | null>;
@@ -736,7 +748,28 @@ interface AiRunTimesBridge {
   clearReadingLog(): Promise<{ ok: true }>;
   exportReadingLog(): Promise<string>;
   openWindow(): Promise<{ ok: true }>;
+  /**
+   * TTS with a Files-backed cache (ADR-045). Hashes the chunk text +
+   * voice into a deterministic key under `ai-run-times/tts/...` in
+   * the user's Files bucket and serves cached bytes on hit;
+   * generates via the AI module on miss and writes the result to
+   * the cache (best-effort, with a 30-day TTL). Replays of the same
+   * article become free.
+   */
+  cachedTts(input: {
+    articleId: string;
+    text: string;
+    voice?: AiTtsVoice;
+  }): Promise<ArtCachedTtsResultView>;
   parseError(err: unknown): ArtErrorJSON | null;
+}
+
+interface BugReportAttachmentView {
+  key: string;
+  name: string;
+  contentType: string;
+  size: number;
+  uploadedAt: string;
 }
 
 interface BugReportBridge {
@@ -746,12 +779,40 @@ interface BugReportBridge {
     redactionStatus: 'none' | 'low' | 'medium' | 'high';
     redactionTotalCount: number;
   }>;
-  save(userDescription: string): Promise<BugReportSaveResult>;
+  /**
+   * Save the report. Optional `attachments` are file references already
+   * uploaded via `attach()`; the main process forwards them onto the
+   * payload so the saved report carries the file keys (not the bytes).
+   */
+  save(
+    userDescription: string,
+    attachments?: BugReportAttachmentView[]
+  ): Promise<BugReportSaveResult>;
   close(): void;
   list(): Promise<BugReportSummary[]>;
   read(idOrPath: string): Promise<unknown>;
   update(timestamp: string, updates: { status?: 'open' | 'resolved'; notes?: string }): Promise<BugReportUpdateResult>;
   delete(timestamp: string): Promise<BugReportDeleteResult>;
+  /**
+   * Upload a file as a bug-report attachment. Returns metadata that
+   * the renderer collects and passes to `save()`. Backed by
+   * `lite/files/` (ADR-045) -- the bytes go into the user's
+   * authenticated Files bucket at a per-report staging prefix; the
+   * payload only references the file key.
+   */
+  attach(input: {
+    name: string;
+    contentType: string;
+    /** Base64-encoded file bytes. The renderer encodes; main decodes. */
+    base64: string;
+  }): Promise<BugReportAttachmentView>;
+  /**
+   * Resolve a fresh signed download URL for an existing attachment
+   * by its file key. The URL is good for ~15 min; re-resolve on
+   * each user click. Server-side ACL: only the signed-in user who
+   * owns the bucket can fetch.
+   */
+  downloadAttachment(key: string): Promise<string>;
 }
 
 // Read app metadata from additionalArguments (passed via webPreferences in
@@ -791,13 +852,18 @@ const logging: LoggingBridge = {
 
 const bugReport: BugReportBridge = {
   capture: (userDescription: string) => ipcRenderer.invoke(BUG_REPORT_CAPTURE, userDescription),
-  save: (userDescription: string) => ipcRenderer.invoke(BUG_REPORT_SAVE, userDescription),
+  save: (userDescription: string, attachments?: BugReportAttachmentView[]) =>
+    ipcRenderer.invoke(BUG_REPORT_SAVE, userDescription, attachments) as Promise<BugReportSaveResult>,
   close: () => ipcRenderer.send(BUG_REPORT_CLOSE),
   list: () => ipcRenderer.invoke(BUG_REPORT_LIST),
   read: (idOrPath: string) => ipcRenderer.invoke(BUG_REPORT_READ, idOrPath),
   update: (timestamp: string, updates: { status?: 'open' | 'resolved'; notes?: string }) =>
     ipcRenderer.invoke(BUG_REPORT_UPDATE, timestamp, updates),
   delete: (timestamp: string) => ipcRenderer.invoke(BUG_REPORT_DELETE, timestamp),
+  attach: (input) =>
+    ipcRenderer.invoke(BUG_REPORT_ATTACH, input) as Promise<BugReportAttachmentView>,
+  downloadAttachment: (key: string) =>
+    ipcRenderer.invoke(BUG_REPORT_DOWNLOAD_ATTACHMENT, key) as Promise<string>,
 };
 
 const updater: UpdaterBridge = {
@@ -1278,6 +1344,8 @@ const aiRunTimes: AiRunTimesBridge = {
     ipcRenderer.invoke(ART_CLEAR_READING_LOG) as Promise<{ ok: true }>,
   exportReadingLog: () => ipcRenderer.invoke(ART_EXPORT_READING_LOG) as Promise<string>,
   openWindow: () => ipcRenderer.invoke(ART_OPEN_WINDOW) as Promise<{ ok: true }>,
+  cachedTts: (input) =>
+    ipcRenderer.invoke(ART_CACHED_TTS, input) as Promise<ArtCachedTtsResultView>,
   parseError: (err) => parseStructuredErrorWith<ArtErrorJSON>(err, '__aiRunTimesError'),
 };
 
