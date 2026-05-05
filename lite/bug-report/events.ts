@@ -23,7 +23,7 @@ export const BUG_REPORT_EVENTS = {
   DELETE_START: 'bug-report.delete.start',
   DELETE_FINISH: 'bug-report.delete.finish',
   DELETE_FAIL: 'bug-report.delete.fail',
-  // IPC entry events -- 7 channels
+  // IPC entry events -- one per renderer-driven channel
   IPC_CAPTURE: 'bug-report.ipc.capture',
   IPC_SAVE: 'bug-report.ipc.save',
   IPC_CLOSE: 'bug-report.ipc.close',
@@ -31,6 +31,8 @@ export const BUG_REPORT_EVENTS = {
   IPC_READ: 'bug-report.ipc.read',
   IPC_UPDATE: 'bug-report.ipc.update',
   IPC_DELETE: 'bug-report.ipc.delete',
+  IPC_ATTACH: 'bug-report.ipc.attach',
+  IPC_DOWNLOAD_ATTACHMENT: 'bug-report.ipc.download-attachment',
 } as const;
 
 export type BugReportEventName =
@@ -176,6 +178,16 @@ export interface BugReportIpcUpdateEvent extends BugReportEventBase {
   level: 'info';
   data: { timestamp: string };
 }
+export interface BugReportIpcAttachEvent extends BugReportEventBase {
+  name: typeof BUG_REPORT_EVENTS.IPC_ATTACH;
+  level: 'info';
+  data?: undefined;
+}
+export interface BugReportIpcDownloadAttachmentEvent extends BugReportEventBase {
+  name: typeof BUG_REPORT_EVENTS.IPC_DOWNLOAD_ATTACHMENT;
+  level: 'info';
+  data?: { key: string | null };
+}
 export interface BugReportIpcDeleteEvent extends BugReportEventBase {
   name: typeof BUG_REPORT_EVENTS.IPC_DELETE;
   level: 'info';
@@ -205,7 +217,9 @@ export type BugReportEvent =
   | BugReportIpcListEvent
   | BugReportIpcReadEvent
   | BugReportIpcUpdateEvent
-  | BugReportIpcDeleteEvent;
+  | BugReportIpcDeleteEvent
+  | BugReportIpcAttachEvent
+  | BugReportIpcDownloadAttachmentEvent;
 
 export function isBugReportEvent(
   ev: EventRecord

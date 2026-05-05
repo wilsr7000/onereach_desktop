@@ -79,6 +79,8 @@ export interface BugReportSummary {
   bytes: number;
   status: BugReportStatus;
   hasNotes: boolean;
+  /** Number of attachments (0 when the report predates ADR-045). */
+  attachmentCount: number;
 }
 
 export interface SaveResult {
@@ -434,6 +436,11 @@ export class BugReportStore {
       bytes: JSON.stringify(v).length,
       status: v.status === 'resolved' ? 'resolved' : 'open',
       hasNotes: typeof v.notes === 'string' && v.notes.length > 0,
+      attachmentCount: Array.isArray(v.attachments) ? v.attachments.length : 0,
     };
   }
 }
+
+// Re-export the type used by api.ts so consumers don't have to know
+// it lives in capture.ts.
+export type { BugReportAttachment } from './capture.js';

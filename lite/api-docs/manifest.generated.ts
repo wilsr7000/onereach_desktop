@@ -822,7 +822,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "BUG_REPORT_EVENTS",
-        "count": 22,
+        "count": 24,
         "entries": [
           {
             "constantKey": "SAVE_START",
@@ -932,6 +932,16 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "IPC_DELETE",
             "name": "bug-report.ipc.delete",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_ATTACH",
+            "name": "bug-report.ipc.attach",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_DOWNLOAD_ATTACHMENT",
+            "name": "bug-report.ipc.download-attachment",
             "description": ""
           }
         ]
@@ -1106,6 +1116,221 @@ export const MANIFEST: Manifest = {
         ]
       },
       "readme": "# `lite/event-bus/` — domain-event pub/sub\n\nPer ADR-043, the event bus sits **on top of** the central logging queue and projects raw module events (`auth.signIn.finish`, `idw.changed`, `main-window.open-tab.finish`, …) into a small, stable catalogue of **domain events** that other systems subscribe to without coupling to module internals.\n\n## Public surface — `getEventBusApi()`\n\n| Method | Purpose |\n|---|---|\n| `on(name, handler, opts?)` | Subscribe to a single domain event by exact name. Type narrows the handler's `event.data`. Returns unsubscribe. |\n| `onPattern(glob, handler, opts?)` | Subscribe via glob (`agent.tab.*`, `*.signed-in`, `*`). Returns unsubscribe. |\n| `recent(name \\| null, limit?)` | Snapshot read of the most-recent matching events from the ring buffer. |\n| `size()` | Count of events currently in the buffer. |\n| `emit(event)` | Manually publish a domain event. Goes through the same fanout + persistence path as translated events. |\n| `onEvent(handler)` | Subscribe to the bus's OWN operational events (translated, persist, hydrate). Main-process only. |\n\nSubscribers receive the full discriminated `DomainEvent` (`{ name, id, ts, data }`). Throws inside a handler are swallowed and logged — a buggy subscriber CANNOT bring down emission.\n\n## Renderer surface — `window.lite.events.*`\n\nSame shape as the main-process API. `recent` / `size` / `emit` are async (Promise-wrapped over IPC); `on` / `onPattern` register a listener directly via the preload-side broadcast channel.\n\n```js\nconst off = window.lite.events.on('user.signed-in', (ev) => {\n  console.log('hello', ev.data.email);\n});\n// later: off();\n\nconst recent = await window.lite.events.recent('agent.tab.opened', 10);\n```\n\n## Subscription contract\n\n- Default: future-only — `on` / `onPattern` returns events that fire *after* registration.\n- Opt-in: `{ replay: true }` — synchronously replay any matching events already in the ring buffer (most-recent-last) before any future events.\n- Snapshot: `recent(name, limit)` — does NOT subscribe; just reads the buffer.\n\n## Domain events (current catalogue)\n\n| Name | Trigger | Payload |\n|---|---|---|\n| `user.signed-in` | `auth.signIn.finish` | `{ env, accountId, email? }` |\n| `user.signed-out` | `auth.signOut.finish` | `{ env }` |\n| `agent.tab.opened` | `main-window.open-tab.finish` (wasFocus=false) | `{ tabId, url, label }` |\n| `agent.tab.focused` | `main-window.open-tab.finish` (wasFocus=true) | `{ tabId, idwId? }` |\n| `agent.tab.closed` | `main-window.close-tab.finish` | `{ tabId }` |\n| `agent.tab.activated` | `main-window.activate-tab.finish` | `{ tabId }` |\n| `token.injected` | `auth.inject-token.finish` (injected=true) | `{ env, partitionPrefix }` |\n| `update.available` | `updater.update-available` | `{ version }` |\n| `update.downloaded` | `updater.update-downloaded` | `{ version }` |\n| `idw.installed` | `idw.store.installed` | `{ id, kind, catalogId }` |\n| `bug-report.submitted` | `bug-report.save.finish` | `{ filePath, redactionBucket }` |\n\nAdding / changing the catalogue is an ADR-worthy event — subscribers depend on the shape staying stable.\n\n## Persistence\n\n- **Ring buffer** (`RING_BUFFER_MAX = 200`): in-memory, evicted oldest-first.\n- **KV mirror** (`lite-event-bus / default`): debounced 500ms after each mutation. Best-effort — on KV failure the in-memory state stays authoritative and the bus retries on the next push.\n- **Hydrate on boot**: `initEventBus()` reads the persisted blob and pre-populates the buffer, so renderer subscribers using `{ replay: true }` immediately after launch see history from the previous session.\n\n## Architecture\n\n```\nauth.signIn.finish event fires\n         ↓\nlogging queue\n         ↓\nevent-bus subscribed ('*')\n         ↓\ntranslator rule for 'auth.signIn.finish'\n         ↓\nDomainEvent { name: 'user.signed-in', data: { env, accountId, email? } }\n         ↓\nring buffer push + KV-debounced persist + EventEmitter fanout\n         ↓\n   ┌─ main-process subscribers (await getEventBusApi().on(...))\n   └─ webContents.send('lite:event-bus:event', ev) → all renderer windows\n                                                      ↓\n                                             window.lite.events.on(name, cb)\n```\n\n## Error catalog\n\n| Code | Meaning |\n|---|---|\n| `EB_UNKNOWN_NAME` | Caller passed a domain event name not in the catalogue. |\n| `EB_INVALID_INPUT` | Subscriber payload failed validation (renderer-side). |\n| `EB_PERSISTENCE_FAILED` | Underlying KV write rejected. Bus stays operational; in-memory state is authoritative. |\n\n## Files\n\n| File | Purpose |\n|---|---|\n| `api.ts` | Public API surface (`getEventBusApi()`) + re-exports. |\n| `types.ts` | `DomainEvent` discriminated union + `DOMAIN_EVENT_NAMES` source-of-truth list + persistence shape. |\n| `translator.ts` | Pure rules table mapping raw `EventRecord` → `DomainEvent`. |\n| `store.ts` | Ring buffer + KV persistence + EventEmitter fanout + glob matching. |\n| `errors.ts` | `EventBusError` + `EVENT_BUS_ERROR_CODES`. |\n| `events.ts` | Bus's OWN typed events (operational telemetry). |\n| `main.ts` | IPC handlers + boot init + cross-window broadcast. |\n\nSee [DECISIONS.md ADR-043](../DECISIONS.md) for the architectural rationale.\n"
+    },
+    {
+      "slug": "files",
+      "title": "Files",
+      "summary": "Files module -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports\ngo through `<module>/api.ts` -- never reach into `sdk-client.ts` or\nany other internal file.\n\nWraps `@or-sdk/files` so other modules can upload, download, list,\nand delete files in OneReach storage without importing the SDK.\nPer-user isolation is enforced server-side: every request carries\nthe user's `mult` token and the active `accountId`.\n\nUsage from another module (main process only):\n\n  import { getFilesApi } from '../files/api.js';\n  const url = await getFilesApi().upload('bug-attachments', 'screenshot.png', bytes, {\n    contentType: 'image/png',\n  });\n\nTests: `_setFilesApiForTesting(stub)` to inject a custom\nimplementation, `_resetFilesApiForTesting()` to clear the singleton.",
+      "surface": {
+        "interfaceName": "FilesApi",
+        "interfaceDescription": "The public surface of the files module.\n\n**Error contract**: every method throws `FilesError` (extends\n`LiteError`) on failure. Inspect `.code`:\n`FILES_NOT_AUTHENTICATED`, `FILES_NOT_FOUND`, `FILES_HTTP`,\n`FILES_NETWORK`, `FILES_ALREADY_EXISTS`, `FILES_TOO_LARGE`,\n`FILES_INVALID_INPUT`. `get()` and `delete()` soft-fail\nnot-found (return null / no-op).\n\n**Auth**: every method requires a signed-in OneReach account.\nSigned-out callers see `FILES_NOT_AUTHENTICATED`.",
+        "methods": [
+          {
+            "name": "upload",
+            "signature": "upload(\n    prefix: string,\n    fileName: string,\n    content: FilesContent,\n    options?: FilesUploadOptions\n  ): Promise<string>",
+            "description": "Upload bytes to a key inside the account's bucket. Returns the\nfull download URL (good for ~15 min for private files).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "getDownloadUrl",
+            "signature": "getDownloadUrl(key: string, options?: FilesDownloadOptions): Promise<string>",
+            "description": "Get a fresh signed download URL for an existing key. Use when\nyou need to hand the URL to a renderer or external system.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "download",
+            "signature": "download(key: string, options?: FilesDownloadOptions): Promise<ArrayBuffer>",
+            "description": "Convenience: download the file's bytes via a signed URL. Returns\nthe raw `ArrayBuffer`. Throws `FILES_NOT_FOUND` on 404.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "get",
+            "signature": "get(key: string, options?: FilesDownloadOptions): Promise<FilesItem | null>",
+            "description": "Read a single file's metadata. Returns null if the key doesn't\nexist (mirrors `kv.get`'s missing-key contract).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "list",
+            "signature": "list(prefix: string, options?: FilesListOptions): Promise<FilesItem[]>",
+            "description": "List items under a prefix. Empty prefix lists from bucket root.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "createFolder",
+            "signature": "createFolder(folderName: string): Promise<void>",
+            "description": "Create a folder. Idempotent at the SDK level.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "delete",
+            "signature": "delete(key: string, options?: FilesDeleteOptions): Promise<void>",
+            "description": "Delete a single file. Soft-fails 404 (no-op when the key is\nalready gone).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "deleteFolder",
+            "signature": "deleteFolder(folderKey: string): Promise<void>",
+            "description": "Delete a folder and everything underneath it.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "setTtl",
+            "signature": "setTtl(key: string, expiresAt: string | null, options?: FilesDeleteOptions): Promise<void>",
+            "description": "Set / clear a TTL. Pass `null` to clear.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "setPrivacy",
+            "signature": "setPrivacy(\n    key: string,\n    newPrivacy: 'private' | 'public',\n    options?: FilesDeleteOptions\n  ): Promise<void>",
+            "description": "Flip a file's privacy in place.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "onEvent",
+            "signature": "onEvent(handler: (event: FilesEvent) => void): () => void;",
+            "description": "Subscribe to typed files events (ADR-032). Branch on `ev.name`\nfor type-narrowed access.",
+            "tags": [],
+            "examples": []
+          }
+        ]
+      },
+      "events": {
+        "constantName": "FILES_EVENTS",
+        "count": 24,
+        "entries": [
+          {
+            "constantKey": "UPLOAD_START",
+            "name": "files.upload.start",
+            "description": ""
+          },
+          {
+            "constantKey": "UPLOAD_FINISH",
+            "name": "files.upload.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "UPLOAD_FAIL",
+            "name": "files.upload.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "DOWNLOAD_START",
+            "name": "files.download.start",
+            "description": ""
+          },
+          {
+            "constantKey": "DOWNLOAD_FINISH",
+            "name": "files.download.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "DOWNLOAD_FAIL",
+            "name": "files.download.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "GET_START",
+            "name": "files.get.start",
+            "description": ""
+          },
+          {
+            "constantKey": "GET_FINISH",
+            "name": "files.get.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "GET_FAIL",
+            "name": "files.get.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_START",
+            "name": "files.list.start",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_FINISH",
+            "name": "files.list.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_FAIL",
+            "name": "files.list.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "DELETE_START",
+            "name": "files.delete.start",
+            "description": ""
+          },
+          {
+            "constantKey": "DELETE_FINISH",
+            "name": "files.delete.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "DELETE_FAIL",
+            "name": "files.delete.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "CREATE_FOLDER_START",
+            "name": "files.createFolder.start",
+            "description": ""
+          },
+          {
+            "constantKey": "CREATE_FOLDER_FINISH",
+            "name": "files.createFolder.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "CREATE_FOLDER_FAIL",
+            "name": "files.createFolder.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "TTL_SET_START",
+            "name": "files.ttl.set.start",
+            "description": ""
+          },
+          {
+            "constantKey": "TTL_SET_FINISH",
+            "name": "files.ttl.set.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "TTL_SET_FAIL",
+            "name": "files.ttl.set.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "PRIVACY_CHANGE_START",
+            "name": "files.privacy.start",
+            "description": ""
+          },
+          {
+            "constantKey": "PRIVACY_CHANGE_FINISH",
+            "name": "files.privacy.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "PRIVACY_CHANGE_FAIL",
+            "name": "files.privacy.fail",
+            "description": ""
+          }
+        ]
+      },
+      "readme": "# `lite/files/` -- File storage on OneReach\n\nWraps `@or-sdk/files` so other Lite modules can upload, download, list, and delete files in OneReach storage without touching the SDK directly. Per-user isolation is enforced server-side: every request carries the user's `mult` token and the active `accountId`, so files in your account are never visible to anyone else's install.\n\n- **Public API**: [`api.ts`](api.ts) -- `FilesApi`, `getFilesApi()`, `FilesError`, `FILES_ERROR_CODES`\n- **Internal**:\n  - [`sdk-client.ts`](sdk-client.ts) -- `SdkFilesClient` SDK wrapper (`@internal`)\n  - [`types.ts`](types.ts) -- `FilesItem`, content + option shapes\n  - [`errors.ts`](errors.ts) -- `FilesError` + code catalog\n  - [`events.ts`](events.ts) -- typed event surface (ADR-032)\n- **Tests**: [`../test/unit/files-api.test.ts`](../test/unit/files-api.test.ts), [`../test/integration/files-integration.test.ts`](../test/integration/files-integration.test.ts)\n\n## Usage\n\n```typescript\nimport { getFilesApi } from '../files/api.js';\n\n// Upload bytes\nconst url = await getFilesApi().upload('bug-attachments', 'screenshot.png', bytes, {\n  contentType: 'image/png',\n  rewriteMode: 'prevent-rewrite',\n  expiresAt: new Date(Date.now() + 7 * 86400_000).toISOString(), // 7 days\n});\n\n// Get a fresh signed URL later\nconst fresh = await getFilesApi().getDownloadUrl('bug-attachments/screenshot.png');\n\n// Convenience: download bytes directly\nconst buf = await getFilesApi().download('bug-attachments/screenshot.png');\n\n// List\nconst items = await getFilesApi().list('bug-attachments');\n// [{ key, size, contentType, lastModified, downloadUrl, ... }]\n\n// Delete\nawait getFilesApi().delete('bug-attachments/screenshot.png');\n```\n\n## Auth\n\nEvery method requires a signed-in OneReach account. Signed-out callers see `FILES_NOT_AUTHENTICATED`. The auth bindings are wired by `lite/main-lite.ts` after `initAuth()` returns, via `setFilesAuthBindings({ getToken, getAccountId })` -- the files module never imports `lite/auth/` directly so dep-cruiser's `no-circular-in-lite` rule stays clean (mirrors the `setKVAuthBindings` pattern from ADR-044).\n\n## Public vs private\n\nEvery method takes an optional `isPublic: boolean` (default `false`). Private files require a signed URL to download; public files can be hot-linked indefinitely. There is no per-account ACL layer beyond this -- if you need fine-grained sharing, layer it in the consumer module.\n\n## Error catalog\n\n| Code | When | Remediation |\n|------|------|-------------|\n| `FILES_NOT_AUTHENTICATED` | No `mult` token / no active account | Sign in via Settings -> Account |\n| `FILES_NOT_FOUND` | Server returned 404 (key doesn't exist) | Check the key + isPublic flag |\n| `FILES_HTTP` | Non-2xx other than 404 / 409 / 413 (incl. 401/403) | Sign out + back in to refresh the token |\n| `FILES_NETWORK` | Underlying fetch rejected (DNS / TCP / TLS) | Check network connectivity |\n| `FILES_ALREADY_EXISTS` | `prevent-rewrite` upload found an existing file | Use `rewriteMode: 'rewrite'` or pick a different name |\n| `FILES_TOO_LARGE` | Upload exceeded the configured `maxFileSize` | Lower the file size or raise `maxFileSize` |\n| `FILES_INVALID_INPUT` | Caller passed an empty key, bad TTL, etc. | Fix the call site |\n\n`get()` and `delete()` soft-fail not-found (return `null` / no-op) -- mirrors `kv.get` / `kv.delete`.\n\n## Hardening roadmap\n\n- **F1: Per-renderer bridge** -- `window.lite.files.*` IPC bridge for renderer-driven uploads (file pickers, drag-and-drop). Today the module is main-process only; renderers go through their own module's IPC (e.g. bug-report's \"attach file\" handler).\n- **F2: Files Sync** -- thin `lite/files-sync/` wrapper around `@or-sdk/files-sync-node` for the \"mirror a local folder to the cloud\" use case (`gsx-file-sync.js` does this in the full app). Deferred -- different mental model, no in-app consumer yet.\n- **F3: Multi-env** -- when the auth-multi-env chunk lands, files inherits per-env discoveryUrl + accountId from auth.\n- **F4: Resumable uploads** -- the SDK's `uploadFileV2` is single-shot. Large-file uploads with resumable behavior would need a separate code path.\n\n## Borrowed pattern\n\nThe construction shape (token getter + discoveryUrl + accountId) mirrors `lib/edison-sdk-manager.js:349-358` -- the full app's pattern, studied but not imported (per `lite/LITE-RULES.md`). The `setFilesAuthBindings` indirection mirrors `setKVAuthBindings` (ADR-044) and is documented in ADR-045.\n"
     },
     {
       "slug": "health",
@@ -2263,5 +2488,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-05-05T17:59:48.220Z"
+  "generatedAt": "2026-05-05T18:24:00.021Z"
 } as const;

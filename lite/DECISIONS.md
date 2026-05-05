@@ -1272,4 +1272,37 @@ New ADRs append below as they're made. Use the next sequential ID (ADR-037, ADR-
 
 ---
 
+## ADR-045: Lite Files module via `@or-sdk/files` -- consumer-routed (no renderer bridge in v1)
+
+- **Date**: 2026-05-05
+- **Status**: Accepted
+- **Context**: With KV moved to authenticated SDK transport (ADR-044), the next OneReach SDK Lite needed in-app was Files -- the per-account file storage backend. Two existing consumers had concrete need: (a) bug reports that today inline log dumps in the JSON payload (no place to attach screenshots / large logs), and (b) AI Run Times TTS, which regenerates audio from OpenAI on every replay (the in-memory `URL.createObjectURL(Blob)` leak from the full app's `Flipboard-IDW-Feed/uxmag.html` was already inherited and there's no cross-session cache). The Files SDK takes the same `{ token, accountId, discoveryUrl }` construction shape as KV, so per-user isolation is again server-side -- nothing new architecturally.
+- **Decision**: Ship `lite/files/` as a new top-level module with the standard Lite shape (`api.ts` public singleton, `sdk-client.ts` `@internal`, `events.ts` typed surface per ADR-032, `errors.ts` structured codes). The public surface is the consumer-friendly subset of the SDK -- `upload / download / getDownloadUrl / get / list / createFolder / delete / deleteFolder / setTtl / setPrivacy / onEvent`. Auth is wired via the same `setFilesAuthBindings` indirection introduced for KV in ADR-044, so `lite/files/` does NOT static-import `lite/auth/` and dep-cruiser's `no-circular-in-lite` rule stays clean. Consumer integrations land in the same PR rather than as follow-ups so the seam is exercised end-to-end by real callers from day one.
+- **Consequences**:
+  - **Bug reports gain attachments without inflating the KV payload.** The payload carries `BugReportAttachment[]` (file references: key + name + contentType + size + uploadedAt), NOT the bytes. The bytes live in `lite-bugs/attachments/staging-<timestamp>/<safeName>` in the user's Files bucket, gated by their `mult` token and accountId server-side. Modal renderer picks a file -> base64 over `lite:bug-report:attach` IPC -> main decodes (10MB cap, sanitized filename, prefix-locked) and uploads -> returns the metadata for the renderer to collect before save. View-saved-bug uses `lite:bug-report:download-attachment` to resolve a fresh signed URL on demand.
+  - **AI Run Times TTS becomes free on replay.** The renderer's `aiBridge.tts(...)` call is replaced with a new `lite:ai-run-times:cached-tts` IPC that hashes the chunk text + voice into a deterministic Files key (`ai-run-times/tts/<articleId>/<voice>-<sha1(text)>.mp3`), checks the cache first, and only generates via OpenAI on miss. Cached uploads carry a 30-day TTL so the user's bucket doesn't grow unbounded. Best-effort write -- if the cache upload fails, the user still gets the bytes (we already paid the OpenAI cost).
+  - **The `setFilesAuthBindings` indirection mirrors `setKVAuthBindings`.** Tests for both now have the same shape; main-lite.ts has both bind calls back-to-back after initAuth. If we add a third SDK module (Bots, Flows, etc.), the same pattern repeats -- no new architectural decision needed.
+  - **No renderer bridge in v1 (deliberate).** `window.lite.files.*` is NOT exposed. Renderers that need files go through their own module's IPC (the bug-report modal does this for attach/download). Reasons: (1) per-IPC validation / size caps / prefix locks live in one place per consumer (bug-report enforces a 10MB cap + prefix lock on download; a generic bridge would have to hardcode less safe defaults), (2) keeps the security review surface minimal until we have a real "user wants to upload arbitrary files" use case, (3) F1 hardening in the README documents the seam if it's needed later.
+  - **Files-Sync deferred.** `@or-sdk/files-sync-node` (the "mirror a folder" engine `gsx-file-sync.js` uses) is heavier and serves a different mental model -- skipped for v1.
+- **Files** (~1,200 LOC across 6 new + ~250 LOC of edits across 4 existing):
+  - New module: `lite/files/{api,sdk-client,types,errors,events}.ts` + `README.md`
+  - New tests: `lite/test/unit/files-api.test.ts` (20 tests) + `lite/test/integration/files-integration.test.ts` (12 tests) + 5 new tests across existing bug-report-{capture,store,api}.test.ts
+  - Wiring: `lite/main-lite.ts` (`setFilesAuthBindings` after initAuth)
+  - Consumer integration: `lite/bug-report/{main,store,capture,api,events}.ts` (attach + downloadAttachment IPCs, payload schema, summary count); `lite/ai-run-times/main.ts` (cached-tts IPC + cache-key helpers); `lite/test/unit/api-docs-manifest.test.ts` (add discovery + files to expected slugs); `lite/api-docs/manifest.generated.ts` (auto-regenerated)
+- **Patterns rejected**:
+  - **Renderer bridge `window.lite.files.*` in v1** -- rejected per the rationale above. Re-evaluate when a concrete consumer needs it.
+  - **Bug-report attachment bytes in the payload** -- rejected. The current KV payload is JSON; encoding 10MB of base64 into it bloats the KV write 30%+ and forces every `list()` to download every report's bytes. Carrying file references keeps the payload small and lets the modal lazy-load attachments only when the user clicks "View".
+  - **AI Run Times cache via KV** -- rejected. KV is for structured records, not blob storage. Caching MP3 chunks in KV would inflate the per-user blob to hundreds of MB and break the "one big JSON" assumption other code makes (see `lite/idw/store.ts` and `lite/main-window/store.ts`).
+  - **Separate `setFilesAuthBindings` mechanism per module (e.g. cookie-style globals)** -- rejected. The setter pattern is the same one ADR-044 introduced for KV; making it identical means tests and consumers learn it once.
+  - **Cache key without `voice` in the hash** -- rejected. Different voices produce different audio; without `voice` in the key, switching voices would replay the wrong audio from cache.
+  - **Migrate existing bug reports to add empty `attachments: []`** -- rejected. The field is optional on `BugReportPayload` and `migrateLegacyPayload` doesn't synthesize it -- old reports continue to read cleanly, the modal just shows "0 attachments" implicitly.
+- **Forward-compat seams (`F`-series, in `README.md`)**:
+  - **F1**: per-renderer `window.lite.files.*` bridge -- adds a guarded IPC handler and updates `lite-window.d.ts` typings.
+  - **F2**: `lite/files-sync/` wrapper around `@or-sdk/files-sync-node` -- different ergonomics, separate module.
+  - **F3**: multi-env (`auth-multi-env` chunk lands first; files inherits per-env discoveryUrl + accountId from auth).
+  - **F4**: resumable uploads -- the SDK's `uploadFileV2` is single-shot.
+- **Process lesson**: shipping the seam without consumer integrations would have left the module untested in a real flow. Wiring bug-report attachments + ai-run-times TTS caching in the same PR caught two integration-level issues during development (the renderer-side base64 transport boundary, and the cache-write-must-not-throw rule for the TTS path) that pure unit tests on `lite/files/` couldn't have surfaced.
+
+---
+
 The chunk-failure-recovery release valve (Phase 2 entry) logs structured incident entries here -- one ADR per declared incident, with the two CODEOWNERS' sign-offs and the time-box.

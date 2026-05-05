@@ -62,6 +62,7 @@ function makeStubApi(): BugReportApi & {
         bytes: JSON.stringify(p).length,
         status: p.status,
         hasNotes: p.notes.length > 0,
+        attachmentCount: p.attachments?.length ?? 0,
       }));
     },
     read: async (idOrPath) => {
