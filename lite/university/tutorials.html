@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:; font-src 'self' data:"
+    />
+    <title>Agentic University -- Quick Starts</title>
+    <link rel="stylesheet" href="./university-tutorials.css" />
+  </head>
+  <body>
+    <header class="frame-header">
+      <div class="frame-header-text">
+        <div class="kicker">Agentic University</div>
+        <h1>Start your journey as a product expert</h1>
+        <p class="frame-subtitle">
+          Hand-picked Quick Starts to take you from "what is this?" to your first shipped agent. Open any card to load it in the Learning Browser.
+        </p>
+      </div>
+    </header>
+
+    <div class="catalog-layout">
+      <main id="content" class="content" aria-live="polite"></main>
+    </div>
+
+    <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+    <footer class="frame-footer">
+      <span class="frame-footer-info">
+        Curated by OneReach. Cards open in a Lite-internal Learning Browser; sessions persist within Lite.
+      </span>
+      <button type="button" id="close-btn" class="btn-secondary">Close</button>
+    </footer>
+
+    <script src="./university-tutorials.js"></script>
+  </body>
+</html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:"
+    />
+    <title>Settings</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./settings.css" />
+  </head>
+  <body>
+    <header class="frame-header">
+      <h1>Settings</h1>
+    </header>
+
+    <div class="settings-layout">
+      <!-- Sidebar nav -- populated by settings.ts from the SECTIONS list. -->
+      <nav id="settings-sidebar" class="sidebar" aria-label="Settings sections"></nav>
+
+      <!-- Content area -- one tab-pane per section, populated by settings.ts. -->
+      <main id="settings-content" class="content-area"></main>
+    </div>
+
+    <footer class="frame-footer">
+      <button type="button" id="close-btn" class="btn-secondary">Close</button>
+    </footer>
+
+    <script src="./settings.js"></script>
+  </body>
+</html>

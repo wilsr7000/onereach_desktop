@@ -815,18 +815,33 @@ describe('AuthStore.hydrate -- token rehydration from auth partition', () => {
 });
 
 describe('AuthStore.injectTokenIntoPartition', () => {
-  it('writes the captured mult AND or cookies to both UI and API domains', async () => {
+  it('clones every OneReach cookie from the auth partition, preserving original domains + attributes', async () => {
     const kv = new FakeKV();
     const authSession = new FakeSession();
+    // mult lives on the API domain; or lives on the UI domain. The
+    // clone preserves each cookie's original domain (no forced
+    // duplication across suffixes -- that would corrupt cookie scope).
     authSession.cookies.seed(multCookie());
     authSession.cookies.seed(orCookie());
+    // Plus a third session-tracking cookie that the SSO interstitial
+    // also checks. The new clone path catches this; the old
+    // mult+or-only inject would have missed it.
+    authSession.cookies.seed({
+      name: 'connect.sid',
+      value: 'abc.def.ghi',
+      domain: '.edison.onereach.ai',
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      expirationDate: Math.floor(Date.now() / 1000) + 3600,
+    });
     const tabSession = new FakeSession();
     const store = new AuthStore({
       kvApi: kv,
       sessionFromPartition: (partition: string) =>
         (partition === 'persist:lite-auth-edison' ? authSession : tabSession) as unknown as Electron.Session,
     });
-    // Seed an AuthSession + run hydrate so the bundle populates.
     await kv.set('lite-auth-sessions', `edison:${SAMPLE_ACCOUNT_ID}`, {
       environment: 'edison',
       accountId: SAMPLE_ACCOUNT_ID,
@@ -837,39 +852,61 @@ describe('AuthStore.injectTokenIntoPartition', () => {
     const result = await store.injectTokenIntoPartition('edison', 'persist:tab-test-1');
 
     expect(result.injected).toBe(true);
-    // Both UI and API domains receive both cookies.
     const setNames = tabSession.cookies.setCalls.map((c) => `${c.name}@${c.domain}`);
+    // mult cloned to its original API domain (the only place it
+    // lives in the auth partition).
     expect(setNames).toContain('mult@.edison.api.onereach.ai');
-    expect(setNames).toContain('mult@.edison.onereach.ai');
-    expect(setNames).toContain('or@.edison.api.onereach.ai');
+    // or cloned to the UI domain.
     expect(setNames).toContain('or@.edison.onereach.ai');
-    // Each cookie value matches its captured value.
-    for (const call of tabSession.cookies.setCalls) {
-      if (call.name === 'mult') {
-        expect(call.value).toBe(SAMPLE_TOKEN);
-        // mult should be httpOnly to match the OneReach Set-Cookie posture.
-        expect(call.httpOnly).toBe(true);
-      }
-      if (call.name === 'or') {
-        // The `or` cookie is a URL-encoded JSON payload, not a bearer.
-        expect(call.value.length).toBeGreaterThan(0);
-        expect(call.value).not.toBe(SAMPLE_TOKEN);
-        // Must NOT be httpOnly -- the OneReach SPA reads it from JS.
-        expect(call.httpOnly).toBe(false);
-      }
-    }
-    // Flush was called so the next loadURL sees the cookie.
+    // Ancillary session cookie also cloned -- this is the value-add
+    // of the full-clone strategy vs. the old mult+or-only.
+    expect(setNames).toContain('connect.sid@.edison.onereach.ai');
+    // Each cookie's value matches its captured value.
+    const multCall = tabSession.cookies.setCalls.find((c) => c.name === 'mult');
+    const orCall = tabSession.cookies.setCalls.find((c) => c.name === 'or');
+    expect(multCall?.value).toBe(SAMPLE_TOKEN);
+    expect(orCall?.value.length ?? 0).toBeGreaterThan(0);
+    expect(orCall?.value).not.toBe(SAMPLE_TOKEN);
+    // Flush was called so the next loadURL sees the cookies.
     expect(tabSession.cookies.flushCallCount).toBeGreaterThan(0);
   });
 
-  it('returns no-token when no captured token exists', async () => {
+  it('returns no-cookies when the auth partition has no captured cookies', async () => {
     const store = new AuthStore({
       kvApi: new FakeKV(),
       sessionFromPartition: () => new FakeSession() as unknown as Electron.Session,
     });
     const result = await store.injectTokenIntoPartition('edison', 'persist:tab-x');
     expect(result.injected).toBe(false);
-    expect(result.reason).toBe('no-token');
+    // The clone path reports `no-cookies` (nothing to copy); the old
+    // mult-only path reported `no-token`. Renamed for accuracy.
+    expect(result.reason).toBe('no-cookies');
+  });
+
+  it('returns no-mult when other cookies exist but mult is missing', async () => {
+    const kv = new FakeKV();
+    const authSession = new FakeSession();
+    authSession.cookies.seed(orCookie()); // or but no mult
+    const tabSession = new FakeSession();
+    const store = new AuthStore({
+      kvApi: kv,
+      sessionFromPartition: (partition: string) =>
+        (partition === 'persist:lite-auth-edison' ? authSession : tabSession) as unknown as Electron.Session,
+    });
+    await kv.set('lite-auth-sessions', `edison:${SAMPLE_ACCOUNT_ID}`, {
+      environment: 'edison',
+      accountId: SAMPLE_ACCOUNT_ID,
+      capturedAt: Date.now(),
+    });
+    await store.hydrate();
+
+    const result = await store.injectTokenIntoPartition('edison', 'persist:tab-z');
+
+    expect(result.injected).toBe(false);
+    // mult is the load-bearing token -- without it we shouldn't pretend the
+    // partition is signed in.
+    expect(result.reason).toBe('no-mult');
+    expect(tabSession.cookies.setCalls).toHaveLength(0);
   });
 
   it('refuses to inject an expired cookie', async () => {

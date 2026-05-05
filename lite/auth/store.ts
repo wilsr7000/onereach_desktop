@@ -148,6 +148,44 @@ export function getEnvironmentForUrl(url: string): Environment | null {
   return extractEnvironment(host);
 }
 
+/**
+ * Extract the OneReach `accountId` UUID from a URL's query string, or
+ * null if the URL has no `?accountId=...` parameter (or it's
+ * malformed). Used when generating per-account partition strings so
+ * IDW tabs that share an account share their session.
+ */
+export function getOneReachAccountIdFromUrl(url: string): string | null {
+  if (typeof url !== 'string' || url.length === 0) return null;
+  const m = url.match(/[?&]accountId=([a-f0-9-]{36})/i);
+  return m === null ? null : m[1] ?? null;
+}
+
+/**
+ * Compute the canonical Electron partition string for a OneReach IDW
+ * URL: `persist:idw-<env>-<accountId>`. Returns null when the URL is
+ * NOT a OneReach IDW (third-party agents) or doesn't carry an
+ * accountId (in which case the caller falls back to a per-tab
+ * `persist:tab-<uuid>` partition).
+ *
+ * Per ADR-042 amendment ("ultimate convenience"): IDW tabs that share
+ * an account use the same partition so signing in once persists
+ * across all tabs and across app restarts. Multi-account works
+ * naturally because different accounts produce different partitions.
+ *
+ * Format spec:
+ *   - `persist:idw-<env>-<accountId>` -- env is one of edison /
+ *     staging / dev / production; accountId is the lowercased UUID
+ *     from the URL.
+ *   - `null` for non-OneReach URLs or URLs without accountId.
+ */
+export function partitionForOneReachUrl(url: string): string | null {
+  const env = getEnvironmentForUrl(url);
+  if (env === null) return null;
+  const accountId = getOneReachAccountIdFromUrl(url);
+  if (accountId === null) return null;
+  return `persist:idw-${env}-${accountId.toLowerCase()}`;
+}
+
 // ---------------------------------------------------------------------------
 // Logger surface -- mirrors the bug-report module's pattern.
 // ---------------------------------------------------------------------------
@@ -458,17 +496,29 @@ export class AuthStore {
   }
 
   /**
-   * Inject the captured `mult` cookie into a target tab partition's
-   * session, scoped to both the env's UI domain (e.g.
-   * `.edison.onereach.ai`) and API domain (`.edison.api.onereach.ai`).
-   * Mirrors the full app's `multi-tenant-store.js:659-856` injection
-   * behaviour but stays inside lite. Per ADR-042, this is what makes
-   * the IDW agent recognize the user on the first tab open without
-   * showing the OneReach account picker.
+   * Inject the captured OneReach session cookies into a target tab
+   * partition's session, scoped to the env's UI + API cookie domains.
+   * Per ADR-042, this is what makes the IDW agent recognize the user
+   * on first tab open without showing the OneReach account picker.
+   *
+   * Strategy: clone EVERY cookie from the auth partition
+   * (`persist:lite-auth-<env>`) whose domain matches one of the env's
+   * cookie suffixes. The `mult` API bearer and `or` account/session
+   * are the load-bearing pair, but OneReach also sets ancillary
+   * cookies (CSRF tokens, session-id markers, etc.) that the SSO
+   * interstitial checks before offering the Skip button. Cloning the
+   * full set instead of cherry-picking mult+or means we don't have
+   * to track which extra cookies OneReach uses today vs tomorrow.
+   *
+   * Per the user's amend (2026-05-05): we keep PER-TAB partition
+   * isolation. Each tab has its own copy of the cookies; signing out
+   * or invalidating in one tab doesn't affect siblings. The clone
+   * happens once per tab on first attach. Multi-account is preserved
+   * because tabs are independent.
    *
    * Returns `{ injected: false, reason: ... }` when no captured token
    * is available, or when the env config is unknown. Soft-fails on
-   * cookie write errors and returns `{ injected: false, reason: 'cookie-write-failed' }`.
+   * cookie write errors.
    */
   async injectTokenIntoPartition(
     env: Environment,
@@ -481,123 +531,63 @@ export class AuthStore {
         span?.finish({ injected: false, reason: 'unsupported-env' });
         return { injected: false, reason: 'unsupported-env' };
       }
-      // Prefer the in-memory token bundle (freshest -- captured this session).
-      // Fall back to the auth partition's persistent cookie jar (rehydrated
-      // across restarts).
-      let multValue = this.tokenBundles.get(env)?.multToken ?? null;
-      let multExpirationDate: number | undefined;
-      if (multValue === null) {
-        const probed = await this.probeAuthPartitionCookie(env, 'mult');
-        if (probed !== null) {
-          multValue = probed.value;
-          multExpirationDate = probed.expirationDate;
-        }
-      } else {
-        // We may also have an expirationDate from the most-recent capture.
-        const bundleExpiresAt = this.tokenBundles.get(env)?.multExpiresAt;
-        if (typeof bundleExpiresAt === 'number') {
-          multExpirationDate = bundleExpiresAt / 1000;
-        }
+
+      // Read every cookie from the auth partition that matches the env's
+      // cookie domain suffixes. This catches mult + or + any ancillary
+      // cookies (CSRF, session markers) the SSO interstitial checks.
+      const sourceCookies = await this.collectAuthPartitionCookies(env);
+      if (sourceCookies.length === 0) {
+        span?.finish({ injected: false, reason: 'no-cookies' });
+        return { injected: false, reason: 'no-cookies' };
       }
-      if (multValue === null) {
-        span?.finish({ injected: false, reason: 'no-token' });
-        return { injected: false, reason: 'no-token' };
+
+      // Refuse to clone if the load-bearing `mult` is missing or expired
+      // -- without it we shouldn't pretend the partition is signed in.
+      const mult = sourceCookies.find((c) => c.name === 'mult');
+      if (mult === undefined) {
+        span?.finish({ injected: false, reason: 'no-mult' });
+        return { injected: false, reason: 'no-mult' };
       }
-      // Refuse to inject expired cookies.
-      if (typeof multExpirationDate === 'number' && multExpirationDate * 1000 < Date.now()) {
-        this.log('warn', 'auth: refusing to inject expired mult cookie', {
+      if (
+        typeof mult.expirationDate === 'number' &&
+        mult.expirationDate * 1000 < Date.now()
+      ) {
+        this.log('warn', 'auth: refusing to clone cookies; mult is expired', {
           env,
-          expiresAt: new Date(multExpirationDate * 1000).toISOString(),
+          expiresAt: new Date(mult.expirationDate * 1000).toISOString(),
         });
         span?.finish({ injected: false, reason: 'expired' });
         return { injected: false, reason: 'expired' };
       }
 
-      // ALSO load the `or` (account/session) cookie -- without it OneReach
-      // has the bearer but no account/session context, so it routes the
-      // user back through the login form even when `mult` is valid.
-      // Same fall-through pattern: in-memory bundle -> auth-partition probe.
-      let orValue = this.tokenBundles.get(env)?.accountToken ?? null;
-      if (orValue !== null && orValue.length === 0) orValue = null;
-      let orExpirationDate: number | undefined;
-      if (orValue === null) {
-        const probedOr = await this.probeAuthPartitionCookie(env, 'or');
-        if (probedOr !== null) {
-          orValue = probedOr.value;
-          orExpirationDate = probedOr.expirationDate;
-        }
-      } else {
-        const bundleOrExpiresAt = this.tokenBundles.get(env)?.accountExpiresAt;
-        if (typeof bundleOrExpiresAt === 'number') {
-          orExpirationDate = bundleOrExpiresAt / 1000;
-        }
-      }
-      // Treat an expired `or` as missing rather than blocking the entire
-      // injection -- the bearer alone is still useful for some pages.
-      if (
-        orValue !== null &&
-        typeof orExpirationDate === 'number' &&
-        orExpirationDate * 1000 < Date.now()
-      ) {
-        this.log('warn', 'auth: dropping expired or cookie from injection', {
-          env,
-          expiresAt: new Date(orExpirationDate * 1000).toISOString(),
-        });
-        orValue = null;
-        orExpirationDate = undefined;
-      }
-
       const ses = this.sessionFromPartition(partition);
-      const successes: string[] = [];
-      const failures: Array<{ domain: string; cookie: 'mult' | 'or'; error: string }> = [];
-      const orInjections: string[] = [];
-      for (const suffix of config.cookieDomainSuffixes) {
-        const host = suffix.replace(/^\./, '');
-        const url = `https://${host}/`;
-        try {
-          await ses.cookies.set({
-            url,
-            name: 'mult',
-            value: multValue,
-            domain: suffix,
-            path: '/',
-            secure: true,
-            httpOnly: true,
-            sameSite: 'no_restriction',
-            ...(typeof multExpirationDate === 'number'
-              ? { expirationDate: multExpirationDate }
-              : {}),
-          });
-          successes.push(suffix);
-        } catch (err) {
-          failures.push({ domain: suffix, cookie: 'mult', error: (err as Error).message });
+      const successes: Array<{ name: string; domain: string }> = [];
+      const failures: Array<{ name: string; domain: string; error: string }> = [];
+      const skippedExpired: Array<{ name: string; domain: string }> = [];
+      const now = Date.now() / 1000;
+      for (const cookie of sourceCookies) {
+        const cookieDomain = cookie.domain ?? '';
+        // Drop individually-expired cookies (don't poison the new
+        // partition with stale entries).
+        if (
+          typeof cookie.expirationDate === 'number' &&
+          cookie.expirationDate < now
+        ) {
+          skippedExpired.push({ name: cookie.name, domain: cookieDomain });
+          continue;
         }
-        if (orValue !== null) {
-          try {
-            await ses.cookies.set({
-              url,
-              name: 'or',
-              value: orValue,
-              domain: suffix,
-              path: '/',
-              secure: true,
-              // The `or` cookie is JS-readable in the OneReach SPA --
-              // do NOT mark it httpOnly or the renderer can't read its
-              // accountId. Same flags Electron captures with on the
-              // auth window.
-              httpOnly: false,
-              sameSite: 'no_restriction',
-              ...(typeof orExpirationDate === 'number'
-                ? { expirationDate: orExpirationDate }
-                : {}),
-            });
-            orInjections.push(suffix);
-          } catch (err) {
-            failures.push({ domain: suffix, cookie: 'or', error: (err as Error).message });
-          }
+        try {
+          await ses.cookies.set(cookieSetDetailsFromSource(cookie));
+          successes.push({ name: cookie.name, domain: cookieDomain });
+        } catch (err) {
+          failures.push({
+            name: cookie.name,
+            domain: cookieDomain,
+            error: (err as Error).message,
+          });
         }
       }
-      // best-effort flush so the next loadURL sees the cookie
+      // best-effort flush so the next loadURL sees the cookies
       try {
         if (typeof ses.cookies.flushStore === 'function') {
           await ses.cookies.flushStore();
@@ -607,28 +597,30 @@ export class AuthStore {
       }
       const injected = successes.length > 0;
       if (injected) {
-        this.log('info', 'auth: injected session cookies into partition', {
+        this.log('info', 'auth: cloned session cookies into partition', {
           env,
           partitionPrefix: partition.slice(0, 16),
-          multDomains: successes,
-          orDomains: orInjections,
-          orInjected: orInjections.length > 0,
-          ...(failures.length > 0 ? { failures: failures.length } : {}),
+          totalSource: sourceCookies.length,
+          successCount: successes.length,
+          ...(failures.length > 0 ? { failureCount: failures.length } : {}),
+          ...(skippedExpired.length > 0
+            ? { skippedExpiredCount: skippedExpired.length }
+            : {}),
         });
       } else if (failures.length > 0) {
-        this.log('warn', 'auth: cookie write failed for every domain', {
+        this.log('warn', 'auth: every cookie clone failed', {
           env,
           partitionPrefix: partition.slice(0, 16),
           failures: failures.length,
         });
       }
-      // Include env + partitionPrefix in the finish payload so the
-      // event-bus translator (ADR-043) can project this into a
+      // Include env + partitionPrefix + counts in the finish payload
+      // so the event-bus translator (ADR-043) can project this into a
       // `token.injected` domain event without needing span correlation.
       span?.finish({
         injected,
-        domains: successes.length,
-        orDomains: orInjections.length,
+        domains: successes.length, // legacy field name kept for translator
+        cookies: successes.length,
         env,
         partitionPrefix: partition.slice(0, 16),
       });
@@ -643,6 +635,43 @@ export class AuthStore {
       });
       return { injected: false, reason: 'unexpected-error' };
     }
+  }
+
+  /**
+   * Read every cookie from `persist:lite-auth-<env>` that matches one
+   * of the env's cookie domain suffixes. Used by injection so the
+   * full session state (mult + or + ancillary) clones to a tab
+   * partition.
+   */
+  private async collectAuthPartitionCookies(env: Environment): Promise<Cookie[]> {
+    const config = ENVIRONMENT_CONFIGS[env];
+    if (config === undefined) return [];
+    let ses: Session;
+    try {
+      ses = this.sessionFromPartition(`persist:lite-auth-${env}`);
+    } catch {
+      return [];
+    }
+    const collected: Cookie[] = [];
+    const seen = new Set<string>();
+    for (const suffix of config.cookieDomainSuffixes) {
+      const host = suffix.replace(/^\./, '');
+      try {
+        const found = await ses.cookies.get({ domain: host });
+        for (const c of found) {
+          if (!cookieDomainMatchesEnv(c.domain, env)) continue;
+          // Dedupe by name+domain+path -- a single cookie can show up
+          // for multiple suffix queries.
+          const key = `${c.name}|${c.domain}|${c.path}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          collected.push(c);
+        }
+      } catch {
+        /* best-effort -- continue with what we have */
+      }
+    }
+    return collected;
   }
 
   hasValidSession(env: Environment): boolean {
@@ -1277,4 +1306,35 @@ function pickFreshest(cookies: Cookie[]): Cookie | null {
   if (cookies.length === 0) return null;
   const sorted = [...cookies].sort((a, b) => (b.expirationDate ?? 0) - (a.expirationDate ?? 0));
   return sorted[0] ?? null;
+}
+
+/**
+ * Convert an Electron `Cookie` (read shape) to the `CookiesSetDetails`
+ * shape that `cookies.set()` accepts. Preserves every meaningful
+ * attribute so the cloned cookie behaves identically to the source on
+ * the target partition.
+ *
+ * Notes:
+ *   - `url` is required by `cookies.set`. We synthesize it from the
+ *     cookie's domain (stripping a leading dot) and protocol (`https:`
+ *     is mandatory when `secure: true`, which OneReach cookies are).
+ *   - We deliberately omit `sameSite` when undefined so Electron
+ *     defaults take over, but explicitly pass through when the source
+ *     specified one.
+ */
+function cookieSetDetailsFromSource(c: Cookie): Electron.CookiesSetDetails {
+  const host = (c.domain ?? '').replace(/^\./, '');
+  const url = `https://${host}${c.path ?? '/'}`;
+  const details: Electron.CookiesSetDetails = {
+    url,
+    name: c.name,
+    value: c.value,
+  };
+  if (c.domain !== undefined) details.domain = c.domain;
+  if (c.path !== undefined) details.path = c.path;
+  if (c.secure !== undefined) details.secure = c.secure;
+  if (c.httpOnly !== undefined) details.httpOnly = c.httpOnly;
+  if (c.sameSite !== undefined) details.sameSite = c.sameSite;
+  if (typeof c.expirationDate === 'number') details.expirationDate = c.expirationDate;
+  return details;
 }

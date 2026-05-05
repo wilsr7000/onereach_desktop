@@ -1,0 +1,636 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Dark-mode scrollbars -- mirror lite/settings/settings.css. See that
+ * file for the rationale (user preference: never white scrollbars on a
+ * dark UI). Chromium 146 ships with `scrollbar-color`; the webkit block
+ * below adds hover state. */
+* {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-width: thin;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0e0e10;
+  color: #e8e8ea;
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+body {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+/* Single outer scroll. Everything else flows naturally inside. */
+.modal-frame {
+  width: 100%;
+  max-width: 760px;
+  background: #18181b;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+}
+
+/* Dark, thin, theme-matched scrollbar. Single rule applies wherever
+   scrolling does happen so the system default never shows. */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  border: 2px solid #18181b;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+header h1 {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  font-size: 12px;
+  opacity: 0.55;
+}
+
+/* --- Search bar ----------------------------------------------------- */
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.reports-search-input {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  background: #0e0e10;
+  color: #e8e8ea;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 8px 12px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.reports-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  width: 14px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  cursor: pointer;
+  position: relative;
+}
+
+.reports-search-input::-webkit-search-cancel-button:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.reports-search-input:focus {
+  border-color: rgba(120, 160, 255, 0.4);
+}
+
+.reports-search-input::placeholder {
+  opacity: 0.4;
+}
+
+.reports-count-label {
+  font-size: 11px;
+  opacity: 0.55;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+
+/* --- Section divider + new-bug section ----------------------------- */
+
+.section-divider {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
+}
+
+.section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.section-description {
+  font-size: 12px;
+  opacity: 0.55;
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+.report-new {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+  font: inherit;
+  font-size: 13px;
+  background: #0e0e10;
+  color: #e8e8ea;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 10px 12px;
+  outline: none;
+}
+
+textarea:focus {
+  border-color: rgba(120, 160, 255, 0.4);
+}
+
+/* --- Disclosure chrome (shared by Show payload + Previous reports) --- */
+
+.modal-frame details {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 14px;
+}
+
+.modal-frame > details > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.7;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modal-frame > details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.modal-frame > details > summary::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  transition: transform 120ms ease;
+  opacity: 0.6;
+}
+
+.modal-frame > details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.modal-frame > details > summary:hover {
+  opacity: 0.95;
+}
+
+/* --- Captured-payload preview --------------------------------------- */
+
+#payload-preview {
+  margin-top: 8px;
+  background: #0e0e10;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.65;
+}
+
+.redaction-info {
+  margin-top: 8px;
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+#redaction-status.has-redactions {
+  color: #f5b042;
+  opacity: 0.85;
+}
+
+#redaction-status.no-redactions {
+  color: #6dc56d;
+  opacity: 0.7;
+}
+
+/* --- Previous reports ----------------------------------------------- */
+
+.reports-list {
+  list-style: none;
+  margin: 10px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reports-list li {
+  padding: 10px 12px;
+  background: #0e0e10;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 100ms ease, border-color 100ms ease;
+}
+
+.reports-list li:hover {
+  background: #131316;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.reports-list li.reports-empty {
+  cursor: default;
+  opacity: 0.45;
+  font-style: italic;
+  text-align: center;
+  padding: 16px;
+}
+
+.reports-list li.reports-empty:hover {
+  background: #0e0e10;
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.report-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11px;
+  opacity: 0.65;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.report-meta-time {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.report-meta-aux {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.7;
+}
+
+.report-badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.report-redaction {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  white-space: nowrap;
+}
+
+.report-redaction.bucket-none {
+  border-color: rgba(109, 197, 109, 0.3);
+  color: #6dc56d;
+  opacity: 0.75;
+}
+
+.report-redaction.bucket-low,
+.report-redaction.bucket-medium,
+.report-redaction.bucket-high {
+  border-color: rgba(245, 176, 66, 0.4);
+  color: #f5b042;
+}
+
+.report-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.report-status.status-open {
+  border-color: rgba(120, 160, 255, 0.4);
+  color: #7da4ff;
+}
+
+.report-status.status-resolved {
+  border-color: rgba(109, 197, 109, 0.3);
+  color: #6dc56d;
+  opacity: 0.85;
+}
+
+.report-notes-marker {
+  font-size: 10px;
+  opacity: 0.55;
+  font-style: italic;
+}
+
+.report-preview {
+  font-size: 12px;
+  opacity: 0.85;
+  word-break: break-word;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+/* --- Expanded report row -------------------------------------------- */
+
+.report-expanded {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  cursor: default;
+}
+
+/* Click anywhere in the expanded section without collapsing the row. */
+.report-expanded * {
+  cursor: auto;
+}
+
+.expanded-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.5;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.expanded-meta-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 11px;
+  opacity: 0.7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.expanded-meta-grid dt {
+  opacity: 0.55;
+}
+
+.expanded-description {
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.expanded-description.empty {
+  opacity: 0.4;
+  font-style: italic;
+}
+
+.expanded-logs {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0a0a0c;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 10px 12px;
+  opacity: 0.65;
+  margin-top: 6px;
+}
+
+.expanded-logs.empty {
+  opacity: 0.4;
+  font-style: italic;
+}
+
+.report-notes-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-notes-editor textarea {
+  font-size: 12px;
+  min-height: 56px;
+  background: #0a0a0c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e8e8ea;
+  padding: 8px 10px;
+  border-radius: 4px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.report-notes-editor textarea:focus {
+  outline: none;
+  border-color: rgba(120, 160, 255, 0.3);
+}
+
+.notes-save-status {
+  font-size: 10px;
+  opacity: 0.5;
+  margin-top: 2px;
+  height: 12px;
+}
+
+.notes-save-status.saved {
+  color: #6dc56d;
+  opacity: 0.7;
+}
+
+.notes-save-status.error {
+  color: #f08585;
+  opacity: 0.85;
+}
+
+.report-detail-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.report-detail-actions button {
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+button.danger {
+  border-color: rgba(220, 80, 80, 0.4);
+  color: #f08585;
+}
+
+button.danger:hover {
+  background: rgba(220, 80, 80, 0.1);
+}
+
+/* --- Footer / actions ----------------------------------------------- */
+
+.reports-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+button {
+  font: inherit;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e8ea;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+button.primary {
+  background: rgba(80, 130, 220, 0.25);
+  border-color: rgba(80, 130, 220, 0.5);
+}
+
+button.primary:hover {
+  background: rgba(80, 130, 220, 0.35);
+}
+
+button.ghost {
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 4px 10px;
+  opacity: 0.8;
+}
+
+button.ghost:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.result {
+  font-size: 12px;
+  background: rgba(80, 130, 220, 0.15);
+  border: 1px solid rgba(80, 130, 220, 0.3);
+  border-radius: 4px;
+  padding: 8px 12px;
+  word-break: break-word;
+}
+
+.result.error {
+  background: rgba(220, 80, 80, 0.15);
+  border-color: rgba(220, 80, 80, 0.3);
+}
+
+.hidden {
+  display: none;
+}
+
+/* --- Signature UI pass ---------------------------------------------- */
+
+.modal-frame {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(79, 140, 255, 0.1), transparent 36%),
+    var(--or-bg-surface);
+  border-left: 1px solid var(--or-border-subtle);
+  border-right: 1px solid var(--or-border-subtle);
+}
+
+.reports-search-input,
+textarea,
+#payload-preview,
+.reports-list li,
+.report-detail {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: var(--or-border-subtle);
+  border-radius: var(--or-radius-sm);
+}
+
+.reports-list li:hover {
+  background: var(--or-bg-hover);
+  border-color: var(--or-border-strong);
+}
+
+.reports-count-label,
+.subtitle,
+.section-description,
+.redaction-info {
+  color: var(--or-text-muted);
+  opacity: 1;
+}
+
+button:hover {
+  background: var(--or-accent-soft);
+  border-color: var(--or-border-signal);
+}
+
+.result.error {
+  border-left-color: var(--or-danger) !important;
+}
