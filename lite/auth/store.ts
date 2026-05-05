@@ -425,19 +425,45 @@ export class AuthStore {
     this.tokens.delete(env);
     this.tokenBundles.delete(env);
 
-    // Remove cookies from the partition. Best-effort: failure here
-    // doesn't propagate -- the in-memory clear has already happened.
+    // Remove EVERY OneReach-domain cookie from the partition. Just
+    // removing `mult` + `or` from the two top-level suffix URLs is
+    // not enough -- OneReach SSO also sets cookies on subdomains
+    // like `auth.edison.onereach.ai`, and Electron's
+    // `cookies.remove(url, name)` only matches the exact (url, name)
+    // tuple. A surviving subdomain `or` cookie was the cause of
+    // "sign out then relaunch shows signed in again": hydrate found
+    // the leftover and reconstructed the session.
+    //
+    // Mirrors `collectAuthPartitionCookies` for completeness.
     if (config !== undefined) {
       try {
         const ses = this.sessionFromPartition(partition);
-        for (const suffix of config.cookieDomainSuffixes) {
-          // ses.cookies.remove takes a URL, not just a domain. Build
-          // an https URL with the suffix as host (strip leading dot).
-          const host = suffix.replace(/^\./, '');
-          const url = `https://${host}/`;
-          await ses.cookies.remove(url, 'mult').catch(() => undefined);
-          await ses.cookies.remove(url, 'or').catch(() => undefined);
+        const cookies = await this.collectAuthPartitionCookies(env);
+        let removed = 0;
+        for (const c of cookies) {
+          // Build the URL Electron expects -- the cookie's actual
+          // host (strip leading dot from domain) plus its path.
+          const cookieDomain = typeof c.domain === 'string' ? c.domain : '';
+          const host = cookieDomain.replace(/^\./, '');
+          if (host.length === 0) continue;
+          const cookiePath = typeof c.path === 'string' && c.path.length > 0 ? c.path : '/';
+          const scheme = c.secure === true ? 'https' : 'http';
+          const url = `${scheme}://${host}${cookiePath}`;
+          try {
+            await ses.cookies.remove(url, c.name);
+            removed += 1;
+          } catch {
+            /* per-cookie best-effort -- continue */
+          }
         }
+        if (typeof ses.cookies.flushStore === 'function') {
+          await ses.cookies.flushStore().catch(() => undefined);
+        }
+        this.log('info', 'auth: cleared partition cookies on signOut', {
+          env,
+          removed,
+          totalCookies: cookies.length,
+        });
       } catch (err) {
         this.log('warn', 'auth: cookie removal during signOut failed', {
           env,
@@ -797,6 +823,15 @@ export class AuthStore {
     if (config === undefined) return null;
     const mult = await this.probeAuthPartitionCookie(env, 'mult');
     if (mult === null) return null;
+    // Defense-in-depth: even if a stale `or` survives a botched
+    // signOut, an expired `mult` should never re-activate a session.
+    if (typeof mult.expirationDate === 'number' && mult.expirationDate * 1000 < Date.now()) {
+      this.log('info', 'auth: hydrate skipping env -- mult cookie expired', {
+        env,
+        expiresAt: new Date(mult.expirationDate * 1000).toISOString(),
+      });
+      return null;
+    }
     const or = await this.probeAuthPartitionCookie(env, 'or');
     if (or === null) return null;
     const decoded = decodeOrCookie(or.value);

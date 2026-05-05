@@ -585,11 +585,18 @@ describe('AuthStore.signOut', () => {
     expect(store.getToken('edison')).toBeNull();
     expect(store.hasValidSession('edison')).toBe(false);
 
-    // Cookies removed for both domain suffixes, both names.
+    // signOut now enumerates EVERY OneReach-domain cookie in the
+    // partition and removes each. Both `mult` and `or` from the
+    // captured set must show up in removeCalls. Subdomain cookies
+    // (e.g. set by the SSO interstitial on `auth.*`) are also
+    // covered by this sweep -- the previous "remove(url, name) for
+    // each top-level suffix" loop missed those, which let stale
+    // cookies survive signOut and re-hydrate as a session on the
+    // next launch.
     const removed = session.cookies.removeCalls;
     const names = removed.map((r) => r.name);
-    expect(names.filter((n) => n === 'mult').length).toBeGreaterThanOrEqual(2);
-    expect(names.filter((n) => n === 'or').length).toBeGreaterThanOrEqual(2);
+    expect(names).toContain('mult');
+    expect(names).toContain('or');
 
     // KV record deleted.
     expect(kv.deletes).toEqual([
@@ -602,6 +609,48 @@ describe('AuthStore.signOut', () => {
     const { store } = buildStore({ windowHandle: handle });
     await expect(store.signOut('edison')).resolves.toBeUndefined();
     expect(store.getSession('edison')).toBeNull();
+  });
+
+  it('regression: signOut clears subdomain cookies so hydrate cannot resurrect the session', async () => {
+    // Bug repro (2026-05-05): Rich signed out, relaunched, and
+    // appeared signed-in again. The OneReach SSO interstitial sets
+    // an `or` cookie on `auth.edison.onereach.ai` (subdomain),
+    // which the previous narrow remove(url, name) loop missed.
+    // hydrate then read the surviving subdomain `or` and reconstructed
+    // the session.
+    const handle = makeFakeWindow({
+      initialUrl: 'https://studio.edison.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID,
+    });
+    const { store, session } = buildStore({ windowHandle: handle });
+
+    // Sign in (top-level cookies).
+    const promise = store.signIn('edison');
+    session.cookies.emit(multCookie());
+    session.cookies.emit(orCookie());
+    await promise;
+
+    // Simulate the subdomain cookie OneReach SSO sets in real life.
+    session.cookies.seed({
+      name: 'or',
+      value: encodeURIComponent(JSON.stringify({ accountId: SAMPLE_ACCOUNT_ID, email: SAMPLE_EMAIL })),
+      domain: 'auth.edison.onereach.ai',
+      path: '/',
+      secure: true,
+      expirationDate: Math.floor(Date.now() / 1000) + 3600,
+    });
+
+    await store.signOut('edison');
+
+    // Now simulate a relaunch: build a fresh store sharing the same
+    // FakeSession and run hydrate. It must NOT reconstruct a session.
+    const reopenedStore = buildStore({
+      windowHandle: handle,
+      session,
+    }).store;
+    await (reopenedStore as unknown as { hydrate: () => Promise<void> }).hydrate();
+
+    expect(reopenedStore.getSession('edison')).toBeNull();
+    expect(reopenedStore.getToken('edison')).toBeNull();
   });
 
   it('notifies onSessionChanged subscribers with null on signOut', async () => {
