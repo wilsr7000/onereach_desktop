@@ -82,6 +82,35 @@ describe('BugReportStore.list', () => {
     const result = await store.list();
     expect(result[0]?.filePath).toBe(`kv:${payload.timestamp}`);
   });
+
+  it('summary attachmentCount reflects payload.attachments length', async () => {
+    const noneAttached = makePayload({ timestamp: '2026-05-04T03:00:00.000Z' });
+    const withAttached = {
+      ...makePayload({ timestamp: '2026-05-04T04:00:00.000Z' }),
+      attachments: [
+        {
+          key: 'lite-bugs/attachments/x/a.png',
+          name: 'a.png',
+          contentType: 'image/png',
+          size: 100,
+          uploadedAt: '2026-05-04T04:00:00.000Z',
+        },
+        {
+          key: 'lite-bugs/attachments/x/b.txt',
+          name: 'b.txt',
+          contentType: 'text/plain',
+          size: 200,
+          uploadedAt: '2026-05-04T04:00:00.000Z',
+        },
+      ],
+    };
+    await store.save(noneAttached);
+    await store.save(withAttached);
+    const result = await store.list();
+    const byTs = new Map(result.map((s) => [s.timestamp, s]));
+    expect(byTs.get(noneAttached.timestamp)?.attachmentCount).toBe(0);
+    expect(byTs.get(withAttached.timestamp)?.attachmentCount).toBe(2);
+  });
 });
 
 describe('BugReportStore.read', () => {

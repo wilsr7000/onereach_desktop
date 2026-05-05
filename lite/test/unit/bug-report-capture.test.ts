@@ -253,6 +253,81 @@ describe('migrateLegacyPayload', () => {
     expect(migrated.status).toBe('open');
   });
 
+  it('preserves attachments through migration when present', () => {
+    const v3 = {
+      timestamp: '2026-05-05T01:00:00.000Z',
+      version: '5.0.0',
+      description: 'with attachments',
+      attachments: [
+        {
+          key: 'lite-bugs/attachments/staging-1/shot.png',
+          name: 'shot.png',
+          contentType: 'image/png',
+          size: 4096,
+          uploadedAt: '2026-05-05T00:59:00.000Z',
+        },
+      ],
+    };
+    const migrated = migrateLegacyPayload(v3 as Record<string, unknown>);
+    expect(migrated.attachments).toHaveLength(1);
+    expect(migrated.attachments?.[0]?.name).toBe('shot.png');
+  });
+
+  it('drops malformed attachments during migration', () => {
+    const v3 = {
+      timestamp: '2026-05-05T01:00:00.000Z',
+      version: '5.0.0',
+      description: 'mixed',
+      attachments: [
+        { key: 'lite-bugs/attachments/staging/ok.png', name: 'ok.png', contentType: 'image/png', size: 10, uploadedAt: '2026-05-05T01:00:00.000Z' },
+        { name: 'no-key' }, // missing key + size + uploadedAt
+        null,
+        'not-an-object',
+      ],
+    };
+    const migrated = migrateLegacyPayload(v3 as Record<string, unknown>);
+    expect(migrated.attachments).toHaveLength(1);
+    expect(migrated.attachments?.[0]?.name).toBe('ok.png');
+  });
+});
+
+describe('capture with attachments', () => {
+  it('forwards attachments onto the payload when provided', () => {
+    const payload = capture({
+      version: '5.0.0',
+      platform: 'darwin',
+      release: '23.0',
+      arch: 'arm64',
+      recentLogLines: [],
+      userDescription: 'has attachments',
+      attachments: [
+        {
+          key: 'lite-bugs/attachments/staging-1/file.txt',
+          name: 'file.txt',
+          contentType: 'text/plain',
+          size: 100,
+          uploadedAt: '2026-05-05T01:00:00.000Z',
+        },
+      ],
+    });
+    expect(payload.attachments).toHaveLength(1);
+    expect(payload.attachments?.[0]?.key).toBe(
+      'lite-bugs/attachments/staging-1/file.txt'
+    );
+  });
+
+  it('omits the attachments field when none are provided', () => {
+    const payload = capture({
+      version: '5.0.0',
+      platform: 'darwin',
+      release: '23.0',
+      arch: 'arm64',
+      recentLogLines: [],
+      userDescription: 'no attachments',
+    });
+    expect(payload.attachments).toBeUndefined();
+  });
+
   it('preserves an attached healthSnapshot through migration', () => {
     const snapshot: import('../../health/api.js').AppHealthSnapshot = {
       schemaVersion: 1,

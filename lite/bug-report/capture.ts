@@ -14,6 +14,28 @@ import type { AppHealthSnapshot } from '../health/api.js';
 
 export type BugReportStatus = 'open' | 'resolved';
 
+/**
+ * A file attached to a bug report. The actual bytes live in
+ * OneReach Files (see `lite/files/api.ts`); the payload only
+ * carries the metadata needed to fetch them on demand.
+ *
+ * Per ADR-045, attachments are uploaded to a per-account, per-report
+ * folder: `bug-attachments/<bugTimestamp>/<safeName>`. The user's
+ * `mult` token gates access; nobody else can read them.
+ */
+export interface BugReportAttachment {
+  /** Files key (path inside the account's bucket). */
+  key: string;
+  /** Original file name as the user knew it. */
+  name: string;
+  /** MIME type, best-effort from the picker / drop event. */
+  contentType: string;
+  /** Bytes. Used by the modal to show "(2.3 MB)" before download. */
+  size: number;
+  /** ISO timestamp the file was uploaded. */
+  uploadedAt: string;
+}
+
 export interface BugReportPayload {
   /** Schema version of the payload itself */
   schemaVersion: 1;
@@ -66,6 +88,14 @@ export interface BugReportPayload {
    * for never-modified reports.
    */
   lastModified: string;
+  /**
+   * Optional file attachments uploaded via `lite/files/`. Each entry is
+   * a reference to a file in the user's OneReach Files bucket, NOT the
+   * bytes themselves. Per ADR-045, attachments are scoped per-account
+   * server-side -- nobody else can read them. The field is optional so
+   * older payloads continue to deserialize.
+   */
+  attachments?: BugReportAttachment[];
 }
 
 export interface CaptureContext {
@@ -88,6 +118,14 @@ export interface CaptureContext {
    * that aren't strictly required.
    */
   healthSnapshot?: AppHealthSnapshot;
+  /**
+   * Optional file attachments collected by the modal before save.
+   * The renderer uploads each file via `window.bugReport.attach(...)`
+   * (which goes through `lite/files/`) and gathers the returned
+   * metadata into this array. capture() forwards it untouched onto
+   * the payload.
+   */
+  attachments?: BugReportAttachment[];
 }
 
 /**
@@ -124,6 +162,9 @@ export function capture(ctx: CaptureContext): BugReportPayload {
     description: descRedaction.text,
     recentLogs: logsRedaction.text,
     ...(ctx.healthSnapshot !== undefined ? { healthSnapshot: ctx.healthSnapshot } : {}),
+    ...(ctx.attachments !== undefined && ctx.attachments.length > 0
+      ? { attachments: [...ctx.attachments] }
+      : {}),
     redactionTelemetry: {
       bucket: bucketFor(totalCount),
       countsByKind,
@@ -157,6 +198,9 @@ export function migrateLegacyPayload(payload: Partial<BugReportPayload> & Record
     redactionTelemetry: payload.redactionTelemetry ?? { bucket: 'none', countsByKind: {} },
     status: payload.status === 'resolved' ? 'resolved' : 'open',
     notes: typeof payload.notes === 'string' ? payload.notes : '',
+    ...(Array.isArray(payload.attachments)
+      ? { attachments: payload.attachments.filter(isLikelyAttachment) }
+      : {}),
     lastModified:
       typeof payload.lastModified === 'string'
         ? payload.lastModified
@@ -164,4 +208,17 @@ export function migrateLegacyPayload(payload: Partial<BugReportPayload> & Record
           ? payload.timestamp
           : new Date().toISOString(),
   };
+}
+
+/** Defensive runtime check for attachment shape during legacy migration. */
+function isLikelyAttachment(value: unknown): value is BugReportAttachment {
+  if (value === null || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v['key'] === 'string' &&
+    typeof v['name'] === 'string' &&
+    typeof v['contentType'] === 'string' &&
+    typeof v['size'] === 'number' &&
+    typeof v['uploadedAt'] === 'string'
+  );
 }

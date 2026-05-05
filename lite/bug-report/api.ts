@@ -41,7 +41,7 @@ export type {
   BugReportErrorCode,
   BugReportErrorOptions,
 } from './store.js';
-export type { BugReportPayload, BugReportStatus } from './capture.js';
+export type { BugReportAttachment, BugReportPayload, BugReportStatus } from './capture.js';
 
 // Re-export the structured error class + code catalog so consumers
 // catch and branch via the public surface, never reaching into
@@ -76,6 +76,8 @@ export {
   type BugReportIpcReadEvent,
   type BugReportIpcUpdateEvent,
   type BugReportIpcDeleteEvent,
+  type BugReportIpcAttachEvent,
+  type BugReportIpcDownloadAttachmentEvent,
 } from './events.js';
 // Generic base class -- consumers can also catch via `instanceof LiteError`
 // if they want to handle errors uniformly across all lite modules.

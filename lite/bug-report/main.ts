@@ -13,10 +13,11 @@
 import { BrowserWindow, ipcMain } from 'electron';
 import * as os from 'node:os';
 import * as http from 'node:http';
-import { capture, type BugReportPayload } from './capture.js';
+import { capture, type BugReportAttachment, type BugReportPayload } from './capture.js';
 import { getBugReportApi, _resetBugReportApiForTesting } from './api.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getHealthApi, type AppHealthSnapshot } from '../health/api.js';
+import { getFilesApi, FilesError } from '../files/api.js';
 
 const IPC_CAPTURE = 'lite:bug-report:capture';
 const IPC_SAVE = 'lite:bug-report:save';
@@ -25,6 +26,15 @@ const IPC_LIST = 'lite:bug-report:list';
 const IPC_READ = 'lite:bug-report:read';
 const IPC_UPDATE = 'lite:bug-report:update';
 const IPC_DELETE = 'lite:bug-report:delete';
+const IPC_ATTACH = 'lite:bug-report:attach';
+const IPC_DOWNLOAD_ATTACHMENT = 'lite:bug-report:download-attachment';
+
+/** Files prefix where bug-report attachments live in the user's bucket. */
+const ATTACHMENT_PREFIX = 'lite-bugs/attachments';
+/** Hard ceiling on a single attachment (10 MB). Renderer can pre-warn. */
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** Per-report attachment count cap (defensive, mostly UX). */
+const MAX_ATTACHMENTS_PER_REPORT = 10;
 
 let modalWindow: BrowserWindow | null = null;
 let handlersRegistered = false;
@@ -63,13 +73,107 @@ export function initBugReport(opts: InitOptions): void {
     return capturePreview(userDescription);
   });
 
-  ipcMain.handle(IPC_SAVE, async (_event, userDescription: string) => {
+  ipcMain.handle(IPC_SAVE, async (_event, userDescription: string, attachments?: unknown) => {
     getLoggingApi().event('bug-report.ipc.save');
     if (typeof userDescription !== 'string') {
       throw new Error('userDescription must be a string');
     }
-    const payload = await buildPayload(userDescription);
+    const sanitizedAttachments = sanitizeAttachments(attachments);
+    if (sanitizedAttachments.length > MAX_ATTACHMENTS_PER_REPORT) {
+      throw new Error(
+        `attachments exceeds the per-report cap (${MAX_ATTACHMENTS_PER_REPORT})`
+      );
+    }
+    const payload = await buildPayload(userDescription, sanitizedAttachments);
     return getBugReportApi().save(payload);
+  });
+
+  ipcMain.handle(
+    IPC_ATTACH,
+    async (
+      _event,
+      input: { name: unknown; contentType: unknown; base64: unknown }
+    ): Promise<BugReportAttachment> => {
+      getLoggingApi().event('bug-report.ipc.attach');
+      const name = typeof input?.name === 'string' ? input.name : '';
+      const contentType =
+        typeof input?.contentType === 'string' && input.contentType.length > 0
+          ? input.contentType
+          : 'application/octet-stream';
+      const base64 = typeof input?.base64 === 'string' ? input.base64 : '';
+      if (name.length === 0) throw new Error('attach: name must be a non-empty string');
+      if (base64.length === 0) throw new Error('attach: base64 must be a non-empty string');
+      const bytes = Buffer.from(base64, 'base64');
+      if (bytes.length === 0) {
+        throw new Error('attach: decoded payload is empty');
+      }
+      if (bytes.length > MAX_ATTACHMENT_BYTES) {
+        throw new Error(
+          `attach: file exceeds ${MAX_ATTACHMENT_BYTES} bytes (got ${bytes.length})`
+        );
+      }
+      const safeName = sanitizeFileName(name);
+      // One folder per report-staging session so the modal can clean
+      // up if the user cancels (cleanup on cancel is a future
+      // hardening; today the orphan files just live in the user's
+      // bucket until they prune them).
+      const stagingPrefix = `${ATTACHMENT_PREFIX}/staging-${Date.now()}`;
+      try {
+        const url = await getFilesApi().upload(stagingPrefix, safeName, bytes, {
+          contentType,
+          isPublic: false,
+          rewriteMode: 'rewrite',
+          maxFileSize: MAX_ATTACHMENT_BYTES,
+        });
+        const key = `${stagingPrefix}/${safeName}`;
+        getLoggingApi().info('bug-report', 'attachment uploaded', {
+          key,
+          bytes: bytes.length,
+          contentType,
+        });
+        // The download URL the SDK returns is informational; the
+        // renderer should always re-resolve via downloadAttachment()
+        // since signed URLs expire.
+        void url;
+        return {
+          key,
+          name: safeName,
+          contentType,
+          size: bytes.length,
+          uploadedAt: new Date().toISOString(),
+        };
+      } catch (err) {
+        if (err instanceof FilesError) {
+          // Bubble a clean message to the renderer.
+          throw new Error(`attach failed: ${err.formatForUser()}`);
+        }
+        throw err;
+      }
+    }
+  );
+
+  ipcMain.handle(IPC_DOWNLOAD_ATTACHMENT, async (_event, key: unknown) => {
+    getLoggingApi().event('bug-report.ipc.download-attachment', {
+      key: typeof key === 'string' ? key : null,
+    });
+    if (typeof key !== 'string' || key.length === 0) {
+      throw new Error('download-attachment: key must be a non-empty string');
+    }
+    // Restrict to the bug-attachments prefix so a buggy renderer
+    // can't request arbitrary keys from the user's bucket.
+    if (!key.startsWith(ATTACHMENT_PREFIX)) {
+      throw new Error(
+        `download-attachment: key must start with ${ATTACHMENT_PREFIX}`
+      );
+    }
+    try {
+      return await getFilesApi().getDownloadUrl(key);
+    } catch (err) {
+      if (err instanceof FilesError) {
+        throw new Error(`download-attachment failed: ${err.formatForUser()}`);
+      }
+      throw err;
+    }
   });
 
   ipcMain.on(IPC_CLOSE, () => {
@@ -204,7 +308,10 @@ async function capturePreview(userDescription: string): Promise<{
 /**
  * Build the structured payload from current app state + log server.
  */
-async function buildPayload(userDescription: string): Promise<BugReportPayload> {
+async function buildPayload(
+  userDescription: string,
+  attachments: BugReportAttachment[] = []
+): Promise<BugReportPayload> {
   if (options === null) {
     throw new Error('initBugReport must be called before buildPayload');
   }
@@ -232,7 +339,50 @@ async function buildPayload(userDescription: string): Promise<BugReportPayload> 
     recentLogLines,
     userDescription,
     ...(healthSnapshot !== undefined ? { healthSnapshot } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
   });
+}
+
+/**
+ * Tighten the renderer-supplied attachments list. Drops any entry
+ * that doesn't have the required shape (key + name + size) so a
+ * buggy renderer can't sneak garbage onto the payload. Keeps key
+ * paths inside the ATTACHMENT_PREFIX so we can't be tricked into
+ * referencing files outside the bug-attachments folder.
+ */
+function sanitizeAttachments(input: unknown): BugReportAttachment[] {
+  if (!Array.isArray(input)) return [];
+  const out: BugReportAttachment[] = [];
+  for (const raw of input) {
+    if (raw === null || typeof raw !== 'object') continue;
+    const v = raw as Record<string, unknown>;
+    const key = typeof v['key'] === 'string' ? v['key'] : '';
+    const name = typeof v['name'] === 'string' ? v['name'] : '';
+    const contentType =
+      typeof v['contentType'] === 'string' && v['contentType'].length > 0
+        ? v['contentType']
+        : 'application/octet-stream';
+    const size = typeof v['size'] === 'number' && Number.isFinite(v['size']) ? v['size'] : 0;
+    const uploadedAt =
+      typeof v['uploadedAt'] === 'string' ? v['uploadedAt'] : new Date().toISOString();
+    if (key.length === 0 || name.length === 0) continue;
+    if (!key.startsWith(ATTACHMENT_PREFIX)) continue;
+    out.push({ key, name, contentType, size, uploadedAt });
+  }
+  return out;
+}
+
+/**
+ * Replace path separators + control chars in a user-supplied filename
+ * so we can't write to arbitrary subfolders. Keeps the original name
+ * recognizable (a screenshot called "Screen Shot 2026.png" still
+ * looks reasonable after sanitizing).
+ */
+function sanitizeFileName(name: string): string {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = name.replace(/[/\\\u0000-\u001f]/g, '_').trim();
+  if (cleaned.length === 0) return `attachment-${Date.now()}`;
+  return cleaned.slice(0, 200);
 }
 
 /**
@@ -301,6 +451,8 @@ export function _teardownForTesting(): void {
   ipcMain.removeHandler(IPC_READ);
   ipcMain.removeHandler(IPC_UPDATE);
   ipcMain.removeHandler(IPC_DELETE);
+  ipcMain.removeHandler(IPC_ATTACH);
+  ipcMain.removeHandler(IPC_DOWNLOAD_ATTACHMENT);
   ipcMain.removeAllListeners(IPC_CLOSE);
   handlersRegistered = false;
   options = null;
@@ -317,4 +469,9 @@ export const BUG_REPORT_IPC = {
   read: IPC_READ,
   update: IPC_UPDATE,
   delete: IPC_DELETE,
+  attach: IPC_ATTACH,
+  downloadAttachment: IPC_DOWNLOAD_ATTACHMENT,
 };
+
+/** @internal -- exposed for the event-name conformance test. */
+export const BUG_REPORT_ATTACHMENT_PREFIX = ATTACHMENT_PREFIX;

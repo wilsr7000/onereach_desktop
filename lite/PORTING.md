@@ -863,6 +863,38 @@ Ports that have passed the six-criteria contract and are stable:
 - **migration outcome**: existing pilot installs preserve their IDWs / tabs / Neon config / AI key on first sign-in after this update. Per-user isolation is now enforced server-side; multi-user leakage (the bug Rich hit on his fresh clone) cannot recur.
 - **consumers today**: `lite/bug-report/store.ts`, `lite/idw/store.ts`, `lite/main-window/store.ts`, `lite/neon/credentials.ts`, `lite/ai/credentials.ts`. All gate on `getActiveAccountId`; signed-out users see graceful empty states or "sign in first" errors instead of leaking other users' data.
 
+### chunk: lite-files-v1
+
+- **status**: hardened
+- **plan reference**: ADR-045 in [`DECISIONS.md`](DECISIONS.md)
+- **borrowed from full**: `lib/edison-sdk-manager.js:349-358` -- the SDK construction shape (token getter + discoveryUrl + accountId). Studied, not imported (Rule 1).
+- **public surface (new)**: `lite/files/api.ts` -- `FilesApi`, `getFilesApi()`, `_resetFilesApiForTesting()`, `_setFilesApiForTesting()`, `_buildFilesApiForTesting()`, `setFilesAuthBindings()`. Re-exports `FilesError`, `FILES_ERROR_CODES`, `FilesItem`, `FilesContent`, content + option types.
+- **internal**:
+  - `lite/files/sdk-client.ts` -- `SdkFilesClient` thin wrapper around `@or-sdk/files`. Re-creates the SDK when the active accountId changes (mirrors `SdkKVClient`). `@internal`.
+  - `lite/files/types.ts` -- `FilesItem` + option shapes.
+  - `lite/files/errors.ts` -- `FilesError` + 7-code catalog.
+  - `lite/files/events.ts` -- typed event surface (24 events: upload/download/get/list/delete/createFolder/ttl.set/privacy each with start/finish/fail).
+- **consumer integrations**:
+  - `lite/bug-report/` -- new `attach()` + `downloadAttachment()` IPCs (`lite:bug-report:attach` / `lite:bug-report:download-attachment`). Renderer picks a file -> base64 over IPC -> main uploads via Files at `lite-bugs/attachments/staging-<ts>/<safeName>` (private, 10MB cap, sanitized filename, prefix-locked download). Payload schema gains optional `attachments?: BugReportAttachment[]` carrying file references (`{key, name, contentType, size, uploadedAt}`); `BugReportSummary.attachmentCount` exposes the count for the modal list view. Legacy payloads without attachments deserialize unchanged via `migrateLegacyPayload`.
+  - `lite/ai-run-times/` -- new `cached-tts` IPC (`lite:ai-run-times:cached-tts`). Renderer-driven TTS chunks now check Files first by deterministic key (`ai-run-times/tts/<articleId>/<voice>-<sha1(text)>.mp3`) and replay from cache when present. On miss, generates via the AI module and uploads with a 30-day TTL so re-listening doesn't burn OpenAI credits. Best-effort cache write -- upload failures don't block audio delivery.
+- **wiring**: `setFilesAuthBindings` is called from `main-lite.ts` immediately after `setKVAuthBindings` (after `initAuth` completes). The binding is read lazily on every Files op, so it always reflects the current sign-in state.
+- **api conformance**: `lite/test/unit/files-api.test.ts` runs `runApiConformanceContract` against the 11 expected methods.
+- **unit tests**:
+  - `lite/test/unit/files-api.test.ts` -- 20 tests (conformance + behavior + error mapping + auth binding).
+  - `lite/test/unit/bug-report-capture.test.ts` -- 4 new tests (capture forwards attachments; migrateLegacyPayload preserves valid attachments + drops malformed entries; attachments-omitted payload).
+  - `lite/test/unit/bug-report-store.test.ts` -- 1 new test (summary's `attachmentCount` reflects payload).
+- **integration tests**: `lite/test/integration/files-integration.test.ts` -- 12 tests (upload + getDownloadUrl round-trip, get returns null for missing, list/delete, per-account isolation, signed-out gating, rewrite vs prevent-rewrite, TTL add/update/clear, privacy flip).
+- **e2e tests**: none direct -- exercised transitively via bug-report and ai-run-times. A future `bug-report-attachments-e2e` Playwright spec would round-trip an attachment against the live OneReach Files endpoint.
+- **failure modes covered**: signed-out reads/writes (return null / throw `FILES_NOT_AUTHENTICATED`), 401/403 (token expired remediation), 404 on get/delete (soft-fail to null/no-op), 409 on prevent-rewrite (`FILES_ALREADY_EXISTS`), 413 on oversize upload (`FILES_TOO_LARGE`), 5xx (server error remediation), network failure, invalid input (empty key/name).
+- **events**: 24 events emitted via `getLoggingApi()` -- one start/finish/fail per op (upload, download, get, list, delete, createFolder, ttl.set, privacy.change).
+- **observability**: structured logger tags `[files]`; SDK rebuild on accountId switch logs a re-construct line; cache hits/misses logged at info level for the AI Run Times TTS cache.
+- **deliberately not ported from full**:
+  - `@or-sdk/files-sync-node` (the `gsx-file-sync.js` "mirror a folder" engine) -- different mental model, no in-app consumer yet, deferred to `lite-files-sync-v1` chunk.
+  - The SDK's deprecated `uploadFile` / `getUploadUrl` / `uploadSystemFileV2` legacy variants -- v1 uses only the modern `*V2` / `*V3` shapes.
+  - Renderer-direct `window.lite.files.*` IPC bridge -- v1 keeps the module main-process only; renderer consumers go through their own module's IPC (e.g. bug-report's `attach` handler) so per-IPC validation / size caps / prefix locks live in one place per consumer.
+- **regression-replay fixture**: none yet.
+- **consumers today**: `lite/bug-report/main.ts` (attach + downloadAttachment), `lite/ai-run-times/main.ts` (cached-tts).
+
 ## Deferred Queue
 
 Pending ports, ordered roughly by likely value but not committed:

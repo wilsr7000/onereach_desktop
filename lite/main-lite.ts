@@ -45,6 +45,7 @@ import { getLoggingApi, LOGGING_SELF_CATEGORY } from './logging/api.js';
 import { getAuthApi } from './auth/api.js';
 import { runKvMigration } from './kv/migration.js';
 import { setKVAuthBindings } from './kv/api.js';
+import { setFilesAuthBindings } from './files/api.js';
 import { getDiscoveryApi } from './discovery/api.js';
 
 const LITE_LOG_PORT = 47392;
@@ -439,6 +440,21 @@ app
       });
     } catch (err) {
       getLoggingApi().error('kv', 'setKVAuthBindings threw', {
+        error: (err as Error).message,
+      });
+    }
+
+    // Same pattern for Files (ADR-045). lite/files/ does not import
+    // lite/auth/ either, so main-lite.ts injects the resolvers here.
+    // The bindings are read lazily on every Files op, so they always
+    // reflect the current sign-in state.
+    try {
+      setFilesAuthBindings({
+        getToken: () => getAuthApi().getToken('edison') ?? '',
+        getAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
+      });
+    } catch (err) {
+      getLoggingApi().error('files', 'setFilesAuthBindings threw', {
         error: (err as Error).message,
       });
     }
