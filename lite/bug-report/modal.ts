@@ -12,6 +12,14 @@
 // This file is a module (the trailing `export {}` ensures it).
 export {};
 
+interface BugReportAttachment {
+  key: string;
+  name: string;
+  contentType: string;
+  size: number;
+  uploadedAt: string;
+}
+
 interface BugReportSummary {
   filePath: string;
   filename: string;
@@ -23,6 +31,7 @@ interface BugReportSummary {
   bytes: number;
   status: 'open' | 'resolved';
   hasNotes: boolean;
+  attachmentCount: number;
 }
 
 interface BugReportPayload {
@@ -38,6 +47,7 @@ interface BugReportPayload {
   status: 'open' | 'resolved';
   notes: string;
   lastModified: string;
+  attachments?: BugReportAttachment[];
 }
 
 interface BugReportUpdateResult {
@@ -63,12 +73,21 @@ interface BugReportBridge {
     redactionStatus: 'none' | 'low' | 'medium' | 'high';
     redactionTotalCount: number;
   }>;
-  save(userDescription: string): Promise<BugReportSaveResult>;
+  save(
+    userDescription: string,
+    attachments?: BugReportAttachment[]
+  ): Promise<BugReportSaveResult>;
   close(): void;
   list(): Promise<BugReportSummary[]>;
   read(idOrPath: string): Promise<BugReportPayload>;
   update(timestamp: string, updates: { status?: 'open' | 'resolved'; notes?: string }): Promise<BugReportUpdateResult>;
   delete(timestamp: string): Promise<BugReportDeleteResult>;
+  attach(input: {
+    name: string;
+    contentType: string;
+    base64: string;
+  }): Promise<BugReportAttachment>;
+  downloadAttachment(key: string): Promise<string>;
 }
 
 // `window.lite` is declared in lite/lite-window.d.ts (shared with
@@ -100,6 +119,14 @@ const reportsCountNoun = $<HTMLSpanElement>('reports-count-noun');
 const reportsList = $<HTMLUListElement>('reports-list');
 const reportsRefreshBtn = $<HTMLButtonElement>('reports-refresh');
 const searchInput = $<HTMLInputElement>('reports-search');
+const attachBtn = $<HTMLButtonElement>('attach-btn');
+const filePicker = $<HTMLInputElement>('file-picker');
+const attachmentsList = $<HTMLUListElement>('attachments-list');
+
+/** Per-report cap (matches MAX_ATTACHMENTS_PER_REPORT in main.ts). */
+const MAX_ATTACHMENTS = 10;
+/** Single-file cap (matches MAX_ATTACHMENT_BYTES in main.ts). */
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 /** HTML escape -- safe for renderer interpolation since CSP disallows inline. */
 function esc(s: string): string {
@@ -144,13 +171,186 @@ function scheduleRefresh(): void {
 
 descriptionInput.addEventListener('input', scheduleRefresh);
 
+// --- Staged attachments (uploaded but not yet saved with the report) ---
+
+interface StagedAttachment {
+  /** Local-only id used to address the row before / after upload. */
+  localId: string;
+  name: string;
+  size: number;
+  contentType: string;
+  /** Set once the upload finishes; absent while uploading or on failure. */
+  uploaded?: BugReportAttachment;
+  /** Set if the upload failed; the user can remove + retry. */
+  error?: string;
+  /** True while the upload is in flight. */
+  uploading: boolean;
+}
+
+const stagedAttachments: StagedAttachment[] = [];
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderStagedAttachments(): void {
+  if (stagedAttachments.length === 0) {
+    attachmentsList.innerHTML = '';
+    return;
+  }
+  attachmentsList.innerHTML = stagedAttachments
+    .map((att) => {
+      const stateClass = att.error !== undefined
+        ? 'failed'
+        : att.uploading
+          ? 'uploading'
+          : '';
+      const status = att.error !== undefined
+        ? `<span class="attachment-status failed">${esc(att.error)}</span>`
+        : att.uploading
+          ? `<span class="attachment-status">Uploading...</span>`
+          : `<span class="attachment-status">Ready</span>`;
+      return `
+        <li class="attachment-item ${stateClass}" data-local-id="${esc(att.localId)}">
+          <span class="attachment-name" title="${esc(att.name)}">${esc(att.name)}</span>
+          <span class="attachment-meta">${formatFileSize(att.size)}</span>
+          ${status}
+          <button type="button" class="attachment-remove" data-local-id="${esc(att.localId)}">Remove</button>
+        </li>
+      `;
+    })
+    .join('');
+}
+
+attachmentsList.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  const removeBtn = target.closest<HTMLButtonElement>('.attachment-remove');
+  if (removeBtn === null) return;
+  const localId = removeBtn.getAttribute('data-local-id');
+  if (localId === null) return;
+  const idx = stagedAttachments.findIndex((a) => a.localId === localId);
+  if (idx >= 0) {
+    stagedAttachments.splice(idx, 1);
+    renderStagedAttachments();
+  }
+});
+
+attachBtn.addEventListener('click', () => {
+  if (stagedAttachments.length >= MAX_ATTACHMENTS) {
+    showInlineError(`Already ${MAX_ATTACHMENTS} attachments staged (the per-report cap).`);
+    return;
+  }
+  filePicker.click();
+});
+
+filePicker.addEventListener('change', () => {
+  const files = filePicker.files;
+  if (files === null || files.length === 0) return;
+  const slots = Math.max(0, MAX_ATTACHMENTS - stagedAttachments.length);
+  const toUpload = Array.from(files).slice(0, slots);
+  if (files.length > slots) {
+    showInlineError(`Only ${slots} more file${slots === 1 ? '' : 's'} fit -- some skipped.`);
+  }
+  // Reset the picker so picking the same file twice in a row still fires change.
+  filePicker.value = '';
+  for (const file of toUpload) {
+    void uploadOne(file);
+  }
+});
+
+async function uploadOne(file: File): Promise<void> {
+  const localId = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    stagedAttachments.push({
+      localId,
+      name: file.name,
+      size: file.size,
+      contentType: file.type !== '' ? file.type : 'application/octet-stream',
+      uploading: false,
+      error: `Too big (${formatFileSize(file.size)} > ${formatFileSize(MAX_ATTACHMENT_BYTES)})`,
+    });
+    renderStagedAttachments();
+    return;
+  }
+  const entry: StagedAttachment = {
+    localId,
+    name: file.name,
+    size: file.size,
+    contentType: file.type !== '' ? file.type : 'application/octet-stream',
+    uploading: true,
+  };
+  stagedAttachments.push(entry);
+  renderStagedAttachments();
+
+  try {
+    const buf = await file.arrayBuffer();
+    const base64 = arrayBufferToBase64(buf);
+    const meta = await window.bugReport.attach({
+      name: file.name,
+      contentType: entry.contentType,
+      base64,
+    });
+    entry.uploaded = meta;
+    entry.uploading = false;
+  } catch (err) {
+    entry.uploading = false;
+    entry.error = (err as Error).message;
+  }
+  renderStagedAttachments();
+}
+
+/**
+ * Encode an ArrayBuffer to base64 using the renderer's btoa. Done in
+ * 32 KB chunks so we don't blow the call stack on multi-MB files.
+ */
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  const CHUNK = 0x8000; // 32 KB; safely under typical max-args
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const slice = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
+    binary += String.fromCharCode.apply(null, Array.from(slice));
+  }
+  return btoa(binary);
+}
+
+function showInlineError(msg: string): void {
+  resultDiv.textContent = msg;
+  resultDiv.classList.remove('hidden');
+  resultDiv.classList.add('error');
+  window.setTimeout(() => {
+    if (resultDiv.textContent === msg) {
+      resultDiv.textContent = '';
+      resultDiv.classList.add('hidden');
+      resultDiv.classList.remove('error');
+    }
+  }, 4000);
+}
+
 sendBtn.addEventListener('click', async () => {
+  // Block send while any attachment is still uploading -- otherwise
+  // the saved payload would reference a key that doesn't exist yet.
+  const stillUploading = stagedAttachments.some((a) => a.uploading);
+  if (stillUploading) {
+    showInlineError('Wait for attachment uploads to finish (or remove them) before sending.');
+    return;
+  }
+  // Filter out any failed uploads -- they're not on the server.
+  const validAttachments = stagedAttachments
+    .filter((a) => a.uploaded !== undefined)
+    .map((a) => a.uploaded as BugReportAttachment);
+
   sendBtn.disabled = true;
   cancelBtn.disabled = true;
   try {
-    await window.bugReport.save(descriptionInput.value);
+    await window.bugReport.save(descriptionInput.value, validAttachments);
     resultDiv.textContent = 'Bug report sent. Thanks.';
     resultDiv.classList.remove('hidden', 'error');
+    // Clear staged attachments -- they live in the saved report now.
+    stagedAttachments.length = 0;
+    renderStagedAttachments();
     // Refresh the list so the user immediately sees their just-filed report
     void refreshReportsList();
     // Auto-close after a beat so the user sees the success message
@@ -165,6 +365,10 @@ sendBtn.addEventListener('click', async () => {
 });
 
 cancelBtn.addEventListener('click', () => {
+  // NOTE: orphan attachments stay in the user's Files bucket on cancel.
+  // They're harmless (gated by the user's own auth) and a future cleanup
+  // pass can prune unreferenced staging-* folders. Tracked as a future
+  // hardening item alongside the broader Files cleanup work.
   window.bugReport.close();
 });
 
@@ -242,6 +446,10 @@ function renderRow(s: BugReportSummary): string {
       : `<span class="report-redaction bucket-none">clean</span>`;
   const statusBadge = `<span class="report-status status-${s.status}">${s.status}</span>`;
   const notesMarker = s.hasNotes ? `<span class="report-notes-marker">notes</span>` : '';
+  const attachMarker =
+    s.attachmentCount > 0
+      ? `<span class="report-notes-marker">${s.attachmentCount} attachment${s.attachmentCount === 1 ? '' : 's'}</span>`
+      : '';
   return `
     <li data-path="${esc(s.filePath)}" data-timestamp="${esc(s.timestamp)}">
       <div class="report-meta">
@@ -251,7 +459,7 @@ function renderRow(s: BugReportSummary): string {
       <div class="report-preview">${esc(preview)}${truncated}</div>
       <div class="report-meta" style="margin-top:6px;margin-bottom:0">
         <span class="report-meta-aux">v${esc(s.version)} - ${formatBytes(s.bytes)}</span>
-        ${notesMarker}
+        ${notesMarker}${attachMarker}
       </div>
     </li>
   `;
@@ -382,6 +590,60 @@ async function expandRow(li: HTMLLIElement, filePath: string, timestamp: string)
   notesWrap.appendChild(notesInput);
   notesWrap.appendChild(saveStatus);
   expanded.appendChild(section('Notes', notesWrap));
+
+  // -- Attachments (only if any) --
+  if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
+    const attListEl = document.createElement('ul');
+    attListEl.className = 'attachments-list';
+    for (const att of payload.attachments) {
+      const li = document.createElement('li');
+      li.className = 'attachment-item';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'attachment-name';
+      nameEl.title = att.name;
+      nameEl.textContent = att.name;
+      li.appendChild(nameEl);
+
+      const metaEl = document.createElement('span');
+      metaEl.className = 'attachment-meta';
+      metaEl.textContent = formatFileSize(att.size);
+      li.appendChild(metaEl);
+
+      const dlBtn = document.createElement('button');
+      dlBtn.type = 'button';
+      dlBtn.className = 'attachment-download';
+      dlBtn.textContent = 'Download';
+      dlBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        dlBtn.disabled = true;
+        const previousText = dlBtn.textContent;
+        dlBtn.textContent = 'Resolving...';
+        try {
+          const url = await window.bugReport.downloadAttachment(att.key);
+          // Open the signed URL in the user's default browser. The
+          // shell handler in main intercepts and routes external.
+          window.open(url, '_blank', 'noopener,noreferrer');
+          dlBtn.textContent = 'Opened';
+          window.setTimeout(() => {
+            dlBtn.textContent = previousText;
+            dlBtn.disabled = false;
+          }, 1500);
+        } catch (err) {
+          dlBtn.textContent = 'Failed';
+          dlBtn.title = (err as Error).message;
+          window.setTimeout(() => {
+            dlBtn.textContent = previousText;
+            dlBtn.disabled = false;
+          }, 3000);
+        }
+      });
+      li.appendChild(dlBtn);
+
+      attListEl.appendChild(li);
+    }
+    expanded.appendChild(section('Attachments', attListEl));
+  }
 
   // -- Recent logs (only if non-empty) --
   if (payload.recentLogs.trim() !== '') {

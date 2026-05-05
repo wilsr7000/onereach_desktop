@@ -186,6 +186,116 @@ textarea:focus {
   border-color: rgba(120, 160, 255, 0.4);
 }
 
+/* --- File attachments (ADR-045) ----------------------------------------- */
+
+.attachments-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.attachments-row .attachments-hint {
+  font-size: 11px;
+  opacity: 0.55;
+  flex: 1 1 auto;
+  min-width: 200px;
+}
+
+.attachments-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.attachments-list:empty {
+  display: none;
+}
+
+.attachments-list .attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.attachments-list .attachment-item.uploading {
+  opacity: 0.7;
+}
+
+.attachments-list .attachment-item.failed {
+  border-color: rgba(220, 80, 80, 0.4);
+}
+
+.attachments-list .attachment-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachments-list .attachment-meta {
+  font-size: 11px;
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+
+.attachments-list .attachment-status {
+  font-size: 11px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.attachments-list .attachment-status.failed {
+  color: #f08585;
+  opacity: 1;
+}
+
+.attachments-list .attachment-remove {
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e8e8ea;
+  border-radius: 3px;
+  padding: 3px 8px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.attachments-list .attachment-remove:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* In the expanded saved-report view, attachments use the same item
+   shape but instead of a "remove" button they get a "Download" link. */
+.attachments-list .attachment-download {
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid rgba(120, 160, 255, 0.35);
+  color: #c4d6ff;
+  border-radius: 3px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.attachments-list .attachment-download:hover {
+  background: rgba(120, 160, 255, 0.1);
+}
+
+.attachments-list .attachment-download:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* --- Disclosure chrome (shared by Show payload + Previous reports) --- */
 
 .modal-frame details {

@@ -781,6 +781,15 @@ interface LiteAiRunTimesErrorJSON {
   cause?: string;
 }
 
+interface LiteAiRunTimesCachedTtsResult {
+  /** Base64-encoded MP3 bytes. */
+  audioBase64: string;
+  /** Always 'audio/mpeg' for v1. */
+  contentType: string;
+  /** True when the chunk was served from cache (no OpenAI cost). */
+  cached: boolean;
+}
+
 interface LiteAiRunTimesBridge {
   listArticles(): Promise<LiteAiRunTimesArticle[]>;
   getArticle(id: string): Promise<LiteAiRunTimesArticle | null>;
@@ -804,6 +813,17 @@ interface LiteAiRunTimesBridge {
   clearReadingLog(): Promise<{ ok: true }>;
   exportReadingLog(): Promise<string>;
   openWindow(): Promise<{ ok: true }>;
+  /**
+   * TTS with a Files-backed cache (ADR-045). On cache hit the audio
+   * comes back without contacting OpenAI; on miss the bytes are
+   * generated and stored under `ai-run-times/tts/<articleId>/...`
+   * with a 30-day TTL. Per-account isolation is enforced server-side.
+   */
+  cachedTts(input: {
+    articleId: string;
+    text: string;
+    voice?: LiteAiTtsVoice;
+  }): Promise<LiteAiRunTimesCachedTtsResult>;
   parseError(err: unknown): LiteAiRunTimesErrorJSON | null;
 }
 
