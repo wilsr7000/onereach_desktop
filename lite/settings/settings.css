@@ -1,0 +1,1508 @@
+/*
+ * Settings shell: header, sidebar, content panes, footer.
+ *
+ * Layout adapted from full app's settings.html (studied per the
+ * cherry-pick discipline in LITE-RULES.md). Palette + spacing kept
+ * consistent with lite's other windows (placeholder, bug-report modal):
+ * background #0e0e10, accent #4f8cff, text #e8e8ea.
+ *
+ * Section-specific styles live in their own blocks below
+ * (`.tf-*` for Two-Factor, `.acc-*` for Account, etc.). Shell styles
+ * (.btn-*, .banner) are shared and prefixed with the section name when
+ * a section needs to override.
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ============================================================
+ * SCROLLBARS -- dark-mode by default
+ *
+ * User preference: any lite window with a dark body must have a dark
+ * scrollbar. White scrollbars on a dark UI are a hard no. Replicate
+ * this block in every other dark-themed lite stylesheet (modal.css,
+ * placeholder.html inline, etc.).
+ *
+ * `scrollbar-color` works in Chromium 121+ (Electron 41 ships
+ * Chromium 146); the `::-webkit-scrollbar` block below adds hover
+ * state control that `scrollbar-color` alone doesn't expose.
+ * ============================================================ */
+
+* {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0e0e10;
+  color: #e8e8ea;
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ============================================================
+ * FRAME (header / layout / footer)
+ * ============================================================ */
+
+.frame-header {
+  flex: 0 0 auto;
+  padding: 16px 22px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.frame-header h1 {
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.settings-layout {
+  display: flex;
+  flex: 1 1 auto;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.frame-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 22px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ============================================================
+ * SIDEBAR
+ * ============================================================ */
+
+.sidebar {
+  width: 188px;
+  flex: 0 0 auto;
+  background: #161618;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+  overflow-y: auto;
+}
+
+.sidebar-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12.5px;
+  border-left: 3px solid transparent;
+  transition: background 120ms, color 120ms, border-color 120ms;
+  user-select: none;
+  background: transparent;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+.sidebar-tab:focus {
+  outline: none;
+}
+
+.sidebar-tab:hover {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sidebar-tab.active {
+  color: #ffffff;
+  background: rgba(79, 140, 255, 0.10);
+  border-left-color: #4f8cff;
+}
+
+.sidebar-tab svg {
+  flex: 0 0 auto;
+  opacity: 0.7;
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-tab.active svg {
+  opacity: 1;
+}
+
+.sidebar-tab.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ============================================================
+ * CONTENT AREA
+ * ============================================================ */
+
+.content-area {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 24px 32px;
+  min-width: 0;
+}
+
+.tab-pane {
+  display: none;
+  max-width: 840px;
+}
+
+.tab-pane.active {
+  display: block;
+}
+
+.pane-header {
+  margin-bottom: 14px;
+}
+
+.pane-title {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin-bottom: 2px;
+}
+
+.pane-subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Placeholder content for unimplemented panes. */
+.pane-placeholder {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 20px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.5;
+}
+
+/* Developer section -- single-button layout for the API Reference launcher. */
+.pane-intro {
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.78);
+  margin: 4px 0 18px;
+  max-width: 70ch;
+}
+
+.dev-actions {
+  margin: 8px 0 16px;
+}
+
+.pane-note {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.5;
+  max-width: 70ch;
+}
+
+/* ============================================================
+ * BUTTONS (shared by all sections)
+ * ============================================================ */
+
+.btn-primary,
+.btn-secondary {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 120ms, border-color 120ms;
+}
+
+.btn-primary {
+  background: #4f8cff;
+  color: white;
+  border-color: #4f8cff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #3a78f0;
+  border-color: #3a78f0;
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: progress;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.btn-danger {
+  color: #ff8e8e;
+  border-color: rgba(255, 142, 142, 0.4);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 142, 142, 0.08);
+  border-color: rgba(255, 142, 142, 0.7);
+}
+
+/* ============================================================
+ * BANNERS (shared)
+ * ============================================================ */
+
+.banner {
+  font-size: 11px;
+  padding: 8px 12px;
+  border-radius: 5px;
+  line-height: 1.5;
+  margin-top: 10px;
+}
+
+.banner.error {
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  color: #ff8e8e;
+}
+
+.banner.success {
+  background: rgba(107, 255, 138, 0.08);
+  border: 1px solid rgba(107, 255, 138, 0.3);
+  color: #6bff8a;
+}
+
+.banner.info {
+  background: rgba(79, 140, 255, 0.08);
+  border: 1px solid rgba(79, 140, 255, 0.3);
+  color: #9bb9ff;
+}
+
+/* ============================================================
+ * ACCOUNT SECTION
+ * ============================================================ */
+
+.acc-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 18px 18px 16px;
+}
+
+.acc-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.acc-status-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.acc-status-icon-out {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.acc-status-icon-in {
+  background: rgba(107, 255, 138, 0.12);
+  color: #6bff8a;
+}
+
+.acc-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.acc-status-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.acc-status-help {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.5;
+}
+
+.acc-email {
+  color: rgba(255, 255, 255, 0.75);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.acc-meta {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.acc-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11px;
+}
+
+.acc-meta-row dt {
+  flex: 0 0 72px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+}
+
+.acc-meta-row dd {
+  flex: 1 1 auto;
+  color: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acc-meta-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+}
+
+.acc-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ============================================================
+ * TOKEN BUNDLE -- Settings -> Account verification UI
+ * ============================================================ */
+
+.acc-tokens {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+
+.acc-tokens-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.acc-tokens-help {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.52);
+  line-height: 1.55;
+}
+
+.acc-token {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.acc-token-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.acc-token-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.acc-token-meta {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.acc-token-value-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.acc-token-value {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  color: rgba(255, 255, 255, 0.88);
+  user-select: text;
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+.acc-token-copy {
+  align-self: flex-start;
+  white-space: nowrap;
+}
+
+.acc-tokens-empty {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  font-style: italic;
+}
+
+/* ============================================================
+ * TWO-FACTOR SECTION (migrated from lite/totp/authenticator.css)
+ * ============================================================ */
+
+.tf-explainer-card,
+.tf-security-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+
+.tf-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.tf-card-body {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.52);
+  line-height: 1.55;
+}
+
+.tf-explainer-list,
+.tf-security-list {
+  margin: 10px 0 0 18px;
+  padding: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.55;
+}
+
+.tf-explainer-list li,
+.tf-security-list li {
+  margin-bottom: 4px;
+}
+
+.tf-security-card {
+  border-color: rgba(107, 255, 138, 0.18);
+  background: rgba(107, 255, 138, 0.04);
+}
+
+.tf-setup-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.tf-setup-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.tf-setup-help {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.tf-setup-warning {
+  color: rgba(255, 184, 79, 0.9);
+}
+
+.tf-setup-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tf-manual-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tf-manual-form input[type="text"] {
+  background: #1a1a1d;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8e8ea;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  outline: none;
+}
+
+.tf-manual-form input[type="text"]:focus {
+  border-color: #4f8cff;
+}
+
+.tf-manual-help {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.tf-code-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 18px 16px;
+  text-align: center;
+}
+
+.tf-code-meta {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.tf-code-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: 4px;
+  color: #6bff8a;
+  cursor: copy;
+  user-select: all;
+}
+
+.tf-code-value.copied {
+  color: #4f8cff;
+}
+
+.tf-code-help {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.5;
+}
+
+.tf-countdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tf-countdown-bar {
+  width: 100px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.tf-countdown-fill {
+  width: 100%;
+  height: 100%;
+  background: #6bff8a;
+  transition: width 1000ms linear, background 200ms;
+}
+
+.tf-countdown-fill.warning {
+  background: #ffb84f;
+}
+
+.tf-countdown-fill.danger {
+  background: #ff6b6b;
+}
+
+.tf-countdown-text {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.tf-account-row {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.tf-code-source {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+}
+
+.tf-config-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.tf-copy-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: center;
+  margin-top: 6px;
+}
+
+.tf-copy-hint.success {
+  color: #6bff8a;
+}
+
+/* ============================================================
+ * NEON SECTION
+ * ============================================================ */
+
+.neon-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.neon-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.neon-status-pill {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  flex: 0 0 auto;
+}
+
+.neon-status-pill.ok {
+  background: rgba(107, 255, 138, 0.12);
+  color: #6bff8a;
+  border: 1px solid rgba(107, 255, 138, 0.3);
+}
+
+.neon-status-pill.warn {
+  background: rgba(255, 184, 79, 0.1);
+  color: #ffb84f;
+  border: 1px solid rgba(255, 184, 79, 0.3);
+}
+
+.neon-status-help {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.5;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.neon-explainer {
+  background: rgba(79, 140, 255, 0.04);
+  border: 1px solid rgba(79, 140, 255, 0.18);
+  border-radius: 6px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.neon-explainer-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(155, 185, 255, 0.95);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.neon-explainer-body {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.neon-explainer-body strong {
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 500;
+}
+
+.neon-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.neon-field label {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.neon-field-row {
+  display: flex;
+  gap: 12px;
+}
+
+.neon-field-half {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.neon-input {
+  background: #1a1a1d;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8e8ea;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  outline: none;
+  width: 100%;
+}
+
+.neon-input:focus {
+  border-color: #4f8cff;
+}
+
+.neon-input-password {
+  letter-spacing: 1px;
+}
+
+.neon-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.neon-field-help {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1.5;
+}
+
+.neon-field-help code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.neon-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.neon-link-button {
+  background: none;
+  border: none;
+  color: #9bb9ff;
+  font-size: 10.5px;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  text-decoration: underline;
+}
+
+.neon-link-button:hover {
+  color: #c6d6ff;
+}
+
+/* ============================================================
+ * DIAGNOSTICS SECTION
+ *
+ * Renders the AppHealthSnapshot from window.lite.health.snapshot()
+ * as a stack of small definition-list cards. Density first: the
+ * panel is a developer-facing diagnostic, not marketing copy, so
+ * each section is compact and scannable. Pills mark window types,
+ * focus state, and visibility. The Refresh + Copy as JSON buttons
+ * sit in a sticky-feeling toolbar at the top.
+ * ============================================================ */
+
+.diag-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.diag-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+}
+
+.diag-toolbar-text {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.diag-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.diag-intro {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0 2px 4px;
+  max-width: 70ch;
+}
+
+.diag-section {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.diag-section-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(155, 185, 255, 0.95);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 10px;
+}
+
+.diag-section-count {
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.diag-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) 1fr;
+  column-gap: 16px;
+  row-gap: 4px;
+  margin: 0;
+}
+
+.diag-row {
+  display: contents;
+}
+
+.diag-row dt {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.diag-row dd {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.85);
+  margin: 0;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.diag-muted {
+  color: rgba(255, 255, 255, 0.35);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.diag-empty {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.5;
+}
+
+.diag-window-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diag-window {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.diag-window-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.diag-window-title {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.diag-window-url {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+
+.diag-pill-row {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.diag-pill {
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.diag-pill-main {
+  background: rgba(79, 140, 255, 0.15);
+  color: #9bb9ff;
+  border-color: rgba(79, 140, 255, 0.3);
+}
+
+.diag-pill-settings {
+  background: rgba(155, 185, 255, 0.12);
+  color: rgba(200, 215, 255, 0.95);
+  border-color: rgba(155, 185, 255, 0.25);
+}
+
+.diag-pill-bug-report,
+.diag-pill-bug_report {
+  background: rgba(255, 184, 79, 0.12);
+  color: #ffb84f;
+  border-color: rgba(255, 184, 79, 0.3);
+}
+
+.diag-pill-auth {
+  background: rgba(107, 255, 138, 0.12);
+  color: #6bff8a;
+  border-color: rgba(107, 255, 138, 0.3);
+}
+
+.diag-pill-api-docs,
+.diag-pill-api_docs {
+  background: rgba(186, 154, 255, 0.12);
+  color: #c5b0ff;
+  border-color: rgba(186, 154, 255, 0.3);
+}
+
+.diag-pill-about {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.diag-pill-unknown {
+  background: rgba(255, 107, 107, 0.1);
+  color: #ff8e8e;
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+.diag-pill-focused {
+  background: rgba(79, 140, 255, 0.15);
+  color: #9bb9ff;
+  border-color: rgba(79, 140, 255, 0.3);
+}
+
+.diag-pill-visible {
+  background: rgba(107, 255, 138, 0.1);
+  color: #8fff9c;
+  border-color: rgba(107, 255, 138, 0.25);
+}
+
+.diag-pill-destroyed {
+  background: rgba(255, 107, 107, 0.1);
+  color: #ff8e8e;
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+/* ============================================================
+ * IDW SECTION (Settings -> IDWs)
+ *
+ * Per-kind accent design tokens are reused from the catalog
+ * window (see lite/idw/catalog.css). Defined here so the section
+ * also has them when settings.css loads alone.
+ * ============================================================ */
+
+:root {
+  --accent-idw: #4f8cff;
+  --accent-external-bot: #b87bff;
+  --accent-image-creator: #ff7bb3;
+  --accent-video-creator: #ff9c4a;
+  --accent-audio-generator: #6bff8a;
+  --accent-ui-design-tool: #7bdbff;
+}
+
+.idw-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.idw-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.idw-status-pill {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  flex: 0 0 auto;
+}
+
+.idw-status-pill.ok {
+  background: rgba(79, 140, 255, 0.12);
+  color: #9bb9ff;
+  border: 1px solid rgba(79, 140, 255, 0.3);
+}
+
+.idw-status-help {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.5;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Welcome card (empty state) */
+.idw-welcome {
+  background: linear-gradient(
+    135deg,
+    rgba(79, 140, 255, 0.06) 0%,
+    rgba(184, 123, 255, 0.04) 100%
+  );
+  border: 1px solid rgba(79, 140, 255, 0.18);
+  border-radius: 10px;
+  padding: 20px 22px;
+  text-align: left;
+}
+
+.idw-welcome-title {
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+  background: linear-gradient(90deg, #9bb9ff, #d6b6ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.idw-welcome-body {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.55;
+  margin-bottom: 14px;
+}
+
+.idw-welcome-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Action row */
+.idw-actions-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Filter pills row */
+.idw-filter-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.idw-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+  font-family: inherit;
+}
+
+.idw-filter-pill:hover { background: rgba(255, 255, 255, 0.08); color: #e8e8ea; }
+
+.idw-filter-pill.active {
+  background: rgba(79, 140, 255, 0.16);
+  color: #ffffff;
+  border-color: rgba(79, 140, 255, 0.45);
+}
+
+.idw-filter-pill-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  opacity: 0.7;
+}
+
+/* Card-rows table */
+.idw-table {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.idw-row {
+  background: rgba(20, 20, 22, 0.6);
+  transition: background 150ms, max-height 280ms ease, opacity 200ms;
+  max-height: 800px;
+  overflow: hidden;
+}
+
+.idw-row:hover { background: rgba(255, 255, 255, 0.04); }
+
+.idw-row.removing {
+  max-height: 0;
+  opacity: 0;
+  border-top: 0;
+}
+
+.idw-row-summary {
+  display: grid;
+  grid-template-columns: 32px 1fr auto auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.idw-row-icon {
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.idw-row-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.idw-row-text { min-width: 0; }
+.idw-row-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.idw-row-url {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.4);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idw-row-updated {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.idw-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+.idw-pill[data-kind="idw"] { background: rgba(79, 140, 255, 0.16); color: var(--accent-idw); }
+.idw-pill[data-kind="external-bot"] { background: rgba(184, 123, 255, 0.16); color: var(--accent-external-bot); }
+.idw-pill[data-kind="image-creator"] { background: rgba(255, 123, 179, 0.16); color: var(--accent-image-creator); }
+.idw-pill[data-kind="video-creator"] { background: rgba(255, 156, 74, 0.16); color: var(--accent-video-creator); }
+.idw-pill[data-kind="audio-generator"] { background: rgba(107, 255, 138, 0.16); color: var(--accent-audio-generator); }
+.idw-pill[data-kind="ui-design-tool"] { background: rgba(123, 219, 255, 0.16); color: var(--accent-ui-design-tool); }
+
+.idw-pill-source {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.idw-row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.idw-link-button {
+  background: none;
+  border: none;
+  color: #9bb9ff;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  text-decoration: underline;
+}
+
+.idw-link-button:hover { color: #c6d6ff; }
+
+.idw-link-button.danger { color: #ff9c9c; }
+.idw-link-button.danger:hover { color: #ffc1c1; }
+
+/* Inline edit + Add form */
+.idw-row-edit { padding: 0 12px; }
+.idw-add-form-wrap { padding: 4px 0; }
+
+.idw-form {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: slideDown 200ms ease;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.idw-form-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.idw-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* `display: flex` above overrides the HTML `hidden` attribute's default
+ * `display: none`. Re-establish hidden semantics so the per-kind
+ * conditional fields (apiUrl, environment, audio, botType) actually
+ * disappear when the form's `data-show-when` logic toggles `hidden`. */
+.idw-form-field[hidden] {
+  display: none;
+}
+
+.idw-form-field label {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.idw-form-field input[type="text"],
+.idw-form-field select {
+  background: #1a1a1d;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8e8ea;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+.idw-form-field input[type="text"]:focus,
+.idw-form-field select:focus {
+  border-color: rgba(79, 140, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.15);
+}
+
+.idw-form-field input.invalid {
+  border-color: rgba(255, 107, 107, 0.55);
+}
+
+.idw-form-help {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.idw-form-help.invalid { color: #ff9c9c; }
+
+.idw-form-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.idw-form-error {
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  color: #ff9c9c;
+  border-radius: 5px;
+  padding: 8px 10px;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+/* ============================================================
+ * SIGNATURE UI PASS -- orb + blue signal polish
+ * ============================================================ */
+
+.frame-header {
+  background:
+    radial-gradient(circle at 4% 0%, rgba(79, 140, 255, 0.12), transparent 34%),
+    var(--or-bg-shell);
+}
+
+.frame-footer,
+.sidebar {
+  background: var(--or-bg-surface);
+}
+
+.sidebar-tab:hover {
+  background: var(--or-bg-hover);
+}
+
+.sidebar-tab.active {
+  background: var(--or-bg-active);
+  border-left-color: var(--or-accent);
+  box-shadow: inset 10px 0 24px rgba(79, 140, 255, 0.05);
+}
+
+.pane-placeholder,
+.acc-card,
+.neon-card,
+.diag-section,
+.idw-card,
+.tf-explainer-card,
+.tf-security-card {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(79, 140, 255, 0.08), transparent 38%),
+    rgba(255, 255, 255, 0.03);
+  border-color: var(--or-border-subtle);
+  border-radius: var(--or-radius-md);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--or-accent-soft);
+  border-color: var(--or-border-signal);
+}
+
+.banner.info,
+.banner.success,
+.banner.error {
+  border-left: 3px solid currentColor;
+}

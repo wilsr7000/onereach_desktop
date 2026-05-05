@@ -26,6 +26,7 @@ import type { Rectangle } from 'electron';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
 import { getAuthApi, getEnvironmentForUrl } from '../auth/api.js';
+import { isOneReachSsoSkipUrl, tryAutoSkipSso } from '../auth/sso-skip.js';
 import { startTotpAutofillForWebContents } from '../auth/totp-autofill.js';
 import type { Tab } from './types.js';
 import { CHROME_HEIGHT_PX } from './types.js';
@@ -352,9 +353,20 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
   // restore the user's place across app restarts.
   view.webContents.on('did-navigate', (_e, url) => {
     void getMainWindowApi().setTabUrl(tab.id, url);
+    // Auto-skip SSO interstitial -- runs on every main-frame nav so
+    // mid-flight redirects through auth.<env>.onereach.ai are caught
+    // even when the page has already finished an earlier load.
+    const ssoMatch = isOneReachSsoSkipUrl(url);
+    if (ssoMatch.match && ssoMatch.env !== null) {
+      void tryAutoSkipSso(view.webContents, ssoMatch.env, url);
+    }
   });
   view.webContents.on('did-navigate-in-page', (_e, url) => {
     void getMainWindowApi().setTabUrl(tab.id, url);
+    const ssoMatch = isOneReachSsoSkipUrl(url);
+    if (ssoMatch.match && ssoMatch.env !== null) {
+      void tryAutoSkipSso(view.webContents, ssoMatch.env, url);
+    }
   });
 
   // Update the tab label when the page title resolves -- gives users
@@ -395,6 +407,17 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
       id: tab.id,
       durationMs: Date.now() - loadStart,
     });
+    // Per the "ultimate convenience" goal: when the IDW redirects
+    // through OneReach's SSO interstitial (auth.<env>.onereach.ai/?
+    // sso=true&showSkip=true), auto-click the Skip / Continue button
+    // so the user never sees that page. The cookies we injected on
+    // attach already carry the user's session; the Skip button just
+    // confirms it.
+    const currentUrl = safeWebContentsUrl(view.webContents);
+    const ssoMatch = isOneReachSsoSkipUrl(currentUrl);
+    if (ssoMatch.match && ssoMatch.env !== null) {
+      void tryAutoSkipSso(view.webContents, ssoMatch.env, currentUrl);
+    }
   });
 
   win.contentView.addChildView(view);

@@ -1,0 +1,116 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.onereach.lite",
+  "productName": "Onereach.ai Lite",
+  "copyright": "Copyright © 2026 Onereach.ai",
+  "directories": {
+    "output": "dist-lite",
+    "buildResources": "build"
+  },
+  "extraMetadata": {
+    "main": "dist-lite/build/main-lite.js"
+  },
+  "files": [
+    "dist-lite/build/**/*",
+    "lite/placeholder.html",
+    "lite/about.html",
+    "lite/bug-report/modal.html",
+    "lite/bug-report/modal.css",
+    "lib/**/*",
+    "package.json",
+    "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+    "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+    "!**/node_modules/*.d.ts",
+    "!**/node_modules/.bin",
+    "!**/.{idea,git,github,vscode,cursor}/**",
+    "!**/{.DS_Store,.git,.gitignore,.npmignore}",
+    "!main.js",
+    "!preload.js",
+    "!preload-*.js",
+    "!*.html",
+    "!action-executor.js",
+    "!app-manager-agent.js",
+    "!menu.js",
+    "!menu-data-manager.js",
+    "!module-manager.js",
+    "!module-manager-ui.html",
+    "!packages/**/*",
+    "!test/**/*",
+    "!lite/test/**/*",
+    "!lite/**/*.ts",
+    "!Flipboard-IDW-Feed/**/*",
+    "!agentic-player/**/*",
+    "!docs/**/*",
+    "!_scripts/**/*",
+    "!_temp/**/*",
+    "!*.md",
+    "!*.sh",
+    "!*.log",
+    "!api-*.json",
+    "!example-module/**/*"
+  ],
+  "publish": {
+    "provider": "github",
+    "owner": "wilsr7000",
+    "repo": "Onereach_Lite_Desktop_App"
+  },
+  "mac": {
+    "category": "public.app-category.productivity",
+    "icon": "assets/icon.icns",
+    "target": [
+      "dmg",
+      "zip"
+    ],
+    "artifactName": "Onereach.ai.Lite-${version}-${arch}-mac.${ext}",
+    "darkModeSupport": true,
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "strictVerify": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist",
+    "notarize": false,
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "Onereach.ai Lite uses the microphone for future voice features (kernel does not access mic).",
+      "NSCameraUsageDescription": "Onereach.ai Lite uses the camera for future recording features (kernel does not access camera).",
+      "CFBundleHelpBookFolder": "OnereachLite.help",
+      "CFBundleHelpBookName": "com.onereach.lite.help"
+    }
+  },
+  "afterSign": "scripts/notarize.js",
+  "win": {
+    "icon": "assets/tray-icon.png",
+    "target": [
+      "nsis",
+      "zip"
+    ]
+  },
+  "linux": {
+    "icon": "assets/tray-icon.png",
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "category": "Office"
+  },
+  "dmg": {
+    "icon": "assets/icon.icns",
+    "iconSize": 128,
+    "title": "Onereach.ai Lite ${version}",
+    "contents": [
+      {
+        "x": 130,
+        "y": 220
+      },
+      {
+        "x": 410,
+        "y": 220,
+        "type": "link",
+        "path": "/Applications"
+      }
+    ]
+  },
+  "asar": true,
+  "asarUnpack": [
+    "lib/log-event-queue.js"
+  ]
+}

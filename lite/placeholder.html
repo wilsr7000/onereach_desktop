@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>Onereach.ai Lite</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body {
+        position: relative;
+        display: grid;
+        place-items: center;
+        min-width: 560px;
+        min-height: 420px;
+        padding: 20px;
+        color: var(--or-text-primary);
+        font-family: var(--or-font-sans);
+        background:
+          radial-gradient(circle at 18% 12%, rgba(123, 219, 255, 0.18), transparent 30%),
+          radial-gradient(circle at 82% 18%, rgba(79, 140, 255, 0.18), transparent 34%),
+          linear-gradient(135deg, #090a0d 0%, var(--or-bg-canvas) 46%, #11131a 100%);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body::before,
+      body::after {
+        content: '';
+        position: fixed;
+        inset: auto;
+        border-radius: 999px;
+        pointer-events: none;
+      }
+
+      body::before {
+        right: -130px;
+        bottom: -150px;
+        width: 360px;
+        height: 360px;
+        background: radial-gradient(circle, rgba(79, 140, 255, 0.18), transparent 68%);
+        filter: blur(2px);
+      }
+
+      body::after {
+        left: -120px;
+        top: -150px;
+        width: 320px;
+        height: 320px;
+        border: 1px solid rgba(123, 219, 255, 0.08);
+        box-shadow: inset 0 0 80px rgba(79, 140, 255, 0.08);
+      }
+
+      .login-shell {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 278px;
+        gap: 18px;
+        width: min(100%, 840px);
+        min-height: min(400px, calc(100vh - 40px));
+      }
+
+      .brand-panel,
+      .access-card {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--or-border-subtle);
+        box-shadow: var(--or-shadow-lg);
+        backdrop-filter: blur(18px);
+      }
+
+      .brand-panel {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-width: 0;
+        padding: 26px;
+        border-radius: 28px;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015)),
+          radial-gradient(circle at 16% 18%, rgba(79, 140, 255, 0.18), transparent 38%),
+          rgba(18, 18, 22, 0.72);
+      }
+
+      .brand-panel::before {
+        content: '';
+        position: absolute;
+        inset: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.045);
+        border-radius: 22px;
+        pointer-events: none;
+      }
+
+      .brand-panel::after {
+        content: '';
+        position: absolute;
+        right: -110px;
+        top: -110px;
+        width: 270px;
+        height: 270px;
+        border: 1px solid rgba(79, 140, 255, 0.2);
+        border-radius: 50%;
+        box-shadow:
+          inset 0 0 70px rgba(79, 140, 255, 0.08),
+          0 0 70px rgba(79, 140, 255, 0.08);
+        pointer-events: none;
+      }
+
+      .brand-mark {
+        position: relative;
+        display: inline-grid;
+        width: 84px;
+        height: 84px;
+        margin-bottom: 18px;
+        place-items: center;
+        border: 1px solid rgba(123, 219, 255, 0.2);
+        border-radius: 50%;
+        background:
+          radial-gradient(circle, rgba(123, 219, 255, 0.2), transparent 58%),
+          rgba(79, 140, 255, 0.045);
+        box-shadow:
+          inset 0 0 34px rgba(79, 140, 255, 0.12),
+          0 0 42px rgba(79, 140, 255, 0.16);
+      }
+
+      .brand-mark::before,
+      .brand-mark::after {
+        content: '';
+        position: absolute;
+        border-radius: 50%;
+      }
+
+      .brand-mark::before {
+        inset: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.11);
+      }
+
+      .brand-mark::after {
+        width: 18px;
+        height: 18px;
+        background: linear-gradient(180deg, #a7e9ff, var(--or-accent));
+        box-shadow: 0 0 32px rgba(123, 219, 255, 0.55);
+      }
+
+      .eyebrow,
+      .version {
+        color: var(--or-accent-strong);
+        font-family: var(--or-font-mono);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .wordmark {
+        margin-top: 8px;
+        color: rgba(244, 246, 251, 0.88);
+        font-size: 15px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+      }
+
+      .wordmark .lite {
+        color: var(--or-text-muted);
+        font-weight: 400;
+      }
+
+      h1 {
+        max-width: 390px;
+        margin-top: 14px;
+        font-size: clamp(31px, 5.2vw, 40px);
+        font-weight: 300;
+        letter-spacing: -0.055em;
+        line-height: 0.95;
+      }
+
+      .hero-copy {
+        max-width: 385px;
+        margin-top: 14px;
+        color: var(--or-text-secondary);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .signal-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 20px;
+      }
+
+      .signal-pill {
+        min-width: 0;
+        padding: 10px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.075);
+        border-radius: 999px;
+        color: var(--or-text-muted);
+        background: rgba(255, 255, 255, 0.035);
+        font-size: 11px;
+        line-height: 1.2;
+        text-align: center;
+        white-space: nowrap;
+      }
+
+      .access-card {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 20px;
+        border-radius: 24px;
+        background:
+          radial-gradient(circle at 50% 0%, rgba(79, 140, 255, 0.16), transparent 42%),
+          linear-gradient(180deg, rgba(27, 27, 32, 0.96), rgba(17, 18, 23, 0.94));
+      }
+
+      .card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .status-dot {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--or-text-muted);
+        font-size: 12px;
+      }
+
+      .status-dot::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--or-success);
+        box-shadow: 0 0 14px rgba(107, 255, 138, 0.55);
+      }
+
+      .version {
+        color: var(--or-text-faint);
+        text-align: right;
+      }
+
+      .login-copy {
+        margin: 22px 0 14px;
+      }
+
+      .login-copy h2 {
+        margin-bottom: 8px;
+        font-size: 25px;
+        font-weight: 400;
+        letter-spacing: -0.035em;
+      }
+
+      .login-copy p {
+        color: var(--or-text-muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .auth-block {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: center;
+        min-height: 104px;
+      }
+
+      .signin-button {
+        width: 100%;
+        min-height: 46px;
+        padding: 12px 18px;
+        border-radius: 999px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .signin-button:focus-visible,
+      .settings-shortcut:focus-visible,
+      .signout-link:focus-visible {
+        outline: 2px solid rgba(123, 219, 255, 0.72);
+        outline-offset: 3px;
+      }
+
+      .signin-button:disabled {
+        cursor: progress;
+        opacity: 0.62;
+      }
+
+      .settings-shortcut,
+      .signout-link {
+        margin-top: 12px;
+        padding: 7px 10px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--or-text-muted);
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 12px;
+        line-height: 1.35;
+        text-align: center;
+        transition:
+          background var(--or-transition-fast),
+          border-color var(--or-transition-fast),
+          color var(--or-transition-fast);
+      }
+
+      .settings-shortcut:hover,
+      .signout-link:hover {
+        border-color: rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--or-text-primary);
+      }
+
+      .signed-in {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 14px;
+        border: 1px solid rgba(107, 255, 138, 0.18);
+        border-radius: 18px;
+        background: rgba(107, 255, 138, 0.055);
+      }
+
+      .signed-in .email {
+        color: var(--or-text-primary);
+        font-size: 14px;
+        line-height: 1.35;
+      }
+
+      .signed-in .account {
+        color: var(--or-text-muted);
+        font-family: var(--or-font-mono);
+        font-size: 11px;
+      }
+
+      .signed-in .signout-link {
+        align-self: flex-start;
+        margin-top: 2px;
+        padding-inline: 0;
+      }
+
+      .error-banner {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid rgba(255, 107, 122, 0.36);
+        border-radius: 14px;
+        color: #ffb1b8;
+        background: rgba(255, 107, 122, 0.11);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .security-note {
+        display: grid;
+        gap: 10px;
+        padding-top: 16px;
+        border-top: 1px solid rgba(255, 255, 255, 0.07);
+      }
+
+      .security-note strong {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--or-text-secondary);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .security-note span {
+        display: block;
+        color: var(--or-text-faint);
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
+      .hint {
+        margin-top: 14px;
+        color: var(--or-text-faint);
+        font-size: 11px;
+        line-height: 1.45;
+        text-align: center;
+      }
+
+      @media (max-width: 680px), (max-height: 440px) {
+        body {
+          min-width: 0;
+          overflow: auto;
+        }
+
+        .login-shell {
+          grid-template-columns: 1fr;
+          min-height: 0;
+        }
+
+        .brand-panel {
+          min-height: 260px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="login-shell" aria-label="Onereach.ai Lite sign-in">
+      <section class="brand-panel" aria-label="Welcome">
+        <div>
+          <div class="brand-mark" aria-hidden="true"></div>
+          <div class="eyebrow">Onereach.ai Lite</div>
+          <div class="wordmark">Onereach.ai <span class="lite">Lite</span></div>
+          <h1>Your AI workspace, distilled.</h1>
+          <p class="hero-copy">
+            A focused doorway into GSX, tuned for fast starts, private local state,
+            and the blue signal system that carries the Onereach experience.
+          </p>
+        </div>
+        <div class="signal-row" aria-label="Lite qualities">
+          <div class="signal-pill">Focused kernel</div>
+          <div class="signal-pill">Secure session</div>
+          <div class="signal-pill">Auto-updated</div>
+        </div>
+      </section>
+
+      <section class="access-card" aria-label="Access">
+        <div>
+          <div class="card-top">
+            <div class="status-dot">Ready</div>
+            <div class="version" id="version">v0.0.0</div>
+          </div>
+
+          <div class="login-copy">
+            <h2>Welcome back.</h2>
+            <p>Connect your GSX account to open your Lite workspace.</p>
+          </div>
+
+          <div class="auth-block" id="auth-block">
+            <button id="signin-btn" class="signin-button" type="button">Sign in to GSX</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="security-note" aria-label="Security notes">
+            <div>
+              <strong>2FA ready</strong>
+              <span>Use Settings when OneReach asks for a six-digit code.</span>
+            </div>
+            <div>
+              <strong>Local by design</strong>
+              <span>Lite keeps the sign-in flow inside its own app boundary.</span>
+            </div>
+          </div>
+
+          <div class="hint">
+            Use the <strong>Onereach.ai Lite</strong> menu above to report a bug or quit.
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!--
+      External script (not inline) so the strict CSP `script-src 'self'`
+      allows execution. Source: lite/placeholder.ts -> bundled by
+      esbuild to dist-lite/build/placeholder.js.
+    -->
+    <script src="./placeholder.js"></script>
+  </body>
+</html>

@@ -1,0 +1,581 @@
+/*
+ * API Reference window stylesheet (ADR-035).
+ *
+ * Two-pane layout: sidebar on the left, content area on the right.
+ * Palette and conventions match lite/settings/settings.css so the
+ * window feels at home next to Settings.
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Dark scrollbars per LITE convention. */
+* {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-width: thin;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0e0e10;
+  color: #e8e8ea;
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ────────── Frame ────────── */
+
+.frame-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #232327;
+  background: #131316;
+  flex-shrink: 0;
+}
+
+.frame-header h1 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.frame-subtitle {
+  color: #6b6b72;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.frame-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 20px;
+  border-top: 1px solid #232327;
+  background: #131316;
+  flex-shrink: 0;
+}
+
+.frame-footer-info {
+  color: #6b6b72;
+  font-size: 11px;
+}
+
+.frame-footer-info code {
+  background: #1c1c1f;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+}
+
+/* ────────── Layout ────────── */
+
+.docs-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 0;
+}
+
+/* ────────── Sidebar ────────── */
+
+.sidebar {
+  background: #111114;
+  border-right: 1px solid #232327;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.filter-row {
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid #1d1d20;
+}
+
+.filter-input {
+  width: 100%;
+  background: #1c1c1f;
+  border: 1px solid #2b2b30;
+  color: #e8e8ea;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  outline: none;
+}
+
+.filter-input:focus {
+  border-color: #4f8cff;
+}
+
+.filter-input::placeholder {
+  color: #5b5b62;
+}
+
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 6px 12px;
+}
+
+.sidebar-tab {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #c0c0c6;
+  text-align: left;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  letter-spacing: 0.1px;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.sidebar-tab:hover {
+  background: #1c1c1f;
+  color: #e8e8ea;
+}
+
+.sidebar-tab.active {
+  background: #20242c;
+  color: #e8e8ea;
+  border-left: 2px solid #4f8cff;
+  padding-left: 8px;
+}
+
+.sidebar-tab .badge {
+  margin-left: auto;
+  font-size: 10px;
+  color: #6b6b72;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.sidebar-tab.hidden {
+  display: none;
+}
+
+.untyped-section {
+  border-top: 1px solid #1d1d20;
+  padding: 12px 14px;
+  flex-shrink: 0;
+}
+
+.untyped-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #5b5b62;
+  margin-bottom: 6px;
+}
+
+.untyped-list {
+  list-style: none;
+}
+
+.untyped-list li {
+  font-size: 11px;
+  color: #6b6b72;
+  padding: 4px 0;
+  border-bottom: 1px dotted #232327;
+}
+
+.untyped-list li:last-child {
+  border-bottom: none;
+}
+
+.untyped-list strong {
+  color: #c0c0c6;
+}
+
+/* ────────── Content ────────── */
+
+.content {
+  background: #0e0e10;
+  overflow-y: auto;
+  padding: 0 28px 60px;
+}
+
+.empty-state {
+  padding: 80px 28px;
+  text-align: center;
+  color: #6b6b72;
+}
+
+.module-header {
+  position: sticky;
+  top: 0;
+  background: linear-gradient(to bottom, #0e0e10 70%, rgba(14, 14, 16, 0));
+  padding: 22px 0 18px;
+  z-index: 10;
+}
+
+.module-title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  margin-bottom: 4px;
+}
+
+.module-slug {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #4f8cff;
+  background: #131820;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.module-summary {
+  margin-top: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #c0c0c6;
+  white-space: pre-wrap;
+  max-width: 78ch;
+}
+
+.section-heading {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #5b5b62;
+  margin: 28px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #1d1d20;
+}
+
+/* ────────── Method cards ────────── */
+
+.method-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.method-card {
+  background: #131316;
+  border: 1px solid #1d1d20;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.method-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.method-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4f8cff;
+}
+
+.method-no-doc {
+  color: #d97706;
+  font-size: 11px;
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.method-signature {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #c0c0c6;
+  background: #0a0a0c;
+  padding: 8px 12px;
+  border-radius: 5px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  border: 1px solid #1d1d20;
+  margin-bottom: 12px;
+}
+
+.method-description {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #c0c0c6;
+  white-space: pre-wrap;
+}
+
+.method-tags {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #9b9ba1;
+}
+
+.method-tags dt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #6b6b72;
+  margin-top: 6px;
+}
+
+.method-tags dd {
+  margin: 2px 0 0 12px;
+  white-space: pre-wrap;
+}
+
+.method-examples {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.method-examples pre {
+  background: #0a0a0c;
+  border: 1px solid #1d1d20;
+  border-radius: 5px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #c0c0c6;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+/* ────────── Events table ────────── */
+
+.events-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.events-table th,
+.events-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid #1d1d20;
+}
+
+.events-table th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #5b5b62;
+  font-weight: 600;
+  background: #131316;
+}
+
+.events-table td {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #c0c0c6;
+}
+
+.events-table td:first-child {
+  color: #4f8cff;
+}
+
+/* ────────── README rendering ────────── */
+
+.readme-content {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #c0c0c6;
+  max-width: 84ch;
+}
+
+.readme-content h1,
+.readme-content h2,
+.readme-content h3,
+.readme-content h4 {
+  color: #e8e8ea;
+  margin: 24px 0 8px;
+}
+
+.readme-content h1 {
+  font-size: 18px;
+}
+.readme-content h2 {
+  font-size: 15px;
+}
+.readme-content h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #9b9ba1;
+}
+.readme-content h4 {
+  font-size: 13px;
+}
+
+.readme-content p {
+  margin: 10px 0;
+}
+
+.readme-content ul,
+.readme-content ol {
+  margin: 10px 0 10px 22px;
+}
+
+.readme-content li {
+  margin: 4px 0;
+}
+
+.readme-content a {
+  color: #4f8cff;
+  text-decoration: none;
+}
+
+.readme-content a:hover {
+  text-decoration: underline;
+}
+
+.readme-content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: #1c1c1f;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: #d6c39a;
+}
+
+.readme-content pre {
+  background: #0a0a0c;
+  border: 1px solid #1d1d20;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  overflow-x: auto;
+}
+
+.readme-content pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  color: #c0c0c6;
+}
+
+.readme-content table {
+  border-collapse: collapse;
+  margin: 14px 0;
+  width: 100%;
+  font-size: 12px;
+}
+
+.readme-content th,
+.readme-content td {
+  border: 1px solid #1d1d20;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.readme-content th {
+  background: #131316;
+  font-weight: 600;
+  color: #e8e8ea;
+}
+
+.readme-content blockquote {
+  border-left: 2px solid #4f8cff;
+  padding: 4px 14px;
+  margin: 12px 0;
+  color: #9b9ba1;
+  font-style: italic;
+}
+
+.readme-content hr {
+  border: none;
+  border-top: 1px solid #1d1d20;
+  margin: 18px 0;
+}
+
+/* ────────── Buttons ────────── */
+
+.btn-secondary {
+  background: transparent;
+  color: #c0c0c6;
+  border: 1px solid #2b2b30;
+  padding: 5px 14px;
+  font-size: 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-secondary:hover {
+  background: #1c1c1f;
+  color: #e8e8ea;
+}
+
+/* ────────── Signature UI pass ────────── */
+
+.frame-header,
+.frame-footer {
+  background:
+    radial-gradient(circle at 4% 0%, rgba(79, 140, 255, 0.1), transparent 34%),
+    var(--or-bg-shell);
+  border-color: var(--or-border-subtle);
+}
+
+.sidebar {
+  background: var(--or-bg-surface);
+  border-color: var(--or-border-subtle);
+}
+
+.filter-input,
+.sidebar-tab,
+.content-card,
+.method-card,
+.event-card,
+.readme-content pre {
+  border-color: var(--or-border-subtle);
+}
+
+.sidebar-tab:hover {
+  background: var(--or-bg-hover);
+}
+
+.sidebar-tab.active {
+  background: var(--or-bg-active);
+  border-left-color: var(--or-accent);
+  box-shadow: inset 10px 0 24px rgba(79, 140, 255, 0.05);
+}
+
+.empty-state {
+  color: var(--or-text-muted);
+}
+
+.btn-secondary:hover {
+  background: var(--or-accent-soft);
+  border-color: var(--or-border-signal);
+}

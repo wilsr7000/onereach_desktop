@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>About Onereach.ai Lite</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        height: 100%;
+        font-family: var(--or-font-sans);
+        background:
+          radial-gradient(circle at 50% 14%, rgba(79, 140, 255, 0.12), transparent 38%),
+          var(--or-bg-canvas);
+        color: var(--or-text-primary);
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+      }
+      .product {
+        position: relative;
+        font-size: 24px;
+        font-weight: 500;
+        margin-bottom: 4px;
+      }
+      .product::before {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: -78px;
+        width: 128px;
+        height: 128px;
+        transform: translateX(-50%);
+        border: 1px solid rgba(79, 140, 255, 0.14);
+        border-radius: 50%;
+        box-shadow: inset 0 0 36px rgba(79, 140, 255, 0.045);
+        pointer-events: none;
+      }
+      .version {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        opacity: 0.5;
+        margin-bottom: 24px;
+      }
+      .copyright {
+        font-size: 12px;
+        opacity: 0.4;
+        margin-bottom: 24px;
+        text-align: center;
+      }
+      .description {
+        font-size: 12px;
+        opacity: 0.5;
+        text-align: center;
+        max-width: 320px;
+        line-height: 1.6;
+        margin-bottom: 32px;
+      }
+      button {
+        font: inherit;
+        font-size: 13px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--or-text-primary);
+        border: 1px solid var(--or-border-subtle);
+        border-radius: var(--or-radius-sm);
+        padding: 6px 16px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: var(--or-accent-soft);
+        border-color: var(--or-border-signal);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="product">Onereach.ai Lite</div>
+    <div class="version" id="version">v0.0.0</div>
+    <div class="description" id="description">
+      Lightweight desktop shell for Onereach.ai. Kernel build.
+    </div>
+    <div class="copyright" id="copyright">Copyright &copy; 2026 Onereach.ai</div>
+    <button onclick="window.close()">Close</button>
+    <script>
+      if (window.lite) {
+        if (window.lite.version) {
+          document.getElementById('version').textContent = 'v' + window.lite.version;
+        }
+      }
+    </script>
+  </body>
+</html>

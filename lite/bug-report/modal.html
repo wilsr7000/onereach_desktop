@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>Report a Bug</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./modal.css" />
+  </head>
+  <body>
+    <div class="modal-frame">
+      <header>
+        <h1>Report a Bug</h1>
+        <p class="subtitle">Check whether it's already been reported. Otherwise, file a new one below.</p>
+      </header>
+
+      <section class="reports-browse">
+        <div class="search-row">
+          <input
+            type="search"
+            id="reports-search"
+            class="reports-search-input"
+            placeholder="Search reports..."
+            autofocus
+            autocomplete="off"
+          />
+          <span class="reports-count-label">
+            <span id="reports-count">0</span> <span id="reports-count-noun">reports</span>
+          </span>
+        </div>
+        <ul id="reports-list" class="reports-list" aria-live="polite">
+          <li class="reports-empty">Loading...</li>
+        </ul>
+        <div class="reports-actions">
+          <button type="button" id="reports-refresh" class="ghost">Refresh</button>
+        </div>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section class="report-new">
+        <div class="section-label">File a new bug report</div>
+        <p class="section-description">Your report includes app version, OS, and the last 200 log lines (with secrets automatically redacted).</p>
+        <textarea
+          id="description"
+          placeholder="What happened? Steps to reproduce. Expected vs actual behavior."
+          autocomplete="off"
+        ></textarea>
+
+        <div class="redaction-info">
+          Redaction status: <span id="redaction-status">scanning...</span>
+        </div>
+        <details>
+          <summary>Show what gets sent</summary>
+          <pre id="payload-preview" aria-live="polite">Loading...</pre>
+        </details>
+      </section>
+
+      <footer>
+        <button type="button" id="cancel">Cancel</button>
+        <button type="button" id="send" class="primary">Send Bug Report</button>
+      </footer>
+
+      <div id="result" class="result hidden" role="status" aria-live="polite"></div>
+    </div>
+
+    <script src="./bug-report-modal.js"></script>
+  </body>
+</html>

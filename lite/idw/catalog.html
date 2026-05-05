@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:; font-src 'self' data:"
+    />
+    <title>OAGI Store</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./idw-store.css" />
+  </head>
+  <body>
+    <header class="frame-header">
+      <div class="frame-header-text">
+        <h1>OAGI Store</h1>
+        <p class="frame-subtitle">
+          Browse the IDWs your organization has published. Install the ones you'll work with most as you start your journey as a product expert.
+        </p>
+      </div>
+    </header>
+
+    <div class="catalog-layout">
+      <div class="controls-row">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <line x1="11" y1="11" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+          <input
+            type="search"
+            id="search-input"
+            class="search-input"
+            placeholder="Search agents..."
+            aria-label="Search agents"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </div>
+        <div class="filter-pills" id="kind-pills" role="tablist" aria-label="Filter by kind"></div>
+      </div>
+
+      <main id="content" class="content" aria-live="polite"></main>
+    </div>
+
+    <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+    <footer class="frame-footer">
+      <span class="frame-footer-info">
+        OAGI catalog is published by your organization administrator.
+      </span>
+      <div class="frame-footer-actions">
+        <button type="button" id="manage-agents-btn" class="btn-secondary">Manage Agents</button>
+        <button type="button" id="close-btn" class="btn-secondary">Close</button>
+      </div>
+    </footer>
+
+    <script src="./idw-store.js"></script>
+  </body>
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"
+    />
+    <title>Onereach.ai Lite</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./chrome.css" />
+  </head>
+  <body>
+    <!-- Tab bar at the top -- 36px high, defined in chrome.css. -->
+    <div id="tab-bar" class="tab-bar" role="tablist" aria-label="Open agent tabs">
+      <button
+        id="home-pill"
+        class="tab-pill home-pill active"
+        type="button"
+        role="tab"
+        aria-selected="true"
+        title="Home"
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+          <path
+            d="M12 3 L3 12 H6 V20 H10 V14 H14 V20 H18 V12 H21 Z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <span class="tab-pill-label">Home</span>
+      </button>
+      <div id="tab-list" class="tab-list" aria-live="polite"></div>
+    </div>
+
+    <!-- Home view: visible when no agent tab is active. Tab views in
+         the main process cover this region when a tab is foregrounded. -->
+    <main id="home-view" class="home-view">
+      <div class="home-inner">
+        <div class="wordmark">Onereach.ai <span class="lite">Lite</span></div>
+        <div class="version" id="version">v0.0.0</div>
+        <div class="tagline">v0.2 -- kernel (auto-updated)</div>
+
+        <div class="auth-block" id="auth-block">
+          <button id="signin-btn" class="signin-button" type="button">Sign in to GSX</button>
+        </div>
+
+        <div class="home-cta-row">
+          <button id="open-store-btn" class="btn-primary" type="button">Open OAGI Store</button>
+          <button id="manage-agents-btn" class="btn-secondary" type="button">Manage Agents</button>
+        </div>
+
+        <div class="hint">
+          Open an agent from the <strong>IDW</strong> menu to spin up a new tab. Each tab has its own session, so you can stay signed into more than one at a time.
+        </div>
+      </div>
+    </main>
+
+    <!-- External script (not inline) so the strict CSP `script-src 'self'`
+         allows execution. Source: lite/main-window/chrome.ts -> bundled by
+         esbuild to dist-lite/build/chrome.js. -->
+    <script src="./chrome.js"></script>
+  </body>
+</html>

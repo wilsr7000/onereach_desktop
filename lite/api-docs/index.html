@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>API Reference</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./api-docs.css" />
+  </head>
+  <body>
+    <header class="frame-header">
+      <h1>API Reference</h1>
+      <span id="generated-at" class="frame-subtitle"></span>
+    </header>
+
+    <div class="docs-layout">
+      <aside class="sidebar" aria-label="Module list">
+        <div class="filter-row">
+          <input
+            type="search"
+            id="filter-input"
+            class="filter-input"
+            placeholder="Filter modules..."
+            aria-label="Filter modules"
+          />
+        </div>
+        <nav id="sidebar-nav" class="sidebar-nav" aria-label="Documented modules"></nav>
+        <div id="untyped-section" class="untyped-section" aria-label="Modules without typed APIs">
+          <h3 class="untyped-title">Without typed API</h3>
+          <ul id="untyped-list" class="untyped-list"></ul>
+        </div>
+      </aside>
+
+      <main id="content" class="content" aria-live="polite">
+        <div class="empty-state">
+          <p>Select a module to view its documentation.</p>
+        </div>
+      </main>
+    </div>
+
+    <footer class="frame-footer">
+      <span class="frame-footer-info">
+        Source: <code>lite/&lt;module&gt;/{api.ts, events.ts, README.md}</code> (built with
+        <code>lite:build:api-docs-manifest</code>)
+      </span>
+      <button type="button" id="close-btn" class="btn-secondary">Close</button>
+    </footer>
+
+    <script src="./api-docs.js"></script>
+  </body>
+</html>
