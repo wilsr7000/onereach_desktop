@@ -56,6 +56,8 @@ interface FakeCookie {
 
 class FakeCookieJar {
   readonly listeners: Array<(event: object, cookie: FakeCookie, cause: string, removed: boolean) => void> = [];
+  /** Seeded cookies returned from get() -- mirrors the partition cookie jar. */
+  readonly seeded: FakeCookie[] = [];
   on(_e: string, l: (event: object, cookie: FakeCookie, cause: string, removed: boolean) => void): void {
     this.listeners.push(l);
   }
@@ -63,8 +65,12 @@ class FakeCookieJar {
     const i = this.listeners.indexOf(l);
     if (i >= 0) this.listeners.splice(i, 1);
   }
-  async get(): Promise<FakeCookie[]> {
-    return [];
+  async get(filter?: { domain?: string; name?: string }): Promise<FakeCookie[]> {
+    return this.seeded.filter((c) => {
+      if (filter?.domain !== undefined && c.domain.replace(/^\./, '') !== filter.domain) return false;
+      if (filter?.name !== undefined && c.name !== filter.name) return false;
+      return true;
+    });
   }
   async remove(): Promise<void> {
     return undefined;
@@ -72,10 +78,37 @@ class FakeCookieJar {
   emit(c: FakeCookie): void {
     for (const l of [...this.listeners]) l({}, c, 'explicit', false);
   }
+  seed(c: FakeCookie): void {
+    this.seeded.push(c);
+  }
 }
 
 class FakeSession {
   readonly cookies = new FakeCookieJar();
+}
+
+function multCookie(): FakeCookie {
+  return {
+    name: 'mult',
+    value: SAMPLE_TOKEN,
+    domain: '.edison.api.onereach.ai',
+    path: '/',
+    expirationDate: Math.floor(Date.now() / 1000) + 3600,
+    httpOnly: true,
+    secure: true,
+  };
+}
+
+function orCookie(payload: { accountId: string; email?: string }): FakeCookie {
+  return {
+    name: 'or',
+    value: encodeURIComponent(JSON.stringify(payload)),
+    domain: '.edison.onereach.ai',
+    path: '/',
+    expirationDate: Math.floor(Date.now() / 1000) + 3600,
+    httpOnly: false,
+    secure: true,
+  };
 }
 
 function makeHandle(url: string): AuthWindowHandle {
@@ -211,20 +244,19 @@ describe('auth integration -- KV wire format', () => {
     expect(server.store.has('lite-auth-sessions::edison:' + SAMPLE_ACCOUNT_ID)).toBe(false);
   });
 
-  it('hydrate loads a previously-persisted session from KV', async () => {
-    // Pre-populate the KV server.
+  it('hydrate loads a previously-persisted session from THIS install\'s partition cookies', async () => {
+    // Per the 2026-05-05 multi-user leak fix, hydrate now reads ONLY
+    // from the persistent partition cookie jar -- not from KV. The KV
+    // namespace is anonymous and globally shared, so trusting it on
+    // boot loaded every other Lite user's session.
     const realKv = new EdisonKVClient({ url: server.url + '/keyvalue' });
-    await realKv.set('lite-auth-sessions', 'edison:' + SAMPLE_ACCOUNT_ID, {
-      environment: 'edison',
-      accountId: SAMPLE_ACCOUNT_ID,
-      email: SAMPLE_EMAIL,
-      capturedAt: Date.now() - 60_000,
-      expiresAt: Date.now() + 3_600_000,
-    });
+    const session = new FakeSession();
+    session.cookies.seed(multCookie());
+    session.cookies.seed(orCookie({ accountId: SAMPLE_ACCOUNT_ID, email: SAMPLE_EMAIL }));
 
     const store = new AuthStore({
       kvApi: realKv,
-      sessionFromPartition: () => new FakeSession() as unknown as Electron.Session,
+      sessionFromPartition: () => session as unknown as Electron.Session,
       windowFactory: { create: () => makeHandle('https://studio.edison.onereach.ai/') },
     });
 
@@ -237,27 +269,23 @@ describe('auth integration -- KV wire format', () => {
     expect(s?.accountId).toBe(SAMPLE_ACCOUNT_ID);
     expect(s?.email).toBe(SAMPLE_EMAIL);
     expect(store.hasValidSession('edison')).toBe(true);
-    // Token is NOT rehydrated -- it never persisted.
-    expect(store.getToken('edison')).toBeNull();
+    // Token IS rehydrated now because the partition has cookies.
+    expect(store.getToken('edison')).toBe(SAMPLE_TOKEN);
   });
 
   it('hydrate notifies session-changed subscribers for each rehydrated session', async () => {
     // Regression: the placeholder window subscribes to session-changed
     // AFTER initAuth has already started hydrating. Without this notify,
-    // the placeholder shows the "Sign in" button even when KV holds a
-    // valid session, until the user clicks something. ADR-026.
+    // the placeholder shows the "Sign in" button even when partition
+    // cookies hold a valid session, until the user clicks something.
     const realKv = new EdisonKVClient({ url: server.url + '/keyvalue' });
-    await realKv.set('lite-auth-sessions', 'edison:' + SAMPLE_ACCOUNT_ID, {
-      environment: 'edison',
-      accountId: SAMPLE_ACCOUNT_ID,
-      email: SAMPLE_EMAIL,
-      capturedAt: Date.now() - 60_000,
-      expiresAt: Date.now() + 3_600_000,
-    });
+    const session = new FakeSession();
+    session.cookies.seed(multCookie());
+    session.cookies.seed(orCookie({ accountId: SAMPLE_ACCOUNT_ID, email: SAMPLE_EMAIL }));
 
     const store = new AuthStore({
       kvApi: realKv,
-      sessionFromPartition: () => new FakeSession() as unknown as Electron.Session,
+      sessionFromPartition: () => session as unknown as Electron.Session,
       windowFactory: { create: () => makeHandle('https://studio.edison.onereach.ai/') },
     });
 
@@ -280,14 +308,11 @@ describe('auth integration -- KV wire format', () => {
     ]);
   });
 
-  it('hydrate coalesces concurrent calls onto a single kv list', async () => {
-    // Regression: without coalescing, the boot-time hydrate from
-    // initAuth and the IPC-handler hydrate from a renderer probe both
-    // hit kv.list, doubling boot-time KV traffic.
-    //
-    // EdisonKVClient.list() composes listKeys (POST) + parallel gets;
-    // an empty collection only fires the listKeys. Counting POSTs
-    // here measures the listKeys roundtrip directly.
+  it('hydrate does NOT touch KV (post-2026-05-05 multi-user leak fix)', async () => {
+    // Hydrate must never read from the global KV namespace -- doing so
+    // historically loaded other users' sessions into this install. We
+    // verify by counting POSTs to the KV server before/after multiple
+    // concurrent hydrates: it should stay at zero.
     const realKv = new EdisonKVClient({ url: server.url + '/keyvalue' });
 
     const store = new AuthStore({
@@ -297,11 +322,12 @@ describe('auth integration -- KV wire format', () => {
     });
 
     const beforePosts = server.getRequests().filter((r) => r.method === 'POST').length;
+    const beforeGets = server.getRequests().filter((r) => r.method === 'GET').length;
     await Promise.all([store.hydrate(), store.hydrate(), store.hydrate()]);
     const afterPosts = server.getRequests().filter((r) => r.method === 'POST').length;
+    const afterGets = server.getRequests().filter((r) => r.method === 'GET').length;
 
-    // Exactly one new POST (the kv.listKeys) regardless of how many
-    // parallel hydrate() calls fired.
-    expect(afterPosts - beforePosts).toBe(1);
+    expect(afterPosts - beforePosts).toBe(0);
+    expect(afterGets - beforeGets).toBe(0);
   });
 });

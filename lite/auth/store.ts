@@ -733,32 +733,27 @@ export class AuthStore {
   private async runHydrate(): Promise<void> {
     // ADR-030: span the hydrate. Idempotent -- repeat calls return
     // early before this fires.
+    //
+    // SECURITY (per the 2026-05-05 multi-user leak fix): hydrate now
+    // reads ONLY from this install's persistent partition cookie jar
+    // (`persist:lite-auth-<env>`), which is local to this Mac/OS-user.
+    // It NEVER reads `lite-auth-sessions` from the shared OneReach KV,
+    // because that endpoint is anonymous and globally shared -- doing
+    // so was loading every other user's session into this install and
+    // making them appear signed-in as someone else.
     const span = this.spanEmitter?.('auth.hydrate');
     const rehydrated: Array<[Environment, AuthSession]> = [];
     try {
-      const records = await this.kv.list(KV_COLLECTION);
-      for (const { key, value } of records) {
-        const session = parseAuthSessionRecord(value);
-        if (session === null) {
-          this.log('warn', 'auth: hydrate skipped malformed record', { key });
-          continue;
-        }
-        const isNew = !this.sessions.has(session.environment);
-        this.sessions.set(session.environment, session);
-        if (isNew) rehydrated.push([session.environment, session]);
-      }
-      // ADR-042: rehydrate the in-memory tokenBundles from the
-      // persistent cookie jar of `persist:lite-auth-<env>`. Electron
-      // stores cookies on disk by default for `persist:` partitions,
-      // so as long as the user signed in at least once before the
-      // cookie expired, we can recover the token without re-prompting
-      // them. This is what fixes "tokens lost on restart".
       let tokensRehydrated = 0;
-      for (const env of this.sessions.keys()) {
-        const recovered = await this.recoverTokenBundleFromAuthPartition(env);
-        if (recovered) tokensRehydrated += 1;
+      for (const env of SUPPORTED_ENVIRONMENTS) {
+        const recovered = await this.recoverSessionFromAuthPartition(env);
+        if (recovered === null) continue;
+        tokensRehydrated += 1;
+        const isNew = !this.sessions.has(env);
+        this.sessions.set(env, recovered);
+        if (isNew) rehydrated.push([env, recovered]);
       }
-      this.log('info', 'auth: hydrated from KV', {
+      this.log('info', 'auth: hydrated from partition cookies', {
         count: this.sessions.size,
         rehydrated: rehydrated.length,
         tokensRehydrated,
@@ -785,39 +780,57 @@ export class AuthStore {
   }
 
   /**
-   * Read the `mult` and `or` cookies from `persist:lite-auth-<env>`
-   * and repopulate the in-memory `tokens` and `tokenBundles` for that
-   * env. Soft-fail: returns false on any error or when neither cookie
-   * is present. Mirrors `probeExistingCookies()` but operates outside
-   * the sign-in window flow.
+   * Recover a full AuthSession + token bundle from this install's
+   * `persist:lite-auth-<env>` partition cookies. Returns null when the
+   * partition has no captured `mult` + `or` cookies (i.e. user has
+   * never signed in on this install, or signed out).
+   *
+   * The `or` cookie carries `accountId` / `email` / `expiresAt`, so
+   * the full AuthSession can be reconstructed from the local cookie
+   * jar without ever consulting the shared KV namespace.
+   *
+   * Side-effect: also populates `this.tokens` and `this.tokenBundles`
+   * for the env (mirrors `recoverTokenBundleFromAuthPartition`).
    */
-  private async recoverTokenBundleFromAuthPartition(env: Environment): Promise<boolean> {
-    try {
-      const config = ENVIRONMENT_CONFIGS[env];
-      if (config === undefined) return false;
-      const mult = await this.probeAuthPartitionCookie(env, 'mult');
-      if (mult === null) return false;
-      const or = await this.probeAuthPartitionCookie(env, 'or');
-      this.tokens.set(env, mult.value);
-      this.tokenBundles.set(env, {
-        multToken: mult.value,
-        accountToken: or?.value ?? '',
-        capturedAt: Date.now(),
-        ...(typeof mult.expirationDate === 'number'
-          ? { multExpiresAt: Math.floor(mult.expirationDate * 1000) }
-          : {}),
-        ...(or !== null && typeof or.expirationDate === 'number'
-          ? { accountExpiresAt: Math.floor(or.expirationDate * 1000) }
-          : {}),
-      });
-      return true;
-    } catch (err) {
-      this.log('warn', 'auth: token rehydration probe failed', {
-        env,
-        error: (err as Error).message,
-      });
-      return false;
+  private async recoverSessionFromAuthPartition(env: Environment): Promise<AuthSession | null> {
+    const config = ENVIRONMENT_CONFIGS[env];
+    if (config === undefined) return null;
+    const mult = await this.probeAuthPartitionCookie(env, 'mult');
+    if (mult === null) return null;
+    const or = await this.probeAuthPartitionCookie(env, 'or');
+    if (or === null) return null;
+    const decoded = decodeOrCookie(or.value);
+    if (decoded === null) {
+      this.log('warn', 'auth: hydrate or cookie decode failed; skipping env', { env });
+      return null;
     }
+    const accountId = decoded.accountId;
+    if (typeof accountId !== 'string' || accountId.length === 0) {
+      this.log('warn', 'auth: hydrate or cookie missing accountId; skipping env', { env });
+      return null;
+    }
+    const session: AuthSession = {
+      environment: env,
+      accountId,
+      capturedAt: Date.now(),
+      ...(typeof decoded.email === 'string' ? { email: decoded.email } : {}),
+      ...(typeof or.expirationDate === 'number'
+        ? { expiresAt: Math.floor(or.expirationDate * 1000) }
+        : {}),
+    };
+    this.tokens.set(env, mult.value);
+    this.tokenBundles.set(env, {
+      multToken: mult.value,
+      accountToken: or.value,
+      capturedAt: session.capturedAt,
+      ...(typeof mult.expirationDate === 'number'
+        ? { multExpiresAt: Math.floor(mult.expirationDate * 1000) }
+        : {}),
+      ...(typeof or.expirationDate === 'number'
+        ? { accountExpiresAt: Math.floor(or.expirationDate * 1000) }
+        : {}),
+    });
+    return session;
   }
 
   /**
@@ -1270,26 +1283,6 @@ export function decodeOrCookie(rawValue: string): OrCookiePayload | null {
   } catch {
     return null;
   }
-}
-
-/**
- * Validate a value loaded from KV against the AuthSession shape.
- * Returns null if the value is malformed (defensive -- KV may hold
- * orphaned records from older schemas).
- */
-function parseAuthSessionRecord(value: unknown): AuthSession | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const v = value as Partial<AuthSession>;
-  if (typeof v.environment !== 'string' || typeof v.accountId !== 'string') return null;
-  if (!SUPPORTED_ENVIRONMENTS.includes(v.environment as Environment)) return null;
-  if (typeof v.capturedAt !== 'number') return null;
-  return {
-    environment: v.environment as Environment,
-    accountId: v.accountId,
-    ...(typeof v.email === 'string' ? { email: v.email } : {}),
-    capturedAt: v.capturedAt,
-    ...(typeof v.expiresAt === 'number' ? { expiresAt: v.expiresAt } : {}),
-  };
 }
 
 function extractAccountIdFromUrl(url: string): string | null {

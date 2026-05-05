@@ -44,7 +44,22 @@ import { KIND_META } from './kind-metadata.js';
 import { isIdwEvent, type IdwEvent, IDW_EVENTS } from './events.js';
 
 export const KV_COLLECTION = 'lite-idw-entries';
+/**
+ * Legacy globally-shared KV key. PRESERVED FOR BACKWARD-COMPAT ONLY:
+ * old installs (and the global anonymous KV namespace) still hold one
+ * `default` blob with whoever's data won the last race. New reads /
+ * writes use a per-account key (see `keyForAccount`), so multi-user
+ * isolation is restored even though that legacy blob still exists.
+ */
 export const KV_KEY = 'default';
+
+/**
+ * Per-account KV key. The IDW catalog belongs to the user's OneReach
+ * account, not to the local Mac, so we key by the captured `accountId`.
+ */
+function keyForAccount(accountId: string): string {
+  return `edison:${accountId}`;
+}
 
 /**
  * The result of `add()`. `wasUpdate=true` indicates an existing Store
@@ -76,6 +91,18 @@ export interface StoreConfig {
    * + short random suffix.
    */
   generateId?: (entry: Pick<IdwEntry, 'kind' | 'label'>) => string;
+  /**
+   * Resolver for the active OneReach `accountId`. When `null`, the
+   * store treats the user as signed-out: reads return an empty list
+   * and writes are refused. Wired in `lite/idw/api.ts` to
+   * `getAuthApi().getSession('edison')?.accountId ?? null`.
+   *
+   * If omitted (e.g. legacy tests), the store falls back to the
+   * globally-shared `'default'` key for backward compatibility -- but
+   * runtime callers always pass this resolver so multi-user isolation
+   * is enforced.
+   */
+  getActiveAccountId?: () => string | null;
 }
 
 /**
@@ -91,9 +118,12 @@ export class IdwStore {
   private readonly spanEmitter: NonNullable<StoreConfig['spanEmitter']> | null;
   private readonly nowFn: () => Date;
   private readonly genIdFn: NonNullable<StoreConfig['generateId']>;
+  private readonly getActiveAccountId: NonNullable<StoreConfig['getActiveAccountId']> | null;
   private readonly emitter = new EventEmitter();
   /** Cached blob -- read on first access, refreshed after every write. */
   private cache: IdwStorageBlob | null = null;
+  /** accountId we last cached for; used to invalidate cache on user switch. */
+  private cachedForAccountId: string | null | undefined = undefined;
 
   constructor(config: StoreConfig = {}) {
     this.kv = config.kvApi ?? getKVApi();
@@ -105,6 +135,21 @@ export class IdwStore {
     this.spanEmitter = config.spanEmitter ?? null;
     this.nowFn = config.now ?? ((): Date => new Date());
     this.genIdFn = config.generateId ?? defaultGenerateId;
+    this.getActiveAccountId = config.getActiveAccountId ?? null;
+  }
+
+  /**
+   * Resolve the KV key for the current sign-in state. Returns null
+   * when no account is active and the legacy global-default fallback
+   * is disabled (i.e. `getActiveAccountId` was provided in config).
+   * Returns 'default' (the legacy global key) only when no resolver
+   * was provided -- preserves backward-compat for tests.
+   */
+  private resolveKey(): string | null {
+    if (this.getActiveAccountId === null) return KV_KEY; // legacy fallback
+    const accountId = this.getActiveAccountId();
+    if (typeof accountId !== 'string' || accountId.length === 0) return null;
+    return keyForAccount(accountId);
   }
 
   /** Read all entries (cached). */
@@ -360,11 +405,20 @@ export class IdwStore {
   // ─── internals ───────────────────────────────────────────────────────────
 
   private async readBlob(): Promise<IdwStorageBlob> {
-    if (this.cache !== null) return this.cache;
+    const key = this.resolveKey();
+    // Signed-out: empty list. Don't read or write the shared global
+    // default blob -- doing so historically leaked one user's IDWs to
+    // every other Lite install.
+    if (key === null) {
+      return { schemaVersion: 1, entries: [] };
+    }
+    // Cache invalidation on account switch.
+    if (this.cache !== null && this.cachedForAccountId === key) return this.cache;
     try {
-      const raw = await this.kv.get(KV_COLLECTION, KV_KEY);
+      const raw = await this.kv.get(KV_COLLECTION, key);
       if (raw === null || raw === undefined) {
         this.cache = { schemaVersion: 1, entries: [] };
+        this.cachedForAccountId = key;
         return this.cache;
       }
       if (typeof raw !== 'object' || Array.isArray(raw)) {
@@ -373,11 +427,13 @@ export class IdwStore {
           actualType: Array.isArray(raw) ? 'array' : typeof raw,
         });
         this.cache = { schemaVersion: 1, entries: [] };
+        this.cachedForAccountId = key;
         return this.cache;
       }
       const blob = raw as Partial<IdwStorageBlob>;
       const entries = Array.isArray(blob.entries) ? blob.entries.filter(isLikelyEntry) : [];
       this.cache = { schemaVersion: 1, entries };
+      this.cachedForAccountId = key;
       return this.cache;
     } catch (err) {
       if (err instanceof KVError) {
@@ -386,6 +442,7 @@ export class IdwStore {
           code: err.code,
         });
         this.cache = { schemaVersion: 1, entries: [] };
+        this.cachedForAccountId = key;
         return this.cache;
       }
       throw err;
@@ -393,9 +450,22 @@ export class IdwStore {
   }
 
   private async writeBlob(blob: IdwStorageBlob): Promise<void> {
+    const key = this.resolveKey();
+    if (key === null) {
+      // Signed-out: refuse the write rather than corrupt the shared
+      // global default blob. UI should not be exposing add/remove when
+      // signed-out, but defend in depth.
+      throw new IdwError({
+        code: IDW_ERROR_CODES.PERSISTENCE_FAILED,
+        message: 'Cannot save IDW changes while signed out. Sign in to OneReach first.',
+        context: { op: 'write', collection: KV_COLLECTION, reason: 'signed-out' },
+        remediation: 'Open Settings -> Account and sign in.',
+      });
+    }
     try {
-      await this.kv.set(KV_COLLECTION, KV_KEY, blob);
+      await this.kv.set(KV_COLLECTION, key, blob);
       this.cache = blob;
+      this.cachedForAccountId = key;
     } catch (err) {
       const message = (err as Error).message;
       throw new IdwError({
@@ -404,7 +474,7 @@ export class IdwStore {
         context: {
           op: 'write',
           collection: KV_COLLECTION,
-          key: KV_KEY,
+          key,
           ...(err instanceof KVError ? { kvCode: err.code, kvStatus: err.status } : {}),
         },
         remediation:
