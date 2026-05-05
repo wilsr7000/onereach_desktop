@@ -834,6 +834,35 @@ Ports that have passed the six-criteria contract and are stable:
 - **regression-replay fixture**: none yet (would be added the first time a real KV regression is observed in production).
 - **consumers today**: `lite/bug-report/store.ts` (collection: `lite-bugs`).
 
+### chunk: lite-kv-via-sdk
+
+- **status**: hardened
+- **plan reference**: `.cursor/plans/lite_kv_via_sdk_*.plan.md`
+- **borrowed from full**: `lib/edison-sdk-manager.js:298-308` -- the SDK construction shape (token getter + discoveryUrl + accountId). Studied, not imported (Rule 1).
+- **public surface (new)**: `lite/discovery/api.ts` -- `DiscoveryApi`, `getDiscoveryApi()`, `_resetDiscoveryApiForTesting()`, `_setDiscoveryApiForTesting()`, `_buildDiscoveryApiForTesting()`. Re-exports `DiscoveryError`, `DISCOVERY_ERROR_CODES`, `DiscoveryService`. Wraps `@or-sdk/discovery`.
+- **public surface (changed)**: `lite/kv/api.ts` -- same `KVApi` interface; `getKVApi()` now returns an `SdkKVClient` instance instead of an `EdisonKVClient`. The legacy `EdisonKVClient` remains exported for the one-shot migration path only.
+- **internal**:
+  - `lite/discovery/store.ts` -- `DiscoveryStore` SDK wrapper + 5-minute resolve cache. `@internal`.
+  - `lite/kv/sdk-client.ts` -- `SdkKVClient` thin wrapper around `@or-sdk/key-value-storage`. Re-creates the SDK when the active accountId changes. `@internal`.
+  - `lite/kv/migration.ts` -- one-shot copy on first sign-in: `runKvMigration(accountId)` reads `lite-idw-entries`, `lite-main-window-tabs`, `lite-neon-config`, `lite-ai-config` from the legacy anonymous KV (per-account `edison:<accountId>` first, then global `default` fallback) and copies into the user's authenticated KV at `default`. Idempotent via `lite-migrations / migrated-from-default-v1` sentinel.
+  - `lite/auth/types.ts` -- new `EnvironmentConfig.discoveryUrl` field (Edison: `https://discovery.edison.api.onereach.ai`).
+- **gating added (defense in depth)**: `lite/idw/store.ts`, `lite/main-window/store.ts`, `lite/bug-report/store.ts`, `lite/neon/credentials.ts`, `lite/ai/credentials.ts` -- each accepts a `getActiveAccountId` resolver in its config; reads return empty / writes throw a clear "sign in first" error when no active account. Wired in each module's `api.ts` to `getAuthApi().getSession('edison')?.accountId ?? null`.
+- **redundant prefix removed**: yesterday's interim fix added an `edison:<accountId>` KV key prefix to `lite/idw/store.ts` and `lite/main-window/store.ts`. The SDK now scopes per-account server-side, so the client-side prefix is unnecessary; both stores are back to the singleton `'default'` key. Per-user isolation is now enforced by the auth token + accountId on the SDK request, not by the key name. The signed-in gating stays.
+- **api conformance**: `lite/test/unit/discovery-api.test.ts` runs `runApiConformanceContract`. KVApi conformance test was already in place and continues to pass against the new client.
+- **unit tests**:
+  - `lite/test/unit/discovery-api.test.ts` -- 14 tests (conformance + caching + error mapping + signed-out gate).
+  - `lite/test/unit/sdk-kv-client.test.ts` -- 8 tests (set/get/listKeys/list delegation, signed-out 401, account-switch SDK rebuild).
+  - `lite/test/unit/kv-migration.test.ts` -- 9 tests (idempotency, per-account → global fallback, no-overwrite when user already has data, partial-failure tolerance).
+- **integration tests**: `lite/test/integration/kv-integration.test.ts` -- rewritten to drive `SdkKVClient` against a fake SDK that mimics `@or-sdk/key-value-storage`'s wire-format (round-trip, per-account isolation, signed-out gating, SDK error mapping).
+- **e2e tests**: none direct -- exercised transitively via signing in then opening tabs / IDWs in `lite/test/e2e/kernel-smoke.spec.ts`.
+- **failure modes covered**: signed-out reads (return null/empty), signed-out writes (throw `KV_HTTP` 401), 401/403 server response (token expired remediation), 404 on get (treated as null), 5xx (rate-limit / server error remediation), network failure, account switch mid-session (SDK rebuilt, cache invalidated).
+- **events**: KV ops still emit `kv.<op>.start/.finish/.fail` (unchanged). Discovery emits `discovery.resolve.start/.finish/.fail`, `discovery.list.start/.finish/.fail`, `discovery.cache.hit`. Both modules use the central `getLoggingApi()` event surface.
+- **observability**: structured logger tags `[kv]` and `[discovery]`; cold-start cost paid once per service per session (cache TTL 5 min); accountId switches log a re-construct line.
+- **deliberately not ported from full**: `lib/edison-sdk-manager.js`'s broader SDK orchestration (sdk reuse caching across many services, per-feature config). Lite uses just `@or-sdk/discovery` and `@or-sdk/key-value-storage` for now; future SDKs (`@or-sdk/flows`, `@or-sdk/users`, etc.) port one-by-one through `lite/discovery/api.ts`.
+- **regression-replay fixture**: none yet (would be added if a real KV regression escapes to production).
+- **migration outcome**: existing pilot installs preserve their IDWs / tabs / Neon config / AI key on first sign-in after this update. Per-user isolation is now enforced server-side; multi-user leakage (the bug Rich hit on his fresh clone) cannot recur.
+- **consumers today**: `lite/bug-report/store.ts`, `lite/idw/store.ts`, `lite/main-window/store.ts`, `lite/neon/credentials.ts`, `lite/ai/credentials.ts`. All gate on `getActiveAccountId`; signed-out users see graceful empty states or "sign in first" errors instead of leaking other users' data.
+
 ## Deferred Queue
 
 Pending ports, ordered roughly by likely value but not committed:

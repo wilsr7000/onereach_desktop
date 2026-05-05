@@ -42,6 +42,10 @@ import { initAi, type AiHandle } from './ai/main.js';
 import { initAiRunTimes, type AiRunTimesHandle } from './ai-run-times/main.js';
 import { initUpdater, verifyUpdateOnStartup, type UpdaterHandle } from './updater/index.js';
 import { getLoggingApi, LOGGING_SELF_CATEGORY } from './logging/api.js';
+import { getAuthApi } from './auth/api.js';
+import { runKvMigration } from './kv/migration.js';
+import { setKVAuthBindings } from './kv/api.js';
+import { getDiscoveryApi } from './discovery/api.js';
 
 const LITE_LOG_PORT = 47392;
 const LITE_PRODUCT_NAME = 'Onereach.ai Lite';
@@ -420,6 +424,67 @@ app
       });
     } catch (err) {
       getLoggingApi().error('auth', 'initAuth threw', {
+        error: (err as Error).message,
+      });
+    }
+
+    // Wire KV's default config to live auth. Per ADR-044, lite/kv/api.ts
+    // intentionally does NOT import lite/auth/ to avoid the
+    // auth -> kv -> auth cycle. Instead, main-lite.ts (which sits
+    // above both) injects the resolvers after initAuth completes.
+    try {
+      setKVAuthBindings({
+        getToken: () => getAuthApi().getToken('edison') ?? '',
+        getAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
+      });
+    } catch (err) {
+      getLoggingApi().error('kv', 'setKVAuthBindings threw', {
+        error: (err as Error).message,
+      });
+    }
+
+    // KV migration + discovery cache invalidation on session changes.
+    // The lite-kv-via-sdk chunk introduced server-side per-account
+    // scoping for KV; existing data still lives in the legacy
+    // anonymous KV. On every sign-in, attempt a one-shot copy into
+    // the user's authenticated namespace. Idempotent -- subsequent
+    // calls for the same account are no-ops once the sentinel is set.
+    //
+    // Discovery cache is cleared on sign-out so a subsequent sign-in
+    // (potentially as a different user) re-resolves service URLs
+    // through the new token.
+    try {
+      getAuthApi().onSessionChanged((env, session) => {
+        if (env !== 'edison') return;
+        if (session === null) {
+          try {
+            getDiscoveryApi().invalidateCache();
+          } catch (err) {
+            getLoggingApi().warn('discovery', 'invalidateCache on sign-out failed', {
+              error: (err as Error).message,
+            });
+          }
+          return;
+        }
+        // Run migration in the background -- never block sign-in on it.
+        void runKvMigration(session.accountId)
+          .then((result) => {
+            getLoggingApi().info('kv-migration', 'sign-in migration complete', {
+              accountId: result.accountId,
+              alreadyMigrated: result.alreadyMigrated,
+              copiedCount: result.copied.length,
+              failedCount: result.failed.length,
+            });
+          })
+          .catch((err: unknown) => {
+            getLoggingApi().error('kv-migration', 'sign-in migration threw', {
+              accountId: session.accountId,
+              error: (err as Error).message,
+            });
+          });
+      });
+    } catch (err) {
+      getLoggingApi().error('kv-migration', 'failed to wire onSessionChanged', {
         error: (err as Error).message,
       });
     }

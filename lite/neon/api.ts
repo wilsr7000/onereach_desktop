@@ -29,6 +29,7 @@ import {
   type CredentialsProvider,
 } from './credentials.js';
 import { NeonError, NEON_ERROR_CODES } from './errors.js';
+import { getAuthApi } from '../auth/api.js';
 import { getLoggingApi } from '../logging/api.js';
 
 // Re-export the public types consumers need to typecheck calls.
@@ -219,7 +220,13 @@ function buildDefaultApi(): NeonApi {
   // notice and removal plan.
   const credentials =
     _credentialsProvider ??
-    new KVCredentialsProvider({ fallbackRecord: { ...BAKED_IN_DEFAULT_GRAPH } });
+    new KVCredentialsProvider({
+      fallbackRecord: { ...BAKED_IN_DEFAULT_GRAPH },
+      // Per the lite-kv-via-sdk chunk in lite/PORTING.md, KV writes
+      // require a signed-in user. Reads still fall back to the
+      // baked-in default so unauth'd graph queries keep working.
+      getActiveAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
+    });
   const client = new EdisonNeonClient({
     credentials,
     logger: (level, message, data) => {

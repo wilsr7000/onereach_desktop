@@ -69,11 +69,6 @@ export interface StoreConfig {
   getActiveAccountId?: () => string | null;
 }
 
-/** Per-account KV key (mirrors lite/idw/store.ts). */
-function tabsKeyForAccount(accountId: string): string {
-  return `edison:${accountId}`;
-}
-
 /**
  * Module-internal class. Other lite modules MUST NOT import this directly --
  * use `getMainWindowApi()` from `./api.ts` instead.
@@ -89,7 +84,14 @@ export class TabStore {
   private readonly getActiveAccountId: NonNullable<StoreConfig['getActiveAccountId']> | null;
   private readonly emitter = new EventEmitter();
   private cache: TabsBlob | null = null;
-  private cachedForKey: string | null | undefined = undefined;
+  /**
+   * The accountId the cache was populated for. Used to invalidate on
+   * user switch -- the KV key is always `'default'` (server scopes
+   * by accountId server-side via the SDK), but if the active accountId
+   * changes we must re-read because the SDK is now using a different
+   * server-side bucket.
+   */
+  private cachedForAccountId: string | null | undefined = undefined;
 
   constructor(config: StoreConfig = {}) {
     this.kv = config.kvApi ?? getKVApi();
@@ -105,16 +107,18 @@ export class TabStore {
   }
 
   /**
-   * Resolve the per-user KV key. Returns null when signed-out (and a
-   * resolver was provided) so the store can short-circuit reads/writes.
-   * Returns the legacy 'default' key when no resolver was provided
-   * (preserves backward compat for tests).
+   * Active accountId, or null when signed-out (and a resolver was
+   * provided so callers short-circuit reads/writes). Returns the
+   * sentinel `'__legacy__'` when no resolver was provided so caching
+   * still works in unit tests that don't wire auth. The KV key
+   * itself is always `'default'` -- the SDK passes accountId
+   * server-side for proper isolation.
    */
-  private resolveKey(): string | null {
-    if (this.getActiveAccountId === null) return KV_KEY;
+  private currentAccountId(): string | null {
+    if (this.getActiveAccountId === null) return '__legacy__';
     const accountId = this.getActiveAccountId();
     if (typeof accountId !== 'string' || accountId.length === 0) return null;
-    return tabsKeyForAccount(accountId);
+    return accountId;
   }
 
   /** Read all tabs (cached). */
@@ -386,18 +390,18 @@ export class TabStore {
   // ─── internals ───────────────────────────────────────────────────────────
 
   private async readBlob(): Promise<TabsBlob> {
-    const key = this.resolveKey();
-    if (key === null) {
-      // Signed-out: empty tabs. Don't read the shared global blob --
-      // historically that leaked one user's tabs to every install.
+    const accountId = this.currentAccountId();
+    if (accountId === null) {
+      // Signed-out: empty tabs. Don't read shared data -- historically
+      // that leaked one user's tabs to every install.
       return { schemaVersion: 1, tabs: [], activeId: null };
     }
-    if (this.cache !== null && this.cachedForKey === key) return this.cache;
+    if (this.cache !== null && this.cachedForAccountId === accountId) return this.cache;
     try {
-      const raw = await this.kv.get(KV_COLLECTION, key);
+      const raw = await this.kv.get(KV_COLLECTION, KV_KEY);
       if (raw === null || raw === undefined) {
         this.cache = { schemaVersion: 1, tabs: [], activeId: null };
-        this.cachedForKey = key;
+        this.cachedForAccountId = accountId;
         return this.cache;
       }
       if (typeof raw !== 'object' || Array.isArray(raw)) {
@@ -405,7 +409,7 @@ export class TabStore {
           actualType: Array.isArray(raw) ? 'array' : typeof raw,
         });
         this.cache = { schemaVersion: 1, tabs: [], activeId: null };
-        this.cachedForKey = key;
+        this.cachedForAccountId = accountId;
         return this.cache;
       }
       const blob = raw as Partial<TabsBlob>;
@@ -415,7 +419,7 @@ export class TabStore {
           ? blob.activeId
           : null;
       this.cache = { schemaVersion: 1, tabs, activeId };
-      this.cachedForKey = key;
+      this.cachedForAccountId = accountId;
       return this.cache;
     } catch (err) {
       if (err instanceof KVError) {
@@ -424,7 +428,7 @@ export class TabStore {
           code: err.code,
         });
         this.cache = { schemaVersion: 1, tabs: [], activeId: null };
-        this.cachedForKey = key;
+        this.cachedForAccountId = accountId;
         return this.cache;
       }
       throw err;
@@ -432,8 +436,8 @@ export class TabStore {
   }
 
   private async writeBlob(blob: TabsBlob): Promise<void> {
-    const key = this.resolveKey();
-    if (key === null) {
+    const accountId = this.currentAccountId();
+    if (accountId === null) {
       throw new MainWindowError({
         code: MAIN_WINDOW_ERROR_CODES.PERSISTENCE_FAILED,
         message: 'Cannot save tab changes while signed out. Sign in to OneReach first.',
@@ -442,9 +446,9 @@ export class TabStore {
       });
     }
     try {
-      await this.kv.set(KV_COLLECTION, key, blob);
+      await this.kv.set(KV_COLLECTION, KV_KEY, blob);
       this.cache = blob;
-      this.cachedForKey = key;
+      this.cachedForAccountId = accountId;
     } catch (err) {
       const message = (err as Error).message;
       throw new MainWindowError({
@@ -453,7 +457,7 @@ export class TabStore {
         context: {
           op: 'write',
           collection: KV_COLLECTION,
-          key,
+          key: KV_KEY,
           ...(err instanceof KVError ? { kvCode: err.code, kvStatus: err.status } : {}),
         },
         remediation:

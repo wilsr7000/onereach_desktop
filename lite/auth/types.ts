@@ -45,6 +45,15 @@ export interface EnvironmentConfig {
   readonly cookieDomainSuffixes: readonly string[];
   /** Hostname prefix that identifies the auth page (used to detect "left auth"). */
   readonly authHostnamePrefix: string;
+  /**
+   * OneReach Service Discovery base URL. Used by `lite/discovery/` to
+   * resolve serviceKey -> service URL via `@or-sdk/discovery`. The
+   * resolved URLs feed every other authenticated SDK call (e.g.
+   * `@or-sdk/key-value-storage`), so per-env routing is mandatory.
+   *
+   * Matches the URL `lib/edison-sdk-manager.js:36` uses for the full app.
+   */
+  readonly discoveryUrl: string;
 }
 
 /**
@@ -57,6 +66,7 @@ export const ENVIRONMENT_CONFIGS: Readonly<Partial<Record<Environment, Environme
     studioUrl: 'https://studio.edison.onereach.ai',
     cookieDomainSuffixes: ['.edison.onereach.ai', '.edison.api.onereach.ai'] as const,
     authHostnamePrefix: 'auth.',
+    discoveryUrl: 'https://discovery.edison.api.onereach.ai',
   },
 };
 

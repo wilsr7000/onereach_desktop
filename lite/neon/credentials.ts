@@ -162,6 +162,18 @@ interface KVCredentialsProviderOptions {
    * OneReach default graph so fresh installs are pre-configured.
    */
   fallbackRecord?: NeonSettingsRecord;
+  /**
+   * Resolver for the active OneReach `accountId`. When `null`, the
+   * provider treats the user as signed-out: reads return the fallback
+   * record (or null) without hitting KV; writes throw a clear error.
+   *
+   * Wired in `lite/neon/api.ts` to
+   * `getAuthApi().getSession('edison')?.accountId ?? null`.
+   *
+   * If omitted (legacy tests), the provider falls back to allowing
+   * all operations -- preserves backward compat.
+   */
+  getActiveAccountId?: () => string | null;
 }
 
 /**
@@ -177,6 +189,9 @@ export class KVCredentialsProvider implements CredentialsProvider {
   private readonly collection: string;
   private readonly key: string;
   private readonly fallbackRecord: NeonSettingsRecord | null;
+  private readonly getActiveAccountId: NonNullable<
+    KVCredentialsProviderOptions['getActiveAccountId']
+  > | null;
 
   constructor(options: KVCredentialsProviderOptions = {}) {
     this.kvApi = options.kvApi ?? getKVApi();
@@ -184,6 +199,17 @@ export class KVCredentialsProvider implements CredentialsProvider {
     this.key = options.key ?? KV_KEY;
     this.fallbackRecord =
       options.fallbackRecord !== undefined ? { ...options.fallbackRecord } : null;
+    this.getActiveAccountId = options.getActiveAccountId ?? null;
+  }
+
+  /**
+   * True when callers should hit KV. When `getActiveAccountId` was
+   * not provided (legacy tests), always returns true.
+   */
+  private isSignedIn(): boolean {
+    if (this.getActiveAccountId === null) return true;
+    const accountId = this.getActiveAccountId();
+    return typeof accountId === 'string' && accountId.length > 0;
   }
 
   async get(): Promise<NeonCredentials | null> {
@@ -225,6 +251,15 @@ export class KVCredentialsProvider implements CredentialsProvider {
   }
 
   async write(partial: Partial<NeonSettingsRecord>): Promise<void> {
+    if (!this.isSignedIn()) {
+      throw new KVError({
+        code: 'KV_HTTP',
+        message: 'Cannot save Neon configuration while signed out.',
+        status: 401,
+        context: { op: 'set', collection: this.collection, key: this.key, reason: 'signed-out' },
+        remediation: 'Open Settings -> Account and sign in to OneReach.',
+      });
+    }
     const current = (await this.readRecord()) ?? { ...DEFAULT_RECORD };
     const next: NeonSettingsRecord = {
       endpoint: partial.endpoint !== undefined ? partial.endpoint : current.endpoint,
@@ -245,8 +280,16 @@ export class KVCredentialsProvider implements CredentialsProvider {
    * to the constructor, that record is returned for absent / malformed
    * KV values so callers see a fully-formed configuration.
    * KV failures bubble through as `KVError`; callers wrap as needed.
+   *
+   * Signed-out short-circuit: skip the KV read entirely and return
+   * the fallback record (or null). This keeps the production
+   * BAKED_IN_DEFAULT_GRAPH usable for unauth'd reads (the URL is
+   * already public knowledge); only WRITES are gated.
    */
   private async readRecord(): Promise<NeonSettingsRecord | null> {
+    if (!this.isSignedIn()) {
+      return this.fallbackRecord !== null ? { ...this.fallbackRecord } : null;
+    }
     try {
       const value = await this.kvApi.get(this.collection, this.key);
       if (value === null || value === undefined) {
