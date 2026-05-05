@@ -21,9 +21,10 @@
  * `_resetKVApiForTesting()` to clear the singleton.
  */
 
-import { EdisonKVClient } from './client.js';
 import type { KVConfig, KVRecord } from './client.js';
+import { SdkKVClient } from './sdk-client.js';
 import { getLoggingApi } from '../logging/api.js';
+import { ENVIRONMENT_CONFIGS } from '../auth/types.js';
 import type { KvEvent } from './events.js';
 
 // Re-export the types, error class, and error codes consumers need to
@@ -217,10 +218,18 @@ let _instance: KVApi | null = null;
 /**
  * Get the singleton KV API. Lazily instantiates on first call.
  *
- * Default backing implementation is `EdisonKVClient` with default config
- * (URL, timeouts). To override (e.g. for tests, or to pass a custom
- * fetch implementation), use `_setKVApiForTesting()` before the first
- * call, or call `_resetKVApiForTesting()` to clear and re-init.
+ * Default backing implementation is `SdkKVClient` -- a thin wrapper
+ * around `@or-sdk/key-value-storage` that authenticates each request
+ * with the signed-in user's `mult` token and scopes records server-side
+ * by the active `accountId` (resolved via `getAuthApi()`).
+ *
+ * Signed-out callers will see `KV_HTTP` (status 401) on first read or
+ * write -- store consumers (`idw`, `main-window`, etc.) gate on
+ * `getActiveAccountId` upstream and short-circuit before reaching here.
+ *
+ * To override (e.g. for tests), use `_setKVApiForTesting()` before
+ * the first call, or call `_resetKVApiForTesting()` to clear and
+ * re-init.
  *
  * @returns The shared `KVApi` instance.
  *
@@ -233,7 +242,7 @@ let _instance: KVApi | null = null;
  */
 export function getKVApi(): KVApi {
   if (_instance === null) {
-    _instance = new EdisonKVClient(defaultConfig());
+    _instance = new SdkKVClient(defaultConfig());
   }
   return _instance;
 }
@@ -241,6 +250,7 @@ export function getKVApi(): KVApi {
 /** Reset the singleton (for tests). */
 export function _resetKVApiForTesting(): void {
   _instance = null;
+  _authBindings = null;
 }
 
 /**
@@ -253,11 +263,42 @@ export function _setKVApiForTesting(api: KVApi): void {
 }
 
 /**
- * Default client config -- console logger keyed to the [kv] tag so
- * consumers see KV activity without each having to wire its own logger.
+ * Default client config -- routes through `@or-sdk/key-value-storage`
+ * authenticated by the signed-in user's `mult` token. Per-account
+ * scoping is enforced server-side (the SDK passes accountId on every
+ * request).
+ *
+ * Token + accountId are resolved lazily on every call via getter
+ * functions, so the client always uses the current sign-in state --
+ * no need to re-instantiate after a sign-in or sign-out (the SDK
+ * itself is rebuilt internally if the active accountId changes).
+ *
+ * Edison only in v1; multi-env support lands when the `auth-multi-env`
+ * chunk in `lite/PORTING.md` does.
  */
-function defaultConfig(): KVConfig {
+function defaultConfig(): {
+  token: () => string;
+  discoveryUrl: string;
+  accountId: () => string | null;
+  logger: NonNullable<KVConfig['logger']>;
+  spanEmitter: NonNullable<KVConfig['spanEmitter']>;
+} {
+  const edisonConfig = ENVIRONMENT_CONFIGS['edison'];
+  if (edisonConfig === undefined) {
+    // Defensive: ENVIRONMENT_CONFIGS always defines edison in v1.
+    throw new Error('lite/kv: no EnvironmentConfig found for edison');
+  }
   return {
+    // The token + accountId getters consult the registered auth
+    // bindings (set by `setKVAuthBindings` -- typically called from
+    // main-lite.ts after `initAuth`). When unset, KV behaves as if
+    // signed-out: writes throw `KV_HTTP` 401, reads return null
+    // through the consumer-side gating. This keeps `lite/kv/api.ts`
+    // free of any static dependency on `lite/auth/`, breaking the
+    // `auth/api -> auth/store -> kv/api -> auth/api` cycle.
+    token: () => _authBindings?.getToken() ?? '',
+    discoveryUrl: edisonConfig.discoveryUrl,
+    accountId: () => _authBindings?.getAccountId() ?? null,
     logger: (level, message, data) => {
       const log = getLoggingApi();
       log[level]('kv', message, data);
@@ -266,4 +307,38 @@ function defaultConfig(): KVConfig {
     // start/finish/fail span through the central event log.
     spanEmitter: (name, data) => getLoggingApi().start(name, data),
   };
+}
+
+/**
+ * Late-bound auth resolvers for the default `SdkKVClient` config.
+ *
+ * Wired by `lite/main-lite.ts` after `initAuth()` returns:
+ *
+ *     setKVAuthBindings({
+ *       getToken: () => getAuthApi().getToken('edison') ?? '',
+ *       getAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
+ *     });
+ *
+ * Stays optional so that pre-binding calls (or tests with their own
+ * `_setKVApiForTesting` stub) remain unaffected. The KV module
+ * itself never imports `lite/auth/` to avoid the
+ * `auth -> kv -> auth` cycle dep-cruiser flagged.
+ */
+export interface KVAuthBindings {
+  /** Returns the bearer token, or empty string when signed-out. */
+  getToken: () => string;
+  /** Returns the active accountId, or null when signed-out. */
+  getAccountId: () => string | null;
+}
+
+let _authBindings: KVAuthBindings | null = null;
+
+/**
+ * Wire the KV module's default config to a live auth source. Idempotent:
+ * subsequent calls overwrite the previous bindings (useful in tests).
+ *
+ * Should be called exactly once at app boot, after `initAuth()`.
+ */
+export function setKVAuthBindings(bindings: KVAuthBindings): void {
+  _authBindings = bindings;
 }

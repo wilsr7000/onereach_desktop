@@ -1241,4 +1241,35 @@ New ADRs append below as they're made. Use the next sequential ID (ADR-037, ADR-
 
 ---
 
+## ADR-044: Lite KV transport via `@or-sdk/discovery` + `@or-sdk/key-value-storage`
+
+- **Date**: 2026-05-05
+- **Status**: Accepted
+- **Context**: `lite/kv/` originally hit a hardcoded anonymous Edison flow URL (`https://em.edison.api.onereach.ai/http/.../keyvalue`) with no authentication. Every Lite install on every Mac wrote into the same shared bucket -- whoever wrote last won. When Rich cloned the repo and ran Lite for the first time, he saw the user's IDW menu, tabs, and account-id-shaped state from a sign-in he never performed. The interim fix yesterday added an `edison:<accountId>` client-side key prefix to two stores (idw, main-window), but five other collections (`lite-bugs`, `lite-neon-config`, `lite-ai-config`, `lite-event-bus`, `lite-event-bus`) still used the unscoped `default` key, and the underlying transport was still anonymous -- nothing actually proved the request came from the user whose accountId was in the key.
+- **Decision**: Replace the anonymous Edison KV transport with `@or-sdk/key-value-storage` authenticated by the signed-in user's `mult` token, with the service URL discovered via `@or-sdk/discovery`. The OneReach KV service scopes records by `accountId` server-side (passed by the SDK on every request), so per-user isolation moves from "we hope the client puts the right prefix on the key" to "the server enforces the bucket". A new module `lite/discovery/` wraps the discovery SDK with the standard Lite shape (`api.ts` singleton, lazy 5-minute resolve cache, structured `DiscoveryError`); `lite/kv/sdk-client.ts` is a thin adapter that preserves the public `KVApi` surface (`set/get/listKeys/list/delete/onEvent`) so consumers (idw, main-window, bug-report, ai, neon) need ZERO changes. A one-shot `lite/kv/migration.ts` triggered from `main-lite.ts` on every `onSessionChanged('edison', session)` copies legacy blobs from BOTH layouts (per-account `edison:<accountId>` first, then global `default` fallback) into the user's authenticated namespace at `default`; idempotent via a `lite-migrations / migrated-from-default-v1` sentinel.
+- **Consequences**:
+  - **Multi-user isolation enforced server-side.** The bug Rich hit cannot recur. A user who has never signed in sees the kernel's empty state, not whoever last wrote to the shared anonymous bucket.
+  - **Defense-in-depth gating.** Every store that touches KV (`idw`, `main-window`, `bug-report`, `neon`, `ai`) now accepts a `getActiveAccountId` resolver and returns empty / throws "sign in first" when no account is active, instead of falling through to a generic 401 from the SDK. Easier diagnostics, clearer UX.
+  - **Existing pilot data preserved.** First sign-in after upgrade copies the legacy blobs into the user's bucket. Second sign-in is a no-op (sentinel found). New users start with an empty state and never see migration overhead.
+  - **Cold-start latency.** First KV call per session pays a one-time ~200-500ms discovery resolve, then every subsequent call reuses the cached URL. Acceptable given the user-perceived "I just signed in" moment masks it.
+  - **Forward seam for other SDKs.** Future ports needing `@or-sdk/flows`, `@or-sdk/users`, etc. layer in via `lite/discovery/api.ts` -- one more `getServiceUrl` call, no new infrastructure.
+  - **Redundant client-side prefix removed.** The interim `edison:<accountId>` key prefix in `lite/idw/store.ts` and `lite/main-window/store.ts` is reverted to the singleton `'default'` key. Cache invalidation now tracks the active accountId rather than the key string; user-switch invalidation is preserved.
+- **Files** (~1,000 LOC across new + ~150 LOC of edits):
+  - New module: `lite/discovery/{api,store,events,types}.ts` + `README.md`
+  - New transport: `lite/kv/sdk-client.ts`
+  - New migration: `lite/kv/migration.ts`
+  - Wiring: `lite/kv/api.ts` (default config), `lite/auth/types.ts` (`discoveryUrl` field), `lite/main-lite.ts` (onSessionChanged → migrate + invalidate cache)
+  - Gating + prefix revert: `lite/idw/store.ts`, `lite/main-window/store.ts`, `lite/bug-report/store.ts`, `lite/neon/credentials.ts`, `lite/ai/credentials.ts` + their `api.ts` defaults
+  - Tests: `lite/test/unit/discovery-api.test.ts`, `lite/test/unit/sdk-kv-client.test.ts`, `lite/test/unit/kv-migration.test.ts`, `lite/test/integration/kv-integration.test.ts` (rewritten)
+- **Patterns rejected**:
+  - **Keep the anonymous endpoint and just enforce client-side per-account keys** -- rejected: this is what yesterday's fix did and it left the door open for a malicious or buggy client to read another user's bucket by guessing accountIds. Server-side scoping is the only durable answer.
+  - **Migrate by deleting the legacy data** -- rejected: pilots already have IDWs and tabs configured. Silent migration on first sign-in is the kindest UX; the legacy blob remains in the shared bucket as forensic evidence and gets cleaned up in a one-off pass post-pilot.
+  - **Block sign-in on migration completion** -- rejected: migration runs in `void runKvMigration(...)` (background). Failures log a warning but never delay the user. The sentinel still gets written so failures don't keep retrying every sign-in.
+  - **Replace the legacy `EdisonKVClient` outright** -- rejected: the migration module needs the legacy client to read the old anonymous endpoint. Keeping the class exported (with `@internal` discipline) is the right shape.
+  - **Server-side migration triggered by the OneReach team** -- rejected: requires coordination with a server team and gives Lite no control over the per-install one-shot guarantee. Client-side migration scoped to the active accountId is self-contained.
+- **Migration test coverage**: 9 unit tests guarding (a) sentinel honored on second sign-in, (b) per-account legacy → user `default`, (c) global `default` legacy → user `default` (when no per-account blob), (d) NO overwrite when user already has data, (e) clean install no-op, (f) idempotency, (g) no-account guard, (h) partial-failure tolerance (one collection fails, others copy, sentinel still written), (i) `COLLECTIONS_TO_MIGRATE` enumeration is exactly the four expected names.
+- **Process lesson**: when an architectural fix to a shared resource lands, every existing collection living on that resource needs the same fix. The `gate-other-collections` step (bringing `bug-report`, `neon`, `ai` under the same `getActiveAccountId` resolver pattern as `idw` + `main-window`) was easy to forget but high-impact -- without it the leak resurfaces in a smaller window the next time someone forgets to gate a new module.
+
+---
+
 The chunk-failure-recovery release valve (Phase 2 entry) logs structured incident entries here -- one ADR per declared incident, with the two CODEOWNERS' sign-offs and the time-box.

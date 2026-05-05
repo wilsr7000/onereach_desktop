@@ -112,6 +112,17 @@ export interface StoreConfig {
    * `getLoggingApi().start()`. Tests can pass a stub or omit.
    */
   spanEmitter?: (name: string, data?: unknown) => Span;
+  /**
+   * Resolver for the active OneReach `accountId`. When `null`, the
+   * store treats the user as signed-out: `list()` returns empty,
+   * `save()` / `update()` / `delete()` reject with a clear error.
+   * Wired in `lite/bug-report/api.ts` to
+   * `getAuthApi().getSession('edison')?.accountId ?? null`.
+   *
+   * If omitted (legacy tests / standalone usage), the store falls
+   * back to allowing all operations -- preserves backward compat.
+   */
+  getActiveAccountId?: () => string | null;
 }
 
 /**
@@ -131,6 +142,7 @@ export class BugReportStore {
   private readonly kv: KVApi;
   private readonly log: NonNullable<StoreConfig['logger']>;
   private readonly spanEmitter: NonNullable<StoreConfig['spanEmitter']> | null;
+  private readonly getActiveAccountId: NonNullable<StoreConfig['getActiveAccountId']> | null;
 
   constructor(config: StoreConfig = {}) {
     this.kv = config.kvApi ?? getKVApi();
@@ -140,6 +152,18 @@ export class BugReportStore {
         /* default: silent */
       });
     this.spanEmitter = config.spanEmitter ?? null;
+    this.getActiveAccountId = config.getActiveAccountId ?? null;
+  }
+
+  /**
+   * True when callers should treat the user as signed-in. When
+   * `getActiveAccountId` was not provided (legacy tests), always
+   * returns true so existing callers are unaffected.
+   */
+  private isSignedIn(): boolean {
+    if (this.getActiveAccountId === null) return true;
+    const accountId = this.getActiveAccountId();
+    return typeof accountId === 'string' && accountId.length > 0;
   }
 
   /**
@@ -147,6 +171,16 @@ export class BugReportStore {
    */
   async save(payload: BugReportPayload): Promise<SaveResult> {
     const span = this.spanEmitter?.('bug-report.save', { timestamp: payload.timestamp });
+    if (!this.isSignedIn()) {
+      const wrapped = new BugReportError({
+        code: BUG_REPORT_ERROR_CODES.SAVE_FAILED,
+        message: 'Cannot save a bug report while signed out.',
+        context: { op: 'save', timestamp: payload.timestamp, reason: 'signed-out' },
+        remediation: 'Open Settings -> Account and sign in to OneReach.',
+      });
+      span?.fail(wrapped);
+      throw wrapped;
+    }
     try {
       await this.kv.set(KV_COLLECTION, payload.timestamp, payload);
       this.log('info', 'store: kv save ok', { key: payload.timestamp });
@@ -182,6 +216,12 @@ export class BugReportStore {
    */
   async list(): Promise<BugReportSummary[]> {
     const span = this.spanEmitter?.('bug-report.list');
+    if (!this.isSignedIn()) {
+      // Soft-fail: render an empty list rather than an error so the
+      // modal still opens for signed-out users.
+      span?.finish({ count: 0, signedOut: true });
+      return [];
+    }
     try {
       const records = await this.kv.list(KV_COLLECTION);
       const summaries = records
@@ -214,6 +254,16 @@ export class BugReportStore {
   async read(idOrPath: string): Promise<BugReportPayload> {
     const key = idOrPath.startsWith('kv:') ? idOrPath.slice(3) : idOrPath;
     const span = this.spanEmitter?.('bug-report.read', { key });
+    if (!this.isSignedIn()) {
+      const notFoundErr = new BugReportError({
+        code: BUG_REPORT_ERROR_CODES.NOT_FOUND,
+        message: `Bug report not found: ${key} (signed out)`,
+        context: { op: 'read', idOrPath, key, reason: 'signed-out' },
+        remediation: 'Sign in to OneReach (Settings -> Account) to access saved reports.',
+      });
+      span?.fail(notFoundErr);
+      throw notFoundErr;
+    }
     try {
       const value = await this.kv.get(KV_COLLECTION, key);
       if (value === null) {
@@ -266,6 +316,16 @@ export class BugReportStore {
       hasStatusChange: updates.status !== undefined,
       hasNotesChange: updates.notes !== undefined,
     });
+    if (!this.isSignedIn()) {
+      const wrapped = new BugReportError({
+        code: BUG_REPORT_ERROR_CODES.SAVE_FAILED,
+        message: 'Cannot update a bug report while signed out.',
+        context: { op: 'update', timestamp, reason: 'signed-out' },
+        remediation: 'Open Settings -> Account and sign in to OneReach.',
+      });
+      span?.fail(wrapped);
+      throw wrapped;
+    }
     // Read current state, apply mutations, write back.
     let current: BugReportPayload;
     try {
@@ -307,6 +367,13 @@ export class BugReportStore {
    */
   async delete(timestamp: string): Promise<DeleteResult> {
     const span = this.spanEmitter?.('bug-report.delete', { timestamp });
+    if (!this.isSignedIn()) {
+      span?.finish({ kvDeleted: false, signedOut: true });
+      return {
+        kvDeleted: false,
+        kvError: 'Cannot delete bug reports while signed out. Sign in via Settings -> Account.',
+      };
+    }
     try {
       await this.kv.delete(KV_COLLECTION, timestamp);
       this.log('info', 'store: kv delete ok', { timestamp });

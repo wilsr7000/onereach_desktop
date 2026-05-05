@@ -20,6 +20,7 @@ import {
   KVAiCredentialsProvider,
   type AiCredentialsProvider,
 } from './credentials.js';
+import { getAuthApi } from '../auth/api.js';
 import type {
   AiConfig,
   AiStatus,
@@ -134,7 +135,12 @@ export function buildAiApi(provider: AiCredentialsProvider): AiApi {
 // ── default implementation ────────────────────────────────────────────────
 
 function buildDefaultApi(): AiApi {
-  const provider = new KVAiCredentialsProvider();
+  // Per the lite-kv-via-sdk chunk in lite/PORTING.md, KV writes
+  // require a signed-in user. Reads short-circuit to defaults when
+  // signed out so the AI status panel can still render.
+  const provider = new KVAiCredentialsProvider({
+    getActiveAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
+  });
   const client = new OpenAiClient({ credentials: provider });
   return makeApi(provider, client);
 }

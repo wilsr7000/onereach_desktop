@@ -28,6 +28,7 @@
 import { BugReportStore } from './store.js';
 import type { StoreConfig } from './store.js';
 import { getLoggingApi } from '../logging/api.js';
+import { getAuthApi } from '../auth/api.js';
 import type { BugReportEvent } from './events.js';
 
 // Re-export the public types other modules need to typecheck calls.
@@ -279,5 +280,11 @@ function defaultConfig(): StoreConfig {
     // ADR-026: every save/list/read/update/delete emits a
     // start/finish/fail span through the central event log.
     spanEmitter: (name, data) => getLoggingApi().start(name, data),
+    // Per the lite-kv-via-sdk chunk in lite/PORTING.md, KV calls now
+    // require a signed-in user (the SDK injects the mult token and
+    // the server scopes by accountId). Without this resolver, `save`
+    // and friends would surface a generic 401 to the user. Refusing
+    // the operation up-front yields a clearer "sign in first" error.
+    getActiveAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
   };
 }

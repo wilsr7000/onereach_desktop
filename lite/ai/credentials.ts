@@ -74,6 +74,18 @@ interface KVCredentialsProviderOptions {
   kvApi?: ReturnType<typeof getKVApi>;
   collection?: string;
   key?: string;
+  /**
+   * Resolver for the active OneReach `accountId`. When `null`, the
+   * provider treats the user as signed-out: reads return defaults
+   * without hitting KV; writes throw a clear error.
+   *
+   * Wired in `lite/ai/api.ts` to
+   * `getAuthApi().getSession('edison')?.accountId ?? null`.
+   *
+   * If omitted (legacy tests), the provider falls back to allowing
+   * all operations.
+   */
+  getActiveAccountId?: () => string | null;
 }
 
 /**
@@ -84,11 +96,22 @@ export class KVAiCredentialsProvider implements AiCredentialsProvider {
   private readonly kvApi: ReturnType<typeof getKVApi>;
   private readonly collection: string;
   private readonly key: string;
+  private readonly getActiveAccountId: NonNullable<
+    KVCredentialsProviderOptions['getActiveAccountId']
+  > | null;
 
   constructor(options: KVCredentialsProviderOptions = {}) {
     this.kvApi = options.kvApi ?? getKVApi();
     this.collection = options.collection ?? KV_COLLECTION;
     this.key = options.key ?? KV_KEY;
+    this.getActiveAccountId = options.getActiveAccountId ?? null;
+  }
+
+  /** True when callers should hit KV. Always true in legacy mode. */
+  private isSignedIn(): boolean {
+    if (this.getActiveAccountId === null) return true;
+    const accountId = this.getActiveAccountId();
+    return typeof accountId === 'string' && accountId.length > 0;
   }
 
   async get(): Promise<AiCredentials | null> {
@@ -113,6 +136,11 @@ export class KVAiCredentialsProvider implements AiCredentialsProvider {
   }
 
   async write(partial: Partial<AiSettingsRecord>): Promise<void> {
+    if (!this.isSignedIn()) {
+      throw new Error(
+        'Cannot save AI configuration while signed out. Open Settings -> Account to sign in.'
+      );
+    }
     const current = await this.readRecord();
     const next: AiSettingsRecord = {
       apiKey: partial.apiKey !== undefined ? partial.apiKey : current.apiKey,
@@ -133,6 +161,11 @@ export class KVAiCredentialsProvider implements AiCredentialsProvider {
   }
 
   private async readRecord(): Promise<AiSettingsRecord> {
+    if (!this.isSignedIn()) {
+      // Signed-out: skip the KV round-trip and serve defaults so
+      // status() / readPublic() render meaningfully.
+      return { ...DEFAULT_RECORD };
+    }
     try {
       const value = await this.kvApi.get(this.collection, this.key);
       if (value === null || value === undefined || typeof value !== 'object') {
