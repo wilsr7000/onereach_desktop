@@ -49,6 +49,24 @@ export const AUTH_EVENTS = {
   SSO_SKIP_CLICKED: 'auth.sso-skip.clicked',
   SSO_SKIP_NOT_FOUND: 'auth.sso-skip.not-found',
   SSO_SKIP_FAILED: 'auth.sso-skip.failed',
+  // OAuth popup lifecycle (Google / Microsoft / Apple / GitHub /
+  // Auth0 / Okta / Slack / Zoom / OpenAI / Anthropic / X). Helper
+  // lives in lite/auth/oauth-popup.ts; event names match the
+  // `auth.oauth-popup.*` namespace.
+  OAUTH_POPUP_ALLOWED: 'auth.oauth-popup.allowed',
+  OAUTH_POPUP_DENIED: 'auth.oauth-popup.denied',
+  OAUTH_POPUP_PARENT_ORIGIN_REACHED: 'auth.oauth-popup.parent-origin-reached',
+  OAUTH_POPUP_AUTO_CLOSED: 'auth.oauth-popup.auto-closed',
+  OAUTH_POPUP_CRASHED: 'auth.oauth-popup.crashed',
+  // TOTP autofill + account-picker auto-select (lite/auth/totp-autofill.ts).
+  // 2FA codes and TOTP secrets are NEVER logged -- only metadata
+  // (which frame URL, success/failure, attempt counter).
+  TOTP_DETECTED: 'auth.totp.detected',
+  TOTP_FILLED: 'auth.totp.filled',
+  TOTP_FILL_FAILED: 'auth.totp.fill-failed',
+  TOTP_NO_SECRET: 'auth.totp.no-secret',
+  ACCOUNT_PICKER_DETECTED: 'auth.account-picker.detected',
+  ACCOUNT_PICKER_SELECTED: 'auth.account-picker.selected',
   // IPC entries (5)
   IPC_SIGN_IN: 'auth.ipc.sign-in',
   IPC_SIGN_OUT: 'auth.ipc.sign-out',
@@ -242,6 +260,97 @@ export interface AuthSessionReadEvent extends AuthEventBase {
   data: { env: Environment; hasSession: boolean };
 }
 
+// ─── OAuth popup lifecycle ────────────────────────────────────────────────
+
+export interface AuthOauthPopupAllowedEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.OAUTH_POPUP_ALLOWED;
+  level: 'info';
+  data: {
+    /** Origin (scheme + host) of the popup target. Path/query NOT logged. */
+    origin: string;
+    reason: 'extra-predicate' | 'oauth-allowlist';
+    partition: string;
+    source?: string;
+  };
+}
+export interface AuthOauthPopupDeniedEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.OAUTH_POPUP_DENIED;
+  level: 'info';
+  data: {
+    /** Origin only -- the URL is opened in the OS default browser. */
+    origin: string;
+    source?: string;
+  };
+}
+export interface AuthOauthPopupParentOriginReachedEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.OAUTH_POPUP_PARENT_ORIGIN_REACHED;
+  level: 'info';
+  data: { origin: string; graceMs: number; source?: string };
+}
+export interface AuthOauthPopupAutoClosedEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.OAUTH_POPUP_AUTO_CLOSED;
+  level: 'info';
+  data: {
+    /** Trigger description, e.g. 'parent-navigated-post-auth'. */
+    reason: string;
+    source?: string;
+  };
+}
+export interface AuthOauthPopupCrashedEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.OAUTH_POPUP_CRASHED;
+  level: 'warn';
+  data: { source?: string };
+}
+
+// ─── TOTP autofill + account picker ───────────────────────────────────────
+
+export interface AuthTotpDetectedEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.TOTP_DETECTED;
+  level: 'info';
+  data: {
+    /** Frame origin where the 2FA input was detected (NOT the path/query). */
+    frameOrigin: string;
+    /** Number of fill attempts already made on this watcher. */
+    attempts: number;
+  };
+}
+export interface AuthTotpFilledEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.TOTP_FILLED;
+  level: 'info';
+  data: { frameOrigin: string; attempts: number };
+}
+export interface AuthTotpFillFailedEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.TOTP_FILL_FAILED;
+  level: 'warn';
+  data: {
+    frameOrigin: string;
+    /** 'fill-threw' | 'fill-failed' | 'submit-threw' | 'code-error' */
+    stage: string;
+    attempts: number;
+    error?: string;
+  };
+}
+export interface AuthTotpNoSecretEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.TOTP_NO_SECRET;
+  level: 'info';
+  data: { frameOrigin: string };
+}
+export interface AuthAccountPickerDetectedEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.ACCOUNT_PICKER_DETECTED;
+  level: 'info';
+  data: { frameOrigin: string; hasTargetAccountId: boolean };
+}
+export interface AuthAccountPickerSelectedEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.ACCOUNT_PICKER_SELECTED;
+  level: 'info';
+  data: {
+    frameOrigin: string;
+    success: boolean;
+    /** 'auto-selected' | 'select-failed' | 'select-threw' | 'no-target' | 'no-script' */
+    reason: string;
+  };
+}
+
 // ─── IPC entries ──────────────────────────────────────────────────────────
 
 export interface AuthIpcSignInEvent extends AuthEventBase {
@@ -298,7 +407,18 @@ export type AuthEvent =
   | AuthIpcSignOutEvent
   | AuthIpcGetSessionEvent
   | AuthIpcGetTokenBundleEvent
-  | AuthIpcHasValidSessionEvent;
+  | AuthIpcHasValidSessionEvent
+  | AuthOauthPopupAllowedEvent
+  | AuthOauthPopupDeniedEvent
+  | AuthOauthPopupParentOriginReachedEvent
+  | AuthOauthPopupAutoClosedEvent
+  | AuthOauthPopupCrashedEvent
+  | AuthTotpDetectedEvent
+  | AuthTotpFilledEvent
+  | AuthTotpFillFailedEvent
+  | AuthTotpNoSecretEvent
+  | AuthAccountPickerDetectedEvent
+  | AuthAccountPickerSelectedEvent;
 
 export function isAuthEvent(ev: EventRecord): ev is EventRecord & AuthEvent {
   return Object.values(AUTH_EVENTS).includes(ev.name as AuthEventName);

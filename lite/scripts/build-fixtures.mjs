@@ -48,32 +48,43 @@ for (const version of pair) {
     continue;
   }
 
-  console.log(`[fixtures] building v${version} (slow ~1-3 min)`);
+  console.log(`[fixtures] building v${version} (slim build per ADR-047, ~120 sec)`);
 
-  // electron-builder accepts --config.extraMetadata.version to override
-  // package.json's version without mutating the file. This avoids race
-  // conditions if multiple fixture builds run in parallel.
+  // Bump lite/package.json's version so the fixture's main-lite.ts
+  // readLiteVersion() returns the right value. Restore after the build.
+  const litePkgPath = path.join(repoRoot, 'lite', 'package.json');
+  const litePkgBefore = await fs.readFile(litePkgPath, 'utf-8');
+  const litePkg = JSON.parse(litePkgBefore);
+  const originalVersion = litePkg.version;
+  litePkg.version = version;
+  await fs.writeFile(litePkgPath, JSON.stringify(litePkg, null, 2) + '\n');
+
+  // The dedicated runner (lite/scripts/electron-builder-mac.mjs) reads
+  // lite/package.json and writes a merged temp config with version +
+  // deps overrides. The slim itself is enforced by the !node_modules/*
+  // exclude list in lite/electron-builder.json (ADR-047).
   const cmd = [
     'npm run lite:build',
     '&&',
     'npm run lite:lib-pin',
     '&&',
-    'npx electron-builder build --mac',
-    '--config lite/electron-builder.json',
-    `--config.extraMetadata.version=${version}`,
-    '--config.mac.identity=null',
-    '--config.mac.notarize=false',
-    '--publish never',
+    'node lite/scripts/electron-builder-mac.mjs',
+    '--publish=never',
   ].join(' ');
 
-  execSync(cmd, { cwd: repoRoot, stdio: 'inherit' });
+  try {
+    execSync(cmd, { cwd: repoRoot, stdio: 'inherit' });
+  } finally {
+    await fs.writeFile(litePkgPath, litePkgBefore);
+  }
 
-  // Copy artifacts to cache.
+  // Copy artifacts to cache. Note artifactName produces dotted file names
+  // per lite/electron-builder.json (avoids GitHub auto-rename surprise).
   const builtAppPath = path.join(repoRoot, 'dist-lite', 'mac-arm64', 'Onereach.ai Lite.app');
   const builtZipPath = path.join(
     repoRoot,
     'dist-lite',
-    `Onereach.ai Lite-${version}-arm64-mac.zip`
+    `Onereach.ai.Lite-${version}-arm64-mac.zip`
   );
 
   await fs.mkdir(versionCacheDir, { recursive: true });

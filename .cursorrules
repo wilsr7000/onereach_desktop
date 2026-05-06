@@ -18,7 +18,30 @@ These documents are the source of truth for project planning and must be kept cu
   - After completing major features (update status)
   - When product direction changes (update roadmap items)
   - Quarterly review of timeline accuracy
-- **Products covered**: GSX Create, Video Editor, Spaces, Clipboard Manager, Smart Export, IDW Hub, AI Agents, Budget Manager, App Health
+- **Products covered**: GSX Create, Video Editor, Spaces, Clipboard Manager, Smart Export, IDW Hub, AI Agents, Budget Manager, App Health, **Onereach Lite (v1 launch trajectory)**
+
+### lite/ vs Full App
+
+The repo contains TWO Electron apps sharing only `lib/`:
+
+- **Full app** at the repo root -- the existing source-of-truth app, ~370K LOC, hardening continues
+- **Onereach Lite** at `lite/` -- new strangler app, ships with minimal kernel and grows by porting features one at a time
+
+**The single rule everyone remembers**: Lite imports only from `lite/` and `lib/`. Full does not import from `lite/`. `lib/` has no upward dependencies.
+
+Per-app constitutional documents:
+- `lite/LITE-RULES.md` -- the 10-rule constitution + port table
+- `lite/PORTING.md` -- per-chunk hardening status ledger + menu-entry-registration template
+- `lite/DECISIONS.md` -- ADR-format decision log
+- `lite/LITE-PUNCH-LIST.md` -- lite-specific bugs/fixes (separate from full's PUNCH-LIST.md)
+- `.cursor/plans/onereach_lite_strangler_build_*.plan.md` -- the strategic plan with phase gates
+
+When working in `lite/`:
+- Read the plan file before any port to find the relevant chunk-hardening contract
+- Cherry-pick from full app's patterns; never `import` from full's root files or `packages/`
+- Each commit names the borrowed pattern: `[lite] foo.ts: borrows X pattern from full/foo.js:NNN; rewrites Y for lite scope.`
+- Commit prefixes: `[lite]`, `[full]`, `[lib]`
+- Cross-module references in `lite/` go through `<module>/api.ts` only. Never import from `<module>/store.ts`, `<module>/main.ts`, or other internals. See `lite/PORTING.md` "Module Structure" and `lite/DECISIONS.md` ADR-019.
 
 ## Development Workflow
 
@@ -233,6 +256,51 @@ Use `npm run release` which runs `scripts/release-master.sh`:
 - Don't ask about GitHub token - it's configured and working
 - Reference file paths when discussing changes
 - Update constitutional documents as part of completing work
+
+## Keyboard Shortcuts (MANDATORY)
+
+**Never add keyboard shortcuts, accelerators, or hotkeys unless the user explicitly requests them by name.** This applies to:
+- Electron menu `accelerator` properties (e.g. `'CmdOrCtrl+Q'`, `'CmdOrCtrl+Shift+/'`)
+- Renderer-side `keydown` / `keyup` handlers that bind keys to actions (Esc, Enter, Cmd+Enter, etc.)
+- Electron `globalShortcut.register` calls
+- HTML `accesskey` attributes
+- Role-provided default accelerators -- when using `role: 'quit'` on macOS, Electron auto-adds Cmd+Q. If the user wants no shortcuts, prefer explicit `click` handlers over roles that come with built-in accelerators.
+
+The user controls keybindings. Discoverability is the menu label and the button, not muscle memory the user didn't ask for.
+
+### What you may still do without explicit request
+
+- Wire menu items via `click` handlers (no accelerator)
+- Use `role:` for semantic behavior (About panel, Edit > Copy/Paste, Window > Minimize) when the role provides functionality you can't easily replicate -- but flag the role's default accelerator in your response so the user can decide whether to keep it
+- Wire native dialog confirm/cancel buttons (these have OS-level shortcuts that aren't ours to add or remove)
+
+### When the user asks for a shortcut
+
+Add only the specific shortcut they named. Don't add "while you're in there" extras (e.g. don't add Cmd+W to close just because you added Cmd+Q to quit).
+
+### Examples of what NOT to do
+
+```typescript
+// BAD -- accelerator added without being asked
+registry.register({ id: 'help:report-bug', label: 'Report a Bug...', accelerator: 'CmdOrCtrl+Shift+/', click: handler });
+
+// BAD -- role's default Cmd+Q added implicitly on macOS
+registry.register({ id: 'app:quit', role: 'quit' });
+
+// BAD -- renderer-level shortcut not requested
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+```
+
+```typescript
+// GOOD -- click only, no accelerator
+registry.register({ id: 'help:report-bug', label: 'Report a Bug...', click: handler });
+
+// GOOD -- explicit click handler, no role-provided accelerator
+registry.register({ id: 'app:quit', label: 'Quit Onereach.ai Lite', click: () => app.quit() });
+
+// GOOD -- the user explicitly asked for Cmd+Q, so it's added
+registry.register({ id: 'app:quit', label: 'Quit Onereach.ai Lite', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() });
+```
 
 ## Classification Approach (MANDATORY)
 

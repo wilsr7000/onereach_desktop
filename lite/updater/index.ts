@@ -269,6 +269,31 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
   // Menu entry.
   registerUpdaterMenu({
     onCheckForUpdates: () => {
+      // electron-updater's internal `isUpdaterActive()` check returns
+      // false when `!app.isPackaged && !forceDevUpdateConfig`. In that
+      // state `checkForUpdates()` resolves to null without firing any
+      // event, so check.ts's Promise.race resolves cleanly with no
+      // dialog -- the click produces zero UI feedback. Surface it
+      // explicitly so dev runs aren't silent. The test harness sets
+      // forceDevUpdateConfig=true via LITE_DEV_UPDATE_CONFIG and skips
+      // this branch.
+      if (!app.isPackaged && autoUpdater.forceDevUpdateConfig !== true) {
+        void ui
+          .showMessageBox({
+            type: 'info',
+            title: 'Update Checks Disabled in Dev Build',
+            message: 'Automatic update checks only run in packaged builds',
+            detail:
+              'You are running from source. electron-updater suppresses real checks in dev to avoid replacing the dev tree. Open the GitHub releases page to see the latest version, or run a packaged build to test the full flow.',
+            buttons: ['Open Releases Page', 'OK'],
+            defaultId: 0,
+            cancelId: 1,
+          })
+          .then((res) => {
+            if (res.response === 0) void ui.openReleasesPage();
+          });
+        return;
+      }
       void checkRunner.check({ manual: true });
     },
   });

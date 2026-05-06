@@ -1,0 +1,37 @@
+#!/usr/bin/env sh
+# Commit-message validation hook -- enforces the commit prefix policy from
+# lite/LITE-RULES.md. Every commit message must start with one of:
+#   [lite]    -- changes affecting only lite/
+#   [full]    -- changes affecting only the full app
+#   [lib]     -- changes to shared lib/ (also touches both apps)
+#   [infra]   -- changes to build, CI, dep-cruiser, CODEOWNERS, .cursorrules, etc.
+#   [plan]    -- changes to .cursor/plans/ documents
+#
+# Bypass with `git commit --no-verify` only in genuine emergencies; explain the
+# bypass in the next regular commit's body.
+
+commit_msg_file="$1"
+first_line=$(head -n 1 "$commit_msg_file")
+
+# Allow merge commits, reverts, and empty messages (rebase amendments etc.)
+case "$first_line" in
+  "Merge "*|"Revert "*|"Squash "*|"fixup!"*|"squash!"*|"") exit 0 ;;
+esac
+
+case "$first_line" in
+  "[lite] "*|"[full] "*|"[lib] "*|"[infra] "*|"[plan] "*) exit 0 ;;
+esac
+
+echo "ERROR: commit message must start with one of [lite], [full], [lib], [infra], or [plan]."
+echo "       See lite/LITE-RULES.md for the convention."
+echo ""
+echo "Your commit message:"
+echo "  $first_line"
+echo ""
+echo "Examples:"
+echo "  [lite] menu/registry.ts: implement typed MenuEntry registry"
+echo "  [full] tabbed-browser.html: fix tab-restoration race"
+echo "  [lib] log-event-queue.js: add cohort-tagged metric for redaction count"
+echo "  [infra] dep-cruiser: add lite->packages forbidden rule"
+echo "  [plan] update Phase 0a deliverables list"
+exit 1

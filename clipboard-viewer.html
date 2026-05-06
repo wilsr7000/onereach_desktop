@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Work Space Knowledge Manager</title>
+    <link rel="stylesheet" href="onereach-signature.css" />
     <style>
       * {
           margin: 0;
@@ -14,15 +15,15 @@
       html {
           /* Ensure opaque background covers entire window - prevents
              transparent pixel click-through on macOS with transparent: true */
-          background: #1a1a1a;
+          background: var(--or-bg-canvas);
           width: 100%;
           height: 100%;
       }
 
       body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          background: #1a1a1a;
-          color: #fff;
+          font-family: var(--or-font-sans);
+          background: var(--or-bg-canvas);
+          color: var(--or-text-primary);
           overflow: hidden;
           -webkit-font-smoothing: antialiased;
           width: 100%;
@@ -35,19 +36,21 @@
           display: flex;
           flex-direction: column;
           overflow: hidden;
-          background: #1a1a1a;
+          background: var(--or-bg-canvas);
       }
 
       /* Title bar for window controls */
       .title-bar {
           height: 40px;
-          background: rgba(20, 20, 20, 0.95);
+          background:
+            radial-gradient(circle at 3% 0%, rgba(79, 140, 255, 0.1), transparent 34%),
+            rgba(18, 18, 22, 0.96);
           display: flex;
           align-items: center;
           justify-content: space-between;
           padding: 0 16px;
           -webkit-app-region: drag;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          border-bottom: 1px solid var(--or-border-subtle);
           position: relative;
           z-index: 100;
       }
@@ -55,7 +58,7 @@
       .title-bar-title {
           font-size: 14px;
           font-weight: 500;
-          color: rgba(255, 255, 255, 0.8);
+          color: var(--or-text-secondary);
       }
 
       .window-controls {
@@ -99,8 +102,8 @@
       /* Sidebar for Spaces - Polished Dark Design */
       .sidebar {
           width: 300px;
-          background: #222;
-          border-right: 1px solid rgba(255, 255, 255, 0.08);
+          background: var(--or-bg-surface);
+          border-right: 1px solid var(--or-border-subtle);
           display: flex;
           flex-direction: column;
           overflow: hidden;
@@ -115,7 +118,7 @@
       .sidebar-title {
           font-size: 11px;
           font-weight: 500;
-          color: rgba(255, 255, 255, 0.35);
+          color: var(--or-text-muted);
           text-transform: uppercase;
           letter-spacing: 1.2px;
           margin-bottom: 0;
@@ -126,7 +129,7 @@
           background: transparent;
           border-bottom: 1px solid rgba(255, 255, 255, 0.04);
           font-size: 11px;
-          color: rgba(255, 255, 255, 0.7);
+          color: var(--or-text-secondary);
           display: none;
           align-items: center;
           gap: 8px;
@@ -148,7 +151,7 @@
 
       .active-space-indicator .status {
           font-size: 9px;
-          background: rgba(255, 255, 255, 0.08);
+          background: var(--or-bg-active);
           padding: 2px 6px;
           border-radius: 3px;
           text-transform: uppercase;
@@ -208,13 +211,13 @@
 
       .space-item:hover,
       .space-item.is-hovered {
-          background: rgba(255, 255, 255, 0.05);
-          color: rgba(255, 255, 255, 0.95);
+          background: var(--or-bg-hover);
+          color: var(--or-text-primary);
       }
 
       .space-item.active {
-          background: rgba(255, 255, 255, 0.08);
-          color: rgba(255, 255, 255, 1);
+          background: var(--or-bg-active);
+          color: var(--or-text-primary);
       }
 
       .space-item.active::before {
@@ -225,7 +228,7 @@
           transform: translateY(-50%);
           width: 2px;
           height: 16px;
-          background: rgba(255, 255, 255, 0.6);
+          background: linear-gradient(180deg, var(--or-accent-strong), var(--or-accent));
           border-radius: 1px;
       }
 
@@ -271,10 +274,8 @@
           color: rgba(255, 255, 255, 0.4);
           font-weight: 400;
           font-variant-numeric: tabular-nums;
-      }
           min-width: 18px;
           text-align: right;
-          font-variant-numeric: tabular-nums;
       }
 
       .space-item:hover .space-count,
@@ -481,7 +482,7 @@
       .bulk-action-btn.gsx-push {
           background: rgba(100, 200, 255, 0.15);
           border-color: rgba(100, 200, 255, 0.4);
-          color: #64c8ff;
+          color: var(--or-accent-strong);
       }
 
       .bulk-action-btn.gsx-push:hover {
@@ -495,7 +496,7 @@
 
       /* GSX Context Menu Items */
       .gsx-menu-item {
-          color: #64c8ff;
+          color: var(--or-accent-strong);
       }
 
       .gsx-menu-item:hover {
@@ -519,7 +520,7 @@
       }
 
       .gsx-status-icon.pushed {
-          color: #64c8ff;
+          color: var(--or-accent-strong);
       }
 
       .gsx-status-icon.changed {
@@ -593,7 +594,7 @@
       }
 
       .gsx-visibility-option.selected {
-          border-color: #64c8ff;
+          border-color: var(--or-accent);
           background: rgba(100, 200, 255, 0.1);
       }
 
@@ -628,7 +629,7 @@
           margin-bottom: 12px;
           font-size: 14px;
           font-weight: 600;
-          color: #64c8ff;
+          color: var(--or-accent-strong);
       }
 
       .gsx-link-row {
@@ -661,7 +662,7 @@
           padding: 6px 12px;
           background: rgba(100, 200, 255, 0.15);
           border: 1px solid rgba(100, 200, 255, 0.3);
-          color: #64c8ff;
+          color: var(--or-accent-strong);
           border-radius: 4px;
           cursor: pointer;
           font-size: 11px;
@@ -697,7 +698,7 @@
           padding: 6px;
           background: rgba(100, 200, 255, 0.1);
           border: 1px solid rgba(100, 200, 255, 0.3);
-          color: #64c8ff;
+          color: var(--or-accent-strong);
           border-radius: 4px;
           cursor: pointer;
           display: flex;
@@ -754,7 +755,7 @@
       #gsxPushBtn {
           background: rgba(100, 200, 255, 0.15);
           border: 1px solid rgba(100, 200, 255, 0.3);
-          color: #64c8ff;
+          color: var(--or-accent-strong);
       }
 
       #gsxPushBtn:hover {
@@ -1214,7 +1215,7 @@
 
       .view-btn.active {
           background: rgba(100, 200, 255, 0.2);
-          color: #64c8ff;
+          color: var(--or-accent-strong);
       }
 
       .filters {
@@ -1250,7 +1251,7 @@
       .filter-btn.active {
           background: rgba(100, 200, 255, 0.2);
           border-color: rgba(100, 200, 255, 0.4);
-          color: #64c8ff;
+          color: var(--or-accent-strong);
       }
 
       /* Visual separators for filter groups */
@@ -1509,7 +1510,7 @@
 
       .download-progress-fill {
           height: 100%;
-          background: linear-gradient(90deg, #6366f1, #8b5cf6);
+          background: linear-gradient(90deg, var(--or-accent), var(--or-accent-strong));
           border-radius: 2px;
           transition: width 0.3s ease;
       }
@@ -1518,7 +1519,7 @@
           width: 14px;
           height: 14px;
           border: 2px solid rgba(99, 102, 241, 0.3);
-          border-top-color: #6366f1;
+          border-top-color: var(--or-accent);
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
       }
@@ -1660,7 +1661,7 @@
       }
 
       .icon-option.selected {
-          border-color: #64c8ff;
+          border-color: var(--or-accent);
           background: rgba(100, 200, 255, 0.1);
       }
 
@@ -1754,7 +1755,7 @@
       }
 
       .btn-primary {
-          background: #64c8ff;
+          background: var(--or-accent);
           color: #000;
       }
 
@@ -1934,7 +1935,7 @@
       .pdf-nav-btn {
           background: rgba(100, 200, 255, 0.2);
           border: 1px solid rgba(100, 200, 255, 0.3);
-          color: #64c8ff;
+          color: var(--or-accent-strong);
           padding: 4px 12px;
           border-radius: 4px;
           cursor: pointer;
@@ -1975,7 +1976,7 @@
           width: 30px;
           height: 30px;
           border: 3px solid rgba(100, 200, 255, 0.3);
-          border-top-color: #64c8ff;
+          border-top-color: var(--or-accent);
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
       }
@@ -2121,10 +2122,32 @@
           align-items: center;
           justify-content: center;
           min-height: 400px;
-          color: rgba(255, 255, 255, 0.3);
+          color: var(--or-text-muted);
           text-align: center;
           padding: 40px;
           position: relative;
+      }
+
+      .empty-state::before {
+          content: '';
+          position: absolute;
+          width: 190px;
+          height: 190px;
+          border: 1px solid rgba(79, 140, 255, 0.14);
+          border-radius: 50%;
+          box-shadow: inset 0 0 48px rgba(79, 140, 255, 0.045);
+          z-index: 0;
+      }
+
+      .empty-state::after {
+          content: '';
+          position: absolute;
+          width: 82px;
+          height: 82px;
+          border-top: 1px solid rgba(123, 219, 255, 0.5);
+          border-radius: 50%;
+          transform: rotate(24deg);
+          z-index: 0;
       }
 
       .empty-logo {
@@ -2145,7 +2168,7 @@
 
       .empty-text {
           font-size: 16px;
-          margin-top: 150px;
+          margin-top: 132px;
           margin-bottom: 8px;
           position: relative;
           z-index: 1;
@@ -2420,7 +2443,7 @@
           justify-content: center;
           width: 18px;
           height: 18px;
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
+          background: linear-gradient(135deg, var(--or-accent), var(--or-accent-strong));
           border-radius: 4px;
           font-size: 8px;
           color: white;
@@ -2517,7 +2540,7 @@
 
       .download-progress-fill {
           height: 100%;
-          background: linear-gradient(90deg, #6366f1, #8b5cf6);
+          background: linear-gradient(90deg, var(--or-accent), var(--or-accent-strong));
           border-radius: 2px;
           transition: width 0.3s ease;
       }
@@ -2547,7 +2570,7 @@
       }
 
       .type-icon.type-video {
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
+          background: linear-gradient(135deg, var(--or-accent), var(--or-accent-strong));
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
@@ -2676,7 +2699,7 @@
       .history-item[data-type="video"]::after,
       .history-item.tile-video::after,
       .history-item:has(.video-tile)::after {
-          background: linear-gradient(180deg, #8b5cf6, #6366f1);
+          background: linear-gradient(180deg, var(--or-accent-strong), var(--or-accent));
       }
 
       .history-item[data-type="video"],

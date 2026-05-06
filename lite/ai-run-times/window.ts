@@ -3,10 +3,10 @@
  *
  * Single-instance BrowserWindow loading `ai-run-times.html` with
  * the lite preload so the renderer can call
- * `window.lite.aiRunTimes.*` and `window.lite.ai.tts(...)`.
+ * `window.lite.aiRunTimes.*`.
  *
  * Larger default size than the IDW catalog (1400x900) since it
- * carries a tile grid + article overlay + playlist bar.
+ * carries a tile grid + article overlay reader.
  *
  * @internal
  */
@@ -25,6 +25,15 @@ export function openAiRunTimesWindow(config: AiRunTimesWindowConfig): BrowserWin
   if (openWindow !== null && !openWindow.isDestroyed()) {
     if (openWindow.isMinimized()) openWindow.restore();
     openWindow.focus();
+    // Force a fresh load on re-open. file:// loads don't cache the
+    // way HTTP does, but reloadIgnoringCache() is the belt-and-
+    // suspenders move that guarantees the latest bundled JS is
+    // executed -- helpful during dev iteration and harmless in prod.
+    try {
+      openWindow.webContents.reloadIgnoringCache();
+    } catch {
+      /* best-effort */
+    }
     return openWindow;
   }
 
@@ -41,7 +50,9 @@ export function openAiRunTimesWindow(config: AiRunTimesWindowConfig): BrowserWin
     webPreferences: {
       preload: config.preloadPath,
       contextIsolation: true,
-      sandbox: false, // need fetch + Audio API in renderer
+      // Sandboxed: the renderer doesn't need fetch (all HTTP goes
+      // through main-process IPC) or the Audio API (TTS pulled).
+      sandbox: true,
       nodeIntegration: false,
       webSecurity: true,
     },

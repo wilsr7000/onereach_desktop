@@ -236,6 +236,18 @@ export interface AuthApi {
   onSessionChanged(cb: (env: Environment, session: AuthSession | null) => void): () => void;
 
   /**
+   * Subscribe to 2FA-needs-setup notifications. Fires when the
+   * autofill watcher detects a OneReach 2FA prompt during sign-in
+   * AND Lite has no TOTP secret saved in the keychain (i.e. the user
+   * needs to open Settings -> Two-Factor and paste their authenticator
+   * setup secret). The renderer wires a contextual banner +
+   * "Open Settings -> Two-Factor" button. Returns an unsubscribe.
+   */
+  onTwoFactorNeedsSetup(
+    cb: (payload: import('./store.js').TwoFactorNeedsSetupPayload) => void
+  ): () => void;
+
+  /**
    * Subscribe to typed auth events (ADR-032). Branch on `ev.name` for
    * type-narrowed access to span data, IPC payloads, the
    * `auth.signIn.coalesced` event, and serialized errors.

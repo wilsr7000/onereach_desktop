@@ -417,10 +417,18 @@ describe('AuthStore.signIn -- failure modes', () => {
     expect(windowHandle.closed).toBe(true);
   });
 
-  it('rejects AUTH_KV_FAILED, closes window, when KV write fails', async () => {
+  it('rejects AUTH_KV_FAILED on a transient KV failure, but keeps the new credentials in memory', async () => {
+    // The new credentials must be in memory BEFORE the KV write so
+    // the SDK can authenticate the request itself (it reads bearer +
+    // accountId via getAuthApi() resolvers, not from the buffer).
+    // For non-auth-rejection failures (network, 5xx, etc.), the
+    // in-memory state stays so a renderer-driven retry can replay the
+    // KV write without forcing a full re-sign-in. The window still
+    // closes and signIn() rejects with AUTH_KV_FAILED so the UI
+    // shows the persistence error.
     const handle = makeFakeWindow({ initialUrl: 'https://studio.edison.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID });
     const kv = new FakeKV();
-    kv.failSet = true;
+    kv.failSet = true; // FakeKV throws KV_HTTP with status 500 -- transient
     const { store, session, windowHandle } = buildStore({ kv, windowHandle: handle });
 
     const promise = store.signIn('edison');
@@ -429,9 +437,88 @@ describe('AuthStore.signIn -- failure modes', () => {
 
     await expect(promise).rejects.toMatchObject({ code: AUTH_ERROR_CODES.KV_FAILED });
     expect(windowHandle.closed).toBe(true);
-    // No session was persisted in memory.
+    const persistedSession = store.getSession('edison');
+    expect(persistedSession).not.toBeNull();
+    expect(persistedSession?.accountId).toBe(SAMPLE_ACCOUNT_ID);
+    expect(store.getToken('edison')).toBe(SAMPLE_TOKEN);
+    expect(store.getTokenBundle('edison')).not.toBeNull();
+  });
+
+  it('rejects AUTH_KV_FAILED AND rolls back the in-memory state when KV reports a 401 / auth rejection', async () => {
+    // When the KV server rejects the freshly-captured token (e.g. the
+    // OneReach KV's "Token was not accepted: wrong keyId" surfaces
+    // as a 401 / 403), keeping the new credentials in memory just
+    // guarantees more 401s on every subsequent read. Roll back to
+    // whatever was in memory before -- in this test, nothing -- so
+    // getSession / getToken / getTokenBundle return null and the
+    // user sees a clean signed-out state to retry from.
+    const handle = makeFakeWindow({
+      initialUrl: 'https://studio.edison.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID,
+    });
+    class AuthRejectingKV extends FakeKV {
+      override async set(collection: string, key: string, _value: unknown): Promise<void> {
+        throw new (await import('../../kv/api.js')).KVError({
+          code: 'KV_HTTP',
+          message: 'KV set rejected: Token was not accepted: wrong keyId',
+          status: 401,
+          context: { op: 'set', collection, key },
+          remediation: 'Sign out and sign back in.',
+        });
+      }
+    }
+    const kv = new AuthRejectingKV();
+    const { store, session, windowHandle } = buildStore({ kv, windowHandle: handle });
+
+    const promise = store.signIn('edison');
+    session.cookies.emit(multCookie());
+    session.cookies.emit(orCookie());
+
+    await expect(promise).rejects.toMatchObject({
+      code: AUTH_ERROR_CODES.KV_FAILED,
+      context: expect.objectContaining({ kvStatus: 401 }),
+    });
+    expect(windowHandle.closed).toBe(true);
     expect(store.getSession('edison')).toBeNull();
     expect(store.getToken('edison')).toBeNull();
+    expect(store.getTokenBundle('edison')).toBeNull();
+  });
+
+  it('passes the freshly-captured token + accountId to the KV write (chicken-and-egg regression)', async () => {
+    // Before the persist-then-set fix, the SDK's `token` and
+    // `accountId` resolvers ran during `kv.set(...)` and read from
+    // maps the store hadn't populated yet. KV would authenticate
+    // with the previous sign-in's credentials (or null on a first
+    // sign-in), causing the OneReach KV service to reject with
+    // "Token was not accepted: wrong keyId" / "no-account" on
+    // every fresh sign-in. The fix populates session + token +
+    // bundle BEFORE kv.set, so the resolvers see the just-captured
+    // state.
+    const handle = makeFakeWindow({
+      initialUrl: 'https://studio.edison.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID,
+    });
+    const kv = new FakeKV();
+    const seen: Array<{ accountId: string | null; token: string | null }> = [];
+    const { store, session } = buildStore({ kv, windowHandle: handle });
+
+    // Replace kv.set with a probe that reads the store's resolvers
+    // mid-flight (mimics the SDK's behavior).
+    const originalSet = kv.set.bind(kv);
+    kv.set = async (collection: string, key: string, value: unknown): Promise<void> => {
+      seen.push({
+        accountId: store.getSession('edison')?.accountId ?? null,
+        token: store.getToken('edison') ?? null,
+      });
+      return originalSet(collection, key, value);
+    };
+
+    const promise = store.signIn('edison');
+    session.cookies.emit(multCookie());
+    session.cookies.emit(orCookie());
+    await promise;
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.accountId).toBe(SAMPLE_ACCOUNT_ID);
+    expect(seen[0]?.token).toBe(SAMPLE_TOKEN);
   });
 
   it('rejects AUTH_INVALID_COOKIE when the or cookie value is not URL-encoded JSON', async () => {

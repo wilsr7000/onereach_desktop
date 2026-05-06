@@ -34,11 +34,6 @@ const ENV: LiteAuthEnvironment = 'edison';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function shortenAccountId(id: string): string {
-  if (id.length <= 12) return id;
-  return id.slice(0, 8) + '...' + id.slice(-4);
-}
-
 function getAuthBlock(): HTMLElement {
   const el = document.getElementById('auth-block');
   if (el === null) {
@@ -51,7 +46,13 @@ function getAuthBlock(): HTMLElement {
 // Renderers
 // ---------------------------------------------------------------------------
 
-function renderSignedOut(errorText: string | null): void {
+type SignedOutHint =
+  | { kind: 'error'; text: string }
+  | { kind: 'cancelled' }
+  | { kind: 'twofa-needs-setup' }
+  | null;
+
+function renderSignedOut(hint: SignedOutHint): void {
   const block = getAuthBlock();
   block.innerHTML = '';
 
@@ -66,10 +67,47 @@ function renderSignedOut(errorText: string | null): void {
   block.appendChild(btn);
   appendSettingsShortcut(block);
 
-  if (errorText !== null && errorText.length > 0) {
+  if (hint === null) return;
+
+  if (hint.kind === 'error') {
     const banner = document.createElement('div');
     banner.className = 'error-banner';
-    banner.textContent = errorText;
+    banner.textContent = hint.text;
+    block.appendChild(banner);
+    return;
+  }
+
+  if (hint.kind === 'cancelled') {
+    const banner = document.createElement('div');
+    banner.className = 'info-banner';
+    banner.textContent = 'Sign-in window closed. Click Sign in to GSX to try again.';
+    block.appendChild(banner);
+    return;
+  }
+
+  if (hint.kind === 'twofa-needs-setup') {
+    const banner = document.createElement('div');
+    banner.className = 'warn-banner';
+    const headline = document.createElement('div');
+    headline.className = 'warn-banner-headline';
+    headline.textContent = 'OneReach is asking for a 2FA code.';
+    banner.appendChild(headline);
+    const body = document.createElement('div');
+    body.className = 'warn-banner-body';
+    body.textContent =
+      'Lite has no authenticator secret saved yet. Open Settings -> Two-Factor and paste your setup secret, then try signing in again.';
+    banner.appendChild(body);
+    const settings = window.lite?.settings;
+    if (settings !== undefined) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'warn-banner-action';
+      link.textContent = 'Open Settings -> Two-Factor';
+      link.addEventListener('click', () => {
+        void settings.open('two-factor');
+      });
+      banner.appendChild(link);
+    }
     block.appendChild(banner);
   }
 }
@@ -103,10 +141,8 @@ function renderSignedIn(session: LiteAuthSessionRendererView): void {
       : 'Signed in';
   wrap.appendChild(email);
 
-  const account = document.createElement('div');
-  account.className = 'account';
-  account.textContent = ENV + ' / ' + shortenAccountId(session.accountId);
-  wrap.appendChild(account);
+  // The "edison / <accountId>" line is dev-only diagnostics noise
+  // for users. Full details live in Settings -> Account.
 
   const signOutBtn = document.createElement('button');
   signOutBtn.className = 'signout-link';
@@ -129,7 +165,9 @@ function appendSettingsShortcut(block: HTMLElement): void {
   link.className = 'settings-shortcut';
   link.textContent = 'Need a 2FA code? Open Two-Factor settings';
   link.addEventListener('click', () => {
-    void settings.open();
+    // Pass the section id so the link goes directly to Two-Factor
+    // instead of dropping the user on the default Account section.
+    void settings.open('two-factor');
   });
   block.appendChild(link);
 }
@@ -141,7 +179,7 @@ function appendSettingsShortcut(block: HTMLElement): void {
 async function startSignIn(): Promise<void> {
   const auth = window.lite?.auth;
   if (auth === undefined) {
-    renderSignedOut('Auth bridge unavailable. Try restarting the app.');
+    renderSignedOut({ kind: 'error', text: 'Auth bridge unavailable. Try restarting the app.' });
     return;
   }
   renderSigningIn();
@@ -152,12 +190,13 @@ async function startSignIn(): Promise<void> {
     const parsed = auth.parseError(err);
 
     // Cancellation is a normal user action -- they closed the auth
-    // window themselves -- not an error. Silently return to the
-    // signed-out state. A red banner saying "click Sign in to try
-    // again" right next to the Sign-in button would be redundant
-    // and feel like a failure.
+    // window themselves. Surface a small "ready to try again" hint
+    // above the Sign in button so the user knows the app is alive
+    // and the click did something. (Earlier versions silently flipped
+    // back to the bare button, which made it look like nothing
+    // happened.)
     if (parsed !== null && parsed.code === 'AUTH_CANCELLED') {
-      renderSignedOut(null);
+      renderSignedOut({ kind: 'cancelled' });
       return;
     }
 
@@ -172,7 +211,7 @@ async function startSignIn(): Promise<void> {
     } else {
       message = 'Sign-in failed.';
     }
-    renderSignedOut(message);
+    renderSignedOut({ kind: 'error', text: message });
   }
 }
 
@@ -222,6 +261,13 @@ function bootstrap(): void {
     } else {
       renderSignedOut(null);
     }
+  });
+
+  // 3b. Subscribe to 2FA-needs-setup broadcasts so the user sees a
+  //     contextual banner the moment the autofill watcher discovers
+  //     they have nothing in the keychain to autofill from.
+  auth.on2FANeedsSetup(() => {
+    renderSignedOut({ kind: 'twofa-needs-setup' });
   });
 
   // 4. Probe for an already-rehydrated session.

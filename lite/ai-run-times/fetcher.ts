@@ -6,9 +6,14 @@
  *  1. `fetchAndParseFeed(url)` -- GET the feed URL, parse the XML
  *     (no DOM in main process, so we use a small regex parser
  *     scoped to the RSS subset uxmag.com / WordPress feeds emit).
- *  2. `fetchArticleContent(url)` -- GET the article HTML and run
- *     a Readability-style extraction (largest-text-block heuristic
- *     with a few common content-container fallbacks).
+ *  2. `fetchArticleContent(url)` -- GET the article HTML and return
+ *     the raw bytes verbatim plus a coarse word-count for reading-
+ *     time UX. **Extraction happens in the renderer** (see
+ *     `article-extractor.ts`) using `DOMParser` and the same
+ *     selector cascade the full app uses; the main process never
+ *     parses article HTML now that we ship raw bytes through IPC.
+ *     Mirrors the full app's `Flipboard-IDW-Feed/uxmag-script.js`
+ *     pattern.
  *
  * Both follow up to 5 redirects, time out after 15s, and surface
  * `AiRunTimesError` with `ART_FEED_FETCH_FAILED` /
@@ -79,10 +84,16 @@ export async function fetchArticleContent(opts: FetchArticleOptions): Promise<Fe
     accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     onError: (err, status) => articleFetchError(opts.url, err, status),
   });
-  const extracted = extractArticleContent(html);
-  const wordCount = countWords(extracted);
+  // Ship the raw HTML untouched -- the renderer parses it with
+  // `DOMParser` and applies the source-specific selector cascade
+  // (see `article-extractor.ts`). The main process used to run a
+  // regex extractor here, but it picked the wrong block on most
+  // modern templates and produced noticeably worse output than the
+  // full app. Word count is computed from a coarse text strip so
+  // reading-time UX still works without a renderer round-trip.
+  const wordCount = countWords(html);
   return {
-    html: extracted,
+    html,
     wordCount,
     readingTimeMinutes: Math.max(1, Math.round(wordCount / READING_TIME_WPM)),
   };
@@ -316,86 +327,15 @@ export function stableArticleId(link: string): string {
   return `${lo}${hi}`;
 }
 
-// ─── article HTML extraction ────────────────────────────────────────────
-
-/**
- * Heuristic content extractor for a fetched HTML page.
- *
- * Strategy (in order):
- *  1. Look for `<article>` or `<main>` -- canonical semantic HTML5.
- *  2. Look for known content-container classes: `.entry-content`,
- *     `.post-content`, `.article-body`, `.content-body`. Matches
- *     uxmag.com (WordPress) and most modern publisher templates.
- *  3. Fall back to the largest `<div>` by inner-text length.
- *
- * Always strips `<script>`, `<style>`, `<noscript>`, `<iframe>`,
- * `<nav>`, `<aside>`, `<form>`, `<header>`, `<footer>` blocks.
- */
-export function extractArticleContent(html: string): string {
-  const cleaned = stripUnsafeBlocks(html);
-
-  // 1. semantic
-  const article = matchOuter(cleaned, /<article\b[^>]*>([\s\S]*?)<\/article>/i);
-  if (article !== null && innerTextLength(article) > 400) return article;
-
-  const main = matchOuter(cleaned, /<main\b[^>]*>([\s\S]*?)<\/main>/i);
-  if (main !== null && innerTextLength(main) > 400) return main;
-
-  // 2. known content-container classes
-  const candidates = [
-    /<div\b[^>]*class="[^"]*\b(?:entry-content|post-content|article-body|content-body|td-post-content)\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-  ];
-  for (const re of candidates) {
-    const m = matchOuter(cleaned, re);
-    if (m !== null && innerTextLength(m) > 400) return m;
-  }
-
-  // 3. largest <div>
-  const divs = cleaned.matchAll(/<div\b[^>]*>([\s\S]*?)<\/div>/gi);
-  let best = '';
-  let bestLen = 0;
-  for (const d of divs) {
-    const inner = d[1] ?? '';
-    const len = innerTextLength(inner);
-    if (len > bestLen) {
-      bestLen = len;
-      best = inner;
-    }
-  }
-  if (bestLen > 200) return best;
-
-  // 4. give up: return body
-  const body = matchOuter(cleaned, /<body\b[^>]*>([\s\S]*?)<\/body>/i);
-  return body ?? cleaned;
-}
-
-function stripUnsafeBlocks(html: string): string {
-  return html
-    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-    .replace(/<style\b[\s\S]*?<\/style>/gi, '')
-    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, '')
-    .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<nav\b[\s\S]*?<\/nav>/gi, '')
-    .replace(/<aside\b[\s\S]*?<\/aside>/gi, '')
-    .replace(/<form\b[\s\S]*?<\/form>/gi, '')
-    .replace(/<header\b[\s\S]*?<\/header>/gi, '')
-    .replace(/<footer\b[\s\S]*?<\/footer>/gi, '')
-    .replace(/<svg\b[\s\S]*?<\/svg>/gi, '')
-    .replace(/\son\w+="[^"]*"/gi, '')
-    .replace(/\son\w+='[^']*'/gi, '');
-}
-
-function matchOuter(html: string, re: RegExp): string | null {
-  const m = re.exec(html);
-  return m !== null && m[1] !== undefined ? m[1] : null;
-}
-
-function innerTextLength(html: string): number {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim().length;
-}
+// ─── article HTML word counting ─────────────────────────────────────────
+//
+// As of the renderer-side extractor port (matches the full app's
+// DOMParser-based logic in `Flipboard-IDW-Feed/uxmag-script.js`), the
+// regex-based `extractArticleContent` that used to live here is gone --
+// the renderer parses raw HTML with `DOMParser` and applies the same
+// selector cascade the full app uses.  Word counting still lives in
+// the main process so the article tile's "X min read" badge is set
+// without a renderer round-trip.
 
 /**
  * Plain-text word count. Used for reading time. Strips HTML tags,

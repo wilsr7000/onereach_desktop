@@ -395,11 +395,6 @@ function _buildUniversityMenu() {
           aiWindow.loadFile('Flipboard-IDW-Feed/uxmag.html');
         },
       },
-      { type: 'separator' },
-      {
-        label: 'Wiser Method',
-        click: () => openLearningWindow('https://www.wisermethod.com/', 'Wiser Method'),
-      },
     ],
   };
 }

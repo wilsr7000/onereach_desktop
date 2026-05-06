@@ -1,0 +1,389 @@
+/*
+ * Tools manager window styles.
+ *
+ * Mirrors the visual language of lite/idw/catalog.css and
+ * lite/settings/settings.css: dark canvas, soft borders, accent blue.
+ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--or-bg-canvas, #0e0e10);
+  color: var(--or-text-primary, #f4f6fb);
+  -webkit-font-smoothing: antialiased;
+  font-size: 13px;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ============================================================
+ * FRAME
+ * ============================================================ */
+
+.frame-header {
+  flex: 0 0 auto;
+  padding: 22px 28px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.frame-header h1 {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin-bottom: 4px;
+}
+
+.frame-subtitle {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.5;
+  max-width: 720px;
+  display: block;
+}
+
+.frame-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 22px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.frame-footer-info {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.frame-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ============================================================
+ * LAYOUT
+ * ============================================================ */
+
+.manager-layout {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(320px, 380px) 1fr;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  min-height: 0;
+}
+
+.form-panel,
+.list-panel {
+  background: var(--or-bg-shell, #121216);
+  padding: 22px 24px 24px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.panel-header {
+  margin-bottom: 18px;
+}
+
+.panel-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  margin-bottom: 4px;
+}
+
+.panel-subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.5;
+}
+
+/* ============================================================
+ * FORM
+ * ============================================================ */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.field label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.field input[type='text'],
+.field input[type='url'] {
+  width: 100%;
+  padding: 9px 11px;
+  background: var(--or-bg-elevated, #1b1b20);
+  color: var(--or-text-primary, #f4f6fb);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--or-radius-sm, 6px);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.field input[type='text']:focus,
+.field input[type='url']:focus {
+  border-color: var(--or-border-signal, rgba(79, 140, 255, 0.46));
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.15);
+}
+
+.field input[aria-invalid='true'] {
+  border-color: rgba(255, 107, 122, 0.6);
+}
+
+.field-error {
+  display: none;
+  font-size: 11.5px;
+  color: var(--or-danger, #ff6b7a);
+  line-height: 1.4;
+}
+
+.field-error.visible {
+  display: block;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ============================================================
+ * BUTTONS (signature.css already styles .btn-primary; this adds
+ * ergonomics + secondary styling)
+ * ============================================================ */
+
+.btn-primary,
+.btn-secondary {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.005em;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, var(--or-accent-hover, #6fa2ff), var(--or-accent, #4f8cff));
+  color: #ffffff;
+}
+
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.btn-danger {
+  appearance: none;
+  border: 1px solid rgba(255, 107, 122, 0.36);
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 6px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  background: rgba(255, 107, 122, 0.1);
+  color: var(--or-danger, #ff6b7a);
+}
+
+.btn-danger:hover {
+  background: rgba(255, 107, 122, 0.18);
+  border-color: rgba(255, 107, 122, 0.56);
+}
+
+.btn-icon {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 6px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.btn-icon:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* ============================================================
+ * TOOL LIST
+ * ============================================================ */
+
+.tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--or-bg-elevated, #1b1b20);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--or-radius-md, 10px);
+  transition: border-color var(--or-transition-fast, 120ms ease);
+}
+
+.tool-row:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.tool-row.editing {
+  border-color: var(--or-border-signal, rgba(79, 140, 255, 0.46));
+  box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.18);
+}
+
+.tool-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tool-row-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--or-text-primary, #f4f6fb);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-row-url {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: var(--or-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.empty-state {
+  padding: 28px 16px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12.5px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: var(--or-radius-md, 10px);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* ============================================================
+ * TOAST
+ * ============================================================ */
+
+.toast-stack {
+  position: fixed;
+  bottom: 64px;
+  right: 22px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  z-index: 80;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  padding: 10px 14px;
+  border-radius: var(--or-radius-md, 10px);
+  background: var(--or-bg-elevated, #1b1b20);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--or-text-primary, #f4f6fb);
+  font-size: 12.5px;
+  box-shadow: var(--or-shadow-md, 0 12px 36px rgba(0, 0, 0, 0.42));
+  max-width: 360px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity var(--or-transition-fast, 120ms ease),
+    transform var(--or-transition-fast, 120ms ease);
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.success {
+  border-color: rgba(107, 255, 138, 0.3);
+}
+
+.toast.error {
+  border-color: rgba(255, 107, 122, 0.4);
+  color: var(--or-danger, #ff6b7a);
+}
+
+/* Dark scrollbars on dark surfaces (per project feedback). */
+.form-panel,
+.list-panel {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-width: thin;
+}
+
+.form-panel::-webkit-scrollbar,
+.list-panel::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.form-panel::-webkit-scrollbar-thumb,
+.list-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.form-panel::-webkit-scrollbar-thumb:hover,
+.list-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
+}

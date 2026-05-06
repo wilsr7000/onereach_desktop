@@ -6,18 +6,26 @@ Thank you for your interest in contributing to Onereach.ai Desktop! This guide w
 
 ### 1. Prerequisites
 
-- **Node.js** v14 or higher
-- **npm** v6 or higher
+- **Node.js** v20 or higher
+- **npm** v9 or higher
+- **macOS** 12+ (Apple Silicon or Intel) — Windows support is in progress
 - **Git** for version control
 - A code editor (we recommend [Cursor](https://cursor.sh) for AI-powered development)
+- **API keys** (configured in-app via Settings > API Keys, not `.env`):
+  - OpenAI (required — voice, transcription, embeddings)
+  - Anthropic (required — agents, chat, analysis)
+  - ElevenLabs (optional — Video Editor voice synthesis)
 
-### 2. Fork & Clone
+### 2. Clone
+
+Direct collaborators can clone the repo directly:
 
 ```bash
-# Fork the repository on GitHub first, then:
-git clone https://github.com/YOUR_USERNAME/onereach_desktop.git
+git clone https://github.com/wilsr7000/onereach_desktop.git
 cd onereach_desktop
 ```
+
+External contributors should fork first, then clone their fork.
 
 ### 3. Install Dependencies
 
@@ -28,37 +36,39 @@ npm install
 ### 4. Run the Application
 
 ```bash
-# Development mode (with hot reload)
-npm run dev
-
 # Standard mode
 npm start
 
-# Windows development mode
-npm run dev:win
+# Development mode (with extra logging)
+npm run dev
 ```
 
 ### 5. Make Changes
 
-1. Create a new branch for your feature/fix:
+1. Create a feature branch (use your username as a prefix to avoid conflicts):
    ```bash
-   git checkout -b feature/your-feature-name
+   git checkout -b yourname/short-description
    ```
 
-2. Make your changes using Cursor or your preferred editor
-3. Test your changes thoroughly
+2. Make your changes using Cursor or your preferred editor.
+3. Test your changes (`npm test`, and `npm run test:journey` for E2E).
 4. Commit with clear, descriptive messages:
    ```bash
    git add .
    git commit -m "feat: add new feature description"
    ```
 
-5. Push to your fork:
+5. Push the branch:
    ```bash
-   git push origin feature/your-feature-name
+   git push -u origin yourname/short-description
    ```
 
-6. Open a Pull Request on GitHub
+6. Open a Pull Request against `main`:
+   ```bash
+   gh pr create --fill
+   ```
+
+> **Note**: Direct pushes to `main` are blocked by branch protection. All changes must land via PR. Force pushes and branch deletion on `main` are also disabled.
 
 ## Project Structure
 

@@ -42,6 +42,14 @@ interface LiteAuthErrorJSON {
   cause?: string;
 }
 
+interface LiteAuthTwoFactorNeedsSetupPayload {
+  source: string;
+  frameUrl: string;
+  reason?: string;
+  inputCount?: number;
+  timestamp: string;
+}
+
 interface LiteAuthBridge {
   signIn(
     env: LiteAuthEnvironment,
@@ -61,6 +69,15 @@ interface LiteAuthBridge {
       env: LiteAuthEnvironment;
       session: LiteAuthSessionRendererView | null;
     }) => void
+  ): () => void;
+  /**
+   * Subscribe to 2FA-needs-setup broadcasts. Fires when the autofill
+   * watcher sees a OneReach 2FA prompt during sign-in but Lite has
+   * no TOTP secret saved (the user needs to open Settings ->
+   * Two-Factor and paste their authenticator setup secret).
+   */
+  on2FANeedsSetup(
+    listener: (payload: LiteAuthTwoFactorNeedsSetupPayload) => void
   ): () => void;
   parseError(err: unknown): LiteAuthErrorJSON | null;
 }
@@ -414,6 +431,53 @@ interface LiteIdwErrorJSON {
   cause?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Lite Tools bridge -- mirrors lite/tools/api.ts ToolsApi.
+// ---------------------------------------------------------------------------
+
+interface LiteToolEntry {
+  id: string;
+  label: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface LiteToolAddInput {
+  id?: string;
+  label: string;
+  url: string;
+}
+
+interface LiteToolsErrorJSON {
+  name: string;
+  code: string;
+  message: string;
+  context: Record<string, unknown>;
+  remediation: string;
+  cause?: string;
+}
+
+interface LiteToolsBridge {
+  list(): Promise<LiteToolEntry[]>;
+  get(id: string): Promise<LiteToolEntry | null>;
+  /**
+   * Add a new tool. Throws an Error whose `.message` is JSON containing
+   * `{__toolsError: LiteToolsErrorJSON}` -- use `parseError(err)`.
+   */
+  add(entry: LiteToolAddInput): Promise<LiteToolEntry>;
+  /** Update label/url. Throws on TOOLS_NOT_FOUND / TOOLS_INVALID_*. */
+  update(id: string, patch: Partial<LiteToolEntry>): Promise<LiteToolEntry>;
+  /** Remove a tool. */
+  remove(id: string): Promise<{ ok: true }>;
+  /** Open (or focus) the Tools manager window. */
+  openManager(): Promise<{ ok: true }>;
+  /** Subscribe to mutations broadcast from the main process. */
+  onChange(handler: (entries: LiteToolEntry[]) => void): () => void;
+  /** Parse a thrown error to recover the structured ToolsError. */
+  parseError(err: unknown): LiteToolsErrorJSON | null;
+}
+
 interface LiteIdwBridge {
   list(): Promise<LiteIdwEntry[]>;
   listByKind(kind: LiteAgentKind): Promise<LiteIdwEntry[]>;
@@ -625,88 +689,19 @@ interface LiteWindowBridge {
   health?: LiteHealthBridge;
   neon?: LiteNeonBridge;
   idw?: LiteIdwBridge;
+  tools?: LiteToolsBridge;
   mainWindow?: LiteMainWindowBridge;
   events?: LiteEventBusBridge;
   university?: LiteUniversityBridge;
-  ai?: LiteAiBridge;
+  // ai bridge removed -- TTS + lite/ai/ pulled.
   aiRunTimes?: LiteAiRunTimesBridge;
+  onboarding?: LiteOnboardingBridge;
 }
 
 // ---------------------------------------------------------------------------
-// Lite AI service bridge -- mirrors lite/ai/api.ts AiApi.
+// Lite AI service bridge -- removed in the first-run UX hardening
+// pass (TTS pulled). Re-introducing it is a separate chunk.
 // ---------------------------------------------------------------------------
-
-type LiteAiTtsVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
-type LiteAiTtsModel = 'tts-1' | 'tts-1-hd';
-type LiteAiTtsFormat = 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
-
-interface LiteAiTtsRequest {
-  text: string;
-  voice?: LiteAiTtsVoice;
-  model?: LiteAiTtsModel;
-  format?: LiteAiTtsFormat;
-  speed?: number;
-  feature?: string;
-}
-
-interface LiteAiTtsResult {
-  audioBase64: string;
-  mimeType: string;
-  voice: string;
-  model: string;
-  format: string;
-}
-
-interface LiteAiChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-interface LiteAiChatRequest {
-  messages: LiteAiChatMessage[];
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  feature?: string;
-}
-
-interface LiteAiChatResponse {
-  content: string;
-  model: string;
-  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
-}
-
-interface LiteAiStatus {
-  provider: 'openai';
-  hasApiKey: boolean;
-  defaultTtsVoice: string;
-  defaultTtsModel: string;
-  defaultChatModel: string;
-}
-
-interface LiteAiConfig {
-  apiKey?: string;
-  defaultTtsVoice?: LiteAiTtsVoice;
-  defaultTtsModel?: LiteAiTtsModel;
-  defaultChatModel?: string;
-}
-
-interface LiteAiErrorJSON {
-  name: string;
-  code: string;
-  message: string;
-  context: Record<string, unknown>;
-  remediation: string;
-  cause?: string;
-}
-
-interface LiteAiBridge {
-  tts(req: LiteAiTtsRequest): Promise<LiteAiTtsResult>;
-  chat(req: LiteAiChatRequest): Promise<LiteAiChatResponse>;
-  status(): Promise<LiteAiStatus>;
-  configure(config: LiteAiConfig): Promise<{ ok: true }>;
-  parseError(err: unknown): LiteAiErrorJSON | null;
-}
 
 // ---------------------------------------------------------------------------
 // AI Run Times bridge -- mirrors lite/ai-run-times/api.ts AiRunTimesApi.
@@ -781,15 +776,6 @@ interface LiteAiRunTimesErrorJSON {
   cause?: string;
 }
 
-interface LiteAiRunTimesCachedTtsResult {
-  /** Base64-encoded MP3 bytes. */
-  audioBase64: string;
-  /** Always 'audio/mpeg' for v1. */
-  contentType: string;
-  /** True when the chunk was served from cache (no OpenAI cost). */
-  cached: boolean;
-}
-
 interface LiteAiRunTimesBridge {
   listArticles(): Promise<LiteAiRunTimesArticle[]>;
   getArticle(id: string): Promise<LiteAiRunTimesArticle | null>;
@@ -813,18 +799,29 @@ interface LiteAiRunTimesBridge {
   clearReadingLog(): Promise<{ ok: true }>;
   exportReadingLog(): Promise<string>;
   openWindow(): Promise<{ ok: true }>;
-  /**
-   * TTS with a Files-backed cache (ADR-045). On cache hit the audio
-   * comes back without contacting OpenAI; on miss the bytes are
-   * generated and stored under `ai-run-times/tts/<articleId>/...`
-   * with a 30-day TTL. Per-account isolation is enforced server-side.
-   */
-  cachedTts(input: {
-    articleId: string;
-    text: string;
-    voice?: LiteAiTtsVoice;
-  }): Promise<LiteAiRunTimesCachedTtsResult>;
+  // cachedTts removed alongside the AI module (TTS pulled).
   parseError(err: unknown): LiteAiRunTimesErrorJSON | null;
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding bridge -- mirrors lite/onboarding/api.ts OnboardingApi.
+// ---------------------------------------------------------------------------
+
+type LiteOnboardingStepId =
+  | 'signed-in'
+  | 'two-factor-saved'
+  | 'first-agent-opened';
+
+interface LiteOnboardingState {
+  schemaVersion: 1;
+  completedAt: Partial<Record<LiteOnboardingStepId, string>>;
+  dismissedAt: string | null;
+}
+
+interface LiteOnboardingBridge {
+  load(): Promise<LiteOnboardingState>;
+  markComplete(stepId: LiteOnboardingStepId): Promise<LiteOnboardingState>;
+  dismiss(): Promise<LiteOnboardingState>;
 }
 
 // ---------------------------------------------------------------------------
@@ -839,6 +836,37 @@ interface LiteAiRunTimesBridge {
 // etc. without importing). All identifiers are prefixed `Lite` to
 // keep the global namespace pollution scoped.
 
+/**
+ * Renderer-side structured logging surface, mirrors `LoggingBridge`
+ * in `preload-lite.ts`. `event` is the primary lever for emitting
+ * named events into the central log; `info/warn/error/debug` log
+ * free-form messages with a `category`. Spans (`start()`) stay
+ * main-process only -- see ADR-025.
+ */
+interface LiteLoggingBridge {
+  debug(category: string, message: string, data?: unknown): void;
+  info(category: string, message: string, data?: unknown): void;
+  warn(category: string, message: string, data?: unknown): void;
+  error(category: string, message: string, data?: unknown): void;
+  event(
+    name: string,
+    data?: unknown,
+    level?: 'debug' | 'info' | 'warn' | 'error'
+  ): void;
+  recent(
+    pattern: string,
+    limit?: number
+  ): Promise<
+    Array<{
+      timestamp: string;
+      name: string;
+      data?: unknown;
+      level?: 'debug' | 'info' | 'warn' | 'error';
+    }>
+  >;
+}
+
 interface Window {
   lite?: LiteWindowBridge;
+  logging?: LiteLoggingBridge;
 }

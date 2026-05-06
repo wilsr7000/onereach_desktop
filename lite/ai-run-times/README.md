@@ -1,13 +1,19 @@
-# lite/ai-run-times -- Flipboard-style article reader with TTS
+# lite/ai-run-times -- Flipboard-style article reader
 
 Public surface: `getAiRunTimesApi()` from `./api.ts`. Renderer
 surface: `window.lite.aiRunTimes`.
 
 This module ports the full app's
 `Flipboard-IDW-Feed/uxmag.html` -- a polished article reader with
-RSS fetching, in-app reading, content preferences, reading log
-export, and (when an OpenAI key is configured in
-`Settings -> AI`) TTS audio playback with a queueable playlist.
+RSS fetching, in-app reading, content preferences, and reading log
+export.
+
+> **TTS pulled.** The "Listen" feature, audio playlist, queue, and
+> the `lite/ai/` service that powered them were removed in the
+> first-run UX hardening pass. The OpenAI key dependency wasn't
+> earning its keep for a single feature. Bringing TTS back is a
+> separate chunk -- it would re-introduce `lite/ai/`, the Settings
+> -> AI section, the Listen UI, and the `cachedTts` IPC.
 
 The Agentic University menu's "AI Run Times" item routes here
 (replaces the v1 placeholder that opened `uxmag.com` in the
@@ -32,7 +38,7 @@ generic Learning Browser). The dedicated reader window
   pill, "New" / "Read" badges (auto-derived from publish date and
   reading log).
 - **Article overlay reader**: Lite-styled modal with reading-time
-  badge, source pill, Listen button (TTS), Open Original button.
+  badge, source pill, and Open Original button.
   Auto-records article-opened in the reading log.
 - **Content preferences**: 7 categories (matches full app's
   `contentPreferences`). Saved in KV; the tile grid filters by
@@ -49,18 +55,7 @@ generic Learning Browser). The dedicated reader window
 - **Article cache**: capped at 200 entries (oldest pruned by
   publishedAt). Re-upserts preserve cached `contentHtml` /
   `wordCount` / `readingTimeMinutes`.
-- **TTS playlist** (when `lite/ai/` has an API key):
-  - Per-article "Listen" button adds to the queue.
-  - Long articles auto-chunk on sentence boundary at ~3500 chars.
-  - First chunk plays immediately; remaining chunks generate in
-    the background while playing (no upfront wait for huge
-    articles).
-  - Audio Blob URL revoked on cleanup (no memory leak across many
-    articles, fixing a known issue from the full app's
-    implementation).
-  - Queue auto-advances on chunk-end; finished article marks the
-    reading log entry as `listenedToCompletion: true`.
-  - Global play/pause/prev/next/seek bar at the top of the window.
+- *(TTS playlist removed -- see banner at the top.)*
 
 ## Usage
 
@@ -126,13 +121,21 @@ Names (full catalog in `./events.ts`):
   `ai-run-times.fetch-article.{start,finish,fail}`
 - Activity: `window.opened`, `article.opened`, `article.finished`,
   `preferences.saved`, `feed-source.added/removed/toggled`,
-  `reading-log.exported/cleared`,
-  `tts.playback-{start,finish,fail}`, `changed`
+  `reading-log.exported/cleared`, `changed`
 - IPC entries (per ADR-030): `ipc.{list-articles, refresh-feed,
-  get-article, list-preferences, save-preferences,
-  list-reading-log, record-read, list-feed-sources,
+  get-article, fetch-article-body, list-preferences,
+  save-preferences, list-reading-log, record-read,
+  clear-reading-log, export-reading-log, list-feed-sources,
   add-feed-source, remove-feed-source, toggle-feed-source,
   open-window}`
+
+The `record-read` IPC handler emits `article.opened` (when
+`finishedAt` is null) or `article.finished` (when `finishedAt` is
+set, with a best-effort `durationMs` derived from `openedAt` ->
+`finishedAt`). Per-feed refresh failures emit
+`getLoggingApi().warn('ai-run-times', 'feed fetch failed', ...)`
+so an individual broken feed inside an otherwise-OK refresh is
+still observable in the central log.
 
 ## Persistence
 

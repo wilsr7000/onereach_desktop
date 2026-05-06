@@ -25,11 +25,12 @@
  * @internal
  */
 
-import { BrowserWindow, dialog, shell } from 'electron';
+import { BrowserWindow, dialog } from 'electron';
 import type { IdwEntry } from './types.js';
 import { KIND_META } from './kind-metadata.js';
 import { getLoggingApi } from '../logging/api.js';
 import { IDW_EVENTS } from './events.js';
+import { buildPopupHandler } from '../auth/oauth-popup.js';
 
 const PARTITION = 'persist:lite-idw-browser';
 const DEFAULT_WIDTH = 1280;
@@ -111,12 +112,21 @@ export function openAgentInBrowser(entry: IdwEntry): void {
     }
   });
 
-  // External links + window.open() targets route to the OS default
-  // browser; never spawn child Electron windows.
-  browserWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  // Popup handler: allow OAuth IdP popups (Google / Microsoft / Apple /
+  // Auth0 / Okta / etc.) in the SAME `persist:lite-idw-browser`
+  // partition so cookies land in this browser's jar. Anything else
+  // routes to the OS default browser via `shell.openExternal`.
+  //
+  // Prior behavior denied every popup, which silently broke
+  // "Sign in with Google" inside ChatGPT / Claude / Gemini / etc.
+  // when the user opened them via the placeholder fallback path.
+  browserWindow.webContents.setWindowOpenHandler(
+    buildPopupHandler({
+      partition: PARTITION,
+      source: 'idw-placeholder-browser',
+      logger: (level, message, data) => getLoggingApi()[level]('auth', message, data),
+    })
+  );
 }
 
 /** Close the shared placeholder window if open. Idempotent. */

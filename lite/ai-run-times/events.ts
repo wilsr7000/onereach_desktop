@@ -5,14 +5,17 @@
 import type { EventRecord } from '../logging/events.js';
 
 export const AI_RUN_TIMES_EVENTS = {
-  // Spans
+  // Spans (start / finish / fail). Emitted via `getLoggingApi().start(...)`
+  // which produces all three in one fluent chain; we list them here so
+  // event-name-conformance + typed-onevent can validate the surface.
   REFRESH_FEED_START: 'ai-run-times.refresh-feed.start',
   REFRESH_FEED_FINISH: 'ai-run-times.refresh-feed.finish',
   REFRESH_FEED_FAIL: 'ai-run-times.refresh-feed.fail',
   FETCH_ARTICLE_START: 'ai-run-times.fetch-article.start',
   FETCH_ARTICLE_FINISH: 'ai-run-times.fetch-article.finish',
   FETCH_ARTICLE_FAIL: 'ai-run-times.fetch-article.fail',
-  // Activity (instant)
+  // Activity (instant). One event per state change the user can
+  // observe in the UI.
   WINDOW_OPENED: 'ai-run-times.window.opened',
   ARTICLE_OPENED: 'ai-run-times.article.opened',
   ARTICLE_FINISHED: 'ai-run-times.article.finished',
@@ -22,18 +25,21 @@ export const AI_RUN_TIMES_EVENTS = {
   FEED_SOURCE_TOGGLED: 'ai-run-times.feed-source.toggled',
   READING_LOG_EXPORTED: 'ai-run-times.reading-log.exported',
   READING_LOG_CLEARED: 'ai-run-times.reading-log.cleared',
-  TTS_PLAYBACK_START: 'ai-run-times.tts.playback-start',
-  TTS_PLAYBACK_FINISH: 'ai-run-times.tts.playback-finish',
-  TTS_PLAYBACK_FAIL: 'ai-run-times.tts.playback-fail',
   CHANGED: 'ai-run-times.changed',
-  // IPC entry events (per ADR-030)
+  // IPC entry events (per ADR-030). Every IPC handler emits its
+  // entry event BEFORE doing any real work, so renderer-driven
+  // activity is observable in `/logs?category=ai-run-times` even
+  // when the call ultimately fails or is malformed.
   IPC_LIST_ARTICLES: 'ai-run-times.ipc.list-articles',
   IPC_REFRESH_FEED: 'ai-run-times.ipc.refresh-feed',
   IPC_GET_ARTICLE: 'ai-run-times.ipc.get-article',
+  IPC_FETCH_ARTICLE_BODY: 'ai-run-times.ipc.fetch-article-body',
   IPC_LIST_PREFERENCES: 'ai-run-times.ipc.list-preferences',
   IPC_SAVE_PREFERENCES: 'ai-run-times.ipc.save-preferences',
   IPC_LIST_READING_LOG: 'ai-run-times.ipc.list-reading-log',
   IPC_RECORD_READ: 'ai-run-times.ipc.record-read',
+  IPC_CLEAR_READING_LOG: 'ai-run-times.ipc.clear-reading-log',
+  IPC_EXPORT_READING_LOG: 'ai-run-times.ipc.export-reading-log',
   IPC_LIST_FEED_SOURCES: 'ai-run-times.ipc.list-feed-sources',
   IPC_ADD_FEED_SOURCE: 'ai-run-times.ipc.add-feed-source',
   IPC_REMOVE_FEED_SOURCE: 'ai-run-times.ipc.remove-feed-source',
@@ -124,21 +130,10 @@ export interface ArtReadingLogClearedEvent extends ArtBase {
   name: typeof AI_RUN_TIMES_EVENTS.READING_LOG_CLEARED;
   level: 'info';
 }
-export interface ArtTtsPlaybackStartEvent extends ArtBase {
-  name: typeof AI_RUN_TIMES_EVENTS.TTS_PLAYBACK_START;
-  level: 'info';
-  data: { articleId: string; voice: string };
-}
-export interface ArtTtsPlaybackFinishEvent extends ArtBase {
-  name: typeof AI_RUN_TIMES_EVENTS.TTS_PLAYBACK_FINISH;
-  level: 'info';
-  data: { articleId: string; durationMs: number };
-}
-export interface ArtTtsPlaybackFailEvent extends ArtBase {
-  name: typeof AI_RUN_TIMES_EVENTS.TTS_PLAYBACK_FAIL;
-  level: 'error';
-  data: { articleId: string; code: string };
-}
+// TTS_PLAYBACK_* events removed -- TTS was pulled along with
+// `lite/ai/`. Bringing TTS back is a separate chunk that re-adds
+// these event names to AI_RUN_TIMES_EVENTS + the union below.
+
 export interface ArtChangedEvent extends ArtBase {
   name: typeof AI_RUN_TIMES_EVENTS.CHANGED;
   level: 'info';
@@ -158,6 +153,10 @@ export interface ArtIpcGetArticleEvent extends ArtBase {
   name: typeof AI_RUN_TIMES_EVENTS.IPC_GET_ARTICLE;
   level: 'info';
 }
+export interface ArtIpcFetchArticleBodyEvent extends ArtBase {
+  name: typeof AI_RUN_TIMES_EVENTS.IPC_FETCH_ARTICLE_BODY;
+  level: 'info';
+}
 export interface ArtIpcListPreferencesEvent extends ArtBase {
   name: typeof AI_RUN_TIMES_EVENTS.IPC_LIST_PREFERENCES;
   level: 'info';
@@ -172,6 +171,14 @@ export interface ArtIpcListReadingLogEvent extends ArtBase {
 }
 export interface ArtIpcRecordReadEvent extends ArtBase {
   name: typeof AI_RUN_TIMES_EVENTS.IPC_RECORD_READ;
+  level: 'info';
+}
+export interface ArtIpcClearReadingLogEvent extends ArtBase {
+  name: typeof AI_RUN_TIMES_EVENTS.IPC_CLEAR_READING_LOG;
+  level: 'info';
+}
+export interface ArtIpcExportReadingLogEvent extends ArtBase {
+  name: typeof AI_RUN_TIMES_EVENTS.IPC_EXPORT_READING_LOG;
   level: 'info';
 }
 export interface ArtIpcListFeedSourcesEvent extends ArtBase {
@@ -211,17 +218,17 @@ export type AiRunTimesEvent =
   | ArtFeedSourceToggledEvent
   | ArtReadingLogExportedEvent
   | ArtReadingLogClearedEvent
-  | ArtTtsPlaybackStartEvent
-  | ArtTtsPlaybackFinishEvent
-  | ArtTtsPlaybackFailEvent
   | ArtChangedEvent
   | ArtIpcListArticlesEvent
   | ArtIpcRefreshFeedEvent
   | ArtIpcGetArticleEvent
+  | ArtIpcFetchArticleBodyEvent
   | ArtIpcListPreferencesEvent
   | ArtIpcSavePreferencesEvent
   | ArtIpcListReadingLogEvent
   | ArtIpcRecordReadEvent
+  | ArtIpcClearReadingLogEvent
+  | ArtIpcExportReadingLogEvent
   | ArtIpcListFeedSourcesEvent
   | ArtIpcAddFeedSourceEvent
   | ArtIpcRemoveFeedSourceEvent

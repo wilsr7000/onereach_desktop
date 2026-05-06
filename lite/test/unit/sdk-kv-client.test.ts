@@ -131,6 +131,132 @@ describe('SdkKVClient.set', () => {
   });
 });
 
+describe('SdkKVClient stale-token reclassification', () => {
+  function makeClientWithAuthRejected(
+    err: Error,
+    onAuthRejected: (reason: string) => void
+  ): SdkKVClient {
+    class ThrowingSdk extends FakeKvSdk {
+      constructor(p: { token: () => string; discoveryUrl: string; accountId?: string }) {
+        super(p, { throwError: err });
+      }
+    }
+    return new SdkKVClient({
+      token: () => 'tok',
+      discoveryUrl: 'https://discovery.test',
+      accountId: () => 'acct-1',
+      sdkCtor: ThrowingSdk,
+      onAuthRejected,
+    });
+  }
+
+  it('reclassifies "Token was not accepted" as KV_HTTP 401 with the sign-out remediation', async () => {
+    const rejected: string[] = [];
+    const upstream = new Error('Token was not accepted: wrong keyId');
+    const client = makeClientWithAuthRejected(upstream, (r) => rejected.push(r));
+    try {
+      await client.set('lite-tool-entries', 'default', {});
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(KVError);
+      const kv = err as KVError;
+      expect(kv.code).toBe(KV_ERROR_CODES.HTTP);
+      expect(kv.status).toBe(401);
+      expect(kv.remediation).toMatch(/sign out and back in/i);
+      expect(kv.context).toMatchObject({ reason: 'token-rejected' });
+    }
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toContain('wrong keyId');
+  });
+
+  it('reclassifies "wrong keyId" alone (case-insensitive)', async () => {
+    const rejected: string[] = [];
+    const upstream = new Error('Auth check failed: WRONG KEYID');
+    const client = makeClientWithAuthRejected(upstream, (r) => rejected.push(r));
+    await expect(client.set('coll', 'key', {})).rejects.toMatchObject({
+      code: KV_ERROR_CODES.HTTP,
+      status: 401,
+    });
+    expect(rejected).toHaveLength(1);
+  });
+
+  it('reclassifies "jwt expired" / "token expired"', async () => {
+    const rejected: string[] = [];
+    const upstream = new Error('jwt expired');
+    const client = makeClientWithAuthRejected(upstream, (r) => rejected.push(r));
+    await expect(client.set('coll', 'key', {})).rejects.toMatchObject({
+      code: KV_ERROR_CODES.HTTP,
+      status: 401,
+    });
+    expect(rejected).toEqual(['jwt expired']);
+  });
+
+  it('does NOT trigger onAuthRejected for plain network errors', async () => {
+    const rejected: string[] = [];
+    const upstream = new Error('connect ECONNREFUSED 127.0.0.1');
+    const client = makeClientWithAuthRejected(upstream, (r) => rejected.push(r));
+    await expect(client.set('coll', 'key', {})).rejects.toMatchObject({
+      code: KV_ERROR_CODES.NETWORK,
+    });
+    expect(rejected).toEqual([]);
+  });
+
+  it('does NOT trigger onAuthRejected for timeouts', async () => {
+    const rejected: string[] = [];
+    const upstream = Object.assign(new Error('timeout of 5000ms exceeded'), {
+      code: 'ECONNABORTED',
+    });
+    const client = makeClientWithAuthRejected(upstream, (r) => rejected.push(r));
+    await expect(client.set('coll', 'key', {})).rejects.toMatchObject({
+      code: KV_ERROR_CODES.TIMEOUT,
+    });
+    expect(rejected).toEqual([]);
+  });
+
+  it('triggers onAuthRejected for explicit HTTP 401 responses', async () => {
+    const rejected: string[] = [];
+    const upstream = Object.assign(new Error('Unauthorized'), {
+      response: { status: 401 },
+    });
+    const client = makeClientWithAuthRejected(upstream, (r) => rejected.push(r));
+    await expect(client.set('coll', 'key', {})).rejects.toMatchObject({
+      code: KV_ERROR_CODES.HTTP,
+      status: 401,
+    });
+    expect(rejected).toHaveLength(1);
+  });
+
+  it('triggers onAuthRejected for the no-accountId KVError (signed-out)', async () => {
+    const rejected: string[] = [];
+    class SdkCtor extends FakeKvSdk {
+      constructor(p: { token: () => string; discoveryUrl: string; accountId?: string }) {
+        super(p);
+      }
+    }
+    const client = new SdkKVClient({
+      token: () => 'tok',
+      discoveryUrl: 'https://discovery.test',
+      accountId: () => null,
+      sdkCtor: SdkCtor,
+      onAuthRejected: (r) => rejected.push(r),
+    });
+    await expect(client.set('coll', 'key', {})).rejects.toBeInstanceOf(KVError);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toMatch(/signed-in OneReach account/i);
+  });
+
+  it('swallows handler errors so the KV error still propagates', async () => {
+    const upstream = new Error('Token was not accepted: wrong keyId');
+    const client = makeClientWithAuthRejected(upstream, () => {
+      throw new Error('boom');
+    });
+    await expect(client.set('coll', 'key', {})).rejects.toMatchObject({
+      code: KV_ERROR_CODES.HTTP,
+      status: 401,
+    });
+  });
+});
+
 describe('SdkKVClient.get', () => {
   it('returns the value when present', async () => {
     const store = new Map<string, unknown>([['coll/key-1', { foo: 'bar' }]]);

@@ -249,10 +249,28 @@ async function renderTokens(mount: HTMLElement): Promise<void> {
   for (const id of ['mult', 'or']) {
     const btn = mount.querySelector<HTMLButtonElement>(`#acc-token-copy-${id}`);
     const value = mount.querySelector<HTMLElement>(`#acc-token-value-${id}`);
-    if (btn === null || value === null) continue;
-    btn.addEventListener('click', () => {
-      void copyToken(btn, value.textContent ?? '');
-    });
+    if (btn !== null && value !== null) {
+      btn.addEventListener('click', () => {
+        void copyToken(btn, value.textContent ?? '');
+      });
+    }
+    const toggle = mount.querySelector<HTMLButtonElement>(`#acc-token-toggle-${id}`);
+    const body = mount.querySelector<HTMLElement>(`#acc-token-body-${id}`);
+    const chevron = toggle?.querySelector<HTMLElement>('.acc-token-toggle-chevron') ?? null;
+    if (toggle !== null && body !== null) {
+      toggle.addEventListener('click', () => {
+        const expanded = toggle.getAttribute('aria-expanded') === 'true';
+        const next = !expanded;
+        toggle.setAttribute('aria-expanded', String(next));
+        if (next) {
+          body.removeAttribute('hidden');
+          if (chevron !== null) chevron.textContent = '\u25BE';
+        } else {
+          body.setAttribute('hidden', '');
+          if (chevron !== null) chevron.textContent = '\u25B8';
+        }
+      });
+    }
   }
 }
 
@@ -265,15 +283,35 @@ function tokenBlock(
   const safeLabel = escapeHtml(label);
   const safeValue = escapeHtml(value);
   const meta = `${value.length} chars${expires !== null ? ` &middot; expires ${escapeHtml(expires)}` : ''}`;
+  // Tokens are collapsed by default. The value pane only mounts +
+  // becomes visible when the user clicks "Show", which keeps the
+  // section scannable when the user just wants to see "yes, both
+  // tokens are captured" without staring at two long base64-ish
+  // strings on screen all the time.
   return `
-    <div class="acc-token">
+    <div class="acc-token" data-token-id="${id}">
       <div class="acc-token-head">
-        <span class="acc-token-label">${safeLabel}</span>
+        <button
+          type="button"
+          class="acc-token-toggle"
+          id="acc-token-toggle-${id}"
+          aria-expanded="false"
+          aria-controls="acc-token-body-${id}"
+        >
+          <span class="acc-token-toggle-chevron" aria-hidden="true">\u25B8</span>
+          <span class="acc-token-label">${safeLabel}</span>
+        </button>
         <span class="acc-token-meta">${meta}</span>
       </div>
-      <div class="acc-token-value-row">
-        <pre class="acc-token-value" id="acc-token-value-${id}">${safeValue}</pre>
-        <button type="button" class="btn-secondary acc-token-copy" id="acc-token-copy-${id}">Copy</button>
+      <div
+        class="acc-token-body"
+        id="acc-token-body-${id}"
+        hidden
+      >
+        <div class="acc-token-value-row">
+          <pre class="acc-token-value" id="acc-token-value-${id}">${safeValue}</pre>
+          <button type="button" class="btn-secondary acc-token-copy" id="acc-token-copy-${id}">Copy</button>
+        </div>
       </div>
     </div>
   `;

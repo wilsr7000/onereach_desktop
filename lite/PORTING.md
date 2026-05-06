@@ -298,6 +298,15 @@ Currently porting from full into lite (one at a time):
 
 ### chunk: ai-openai-v1
 
+> **PULLED.** This chunk has been removed from the codebase. Brought
+> the `lite/ai/` module + Settings -> AI section + TTS support; the
+> Listen feature in AI Run Times never earned its keep as a single
+> consumer of a full AI service module. Bringing it back is a new
+> chunk that reverses the deletion + re-wires the consumers.
+> The original chunk notes are preserved below for reference.
+
+
+
 - **status**: ported
 - **plan reference**: ADR-040 in `lite/DECISIONS.md`
 - **borrowed from full** (studied or reused as noted):
@@ -347,8 +356,23 @@ Currently porting from full into lite (one at a time):
 
 ### chunk: ai-run-times
 
-- **status**: ported
+- **status**: ported (TTS half pulled -- see amendment 2026-05-05)
 - **plan reference**: ADR-041 in `lite/DECISIONS.md`
+- **amendment 2026-05-05** -- TTS pulled along with `lite/ai/`:
+  - Listen button removed from the article overlay.
+  - Audio playlist bar + queue panel removed from the reader window.
+  - `AI Run Times can read articles aloud` AI key banner removed.
+  - `cachedTts` IPC + `cachedTts` bridge method removed.
+  - `lite:ai-run-times:cached-tts` channel and Files-backed cache
+    helpers (`ttsCachePrefix`, `ttsCacheFileName`, `ttsCacheKey`)
+    deleted from `main.ts`.
+  - `lite/test/unit/ai-run-times-cached-tts.test.ts` deleted.
+  - The `openai-key-set` onboarding step was dropped.
+  - Reading log still records the `listenedToCompletion` flag in
+    its persisted shape (no schema migration needed); new entries
+    will always have it `false`.
+  - The README banner notes the deletion + reversal path.
+
 - **borrowed from full** (studied or reused as noted):
   - `Flipboard-IDW-Feed/uxmag-script.js` (~3500 LOC) -- `FlipboardReader` class shape: tile grid + article viewer overlay + playlist bar + content preferences. Lite ports the structure as TS-strict modules + bundled renderer (~1600 LOC of TS + 600 LOC of CSS).
   - `Flipboard-IDW-Feed/main.js` -- main-process RSS fetch with redirect handling. Lite uses `fetch()` directly (Electron 22+) with `AbortSignal` for timeouts; rewrites for cleaner error mapping.
@@ -378,10 +402,11 @@ Currently porting from full into lite (one at a time):
   - `ART_NOT_FOUND` -- removeFeedSource / toggleFeedSource / setArticleContent for unknown id
   - `ART_PERSISTENCE_FAILED` -- KV write rejected
   - Renderer: missing OpenAI key shows friendly toast on Listen click; bridge unavailable shows error banner
-- **observability**:
+- **observability** (full coverage 2026-05-05 -- ADR-030):
   - log spans: `ai-run-times.refresh-feed.{start,finish,fail}`, `ai-run-times.fetch-article.{start,finish,fail}`
-  - activity events: `window.opened`, `article.opened`, `article.finished`, `preferences.saved`, `feed-source.{added,removed,toggled}`, `reading-log.{exported,cleared}`, `tts.playback-{start,finish,fail}`, `changed`
-  - IPC entry events (per ADR-030): 12 IPC channels each emit a `ipc.<verb>` event on entry
+  - activity events: `window.opened`, `article.opened` (recordRead with no `finishedAt`), `article.finished` (recordRead with `finishedAt`, includes best-effort `durationMs` derived from `openedAt -> finishedAt`), `preferences.saved`, `feed-source.{added,removed,toggled}`, `reading-log.{exported,cleared}`, `changed` (TTS events removed alongside `lite/ai/`; bringing TTS back re-adds `tts.playback-{start,finish,fail}`)
+  - IPC entry events (per ADR-030): all 15 IPC channels each emit a `ipc.<verb>` event on entry: `list-articles`, `refresh-feed`, `get-article`, `fetch-article-body`, `list-preferences`, `save-preferences`, `list-reading-log`, `record-read`, `clear-reading-log`, `export-reading-log`, `list-feed-sources`, `add-feed-source`, `remove-feed-source`, `toggle-feed-source`, `open-window`
+  - per-feed warn: refresh swallows individual feed failures so it can return per-feed status; each failure also emits `getLoggingApi().warn('ai-run-times', 'feed fetch failed', {feedId, url, code, message})` so a single broken feed inside an otherwise-OK refresh remains observable
   - all under `category=ai-run-times` on lite log server (port 47392)
 - **persistence**: KV collection `lite-ai-run-times`, key `default`. Single blob: `{schemaVersion, feedSources[], preferences[], articles[], readingLog[]}`. Article cache capped at 200 entries, reading log capped at 1000.
 - **forward-compat**:
@@ -894,6 +919,76 @@ Ports that have passed the six-criteria contract and are stable:
   - Renderer-direct `window.lite.files.*` IPC bridge -- v1 keeps the module main-process only; renderer consumers go through their own module's IPC (e.g. bug-report's `attach` handler) so per-IPC validation / size caps / prefix locks live in one place per consumer.
 - **regression-replay fixture**: none yet.
 - **consumers today**: `lite/bug-report/main.ts` (attach + downloadAttachment), `lite/ai-run-times/main.ts` (cached-tts).
+
+### chunk: oauth-popups
+
+- **status**: ported
+- **plan reference**: ADR-046 in `lite/DECISIONS.md`
+- **borrowed from full** (studied or reused as noted):
+  - `main.js:182-218` `shell.openExternal` override pattern -- studied; the inverse problem (we want SOME popups in-app, not all out).
+  - `lib/gsx-autologin.js:1063-1120` per-account session partition shape -- the `partition` shape Lite already adopted for the auth window.
+- **public surface**:
+  - `lite/auth/oauth-popup.ts` -- `OAUTH_POPUP_ALLOWLIST`, `isOAuthPopupUrl(url)`, `buildPopupHandler({partition, logger, extraAllowPredicate, source, shellOpenExternal})`, `attachPopupLifecycle(parent, popup, opts)`. Test seam: `shellOpenExternal` override.
+  - Three popup-aware contexts wired: `lite/auth/window.ts` (auth window with extra `*.onereach.ai` predicate), `lite/main-window/window.ts` (per-tab partition inheritance), `lite/idw/browser-window.ts` (placeholder fallback).
+- **api conformance**: not applicable -- this is a helper, not a singleton API.
+- **error conformance**: not applicable.
+- **events conformance** (ADR-032): emits structured log events via the optional `logger` callback (info on allow / deny, with origin + partition + source).
+- **unit tests** (1 file, 13 tests): `lite/test/unit/oauth-popup.test.ts` -- `isOAuthPopupUrl` truth table, `buildPopupHandler` allow / deny shape, `extraAllowPredicate` short-circuit, defense-in-depth (javascript: still denied even though not on the allowlist).
+- **failure modes covered**:
+  - Subdomain match (e.g. `tenant.auth0.com`) -- allowed
+  - Substring-style spoof (e.g. `accounts.google.com.evil.com`) -- denied (correct behavior verified by test)
+  - Malformed URL -- denied
+  - non-http(s) scheme (`javascript:`, `file:`) -- denied
+- **observability**:
+  - log events (via injected logger): `oauth-popup: allowed in-app child window` (info; reason: `extra-predicate` or `oauth-allowlist`), `oauth-popup: routed to OS default browser` (info)
+- **persistence**: none (helper only); the partition string flows from the caller.
+- **forward-compat**:
+  - **Per-IDW partitions in placeholder**: when ADR-037's deferred per-IDW partition split lands, `buildPopupHandler` already takes the partition as a parameter -- no change needed in the helper.
+  - **Bearer-only IdPs (ADR-040 A2)**: a future bearer-token IdP that needs popup messaging slots into the allowlist with a one-line edit.
+- **deliberately not ported from full**:
+  - Allow-all popups (rejected for security)
+  - Custom OAuth window chrome (popups use Electron's default)
+- **consumers today**: `lite/auth/window.ts`, `lite/main-window/window.ts`, `lite/idw/browser-window.ts`.
+
+### chunk: first-run-ux-hardening
+
+- **status**: ported
+- **plan reference**: ADR-046 in `lite/DECISIONS.md`
+- **borrowed from full** (studied or reused as noted):
+  - Full app's auth window doesn't have a 2FA-needs-setup banner -- the Lite chunk introduces this pattern proactively.
+  - Onboarding pattern is Lite-native; full app uses a setup-wizard.html that's much heavier.
+- **public surface**:
+  - `lite/onboarding/api.ts` -- `OnboardingApi` (`load`, `markComplete`, `dismiss`, `onChange`); 4-step `OnboardingStepId` union.
+  - `window.lite.onboarding` (preload bridge): `load`, `markComplete`, `dismiss`.
+  - `window.lite.auth.on2FANeedsSetup(handler)` -- new bridge method on the existing auth surface.
+  - `lite:auth:2fa-needs-setup` IPC broadcast (one-per-watcher dedupe).
+- **contracts**: `lite/onboarding/types.ts` (`OnboardingState`, `OnboardingStepId`).
+- **api conformance**: not yet -- onboarding is small enough to skip the full conformance harness for v1.
+- **events conformance**: no module-specific events (uses the auth event surface).
+- **unit tests** (4 files, 29 tests):
+  - `lite/test/unit/oauth-popup.test.ts` (13 tests; under chunk: oauth-popups)
+  - `lite/test/unit/onboarding-store.test.ts` (11 tests) -- KV persistence, idempotent markComplete, dismiss, reset, listener isolation
+  - `lite/test/unit/auth-twofa-needs-setup.test.ts` (4 tests) -- 2FA-needs-setup fires on detection + NO_SECRET, NOT on success, NOT on non-2FA pages, exactly once per watcher
+  - `lite/test/unit/settings-deep-links.test.ts` (1 lint test) -- scans renderer surfaces for unscoped `settings.open()` calls; guards against the bug where contextual links dropped users on Account
+- **failure modes covered**:
+  - 2FA detected + no secret -> banner (not silent)
+  - AUTH_CANCELLED -> banner ("ready to try again", not silent)
+  - Two-Factor link -> deep-links to the right section (not Account)
+  - AI Run Times Listen without key -> banner before the click (not toast after)
+  - OAGI returns malformed rows -> distinct empty state ("missing required fields", not "no agents yet")
+  - Multi-listener on onChange -- isolated; one bad listener doesn't break others
+- **observability**:
+  - log events: `2fa-needs-setup broadcast` (auth), `oauth-popup: allowed/routed` (auth)
+  - new IPC channel: `lite:auth:2fa-needs-setup`, `lite:onboarding:{load, mark-complete, dismiss}`
+- **persistence**: KV collection `lite-onboarding`, key `default`. Single blob: `{schemaVersion, completedAt: Partial<Record<StepId, string>>, dismissedAt: string | null}`.
+- **forward-compat**:
+  - **Add new checklist steps**: append to `ONBOARDING_STEP_IDS`; existing entries' completion state survives.
+  - **Per-account onboarding state**: today's blob is per-device; if needed, add `accountId` to the KV key.
+  - **More 2FA-needs-X notifications**: same pattern can fire `lite:auth:account-picker-needs-attention` etc.
+- **deliberately not ported from full**:
+  - First-run setup wizard (`setup-wizard.html`) -- Lite's checklist card is the lighter-weight equivalent.
+  - Tooltips / coach-marks tour -- considered, deferred (not on roadmap).
+- **consumers today**: `lite/main-window/chrome.ts` (renders the checklist + reads `on2FANeedsSetup`), `lite/placeholder.ts` (reads `on2FANeedsSetup`).
 
 ## Deferred Queue
 

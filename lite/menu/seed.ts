@@ -5,6 +5,8 @@
  *
  *   Onereach.ai Lite (top:app,  role: appMenu)
  *     |- About Onereach.ai Lite (app:about, click)
+ *     |- Edit                   (top:edit,  submenu)
+ *     |    |- Undo / Redo / Cut / Copy / Paste / Select All (role-driven)
  *     |- Quit Onereach.ai Lite  (app:quit,  click)
  *
  *   Help (top:help, role: help)
@@ -76,6 +78,93 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
     order: 100,
   });
 
+  // Edit menu -- nested as a submenu under the App menu (top:app)
+  // rather than at the top level. WITHOUT these role-driven items the
+  // OS does not dispatch Cmd+C / Cmd+V / Cmd+X / Cmd+A to focused
+  // inputs in any window, so users can't copy/paste anywhere -- not
+  // in Settings forms, not in agent tabs, not in the Bug Report
+  // modal. The role-based items below are the standard fix; each role
+  // carries its platform-default accelerator (Cmd+Z, Shift+Cmd+Z,
+  // Cmd+X, Cmd+C, Cmd+V, Cmd+A on macOS; Ctrl-equivalents on Windows
+  // / Linux). The accelerators dispatch the same way regardless of
+  // whether Edit lives at the top level or nested under another menu,
+  // so functionality is preserved by this nesting.
+  //
+  // Per .cursorrules ("Use `role:` for semantic behavior ... when the
+  // role provides functionality you can't easily replicate") this is
+  // the documented exception to the no-accelerators policy. The
+  // alternative -- per-window keydown handlers calling
+  // document.execCommand('copy') etc. -- is unreliable across
+  // contextIsolated windows and doesn't work in the auth window /
+  // agent tabs (which deliberately have no preload).
+  //
+  // NOTE: nesting Edit under the App menu is non-standard for macOS
+  // (every macOS app convention puts Edit at the top level). Children
+  // keep `parentId: 'top:edit'`, so flipping `type` back to
+  // 'top-level' and removing `parentId` here restores the standard
+  // macOS layout in one diff.
+  registry.upsert({
+    id: 'top:edit',
+    type: 'item',
+    parentId: 'top:app',
+    label: 'Edit',
+    order: 25, // between app:about (0) and app:settings (50) / app:quit (100)
+  });
+  registry.upsert({
+    id: 'edit:undo',
+    type: 'item',
+    parentId: 'top:edit',
+    role: 'undo',
+    order: 0,
+  });
+  registry.upsert({
+    id: 'edit:redo',
+    type: 'item',
+    parentId: 'top:edit',
+    role: 'redo',
+    order: 10,
+  });
+  registry.upsert({
+    id: 'edit:sep-1',
+    type: 'separator',
+    parentId: 'top:edit',
+    order: 20,
+  });
+  registry.upsert({
+    id: 'edit:cut',
+    type: 'item',
+    parentId: 'top:edit',
+    role: 'cut',
+    order: 30,
+  });
+  registry.upsert({
+    id: 'edit:copy',
+    type: 'item',
+    parentId: 'top:edit',
+    role: 'copy',
+    order: 40,
+  });
+  registry.upsert({
+    id: 'edit:paste',
+    type: 'item',
+    parentId: 'top:edit',
+    role: 'paste',
+    order: 50,
+  });
+  registry.upsert({
+    id: 'edit:sep-2',
+    type: 'separator',
+    parentId: 'top:edit',
+    order: 60,
+  });
+  registry.upsert({
+    id: 'edit:select-all',
+    type: 'item',
+    parentId: 'top:edit',
+    role: 'selectAll',
+    order: 70,
+  });
+
   if (
     handlers.onOpenFocusedDevTools !== undefined ||
     handlers.onOpenActiveTabDevTools !== undefined ||
@@ -88,6 +177,10 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
       order: 90,
     });
   }
+
+  // The Tools top-level menu (top:tools) is owned by lite/tools/menu-builder.ts,
+  // following the IDW + University pattern: each module registers its own
+  // top-level placeholder and dynamic items via initMenuBuilder() on init.
 
   // App menu items.
   // No `role:` on items -- roles can come with platform-default
@@ -172,12 +265,11 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
     click: handlers.onReportBug,
   });
 
-  // Tools menu used to host the standalone Authenticator window
-  // (ADR-027). That moved into Settings -> Two-Factor as part of
-  // ADR-031; the Tools placeholder is no longer registered. The
-  // registry's getChildren semantics auto-hide top-level menus with
-  // no children, so removing the top:tools registration is enough --
-  // the menu bar reflects the change immediately.
+  // The standalone Authenticator window that previously lived under
+  // Tools (ADR-027) was moved into Settings -> Two-Factor as part of
+  // ADR-031. The Tools menu was reintroduced (now owned by
+  // lite/tools/menu-builder.ts) as a host for user-curated label+url
+  // shortcuts plus a "Manage Tools..." entry.
 
   seeded = true;
 }

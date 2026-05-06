@@ -40,6 +40,7 @@ runApiConformanceContract<AuthApi>({
     'injectTokenIntoPartition',
     'hasValidSession',
     'onSessionChanged',
+    'onTwoFactorNeedsSetup',
     'onEvent',
   ],
 });
@@ -136,6 +137,10 @@ function makeStubApi(): AuthApi & {
         const i = subscribers.indexOf(cb);
         if (i >= 0) subscribers.splice(i, 1);
       };
+    },
+    onTwoFactorNeedsSetup: () => {
+      calls.push({ method: 'onTwoFactorNeedsSetup', args: [] });
+      return (): void => undefined;
     },
     onEvent: () => {
       calls.push({ method: 'onEvent', args: [] });

@@ -1,0 +1,14 @@
+{
+  "name": "onereach-lite",
+  "version": "0.0.3",
+  "description": "Onereach.ai Lite -- slim Electron kernel that ships independently from the full Onereach.ai app.",
+  "private": true,
+  "comment": "Standalone version source for Lite. The full app's package.json at the repo root tracks its OWN version (currently 5.x); Lite reads from THIS file first via readLiteVersion() in main-lite.ts. Bump independently from the full app per its own release cadence.",
+  "depsComment": "These four are lite's COMPLETE runtime dependency set. lite/scripts/electron-builder-mac.mjs reads this block and writes it into a merged temp config so the packaged metadata reflects lite's deps (not full's). The actual bundle slimming is done by the !node_modules/<pkg>/**/* exclude list in lite/electron-builder.json. Adding a runtime dep to lite means: (1) add it here, (2) add it to root package.json so npm install resolves it, (3) make sure it is NOT in lite/electron-builder.json's exclude list. See ADR-047.",
+  "dependencies": {
+    "electron-updater": "^6.6.2",
+    "otplib": "^13.2.1",
+    "jsqr": "^1.4.0",
+    "keytar": "^7.9.0"
+  }
+}

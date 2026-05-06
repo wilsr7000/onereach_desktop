@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Command Palette</title>
+    <link rel="stylesheet" href="onereach-signature.css" />
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -11,24 +12,26 @@
         width: 100%; height: 100%;
         background: transparent;
         overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family: var(--or-font-sans);
       }
 
       .palette {
         position: absolute;
         top: 8px; left: 8px; right: 8px; bottom: 8px;
-        background: linear-gradient(165deg, rgba(28, 28, 38, 0.96) 0%, rgba(18, 18, 26, 0.99) 100%);
+        background:
+          radial-gradient(circle at 12% 0%, rgba(79, 140, 255, 0.14), transparent 38%),
+          linear-gradient(165deg, rgba(24, 24, 30, 0.96) 0%, rgba(14, 14, 16, 0.99) 100%);
         backdrop-filter: blur(24px);
         -webkit-backdrop-filter: blur(24px);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 14px;
-        box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-        color: #e0e0e0;
+        border: 1px solid var(--or-border-strong);
+        border-radius: var(--or-radius-lg);
+        box-shadow: var(--or-shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        color: var(--or-text-primary);
         display: flex;
         flex-direction: column;
         opacity: 0;
         transform: scale(0.97) translateY(-6px);
-        transition: opacity 0.15s ease, transform 0.15s ease;
+        transition: opacity var(--or-transition-normal), transform var(--or-transition-normal);
       }
 
       .palette.visible {
@@ -41,7 +44,7 @@
         align-items: center;
         gap: 10px;
         padding: 14px 16px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        border-bottom: 1px solid var(--or-border-subtle);
       }
 
       .search-icon {
@@ -58,16 +61,16 @@
         color: #fff;
         font-size: 15px;
         font-weight: 400;
-        caret-color: rgba(139, 92, 246, 0.8);
+        caret-color: var(--or-accent-strong);
       }
 
-      .search-input::placeholder { color: rgba(255, 255, 255, 0.3); }
+      .search-input::placeholder { color: var(--or-text-faint); }
 
       .shortcut-hint {
         font-size: 10px;
-        color: rgba(255, 255, 255, 0.25);
+        color: var(--or-text-faint);
         padding: 2px 6px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border: 1px solid var(--or-border-subtle);
         border-radius: 4px;
         flex-shrink: 0;
       }
@@ -80,7 +83,7 @@
 
       .results::-webkit-scrollbar { width: 4px; }
       .results::-webkit-scrollbar-track { background: transparent; }
-      .results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+      .results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
 
       .category-header {
         padding: 6px 16px 4px;
@@ -88,7 +91,7 @@
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.8px;
-        color: rgba(255, 255, 255, 0.3);
+        color: var(--or-text-faint);
       }
 
       .result-item {
@@ -97,15 +100,15 @@
         gap: 10px;
         padding: 8px 16px;
         cursor: pointer;
-        transition: background 0.08s ease;
+        transition: background var(--or-transition-fast), color var(--or-transition-fast);
       }
 
       .result-item:hover, .result-item.selected {
-        background: rgba(139, 92, 246, 0.12);
+        background: var(--or-accent-soft);
       }
 
       .result-item.selected {
-        background: rgba(139, 92, 246, 0.18);
+        background: rgba(79, 140, 255, 0.2);
       }
 
       .item-icon {
@@ -127,14 +130,14 @@
       .item-name {
         font-size: 13px;
         font-weight: 500;
-        color: #f0f0f0;
+        color: var(--or-text-primary);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
 
       .item-name mark {
-        background: rgba(139, 92, 246, 0.3);
+        background: rgba(79, 140, 255, 0.3);
         color: inherit;
         border-radius: 2px;
         padding: 0 1px;
@@ -142,7 +145,7 @@
 
       .item-desc {
         font-size: 11px;
-        color: rgba(255, 255, 255, 0.35);
+        color: var(--or-text-muted);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -158,8 +161,8 @@
         flex-shrink: 0;
       }
 
-      .badge-feature { background: rgba(59, 130, 246, 0.15); color: rgba(147, 197, 253, 0.9); }
-      .badge-agent { background: rgba(139, 92, 246, 0.15); color: rgba(196, 181, 253, 0.9); }
+      .badge-feature { background: rgba(79, 140, 255, 0.16); color: rgba(167, 197, 255, 0.95); }
+      .badge-agent { background: rgba(184, 123, 255, 0.14); color: rgba(218, 196, 255, 0.95); }
       .badge-space { background: rgba(16, 185, 129, 0.15); color: rgba(110, 231, 183, 0.9); }
       .badge-ai { background: rgba(245, 158, 11, 0.15); color: rgba(253, 230, 138, 0.9); }
       .badge-tool { background: rgba(107, 114, 128, 0.15); color: rgba(209, 213, 219, 0.9); }
@@ -168,35 +171,48 @@
 
       .item-shortcut {
         font-size: 10px;
-        color: rgba(255, 255, 255, 0.2);
+        color: var(--or-text-faint);
         flex-shrink: 0;
       }
 
       .empty-state {
+        position: relative;
         padding: 32px 16px;
         text-align: center;
-        color: rgba(255, 255, 255, 0.25);
+        color: var(--or-text-muted);
         font-size: 13px;
+        overflow: hidden;
+      }
+
+      .empty-state::before {
+        content: '';
+        display: block;
+        width: 96px;
+        height: 96px;
+        margin: 0 auto 12px;
+        border: 1px solid rgba(79, 140, 255, 0.16);
+        border-radius: 50%;
+        box-shadow: inset 0 0 28px rgba(79, 140, 255, 0.04);
       }
 
       .footer {
         padding: 8px 16px;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        border-top: 1px solid var(--or-border-subtle);
         display: flex;
         align-items: center;
         gap: 12px;
         font-size: 10px;
-        color: rgba(255, 255, 255, 0.2);
+        color: var(--or-text-faint);
       }
 
       .footer kbd {
         display: inline-block;
         padding: 1px 4px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid var(--or-border-subtle);
         border-radius: 3px;
         font-family: inherit;
         font-size: 10px;
-        color: rgba(255, 255, 255, 0.3);
+        color: var(--or-text-muted);
       }
     </style>
   </head>

@@ -350,9 +350,28 @@ function toggleAddForm(state: SectionState): void {
 }
 
 function renderAddForm(): string {
+  // Quick-add row at the top of the form: pick a popular agent
+  // (ChatGPT / Claude / Gemini / Perplexity / Grok) and the form
+  // jumps straight to kind=external-bot + the preset's URL pre-filled.
+  // Fast path for first-time users; the full form below is the
+  // power-user path.
+  const quickAddPresets = BOT_PRESETS.filter((p) => p.id !== 'custom');
+  const quickAddButtons = quickAddPresets
+    .map(
+      (p) =>
+        `<button type="button" class="idw-quick-add-btn" data-quick-add="${escapeAttr(p.id)}">${escapeHtml(p.label)}</button>`
+    )
+    .join('');
+
   return `
     <form class="idw-form" id="idw-add-form">
       <div class="idw-form-title">Add Custom Agent</div>
+
+      <div class="idw-quick-add" data-show-when="quick-add">
+        <div class="idw-quick-add-label">Quick add a popular agent</div>
+        <div class="idw-quick-add-row">${quickAddButtons}</div>
+        <div class="idw-quick-add-help">Or fill out the form below for a custom agent.</div>
+      </div>
 
       <div class="idw-form-field">
         <label for="idw-form-kind">Kind</label>
@@ -467,6 +486,32 @@ function wireFormFields(state: SectionState, wrap: HTMLElement, editingEntry: Li
   const botTypeSelect = wrap.querySelector<HTMLSelectElement>('select[name="botType"]');
   if (botTypeSelect !== null) {
     botTypeSelect.addEventListener('change', () => applyBotTypePreset(wrap));
+  }
+
+  // Quick-add buttons: pick a popular agent and the form jumps to
+  // kind=external-bot + the preset's URL pre-filled. Hidden in edit
+  // mode (kind cannot change). Focus the Save button after pre-fill
+  // so the user can press Enter to save without further input.
+  const quickAddRow = wrap.querySelector<HTMLElement>('[data-show-when="quick-add"]');
+  if (editingEntry !== null && quickAddRow !== null) {
+    quickAddRow.setAttribute('hidden', '');
+  }
+  for (const btn of Array.from(
+    wrap.querySelectorAll<HTMLButtonElement>('button.idw-quick-add-btn[data-quick-add]')
+  )) {
+    btn.addEventListener('click', () => {
+      const presetId = btn.dataset['quickAdd'] ?? '';
+      if (kindSelect !== null) {
+        kindSelect.value = 'external-bot';
+        updateVisibility('external-bot');
+      }
+      if (botTypeSelect !== null) {
+        botTypeSelect.value = presetId;
+      }
+      applyBotTypePreset(wrap);
+      const saveBtn = wrap.querySelector<HTMLButtonElement>('#idw-form-save');
+      if (saveBtn !== null) saveBtn.focus();
+    });
   }
 
   // Once the user types into Label or URL, clear the "preset-set"

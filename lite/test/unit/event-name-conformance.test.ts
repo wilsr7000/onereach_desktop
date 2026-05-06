@@ -31,8 +31,8 @@ import { AUTH_EVENTS } from '../../auth/events.js';
 import { UPDATER_EVENTS } from '../../updater/events.js';
 import { NEON_EVENTS } from '../../neon/events.js';
 import { IDW_EVENTS } from '../../idw/events.js';
+import { TOOLS_EVENTS } from '../../tools/events.js';
 import { UNIVERSITY_EVENTS } from '../../university/events.js';
-import { AI_EVENTS } from '../../ai/events.js';
 import { AI_RUN_TIMES_EVENTS } from '../../ai-run-times/events.js';
 
 const liteRoot = path.resolve(__dirname, '..', '..');
@@ -58,7 +58,12 @@ const MODULES: ModuleSpec[] = [
   },
   {
     name: 'auth',
-    sourceFiles: ['auth/store.ts', 'auth/main.ts'],
+    sourceFiles: [
+      'auth/store.ts',
+      'auth/main.ts',
+      'auth/oauth-popup.ts',
+      'auth/totp-autofill.ts',
+    ],
     events: AUTH_EVENTS,
   },
   {
@@ -77,6 +82,11 @@ const MODULES: ModuleSpec[] = [
     events: IDW_EVENTS,
   },
   {
+    name: 'tools',
+    sourceFiles: ['tools/store.ts', 'tools/main.ts', 'tools/menu-builder.ts'],
+    events: TOOLS_EVENTS,
+  },
+  {
     name: 'university',
     sourceFiles: [
       'university/main.ts',
@@ -84,11 +94,6 @@ const MODULES: ModuleSpec[] = [
       'university/browser-window.ts',
     ],
     events: UNIVERSITY_EVENTS,
-  },
-  {
-    name: 'ai',
-    sourceFiles: ['ai/api.ts', 'ai/main.ts'],
-    events: AI_EVENTS,
   },
   {
     name: 'ai-run-times',

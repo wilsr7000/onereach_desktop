@@ -145,9 +145,14 @@ Names (full catalog in `./events.ts`):
 - **URL validation**: defensive at the `openAgentInBrowser` boundary
   -- invalid URLs surface a friendly dialog instead of crashing the
   window. Validation is also enforced in `IdwStore.add/update`.
-- **External link handling**: `setWindowOpenHandler` denies child
-  Electron windows; `window.open()` and `target="_blank"` clicks
-  route to the OS default browser via `shell.openExternal`.
+- **External link + popup handling** (ADR-046): `setWindowOpenHandler`
+  uses `buildPopupHandler` from `lite/auth/oauth-popup.ts`. OAuth
+  IdP popups (Google / Microsoft / Apple / Auth0 / Okta / etc. --
+  see `OAUTH_POPUP_ALLOWLIST`) are allowed as in-app child windows
+  inheriting the placeholder's partition (so "Sign in with Google"
+  inside ChatGPT / Claude / Gemini actually completes in-app).
+  Anything else routes to the OS default browser via
+  `shell.openExternal`.
 
 ## Hardening roadmap
 

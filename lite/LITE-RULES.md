@@ -43,6 +43,7 @@ repo's "Latest release" is per-app.
 - Cloud backend (OmniGraph, AI providers, Spaces -- lit only when respective ports land)
 - macOS signing identity (Apple Developer cert, `.env.notarization`)
 - Source files in `lib/` (read by both apps; pinned-by-SHA at lite release time)
+- The repo-root `node_modules/` directory (single `npm install` for both apps), but **lite ships with only its own 4 declared deps** (electron-updater, otplib, jsqr, keytar) per ADR-047. The slim is enforced by an explicit `!node_modules/<pkg>/**/*` exclude list in `lite/electron-builder.json` covering full's heavy deps. When full adds a new heavy dep, add it to that exclude list (the release script's bundle-size check fails the build at >200MB to catch regressions).
 
 ## What Lite Does Not Share
 

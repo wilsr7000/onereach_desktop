@@ -28,6 +28,70 @@ import {
 } from 'electron';
 import type { Environment, EnvironmentConfig } from './types.js';
 import { AUTH_EVENTS } from './events.js';
+import { buildPopupHandler, attachPopupLifecycle } from './oauth-popup.js';
+
+/**
+ * Build a Chrome user-agent string that matches the Electron-bundled
+ * Chromium version, with platform-aware OS string. Google's
+ * "Sign in with Google" flow ("WebLiteSignIn" / `disallowed_useragent`
+ * check) refuses any UA that contains `Electron` or other webview
+ * markers, so the auth window has to advertise itself as plain
+ * Chrome -- mirrors `main.js:12575` in the full app.
+ */
+function chromeUserAgent(): string {
+  const chromeVersion = process.versions.chrome ?? '120.0.0.0';
+  if (process.platform === 'darwin') {
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+  }
+  if (process.platform === 'win32') {
+    return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+  }
+  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+}
+
+/**
+ * Per-session marker to remember which auth partitions already had
+ * the header-rewrite hook installed. Re-installing the hook would
+ * cause every request to invoke the callback twice.
+ */
+const REWRITTEN_PARTITIONS = new WeakSet<Session>();
+
+/**
+ * Install the Chrome-disguise on a partition session. Idempotent --
+ * subsequent calls on the same session are no-ops.
+ *
+ * Replaces Electron-revealing request headers on every outgoing
+ * request from this partition:
+ *  - `User-Agent` -> Chrome UA (matches what `setUserAgent` set)
+ *  - `Sec-CH-UA` is dropped if it contains "Electron"; Chromium
+ *    rebuilds it from defaults on the next request
+ *  - Other `X-Electron` / `Electron-Version` style headers stripped
+ *    if any happen to leak in
+ *
+ * Mirrors the full app's `main.js:12579 onBeforeSendHeaders` block.
+ */
+function disguiseSession(sess: Session, userAgent: string): void {
+  if (REWRITTEN_PARTITIONS.has(sess)) return;
+  sess.webRequest.onBeforeSendHeaders((details, callback) => {
+    const headers: Record<string, string> = { ...details.requestHeaders };
+    headers['User-Agent'] = userAgent;
+    if (
+      typeof headers['Sec-CH-UA'] === 'string' &&
+      /electron/i.test(headers['Sec-CH-UA'])
+    ) {
+      delete headers['Sec-CH-UA'];
+      delete headers['Sec-CH-UA-Full-Version'];
+      delete headers['Sec-CH-UA-Full-Version-List'];
+    }
+    delete headers['X-Electron'];
+    delete headers['Electron-Version'];
+    if (headers['Accept-Language'] === undefined) {
+      headers['Accept-Language'] = 'en-US,en;q=0.9';
+    }
+    callback({ requestHeaders: headers });
+  });
+  REWRITTEN_PARTITIONS.add(sess);
+}
 
 /**
  * Handle to an open auth window. Provides only what the store needs --
@@ -116,6 +180,37 @@ export function createAuthWindow(
     },
   });
 
+  // Disguise the auth window as plain Chrome so Google's
+  // "Sign in with Google" flow doesn't refuse credentialing
+  // ("disallowed_useragent" / "this browser may not be secure"
+  // page on `accounts.google.com/v3/signin`). Default Electron UA
+  // contains the literal string `Electron`, which Google blocks.
+  // The full app does the same (`main.js:12575`).
+  //
+  // Test seam: `windowCtor` is overridden in unit tests with a stub
+  // that has no `webContents`, so guard the calls.
+  try {
+    const ua = chromeUserAgent();
+    if (typeof win.webContents?.setUserAgent === 'function') {
+      win.webContents.setUserAgent(ua);
+    }
+    // The session associated with this partition exists as soon as
+    // the BrowserWindow constructor returns. Apply the header
+    // rewriter to it so XHR / OAuth subrequests also carry the
+    // Chrome UA -- not just the top-frame navigations.
+    if (typeof win.webContents?.session === 'object' && win.webContents.session !== null) {
+      disguiseSession(win.webContents.session, ua);
+    } else {
+      // Fallback: look up the partition session via the global
+      // electron `session.fromPartition` API. Same effect.
+      disguiseSession(electronSession.fromPartition(partition), ua);
+    }
+  } catch {
+    // best-effort: a UA-rewrite failure here is non-fatal -- the
+    // user can still try to sign in with email/password, just not
+    // via Google SSO.
+  }
+
   const handle: AuthWindowHandle = {
     partition,
     close: () => {
@@ -197,12 +292,66 @@ export function createAuthWindow(
       void shell.openExternal(url);
     }
   });
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (isOnereachUrl(url)) {
-      return { action: 'allow' };
+  // Popup handler: allow OneReach popups (e.g. OneReach's own
+  // sign-in flow that pops a child) AND OAuth IdP popups (Google /
+  // Microsoft / Apple SSO) in the same partition so cookies land
+  // in `persist:lite-auth-<env>`. Anything else routes to the OS
+  // default browser via `shell.openExternal`.
+  //
+  // Prior behavior denied all non-OneReach popups, which silently
+  // broke "Sign in with Google" because the popup completed in
+  // Safari and the resulting Google session never reached the
+  // auth window's partition.
+  win.webContents.setWindowOpenHandler(
+    buildPopupHandler({
+      partition,
+      source: `auth-window:${env}`,
+      extraAllowPredicate: (url) => isOnereachUrl(url),
+      logger: (level, message, data) => {
+        emit(
+          AUTH_EVENTS.WINDOW_NAV_FINISH,
+          { env, popup: true, level, message, ...(data ?? {}) },
+          'info'
+        );
+      },
+    })
+  );
+
+  // When the popup is created, attach lifecycle helpers so it
+  // auto-closes once the OAuth flow returns control to the parent
+  // (e.g. Google redirects back to login.onereach.ai after the
+  // user authenticates).
+  //
+  // Also disguise the popup as Chrome -- the parent window's UA was
+  // already overridden, but a new BrowserWindow does NOT inherit the
+  // parent's `setUserAgent` value. Without this, Google's "Sign in
+  // with Google" page (opened in the popup) sees Electron's default
+  // UA and shows an indefinite spinner waiting for a credential
+  // handshake that never comes. The session-level header rewrite
+  // catches HTTP requests, but `navigator.userAgent` (the JS-side
+  // value some Google flows check) is set per-webContents, so we
+  // also need `setUserAgent` here.
+  win.webContents.on('did-create-window', (popup) => {
+    try {
+      const ua = chromeUserAgent();
+      if (typeof popup.webContents?.setUserAgent === 'function') {
+        popup.webContents.setUserAgent(ua);
+      }
+    } catch {
+      // best-effort: a UA failure on the popup is non-fatal -- the
+      // session-level header rewrite still presents a Chrome UA at
+      // the HTTP layer.
     }
-    void shell.openExternal(url);
-    return { action: 'deny' };
+    attachPopupLifecycle(win, popup, {
+      source: `auth-window:${env}`,
+      logger: (level, message, data) => {
+        emit(
+          AUTH_EVENTS.WINDOW_NAV_FINISH,
+          { env, popup: true, level, message, ...(data ?? {}) },
+          'info'
+        );
+      },
+    });
   });
 
   // First-load callback: store probes for already-set cookies here.

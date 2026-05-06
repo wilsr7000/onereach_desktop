@@ -85,9 +85,9 @@ export type {
   ArtFeedSourceToggledEvent,
   ArtReadingLogExportedEvent,
   ArtReadingLogClearedEvent,
-  ArtTtsPlaybackStartEvent,
-  ArtTtsPlaybackFinishEvent,
-  ArtTtsPlaybackFailEvent,
+  // TTS playback events (ArtTtsPlayback*) were removed alongside the
+  // TTS feature in the first-run UX hardening pass. Re-add them when
+  // a future chunk re-introduces lite/ai/ + the Listen flow.
   ArtChangedEvent,
 } from './events.js';
 export { AI_RUN_TIMES_EVENTS, isAiRunTimesEvent };
@@ -215,10 +215,21 @@ function makeApi(store: AiRunTimesStore): AiRunTimesApi {
             fetchedCount += 1;
           } catch (err) {
             const e = err as Error & { code?: string };
+            const code = e.code ?? 'ART_FEED_FETCH_FAILED';
             perFeed.push({
               feedId: source.id,
               ok: false,
-              code: e.code ?? 'ART_FEED_FETCH_FAILED',
+              code,
+              message: e.message ?? 'feed fetch failed',
+            });
+            // Surface per-feed failure to the central log. The
+            // refreshFeed span itself only fails if EVERY iteration
+            // throws, so without this warn an individual broken
+            // feed would be invisible to operators.
+            getLoggingApi().warn('ai-run-times', 'feed fetch failed', {
+              feedId: source.id,
+              url: source.url,
+              code,
               message: e.message ?? 'feed fetch failed',
             });
           }

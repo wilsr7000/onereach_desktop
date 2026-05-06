@@ -1,24 +1,24 @@
 /**
  * App Health Dashboard Styles
  * 
- * Dark theme with golden/amber accents
- * Inspired by mission control / radar aesthetics
+ * Dark theme with Onereach blue signal accents.
+ * Inspired by mission control / radar aesthetics.
  */
 
 /* CSS Variables */
 :root {
   /* Background colors */
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #12121a;
-  --bg-tertiary: #1a1a24;
-  --bg-card: #15151f;
-  --bg-hover: #1e1e2a;
+  --bg-primary: #0e0e10;
+  --bg-secondary: #121216;
+  --bg-tertiary: #1b1b20;
+  --bg-card: #161618;
+  --bg-hover: rgba(255, 255, 255, 0.055);
 
-  /* Accent colors - Golden/Amber */
-  --accent-primary: #d4a84b;
-  --accent-secondary: #b8923f;
-  --accent-light: #e8c36d;
-  --accent-glow: rgba(212, 168, 75, 0.3);
+  /* Accent colors - Onereach blue signal */
+  --accent-primary: #4f8cff;
+  --accent-secondary: #6fa2ff;
+  --accent-light: #7bdbff;
+  --accent-glow: rgba(79, 140, 255, 0.3);
 
   /* Status colors */
   --status-success: #4ade80;
@@ -27,13 +27,14 @@
   --status-info: #60a5fa;
 
   /* Text colors */
-  --text-primary: #e8e8ed;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
+  --text-primary: #f4f6fb;
+  --text-secondary: rgba(244, 246, 251, 0.72);
+  --text-muted: rgba(244, 246, 251, 0.48);
+  --text-tertiary: rgba(244, 246, 251, 0.3);
   --text-accent: var(--accent-light);
 
   /* Border colors */
-  --border-primary: #2a2a3a;
+  --border-primary: rgba(255, 255, 255, 0.06);
   --border-accent: var(--accent-primary);
 
   /* Shadows */
@@ -117,9 +118,11 @@ body {
 }
 
 .logo-icon {
-  font-size: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--accent-primary);
-  text-shadow: 0 0 10px var(--accent-glow);
+  filter: drop-shadow(0 0 10px var(--accent-glow));
 }
 
 .logo-text {
@@ -218,7 +221,14 @@ body {
 }
 
 .tab-icon {
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .tab-label {
@@ -300,7 +310,20 @@ body {
 }
 
 .title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--accent-primary);
+}
+
+.title-icon svg,
+.provider-icon svg,
+.attention-icon svg,
+.notice-icon svg,
+.empty-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
 }
 
 /* Overview Grid */

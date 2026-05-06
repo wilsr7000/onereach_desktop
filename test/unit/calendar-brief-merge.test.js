@@ -132,16 +132,19 @@ describe('Phase 1: calendar brief merges live Omnical events', () => {
       };
     });
 
-    it('does not fetch live events; passes empty externalEvents to generateMorningBrief', async () => {
+    it('flag default ON: fetches live events even when settings.get returns undefined', async () => {
+      // Phase 1 rolled out: undefined means "use default", which is ON.
+      // The brief now merges live events out of the box; users can still
+      // opt out explicitly with calendar.briefIncludeLiveEvents = false.
+      fetchSpy.mockResolvedValue([{ id: 'e1', summary: 'Standup' }]);
+
       await calendarQueryAgent.getBriefing();
 
-      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
       expect(mockStore.generateMorningBrief).toHaveBeenCalledTimes(1);
-      const [, externalEvents] = mockStore.generateMorningBrief.mock.calls[0];
-      expect(externalEvents).toEqual([]);
     });
 
-    it('explicit flag = false also skips fetch', async () => {
+    it('explicit flag = false skips fetch (kill switch)', async () => {
       global.settingsManager = {
         get: vi.fn((key) => (key === 'calendar.briefIncludeLiveEvents' ? false : undefined)),
       };
@@ -149,14 +152,16 @@ describe('Phase 1: calendar brief merges live Omnical events', () => {
       await calendarQueryAgent.getBriefing();
 
       expect(fetchSpy).not.toHaveBeenCalled();
+      const [, externalEvents] = mockStore.generateMorningBrief.mock.calls[0];
+      expect(externalEvents).toEqual([]);
     });
 
-    it('settingsManager unavailable: still skips fetch (no crash)', async () => {
+    it('settingsManager unavailable: still uses default (ON), brief still works', async () => {
       global.settingsManager = undefined;
+      fetchSpy.mockResolvedValue([]);
 
       const result = await calendarQueryAgent.getBriefing();
 
-      expect(fetchSpy).not.toHaveBeenCalled();
       expect(result.section).toBe('Calendar');
     });
   });

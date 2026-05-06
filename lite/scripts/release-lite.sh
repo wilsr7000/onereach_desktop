@@ -117,20 +117,38 @@ echo -e "${GREEN}Cleaned${NC}"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 2: Build (esbuild + lib-pin + electron-builder with version override)
+# Step 2: Build (esbuild + lib-pin + electron-builder)
+#
+# Slim bundle (ADR-047): lite ships only the 4 deps declared in
+# lite/package.json (electron-updater, otplib, jsqr, keytar). The
+# `!node_modules/<pkg>/**/*` exclude list in lite/electron-builder.json
+# filters out full's heavy deps at file-copy time. Without the excludes,
+# electron-builder would bundle ALL of full's deps (better-sqlite3,
+# canvas, sharp, ffmpeg-installer, all @or-sdk/*, duckdb, etc.) -- 240MB+
+# of code lite never imports. With the excludes + npmRebuild=false, the
+# DMG drops from 283MB to ~165MB and the build is ~4x faster.
 # ---------------------------------------------------------------------------
 echo -e "${YELLOW}Step 2: Building Onereach.ai Lite v${NEW_VERSION}...${NC}"
 BUILD_START_TIME=$(date +%s)
 
-# esbuild + lib-pin first
+# Bump lite/package.json's version so main-lite.ts's readLiteVersion()
+# picks it up at runtime (the bundled lite/package.json is read FIRST,
+# before extraMetadata's override on the root package.json). This file
+# is the single source of truth for lite's version.
+node -e "
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('lite/package.json', 'utf-8'));
+pkg.version = '${NEW_VERSION}';
+fs.writeFileSync('lite/package.json', JSON.stringify(pkg, null, 2) + '\n');
+"
+
+# esbuild + lib-pin + electron-builder. The dedicated runner reads
+# lite/package.json's version + deps and writes a merged temp config
+# (necessary because electron-builder's flat CLI arg parser can't
+# deserialize JSON object values at leaf nodes).
 npm run lite:build
 node lite/scripts/record-lib-sha.mjs
-
-# electron-builder with version override (no package.json mutation)
-npx electron-builder build --mac \
-    --config lite/electron-builder.json \
-    --config.extraMetadata.version="${NEW_VERSION}" \
-    --publish never
+node lite/scripts/electron-builder-mac.mjs --publish=never
 
 BUILD_DURATION=$(($(date +%s) - BUILD_START_TIME))
 echo -e "${GREEN}Build completed in ${BUILD_DURATION} seconds${NC}"
@@ -162,6 +180,22 @@ done
 
 if [ "$ALL_FILES_EXIST" = false ]; then
     echo -e "${RED}Build failed - missing files${NC}"
+    exit 1
+fi
+
+# Bundle-size sanity check: with the slim excludes (ADR-047), the DMG
+# should be ~165MB. If it's >200MB, the !node_modules/<pkg>/**/*
+# excludes in lite/electron-builder.json are NOT taking effect and one
+# or more of full's heavy deps is being bundled. Hard-fail so we don't
+# silently regress.
+LITE_DMG_BYTES=$(stat -f%z "${LITE_DMG}")
+LITE_DMG_MB=$((LITE_DMG_BYTES / 1024 / 1024))
+echo -e "${BLUE}Bundle size: ${LITE_DMG_MB} MB${NC}"
+if [ "$LITE_DMG_MB" -gt 200 ]; then
+    echo -e "${RED}Bundle too large (${LITE_DMG_MB} MB > 200 MB threshold).${NC}"
+    echo -e "${RED}The slim excludes likely failed -- one of full's heavy deps slipped through.${NC}"
+    echo -e "${RED}Check lite/electron-builder.json's !node_modules/* exclude list.${NC}"
+    echo -e "${RED}Inspect: du -sh dist-lite/mac-arm64/*.app/Contents/Resources/app.asar.unpacked/node_modules/* | sort -rh${NC}"
     exit 1
 fi
 echo ""

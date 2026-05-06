@@ -18,7 +18,6 @@ describe('API docs manifest', () => {
     const slugs = MANIFEST.modules.map((m) => m.slug).sort();
     expect(slugs).toEqual(
       [
-        'ai',
         'ai-run-times',
         'auth',
         'bug-report',
@@ -31,7 +30,9 @@ describe('API docs manifest', () => {
         'logging',
         'main-window',
         'neon',
+        'onboarding',
         'settings',
+        'tools',
         'totp',
         'university',
       ].sort()

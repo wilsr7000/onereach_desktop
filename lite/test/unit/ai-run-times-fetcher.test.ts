@@ -7,7 +7,6 @@ import {
   parseRssFeed,
   stableArticleId,
   countWords,
-  extractArticleContent,
   fetchAndParseFeed,
   fetchArticleContent,
   _setFetchImplForTesting,
@@ -123,52 +122,6 @@ describe('countWords', () => {
   });
 });
 
-describe('extractArticleContent', () => {
-  it('prefers <article> when present and substantive', () => {
-    const html = `
-      <html><body>
-        <nav>nav stuff</nav>
-        <article>
-          <h1>Title</h1>
-          <p>${'Long article content. '.repeat(50)}</p>
-        </article>
-        <footer>foot</footer>
-      </body></html>
-    `;
-    const out = extractArticleContent(html);
-    expect(out).toContain('Long article content');
-    expect(out).not.toContain('nav stuff');
-    expect(out).not.toContain('foot');
-  });
-
-  it('strips script and style blocks', () => {
-    const html = `
-      <html><body>
-        <article>
-          <script>alert('hi')</script>
-          <style>body { color: red; }</style>
-          <p>${'Content '.repeat(50)}</p>
-        </article>
-      </body></html>
-    `;
-    const out = extractArticleContent(html);
-    expect(out).not.toContain('alert');
-    expect(out).not.toContain('color: red');
-  });
-
-  it('falls back to known content classes', () => {
-    const html = `
-      <html><body>
-        <div class="entry-content">
-          <p>${'Real content here. '.repeat(50)}</p>
-        </div>
-      </body></html>
-    `;
-    const out = extractArticleContent(html);
-    expect(out).toContain('Real content here');
-  });
-});
-
 describe('fetchAndParseFeed (with stub fetch)', () => {
   it('returns parsed articles on 200', async () => {
     _setFetchImplForTesting(
@@ -234,7 +187,10 @@ describe('fetchAndParseFeed (with stub fetch)', () => {
 });
 
 describe('fetchArticleContent (with stub fetch)', () => {
-  it('returns extracted html + word count + reading time', async () => {
+  it('returns the raw HTML verbatim plus word count + reading time', async () => {
+    // Renderer-side extraction landed in `article-extractor.ts`. The
+    // fetcher now ships untouched HTML and just produces a coarse
+    // word-count for the "X min read" badge.
     const html = `<html><body><article>${'<p>Body content here. </p>'.repeat(30)}</article></body></html>`;
     _setFetchImplForTesting(
       vi.fn().mockResolvedValue({
@@ -245,6 +201,9 @@ describe('fetchArticleContent (with stub fetch)', () => {
       } as unknown as Response) as unknown as typeof fetch
     );
     const result = await fetchArticleContent({ url: 'https://example.com/a' });
+    // Raw HTML round-trips intact (no extraction applied here).
+    expect(result.html).toBe(html);
+    expect(result.html).toMatch(/<html><body><article>/);
     expect(result.html).toContain('Body content here');
     expect(result.wordCount).toBeGreaterThan(50);
     expect(result.readingTimeMinutes).toBeGreaterThanOrEqual(1);

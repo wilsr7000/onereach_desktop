@@ -174,6 +174,23 @@ body {
   cursor: not-allowed;
 }
 
+.sidebar-tab-label {
+  flex: 1 1 auto;
+}
+
+.sidebar-tab-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff9c4a;
+  box-shadow: 0 0 6px rgba(255, 156, 74, 0.55);
+}
+
+.sidebar-tab-dot[hidden] {
+  display: none;
+}
+
 /* ============================================================
  * CONTENT AREA
  * ============================================================ */
@@ -464,14 +481,59 @@ body {
 .acc-token-head {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+}
+
+/* Disclosure toggle: collapses the long token value behind a click.
+   Tokens are scary-looking when always-on; the user usually only
+   needs to confirm they were captured (via the meta line, which
+   stays visible). */
+.acc-token-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  margin: 0;
+  cursor: pointer;
+  font-family: inherit;
+  color: rgba(255, 255, 255, 0.78);
+  border-radius: 4px;
+  transition: background 120ms;
+}
+
+.acc-token-toggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #ffffff;
+}
+
+.acc-token-toggle:focus-visible {
+  outline: 2px solid rgba(79, 140, 255, 0.6);
+  outline-offset: 1px;
+}
+
+.acc-token-toggle-chevron {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.5);
+  width: 10px;
+  display: inline-block;
+  text-align: center;
+}
+
+.acc-token-toggle[aria-expanded="true"] .acc-token-toggle-chevron {
+  color: rgba(170, 198, 255, 0.95);
+}
+
+.acc-token-body[hidden] {
+  display: none;
 }
 
 .acc-token-label {
   font-size: 12px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.78);
+  color: inherit;
 }
 
 .acc-token-meta {
@@ -1389,6 +1451,61 @@ body {
   font-size: 13px;
   font-weight: 500;
   margin-bottom: 4px;
+}
+
+/* Quick-add row: pre-form picker for popular agents (ChatGPT,
+   Claude, Gemini, Perplexity, Grok). Hidden in edit mode. */
+.idw-quick-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: rgba(79, 140, 255, 0.06);
+  border: 1px solid rgba(79, 140, 255, 0.20);
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.idw-quick-add[hidden] {
+  display: none;
+}
+
+.idw-quick-add-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(170, 198, 255, 0.95);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.idw-quick-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.idw-quick-add-btn {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+
+.idw-quick-add-btn:hover {
+  background: rgba(79, 140, 255, 0.14);
+  border-color: rgba(79, 140, 255, 0.45);
+  color: #fff;
+}
+
+.idw-quick-add-help {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .idw-form-field {

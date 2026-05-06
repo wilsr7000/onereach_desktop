@@ -8,6 +8,7 @@
       content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;"
     />
     <title>OneReach.ai - App Health Dashboard</title>
+    <link rel="stylesheet" href="onereach-signature.css" />
     <link rel="stylesheet" href="app-health-dashboard.css" />
   </head>
   <body>
@@ -16,7 +17,9 @@
       <header class="dashboard-header">
         <div class="header-left">
           <div class="logo">
-            <span class="logo-icon">◎</span>
+            <span class="logo-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/></svg>
+            </span>
             <span class="logo-text">OneReach.ai</span>
           </div>
           <h1 class="dashboard-title">App Health Dashboard</h1>
@@ -33,39 +36,39 @@
       <!-- Navigation Tabs -->
       <nav class="tab-navigation">
         <button class="tab-btn active" data-tab="overview">
-          <span class="tab-icon">◉</span>
+          <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/></svg></span>
           <span class="tab-label">Overview</span>
         </button>
         <button class="tab-btn" data-tab="activity">
-          <span class="tab-icon">◈</span>
+          <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 8 14 10 6 14 18 16 10 20 10"/></svg></span>
           <span class="tab-label">Activity</span>
         </button>
         <button class="tab-btn" data-tab="spaces">
-          <span class="tab-icon">▣</span>
+          <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg></span>
           <span class="tab-label">Spaces</span>
         </button>
         <button class="tab-btn" data-tab="logs">
-          <span class="tab-icon">☰</span>
+          <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>
           <span class="tab-label">Logs</span>
         </button>
         <button class="tab-btn" data-tab="llm">
-          <span class="tab-icon">◇</span>
+          <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="3" transform="rotate(45 12 12)"/></svg></span>
           <span class="tab-label">LLM Usage</span>
         </button>
         <button class="tab-btn" data-tab="pipeline">
-          <span class="tab-icon">⬡</span>
+          <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10l5 8-5 8H7l-5-8 5-8z"/></svg></span>
           <span class="tab-label">Pipeline</span>
         </button>
         <button class="tab-btn" data-tab="agent">
-          <span class="tab-icon">◎</span>
+          <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M12 8V5"/><circle cx="12" cy="3" r="1.5"/></svg></span>
           <span class="tab-label">Agent</span>
         </button>
         <button class="tab-btn" data-tab="broken">
-          <span class="tab-icon">⚠</span>
+          <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span>
           <span class="tab-label">Broken Items</span>
         </button>
         <button class="tab-btn" data-tab="settings">
-          <span class="tab-icon">⚙</span>
+          <span class="tab-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8 1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
           <span class="tab-label">Settings</span>
         </button>
       </nav>
@@ -78,7 +81,7 @@
             <!-- Health Rings Card - Apple Health Style -->
             <div class="card health-rings-card">
               <h3 class="card-title">
-                <span class="title-icon">◎</span>
+                <span class="title-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/></svg></span>
                 Today's Health
                 <span class="health-score-badge" id="overall-health-score">--</span>
               </h3>
@@ -188,7 +191,7 @@
             <!-- Today's Summary Card -->
             <div class="card summary-card">
               <h3 class="card-title">
-                <span class="title-icon">◈</span>
+                <span class="title-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 8 14 10 6 14 18 16 10 20 10"/></svg></span>
                 Today's Summary
               </h3>
               <div class="summary-grid">
@@ -214,7 +217,7 @@
             <!-- Spaces Health Card -->
             <div class="card health-card">
               <h3 class="card-title">
-                <span class="title-icon">▣</span>
+                <span class="title-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/></svg></span>
                 Spaces Health
               </h3>
               <div class="health-content">
@@ -240,7 +243,7 @@
             <!-- LLM Costs Card -->
             <div class="card cost-card">
               <h3 class="card-title">
-                <span class="title-icon">◇</span>
+                <span class="title-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="3" transform="rotate(45 12 12)"/></svg></span>
                 LLM Costs (This Month)
               </h3>
               <div class="cost-content">
@@ -264,7 +267,7 @@
             <!-- Recent Activity Feed -->
             <div class="card activity-feed-card">
               <h3 class="card-title">
-                <span class="title-icon">◎</span>
+                <span class="title-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>
                 Recent Activity
                 <span class="live-indicator">LIVE</span>
               </h3>
@@ -420,7 +423,7 @@
           <div class="llm-overview">
             <div class="llm-provider-card">
               <div class="provider-header claude">
-                <span class="provider-icon">◇</span>
+                <span class="provider-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="3" transform="rotate(45 12 12)"/></svg></span>
                 <span class="provider-name">CLAUDE</span>
               </div>
               <div class="provider-stats">
@@ -445,7 +448,7 @@
 
             <div class="llm-provider-card">
               <div class="provider-header openai">
-                <span class="provider-icon">◈</span>
+                <span class="provider-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 8 14 10 6 14 18 16 10 20 10"/></svg></span>
                 <span class="provider-name">OPENAI</span>
               </div>
               <div class="provider-stats">
@@ -654,7 +657,7 @@
             <h3>Issues Requiring Attention</h3>
             <div class="attention-list" id="attention-list">
               <div class="attention-empty">
-                <span class="attention-icon">✓</span>
+                <span class="attention-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
                 <span>No issues requiring manual intervention</span>
               </div>
             </div>
@@ -696,7 +699,7 @@
           </div>
 
           <div class="broken-notice" id="broken-notice" style="display: none">
-            <span class="notice-icon">ℹ</span>
+            <span class="notice-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span>
             <span class="notice-text"
               >Items with a line through were from a previous version and are archived after update.</span
             >
@@ -706,7 +709,7 @@
             <h3>Current Version Issues</h3>
             <div class="broken-items-list" id="broken-items-list">
               <div class="broken-empty">
-                <span class="empty-icon">✓</span>
+                <span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
                 <span>No broken items recorded for this version</span>
               </div>
             </div>

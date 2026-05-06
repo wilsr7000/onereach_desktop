@@ -15,7 +15,7 @@
         <div class="kicker">Agentic University</div>
         <h1>AI Run Times</h1>
         <p class="frame-subtitle">
-          Field reports, design patterns, and case studies from teams shipping conversational AI at the edge. Configure an OpenAI key in Settings to listen to articles instead of reading them.
+          Field reports, design patterns, and case studies from teams shipping conversational AI at the edge.
         </p>
       </div>
       <div class="frame-header-actions">
@@ -24,38 +24,6 @@
         <button type="button" id="export-log-btn" class="btn-secondary" title="Download reading history">Reading Log</button>
       </div>
     </header>
-
-    <div class="playlist-bar" id="playlist-bar" hidden>
-      <div class="playlist-controls">
-        <button type="button" id="pl-prev" class="playlist-btn" title="Previous">&#9198;</button>
-        <button type="button" id="pl-play" class="playlist-btn playlist-btn-primary" title="Play / Pause">&#9658;</button>
-        <button type="button" id="pl-next" class="playlist-btn" title="Next">&#9197;</button>
-      </div>
-      <div class="playlist-now-playing">
-        <span class="playlist-label" id="playlist-label">Listening Queue</span>
-        <span class="playlist-current-title" id="playlist-current-title">No article selected</span>
-      </div>
-      <div class="playlist-progress-container">
-        <div class="playlist-progress" id="playlist-progress">
-          <div class="playlist-progress-fill" id="playlist-progress-fill"></div>
-        </div>
-        <span class="playlist-time" id="playlist-time">0:00 / 0:00</span>
-      </div>
-      <div class="playlist-queue-toggle">
-        <span class="playlist-queue-count" id="playlist-queue-count">0 in queue</span>
-        <button type="button" id="pl-toggle" class="playlist-toggle-btn" title="Show / hide queue">&#9662;</button>
-      </div>
-    </div>
-    <div class="playlist-panel" id="playlist-panel" hidden>
-      <div class="playlist-panel-header">
-        <span class="playlist-panel-title">Listening Queue</span>
-        <div class="playlist-panel-actions">
-          <button type="button" id="pl-select-all" class="btn-link">Select All</button>
-          <button type="button" id="pl-clear-all" class="btn-link">Clear</button>
-        </div>
-      </div>
-      <div class="playlist-items" id="playlist-items"></div>
-    </div>
 
     <div class="prefs-panel" id="prefs-panel" hidden>
       <div class="prefs-header">
@@ -82,7 +50,6 @@
             <span class="article-modal-reading-time" id="article-reading-time"></span>
           </div>
           <div class="article-modal-actions">
-            <button type="button" id="article-listen-btn" class="btn-secondary" title="Generate TTS audio">Listen</button>
             <button type="button" id="article-original-btn" class="btn-secondary" title="Open in default browser">Open Original</button>
             <button type="button" id="article-close-btn" class="btn-secondary article-close" title="Close" aria-label="Close">&times;</button>
           </div>

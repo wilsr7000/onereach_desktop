@@ -146,6 +146,7 @@ body {
  * ============================================================ */
 
 .home-view {
+  position: relative;
   flex: 1 1 auto;
   background:
     radial-gradient(circle at 50% 12%, rgba(79, 140, 255, 0.12), transparent 36%),
@@ -154,10 +155,63 @@ body {
   align-items: center;
   justify-content: center;
   padding: 40px;
-  overflow: auto;
+  overflow: hidden;
+}
+
+/* Decorative orb mark: partially off-screen bottom-right, heavily
+   faded so it reads as a soft brand watermark, not page chrome.
+   Same visual language as `.brand-mark` in placeholder.html
+   (concentric rings + radial inner glow) but scaled up to 720px and
+   muted with low opacity. pointer-events:none so the auth block /
+   buttons stay clickable through it. */
+.home-orb {
+  position: absolute;
+  bottom: -260px;
+  right: -240px;
+  width: 720px;
+  height: 720px;
+  border: 1px solid rgba(123, 219, 255, 0.10);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(123, 219, 255, 0.10), transparent 58%),
+    rgba(79, 140, 255, 0.025);
+  box-shadow:
+    inset 0 0 220px rgba(79, 140, 255, 0.08),
+    0 0 200px rgba(79, 140, 255, 0.06);
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.home-orb::before,
+.home-orb::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* Inner ring -- echoes the placeholder's concentric ring detail. */
+.home-orb::before {
+  inset: 110px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Hot center: small bright dot, the focal point of the orb. */
+.home-orb::after {
+  top: 50%;
+  left: 50%;
+  width: 56px;
+  height: 56px;
+  margin-top: -28px;
+  margin-left: -28px;
+  background: radial-gradient(circle, rgba(167, 233, 255, 0.55), transparent 70%);
+  filter: blur(2px);
 }
 
 .home-inner {
+  position: relative;
+  z-index: 1;
   max-width: 520px;
   text-align: center;
   display: flex;
@@ -190,11 +244,22 @@ body {
   opacity: 0.6;
 }
 
-.version {
-  font-size: 14px;
+/* Bottom-right version badge: subtle, fixed-position so it stays
+   in the corner regardless of home-view content height. Tab views
+   in the main process cover the home view region, which means the
+   badge naturally hides itself when an agent tab is active --
+   exactly the behavior we want. */
+.version-badge {
+  position: fixed;
+  right: 14px;
+  bottom: 10px;
+  z-index: 5;
+  font-size: 11px;
   font-family: var(--or-font-mono);
-  opacity: 0.5;
-  margin-bottom: 4px;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.4px;
+  pointer-events: none;
+  user-select: none;
 }
 
 .tagline {
@@ -279,6 +344,211 @@ body {
   margin-top: 12px;
   max-width: 360px;
   line-height: 1.5;
+}
+
+.info-banner {
+  background: rgba(79, 140, 255, 0.10);
+  border: 1px solid rgba(79, 140, 255, 0.30);
+  color: #aac6ff;
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  margin-top: 12px;
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+.warn-banner {
+  background: rgba(255, 193, 7, 0.10);
+  border: 1px solid rgba(255, 193, 7, 0.35);
+  color: #ffd76b;
+  font-size: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-top: 12px;
+  max-width: 380px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.warn-banner-headline {
+  font-weight: 500;
+  color: #ffe9a8;
+}
+
+.warn-banner-body {
+  color: rgba(255, 217, 121, 0.85);
+}
+
+.warn-banner-action {
+  align-self: flex-start;
+  margin-top: 4px;
+  background: transparent;
+  border: 1px solid rgba(255, 193, 7, 0.4);
+  color: #ffd76b;
+  font-family: inherit;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.warn-banner-action:hover {
+  background: rgba(255, 193, 7, 0.12);
+}
+
+/* ============================================================
+ * Onboarding card -- "Set up your workspace"
+ *
+ * Three-row card visible AFTER sign-in. Each row is title + subtitle
+ * + action button. NOT a checklist of jargon labels.
+ * ============================================================ */
+
+.onboarding-card {
+  margin-top: 28px;
+  padding: 18px 22px 16px;
+  background: rgba(79, 140, 255, 0.06);
+  border: 1px solid rgba(79, 140, 255, 0.20);
+  border-radius: 12px;
+  max-width: 540px;
+  text-align: left;
+}
+
+.onboarding-card[hidden] { display: none; }
+
+.onboarding-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+
+.onboarding-card-headings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.onboarding-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.onboarding-card-subtitle {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.onboarding-dismiss {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 18px;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  padding: 0;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.onboarding-dismiss:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.onboarding-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.onboarding-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.onboarding-row:first-child {
+  border-top: none;
+}
+
+.onboarding-row.done .onboarding-row-title,
+.onboarding-row.done .onboarding-row-subtitle {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.onboarding-status {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #6bff8a;
+  font-weight: 700;
+  background: transparent;
+}
+
+.onboarding-row.done .onboarding-status {
+  background: rgba(107, 255, 138, 0.18);
+  border-color: rgba(107, 255, 138, 0.45);
+}
+
+.onboarding-text {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.onboarding-row-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+  line-height: 1.35;
+}
+
+.onboarding-row-subtitle {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.45;
+}
+
+.onboarding-row-action {
+  flex: 0 0 auto;
+  background: rgba(79, 140, 255, 0.14);
+  border: 1px solid rgba(79, 140, 255, 0.40);
+  color: #aac6ff;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.onboarding-row-action:hover {
+  background: rgba(79, 140, 255, 0.22);
+  border-color: rgba(79, 140, 255, 0.65);
+  color: #ffffff;
 }
 
 .home-cta-row {

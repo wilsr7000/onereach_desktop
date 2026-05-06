@@ -6,9 +6,12 @@
  *   - Article overlay reader (open via tile click)
  *   - Content preferences side panel
  *   - Reading log JSON download
- *   - TTS audio playlist (per-article Listen button + global
- *     prev/play/next + queue panel) with chunked OpenAI TTS, blob
- *     URL cleanup, queue auto-advance, mark-as-read on completion
+ *
+ * NOTE: TTS / "Listen" / audio playlist support was removed in
+ * the first-run UX hardening pass -- the inline OpenAI dependency
+ * was a niche surface that didn't earn its keep. The article
+ * fetching + reader stays; bringing audio back is a separate chunk
+ * that should also bring back the AI service module.
  *
  * Loaded as an external script (not inline) so the strict CSP
  * `script-src 'self'` allows execution.
@@ -16,11 +19,11 @@
 
 /// <reference path="../lite-window.d.ts" />
 
+import { extractArticle } from './article-extractor.js';
+
 export {};
 
 // ─── helpers ─────────────────────────────────────────────────────────────
-
-const READ_LOG_KEY_PREFIX = 'art-read-cache:';
 
 function $(id: string): HTMLElement | null {
   return document.getElementById(id);
@@ -37,17 +40,6 @@ function escapeHtml(s: string): string {
 
 function escapeAttr(s: string): string {
   return escapeHtml(s);
-}
-
-function truncate(s: string, n: number): string {
-  return s.length <= n ? s : `${s.slice(0, n - 1)}\u2026`;
-}
-
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 function showToast(msg: string, kind: 'info' | 'error' | 'success' = 'info'): void {
@@ -72,25 +64,24 @@ let articles: LiteAiRunTimesArticle[] = [];
 let preferences: LiteAiRunTimesPreference[] = [];
 let readingLogIds = new Set<string>();
 let currentArticleId: string | null = null;
-
-interface QueueItem {
-  articleId: string;
-  title: string;
-  link: string;
-}
-
-let queue: QueueItem[] = [];
-let currentQueueIndex = -1;
-let currentAudio: HTMLAudioElement | null = null;
-let currentAudioBlobUrl: string | null = null;
-let currentAudioChunks: ArrayBuffer[] = [];
-let currentChunkIndex = 0;
-let isPlaying = false;
 let articleStartTimestamp: number | null = null;
 
 // ─── boot ────────────────────────────────────────────────────────────────
 
 function boot(): void {
+  // Defensive: enforce hidden state on the two full-bleed overlay
+  // panels. The HTML `hidden` attribute is in the markup but author
+  // CSS rules (`.article-overlay { display: flex }` and
+  // `.prefs-panel { display: flex }`) used to override it, leaving
+  // both painted across the window on first open. The CSS now
+  // includes a `[hidden] { display: none !important }` reset; this
+  // line is a belt-and-suspenders backstop in case future CSS
+  // edits accidentally regress the same way.
+  const articleOverlayInit = $('article-overlay');
+  if (articleOverlayInit !== null) articleOverlayInit.hidden = true;
+  const prefsPanelInit = $('prefs-panel');
+  if (prefsPanelInit !== null) prefsPanelInit.hidden = true;
+
   const closeBtn = $('close-btn');
   if (closeBtn !== null) closeBtn.addEventListener('click', () => window.close());
 
@@ -117,33 +108,6 @@ function boot(): void {
   if (articleClose !== null) articleClose.addEventListener('click', () => closeArticle());
   const articleOriginal = $('article-original-btn');
   if (articleOriginal !== null) articleOriginal.addEventListener('click', () => openOriginal());
-  const articleListen = $('article-listen-btn');
-  if (articleListen !== null) articleListen.addEventListener('click', () => void listenToArticle());
-
-  // Playlist controls
-  const plPlay = $('pl-play');
-  if (plPlay !== null) plPlay.addEventListener('click', () => togglePlayback());
-  const plPrev = $('pl-prev');
-  if (plPrev !== null) plPrev.addEventListener('click', () => playPrevious());
-  const plNext = $('pl-next');
-  if (plNext !== null) plNext.addEventListener('click', () => playNext());
-  const plToggle = $('pl-toggle');
-  if (plToggle !== null) plToggle.addEventListener('click', () => togglePlaylistPanel());
-  const plSelectAll = $('pl-select-all');
-  if (plSelectAll !== null) plSelectAll.addEventListener('click', () => selectAllInQueue());
-  const plClearAll = $('pl-clear-all');
-  if (plClearAll !== null) plClearAll.addEventListener('click', () => clearQueue());
-
-  // Progress bar seek
-  const progress = $('playlist-progress');
-  if (progress !== null) {
-    progress.addEventListener('click', (e) => {
-      if (currentAudio === null) return;
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const ratio = (e.clientX - rect.left) / rect.width;
-      currentAudio.currentTime = currentAudio.duration * ratio;
-    });
-  }
 
   void initialLoad();
 }
@@ -157,31 +121,90 @@ if (document.readyState === 'loading') {
 // ─── load ────────────────────────────────────────────────────────────────
 
 async function initialLoad(): Promise<void> {
+  window.logging?.info('ai-run-times', 'renderer: initialLoad start', {
+    hasBridge: window.lite?.aiRunTimes !== undefined,
+  });
   const bridge = window.lite?.aiRunTimes;
   if (bridge === undefined) {
+    window.logging?.error('ai-run-times', 'renderer: bridge unavailable', {});
     showError('AI Run Times bridge unavailable. Restart the app to recover.');
     return;
   }
   showLoading();
-  try {
-    const [arts, prefs, log] = await Promise.all([
-      bridge.listArticles(),
-      bridge.listPreferences(),
-      bridge.listReadingLog(),
-    ]);
-    articles = arts;
-    preferences = prefs;
-    readingLogIds = new Set(log.map((e) => e.articleId));
-    if (articles.length === 0) {
-      // Auto-refresh on first open.
-      await refreshFeed(/* silent */ true);
-    } else {
-      render();
-      updateFooter();
-    }
-  } catch (err) {
-    showError(`Failed to load: ${(err as Error).message}`);
+  // Promise.allSettled (not Promise.all) so a single failing section
+  // -- typically reading-log or preferences when KV is rejecting the
+  // session -- doesn't take the whole window down. Each section
+  // independently falls back to an empty default; the overall UI
+  // shell still renders so the user can sign in again, refresh, or
+  // file a bug report.
+  const [artRes, prefRes, logRes] = await Promise.all([
+    bridge.listArticles().catch((err) => ({ __error: err })),
+    bridge.listPreferences().catch((err) => ({ __error: err })),
+    bridge.listReadingLog().catch((err) => ({ __error: err })),
+  ]);
+
+  const sectionErrors: string[] = [];
+  if (Array.isArray(artRes)) {
+    articles = artRes;
+  } else {
+    sectionErrors.push(formatBridgeError(bridge, 'articles', artRes.__error));
+    articles = [];
   }
+  if (Array.isArray(prefRes)) {
+    preferences = prefRes;
+  } else {
+    sectionErrors.push(formatBridgeError(bridge, 'preferences', prefRes.__error));
+    preferences = [];
+  }
+  if (Array.isArray(logRes)) {
+    readingLogIds = new Set(logRes.map((e) => e.articleId));
+  } else {
+    sectionErrors.push(formatBridgeError(bridge, 'reading log', logRes.__error));
+    readingLogIds = new Set();
+  }
+
+  window.logging?.info('ai-run-times', 'renderer: initialLoad results', {
+    articleCount: articles.length,
+    preferenceCount: preferences.length,
+    enabledPreferenceCount: preferences.filter((p) => p.enabled).length,
+    readingLogSize: readingLogIds.size,
+    sectionErrorCount: sectionErrors.length,
+    sectionErrors,
+    artResShape: Array.isArray(artRes) ? `array(${artRes.length})` : typeof artRes,
+    prefResShape: Array.isArray(prefRes) ? `array(${prefRes.length})` : typeof prefRes,
+  });
+
+  if (articles.length === 0 && sectionErrors.length === 0) {
+    window.logging?.info('ai-run-times', 'renderer: auto-refresh triggered (no cached articles)', {});
+    await refreshFeed(/* silent */ true);
+    return;
+  }
+
+  render();
+  updateFooter();
+  if (sectionErrors.length > 0) {
+    // Non-fatal: tell the user once via a toast. The header/footer
+    // remain interactive so they can still hit Refresh, Preferences,
+    // or close the window.
+    showToast(sectionErrors[0] ?? 'Some sections failed to load.', 'error');
+  }
+}
+
+function formatBridgeError(
+  bridge: LiteAiRunTimesBridge,
+  section: string,
+  err: unknown
+): string {
+  const parsed = bridge.parseError(err);
+  if (parsed !== null) {
+    const msg = `${parsed.message} ${parsed.remediation}`.trim();
+    return `Couldn't load ${section}: ${msg}`;
+  }
+  // Strip Electron's "Error invoking remote method '...':" prefix
+  // when the error wasn't our structured shape.
+  const raw = (err as Error)?.message ?? String(err);
+  const cleaned = raw.replace(/^Error invoking remote method[^:]*:\s*Error:\s*/, '');
+  return `Couldn't load ${section}: ${cleaned}`;
 }
 
 async function refreshFeed(silent = false): Promise<void> {
@@ -189,9 +212,21 @@ async function refreshFeed(silent = false): Promise<void> {
   if (bridge === undefined) return;
   if (!silent) showToast('Refreshing feed...', 'info');
   showLoading();
+  window.logging?.info('ai-run-times', 'renderer: refreshFeed start', { silent });
   try {
     const result = await bridge.refreshFeed();
-    articles = await bridge.listArticles();
+    window.logging?.info('ai-run-times', 'renderer: refreshFeed result', {
+      fetchedCount: result.fetchedCount,
+      newArticles: result.newArticles,
+      perFeedCount: result.perFeed.length,
+      failedFeeds: result.perFeed.filter((p) => !p.ok).length,
+    });
+    const fetchedArticles = await bridge.listArticles();
+    window.logging?.info('ai-run-times', 'renderer: refreshFeed listArticles', {
+      articleCount: fetchedArticles.length,
+      sampleIds: fetchedArticles.slice(0, 3).map((a) => a.id),
+    });
+    articles = fetchedArticles;
     if (result.newArticles > 0) {
       showToast(`Added ${result.newArticles} new article${result.newArticles === 1 ? '' : 's'}.`, 'success');
     } else if (result.fetchedCount > 0) {
@@ -225,23 +260,36 @@ function showLoading(): void {
 
 function render(): void {
   const content = $('feed-content');
-  if (content === null) return;
-  const enabledIds = new Set(preferences.filter((p) => p.enabled).map((p) => p.id));
-  const visible = articles.filter((a) => articleMatchesPreferences(a, enabledIds));
-  if (visible.length === 0) {
+  if (content === null) {
+    window.logging?.warn('ai-run-times', 'renderer: render() called but #feed-content not in DOM', {});
+    return;
+  }
+  // Show every cached article. The full app's Flipboard reader does
+  // not filter the article grid by preferences (the prefs panel in
+  // the full app is for the audio playlist queue, not for hiding
+  // tiles); Lite mirrors that behavior. Topic preferences remain
+  // in the side panel for a future feature -- e.g. when articles
+  // are classified by an OAGI model rather than relying on the
+  // RSS feed's categorical hints -- but they never hide tiles
+  // today.
+  window.logging?.info('ai-run-times', 'renderer: render', {
+    articleCount: articles.length,
+    preferenceCount: preferences.length,
+  });
+  if (articles.length === 0) {
     content.innerHTML = `
       <div class="banner empty">
         <div class="empty-title">No articles to show</div>
-        <div class="empty-subtitle">Try Refresh to fetch the latest, or open Preferences to widen the topic filter.</div>
+        <div class="empty-subtitle">Hit Refresh to fetch the latest stories from your feeds.</div>
       </div>
     `;
     return;
   }
-  const tiles = visible.map(renderTile).join('\n');
+  const tiles = articles.map(renderTile).join('\n');
   content.innerHTML = `
     <div class="section-header">
       <span class="section-title">Latest</span>
-      <span class="section-count">(${visible.length})</span>
+      <span class="section-count">(${articles.length})</span>
     </div>
     <div class="tile-grid">${tiles}</div>
   `;
@@ -250,23 +298,6 @@ function render(): void {
     if (typeof id !== 'string') continue;
     tileEl.addEventListener('click', () => void openArticle(id));
   }
-}
-
-function articleMatchesPreferences(
-  article: LiteAiRunTimesArticle,
-  enabledIds: Set<string>
-): boolean {
-  if (enabledIds.size === preferences.length) return true; // all enabled
-  if (article.categories.length === 0) return true; // uncategorized always shows
-  // Match if any of the article's categories overlap any enabled preference label
-  // (simple substring match -- robust to feed-specific category strings).
-  const enabledLabels = preferences
-    .filter((p) => enabledIds.has(p.id))
-    .map((p) => p.label.toLowerCase());
-  const articleCats = article.categories.map((c) => c.toLowerCase());
-  return enabledLabels.some((label) =>
-    articleCats.some((cat) => cat.includes(label) || label.includes(cat))
-  );
 }
 
 function renderTile(a: LiteAiRunTimesArticle): string {
@@ -351,15 +382,54 @@ async function openArticle(id: string): Promise<void> {
 
   try {
     const fetched = await bridge.fetchArticleBody(id);
-    body.innerHTML = `
-      <h1>${escapeHtml(fetched.title)}</h1>
-      ${fetched.author !== null ? `<p style="color:rgba(255,255,255,0.5);font-size:12px;margin-bottom:18px;">By ${escapeHtml(fetched.author)}</p>` : ''}
-      ${fetched.contentHtml ?? '<p>(No content extracted.)</p>'}
-    `;
-    if (fetched.readingTimeMinutes > 0) {
-      readingTimeEl.textContent = `${fetched.readingTimeMinutes} min read`;
+    // The bridge delivers raw HTML in `contentHtml` -- the renderer
+    // owns extraction now (see `article-extractor.ts`). Mirrors the
+    // full app's `Flipboard-IDW-Feed/uxmag-script.js` flow.
+    const rawHtml = fetched.contentHtml ?? '';
+    if (rawHtml.length === 0) {
+      body.innerHTML = '<div class="banner error">Article body could not be loaded.</div>';
+      return;
     }
-    // Update local cache so re-render reflects the new reading time.
+    const extracted = extractArticle(rawHtml, fetched.link);
+
+    // Hero image: prefer the article's own thumbnail (already in the
+    // feed cache) for visual continuity with the tile, fall back to
+    // the og:image / twitter:image meta the extractor pulled.
+    const heroUrl = fetched.thumbnailUrl ?? extracted.heroImageUrl;
+    const author = fetched.author ?? extracted.author;
+    const dateStr = formatPublishedDate(fetched.publishedAt);
+
+    body.innerHTML = renderArticleBody({
+      title: fetched.title,
+      heroUrl,
+      author,
+      dateStr,
+      contentHtml: extracted.contentHtml,
+    });
+
+    // Reading time: prefer the renderer's count over the main-side
+    // raw-HTML count -- the renderer's count is on the cleaned body,
+    // which is what the user actually reads.
+    const minutes =
+      extracted.readingTimeMinutes > 0
+        ? extracted.readingTimeMinutes
+        : fetched.readingTimeMinutes;
+    if (minutes > 0) readingTimeEl.textContent = `${minutes} min read`;
+
+    // Open external links in the user's default browser. The
+    // article body comes from a third-party page; in-window
+    // navigation would replace the modal with that page. Same
+    // behavior the full app's `processContentLinks` enforces.
+    const articleBodyContent = body.querySelector('.article-content');
+    if (articleBodyContent !== null) {
+      for (const a of Array.from(articleBodyContent.querySelectorAll('a'))) {
+        if (a instanceof HTMLAnchorElement) {
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+        }
+      }
+    }
+
     const idx = articles.findIndex((a) => a.id === id);
     if (idx >= 0) articles[idx] = fetched;
     void recordOpen(fetched);
@@ -367,6 +437,68 @@ async function openArticle(id: string): Promise<void> {
     const parsed = bridge.parseError(err);
     const msg = parsed !== null ? `${parsed.message} ${parsed.remediation}`.trim() : (err as Error).message;
     body.innerHTML = `<div class="banner error">${escapeHtml(msg)}</div>`;
+  }
+}
+
+interface RenderArticleBodyOpts {
+  title: string;
+  heroUrl: string | null;
+  author: string | null;
+  dateStr: string | null;
+  contentHtml: string;
+}
+
+/**
+ * Render the article body: hero image with title overlay, then a
+ * metadata row (date + author), then the cleaned article content.
+ * Mirrors the full app's `articleHTML` template in
+ * `uxmag-script.js:openArticle`.
+ *
+ * The extracted `contentHtml` is interpolated raw -- it has already
+ * been DOMParser-cleaned (scripts / styles / event handlers removed
+ * by the extractor). Title / author / date are escaped.
+ */
+function renderArticleBody(opts: RenderArticleBodyOpts): string {
+  const heroBlock =
+    opts.heroUrl !== null && opts.heroUrl.length > 0
+      ? `
+      <div class="article-header">
+        <img class="article-header-image" src="${escapeAttr(opts.heroUrl)}" alt="${escapeAttr(opts.title)}" loading="lazy" />
+        <div class="article-header-overlay">
+          <h1 id="article-title">${escapeHtml(opts.title)}</h1>
+        </div>
+      </div>
+    `
+      : `<h1 class="article-headline-no-hero">${escapeHtml(opts.title)}</h1>`;
+
+  const metaParts: string[] = [];
+  if (opts.dateStr !== null) metaParts.push(`<span class="article-date">${escapeHtml(opts.dateStr)}</span>`);
+  if (opts.author !== null && opts.author.length > 0) {
+    metaParts.push(`<span class="article-author">By ${escapeHtml(opts.author)}</span>`);
+  }
+  const metaBlock =
+    metaParts.length > 0 ? `<div class="article-metadata">${metaParts.join('')}</div>` : '';
+
+  return `
+    ${heroBlock}
+    ${metaBlock}
+    <div class="article-content">${opts.contentHtml}</div>
+  `;
+}
+
+/** Format an ISO publishedAt for the article-metadata bar. Best-effort -- returns null on parse failure. */
+function formatPublishedDate(iso: string | null): string | null {
+  if (iso === null || iso.length === 0) return null;
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return null;
+  try {
+    return new Date(ts).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return null;
   }
 }
 
@@ -413,9 +545,8 @@ function openOriginal(): void {
   const article = articles.find((a) => a.id === currentArticleId);
   if (article === undefined) return;
   // Use Electron's window.open which routes through setWindowOpenHandler.
-  // Since the AI Run Times window has no setWindowOpenHandler defined
-  // for external opens, falling back to changing location triggers
-  // Electron's default external link handling.
+  // Falling through to anchor-click triggers Electron's default
+  // external-link handling.
   const a = document.createElement('a');
   a.href = article.link;
   a.target = '_blank';
@@ -503,393 +634,3 @@ async function exportLog(): Promise<void> {
     showToast(`Export failed: ${(err as Error).message}`, 'error');
   }
 }
-
-// ─── TTS / audio playlist ────────────────────────────────────────────────
-
-async function listenToArticle(): Promise<void> {
-  if (currentArticleId === null) return;
-  const article = articles.find((a) => a.id === currentArticleId);
-  if (article === undefined) return;
-  if (article.contentHtml === null) {
-    showToast('Article body not loaded yet.', 'error');
-    return;
-  }
-  // Add to queue if not already present
-  if (!queue.some((q) => q.articleId === article.id)) {
-    queue.push({ articleId: article.id, title: article.title, link: article.link });
-    renderQueue();
-    updateQueueCount();
-  }
-  // Set as current and play
-  const idx = queue.findIndex((q) => q.articleId === article.id);
-  currentQueueIndex = idx;
-  await playArticle(article);
-}
-
-async function playArticle(article: LiteAiRunTimesArticle): Promise<void> {
-  const aiBridge = window.lite?.ai;
-  if (aiBridge === undefined) {
-    showToast('Lite AI bridge unavailable.', 'error');
-    return;
-  }
-  // Ensure key is configured before generating.
-  let status: { hasApiKey: boolean; defaultTtsVoice: string } | null = null;
-  try {
-    status = await aiBridge.status();
-  } catch {
-    showToast('Could not read AI service status.', 'error');
-    return;
-  }
-  if (!status.hasApiKey) {
-    showToast('Add an OpenAI API key in Settings -> AI to enable Listen.', 'error');
-    return;
-  }
-  showPlaylistBar();
-  setLabelTitle(article.title);
-  setPlayingTitle(article.title);
-  showToast('Generating audio...', 'info');
-
-  // Strip HTML to plain text + chunk to ~3500 chars on sentence boundary.
-  const text = htmlToText(article.contentHtml ?? '');
-  const chunks = chunkText(text, 3500);
-  if (chunks.length === 0) {
-    showToast('Article body is empty.', 'error');
-    return;
-  }
-  currentAudioChunks = [];
-  currentChunkIndex = 0;
-  // Per ADR-045: route TTS through the cached-tts IPC so replays of
-  // articles we've already listened to don't burn OpenAI credits.
-  // The main process checks Files first by deterministic key
-  // (articleId + voice + sha1(text)) and only generates on miss.
-  const artBridge = window.lite?.aiRunTimes;
-  if (artBridge === undefined) {
-    showToast('AI Run Times bridge unavailable.', 'error');
-    return;
-  }
-  // Generate first chunk before playing; subsequent chunks generate while playing.
-  try {
-    const firstResp = await artBridge.cachedTts({
-      articleId: article.id,
-      text: chunks[0] ?? '',
-      voice: status.defaultTtsVoice as LiteAiTtsVoice,
-    });
-    const firstBytes = base64ToBytes(firstResp.audioBase64);
-    currentAudioChunks.push(toArrayBuffer(firstBytes));
-  } catch (err) {
-    const parsed = aiBridge.parseError(err) ?? artBridge.parseError(err);
-    const msg = parsed !== null ? `${parsed.message} ${parsed.remediation}`.trim() : (err as Error).message;
-    showToast(`TTS failed: ${msg}`, 'error');
-    return;
-  }
-  // Play first chunk
-  startPlaybackOfChunk(0, article, chunks);
-  // Background-generate remaining chunks
-  void preloadRemainingChunks(chunks, status.defaultTtsVoice as LiteAiTtsVoice, article.id);
-}
-
-async function preloadRemainingChunks(
-  chunks: string[],
-  voice: LiteAiTtsVoice,
-  articleId: string
-): Promise<void> {
-  const artBridge = window.lite?.aiRunTimes;
-  if (artBridge === undefined) return;
-  for (let i = 1; i < chunks.length; i += 1) {
-    if (currentArticleId !== articleId) return; // user moved on
-    try {
-      const resp = await artBridge.cachedTts({
-        articleId,
-        text: chunks[i] ?? '',
-        voice,
-      });
-      currentAudioChunks.push(toArrayBuffer(base64ToBytes(resp.audioBase64)));
-    } catch {
-      // chunk fail -> stop preloading; user gets what we generated
-      return;
-    }
-  }
-}
-
-function startPlaybackOfChunk(
-  index: number,
-  article: LiteAiRunTimesArticle,
-  chunks: string[]
-): void {
-  if (index < 0 || index >= currentAudioChunks.length) return;
-  const buf = currentAudioChunks[index];
-  if (buf === undefined) return;
-  cleanupAudio();
-  const blob = new Blob([buf], { type: 'audio/mpeg' });
-  currentAudioBlobUrl = URL.createObjectURL(blob);
-  currentAudio = new Audio(currentAudioBlobUrl);
-  currentAudio.addEventListener('timeupdate', updateProgress);
-  currentAudio.addEventListener('ended', () => {
-    // Try next chunk
-    const nextIdx = currentChunkIndex + 1;
-    if (nextIdx < chunks.length) {
-      // Wait briefly for preload if not yet generated
-      const tryNext = (): void => {
-        if (nextIdx < currentAudioChunks.length) {
-          currentChunkIndex = nextIdx;
-          startPlaybackOfChunk(nextIdx, article, chunks);
-        } else {
-          window.setTimeout(tryNext, 400);
-        }
-      };
-      tryNext();
-    } else {
-      // Article finished. Mark as listened in reading log + move to next queue item.
-      void window.lite?.aiRunTimes?.recordRead({
-        articleId: article.id,
-        title: article.title,
-        link: article.link,
-        wordCount: article.wordCount,
-        finishedAt: new Date().toISOString(),
-        listenedToCompletion: true,
-      });
-      readingLogIds.add(article.id);
-      updateFooter();
-      render();
-      void playNext();
-    }
-  });
-  currentAudio.play().then(() => {
-    isPlaying = true;
-    updatePlayPauseButton();
-  }).catch(() => {
-    showToast('Audio playback failed.', 'error');
-  });
-}
-
-function cleanupAudio(): void {
-  if (currentAudio !== null) {
-    try {
-      currentAudio.pause();
-    } catch {
-      /* ignore */
-    }
-    currentAudio.src = '';
-    currentAudio = null;
-  }
-  if (currentAudioBlobUrl !== null) {
-    URL.revokeObjectURL(currentAudioBlobUrl);
-    currentAudioBlobUrl = null;
-  }
-}
-
-function togglePlayback(): void {
-  if (currentAudio === null) return;
-  if (currentAudio.paused) {
-    void currentAudio.play();
-    isPlaying = true;
-  } else {
-    currentAudio.pause();
-    isPlaying = false;
-  }
-  updatePlayPauseButton();
-}
-
-async function playNext(): Promise<void> {
-  if (currentQueueIndex < 0) return;
-  const nextIdx = currentQueueIndex + 1;
-  if (nextIdx >= queue.length) {
-    cleanupAudio();
-    isPlaying = false;
-    updatePlayPauseButton();
-    showToast('Queue finished.', 'success');
-    return;
-  }
-  const next = queue[nextIdx];
-  if (next === undefined) return;
-  currentQueueIndex = nextIdx;
-  const article = articles.find((a) => a.id === next.articleId);
-  if (article === undefined) return;
-  // If article body not loaded yet, fetch it first
-  if (article.contentHtml === null) {
-    try {
-      const fetched = await window.lite!.aiRunTimes!.fetchArticleBody(article.id);
-      const idx = articles.findIndex((a) => a.id === article.id);
-      if (idx >= 0) articles[idx] = fetched;
-      await playArticle(fetched);
-    } catch {
-      showToast(`Could not load ${next.title}.`, 'error');
-    }
-  } else {
-    await playArticle(article);
-  }
-  renderQueue();
-}
-
-async function playPrevious(): Promise<void> {
-  if (currentQueueIndex <= 0) return;
-  currentQueueIndex -= 1;
-  const item = queue[currentQueueIndex];
-  if (item === undefined) return;
-  const article = articles.find((a) => a.id === item.articleId);
-  if (article === undefined) return;
-  if (article.contentHtml === null) {
-    try {
-      const fetched = await window.lite!.aiRunTimes!.fetchArticleBody(article.id);
-      const idx = articles.findIndex((a) => a.id === article.id);
-      if (idx >= 0) articles[idx] = fetched;
-      await playArticle(fetched);
-    } catch {
-      showToast(`Could not load ${item.title}.`, 'error');
-    }
-  } else {
-    await playArticle(article);
-  }
-  renderQueue();
-}
-
-function showPlaylistBar(): void {
-  const bar = $('playlist-bar');
-  if (bar !== null) bar.hidden = false;
-}
-
-function setLabelTitle(t: string): void {
-  const label = $('playlist-label');
-  if (label !== null) label.textContent = `Now Playing \u00b7 ${truncate(t, 30)}`;
-}
-
-function setPlayingTitle(t: string): void {
-  const el = $('playlist-current-title');
-  if (el !== null) el.textContent = t;
-}
-
-function updateProgress(): void {
-  if (currentAudio === null) return;
-  const fill = $('playlist-progress-fill');
-  const time = $('playlist-time');
-  if (fill !== null && currentAudio.duration > 0) {
-    fill.style.width = `${(currentAudio.currentTime / currentAudio.duration) * 100}%`;
-  }
-  if (time !== null) {
-    time.textContent = `${formatTime(currentAudio.currentTime)} / ${formatTime(currentAudio.duration)}`;
-  }
-}
-
-function updatePlayPauseButton(): void {
-  const btn = $('pl-play');
-  if (btn === null) return;
-  btn.innerHTML = isPlaying ? '&#10074;&#10074;' : '&#9658;';
-}
-
-function togglePlaylistPanel(): void {
-  const panel = $('playlist-panel');
-  if (panel === null) return;
-  panel.hidden = !panel.hidden;
-}
-
-function renderQueue(): void {
-  const items = $('playlist-items');
-  if (items === null) return;
-  if (queue.length === 0) {
-    items.innerHTML = '<p style="color:rgba(255,255,255,0.5);font-size:11.5px;padding:8px 0;">Queue is empty. Click Listen on an article to add it.</p>';
-    return;
-  }
-  items.innerHTML = queue
-    .map(
-      (q, i) => `
-      <div class="playlist-item ${i === currentQueueIndex ? 'playing' : ''}" data-idx="${i}">
-        <span class="playlist-item-title">${escapeHtml(q.title)}</span>
-        <span class="playlist-item-meta">${i === currentQueueIndex ? 'playing' : `#${i + 1}`}</span>
-      </div>
-    `
-    )
-    .join('');
-  for (const el of Array.from(items.querySelectorAll<HTMLElement>('.playlist-item'))) {
-    el.addEventListener('click', () => {
-      const idxStr = el.dataset['idx'];
-      if (typeof idxStr !== 'string') return;
-      const idx = Number(idxStr);
-      if (!Number.isFinite(idx)) return;
-      const item = queue[idx];
-      if (item === undefined) return;
-      currentQueueIndex = idx;
-      const article = articles.find((a) => a.id === item.articleId);
-      if (article !== undefined) void playArticle(article);
-    });
-  }
-}
-
-function selectAllInQueue(): void {
-  // For v1, the queue model is "items added via Listen button"; nothing extra to select.
-  showToast('Use Listen on an article to add it to the queue.', 'info');
-}
-
-function clearQueue(): void {
-  cleanupAudio();
-  queue = [];
-  currentQueueIndex = -1;
-  isPlaying = false;
-  updatePlayPauseButton();
-  renderQueue();
-  updateQueueCount();
-  setPlayingTitle('No article selected');
-}
-
-function updateQueueCount(): void {
-  const el = $('playlist-queue-count');
-  if (el !== null) el.textContent = `${queue.length} in queue`;
-}
-
-// ─── helpers ─────────────────────────────────────────────────────────────
-
-function htmlToText(html: string): string {
-  const tmp = document.createElement('div');
-  tmp.innerHTML = html;
-  // Insert a space before block-level closing tags so inline text doesn't fuse.
-  return (tmp.innerText || tmp.textContent || '').replace(/\s+/g, ' ').trim();
-}
-
-function chunkText(text: string, maxChars: number): string[] {
-  if (text.length === 0) return [];
-  if (text.length <= maxChars) return [text];
-  const chunks: string[] = [];
-  let start = 0;
-  while (start < text.length) {
-    let end = Math.min(start + maxChars, text.length);
-    if (end < text.length) {
-      // Look for the last sentence boundary in the slice.
-      const slice = text.slice(start, end);
-      const lastPeriod = Math.max(
-        slice.lastIndexOf('. '),
-        slice.lastIndexOf('! '),
-        slice.lastIndexOf('? '),
-        slice.lastIndexOf('.\n'),
-        slice.lastIndexOf('!\n'),
-        slice.lastIndexOf('?\n')
-      );
-      if (lastPeriod > maxChars * 0.5) {
-        end = start + lastPeriod + 1;
-      }
-    }
-    chunks.push(text.slice(start, end).trim());
-    start = end;
-  }
-  return chunks;
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-/**
- * Copy a Uint8Array's bytes into a fresh ArrayBuffer. Avoids the
- * SharedArrayBuffer | ArrayBuffer ambiguity in `Uint8Array.buffer`
- * that breaks Blob constructor + addEventListener type checks.
- */
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const out = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(out).set(bytes);
-  return out;
-}
-
-// Touch unused imports so dep-cruiser doesn't flag.
-void READ_LOG_KEY_PREFIX;

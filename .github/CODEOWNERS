@@ -1,0 +1,46 @@
+# CODEOWNERS for the Onereach_app monorepo
+#
+# This file enforces review requirements for shared code (lib/) and
+# the lite/ vs full app boundary. See lite/LITE-RULES.md for the policy.
+#
+# Format: path-pattern @owner1 @owner2
+
+# Default owner for everything not otherwise matched
+*                                       @wilsr7000
+
+# Shared lib/ code -- changes affect BOTH apps. Dual review required.
+# Until the team grows, this is single-owner; expand the list when reviewers are added.
+/lib/                                   @wilsr7000
+/lib/**/*                               @wilsr7000
+
+# Lite app -- single-owner stub for now
+/lite/                                  @wilsr7000
+/lite/**/*                              @wilsr7000
+
+# Lite contracts (zod schemas) MUST be reviewed by the corresponding full-app surface owner.
+# Contract drift between lite's schema and full's IPC handler is the silent-divergence vector.
+# When the team grows, map each contract subfolder to the corresponding owner:
+#   /lite/contracts/spaces-*            @wilsr7000 @<spaces-owner>
+#   /lite/contracts/idw-*               @wilsr7000 @<idw-owner>
+#   /lite/contracts/ai-*                @wilsr7000 @<ai-service-owner>
+/lite/contracts/                        @wilsr7000
+/lite/contracts/**/*                    @wilsr7000
+
+# Constitutional documents -- changes are deliberate
+/lite/LITE-RULES.md                     @wilsr7000
+/lite/DECISIONS.md                      @wilsr7000
+/lite/PORTING.md                        @wilsr7000
+/.cursorrules                           @wilsr7000
+/PUNCH-LIST.md                          @wilsr7000
+/ROADMAP.md                             @wilsr7000
+
+# Build & release infrastructure
+/scripts/                               @wilsr7000
+/lite/electron-builder.json             @wilsr7000
+/.dependency-cruiser.cjs                @wilsr7000
+/.github/                               @wilsr7000
+
+# Notarization config -- security-sensitive
+/scripts/notarize.js                    @wilsr7000
+/scripts/notarize-manual.js             @wilsr7000
+/build/entitlements.mac.plist           @wilsr7000

@@ -93,6 +93,16 @@ let catalog: CatalogEntry[] = [];
 let installed: InstalledMap = { byCatalogId: new Map() };
 let activeKindFilter: Kind | 'all' = 'all';
 let searchQuery = '';
+/**
+ * Number of raw records OAGI returned on the most-recent fetch
+ * (BEFORE filtering through `mapRecordToEntry`). When this is > 0
+ * but `catalog.length === 0`, OAGI returned data but every row was
+ * malformed (missing id / url / etc.) -- a different empty state
+ * than "no agents in your org yet" because the fix is "tell your
+ * admin to populate the missing fields", not "ask your admin to
+ * publish the first one."
+ */
+let lastRawRecordCount = 0;
 let unsubscribeChange: (() => void) | null = null;
 const installInflight = new Set<string>();
 
@@ -183,6 +193,7 @@ async function initialLoad(): Promise<void> {
       {}
     );
     const records: NeonRecordLike[] = (result.records ?? []) as NeonRecordLike[];
+    lastRawRecordCount = records.length;
     catalog = records.map(mapRecordToEntry).filter((e): e is CatalogEntry => e !== null);
     catalog.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   } catch (err) {
@@ -268,7 +279,13 @@ function render(): void {
   if (content === null) return;
 
   if (catalog.length === 0) {
-    renderEmptyCatalog();
+    if (lastRawRecordCount > 0) {
+      // OAGI returned rows, but every row was malformed -- different
+      // diagnosis, different fix.
+      renderMalformedCatalog(lastRawRecordCount);
+    } else {
+      renderEmptyCatalog();
+    }
     return;
   }
 
@@ -449,6 +466,43 @@ function renderEmptyCatalog(): void {
   const btn = document.getElementById('empty-open-settings');
   if (btn !== null) {
     btn.addEventListener('click', () => {
+      if (window.lite?.settings?.open !== undefined) {
+        void window.lite.settings.open('idws');
+      }
+    });
+  }
+}
+
+/**
+ * Distinct empty state for "OAGI returned rows but every row was
+ * dropped by the field-validity filter." Common cause: nodes
+ * created without `chatUrl` / `url` / a stable id. The fix is on
+ * the OAGI side, NOT "ask admin to publish the first one."
+ */
+function renderMalformedCatalog(recordCount: number): void {
+  const content = document.getElementById('content');
+  if (content === null) return;
+  const noun = recordCount === 1 ? 'record' : 'records';
+  content.innerHTML = `
+    <div class="empty-state">
+      <svg class="empty-illustration" viewBox="0 0 220 140" fill="none" aria-hidden="true">
+        <rect x="60" y="40" width="100" height="60" rx="6" stroke="currentColor" stroke-width="1.5" opacity="0.35"/>
+        <path d="M82 60h56M82 75h36M82 90h44" stroke="currentColor" stroke-width="1.5" opacity="0.5" stroke-linecap="round"/>
+        <path d="M158 38l8 8M166 38l-8 8" stroke="currentColor" stroke-width="1.5" opacity="0.6" stroke-linecap="round"/>
+      </svg>
+      <div class="empty-title">${escapeHtml(String(recordCount))} OAGI ${noun} returned, but none had a usable URL</div>
+      <div class="empty-body">
+        Your administrator's OAGI nodes are missing required fields (a stable <code>id</code> and an HTTP <code>chatUrl</code> / <code>url</code>).
+        Ask them to populate those fields on each <code>IDW</code> / <code>Agent</code> node, then click Refresh.
+      </div>
+      <div class="empty-actions">
+        <button type="button" id="malformed-add-custom" class="btn-secondary">Add a custom agent</button>
+      </div>
+    </div>
+  `;
+  const addBtn = document.getElementById('malformed-add-custom');
+  if (addBtn !== null) {
+    addBtn.addEventListener('click', () => {
       if (window.lite?.settings?.open !== undefined) {
         void window.lite.settings.open('idws');
       }

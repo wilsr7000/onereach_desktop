@@ -52,6 +52,9 @@ export const VIEW_ALL_TUTORIALS_ID = 'university:view-all-tutorials';
 /** Stable id for "AI Run Times". */
 export const AI_RUN_TIMES_ID = 'university:ai-run-times';
 
+/** Stable id for "Wiser Method". */
+export const WISER_METHOD_ID = 'university:wiser-method';
+
 /** Stable order base for top-level items inside top:university. */
 const ORDER = {
   OPEN_LMS: 100,
@@ -59,6 +62,8 @@ const ORDER = {
   QUICK_STARTS: 200,
   SEP_AFTER_QUICK_STARTS: 250,
   AI_RUN_TIMES: 300,
+  SEP_AFTER_AI_RUN_TIMES: 350,
+  WISER_METHOD: 400,
 };
 
 const QUICK_START_COURSE_IDS = [
@@ -182,6 +187,33 @@ export function initMenuBuilder(config: MenuBuilderConfig): void {
       click: () => {
         emitOpened(aiRunTimes);
         config.onOpenEntry(aiRunTimes);
+      },
+    });
+  }
+
+  // Separator before Wiser Method (matches the full app's
+  // _buildUniversityMenu shape).
+  upsertAndTrack({
+    id: 'university:sep-3',
+    type: 'separator',
+    parentId: TOP_LEVEL_ID,
+    order: ORDER.SEP_AFTER_AI_RUN_TIMES,
+  });
+
+  // Wiser Method (companion methodology site documented in
+  // PORTING.md "chunk: university"). Always opens in the Learning
+  // Browser (no override needed).
+  const wiser = findCurated('wiser-method');
+  if (wiser !== null) {
+    upsertAndTrack({
+      id: WISER_METHOD_ID,
+      type: 'item',
+      parentId: TOP_LEVEL_ID,
+      label: 'Wiser Method',
+      order: ORDER.WISER_METHOD,
+      click: () => {
+        emitOpened(wiser);
+        config.onOpenEntry(wiser);
       },
     });
   }

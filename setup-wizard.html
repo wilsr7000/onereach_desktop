@@ -1998,6 +1998,7 @@
             <button class="bot-type-btn" onclick="selectUIDesignType('figma-ai')">Figma AI</button>
             <button class="bot-type-btn" onclick="selectUIDesignType('uizard')">Uizard</button>
             <button class="bot-type-btn" onclick="selectUIDesignType('galileo')">Galileo AI</button>
+            <button class="bot-type-btn" onclick="selectUIDesignType('claude')">Claude</button>
             <button class="bot-type-btn" onclick="selectUIDesignType('custom')">Custom</button>
           </div>
         </div>
@@ -2637,6 +2638,12 @@
           url: 'https://www.galileo.ai/',
           apiUrl: 'https://docs.galileo.ai/',
           info: 'AI design assistant that creates UI designs from text descriptions. Generates complete design systems with components and layouts.',
+        },
+        claude: {
+          name: 'Claude',
+          url: 'https://claude.ai/',
+          apiUrl: 'https://docs.anthropic.com/',
+          info: "Anthropic's Claude with Artifacts -- generates UI mockups, React components, SVG diagrams, and full design systems from text. Strong at iterating on layouts and design rationale via conversation.",
         },
       };
 

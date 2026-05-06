@@ -195,6 +195,30 @@ function buildDefaultApi(): IdwApi {
     // refuse writes.
     getActiveAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
   });
+
+  // Refresh entries on sign-in / sign-out. The IDW menu builder + the
+  // Settings -> IDWs section subscribe to `store.onChange`; without
+  // this hook the menu only ever runs `list()` once at boot (when the
+  // user is still signed-out) and never re-fetches after auth lands,
+  // leaving previously-installed agents invisible until the user
+  // opens the manager. Bug surfaced via "OAGI store shows X
+  // installed but no menu items".
+  //
+  // Each `onSessionChanged` fire triggers an async refresh; failures
+  // are swallowed inside the store's `refreshAfterAccountChange`. The
+  // listener is intentionally never disposed -- the IDW api is a
+  // process-lifetime singleton.
+  try {
+    getAuthApi().onSessionChanged((env) => {
+      if (env !== 'edison') return;
+      void store.refreshAfterAccountChange();
+    });
+  } catch (err) {
+    getLoggingApi().warn('idw', 'failed to subscribe to onSessionChanged', {
+      error: (err as Error).message,
+    });
+  }
+
   return {
     list: () => store.list(),
     listByKind: (kind) => store.listByKind(kind),

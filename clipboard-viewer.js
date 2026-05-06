@@ -3481,35 +3481,17 @@ function showNotification(options) {
     /* overlay must never block the toast */
   }
 
-  // Determine colors based on type
-  let bgColor = 'rgba(26, 26, 37, 0.95)';
-  let borderColor = 'rgba(99, 102, 241, 0.5)';
-  if (options.type === 'success') {
-    bgColor = 'rgba(16, 185, 129, 0.9)';
-    borderColor = 'rgba(16, 185, 129, 0.8)';
-  } else if (options.type === 'error') {
-    bgColor = 'rgba(239, 68, 68, 0.9)';
-    borderColor = 'rgba(239, 68, 68, 0.8)';
-  } else if (options.type === 'warning') {
-    bgColor = 'rgba(245, 158, 11, 0.9)';
-    borderColor = 'rgba(245, 158, 11, 0.8)';
-  }
-
   // Create notification element
   const notification = document.createElement('div');
+  notification.className = `or-toast ${options.type || 'info'}`;
   notification.style.cssText = `
         position: fixed;
         bottom: 20px;
         right: 20px;
-        background: ${bgColor};
-        color: #fff;
         padding: 12px 20px;
-        border-radius: 8px;
-        border: 1px solid ${borderColor};
         font-size: 13px;
         z-index: 10001;
-        animation: notifSlideIn 0.3s ease;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        animation: notifSlideIn 200ms ease;
         max-width: 400px;
     `;
 
@@ -3532,12 +3514,12 @@ function showNotification(options) {
     style.id = 'notif-animations';
     style.textContent = `
             @keyframes notifSlideIn {
-                from { opacity: 0; transform: translateX(100px); }
+                from { opacity: 0; transform: translateX(16px) scale(0.98); }
                 to { opacity: 1; transform: translateX(0); }
             }
             @keyframes notifSlideOut {
                 from { opacity: 1; transform: translateX(0); }
-                to { opacity: 0; transform: translateX(100px); }
+                to { opacity: 0; transform: translateX(16px) scale(0.98); }
             }
         `;
     document.head.appendChild(style);
@@ -3547,7 +3529,7 @@ function showNotification(options) {
 
   // Remove after 4 seconds
   setTimeout(() => {
-    notification.style.animation = 'notifSlideOut 0.3s ease forwards';
+    notification.style.animation = 'notifSlideOut 200ms ease forwards';
     setTimeout(() => notification.remove(), 300);
   }, 4000);
 }
@@ -3768,7 +3750,7 @@ async function showMoveToSpaceModal(itemId) {
         await loadHistory();
         modal.remove();
         hideContextMenu();
-        showNotification(`✓ Moved to new space "${name}"`);
+        showNotification(`Moved to new space "${name}"`);
       } else {
         throw new Error('Failed to create space');
       }
@@ -4056,7 +4038,7 @@ async function showPasteToSpaceModal() {
         // Paste into the new space
         modal.remove();
         await pasteIntoSpace(newSpaceId);
-        showNotification(`✓ Pasted into new space "${name}"`);
+        showNotification(`Pasted into new space "${name}"`);
       } else {
         throw new Error('Failed to create space');
       }
@@ -7239,9 +7221,9 @@ function setupEventListeners() {
       // Show success message
       if (successCount > 0) {
         if (files.length === 1) {
-          showNotification(`✓ Added ${files[0].name} to ${spaceName}`);
+          showNotification(`Added ${files[0].name} to ${spaceName}`);
         } else {
-          showNotification(`✓ Added ${successCount} file(s) to ${spaceName}`);
+          showNotification(`Added ${successCount} file(s) to ${spaceName}`);
         }
       } else {
         showNotification('Failed to add files');
@@ -7253,23 +7235,21 @@ function setupEventListeners() {
   // Helper function to show notifications
   function showNotification(message) {
     const notification = document.createElement('div');
+    notification.className = 'or-toast';
     notification.style.cssText = `
             position: fixed;
-            top: 60px;
+            bottom: 20px;
             right: 20px;
-            background: rgba(100, 200, 255, 0.95);
-            color: white;
             padding: 12px 20px;
-            border-radius: 8px;
-            font-size: 14px;
-            z-index: 10000;
-            animation: slideIn 0.3s ease-out;
+            font-size: 13px;
+            z-index: 10001;
+            animation: notifSlideIn 200ms ease-out;
         `;
     notification.textContent = message;
     document.body.appendChild(notification);
 
     setTimeout(() => {
-      notification.style.animation = 'slideOut 0.3s ease-out';
+      notification.style.animation = 'notifSlideOut 200ms ease-out';
       setTimeout(() => notification.remove(), 300);
     }, 3000);
   }

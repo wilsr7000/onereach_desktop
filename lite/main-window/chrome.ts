@@ -109,16 +109,17 @@ function wireHomePill(): void {
 // Home view: auth + welcome (ported from placeholder.ts)
 // ---------------------------------------------------------------------------
 
-function shortenAccountId(id: string): string {
-  if (id.length <= 12) return id;
-  return id.slice(0, 8) + '...' + id.slice(-4);
-}
-
 function getAuthBlock(): HTMLElement | null {
   return document.getElementById('auth-block');
 }
 
-function renderSignedOut(errorText: string | null): void {
+type SignedOutHint =
+  | { kind: 'error'; text: string }
+  | { kind: 'cancelled' }
+  | { kind: 'twofa-needs-setup' }
+  | null;
+
+function renderSignedOut(hint: SignedOutHint): void {
   const block = getAuthBlock();
   if (block === null) return;
   block.innerHTML = '';
@@ -134,10 +135,47 @@ function renderSignedOut(errorText: string | null): void {
   block.appendChild(btn);
   appendSettingsShortcut(block);
 
-  if (errorText !== null && errorText.length > 0) {
+  if (hint === null) return;
+
+  if (hint.kind === 'error') {
     const banner = document.createElement('div');
     banner.className = 'error-banner';
-    banner.textContent = errorText;
+    banner.textContent = hint.text;
+    block.appendChild(banner);
+    return;
+  }
+
+  if (hint.kind === 'cancelled') {
+    const banner = document.createElement('div');
+    banner.className = 'info-banner';
+    banner.textContent = 'Sign-in window closed. Click Sign in to GSX to try again.';
+    block.appendChild(banner);
+    return;
+  }
+
+  if (hint.kind === 'twofa-needs-setup') {
+    const banner = document.createElement('div');
+    banner.className = 'warn-banner';
+    const headline = document.createElement('div');
+    headline.className = 'warn-banner-headline';
+    headline.textContent = 'OneReach is asking for a 2FA code.';
+    banner.appendChild(headline);
+    const body = document.createElement('div');
+    body.className = 'warn-banner-body';
+    body.textContent =
+      'Lite has no authenticator secret saved yet. Open Settings -> Two-Factor and paste your setup secret, then try signing in again.';
+    banner.appendChild(body);
+    const settings = window.lite?.settings;
+    if (settings !== undefined) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'warn-banner-action';
+      link.textContent = 'Open Settings -> Two-Factor';
+      link.addEventListener('click', () => {
+        void settings.open('two-factor');
+      });
+      banner.appendChild(link);
+    }
     block.appendChild(banner);
   }
 }
@@ -172,10 +210,10 @@ function renderSignedIn(session: LiteAuthSessionRendererView): void {
       : 'Signed in';
   wrap.appendChild(email);
 
-  const account = document.createElement('div');
-  account.className = 'account';
-  account.textContent = ENV + ' / ' + shortenAccountId(session.accountId);
-  wrap.appendChild(account);
+  // The "edison / <accountId>" line was useful for verifying
+  // capture during dev but is noise for users -- the env name and
+  // partial account id mean nothing to them. The full details
+  // still live in Settings -> Account for diagnostics.
 
   const signOutBtn = document.createElement('button');
   signOutBtn.className = 'signout-link';
@@ -197,7 +235,9 @@ function appendSettingsShortcut(block: HTMLElement): void {
   link.className = 'settings-shortcut';
   link.textContent = 'Need a 2FA code? Open Settings -> Two-Factor';
   link.addEventListener('click', () => {
-    void settings.open();
+    // Pass the section id so the link goes directly to Two-Factor
+    // instead of dropping the user on the default Account section.
+    void settings.open('two-factor');
   });
   block.appendChild(link);
 }
@@ -205,7 +245,7 @@ function appendSettingsShortcut(block: HTMLElement): void {
 async function startSignIn(): Promise<void> {
   const auth = window.lite?.auth;
   if (auth === undefined) {
-    renderSignedOut('Auth bridge unavailable. Try restarting the app.');
+    renderSignedOut({ kind: 'error', text: 'Auth bridge unavailable. Try restarting the app.' });
     return;
   }
   renderSigningIn();
@@ -215,7 +255,11 @@ async function startSignIn(): Promise<void> {
   } catch (err) {
     const parsed = auth.parseError(err);
     if (parsed !== null && parsed.code === 'AUTH_CANCELLED') {
-      renderSignedOut(null);
+      // Surface a friendly hint instead of silently flipping back to
+      // the bare button -- new users sometimes close the window
+      // expecting it to do something else and end up confused why
+      // the app "did nothing."
+      renderSignedOut({ kind: 'cancelled' });
       return;
     }
     let message: string;
@@ -229,7 +273,7 @@ async function startSignIn(): Promise<void> {
     } else {
       message = 'Sign-in failed.';
     }
-    renderSignedOut(message);
+    renderSignedOut({ kind: 'error', text: message });
   }
 }
 
@@ -297,6 +341,12 @@ async function bootstrap(): Promise<void> {
         renderSignedOut(null);
       }
     });
+    // Subscribe to 2FA-needs-setup broadcasts so the user gets a
+    // contextual banner the moment the autofill watcher discovers
+    // they need to save their authenticator setup secret.
+    auth.on2FANeedsSetup(() => {
+      renderSignedOut({ kind: 'twofa-needs-setup' });
+    });
     void auth
       .getSession(ENV)
       .then((result) => {
@@ -327,6 +377,230 @@ async function bootstrap(): Promise<void> {
     } catch {
       /* tab bar starts empty; nothing to do */
     }
+  }
+
+  // 6. Onboarding checklist: show + auto-update on every relevant
+  //    state change.
+  void wireOnboardingCard();
+}
+
+// ─── onboarding card ─────────────────────────────────────────────────────
+//
+// Renders a small "Set up your workspace" card on the home view AFTER
+// the user signs in. Each row has a plain-language outcome title, a
+// one-line subtitle that explains the actual benefit, and a button
+// labeled with the next action. Hidden when:
+//   - The user is not yet signed in (the big Sign-In button above is
+//     the CTA in that state -- a checklist row repeating "Sign in to
+//     GSX" is noise).
+//   - All visible steps are complete.
+//   - The user explicitly clicked the X to dismiss.
+//
+// The 'signed-in' step is still tracked in KV so we can decide
+// whether to show the card at all, but it is NOT rendered as a row
+// (would be redundant with the visible Sign-In button).
+
+interface OnboardingStep {
+  id: LiteOnboardingStepId;
+  /** Plain-language outcome -- what the user gets, not the feature name. */
+  title: string;
+  /** One-line "what this gives you" copy. */
+  subtitle: string;
+  /** Action button label. */
+  buttonLabel: string;
+  /** Run on button click. */
+  action: () => void;
+}
+
+async function wireOnboardingCard(): Promise<void> {
+  const card = document.getElementById('onboarding-card');
+  if (card === null) return;
+  const onboardingBridge = window.lite?.onboarding;
+  if (onboardingBridge === undefined) return;
+
+  // Mark steps complete as they happen.
+  const auth = window.lite?.auth;
+  const mw = window.lite?.mainWindow;
+  const totp = window.lite?.totp;
+
+  // Initial sync: read live state and mark anything already true.
+  try {
+    if (auth !== undefined) {
+      const session = await auth.getSession(ENV);
+      if (session.session !== null) {
+        await onboardingBridge.markComplete('signed-in');
+      }
+    }
+    if (totp !== undefined) {
+      const result = await totp.hasSecret();
+      if (result.hasSecret === true) {
+        await onboardingBridge.markComplete('two-factor-saved');
+      }
+    }
+    if (mw !== undefined) {
+      const tabsList = await mw.listTabs();
+      if (tabsList.length > 0) {
+        await onboardingBridge.markComplete('first-agent-opened');
+      }
+    }
+  } catch {
+    /* best-effort */
+  }
+
+  // Subscribe to changes that should auto-tick the boxes.
+  if (auth !== undefined) {
+    auth.onSessionChanged((payload) => {
+      if (payload.env !== ENV) return;
+      if (payload.session !== null) {
+        void onboardingBridge.markComplete('signed-in').then(refreshOnboardingCard);
+      }
+    });
+  }
+  if (mw !== undefined) {
+    mw.onTabsChanged((payload) => {
+      if (payload.tabs.length > 0) {
+        void onboardingBridge.markComplete('first-agent-opened').then(refreshOnboardingCard);
+      }
+    });
+  }
+  // The two-factor secret can change while Settings is open in a
+  // child window. The chrome doesn't get a direct event, but we can
+  // re-poll on focus (cheap enough).
+  window.addEventListener('focus', () => {
+    void rePollOnboardingState();
+  });
+
+  // Wire dismiss button.
+  const dismissBtn = document.getElementById('onboarding-dismiss');
+  if (dismissBtn !== null) {
+    dismissBtn.addEventListener('click', () => {
+      void onboardingBridge.dismiss().then(() => {
+        const c = document.getElementById('onboarding-card');
+        if (c !== null) c.setAttribute('hidden', '');
+      });
+    });
+  }
+
+  await refreshOnboardingCard();
+}
+
+async function rePollOnboardingState(): Promise<void> {
+  const onboardingBridge = window.lite?.onboarding;
+  if (onboardingBridge === undefined) return;
+  const totp = window.lite?.totp;
+  try {
+    if (totp !== undefined) {
+      const result = await totp.hasSecret();
+      if (result.hasSecret === true) {
+        await onboardingBridge.markComplete('two-factor-saved');
+      }
+    }
+    await refreshOnboardingCard();
+  } catch {
+    /* best-effort */
+  }
+}
+
+async function refreshOnboardingCard(): Promise<void> {
+  const card = document.getElementById('onboarding-card');
+  if (card === null) return;
+  const onboardingBridge = window.lite?.onboarding;
+  if (onboardingBridge === undefined) return;
+
+  let state;
+  try {
+    state = await onboardingBridge.load();
+  } catch {
+    return;
+  }
+
+  // Explicit dismissal wins.
+  if (state.dismissedAt !== null) {
+    card.setAttribute('hidden', '');
+    return;
+  }
+
+  // Hide the card until the user is signed in. The Sign-In button
+  // above the card is the call to action when signed out; a "Sign in
+  // to GSX" row in the card is just noise (and confusing -- "GSX"
+  // means nothing to a brand-new user).
+  const signedIn = state.completedAt['signed-in'] !== undefined;
+  if (!signedIn) {
+    card.setAttribute('hidden', '');
+    return;
+  }
+
+  // Visible steps: outcome titles + subtitles + action buttons.
+  // 'signed-in' is intentionally NOT rendered (already implied by
+  // the card being visible at all).
+  const steps: OnboardingStep[] = [
+    {
+      id: 'two-factor-saved',
+      title: 'Skip the 2FA copy-paste',
+      subtitle:
+        'If your OneReach account uses two-factor sign-in, save your authenticator setup once and Lite fills in the 6-digit codes for you.',
+      buttonLabel: 'Set up auto-fill',
+      action: () => {
+        void window.lite?.settings?.open('two-factor');
+      },
+    },
+    {
+      id: 'first-agent-opened',
+      title: 'Open an AI agent',
+      subtitle:
+        'Pick ChatGPT, Claude, Gemini, or one of your team\u2019s agents from the IDW menu. Each one opens as a tab here.',
+      buttonLabel: 'Browse agents',
+      action: () => {
+        void window.lite?.idw?.openStore();
+      },
+    },
+  ];
+
+  // Hide the card when every visible step is done -- the user has
+  // finished setup; no reason to keep nagging.
+  const allDone = steps.every((s) => state.completedAt[s.id] !== undefined);
+  if (allDone) {
+    card.setAttribute('hidden', '');
+    return;
+  }
+
+  card.removeAttribute('hidden');
+  const list = document.getElementById('onboarding-list');
+  if (list === null) return;
+  list.innerHTML = '';
+  for (const step of steps) {
+    const done = state.completedAt[step.id] !== undefined;
+    const row = document.createElement('div');
+    row.className = 'onboarding-row' + (done ? ' done' : '');
+
+    const status = document.createElement('span');
+    status.className = 'onboarding-status';
+    status.setAttribute('aria-hidden', 'true');
+    status.textContent = done ? '\u2713' : '';
+    row.appendChild(status);
+
+    const text = document.createElement('div');
+    text.className = 'onboarding-text';
+    const title = document.createElement('div');
+    title.className = 'onboarding-row-title';
+    title.textContent = step.title;
+    text.appendChild(title);
+    const sub = document.createElement('div');
+    sub.className = 'onboarding-row-subtitle';
+    sub.textContent = step.subtitle;
+    text.appendChild(sub);
+    row.appendChild(text);
+
+    if (!done) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'onboarding-row-action';
+      btn.textContent = step.buttonLabel;
+      btn.addEventListener('click', () => step.action());
+      row.appendChild(btn);
+    }
+
+    list.appendChild(row);
   }
 }
 

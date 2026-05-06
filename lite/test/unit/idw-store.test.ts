@@ -6,7 +6,7 @@
  * without standing up a real KV server.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { IdwStore, KV_COLLECTION, KV_KEY } from '../../idw/store.js';
 import { IdwError, IDW_ERROR_CODES } from '../../idw/errors.js';
 import type { IdwEntry, AgentKind } from '../../idw/types.js';
@@ -284,6 +284,123 @@ describe('IdwStore onChange', () => {
     await store.remove((all[0] as IdwEntry).id);
     unsub();
     expect(events).toEqual([1, 2, 2, 1]);
+  });
+});
+
+describe('IdwStore refreshAfterAccountChange', () => {
+  // Regression coverage: "OAGI store shows agents installed but no
+  // menu items." When the user signs in AFTER the IDW menu builder
+  // ran its first `list()` (returning [] because signed-out), the
+  // menu was never told to re-fetch. The fix: api.ts hooks
+  // `auth.onSessionChanged` to call `refreshAfterAccountChange`,
+  // which forces a fresh KV read and broadcasts via onChange.
+  it('emits the post-account-change entry list to onChange subscribers', async () => {
+    let accountId: string | null = null;
+    const kv = new FakeKV();
+    let counter = 0;
+    const store = new IdwStore({
+      kvApi: kv,
+      now: () => new Date('2026-05-04T12:00:00.000Z'),
+      generateId: (entry) => `${entry.kind}-${entry.label.toLowerCase().replace(/\s+/g, '-')}-${++counter}`,
+      getActiveAccountId: () => accountId,
+    });
+    // Pre-populate KV directly (simulating a prior session that
+    // installed agents). This bypasses the store -- the store's
+    // signed-out add() throws.
+    await kv.set('lite-idw-entries', 'default', {
+      schemaVersion: 1,
+      entries: [
+        {
+          id: 'idw-marvin-1',
+          kind: 'idw',
+          label: 'Marvin 2',
+          url: 'https://marvin.example',
+          source: 'store',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+        {
+          id: 'idw-myai-1',
+          kind: 'idw',
+          label: 'My Ai',
+          url: 'https://myai.example',
+          source: 'store',
+          createdAt: '2026-05-02T00:00:00.000Z',
+          updatedAt: '2026-05-02T00:00:00.000Z',
+        },
+      ],
+    });
+
+    // Subscribe BEFORE sign-in (mirrors menu-builder's wiring).
+    const events: Array<{ count: number; labels: string[] }> = [];
+    store.onChange((entries) => {
+      events.push({
+        count: entries.length,
+        labels: entries.map((e) => e.label),
+      });
+    });
+
+    // Initial list while signed-out: the store gates and returns [].
+    expect(await store.list()).toEqual([]);
+    expect(events).toHaveLength(0);
+
+    // Simulate auth landing.
+    accountId = '35254342-4a2e-475b-aec1-18547e517e29';
+    await store.refreshAfterAccountChange();
+
+    // The cache invalidates, the store re-reads KV, and the entries
+    // are broadcast through onChange so the menu builder rebuilds.
+    expect(events).toHaveLength(1);
+    expect(events[0]?.count).toBe(2);
+    expect(events[0]?.labels).toEqual(['Marvin 2', 'My Ai']);
+  });
+
+  it('emits an empty list on sign-out (refresh after accountId -> null)', async () => {
+    let accountId: string | null = '35254342-4a2e-475b-aec1-18547e517e29';
+    const kv = new FakeKV();
+    const store = new IdwStore({
+      kvApi: kv,
+      now: () => new Date('2026-05-04T12:00:00.000Z'),
+      generateId: (entry) => `idw-${entry.label}-${counter++}`,
+      getActiveAccountId: () => accountId,
+    });
+    let counter = 0;
+    await store.add({ kind: 'idw', label: 'A', url: 'https://a.example' });
+    expect((await store.list()).length).toBe(1);
+
+    const events: number[] = [];
+    store.onChange((entries) => events.push(entries.length));
+
+    accountId = null;
+    await store.refreshAfterAccountChange();
+
+    expect(events).toEqual([0]);
+  });
+
+  it('still emits even when KV read throws (subscribers never get stuck)', async () => {
+    let accountId: string | null = null;
+    const kv = new FakeKV();
+    // Force the next read to throw a non-KVError, which the store's
+    // readBlob doesn't soft-fail. The catch in
+    // refreshAfterAccountChange should still emit [].
+    const originalGet = kv.get.bind(kv);
+    let throwOnNextGet = false;
+    kv.get = vi.fn(async (collection: string, key: string) => {
+      if (throwOnNextGet) {
+        throwOnNextGet = false;
+        throw new Error('simulated unexpected error');
+      }
+      return originalGet(collection, key);
+    });
+    const store = new IdwStore({ kvApi: kv, getActiveAccountId: () => accountId });
+    const events: number[] = [];
+    store.onChange((entries) => events.push(entries.length));
+
+    accountId = 'acct-xyz';
+    throwOnNextGet = true;
+    await store.refreshAfterAccountChange();
+
+    expect(events).toEqual([0]);
   });
 });
 

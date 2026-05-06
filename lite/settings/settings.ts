@@ -22,7 +22,6 @@ import { mountAccount } from './sections/account.js';
 import { mountTwoFactor } from './sections/two-factor.js';
 import { mountNeon } from './sections/neon.js';
 import { mountIdws } from './sections/idws.js';
-import { mountAi } from './sections/ai.js';
 import { mountDeveloper } from './sections/developer.js';
 import { mountDiagnostics } from './sections/diagnostics.js';
 import type { SectionDescriptor } from './types.js';
@@ -51,8 +50,6 @@ const ICON_DEVELOPER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 // Robot/agent icon for the IDWs section.
 const ICON_IDWS = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="2" /><path d="M8 19v2M16 19v2" /><circle cx="9" cy="13" r="1" /><circle cx="15" cy="13" r="1" /><path d="M12 4v4" /><circle cx="12" cy="3" r="1" /></svg>`;
 
-// Spark/AI icon for the AI section.
-const ICON_AI = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.5L18 9l-4.2 1.5L12 15l-1.8-4.5L6 9l4.2-1.5L12 3z" /><path d="M19 14l.6 1.5L21 16l-1.4.5L19 18l-.6-1.5L17 16l1.4-.5L19 14z" /><path d="M5 14l.6 1.5L7 16l-1.4.5L5 18l-.6-1.5L3 16l1.4-.5L5 14z" /></svg>`;
 
 // ---------------------------------------------------------------------------
 // Placeholder mount -- used by sections that ship empty in v1
@@ -97,12 +94,6 @@ const SECTIONS: SectionDescriptor[] = [
     title: 'IDWs',
     icon: ICON_IDWS,
     mount: mountIdws,
-  },
-  {
-    id: 'ai',
-    title: 'AI',
-    icon: ICON_AI,
-    mount: mountAi,
   },
   {
     id: 'updates',
@@ -183,6 +174,7 @@ function bootstrap(): void {
     closeBtn.addEventListener('click', () => window.close());
   }
 
+
   // Expose a global for the main process to call when the window is
   // already open and the user requests a different section. Uses a
   // double-underscore prefix to signal "internal API; not for general
@@ -226,9 +218,19 @@ function buildSidebarTab(section: SectionDescriptor): HTMLButtonElement {
   label.textContent = section.title;
   btn.appendChild(label);
 
+  // Per-section status dot (e.g. AI section shows a dot when the
+  // OpenAI API key isn't set yet so the user can see the
+  // unfinished-setup signal without entering the section).
+  const dot = document.createElement('span');
+  dot.className = 'sidebar-tab-dot';
+  dot.dataset['for'] = section.id;
+  dot.hidden = true;
+  btn.appendChild(dot);
+
   btn.addEventListener('click', () => activate(section.id));
   return btn;
 }
+
 
 function buildContentPane(section: SectionDescriptor): HTMLElement {
   const pane = document.createElement('section');

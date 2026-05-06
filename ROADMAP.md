@@ -9,6 +9,10 @@
 
 **Onereach.ai** is an AI-powered creative workstation that unifies digital workers, content creation, and intelligent automation into a single desktop experience.
 
+### Signature UI Direction
+
+Onereach's recognizable product language centers on an orb + blue signal system: near-black graphite surfaces, thin outlined icons, cyan-blue focus and activity accents, restrained motion, and branded empty/loading/status states. Product windows can keep their workflow-specific layouts, but primary chrome should feel like one family.
+
 ---
 
 ## Products Overview
@@ -26,6 +30,46 @@
 | **Budget Manager** | 🟢 Active | LLM cost tracking |
 | **App Health** | 🟡 Beta | System monitoring dashboard |
 | **Edison Dev Tools** | 🟡 In Progress | Edison SDK integration & flow builder developer tools |
+| **Onereach Lite** | 🟡 In Progress | v1 launch trajectory -- strangler app with chunk-hardened ports (see `lite/`) |
+
+---
+
+## Onereach Lite (v1 launch trajectory)
+
+*Strangler-pattern app at `lite/` that ships features one chunk at a time with strict hardening contract. The full app continues hardening as the source of truth; lite is the trajectory toward v1 GA.*
+
+### Phase 0a -- Kernel
+- [ ] Slim kernel ships as signed/notarized macOS installer with full's icon
+- [ ] Two top-level menus only: Onereach.ai Lite (About + Quit) and Help (Report a Bug)
+- [ ] Bug reporter with mandatory default-on redaction; writes to `userData/lite-bugs/` (Spaces sink lights up later)
+- [ ] Six-layer isolation enforced (dep-cruiser, tsconfig, OS-level, runtime guards, build globs, repo conventions)
+- [ ] Constitutional files seeded (LITE-RULES, PORTING, DECISIONS with ADR-001..013, LITE-PUNCH-LIST)
+- [ ] Menu registry pattern in place from day 1 -- future ports register entries without touching the builder
+
+### Phase 0b -- Hardening Rig
+- [ ] Multi-project Vitest, Playwright on built artifacts
+- [ ] Fault-injection harness, IPC fuzzer, zod-IPC contracts for every channel
+- [ ] Per-app AI accounting in `lib/ai-service.js` (kernel makes zero AI calls; lands before first AI-using port)
+- [ ] Bug-report-to-regression-test pipeline
+- [ ] Synthetic canary skeleton (local; continuous in Phase 1)
+- [ ] Four-tier test runner (pre-commit / PR / CI required / nightly+release / continuous canary)
+
+### Phase 0c+ -- Menu-item ports
+- [ ] One feature per release tag, hardened against six-criteria contract
+- [ ] Order TBD; deferred queue lives in `lite/PORTING.md`
+
+### Phase 1 -- Distribution wedge
+- [ ] Auto-update pipeline (electron-updater + `latest-lite` channel + signed updates)
+- [ ] Kill-switch + force-update via signed remote config (fail-open in Phase 1)
+- [ ] Synthetic canary continuous against staging + production cohorts
+- [ ] Bad-binary rollback runbook (`lite/RUNBOOKS/bad-binary-rollback.md`)
+- [ ] Windows code signing (gated on EV cert procurement)
+
+### Phase 2-5
+- Strangler porting accelerates (Phase 2) -> Enterprise hardening (Phase 3) -> Pilot (Phase 4) -> GA (Phase 5)
+- GA bars: ≥98% install success, ≥99.5% crash-free, ≥80% update adoption within 7 days (split cohorts: auto-update-enabled vs MDM-managed)
+
+See `.cursor/plans/onereach_lite_strangler_build_*.plan.md` for the full strategic plan with chunk hardening contract, isolation policy, and phase gates.
 
 ---
 
@@ -308,7 +352,7 @@
 - ✅ Image: Midjourney, DALL-E, Ideogram, Leonardo AI
 - ✅ Video: Veo3, Runway, Pika, Kling
 - ✅ Audio: ElevenLabs, Suno, Udio
-- ✅ Design: Stitch, Figma AI
+- ✅ Design: Stitch, Figma AI, Uizard, Galileo AI, Claude (Artifacts)
 
 **Custom Agents:**
 - ✅ Create your own voice-activated agents

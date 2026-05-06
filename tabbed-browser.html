@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GSX Power User</title>
+    <title>Onereach.ai</title>
+    <link rel="stylesheet" href="onereach-signature.css" />
     <style>
       body,
       html {
@@ -11,9 +12,9 @@
         padding: 0;
         height: 100%;
         width: 100%;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-        background-color: #1a1a1a;
-        color: #ffffff;
+        font-family: var(--or-font-sans);
+        background-color: var(--or-bg-canvas);
+        color: var(--or-text-primary);
         overflow: hidden;
       }
 
@@ -26,28 +27,30 @@
 
       .tab-bar {
         display: flex;
-        background: linear-gradient(to bottom, #2a2a2a, #252525);
+        background:
+          radial-gradient(circle at 4% 0%, rgba(79, 140, 255, 0.12), transparent 34%),
+          linear-gradient(to bottom, var(--or-bg-elevated), var(--or-bg-shell));
         height: 44px;
         align-items: center;
         padding: 0 12px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        box-shadow: var(--or-shadow-sm);
         user-select: none;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid var(--or-border-subtle);
       }
 
       .app-tagline {
         font-size: 11px;
-        color: rgba(255, 255, 255, 0.25);
+        color: var(--or-text-faint);
         white-space: nowrap;
         padding: 0 10px 0 4px;
         -webkit-app-region: drag;
-        transition: color 0.2s ease;
+        transition: color var(--or-transition-normal);
         letter-spacing: -0.01em;
         flex-shrink: 0;
       }
 
       .app-tagline:hover {
-        color: rgba(255, 255, 255, 0.45);
+        color: var(--or-text-secondary);
       }
 
       /* Welcome Overlay */
@@ -56,11 +59,11 @@
         position: fixed;
         inset: 0;
         z-index: 10000;
-        background: rgba(0, 0, 0, 0.75);
-        backdrop-filter: blur(8px);
+        background: rgba(4, 6, 12, 0.76);
+        backdrop-filter: blur(10px);
         align-items: center;
         justify-content: center;
-        animation: welcomeFadeIn 0.3s ease;
+        animation: welcomeFadeIn var(--or-transition-panel);
       }
 
       #welcome-overlay.visible { display: flex; }
@@ -73,11 +76,13 @@
       .welcome-panel {
         width: 500px;
         max-height: 90vh;
-        background: #0f0f0f;
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        border-radius: 16px;
+        background:
+          radial-gradient(circle at 50% -18%, rgba(79, 140, 255, 0.13), transparent 42%),
+          var(--or-bg-surface);
+        border: 1px solid var(--or-border-subtle);
+        border-radius: var(--or-radius-xl);
         padding: 36px 32px 28px;
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+        box-shadow: var(--or-shadow-lg), var(--or-shadow-signal);
         overflow-y: auto;
       }
 
@@ -89,14 +94,14 @@
       .welcome-brand-name {
         font-size: 20px;
         font-weight: 600;
-        color: rgba(255, 255, 255, 0.9);
+        color: var(--or-text-primary);
         margin-bottom: 4px;
       }
 
       .welcome-brand-tagline {
         font-size: 11px;
         font-weight: 500;
-        color: rgba(255, 255, 255, 0.35);
+        color: var(--or-text-muted);
         letter-spacing: 0.06em;
         text-transform: uppercase;
       }
@@ -104,7 +109,7 @@
       .welcome-heading {
         font-size: 15px;
         font-weight: 500;
-        color: rgba(255, 255, 255, 0.5);
+        color: var(--or-text-muted);
         text-align: center;
         margin-bottom: 20px;
       }
@@ -114,16 +119,17 @@
         align-items: flex-start;
         gap: 14px;
         padding: 16px;
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid rgba(255, 255, 255, 0.04);
-        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.025);
+        border: 1px solid var(--or-border-subtle);
+        border-radius: var(--or-radius-md);
         margin-bottom: 10px;
-        transition: border-color 0.2s ease;
+        transition: border-color var(--or-transition-normal), background var(--or-transition-normal), box-shadow var(--or-transition-normal);
       }
 
       .welcome-step.completed {
-        border-color: rgba(0, 153, 255, 0.2);
-        background: rgba(0, 153, 255, 0.03);
+        border-color: var(--or-border-signal);
+        background: var(--or-accent-soft);
+        box-shadow: var(--or-shadow-signal);
       }
 
       .welcome-step-num {
@@ -143,7 +149,7 @@
       }
 
       .welcome-step.completed .welcome-step-num {
-        background: #0099ff;
+        background: var(--or-accent);
         color: white;
       }
 
@@ -171,21 +177,25 @@
 
       .welcome-try-btn {
         padding: 6px 16px;
-        background: #0099ff;
+        background: linear-gradient(180deg, var(--or-accent-hover), var(--or-accent));
         color: white;
-        border: none;
-        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: var(--or-radius-sm);
         font-size: 12px;
         font-weight: 500;
         cursor: pointer;
-        transition: background 0.15s ease;
+        transition: background var(--or-transition-fast), box-shadow var(--or-transition-fast), transform var(--or-transition-fast);
       }
 
-      .welcome-try-btn:hover { background: #0080dd; }
+      .welcome-try-btn:hover {
+        background: linear-gradient(180deg, #83b0ff, var(--or-accent-hover));
+        box-shadow: 0 8px 24px rgba(79, 140, 255, 0.24);
+        transform: translateY(-1px);
+      }
 
       .welcome-step.completed .welcome-try-btn {
-        background: rgba(0, 153, 255, 0.15);
-        color: #0099ff;
+        background: var(--or-accent-soft);
+        color: var(--or-accent-strong);
         pointer-events: none;
       }
 
@@ -230,24 +240,28 @@
         align-items: center;
         padding: 0 16px;
         height: 36px;
-        background: linear-gradient(to bottom, #333333, #2a2a2a);
+        background: rgba(255, 255, 255, 0.035);
         margin-right: 4px;
         border-radius: 8px 8px 0 0;
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition:
+          background var(--or-transition-normal),
+          border-color var(--or-transition-normal),
+          box-shadow var(--or-transition-normal),
+          transform var(--or-transition-normal);
         max-width: 200px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         position: relative;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--or-border-subtle);
         border-bottom: none;
       }
 
       .tab.active {
-        background: linear-gradient(to bottom, #3a3a3a, #2a2a2a);
-        border-color: rgba(255, 255, 255, 0.1);
-        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+        background: var(--or-bg-active);
+        border-color: var(--or-border-signal);
+        box-shadow: var(--or-shadow-signal);
       }
 
       .tab.active::after {
@@ -257,14 +271,14 @@
         left: 0;
         right: 0;
         height: 2px;
-        background: #0099ff;
+        background: linear-gradient(90deg, var(--or-accent), var(--or-accent-strong));
         border-radius: 2px;
       }
 
       .tab:hover {
-        background: linear-gradient(to bottom, #383838, #2f2f2f);
+        background: rgba(255, 255, 255, 0.065);
         transform: translateY(-1px);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        box-shadow: var(--or-shadow-sm);
       }
 
       .tab-favicon {
@@ -275,7 +289,7 @@
         background-position: center;
         background-repeat: no-repeat;
         flex-shrink: 0;
-        transition: transform 0.2s ease;
+        transition: transform var(--or-transition-normal);
       }
 
       .tab:hover .tab-favicon {
@@ -292,12 +306,12 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: 13px;
-        color: rgba(255, 255, 255, 0.9);
-        transition: color 0.2s ease;
+        color: var(--or-text-secondary);
+        transition: color var(--or-transition-normal);
       }
 
       .tab:hover .tab-title {
-        color: #ffffff;
+        color: var(--or-text-primary);
       }
 
       .tab-close {
@@ -306,13 +320,17 @@
         height: 18px;
         border-radius: 50%;
         background-color: rgba(255, 255, 255, 0.05);
-        color: rgba(255, 255, 255, 0.5);
+        color: var(--or-text-muted);
         display: flex;
         justify-content: center;
         align-items: center;
         font-size: 14px;
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition:
+          background var(--or-transition-fast),
+          color var(--or-transition-fast),
+          opacity var(--or-transition-fast),
+          transform var(--or-transition-fast);
         opacity: 0;
       }
 
@@ -321,8 +339,8 @@
       }
 
       .tab-close:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-        color: #ffffff;
+        background-color: rgba(79, 140, 255, 0.18);
+        color: var(--or-text-primary);
         transform: scale(1.1);
       }
 
@@ -332,27 +350,32 @@
         display: flex;
         justify-content: center;
         align-items: center;
-        background: linear-gradient(to bottom, #333333, #2a2a2a);
+        background: rgba(255, 255, 255, 0.04);
         border-radius: 8px;
         cursor: pointer;
         margin-left: 8px;
-        transition: all 0.2s ease;
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        color: rgba(255, 255, 255, 0.7);
+        transition:
+          background var(--or-transition-normal),
+          border-color var(--or-transition-normal),
+          box-shadow var(--or-transition-normal),
+          color var(--or-transition-normal),
+          transform var(--or-transition-normal);
+        border: 1px solid var(--or-border-subtle);
+        color: var(--or-text-secondary);
         font-size: 20px;
       }
 
       .new-tab:hover {
-        background: linear-gradient(to bottom, #383838, #2f2f2f);
+        background: var(--or-accent-soft);
         transform: translateY(-1px);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        color: #ffffff;
+        box-shadow: var(--or-shadow-signal);
+        color: var(--or-text-primary);
       }
 
       .browser-container {
         flex: 1;
         position: relative;
-        background-color: #242424;
+        background-color: var(--or-bg-canvas);
       }
 
       .webview-container {
@@ -386,25 +409,36 @@
         display: flex;
         justify-content: center;
         align-items: center;
-        background: linear-gradient(to bottom, #333333, #2a2a2a);
-        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: var(--or-radius-sm);
         cursor: pointer;
-        color: rgba(255, 255, 255, 0.7);
-        transition: all 0.2s ease;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        color: var(--or-text-secondary);
+        transition:
+          background var(--or-transition-normal),
+          border-color var(--or-transition-normal),
+          box-shadow var(--or-transition-normal),
+          color var(--or-transition-normal),
+          transform var(--or-transition-normal);
+        border: 1px solid var(--or-border-subtle);
+      }
+
+      .control-button svg {
+        width: 16px;
+        height: 16px;
+        stroke-width: 1.5;
       }
 
       .control-button:hover {
-        background: linear-gradient(to bottom, #383838, #2f2f2f);
+        background: var(--or-accent-soft);
         transform: translateY(-1px);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        color: #ffffff;
+        box-shadow: var(--or-shadow-signal);
+        color: var(--or-text-primary);
       }
 
       .control-button.active {
-        color: #0099ff;
-        background: linear-gradient(to bottom, #383838, #2f2f2f);
-        border-color: rgba(0, 153, 255, 0.2);
+        color: var(--or-accent-strong);
+        background: var(--or-accent-soft);
+        border-color: var(--or-border-signal);
       }
 
       .control-button:not(.active)#back-button,
@@ -418,11 +452,11 @@
         top: 0;
         left: 0;
         height: 3px;
-        background: linear-gradient(to right, #0099ff, #00ccff);
-        transition: width 0.3s ease-out;
+        background: linear-gradient(to right, var(--or-accent), var(--or-accent-strong));
+        transition: width var(--or-transition-panel);
         z-index: 1000;
         border-radius: 0 2px 2px 0;
-        box-shadow: 0 0 8px rgba(0, 153, 255, 0.5);
+        box-shadow: 0 0 12px var(--or-accent-glow);
       }
 
       /* Special styling for the Black Hole Widget button */
@@ -431,15 +465,17 @@
         overflow: hidden;
         width: 40px !important;
         height: 40px !important;
-        background: linear-gradient(135deg, #6a1b9a 0%, #4a148c 100%) !important;
-        border: 2px solid #9c27b0 !important;
+        background:
+          radial-gradient(circle at 50% 50%, rgba(123, 219, 255, 0.18), transparent 60%),
+          linear-gradient(135deg, #123a72 0%, #111426 100%) !important;
+        border: 1px solid var(--or-border-signal) !important;
         margin: 0 8px;
         font-size: 24px;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 2px 8px rgba(147, 51, 234, 0.4);
-        transition: all 0.3s ease;
+        box-shadow: var(--or-shadow-signal);
+        transition: all var(--or-transition-panel);
       }
 
       /* Add OneReach logo overlay */
@@ -486,10 +522,12 @@
       }
 
       #black-hole-button:hover {
-        background: linear-gradient(135deg, #7b1fa2 0%, #6a1b9a 100%) !important;
-        border-color: #ab47bc !important;
-        transform: translateY(-2px) scale(1.05);
-        box-shadow: 0 4px 16px rgba(147, 51, 234, 0.6);
+        background:
+          radial-gradient(circle at 50% 50%, rgba(123, 219, 255, 0.3), transparent 62%),
+          linear-gradient(135deg, #1a4c92 0%, #151a34 100%) !important;
+        border-color: rgba(123, 219, 255, 0.68) !important;
+        transform: translateY(-2px) scale(1.03);
+        box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.22), 0 8px 28px rgba(79, 140, 255, 0.34);
         animation: glow 2s ease-in-out infinite;
       }
 
@@ -505,15 +543,15 @@
 
       @keyframes glow {
         0% {
-          box-shadow: 0 4px 16px rgba(147, 51, 234, 0.6);
+          box-shadow: 0 4px 16px rgba(79, 140, 255, 0.45);
         }
         50% {
           box-shadow:
-            0 4px 24px rgba(147, 51, 234, 0.8),
-            0 0 32px rgba(147, 51, 234, 0.4);
+            0 4px 24px rgba(79, 140, 255, 0.58),
+            0 0 32px rgba(123, 219, 255, 0.28);
         }
         100% {
-          box-shadow: 0 4px 16px rgba(147, 51, 234, 0.6);
+          box-shadow: 0 4px 16px rgba(79, 140, 255, 0.45);
         }
       }
 
@@ -535,13 +573,15 @@
         align-items: center;
         gap: 6px;
         padding: 4px 10px;
-        background: linear-gradient(135deg, #1e3a5f 0%, #0d2137 100%);
-        border: 1px solid rgba(59, 130, 246, 0.5);
+        background:
+          radial-gradient(circle at 16% 0%, rgba(79, 140, 255, 0.16), transparent 42%),
+          rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--or-border-signal);
         border-radius: 16px;
         margin-right: 12px;
         font-size: 11px;
-        color: rgba(255, 255, 255, 0.9);
-        transition: all 0.3s ease;
+        color: var(--or-text-secondary);
+        transition: all var(--or-transition-panel);
         cursor: pointer;
         position: relative;
         overflow: hidden;
@@ -553,9 +593,11 @@
       }
 
       #llm-badge.calling {
-        background: linear-gradient(135deg, #1e4620 0%, #0d2910 100%);
-        border-color: rgba(34, 197, 94, 0.7);
-        box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
+        background:
+          radial-gradient(circle at 16% 0%, rgba(107, 255, 138, 0.16), transparent 42%),
+          rgba(255, 255, 255, 0.04);
+        border-color: rgba(107, 255, 138, 0.58);
+        box-shadow: 0 0 12px rgba(107, 255, 138, 0.28);
       }
 
       #llm-badge .badge-icon {
@@ -646,14 +688,20 @@
           <span class="badge-cost" id="llm-badge-cost"></span>
         </div>
         <div class="browser-controls">
-          <div class="control-button" id="back-button">←</div>
-          <div class="control-button" id="forward-button">→</div>
-          <div class="control-button" id="refresh-button">↻</div>
-          <!-- Debug button hidden for production build -->
-          <!-- <div class="control-button" id="debug-button" title="Debug Session Isolation (Cmd+Shift+D)" style="font-size: 12px;">🐛</div> -->
+          <div class="control-button" id="back-button" title="Back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </div>
+          <div class="control-button" id="forward-button" title="Forward">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </div>
+          <div class="control-button" id="refresh-button" title="Refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.6"/><polyline points="20 4 20 11 13 11"/></svg>
+          </div>
           <div class="control-button" id="black-hole-button" title="Quick Capture - Drag items here to save"></div>
         </div>
-        <div class="new-tab" id="new-tab-button">+</div>
+        <div class="new-tab" id="new-tab-button" title="New tab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </div>
       </div>
 
       <div class="browser-container" id="browser-container">

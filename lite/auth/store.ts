@@ -19,7 +19,7 @@
  * @internal
  */
 
-import { session as electronSession, type Cookie, type Session, type Event as ElectronEvent } from 'electron';
+import { BrowserWindow, session as electronSession, type Cookie, type Session, type Event as ElectronEvent } from 'electron';
 import { LiteError } from '../errors.js';
 import type { LiteErrorOptions } from '../errors.js';
 import { getKVApi, KVError } from '../kv/api.js';
@@ -190,6 +190,21 @@ export function partitionForOneReachUrl(url: string): string | null {
 // Logger surface -- mirrors the bug-report module's pattern.
 // ---------------------------------------------------------------------------
 
+/**
+ * Payload broadcast when the autofill watcher sees a OneReach 2FA
+ * page but `getCurrentCode()` throws `TOTP_NO_SECRET` (i.e. nothing
+ * is stored in the keychain). Renderer-side hints can use this to
+ * show a contextual banner + "Open Settings -> Two-Factor" button.
+ */
+export interface TwoFactorNeedsSetupPayload {
+  source: string;
+  frameUrl: string;
+  reason?: string;
+  inputCount?: number;
+  /** ISO timestamp of the broadcast for log correlation. */
+  timestamp: string;
+}
+
 export interface AuthStoreConfig {
   /** Optional KV API override (for tests). */
   kvApi?: KVApi;
@@ -252,10 +267,26 @@ export interface AuthWindowFactory {
 }
 
 const defaultWindowFactory: AuthWindowFactory = {
-  create: (env, config, extras) =>
-    createAuthWindow(env, config, {
+  create: (env, config, extras) => {
+    // Glue the auth window to whichever window has focus right now
+    // (typically the main tabbed window). Without `parent`, the auth
+    // window can disappear behind Safari / VS Code / Slack on
+    // multi-monitor setups, and first-time users don't realize the
+    // sign-in flow is still running. `parent` doesn't make it modal;
+    // it just keeps it from getting lost. Best-effort -- if no window
+    // is focused (rare on app boot), createAuthWindow falls back to
+    // an unparented window.
+    let parent: BrowserWindow | null = null;
+    try {
+      parent = BrowserWindow.getFocusedWindow();
+    } catch {
+      parent = null;
+    }
+    return createAuthWindow(env, config, {
       ...(extras?.emitEvent !== undefined ? { emitEvent: extras.emitEvent } : {}),
-    }),
+      ...(parent !== null ? { parent } : {}),
+    });
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -312,6 +343,14 @@ export class AuthStore {
   private readonly inFlight = new Map<Environment, Promise<AuthSession>>();
   /** Subscribers to session-changed events. */
   private readonly subscribers = new Set<(env: Environment, s: AuthSession | null) => void>();
+  /**
+   * Subscribers to 2FA-needs-setup events (the autofill watcher saw a
+   * 2FA page but Lite has no TOTP secret in the keychain). The
+   * renderer wires a banner + "Open Settings -> Two-Factor" button.
+   */
+  private readonly twoFactorNeedsSetupSubscribers = new Set<
+    (payload: TwoFactorNeedsSetupPayload) => void
+  >();
   /** Whether KV has been queried for previously-persisted sessions. */
   private hydrated = false;
   /**
@@ -715,6 +754,20 @@ export class AuthStore {
   }
 
   /**
+   * Subscribe to 2FA-needs-setup broadcasts. Fires when the autofill
+   * watcher detects a 2FA prompt during sign-in and Lite has no
+   * keychain secret to autofill from. Used by `lite/auth/main.ts` to
+   * forward the event to all renderer windows so they can show a
+   * contextual "open Settings -> Two-Factor" banner.
+   */
+  onTwoFactorNeedsSetup(cb: (payload: TwoFactorNeedsSetupPayload) => void): () => void {
+    this.twoFactorNeedsSetupSubscribers.add(cb);
+    return (): void => {
+      this.twoFactorNeedsSetupSubscribers.delete(cb);
+    };
+  }
+
+  /**
    * Subscribe to typed auth events (ADR-032). Filters
    * `getLoggingApi().onEvent('auth.*', ...)` and casts each matching
    * record to `AuthEvent`. See lite/auth/events.ts.
@@ -976,6 +1029,24 @@ export class AuthStore {
       buffer.windowHandle = handle;
       buffer.detachTotpAutofill = startTotpAutofill(handle, {
         logger: (level, message, data) => this.log(level, message, data),
+        onTwoFactorNeedsSetup: (payload) => {
+          const broadcast: TwoFactorNeedsSetupPayload = {
+            source: payload.source,
+            frameUrl: payload.frameUrl,
+            ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+            ...(payload.inputCount !== undefined ? { inputCount: payload.inputCount } : {}),
+            timestamp: new Date().toISOString(),
+          };
+          for (const cb of this.twoFactorNeedsSetupSubscribers) {
+            try {
+              cb(broadcast);
+            } catch (cbErr) {
+              this.log('warn', 'twoFactorNeedsSetup subscriber threw', {
+                error: (cbErr as Error).message,
+              });
+            }
+          }
+        },
       });
 
       // Step 3: When the window closes (user clicked X), reject as cancelled.
@@ -1142,6 +1213,44 @@ export class AuthStore {
         : {}),
     };
 
+    // CRITICAL: install the new session + token + bundle in memory BEFORE
+    // the KV write. `kv.set` reads the bearer token via
+    // `getAuthApi().getToken(env)` and the accountId via
+    // `getAuthApi().getSession(env)?.accountId` (see lite/kv/api.ts
+    // defaultConfig). Both resolvers read directly from the maps below.
+    // If we wrote to KV first, the SDK would authenticate with the
+    // PREVIOUS sign-in's credentials (or null on first sign-in),
+    // producing either "wrong keyId" / "Token was not accepted" (401)
+    // from the OneReach KV service or the SDK's own "KV requires a
+    // signed-in OneReach account" 401 -- both of which surface as
+    // AUTH_KV_FAILED with the cryptic "Sign-in succeeded but the
+    // session could not be saved" message.
+    //
+    // Ordering tradeoff: a KV failure now leaves the new credentials
+    // in memory (so the user is effectively signed in for the rest of
+    // the app run, including read paths). The catch block below still
+    // rejects with AUTH_KV_FAILED so the placeholder UI shows the
+    // banner, and a retry replays the same writes (idempotent in KV).
+    // We do NOT roll back the maps because the captured cookies are
+    // already in the Electron session partition; the in-memory maps
+    // and the partition would otherwise drift.
+    const previousSession = this.sessions.get(buffer.env);
+    const previousToken = this.tokens.get(buffer.env);
+    const previousBundle = this.tokenBundles.get(buffer.env);
+    this.sessions.set(buffer.env, session);
+    this.tokens.set(buffer.env, mult.value);
+    this.tokenBundles.set(buffer.env, {
+      multToken: mult.value,
+      accountToken: or.value,
+      capturedAt: session.capturedAt,
+      ...(typeof mult.expirationDate === 'number'
+        ? { multExpiresAt: Math.floor(mult.expirationDate * 1000) }
+        : {}),
+      ...(typeof or.expirationDate === 'number'
+        ? { accountExpiresAt: Math.floor(or.expirationDate * 1000) }
+        : {}),
+    });
+
     try {
       await this.kv.set(KV_COLLECTION, kvKeyFor(session), session);
       this.eventEmitter?.(AUTH_EVENTS.PERSIST_OK, {
@@ -1151,11 +1260,36 @@ export class AuthStore {
       });
     } catch (err) {
       const friendly = err instanceof KVError ? err.formatForUser() : (err as Error).message;
+      // Detect the "the new token itself is bad" case explicitly --
+      // when the OneReach KV service rejects the token we just
+      // captured, leaving it in memory just guarantees more 401s on
+      // every subsequent read. Fall back to the previous credentials
+      // (or clear them, when there were none). Network / transient
+      // failures keep the new credentials so an in-app retry can
+      // replay the write without forcing a fresh sign-in.
+      const status = err instanceof KVError ? err.status : undefined;
+      const isAuthRejection =
+        status === 401 ||
+        status === 403 ||
+        (typeof friendly === 'string' &&
+          (friendly.toLowerCase().includes('wrong keyid') ||
+            friendly.toLowerCase().includes('token was not accepted') ||
+            friendly.toLowerCase().includes('invalid token') ||
+            friendly.toLowerCase().includes('token expired')));
+      if (isAuthRejection) {
+        if (previousSession === undefined) this.sessions.delete(buffer.env);
+        else this.sessions.set(buffer.env, previousSession);
+        if (previousToken === undefined) this.tokens.delete(buffer.env);
+        else this.tokens.set(buffer.env, previousToken);
+        if (previousBundle === undefined) this.tokenBundles.delete(buffer.env);
+        else this.tokenBundles.set(buffer.env, previousBundle);
+      }
       this.log('error', 'auth: KV persist failed', {
         env: buffer.env,
         accountId,
         error: friendly,
-        ...(err instanceof KVError ? { kvCode: err.code } : {}),
+        rolledBack: isAuthRejection,
+        ...(err instanceof KVError ? { kvCode: err.code, kvStatus: status } : {}),
       });
       this.eventEmitter?.(
         AUTH_EVENTS.PERSIST_FAIL,
@@ -1171,7 +1305,7 @@ export class AuthStore {
             env: buffer.env,
             accountId,
             collection: KV_COLLECTION,
-            ...(err instanceof KVError ? { kvCode: err.code, kvStatus: err.status } : {}),
+            ...(err instanceof KVError ? { kvCode: err.code, kvStatus: status } : {}),
           },
           remediation:
             err instanceof KVError
@@ -1183,20 +1317,7 @@ export class AuthStore {
       return;
     }
 
-    // Persist succeeded -- update in-memory state, close window, resolve.
-    this.sessions.set(buffer.env, session);
-    this.tokens.set(buffer.env, mult.value);
-    this.tokenBundles.set(buffer.env, {
-      multToken: mult.value,
-      accountToken: or.value,
-      capturedAt: session.capturedAt,
-      ...(typeof mult.expirationDate === 'number'
-        ? { multExpiresAt: Math.floor(mult.expirationDate * 1000) }
-        : {}),
-      ...(typeof or.expirationDate === 'number'
-        ? { accountExpiresAt: Math.floor(or.expirationDate * 1000) }
-        : {}),
-    });
+    // Persist succeeded -- emit notifications + close window.
     this.log('info', 'auth: session persisted', {
       env: buffer.env,
       accountId,

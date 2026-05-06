@@ -52,11 +52,9 @@ import {
   _resetUniversityApiForTesting as resetUniversityApi,
   UNIVERSITY_EVENTS as UNIVERSITY_EVENTS_REF,
 } from '../../university/api.js';
-import {
-  getAiApi as getAiApiRef,
-  _resetAiApiForTesting as resetAiApi,
-  AI_EVENTS as AI_EVENTS_REF,
-} from '../../ai/api.js';
+// AI service module pulled (TTS removed); typed-onevent block for
+// AiApi removed below. Re-introducing means restoring the imports
+// + the describe block.
 import {
   getAiRunTimesApi as getAiRunTimesApiRef,
   _resetAiRunTimesApiForTesting as resetAiRunTimesApi,
@@ -431,24 +429,8 @@ describe('UniversityApi.onEvent typed narrowing (ADR-032)', () => {
   });
 });
 
-describe('AiApi.onEvent typed narrowing (ADR-032)', () => {
-  beforeEach(() => {
-    resetAiApi();
-  });
-
-  it('delivers typed AI events; ignores non-AI events', () => {
-    const api = getAiApiRef();
-    const observed: Array<{ name: string }> = [];
-    const unsub = api.onEvent((ev) => observed.push({ name: ev.name }));
-    getLoggingApi().event(AI_EVENTS_REF.IPC_TTS);
-    getLoggingApi().event(AI_EVENTS_REF.IPC_STATUS);
-    getLoggingApi().event('kv.test.noise');
-    unsub();
-    expect(observed.some((o) => o.name === AI_EVENTS_REF.IPC_TTS)).toBe(true);
-    expect(observed.some((o) => o.name === AI_EVENTS_REF.IPC_STATUS)).toBe(true);
-    expect(observed.every((o) => o.name.startsWith('ai.'))).toBe(true);
-  });
-});
+// AI service module pulled (TTS removed); the `AiApi.onEvent` block
+// previously here was deleted.
 
 describe('AiRunTimesApi.onEvent typed narrowing (ADR-032)', () => {
   beforeEach(() => {

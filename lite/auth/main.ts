@@ -31,6 +31,8 @@ export const AUTH_IPC = {
   GET_TOKEN_BUNDLE: 'lite:auth:get-token-bundle',
   HAS_VALID_SESSION: 'lite:auth:has-valid-session',
   SESSION_CHANGED: 'lite:auth:session-changed',
+  /** Broadcast when a 2FA page is detected but Lite has no TOTP secret saved. */
+  TWO_FACTOR_NEEDS_SETUP: 'lite:auth:2fa-needs-setup',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -53,6 +55,7 @@ export interface AuthHandle {
 
 let registered = false;
 let unsubscribe: (() => void) | null = null;
+let unsubscribeTwoFactorNeedsSetup: (() => void) | null = null;
 
 /**
  * Register IPC handlers and start broadcasting session-changed events.
@@ -203,6 +206,29 @@ export function initAuth(opts: InitAuthOptions = {}): AuthHandle {
     }
   });
 
+  // Subscribe to 2FA-needs-setup notifications and broadcast them so
+  // the renderer can show a contextual banner. Per-frame dedupe is
+  // already handled inside the autofill watcher (`needsSetupNotified`
+  // gates to one notification per watcher).
+  unsubscribeTwoFactorNeedsSetup = auth.onTwoFactorNeedsSetup((payload) => {
+    log.info('2fa-needs-setup broadcast', {
+      source: payload.source,
+      hasReason: payload.reason !== undefined,
+    });
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        if (!win.isDestroyed()) {
+          win.webContents.send(AUTH_IPC.TWO_FACTOR_NEEDS_SETUP, payload);
+        }
+      } catch (err) {
+        log.warn('broadcast 2fa-needs-setup failed', {
+          windowId: win.id,
+          error: (err as Error).message,
+        });
+      }
+    }
+  });
+
   registered = true;
   log.info('auth initialized', { supported: [...SUPPORTED_ENVIRONMENTS] });
   return { teardown: teardownInternal };
@@ -226,6 +252,14 @@ function teardownInternal(): void {
       // best-effort
     }
     unsubscribe = null;
+  }
+  if (unsubscribeTwoFactorNeedsSetup !== null) {
+    try {
+      unsubscribeTwoFactorNeedsSetup();
+    } catch {
+      // best-effort
+    }
+    unsubscribeTwoFactorNeedsSetup = null;
   }
   registered = false;
 }

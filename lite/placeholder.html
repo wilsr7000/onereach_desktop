@@ -367,6 +367,59 @@
         line-height: 1.45;
       }
 
+      .info-banner {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid rgba(126, 179, 255, 0.32);
+        border-radius: 14px;
+        color: #aac6ff;
+        background: rgba(79, 140, 255, 0.10);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .warn-banner {
+        margin-top: 12px;
+        padding: 12px;
+        border: 1px solid rgba(255, 193, 7, 0.36);
+        border-radius: 14px;
+        color: #ffd76b;
+        background: rgba(255, 193, 7, 0.10);
+        font-size: 12px;
+        line-height: 1.5;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        text-align: left;
+      }
+
+      .warn-banner-headline {
+        font-weight: 500;
+        color: #ffe9a8;
+      }
+
+      .warn-banner-body {
+        color: rgba(255, 217, 121, 0.85);
+      }
+
+      .warn-banner-action {
+        align-self: flex-start;
+        margin-top: 4px;
+        background: transparent;
+        border: 1px solid rgba(255, 193, 7, 0.40);
+        color: #ffd76b;
+        font-family: inherit;
+        font-size: 11.5px;
+        padding: 5px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 120ms;
+      }
+
+      .warn-banner-action:hover {
+        background: rgba(255, 193, 7, 0.16);
+      }
+
       .security-note {
         display: grid;
         gap: 10px;

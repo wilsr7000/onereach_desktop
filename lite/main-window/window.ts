@@ -21,13 +21,14 @@
  *  during boot.
  */
 
-import { BrowserWindow, WebContentsView, shell } from 'electron';
+import { BrowserWindow, WebContentsView } from 'electron';
 import type { Rectangle } from 'electron';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
 import { getAuthApi, getEnvironmentForUrl } from '../auth/api.js';
 import { isOneReachSsoSkipUrl, tryAutoSkipSso } from '../auth/sso-skip.js';
 import { startTotpAutofillForWebContents } from '../auth/totp-autofill.js';
+import { buildPopupHandler } from '../auth/oauth-popup.js';
 import type { Tab } from './types.js';
 import { CHROME_HEIGHT_PX } from './types.js';
 import { MAIN_WINDOW_EVENTS } from './events.js';
@@ -341,13 +342,22 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
   view.setBounds({ x: 0, y: CHROME_HEIGHT_PX, width: 0, height: 0 });
   view.setVisible(false);
 
-  // Window-open handler: deny child Electron windows; route external
-  // links to the OS default browser. Same posture as ADR-037's
-  // placeholder browser, applied per-tab.
-  view.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  // Window-open handler: allow OAuth IdP popups (Google / Microsoft /
+  // Apple / Auth0 / Okta / etc.) in the SAME `persist:tab-<uuid>`
+  // partition so cookies land in this tab's jar. Anything else still
+  // routes to the OS default browser.
+  //
+  // Prior behavior denied every popup, which silently broke
+  // "Sign in with Google" inside ChatGPT / Claude / Gemini / etc.
+  // tabs because the popup completed in Safari and the resulting
+  // session never reached this tab's partition.
+  view.webContents.setWindowOpenHandler(
+    buildPopupHandler({
+      partition: tab.partition,
+      source: `main-window-tab:${tab.id}`,
+      logger: (level, message, data) => getLoggingApi()[level]('auth', message, data),
+    })
+  );
 
   // Persist navigation -- save the latest URL to the store so we can
   // restore the user's place across app restarts.

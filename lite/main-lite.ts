@@ -1,14 +1,22 @@
 /**
  * Onereach Lite -- main process entry point.
  *
- * Per ADR-011 (slim kernel), this kernel ships with:
+ * Per ADR-011 (slim kernel) + ADR-038 (tabbed main window), this
+ * kernel ships with:
  *   - Single-instance lock keyed on com.onereach.lite
  *   - Boot-time guard that no full-app modules have been loaded
  *   - Branding banner log line at boot
  *   - Log server on port 47392 (via lib/log-server.js)
- *   - Single placeholder window
- *   - Two top-level menus: Onereach.ai Lite (About + Quit) and Help (Report a Bug)
+ *   - Tabbed main window (chrome.html + per-tab WebContentsView under
+ *     a 36px tab bar). Falls back to legacy `placeholder.html` on hard
+ *     init failure.
+ *   - Top-level menus: Onereach.ai Lite, IDW, Agentic University,
+ *     Help, etc. -- registered by per-module `init*()` calls below.
+ *   - Sign-in popup-aware OAuth (Google / Microsoft / Apple SSO) per
+ *     ADR-042: popups stay in the same partition so cookies land
+ *     correctly.
  *   - Bug-reporter modal writing to userData/lite-bugs/ on Send
+ *   - Onboarding checklist card on the home view (KV-backed)
  *
  * Borrowed patterns (studied, never imported):
  *   - main.js:95-115 single-instance lock + second-instance focus
@@ -35,17 +43,22 @@ import { initApiDocs, type ApiDocsHandle } from './api-docs/main.js';
 import { initHealth, type HealthHandle } from './health/main.js';
 import { initNeon, type NeonHandle } from './neon/main.js';
 import { initIdw, type IdwHandle } from './idw/main.js';
+import { initTools, type ToolsHandle } from './tools/main.js';
 import { initMainWindow, type MainWindowHandle } from './main-window/main.js';
 import { initEventBus, type EventBusHandle } from './event-bus/main.js';
 import { initUniversity, type UniversityHandle } from './university/main.js';
-import { initAi, type AiHandle } from './ai/main.js';
+// NOTE: `initAi` from lite/ai/ was removed -- TTS and the AI
+// service module were pulled in the first-run UX hardening pass.
+// Bringing TTS back is a separate chunk that re-introduces lite/ai/.
 import { initAiRunTimes, type AiRunTimesHandle } from './ai-run-times/main.js';
+import { initOnboarding, type OnboardingHandle } from './onboarding/main.js';
 import { initUpdater, verifyUpdateOnStartup, type UpdaterHandle } from './updater/index.js';
 import { getLoggingApi, LOGGING_SELF_CATEGORY } from './logging/api.js';
 import { getAuthApi } from './auth/api.js';
 import { runKvMigration } from './kv/migration.js';
 import { setKVAuthBindings } from './kv/api.js';
 import { setFilesAuthBindings } from './files/api.js';
+import { installReSignInPrompter } from './auth/re-signin-prompt.js';
 import { getDiscoveryApi } from './discovery/api.js';
 
 const LITE_LOG_PORT = 47392;
@@ -77,20 +90,48 @@ app.setName(LITE_PRODUCT_NAME);
 // warning. ADR-042.
 process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true';
 
-// Read version from the project's package.json so dev runs show the
-// real lite version instead of Electron's. Try a few candidate locations
-// because __dirname differs between dev (dist-lite/build/) and packaged
-// (app.asar/dist-lite/build/).
+// Read Lite's version. Lite ships from the same repo as the full
+// app but tracks its own version independently -- the full app's
+// `package.json` at the repo root carries the full app's version
+// (currently 5.x), which is NOT what Lite should display.
+//
+// Resolution order:
+//   1. `lite/package.json` (the canonical Lite version source).
+//   2. Electron-builder packaged metadata at `app.asar/package.json`.
+//   3. Repo-root `package.json` (last-resort fallback only -- if you
+//      see Lite reporting the full app's version, it means the
+//      `lite/package.json` candidate didn't resolve, NOT that this
+//      is the intended source).
+//
+// __dirname differs between dev (`dist-lite/build/`) and packaged
+// (`app.asar/dist-lite/build/`), so we try several relative paths.
 function readLiteVersion(): string {
   const candidates = [
+    // Dev path: <repo>/dist-lite/build -> <repo>/lite/package.json
+    path.resolve(__dirname, '..', '..', 'lite', 'package.json'),
+    // Packaged: extraMetadata.version is written into app.asar/package.json
     path.resolve(__dirname, '..', '..', 'package.json'),
+    // Fallback siblings (rarely used; keep for paranoia).
     path.resolve(__dirname, '..', 'package.json'),
     path.resolve(__dirname, 'package.json'),
   ];
   for (const candidate of candidates) {
     try {
-      const pkg = JSON.parse(fs.readFileSync(candidate, 'utf-8')) as { version?: string };
-      if (typeof pkg.version === 'string' && pkg.version.length > 0) return pkg.version;
+      const pkg = JSON.parse(fs.readFileSync(candidate, 'utf-8')) as {
+        version?: string;
+        name?: string;
+      };
+      // Defense in depth: if we accidentally read the full app's
+      // package.json (name === 'onereach-app' or similar), skip it.
+      // Only `lite/package.json` (name: 'onereach-lite') or the
+      // packaged extraMetadata override should match.
+      if (
+        typeof pkg.version === 'string' &&
+        pkg.version.length > 0 &&
+        (pkg.name === undefined || pkg.name === 'onereach-lite')
+      ) {
+        return pkg.version;
+      }
     } catch {
       /* try next candidate */
     }
@@ -168,11 +209,12 @@ let apiDocsHandle: ApiDocsHandle | null = null;
 let healthHandle: HealthHandle | null = null;
 let neonHandle: NeonHandle | null = null;
 let idwHandle: IdwHandle | null = null;
+let toolsHandle: ToolsHandle | null = null;
 let mainWindowHandle: MainWindowHandle | null = null;
 let eventBusHandle: EventBusHandle | null = null;
 let universityHandle: UniversityHandle | null = null;
-let aiHandle: AiHandle | null = null;
 let aiRunTimesHandle: AiRunTimesHandle | null = null;
+let onboardingHandle: OnboardingHandle | null = null;
 
 app.on('second-instance', () => {
   // Best-effort event emission: if logging isn't initialized yet, skip
@@ -429,14 +471,31 @@ app
       });
     }
 
+    // Install the re-sign-in prompter BEFORE wiring KV bindings so the
+    // KV layer can call `promptReSignIn(reason)` the moment the SDK
+    // surfaces a stale-token rejection. The prompter dedupes
+    // concurrent rejections itself, so the KV layer never has to.
+    const reSignInHandle = installReSignInPrompter({
+      env: 'edison',
+      getParentWindow: () => mainWindow,
+    });
+
     // Wire KV's default config to live auth. Per ADR-044, lite/kv/api.ts
     // intentionally does NOT import lite/auth/ to avoid the
     // auth -> kv -> auth cycle. Instead, main-lite.ts (which sits
     // above both) injects the resolvers after initAuth completes.
+    //
+    // `onAuthRejected` carries the kernel's "Sign in again?" prompt.
+    // The KV transport detects `"Token was not accepted: wrong keyId"`
+    // (and similar stale-token strings) and fires this hook, which
+    // surfaces a system dialog and -- on user consent -- opens the
+    // OneReach SSO popup. Without this hook, the user would see a
+    // generic KV_NETWORK toast and have no recovery path.
     try {
       setKVAuthBindings({
         getToken: () => getAuthApi().getToken('edison') ?? '',
         getAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
+        onAuthRejected: (reason) => reSignInHandle.promptReSignIn(reason),
       });
     } catch (err) {
       getLoggingApi().error('kv', 'setKVAuthBindings threw', {
@@ -605,6 +664,28 @@ app
       });
     }
 
+    // Initialize Tools module. Registers IPC handlers (lite:tools:*),
+    // the top:tools menu placeholder + per-tool items + the always-
+    // present "Manage Tools..." item, and the manager window factory.
+    // Each tool is a user-curated label+url shortcut; clicks open in
+    // the user's default browser.
+    try {
+      toolsHandle = initTools({
+        preloadPath,
+        managerHtmlPath: path.join(__dirname, 'tools-manager.html'),
+        getParentWindow: () => mainWindow,
+        logger: {
+          info: (msg, data) => getLoggingApi().info('tools', msg, data),
+          warn: (msg, data) => getLoggingApi().warn('tools', msg, data),
+          error: (msg, data) => getLoggingApi().error('tools', msg, data),
+        },
+      });
+    } catch (err) {
+      getLoggingApi().error('tools', 'initTools threw', {
+        error: (err as Error).message,
+      });
+    }
+
     // Initialize Agentic University module. Registers the
     // top:university menu (Open LMS / Quick Starts -> View All
     // Tutorials + courses / AI Run Times / Wiser Method), the
@@ -658,22 +739,9 @@ app
       });
     }
 
-    // Initialize Lite AI service (OpenAI BYO-key). Powers the AI
-    // Run Times TTS feature and -- in future chunks -- audio script
-    // generation, summarization, etc. ADR-040.
-    try {
-      aiHandle = initAi({
-        logger: {
-          info: (msg, data) => getLoggingApi().info('ai', msg, data),
-          warn: (msg, data) => getLoggingApi().warn('ai', msg, data),
-          error: (msg, data) => getLoggingApi().error('ai', msg, data),
-        },
-      });
-    } catch (err) {
-      getLoggingApi().error('ai', 'initAi threw', {
-        error: (err as Error).message,
-      });
-    }
+    // Lite AI service (initAi) was pulled in the first-run UX
+    // hardening pass along with TTS. Re-introducing it is a separate
+    // chunk -- see ADR-040 history if you need the original wiring.
 
     // Initialize AI Run Times -- Flipboard-style article reader,
     // owns the dedicated reader window. The University menu's
@@ -692,6 +760,16 @@ app
       });
     } catch (err) {
       getLoggingApi().error('ai-run-times', 'initAiRunTimes threw', {
+        error: (err as Error).message,
+      });
+    }
+
+    // Initialize Onboarding module: KV-backed checklist progress
+    // for the first-run "checklist card" in the chrome home view.
+    try {
+      onboardingHandle = initOnboarding();
+    } catch (err) {
+      getLoggingApi().error('onboarding', 'initOnboarding threw', {
         error: (err as Error).message,
       });
     }
@@ -1036,12 +1114,12 @@ app.on('before-quit', () => {
     /* shutdown best-effort */
   }
   try {
-    aiRunTimesHandle?.teardown();
+    onboardingHandle?.teardown();
   } catch {
     /* shutdown best-effort */
   }
   try {
-    aiHandle?.teardown();
+    aiRunTimesHandle?.teardown();
   } catch {
     /* shutdown best-effort */
   }
@@ -1052,6 +1130,11 @@ app.on('before-quit', () => {
   }
   try {
     idwHandle?.teardown();
+  } catch {
+    /* shutdown best-effort */
+  }
+  try {
+    toolsHandle?.teardown();
   } catch {
     /* shutdown best-effort */
   }

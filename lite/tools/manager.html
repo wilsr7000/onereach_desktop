@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:; font-src 'self' data:"
+    />
+    <title>Manage Tools</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./tools-manager.css" />
+  </head>
+  <body>
+    <header class="frame-header">
+      <div class="frame-header-text">
+        <h1>Manage Tools</h1>
+        <p class="frame-subtitle">
+          Add quick links that show up in the Tools menu. Each entry is a label and a URL --
+          clicking it from the menu opens the URL in your default browser.
+        </p>
+      </div>
+    </header>
+
+    <main class="manager-layout">
+      <section class="form-panel" aria-label="Add or edit tool">
+        <header class="panel-header">
+          <h2 id="form-title">Add a tool</h2>
+          <p class="panel-subtitle" id="form-subtitle">Both fields are required.</p>
+        </header>
+
+        <form id="tool-form" autocomplete="off" novalidate>
+          <input type="hidden" id="tool-id" />
+
+          <div class="field">
+            <label for="tool-label">Menu label</label>
+            <input
+              type="text"
+              id="tool-label"
+              name="label"
+              placeholder="e.g. Notion, GitHub, Linear"
+              maxlength="80"
+              required
+              spellcheck="false"
+            />
+            <div class="field-error" id="label-error" role="alert"></div>
+          </div>
+
+          <div class="field">
+            <label for="tool-url">URL</label>
+            <input
+              type="url"
+              id="tool-url"
+              name="url"
+              placeholder="https://example.com"
+              required
+              spellcheck="false"
+              autocapitalize="none"
+              autocorrect="off"
+            />
+            <div class="field-error" id="url-error" role="alert"></div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" id="save-btn" class="btn-primary">Add tool</button>
+            <button type="button" id="cancel-btn" class="btn-secondary" hidden>Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="list-panel" aria-label="Existing tools">
+        <header class="panel-header">
+          <h2>Your tools</h2>
+          <p class="panel-subtitle" id="list-summary">No tools yet.</p>
+        </header>
+        <div id="tool-list" class="tool-list" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+    <footer class="frame-footer">
+      <span class="frame-footer-info">
+        Changes save automatically. Tools sync to the active OneReach account.
+      </span>
+      <div class="frame-footer-actions">
+        <button type="button" id="close-btn" class="btn-secondary">Close</button>
+      </div>
+    </footer>
+
+    <script src="./tools-manager.js"></script>
+  </body>
+</html>

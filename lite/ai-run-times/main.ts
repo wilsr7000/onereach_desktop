@@ -11,7 +11,6 @@
  */
 
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
-import { createHash } from 'node:crypto';
 import {
   getAiRunTimesApi,
   AiRunTimesError,
@@ -25,8 +24,6 @@ import {
 import { AI_RUN_TIMES_EVENTS } from './events.js';
 import { openAiRunTimesWindow, closeAiRunTimesWindow } from './window.js';
 import { getLoggingApi } from '../logging/api.js';
-import { getAiApi, type OpenAiTtsVoice } from '../ai/api.js';
-import { getFilesApi, FilesError, FILES_ERROR_CODES } from '../files/api.js';
 
 export const AI_RUN_TIMES_IPC = {
   LIST_ARTICLES: 'lite:ai-run-times:list-articles',
@@ -44,27 +41,12 @@ export const AI_RUN_TIMES_IPC = {
   CLEAR_READING_LOG: 'lite:ai-run-times:clear-reading-log',
   EXPORT_READING_LOG: 'lite:ai-run-times:export-reading-log',
   OPEN_WINDOW: 'lite:ai-run-times:open-window',
-  CACHED_TTS: 'lite:ai-run-times:cached-tts',
+  // CACHED_TTS removed in the first-run UX hardening pass -- TTS
+  // (and the lite/ai/ module that powered it) was pulled. Bringing
+  // it back is a separate chunk that re-introduces lite/ai/ +
+  // re-wires this handler against `getAiApi().tts(...)` and
+  // `getFilesApi().download/upload(...)`.
 } as const;
-
-/**
- * Files prefix where cached TTS chunks live in the user's bucket.
- * Keys look like:
- *   ai-run-times/tts/<articleId>/<voice>-<sha1(text)>.mp3
- *
- * The hash makes the cache key stable across Lite restarts and
- * insensitive to chunk-index reshuffling. Per ADR-045 every key is
- * scoped to the user's account server-side, so different users
- * never see each other's audio.
- */
-const TTS_CACHE_PREFIX = 'ai-run-times/tts';
-/**
- * TTL applied to every uploaded TTS chunk so the user's bucket
- * doesn't grow unbounded across thousands of articles. Pilot users
- * can re-listen during this window for free; older chunks fall off
- * and regenerate on demand.
- */
-const TTS_CACHE_TTL_DAYS = 30;
 
 export interface InitAiRunTimesOptions {
   preloadPath: string;
@@ -125,6 +107,7 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
   ipcMain.handle(
     AI_RUN_TIMES_IPC.FETCH_ARTICLE_BODY,
     async (_e: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<Article> => {
+      getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_FETCH_ARTICLE_BODY);
       const id = nonEmptyString(payload?.id, 'id');
       try {
         return await api.fetchArticleBody(id);
@@ -257,7 +240,7 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
         typeof payload?.finishedAt === 'string' ? payload.finishedAt : null;
       const listenedToCompletion = payload?.listenedToCompletion === true;
       try {
-        return await api.recordRead({
+        const result = await api.recordRead({
           articleId,
           title,
           link,
@@ -265,6 +248,33 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
           finishedAt,
           listenedToCompletion,
         });
+        // Renderer-driven activity events. The recordRead IPC is
+        // called twice per article -- once on open (no finishedAt)
+        // and once on close (finishedAt set). We fire one of two
+        // typed events so the central log + downstream subscribers
+        // can distinguish open vs finish.
+        if (finishedAt === null) {
+          getLoggingApi().event(AI_RUN_TIMES_EVENTS.ARTICLE_OPENED, { articleId });
+        } else {
+          // Best-effort durationMs: open->close delta when both
+          // timestamps are present in the persisted entry.
+          let durationMs = 0;
+          try {
+            const openedAtMs = Date.parse(result.openedAt);
+            const finishedAtMs = Date.parse(finishedAt);
+            if (Number.isFinite(openedAtMs) && Number.isFinite(finishedAtMs)) {
+              durationMs = Math.max(0, finishedAtMs - openedAtMs);
+            }
+          } catch {
+            /* leave durationMs at 0 */
+          }
+          getLoggingApi().event(AI_RUN_TIMES_EVENTS.ARTICLE_FINISHED, {
+            articleId,
+            durationMs,
+            listened: listenedToCompletion,
+          });
+        }
+        return result;
       } catch (err) {
         if (err instanceof AiRunTimesError) {
           log.warn('record-read rejected', { code: err.code });
@@ -276,99 +286,14 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
   );
 
   ipcMain.handle(AI_RUN_TIMES_IPC.CLEAR_READING_LOG, async (): Promise<{ ok: true }> => {
+    getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_CLEAR_READING_LOG);
     return api.clearReadingLog();
   });
 
   ipcMain.handle(AI_RUN_TIMES_IPC.EXPORT_READING_LOG, async (): Promise<string> => {
+    getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_EXPORT_READING_LOG);
     return api.exportReadingLog();
   });
-
-  ipcMain.handle(
-    AI_RUN_TIMES_IPC.CACHED_TTS,
-    async (
-      _e: IpcMainInvokeEvent,
-      payload: {
-        articleId?: unknown;
-        text?: unknown;
-        voice?: unknown;
-      }
-    ): Promise<{ audioBase64: string; contentType: string; cached: boolean }> => {
-      const articleId = nonEmptyString(payload?.articleId, 'articleId');
-      const text = typeof payload?.text === 'string' ? payload.text : '';
-      const voice = typeof payload?.voice === 'string' ? (payload.voice as OpenAiTtsVoice) : 'nova';
-      if (text.length === 0) {
-        throw new Error('text must be a non-empty string');
-      }
-      const cacheKey = ttsCacheKey(articleId, voice, text);
-
-      // Try the cache first. Files.get -> getDownloadUrl -> fetch
-      // is two round trips; we collapse via the convenience
-      // .download() method. Treat any error other than "not
-      // authenticated" as cache-miss and fall through to TTS
-      // generation -- the user shouldn't lose audio because the
-      // cache lookup hiccupped.
-      try {
-        const buf = await getFilesApi().download(cacheKey);
-        const audioBase64 = Buffer.from(buf).toString('base64');
-        log.info('cached-tts: hit', { cacheKey, bytes: buf.byteLength });
-        return { audioBase64, contentType: 'audio/mpeg', cached: true };
-      } catch (err) {
-        if (err instanceof FilesError && err.code === FILES_ERROR_CODES.NOT_FOUND) {
-          // Expected miss path -- generate below.
-        } else if (err instanceof FilesError && err.code === FILES_ERROR_CODES.NOT_AUTHENTICATED) {
-          // Signed-out: skip the cache + skip the upload, just
-          // generate. Returning cached:false signals to the
-          // renderer that this won't replay for free next time.
-          log.info('cached-tts: signed-out, skipping cache', { cacheKey });
-        } else {
-          log.warn('cached-tts: lookup failed, generating fresh', {
-            cacheKey,
-            error: (err as Error).message,
-          });
-        }
-      }
-
-      // Cache miss -- generate via the AI module.
-      const ttsResp = await getAiApi().tts({
-        text,
-        voice,
-        format: 'mp3',
-        feature: 'ai-run-times',
-      });
-      const audioBase64 = Buffer.from(ttsResp.audio).toString('base64');
-
-      // Best-effort cache write. Failure here MUST NOT throw --
-      // the user already paid the OpenAI cost for the bytes; we'd
-      // rather hand them the audio than fail because Files was
-      // unreachable.
-      void getFilesApi()
-        .upload(
-          ttsCachePrefix(articleId),
-          ttsCacheFileName(voice, text),
-          ttsResp.audio,
-          {
-            contentType: 'audio/mpeg',
-            isPublic: false,
-            rewriteMode: 'rewrite',
-            expiresAt: new Date(Date.now() + TTS_CACHE_TTL_DAYS * 86400_000).toISOString(),
-          }
-        )
-        .then(() => {
-          log.info('cached-tts: stored for next replay', {
-            cacheKey,
-            bytes: ttsResp.audio.byteLength,
-          });
-        })
-        .catch((err: unknown) => {
-          log.warn('cached-tts: upload failed (audio still returned)', {
-            cacheKey,
-            error: (err as Error).message,
-          });
-        });
-
-      return { audioBase64, contentType: 'audio/mpeg', cached: false };
-    }
-  );
 
   ipcMain.handle(AI_RUN_TIMES_IPC.OPEN_WINDOW, async (): Promise<{ ok: true }> => {
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_OPEN_WINDOW);
@@ -426,29 +351,4 @@ function stringArray(v: unknown, field: string): string[] {
     throw new Error(`${field} must be an array of strings`);
   }
   return v;
-}
-
-/**
- * Slug-ify an articleId for use as a folder name. The article ids
- * coming from the RSS feed can contain `/`, `:`, `?` -- we replace
- * any non-safe character with `_` so the cache layout stays flat.
- */
-function safeArticleId(articleId: string): string {
-  return articleId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
-}
-
-function ttsCachePrefix(articleId: string): string {
-  return `${TTS_CACHE_PREFIX}/${safeArticleId(articleId)}`;
-}
-
-function ttsCacheFileName(voice: string, text: string): string {
-  // sha1 is fine here -- we're keying a cache, not signing
-  // anything. 12 hex chars is enough collision space (2^48) for
-  // the cache lifetime (30 days, max ~few thousand chunks).
-  const hash = createHash('sha1').update(text).digest('hex').slice(0, 12);
-  return `${voice}-${hash}.mp3`;
-}
-
-function ttsCacheKey(articleId: string, voice: string, text: string): string {
-  return `${ttsCachePrefix(articleId)}/${ttsCacheFileName(voice, text)}`;
 }

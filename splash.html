@@ -7,6 +7,7 @@
       content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self';"
     />
     <title>Onereach.ai</title>
+    <link rel="stylesheet" href="onereach-signature.css" />
     <style>
       * {
         margin: 0;
@@ -17,7 +18,7 @@
       body {
         background: transparent;
         color: #ffffff;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        font-family: var(--or-font-sans);
         -webkit-font-smoothing: antialiased;
         overflow: hidden;
         height: 100vh;
@@ -50,7 +51,8 @@
         width: 300px;
         height: 300px;
         border-radius: 50%;
-        background: radial-gradient(circle, rgba(0, 153, 255, 0.12) 0%, transparent 70%);
+        background:
+          radial-gradient(circle, rgba(79, 140, 255, 0.18) 0%, rgba(79, 140, 255, 0.08) 38%, transparent 70%);
         animation: pulseGlow 2.5s ease-in-out forwards;
         pointer-events: none;
         z-index: 0;
@@ -69,7 +71,8 @@
         margin: 0 auto 20px;
         border-radius: 50%;
         object-fit: cover;
-        filter: drop-shadow(0 4px 24px rgba(0, 153, 255, 0.3));
+        filter: drop-shadow(0 4px 24px var(--or-accent-glow));
+        box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.22), 0 0 42px rgba(79, 140, 255, 0.18);
       }
 
       .brand-name {

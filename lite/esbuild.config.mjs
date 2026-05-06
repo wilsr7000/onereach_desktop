@@ -39,6 +39,8 @@ const ASSETS_TO_COPY = [
   { from: 'lite/api-docs/index.css', to: 'api-docs.css' },
   { from: 'lite/idw/catalog.html', to: 'idw-store.html' },
   { from: 'lite/idw/catalog.css', to: 'idw-store.css' },
+  { from: 'lite/tools/manager.html', to: 'tools-manager.html' },
+  { from: 'lite/tools/manager.css', to: 'tools-manager.css' },
   { from: 'lite/main-window/chrome.html', to: 'chrome.html' },
   { from: 'lite/main-window/chrome.css', to: 'chrome.css' },
   { from: 'lite/university/tutorials.html', to: 'university-tutorials.html' },
@@ -150,6 +152,17 @@ const idwStoreOptions = {
 };
 
 /** @type {esbuild.BuildOptions} */
+const toolsManagerOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'tools/manager-renderer.ts')],
+  outfile: resolve(outDir, 'tools-manager.js'),
+  platform: 'browser',
+  target: 'chrome130',
+  format: 'iife',
+  globalName: 'OnereachLiteToolsManager',
+};
+
+/** @type {esbuild.BuildOptions} */
 const universityTutorialsOptions = {
   ...commonOptions,
   entryPoints: [resolve(__dirname, 'university/tutorials-renderer.ts')],
@@ -190,6 +203,7 @@ const allConfigs = [
   settingsOptions,
   apiDocsOptions,
   idwStoreOptions,
+  toolsManagerOptions,
   universityTutorialsOptions,
   chromeOptions,
   aiRunTimesOptions,

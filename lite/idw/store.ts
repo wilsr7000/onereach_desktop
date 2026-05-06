@@ -391,6 +391,36 @@ export class IdwStore {
     });
   }
 
+  /**
+   * Force a fresh KV read and broadcast the result through `onChange`.
+   *
+   * The store auto-invalidates its in-memory cache when the active
+   * `accountId` changes (signed-out -> signed-in or user-switch), but
+   * nothing in the system *triggers* a follow-up `list()` call -- so
+   * subscribers (the IDW menu builder, the Settings -> IDWs section)
+   * keep showing the empty list they read on first render before the
+   * user signed in.
+   *
+   * The kernel calls this on `onSessionChanged` from `lite/idw/api.ts`
+   * so menu items + settings rows light up the moment KV becomes
+   * available, without the user having to open Manage Agents to
+   * trigger a refresh.
+   *
+   * Best-effort: a KV read failure is logged and surfaces as an empty
+   * list to subscribers. Idempotent -- safe to call repeatedly.
+   */
+  async refreshAfterAccountChange(): Promise<void> {
+    try {
+      const blob = await this.readBlob();
+      this.emitChanged(blob.entries);
+    } catch (err) {
+      this.log('warn', 'idw-store: refreshAfterAccountChange failed', {
+        error: (err as Error).message,
+      });
+      this.emitChanged([]);
+    }
+  }
+
   // ─── internals ───────────────────────────────────────────────────────────
 
   /**

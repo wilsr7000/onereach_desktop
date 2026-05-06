@@ -42,6 +42,7 @@ const AUTH_GET_SESSION = 'lite:auth:get-session';
 const AUTH_GET_TOKEN_BUNDLE = 'lite:auth:get-token-bundle';
 const AUTH_HAS_VALID_SESSION = 'lite:auth:has-valid-session';
 const AUTH_SESSION_CHANGED = 'lite:auth:session-changed';
+const AUTH_TWO_FACTOR_NEEDS_SETUP = 'lite:auth:2fa-needs-setup';
 
 const TOTP_HAS_SECRET = 'lite:totp:has-secret';
 const TOTP_GET_METADATA = 'lite:totp:get-metadata';
@@ -86,6 +87,14 @@ const IDW_REMOVE = 'lite:idw:remove';
 const IDW_OPEN_STORE = 'lite:idw:open-store';
 const IDW_CHANGED = 'lite:idw:changed';
 
+const TOOLS_LIST = 'lite:tools:list';
+const TOOLS_GET = 'lite:tools:get';
+const TOOLS_ADD = 'lite:tools:add';
+const TOOLS_UPDATE = 'lite:tools:update';
+const TOOLS_REMOVE = 'lite:tools:remove';
+const TOOLS_OPEN_MANAGER = 'lite:tools:open-manager';
+const TOOLS_CHANGED = 'lite:tools:changed';
+
 const UNIVERSITY_LIST = 'lite:university:list';
 const UNIVERSITY_LIST_BY_KIND = 'lite:university:list-by-kind';
 const UNIVERSITY_GET = 'lite:university:get';
@@ -93,10 +102,14 @@ const UNIVERSITY_OPEN = 'lite:university:open';
 const UNIVERSITY_OPEN_TUTORIALS = 'lite:university:open-tutorials';
 
 // Lite AI service IPC channels
-const AI_TTS = 'lite:ai:tts';
-const AI_CHAT = 'lite:ai:chat';
-const AI_STATUS = 'lite:ai:status';
-const AI_CONFIGURE = 'lite:ai:configure';
+// AI service IPC channels removed -- the lite/ai/ module was pulled
+// in the first-run UX hardening pass along with TTS. Re-introducing
+// them is a separate chunk.
+
+// Onboarding IPC channels
+const ONBOARDING_LOAD = 'lite:onboarding:load';
+const ONBOARDING_MARK_COMPLETE = 'lite:onboarding:mark-complete';
+const ONBOARDING_DISMISS = 'lite:onboarding:dismiss';
 
 // AI Run Times IPC channels
 const ART_LIST_ARTICLES = 'lite:ai-run-times:list-articles';
@@ -114,7 +127,7 @@ const ART_RECORD_READ = 'lite:ai-run-times:record-read';
 const ART_CLEAR_READING_LOG = 'lite:ai-run-times:clear-reading-log';
 const ART_EXPORT_READING_LOG = 'lite:ai-run-times:export-reading-log';
 const ART_OPEN_WINDOW = 'lite:ai-run-times:open-window';
-const ART_CACHED_TTS = 'lite:ai-run-times:cached-tts';
+// ART_CACHED_TTS removed alongside the AI module.
 
 interface LiteMetadata {
   version: string;
@@ -289,10 +302,30 @@ interface AuthBridge {
     listener: (payload: { env: AuthEnvironment; session: AuthSessionRendererView | null }) => void
   ): () => void;
   /**
+   * Subscribe to 2FA-needs-setup broadcasts. Fires when the autofill
+   * watcher detects a OneReach 2FA prompt during sign-in but Lite has
+   * no TOTP secret saved (i.e. the user needs to open Settings ->
+   * Two-Factor and paste their authenticator setup secret).
+   */
+  on2FANeedsSetup(
+    listener: (payload: AuthTwoFactorNeedsSetupPayload) => void
+  ): () => void;
+  /**
    * Convenience: parse a thrown signIn error to get the structured
    * code + remediation. Returns null if the message wasn't an AuthError.
    */
   parseError(err: unknown): AuthErrorJSON | null;
+}
+
+/**
+ * Payload of the `lite:auth:2fa-needs-setup` broadcast.
+ */
+interface AuthTwoFactorNeedsSetupPayload {
+  source: string;
+  frameUrl: string;
+  reason?: string;
+  inputCount?: number;
+  timestamp: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -530,6 +563,49 @@ interface IdwBridge {
 }
 
 // ---------------------------------------------------------------------------
+// Tools bridge -- mirrors lite/tools/api.ts ToolsApi.
+//
+// Hosts the top-level "Tools" menu (user-curated label+url shortcuts).
+// All CRUD methods are bridged. `onChange` is bridged via the
+// `lite:tools:changed` broadcast.
+// ---------------------------------------------------------------------------
+
+interface ToolEntryView {
+  id: string;
+  label: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ToolAddPayload {
+  id?: string;
+  label: string;
+  url: string;
+}
+
+interface ToolsErrorJSON {
+  name: string;
+  code: string;
+  message: string;
+  context: Record<string, unknown>;
+  remediation: string;
+  cause?: string;
+}
+
+interface ToolsBridge {
+  list(): Promise<ToolEntryView[]>;
+  get(id: string): Promise<ToolEntryView | null>;
+  add(entry: ToolAddPayload): Promise<ToolEntryView>;
+  update(id: string, patch: Partial<ToolEntryView>): Promise<ToolEntryView>;
+  remove(id: string): Promise<{ ok: true }>;
+  openManager(): Promise<{ ok: true }>;
+  /** Subscribe to `lite:tools:changed` broadcasts. Returns an unsubscribe fn. */
+  onChange(handler: (entries: ToolEntryView[]) => void): () => void;
+  parseError(err: unknown): ToolsErrorJSON | null;
+}
+
+// ---------------------------------------------------------------------------
 // University bridge -- mirrors lite/university/api.ts UniversityApi.
 // ---------------------------------------------------------------------------
 
@@ -568,80 +644,9 @@ interface UniversityBridge {
 }
 
 // ---------------------------------------------------------------------------
-// Lite AI service bridge
+// Lite AI service bridge -- removed in the first-run UX hardening
+// pass along with TTS. Re-introducing it is a separate chunk.
 // ---------------------------------------------------------------------------
-
-type AiTtsVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
-type AiTtsModel = 'tts-1' | 'tts-1-hd';
-type AiTtsFormat = 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
-
-interface AiTtsRequestBridge {
-  text: string;
-  voice?: AiTtsVoice;
-  model?: AiTtsModel;
-  format?: AiTtsFormat;
-  speed?: number;
-  feature?: string;
-}
-
-interface AiTtsResultBridge {
-  audioBase64: string;
-  mimeType: string;
-  voice: string;
-  model: string;
-  format: string;
-}
-
-interface AiChatMessageBridge {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-interface AiChatRequestBridge {
-  messages: AiChatMessageBridge[];
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  feature?: string;
-}
-
-interface AiChatResponseBridge {
-  content: string;
-  model: string;
-  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
-}
-
-interface AiStatusBridge {
-  provider: 'openai';
-  hasApiKey: boolean;
-  defaultTtsVoice: string;
-  defaultTtsModel: string;
-  defaultChatModel: string;
-}
-
-interface AiConfigBridge {
-  apiKey?: string;
-  defaultTtsVoice?: AiTtsVoice;
-  defaultTtsModel?: AiTtsModel;
-  defaultChatModel?: string;
-}
-
-interface AiErrorJSON {
-  name: string;
-  code: string;
-  message: string;
-  context: Record<string, unknown>;
-  remediation: string;
-  cause?: string;
-}
-
-interface AiBridge {
-  tts(req: AiTtsRequestBridge): Promise<AiTtsResultBridge>;
-  chat(req: AiChatRequestBridge): Promise<AiChatResponseBridge>;
-  status(): Promise<AiStatusBridge>;
-  configure(config: AiConfigBridge): Promise<{ ok: true }>;
-  parseError(err: unknown): AiErrorJSON | null;
-}
 
 // ---------------------------------------------------------------------------
 // AI Run Times bridge
@@ -716,15 +721,6 @@ interface ArtErrorJSON {
   cause?: string;
 }
 
-interface ArtCachedTtsResultView {
-  /** Base64-encoded MP3 bytes. */
-  audioBase64: string;
-  /** Always 'audio/mpeg' for v1 (which only supports mp3). */
-  contentType: string;
-  /** True when the chunk was served from the Files cache (no OpenAI cost). */
-  cached: boolean;
-}
-
 interface AiRunTimesBridge {
   listArticles(): Promise<ArtArticleView[]>;
   getArticle(id: string): Promise<ArtArticleView | null>;
@@ -748,20 +744,29 @@ interface AiRunTimesBridge {
   clearReadingLog(): Promise<{ ok: true }>;
   exportReadingLog(): Promise<string>;
   openWindow(): Promise<{ ok: true }>;
-  /**
-   * TTS with a Files-backed cache (ADR-045). Hashes the chunk text +
-   * voice into a deterministic key under `ai-run-times/tts/...` in
-   * the user's Files bucket and serves cached bytes on hit;
-   * generates via the AI module on miss and writes the result to
-   * the cache (best-effort, with a 30-day TTL). Replays of the same
-   * article become free.
-   */
-  cachedTts(input: {
-    articleId: string;
-    text: string;
-    voice?: AiTtsVoice;
-  }): Promise<ArtCachedTtsResultView>;
+  // cachedTts removed alongside the AI module (TTS pulled).
   parseError(err: unknown): ArtErrorJSON | null;
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding bridge
+// ---------------------------------------------------------------------------
+
+type OnboardingStepIdView =
+  | 'signed-in'
+  | 'two-factor-saved'
+  | 'first-agent-opened';
+
+interface OnboardingStateView {
+  schemaVersion: 1;
+  completedAt: Partial<Record<OnboardingStepIdView, string>>;
+  dismissedAt: string | null;
+}
+
+interface OnboardingBridge {
+  load(): Promise<OnboardingStateView>;
+  markComplete(stepId: OnboardingStepIdView): Promise<OnboardingStateView>;
+  dismiss(): Promise<OnboardingStateView>;
 }
 
 interface BugReportAttachmentView {
@@ -931,6 +936,16 @@ const auth: AuthBridge = {
       ipcRenderer.removeListener(AUTH_SESSION_CHANGED, handler);
     };
   },
+  on2FANeedsSetup: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: AuthTwoFactorNeedsSetupPayload
+    ): void => listener(payload);
+    ipcRenderer.on(AUTH_TWO_FACTOR_NEEDS_SETUP, handler);
+    return (): void => {
+      ipcRenderer.removeListener(AUTH_TWO_FACTOR_NEEDS_SETUP, handler);
+    };
+  },
   parseError: (err) => {
     if (err === null || typeof err !== 'object') return null;
     // Electron rethrows IPC handler errors with `.message` PREFIXED by
@@ -1030,6 +1045,46 @@ const idw: IdwBridge = {
     try {
       const parsed = JSON.parse(message.slice(jsonStart)) as { __idwError?: IdwErrorJSON };
       if (parsed.__idwError !== undefined) return parsed.__idwError;
+    } catch {
+      return null;
+    }
+    return null;
+  },
+};
+
+const tools: ToolsBridge = {
+  list: () => ipcRenderer.invoke(TOOLS_LIST) as Promise<ToolEntryView[]>,
+  get: (id) => ipcRenderer.invoke(TOOLS_GET, { id }) as Promise<ToolEntryView | null>,
+  add: (entry) => ipcRenderer.invoke(TOOLS_ADD, entry) as Promise<ToolEntryView>,
+  update: (id, patch) =>
+    ipcRenderer.invoke(TOOLS_UPDATE, { id, patch }) as Promise<ToolEntryView>,
+  remove: (id) => ipcRenderer.invoke(TOOLS_REMOVE, { id }) as Promise<{ ok: true }>,
+  openManager: () => ipcRenderer.invoke(TOOLS_OPEN_MANAGER) as Promise<{ ok: true }>,
+  onChange: (handler) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { entries: ToolEntryView[] }
+    ): void => {
+      try {
+        handler(payload?.entries ?? []);
+      } catch {
+        // best-effort: never let a buggy handler crash IPC
+      }
+    };
+    ipcRenderer.on(TOOLS_CHANGED, listener);
+    return (): void => {
+      ipcRenderer.removeListener(TOOLS_CHANGED, listener);
+    };
+  },
+  parseError: (err) => {
+    if (err === null || typeof err !== 'object') return null;
+    const message = (err as { message?: unknown }).message;
+    if (typeof message !== 'string') return null;
+    const jsonStart = message.indexOf('{');
+    if (jsonStart < 0) return null;
+    try {
+      const parsed = JSON.parse(message.slice(jsonStart)) as { __toolsError?: ToolsErrorJSON };
+      if (parsed.__toolsError !== undefined) return parsed.__toolsError;
     } catch {
       return null;
     }
@@ -1310,13 +1365,7 @@ function parseStructuredErrorWith<T>(err: unknown, key: string): T | null {
   return null;
 }
 
-const ai: AiBridge = {
-  tts: (req) => ipcRenderer.invoke(AI_TTS, req) as Promise<AiTtsResultBridge>,
-  chat: (req) => ipcRenderer.invoke(AI_CHAT, req) as Promise<AiChatResponseBridge>,
-  status: () => ipcRenderer.invoke(AI_STATUS) as Promise<AiStatusBridge>,
-  configure: (config) => ipcRenderer.invoke(AI_CONFIGURE, config) as Promise<{ ok: true }>,
-  parseError: (err) => parseStructuredErrorWith<AiErrorJSON>(err, '__aiError'),
-};
+// `ai` bridge removed alongside the lite/ai/ module (TTS pulled).
 
 const aiRunTimes: AiRunTimesBridge = {
   listArticles: () => ipcRenderer.invoke(ART_LIST_ARTICLES) as Promise<ArtArticleView[]>,
@@ -1344,9 +1393,15 @@ const aiRunTimes: AiRunTimesBridge = {
     ipcRenderer.invoke(ART_CLEAR_READING_LOG) as Promise<{ ok: true }>,
   exportReadingLog: () => ipcRenderer.invoke(ART_EXPORT_READING_LOG) as Promise<string>,
   openWindow: () => ipcRenderer.invoke(ART_OPEN_WINDOW) as Promise<{ ok: true }>,
-  cachedTts: (input) =>
-    ipcRenderer.invoke(ART_CACHED_TTS, input) as Promise<ArtCachedTtsResultView>,
+  // cachedTts removed alongside the AI module.
   parseError: (err) => parseStructuredErrorWith<ArtErrorJSON>(err, '__aiRunTimesError'),
+};
+
+const onboarding: OnboardingBridge = {
+  load: () => ipcRenderer.invoke(ONBOARDING_LOAD) as Promise<OnboardingStateView>,
+  markComplete: (stepId) =>
+    ipcRenderer.invoke(ONBOARDING_MARK_COMPLETE, { stepId }) as Promise<OnboardingStateView>,
+  dismiss: () => ipcRenderer.invoke(ONBOARDING_DISMISS) as Promise<OnboardingStateView>,
 };
 
 contextBridge.exposeInMainWorld('lite', {
@@ -1358,11 +1413,12 @@ contextBridge.exposeInMainWorld('lite', {
   health,
   neon,
   idw,
+  tools,
   mainWindow,
   events,
   university,
-  ai,
   aiRunTimes,
+  onboarding,
 });
 contextBridge.exposeInMainWorld('logging', logging);
 contextBridge.exposeInMainWorld('bugReport', bugReport);

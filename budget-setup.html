@@ -12,6 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <link rel="stylesheet" href="onereach-signature.css" />
     <style>
       * {
         margin: 0;
@@ -27,8 +28,10 @@
           'Segoe UI',
           Roboto,
           sans-serif;
-        background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #0d1117 100%);
-        color: #e6edf3;
+        background:
+          radial-gradient(circle at 50% 0%, rgba(79, 140, 255, 0.14), transparent 42%),
+          linear-gradient(135deg, var(--or-bg-canvas) 0%, var(--or-bg-shell) 50%, var(--or-bg-canvas) 100%);
+        color: var(--or-text-primary);
         min-height: 100vh;
         display: flex;
         align-items: center;
@@ -37,9 +40,9 @@
       }
 
       .setup-container {
-        background: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 16px;
+        background: var(--or-bg-surface);
+        border: 1px solid var(--or-border-subtle);
+        border-radius: var(--or-radius-xl);
         max-width: 600px;
         width: 100%;
         overflow: hidden;
@@ -47,7 +50,9 @@
       }
 
       .setup-header {
-        background: linear-gradient(135deg, #238636 0%, #2ea043 100%);
+        background:
+          radial-gradient(circle at 50% 0%, rgba(123, 219, 255, 0.18), transparent 60%),
+          linear-gradient(135deg, var(--or-accent) 0%, #2569d8 100%);
         padding: 32px;
         text-align: center;
       }
@@ -82,17 +87,17 @@
         width: 10px;
         height: 10px;
         border-radius: 50%;
-        background: #30363d;
+        background: rgba(255, 255, 255, 0.12);
         transition: all 0.3s ease;
       }
 
       .step.active {
-        background: #238636;
+        background: var(--or-accent);
         transform: scale(1.2);
       }
 
       .step.completed {
-        background: #3fb950;
+        background: var(--or-success);
       }
 
       .form-section {
@@ -387,7 +392,31 @@
 
       .summary-row .value {
         font-family: 'JetBrains Mono', monospace;
-        color: #e6edf3;
+        color: var(--or-text-primary);
+      }
+
+      /* Onereach signature override pass */
+      .form-input,
+      .form-select,
+      .summary-card,
+      .setup-body {
+        background: var(--or-bg-surface) !important;
+        border-color: var(--or-border-subtle) !important;
+      }
+
+      .form-input:focus,
+      .form-select:focus {
+        border-color: var(--or-border-signal) !important;
+        box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.15) !important;
+      }
+
+      .summary-value {
+        color: var(--or-accent-strong) !important;
+      }
+
+      .btn-primary {
+        background: linear-gradient(180deg, var(--or-accent-hover), var(--or-accent)) !important;
+        border-color: var(--or-border-signal) !important;
       }
     </style>
   </head>

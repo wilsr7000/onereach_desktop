@@ -68,6 +68,42 @@ export interface SdkKVClientConfig {
   logger?: KVConfig['logger'];
   /** Optional span emitter (ADR-030). */
   spanEmitter?: KVConfig['spanEmitter'];
+  /**
+   * Optional hook invoked when the KV server rejects the token as
+   * stale. The OneReach KV service surfaces this with messages like
+   * `"Token was not accepted: wrong keyId"` even when the underlying
+   * HTTP status is buried by the SDK's transport. The kernel wires
+   * this to a "Sign in again?" prompt so the user isn't stranded with
+   * an opaque KV error.
+   *
+   * Called once per detected rejection -- the consumer is responsible
+   * for de-duping (e.g. only show one dialog at a time).
+   */
+  onAuthRejected?: (reason: string) => void;
+}
+
+/**
+ * Substrings the OneReach KV service includes in its rejection
+ * messages when the supplied token can't be verified. Detection is
+ * defensive: the upstream wording has shifted between releases, so
+ * we match on multiple known fragments.
+ *
+ * Treated as case-insensitive. Add more patterns as new server-side
+ * rejection messages surface.
+ */
+const AUTH_REJECTED_PATTERNS = [
+  'token was not accepted',
+  'wrong keyid',
+  'invalid token',
+  'token expired',
+  'token has expired',
+  'jwt expired',
+];
+
+/** True iff `message` matches any of `AUTH_REJECTED_PATTERNS`. */
+export function isAuthRejectedMessage(message: string): boolean {
+  const lower = message.toLowerCase();
+  return AUTH_REJECTED_PATTERNS.some((p) => lower.includes(p));
 }
 
 /**
@@ -85,6 +121,7 @@ export class SdkKVClient {
   private readonly log: NonNullable<KVConfig['logger']>;
   private readonly spanEmitter: NonNullable<KVConfig['spanEmitter']> | null;
   private readonly sdkCtor: NonNullable<SdkKVClientConfig['sdkCtor']> | null;
+  private readonly onAuthRejected: NonNullable<SdkKVClientConfig['onAuthRejected']> | null;
   /** SDK instance, lazy. Re-built when accountId changes. */
   private sdk: KvSdkLike | null = null;
   private sdkForAccountId: string | null = null;
@@ -100,6 +137,7 @@ export class SdkKVClient {
       });
     this.spanEmitter = config.spanEmitter ?? null;
     this.sdkCtor = config.sdkCtor ?? null;
+    this.onAuthRejected = config.onAuthRejected ?? null;
   }
 
   async set(collection: string, key: string, value: unknown): Promise<void> {
@@ -265,7 +303,16 @@ export class SdkKVClient {
     collection: string,
     key?: string
   ): KVError {
-    if (err instanceof KVError) return err;
+    if (err instanceof KVError) {
+      // Forward the auth-rejection signal even when the upstream
+      // already wrapped the error -- e.g. `getSdk()` throws KVError
+      // with status 401 when accountId is null, which is the same
+      // re-sign-in case as a server-rejected token.
+      if (err.status === 401 || err.status === 403) {
+        this.notifyAuthRejected(err.message);
+      }
+      return err;
+    }
     const e = err as {
       message?: string;
       response?: { status?: number; data?: unknown };
@@ -279,7 +326,28 @@ export class SdkKVClient {
       ...(key !== undefined ? { key } : {}),
     };
 
+    // The OneReach KV service occasionally rejects a stale `mult`
+    // token by surfacing "Token was not accepted: wrong keyId" without
+    // a clean HTTP status (the SDK swallows the response). Detect that
+    // pattern and treat it as a 401 so the kernel can prompt
+    // re-sign-in instead of leaving the user with an opaque
+    // `KV_NETWORK` toast.
+    if (typeof status !== 'number' && isAuthRejectedMessage(message)) {
+      this.notifyAuthRejected(message);
+      return new KVError({
+        code: KV_ERROR_CODES.HTTP,
+        message: `KV ${op} HTTP 401: ${message}`,
+        status: 401,
+        context: { ...baseContext, reason: 'token-rejected' },
+        remediation: kvHttpRemediation(401),
+        cause: err,
+      });
+    }
+
     if (typeof status === 'number') {
+      if (status === 401 || status === 403) {
+        this.notifyAuthRejected(message);
+      }
       return new KVError({
         code: KV_ERROR_CODES.HTTP,
         message: `KV ${op} HTTP ${status}: ${message}`,
@@ -305,6 +373,22 @@ export class SdkKVClient {
       remediation: 'Check your network connection (DNS, VPN, captive portal).',
       cause: err,
     });
+  }
+
+  /**
+   * Fire the optional auth-rejection callback. Wrapped in try/catch so
+   * a misbehaving consumer (e.g. dialog-show throws) cannot mask the
+   * original KV error.
+   */
+  private notifyAuthRejected(reason: string): void {
+    if (this.onAuthRejected === null) return;
+    try {
+      this.onAuthRejected(reason);
+    } catch (err) {
+      this.log('warn', 'kv-client: onAuthRejected handler threw', {
+        error: (err as Error).message,
+      });
+    }
   }
 }
 

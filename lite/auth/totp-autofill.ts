@@ -38,7 +38,22 @@ import type { BrowserWindow, WebContents, WebFrameMain } from 'electron';
 import * as path from 'node:path';
 import { getTotpApi } from '../totp/api.js';
 import { TOTP_ERROR_CODES, TotpError } from '../totp/errors.js';
+import { getLoggingApi } from '../logging/api.js';
+import { AUTH_EVENTS } from './events.js';
 import type { AuthWindowHandle } from './window.js';
+
+/**
+ * Extract the origin (scheme + host) from a frame URL for safe inclusion
+ * in event payloads. Path / query / fragment may carry session-specific
+ * tokens or correlation ids, so they are stripped before logging.
+ */
+function frameOriginOf(frameUrl: string): string {
+  try {
+    return new URL(frameUrl).origin;
+  } catch {
+    return '<unparseable>';
+  }
+}
 
 /** Hard cap on fill+submit attempts across the entire sign-in. */
 const MAX_ATTEMPTS = 3;
@@ -93,6 +108,19 @@ interface StartOptions {
    */
   onTwoFactorDetected?: (payload: TwoFactorDetectedPayload) => void;
   /**
+   * Called when a 2FA frame is detected AND `getCurrentCode()` throws
+   * `TOTP_NO_SECRET` (i.e. the user has nothing in the keychain to
+   * autofill from). The auth store wires this to a renderer-visible
+   * banner / toast that says "open Settings -> Two-Factor and paste
+   * your secret" so the user isn't left staring at the OneReach 2FA
+   * prompt with no idea what to do.
+   *
+   * Fires AT MOST ONCE per `startTotpAutofill` call (per-frame
+   * detection still gates via `detectedFrames`, but the no-secret
+   * notification is global to the watcher).
+   */
+  onTwoFactorNeedsSetup?: (payload: TwoFactorDetectedPayload) => void;
+  /**
    * Optional resolver for the account id to auto-select on the
    * OneReach account-picker page. Typically derived from the IDW URL
    * (`?accountId=<uuid>`) by the caller. Returning `null` disables
@@ -118,6 +146,8 @@ interface RuntimeState {
   accountPickerHandled: Set<string>;
   /** Per-window event-listener disposers (auth window + every popup). */
   cleanups: Array<() => void>;
+  /** Whether `onTwoFactorNeedsSetup` has fired -- gates to one notification per watcher. */
+  needsSetupNotified: boolean;
 }
 
 export interface TwoFactorDetectedPayload {
@@ -178,6 +208,7 @@ export function startTotpAutofill(handle: AuthWindowHandle, opts: StartOptions =
     getCurrentCode,
     opts.logger,
     opts.onTwoFactorDetected,
+    opts.onTwoFactorNeedsSetup,
     opts.getTargetAccountId,
     opts.onAccountPickerDetected
   );
@@ -217,6 +248,7 @@ export function startTotpAutofillForWebContents(
     getCurrentCode,
     opts.logger,
     opts.onTwoFactorDetected,
+    opts.onTwoFactorNeedsSetup,
     opts.getTargetAccountId,
     opts.onAccountPickerDetected
   );
@@ -236,6 +268,7 @@ function createRuntimeState(): RuntimeState {
     detectedFrames: new Set(),
     accountPickerHandled: new Set(),
     cleanups: [],
+    needsSetupNotified: false,
   };
 }
 
@@ -259,6 +292,7 @@ function attachToTarget(
   getCurrentCode: () => Promise<{ code: string; timeRemaining: number }>,
   logger: StartOptions['logger'],
   onTwoFactorDetected: StartOptions['onTwoFactorDetected'],
+  onTwoFactorNeedsSetup: StartOptions['onTwoFactorNeedsSetup'],
   getTargetAccountId: StartOptions['getTargetAccountId'],
   onAccountPickerDetected: StartOptions['onAccountPickerDetected']
 ): void {
@@ -306,7 +340,8 @@ function attachToTarget(
           getCurrentCode,
           state,
           logger,
-          onTwoFactorDetected
+          onTwoFactorDetected,
+          onTwoFactorNeedsSetup
         );
       }
       if (isAccountPickerUrl(frameUrl) && getTargetAccountId !== undefined) {
@@ -344,6 +379,7 @@ function attachToTarget(
       getCurrentCode,
       logger,
       onTwoFactorDetected,
+      onTwoFactorNeedsSetup,
       getTargetAccountId,
       onAccountPickerDetected
     );
@@ -402,7 +438,8 @@ async function awaitFormThenFill(
   getCurrentCode: () => Promise<{ code: string; timeRemaining: number }>,
   state: RuntimeState,
   logger: StartOptions['logger'],
-  onTwoFactorDetected: StartOptions['onTwoFactorDetected']
+  onTwoFactorDetected: StartOptions['onTwoFactorDetected'],
+  onTwoFactorNeedsSetup: StartOptions['onTwoFactorNeedsSetup']
 ): Promise<void> {
   if (state.disposed || state.attempts >= MAX_ATTEMPTS) return;
   if (target.isDestroyed() || frame.detached) return;
@@ -457,10 +494,38 @@ async function awaitFormThenFill(
           'auth-totp-autofill: skipped because no TOTP secret is configured',
           { frameUrl }
         );
+        getLoggingApi().event(AUTH_EVENTS.TOTP_NO_SECRET, {
+          frameOrigin: frameOriginOf(frameUrl),
+        });
+        // Notify the renderer ONCE per watcher so it can surface a
+        // "go save your authenticator secret" banner. Without this
+        // the user just stares at the OneReach 2FA prompt with no
+        // hint about why nothing happened.
+        if (!state.needsSetupNotified && onTwoFactorNeedsSetup !== undefined) {
+          state.needsSetupNotified = true;
+          try {
+            onTwoFactorNeedsSetup({
+              source: target.source,
+              frameUrl,
+              ...(probe.reason !== undefined ? { reason: probe.reason } : {}),
+              ...(probe.inputCount !== undefined ? { inputCount: probe.inputCount } : {}),
+            });
+          } catch (cbErr) {
+            logger?.('warn', 'auth-totp-autofill: onTwoFactorNeedsSetup callback threw', {
+              error: (cbErr as Error).message,
+            });
+          }
+        }
         return;
       }
       logger?.('warn', 'auth-totp-autofill: getCurrentCode failed', {
         frameUrl,
+        error: (err as Error).message,
+      });
+      getLoggingApi().event(AUTH_EVENTS.TOTP_FILL_FAILED, {
+        frameOrigin: frameOriginOf(frameUrl),
+        stage: 'code-error',
+        attempts: state.attempts,
         error: (err as Error).message,
       });
       return;
@@ -483,6 +548,12 @@ async function awaitFormThenFill(
           frameUrl,
           error: (err as Error).message,
         });
+        getLoggingApi().event(AUTH_EVENTS.TOTP_FILL_FAILED, {
+          frameOrigin: frameOriginOf(frameUrl),
+          stage: 'code-error',
+          attempts: state.attempts,
+          error: (err as Error).message,
+        });
         return;
       }
     }
@@ -498,6 +569,12 @@ async function awaitFormThenFill(
         attempt: state.attempts,
         error: (err as Error).message,
       });
+      getLoggingApi().event(AUTH_EVENTS.TOTP_FILL_FAILED, {
+        frameOrigin: frameOriginOf(frameUrl),
+        stage: 'fill-threw',
+        attempts: state.attempts,
+        error: (err as Error).message,
+      });
       return;
     }
 
@@ -506,6 +583,12 @@ async function awaitFormThenFill(
         frameUrl,
         attempt: state.attempts,
         reason: fillResult.reason,
+      });
+      getLoggingApi().event(AUTH_EVENTS.TOTP_FILL_FAILED, {
+        frameOrigin: frameOriginOf(frameUrl),
+        stage: 'fill-failed',
+        attempts: state.attempts,
+        ...(fillResult.reason !== undefined ? { error: fillResult.reason } : {}),
       });
       return;
     }
@@ -521,6 +604,12 @@ async function awaitFormThenFill(
         attempt: state.attempts,
         error: (err as Error).message,
       });
+      getLoggingApi().event(AUTH_EVENTS.TOTP_FILL_FAILED, {
+        frameOrigin: frameOriginOf(frameUrl),
+        stage: 'submit-threw',
+        attempts: state.attempts,
+        error: (err as Error).message,
+      });
       return;
     }
 
@@ -533,6 +622,10 @@ async function awaitFormThenFill(
       ...(submitResult.method !== undefined ? { submitMethod: submitResult.method } : {}),
       ...(submitResult.reason !== undefined ? { submitReason: submitResult.reason } : {}),
       // code intentionally omitted
+    });
+    getLoggingApi().event(AUTH_EVENTS.TOTP_FILLED, {
+      frameOrigin: frameOriginOf(frameUrl),
+      attempts: state.attempts,
     });
   } finally {
     state.inFlight.delete(key);
@@ -587,6 +680,10 @@ async function awaitAccountPickerThenSelect(
   logger?.('info', 'auth-totp-autofill: account picker detected', {
     source: target.source,
     frameUrl,
+  });
+  getLoggingApi().event(AUTH_EVENTS.ACCOUNT_PICKER_DETECTED, {
+    frameOrigin: frameOriginOf(frameUrl),
+    hasTargetAccountId: true,
   });
   if (onAccountPickerDetected !== undefined) {
     try {
@@ -646,11 +743,21 @@ async function awaitAccountPickerThenSelect(
         frameUrl,
         ...(result.method !== undefined ? { method: result.method } : {}),
       });
+      getLoggingApi().event(AUTH_EVENTS.ACCOUNT_PICKER_SELECTED, {
+        frameOrigin: frameOriginOf(frameUrl),
+        success: true,
+        reason: 'auto-selected',
+      });
     } else {
       logger?.('warn', 'auth-totp-autofill: account auto-select failed', {
         source: target.source,
         frameUrl,
         reason: result.reason,
+      });
+      getLoggingApi().event(AUTH_EVENTS.ACCOUNT_PICKER_SELECTED, {
+        frameOrigin: frameOriginOf(frameUrl),
+        success: false,
+        reason: 'select-failed',
       });
     }
   } catch (err) {
@@ -658,6 +765,11 @@ async function awaitAccountPickerThenSelect(
       source: target.source,
       frameUrl,
       error: (err as Error).message,
+    });
+    getLoggingApi().event(AUTH_EVENTS.ACCOUNT_PICKER_SELECTED, {
+      frameOrigin: frameOriginOf(frameUrl),
+      success: false,
+      reason: 'select-threw',
     });
   }
 }
@@ -680,6 +792,10 @@ function notifyTwoFactorDetected(
     frameUrl,
     ...(probe.reason !== undefined ? { reason: probe.reason } : {}),
     ...(probe.inputCount !== undefined ? { inputCount: probe.inputCount } : {}),
+  });
+  getLoggingApi().event(AUTH_EVENTS.TOTP_DETECTED, {
+    frameOrigin: frameOriginOf(frameUrl),
+    attempts: state.attempts,
   });
 
   if (onTwoFactorDetected === undefined) return;

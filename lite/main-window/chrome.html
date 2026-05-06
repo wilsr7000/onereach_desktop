@@ -38,10 +38,14 @@
     <!-- Home view: visible when no agent tab is active. Tab views in
          the main process cover this region when a tab is foregrounded. -->
     <main id="home-view" class="home-view">
+      <!-- Decorative orb mark -- partially off-screen bottom-right,
+           heavily faded. Pure CSS (no asset to ship); pointer-events
+           none so it never intercepts clicks; aria-hidden because
+           it carries no semantic meaning. -->
+      <div class="home-orb" aria-hidden="true"></div>
+
       <div class="home-inner">
         <div class="wordmark">Onereach.ai <span class="lite">Lite</span></div>
-        <div class="version" id="version">v0.0.0</div>
-        <div class="tagline">v0.2 -- kernel (auto-updated)</div>
 
         <div class="auth-block" id="auth-block">
           <button id="signin-btn" class="signin-button" type="button">Sign in to GSX</button>
@@ -52,11 +56,35 @@
           <button id="manage-agents-btn" class="btn-secondary" type="button">Manage Agents</button>
         </div>
 
+        <!-- Onboarding card: only visible AFTER the user signs in
+             (the giant Sign In button above is the CTA when signed
+             out). Each row is a plain-language outcome ("Skip the
+             2FA copy-paste") + one-line subtitle + action button,
+             not a checklist with jargon labels. KV-backed via
+             `lite/onboarding/`. -->
+        <div id="onboarding-card" class="onboarding-card" hidden>
+          <div class="onboarding-card-header">
+            <div class="onboarding-card-headings">
+              <span class="onboarding-card-title">Set up your workspace</span>
+              <span class="onboarding-card-subtitle">Optional one-time setup. Skip whatever you don't need.</span>
+            </div>
+            <button type="button" id="onboarding-dismiss" class="onboarding-dismiss" title="Hide this card" aria-label="Dismiss">&times;</button>
+          </div>
+          <div class="onboarding-list" id="onboarding-list"></div>
+        </div>
+
         <div class="hint">
           Open an agent from the <strong>IDW</strong> menu to spin up a new tab. Each tab has its own session, so you can stay signed into more than one at a time.
         </div>
       </div>
     </main>
+
+    <!-- Fixed bottom-right version badge: visible on the home view
+         (when no agent tab is foregrounded). Tab views in the main
+         process cover this region when active, so the badge only
+         appears on the home view -- matches the user's intent of
+         "subtle corner indicator, not page chrome." -->
+    <div class="version-badge" id="version" aria-label="App version">v0.0.0</div>
 
     <!-- External script (not inline) so the strict CSP `script-src 'self'`
          allows execution. Source: lite/main-window/chrome.ts -> bundled by

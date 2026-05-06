@@ -22,7 +22,7 @@
  */
 
 import type { KVConfig, KVRecord } from './client.js';
-import { SdkKVClient } from './sdk-client.js';
+import { FlowHttpKVClient } from './flow-http-client.js';
 import { getLoggingApi } from '../logging/api.js';
 import { ENVIRONMENT_CONFIGS } from '../auth/types.js';
 import type { KvEvent } from './events.js';
@@ -218,10 +218,13 @@ let _instance: KVApi | null = null;
 /**
  * Get the singleton KV API. Lazily instantiates on first call.
  *
- * Default backing implementation is `SdkKVClient` -- a thin wrapper
- * around `@or-sdk/key-value-storage` that authenticates each request
- * with the signed-in user's `mult` token and scopes records server-side
- * by the active `accountId` (resolved via `getAuthApi()`).
+ * Default backing implementation is `FlowHttpKVClient` -- direct
+ * HTTP to `https://em.edison.api.onereach.ai/http/{accountId}/keyvalue`,
+ * authenticated with a FLOW token cached from the per-account
+ * `/refresh_token` flow. (The previous `@or-sdk/key-value-storage`
+ * transport rejected the OAuth `mult` cookie with `wrong keyId`; the
+ * flow KV is the same transport the full app's tickets / signaling
+ * clients use successfully.)
  *
  * Signed-out callers will see `KV_HTTP` (status 401) on first read or
  * write -- store consumers (`idw`, `main-window`, etc.) gate on
@@ -242,7 +245,7 @@ let _instance: KVApi | null = null;
  */
 export function getKVApi(): KVApi {
   if (_instance === null) {
-    _instance = new SdkKVClient(defaultConfig());
+    _instance = new FlowHttpKVClient(defaultFlowHttpConfig());
   }
   return _instance;
 }
@@ -263,41 +266,43 @@ export function _setKVApiForTesting(api: KVApi): void {
 }
 
 /**
- * Default client config -- routes through `@or-sdk/key-value-storage`
- * authenticated by the signed-in user's `mult` token. Per-account
- * scoping is enforced server-side (the SDK passes accountId on every
- * request).
+ * Default client config for the per-account flow KV transport. The
+ * service URL is fixed (`em.edison.api.onereach.ai/http/{accountId}/keyvalue`);
+ * the per-account `refresh_token` flow at the same host issues a FLOW
+ * token that the client caches and prefixes onto every request.
  *
- * Token + accountId are resolved lazily on every call via getter
- * functions, so the client always uses the current sign-in state --
- * no need to re-instantiate after a sign-in or sign-out (the SDK
- * itself is rebuilt internally if the active accountId changes).
+ * AccountId is resolved lazily on every call via the registered auth
+ * bindings, so the client always uses the current sign-in state --
+ * no need to re-instantiate after a sign-in or sign-out. The token
+ * cache invalidates automatically when the account changes.
  *
  * Edison only in v1; multi-env support lands when the `auth-multi-env`
  * chunk in `lite/PORTING.md` does.
+ *
+ * Why this transport (not the SDK): the OneReach KV behind
+ * `@or-sdk/key-value-storage` requires a "user-level platform token"
+ * that the lite OAuth flow does not produce -- it rejects the
+ * captured `mult` cookie with `Token was not accepted: wrong keyId`.
+ * The `/http/{accountId}/keyvalue` flow accepts a per-account FLOW
+ * token from a public `/refresh_token` flow and is the same transport
+ * the full app's tickets / signaling clients use successfully.
  */
-function defaultConfig(): {
-  token: () => string;
-  discoveryUrl: string;
+function defaultFlowHttpConfig(): {
   accountId: () => string | null;
   logger: NonNullable<KVConfig['logger']>;
   spanEmitter: NonNullable<KVConfig['spanEmitter']>;
+  onAuthRejected: (reason: string) => void;
 } {
+  // Force-load ENVIRONMENT_CONFIGS to assert the edison entry exists
+  // even though the flow-http transport has no per-environment URL
+  // (it's hard-coded to em.edison.api.onereach.ai). This keeps the
+  // boot-time guard surface unchanged from the SDK transport era; if
+  // we ever introduce a non-edison env we'll need this lookup.
   const edisonConfig = ENVIRONMENT_CONFIGS['edison'];
   if (edisonConfig === undefined) {
-    // Defensive: ENVIRONMENT_CONFIGS always defines edison in v1.
     throw new Error('lite/kv: no EnvironmentConfig found for edison');
   }
   return {
-    // The token + accountId getters consult the registered auth
-    // bindings (set by `setKVAuthBindings` -- typically called from
-    // main-lite.ts after `initAuth`). When unset, KV behaves as if
-    // signed-out: writes throw `KV_HTTP` 401, reads return null
-    // through the consumer-side gating. This keeps `lite/kv/api.ts`
-    // free of any static dependency on `lite/auth/`, breaking the
-    // `auth/api -> auth/store -> kv/api -> auth/api` cycle.
-    token: () => _authBindings?.getToken() ?? '',
-    discoveryUrl: edisonConfig.discoveryUrl,
     accountId: () => _authBindings?.getAccountId() ?? null,
     logger: (level, message, data) => {
       const log = getLoggingApi();
@@ -306,11 +311,23 @@ function defaultConfig(): {
     // ADR-030: every kv op (set/get/listKeys/list/delete) emits a
     // start/finish/fail span through the central event log.
     spanEmitter: (name, data) => getLoggingApi().start(name, data),
+    // The kv-auth bindings carry an optional `onAuthRejected` hook
+    // (the kernel wires it to the re-sign-in prompt). Forward it so
+    // token-rejection signals reach the kernel.
+    onAuthRejected: (reason) => {
+      try {
+        _authBindings?.onAuthRejected?.(reason);
+      } catch (err) {
+        getLoggingApi().warn('kv', 'onAuthRejected binding threw', {
+          error: (err as Error).message,
+        });
+      }
+    },
   };
 }
 
 /**
- * Late-bound auth resolvers for the default `SdkKVClient` config.
+ * Late-bound auth resolvers for the default `FlowHttpKVClient` config.
  *
  * Wired by `lite/main-lite.ts` after `initAuth()` returns:
  *
@@ -329,6 +346,16 @@ export interface KVAuthBindings {
   getToken: () => string;
   /** Returns the active accountId, or null when signed-out. */
   getAccountId: () => string | null;
+  /**
+   * Optional hook fired when the KV server rejects the token as
+   * stale (e.g. `"Token was not accepted: wrong keyId"`). The kernel
+   * wires this to a "Sign in again?" prompt so the user gets a clear
+   * recovery path instead of an opaque KV error.
+   *
+   * Called once per detected rejection; the prompter de-dupes
+   * concurrent rejections internally.
+   */
+  onAuthRejected?: (reason: string) => void;
 }
 
 let _authBindings: KVAuthBindings | null = null;

@@ -114,6 +114,22 @@ app.on('second-instance', (_event, _argv, _workingDirectory) => {
   }
 });
 
+// ============================================================================
+// LITE BOOT GUARD -- Symmetric to lite/main-lite.ts.
+// Per lite/LITE-RULES.md, full app must NEVER import from lite/.
+// This guard surfaces accidental violations loudly in dev rather than
+// letting them silently corrupt state at runtime.
+// ============================================================================
+(function assertNoLiteModulesLoaded() {
+  const liteModulePattern = /[/\\]lite[/\\]/;
+  const violations = Object.keys(require.cache).filter((modulePath) => liteModulePattern.test(modulePath));
+  if (violations.length > 0) {
+    const message = `Onereach full app boot guard: forbidden lite/ modules loaded:\n${violations.join('\n')}`;
+    console.error(message);
+    throw new Error(message);
+  }
+})();
+
 // Enable Speech Recognition API in Electron
 // These must be set before app.whenReady()
 app.commandLine.appendSwitch('enable-speech-dispatcher');

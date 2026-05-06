@@ -255,3 +255,33 @@ To handle this, [`totp-autofill.ts`](./totp-autofill.ts) injects [`buildWaitForA
 OneReach can render the 2FA prompt either in a frame inside the auth window OR in a `window.open` popup the auth window opens. The watcher attaches to popups via `webContents.on('did-create-window', ...)` so both paths are covered without the caller having to know which one OneReach picks today.
 
 Every step writes an `info` log line under the `auth` category (`auth-totp-autofill: started watching`, `: scan`, `: form wait resolved`, `: filled and submitted 2FA code`, etc.). No path returns silently — when the auto-fill does nothing, the log says exactly why. Token values, TOTP secrets, and the generated 6-digit code are never logged.
+
+### What if the user has 2FA on OneReach but Lite has no secret saved?
+
+(ADR-046) The watcher detects the 2FA prompt, calls `getCurrentCode()`, the keychain is empty, and `TotpError(NO_SECRET)` throws. Without a hint, the user just stares at the OneReach prompt with no idea what's happening. The fix:
+
+- The watcher fires `onTwoFactorNeedsSetup({source, frameUrl, ...})` exactly once per `startTotpAutofill` call (gated by `RuntimeState.needsSetupNotified`).
+- The auth store forwards that to its `twoFactorNeedsSetupSubscribers`, then `lite/auth/main.ts` broadcasts `lite:auth:2fa-needs-setup` to every renderer window.
+- `window.lite.auth.on2FANeedsSetup(handler)` lets renderers (chrome / placeholder / future surfaces) wire a contextual banner with an "Open Settings -> Two-Factor" button.
+
+The notification is best-effort: it doesn't block the sign-in flow, and the renderer is free to ignore it. But every renderer that uses the auth bridge today (chrome, placeholder) shows the banner.
+
+## OAuth popups: in-app vs OS browser (ADR-046)
+
+Earlier versions of the auth window denied every non-OneReach popup and called `shell.openExternal(url)` instead. That worked for "open this article in your browser" but silently broke "Sign in with Google" because:
+
+1. User clicks "Sign in with Google" inside the OneReach auth page.
+2. OneReach calls `window.open('https://accounts.google.com/...')`.
+3. Electron denies the popup -> Lite opens accounts.google.com in Safari.
+4. OAuth completes in Safari, sets cookies on `accounts.google.com` in Safari's jar.
+5. The OneReach auth page is still waiting for the popup-postMessage that never comes.
+
+The fix lives in [`oauth-popup.ts`](./oauth-popup.ts). `setWindowOpenHandler` now calls `buildPopupHandler({partition, ...})`, which:
+
+- Allows OAuth IdP popups (Google, Microsoft, Apple, Auth0, Okta, GitHub, Atlassian, Slack, Zoom, OpenAI, Anthropic, X) as in-app child Electron windows that inherit the auth window's `persist:lite-auth-<env>` partition. Cookies land in the right jar; postMessage works; the parent navigates to the post-auth state.
+- Routes everything else to `shell.openExternal` (the previous behavior, preserved for non-OAuth content).
+- Also keeps `*.onereach.ai` popups allowed (some OneReach flows pop a child window for SSO / account picker).
+
+The same helper is used by [`lite/main-window/window.ts`](../main-window/window.ts) for each agent tab and [`lite/idw/browser-window.ts`](../idw/browser-window.ts) for the placeholder fallback. Each surface passes its own partition so OAuth state stays isolated across tabs (per-tab `persist:tab-<uuid>`) but shared inside one tab's session.
+
+Allowlist matching is exact-host or subdomain (`accounts.google.com` matches; `accounts.google.com.evil.com` does NOT). Adding entries means a one-line edit to `OAUTH_POPUP_ALLOWLIST`.
