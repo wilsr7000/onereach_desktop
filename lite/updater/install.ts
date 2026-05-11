@@ -97,11 +97,14 @@ export interface InstallDeps {
    */
   spawnImpl?: typeof spawn;
   /**
-   * Test seam for fs writes. Defaults to the `node:fs` module. Tests pass
-   * an in-memory implementation that captures `writeFileSync` calls so
-   * the helper-script body can be asserted.
+   * Test seam for fs reads. Defaults to the `node:fs` module. The
+   * production install path only reads (`existsSync`) -- the helper
+   * script body is now in source control at
+   * `scripts/install-update.sh`, packaged into
+   * `Contents/Resources/install-update.sh` via electron-builder, not
+   * generated at runtime.
    */
-  fsImpl?: { writeFileSync: typeof fs.writeFileSync };
+  fsImpl?: { existsSync?: typeof fs.existsSync };
   /**
    * Test seam for the user homedir. Defaults to `os.homedir()`. Tests pin
    * a stable directory so the resolved ShipIt + updater cache paths in
@@ -255,144 +258,118 @@ interface SpawnHelperOpts {
   log: { info: (msg: string, data?: unknown) => void };
 }
 
+/**
+ * Locate the packaged install-update.sh script.
+ *
+ * In a packaged build the script lives at
+ * `Contents/Resources/install-update.sh` (placed there by
+ * electron-builder's `extraResources` entry in
+ * `lite/electron-builder.json`). In dev runs (`npm run lite:dev`) the
+ * resources path doesn't exist, so we fall back to the source-tree
+ * location at `<repo>/scripts/install-update.sh`. Returns null when
+ * neither exists -- caller logs + aborts the install.
+ */
+function findInstallHelperScript(deps: InstallDeps): string | null {
+  // Defer to the test seam when present; only fall back to real
+  // `fs.existsSync` when no seam was provided. The previous OR-with-
+  // real-fs path made tests that wanted to simulate a missing script
+  // impossible -- the real file IS present in the repo, so the
+  // fallback always returned true and the test couldn't drive the
+  // missing-script branch.
+  const fsImpl = deps.fsImpl;
+  const exists = (p: string): boolean => {
+    try {
+      if (fsImpl !== undefined && typeof fsImpl.existsSync === 'function') {
+        return fsImpl.existsSync(p);
+      }
+      return fs.existsSync(p);
+    } catch {
+      return false;
+    }
+  };
+  // Packaged: <app>/Contents/Resources/install-update.sh. Electron sets
+  // process.resourcesPath to that directory.
+  const resourcesPath = (process as { resourcesPath?: string }).resourcesPath;
+  if (typeof resourcesPath === 'string' && resourcesPath.length > 0) {
+    const packaged = path.join(resourcesPath, 'install-update.sh');
+    if (exists(packaged)) return packaged;
+  }
+  // Dev fallback: the bundled main-lite.js lives at
+  // `dist-lite/build/main-lite.js`, so the source tree is two
+  // directories up.
+  const dev = path.resolve(__dirname, '..', '..', 'scripts', 'install-update.sh');
+  if (exists(dev)) return dev;
+  return null;
+}
+
 function spawnInstallHelper(deps: InstallDeps, opts: SpawnHelperOpts): void {
   // Resolve test seams. In production these all fall through to the
-  // real implementations (`spawn`, `fs.writeFileSync`, `os.homedir`).
-  // Tests inject stubs so the helper-script body + spawn invocation can
-  // be asserted without actually writing to /tmp or starting bash.
+  // real implementations (`spawn`, `os.homedir`). Tests inject stubs
+  // so the spawn invocation can be asserted without actually starting
+  // bash.
   const spawnFn = deps.spawnImpl ?? spawn;
-  const fsImpl = deps.fsImpl ?? fs;
   const homeDir = (deps.homedir ?? os.homedir)();
   const ts = Date.now();
-  const helperPath = deps.getHelperScriptPath?.() ?? `/tmp/onereach-lite-installer-${ts}.sh`;
   const helperLog = deps.getHelperLogPath?.() ?? `/tmp/onereach-lite-installer-${ts}.log`;
-  // Derive .app path from execPath rather than hard-coding /Applications/...,
-  // so a dev running from a non-/Applications location can still test the
-  // self-install path. execPath is .../Onereach.ai Lite.app/Contents/MacOS/Onereach.ai Lite
-  const appPath = path.dirname(path.dirname(opts.execPath));
+  // Hard-code the installed `.app` path, matching the full app's
+  // `_spawnInstallHelper`. The previous approach derived it from
+  // `process.execPath` so dev runs could test the self-install path,
+  // but in practice the bypass only meaningfully runs against a real
+  // packaged install in `/Applications/` -- a dev run won't have a
+  // valid Squirrel cache or signed bundle to swap in. Hard-coding
+  // keeps the script's `basename "$APP_PATH"` derivation stable
+  // (always "Onereach.ai Lite.app") and matches the cache paths the
+  // helper script grep through.
+  const appPath = '/Applications/Onereach.ai Lite.app';
   const shipItCache = path.join(homeDir, 'Library/Caches/com.onereach.lite.ShipIt');
   const electronUpdaterCache = path.join(
     homeDir,
     'Library/Caches/onereach-lite-updater/pending'
   );
-  const parentPid = process.pid;
-  // Hard-code the lite bundle name. Deriving it from `execPath` was the
-  // previous approach, but in tests `execPath` is whatever the test
-  // process is running -- typically `/path/to/node` -- so the basename
-  // produced no Onereach reference at all. Tests now pin the bundle
-  // name in the helper-script body to catch regressions, which requires
-  // a stable known value here. Production execPath does match (lite's
-  // packaged macOS exec lives inside `Onereach.ai Lite.app`), so this
-  // matches reality even though it stops deriving dynamically.
-  const productName = 'Onereach.ai Lite.app';
+  const statusFile = path.join(deps.userDataPath, 'last-install-result.json');
+
+  // Locate the packaged helper script. Same surface as the full app's
+  // `_spawnInstallHelper` -- the script itself lives at
+  // `scripts/install-update.sh` in the repo, packaged into
+  // `Contents/Resources/install-update.sh` for production runs.
+  const helperPath = deps.getHelperScriptPath?.() ?? findInstallHelperScript(deps);
+  if (helperPath === null) {
+    opts.log.info('updater: install helper script not found', {
+      resourcesPath: (process as { resourcesPath?: string }).resourcesPath ?? null,
+    });
+    throw new Error('install-update.sh not found in packaged resources or dev fallback');
+  }
+  opts.log.info('updater: spawning install helper', {
+    helperPath,
+    helperLog,
+    statusFile,
+  });
 
   // Notes:
   //   - `set -euo pipefail` so any error aborts; the user falls back to the
   //     "Update available" prompt on next launch instead of a corrupt bundle.
   //   - PATH explicit because detached launchd children inherit a stripped PATH.
   //   - Squirrel's cache is tried first (already unpacked, fastest). Fallback
-  //     is electron-updater's pending ZIP, extracted via `ditto -x -k`.
-  //   - `ditto` is used (not cp -R) because cp -R mishandles framework
-  //     symlinks in macOS Mach-O bundles.
-  //   - The old bundle is moved to .old.<ts> (not deleted) so a failed
-  //     install rolls back rather than leaving an empty /Applications slot.
-  //   - `open` (no -n) re-launches the new bundle exactly like a Finder
-  //     double-click; Launch Services picks it up post-swap and the user
-  //     ends up on the new version with the same UI state.
-  const helperScript = `#!/bin/bash
-set -euo pipefail
-exec >> "${helperLog}" 2>&1
-export PATH=/usr/bin:/bin:/usr/sbin:/sbin
-echo "[$(date '+%H:%M:%S')] onereach-lite-installer starting"
-echo "  parent PID: ${parentPid}"
-echo "  target version: ${opts.targetVersion ?? 'unknown'}"
-echo "  app path: ${appPath}"
-echo "  ShipIt cache: ${shipItCache}"
-echo "  updater cache: ${electronUpdaterCache}"
-
-# 1. Wait for parent (Electron) to fully exit. Up to 30s.
-echo "[$(date '+%H:%M:%S')] waiting for parent PID ${parentPid} to exit..."
-for i in $(seq 1 30); do
-  if ! kill -0 ${parentPid} 2>/dev/null; then
-    echo "[$(date '+%H:%M:%S')] parent exited after \${i}s"
-    break
-  fi
-  sleep 1
-done
-if kill -0 ${parentPid} 2>/dev/null; then
-  echo "[$(date '+%H:%M:%S')] WARNING: parent still alive after 30s, force-killing"
-  kill -9 ${parentPid} 2>/dev/null || true
-  sleep 1
-fi
-
-# 2. Locate the new .app bundle. Try Squirrel's cache first.
-NEW_APP=""
-for d in "${shipItCache}"/update.*; do
-  if [ -d "$d/${productName}" ]; then
-    NEW_APP="$d/${productName}"
-    break
-  fi
-done
-
-if [ -z "$NEW_APP" ]; then
-  echo "[$(date '+%H:%M:%S')] no Squirrel cache, extracting from electron-updater ZIP"
-  ZIP=$(ls "${electronUpdaterCache}"/*.zip 2>/dev/null | head -1)
-  if [ -z "$ZIP" ]; then
-    echo "[$(date '+%H:%M:%S')] FATAL: no update bundle found in either cache"
-    exit 1
-  fi
-  EXTRACT_DIR=$(mktemp -d)
-  echo "[$(date '+%H:%M:%S')] extracting $ZIP -> $EXTRACT_DIR"
-  ditto -x -k "$ZIP" "$EXTRACT_DIR"
-  NEW_APP="$EXTRACT_DIR/${productName}"
-fi
-
-if [ ! -d "$NEW_APP" ]; then
-  echo "[$(date '+%H:%M:%S')] FATAL: NEW_APP path doesn't exist: $NEW_APP"
-  exit 1
-fi
-echo "[$(date '+%H:%M:%S')] new bundle: $NEW_APP"
-
-# 3. Verify the new bundle's signature before swapping. If this fails,
-# refuse to install -- bad bundle is worse than a stale bundle.
-if ! codesign --verify "$NEW_APP" 2>/dev/null; then
-  echo "[$(date '+%H:%M:%S')] FATAL: codesign --verify failed on new bundle"
-  exit 1
-fi
-echo "[$(date '+%H:%M:%S')] codesign verify ok"
-
-# 4. Swap. Old bundle is moved aside (so a failed ditto can roll back).
-BACKUP="${appPath}.old.\$(date +%s)"
-echo "[$(date '+%H:%M:%S')] backing up old: ${appPath} -> $BACKUP"
-mv "${appPath}" "$BACKUP"
-echo "[$(date '+%H:%M:%S')] ditto new bundle into ${appPath}"
-if ! ditto "$NEW_APP" "${appPath}"; then
-  echo "[$(date '+%H:%M:%S')] FATAL: ditto failed, rolling back"
-  rm -rf "${appPath}" 2>/dev/null || true
-  mv "$BACKUP" "${appPath}"
-  exit 1
-fi
-
-# 5. Strip quarantine in case the staged bundle inherited it from a downloaded zip.
-xattr -d com.apple.quarantine "${appPath}" 2>/dev/null || true
-
-echo "[$(date '+%H:%M:%S')] swap complete, launching new version"
-open "${appPath}"
-
-echo "[$(date '+%H:%M:%S')] backup left at $BACKUP (cleanup deferred -- user can delete manually)"
-echo "[$(date '+%H:%M:%S')] DONE"
-exit 0
-`;
-
-  fs.writeFileSync(helperPath, helperScript, { mode: 0o755 });
-  opts.log.info('updater: wrote install helper', { helperPath, helperLog });
-
-  // Detached + stdio:'ignore' so the child becomes its own session leader
-  // and our parent process can exit cleanly without holding file descriptors.
-  const child = spawn('/bin/bash', [helperPath], {
+  // Detached + stdio:'ignore' so the child becomes its own session
+  // leader and our parent process can exit cleanly without holding
+  // file descriptors. All inputs pass through env vars (ONEREACH_*
+  // prefix) so the script body itself is hermetic and we don't
+  // string-template anything. Mirrors the full app's
+  // `_spawnInstallHelper` at `main.js:17425-17477`.
+  const child = spawnFn('/bin/bash', [helperPath], {
     detached: true,
     stdio: 'ignore',
+    env: {
+      ...process.env,
+      ONEREACH_PARENT_PID: String(process.pid),
+      ONEREACH_TARGET_VERSION: opts.targetVersion ?? 'unknown',
+      ONEREACH_APP_PATH: appPath,
+      ONEREACH_SHIPIT_CACHE: shipItCache,
+      ONEREACH_UPDATER_CACHE: electronUpdaterCache,
+      ONEREACH_LOG: helperLog,
+      ONEREACH_STATUS_FILE: statusFile,
+    },
   });
-  child.unref();
+  child.unref?.();
   opts.log.info('updater: spawned detached install helper', { pid: child.pid });
 }

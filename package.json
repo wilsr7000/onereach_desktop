@@ -139,7 +139,9 @@
       "!*.sh",
       "!api-*.json",
       "!example-module/**/*",
-      "!test-update-server/**/*"
+      "!test-update-server/**/*",
+      "!lite/**/*",
+      "!dist-lite/**/*"
     ],
     "mac": {
       "category": "public.app-category.productivity",

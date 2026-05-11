@@ -86,22 +86,21 @@ describe('checkAppBundleWritable', () => {
  * `forceExit` is a no-op so the safety-net timer doesn't try to
  * exit the test process.
  */
-function makeBypassSeams(): {
+function makeBypassSeams(opts: { scriptExists?: boolean } = {}): {
   spawnImpl: ReturnType<typeof vi.fn>;
-  fsImpl: { writeFileSync: ReturnType<typeof vi.fn> };
+  fsImpl: { existsSync: ReturnType<typeof vi.fn> };
   appQuit: ReturnType<typeof vi.fn> & (() => void);
   forceExit: ReturnType<typeof vi.fn> & (() => void);
   destroyAllWindows: ReturnType<typeof vi.fn> & (() => void);
-  capturedScript: () => string | undefined;
-  capturedScriptPath: () => string | undefined;
+  getHelperScriptPath: () => string;
 } {
-  let capturedScriptBody: string | undefined;
-  let capturedScriptPath: string | undefined;
+  const scriptExists = opts.scriptExists ?? true;
+  // Production looks the helper script up via `fs.existsSync()` on a
+  // packaged path, falling back to a dev path. Tests pin the
+  // resolution via `getHelperScriptPath` and stub existsSync to
+  // return true so the spawn fires.
   const fsImpl = {
-    writeFileSync: vi.fn((p: string, contents: string) => {
-      capturedScriptPath = p;
-      capturedScriptBody = contents;
-    }),
+    existsSync: vi.fn(() => scriptExists),
   };
   const spawnImpl = vi.fn(() => ({ pid: 12345, unref: vi.fn() }));
   return {
@@ -110,8 +109,7 @@ function makeBypassSeams(): {
     appQuit: vi.fn() as ReturnType<typeof vi.fn> & (() => void),
     forceExit: vi.fn() as ReturnType<typeof vi.fn> & (() => void),
     destroyAllWindows: vi.fn() as ReturnType<typeof vi.fn> & (() => void),
-    capturedScript: () => capturedScriptBody,
-    capturedScriptPath: () => capturedScriptPath,
+    getHelperScriptPath: () => '/fake/install-update.sh',
   };
 }
 
@@ -303,7 +301,7 @@ describe('performUpdateInstall', () => {
   // These tests pin the helper-spawn contract so a future refactor can't
   // regress back to the broken Squirrel path.
 
-  it('writes a /bin/bash helper script and spawns it detached', async () => {
+  it('spawns the packaged install-update.sh detached, with stdio:ignore', async () => {
     const seams = makeBypassSeams();
     await performUpdateInstall(
       {
@@ -316,24 +314,23 @@ describe('performUpdateInstall', () => {
         appQuit: seams.appQuit,
         spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
         fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+        getHelperScriptPath: seams.getHelperScriptPath,
       },
       '2.0.0'
     );
-    expect(seams.fsImpl.writeFileSync).toHaveBeenCalledOnce();
-    expect(seams.capturedScriptPath()).toMatch(/onereach-lite-installer.*\.sh$/);
     expect(seams.spawnImpl).toHaveBeenCalledOnce();
     const [cmd, args, options] = seams.spawnImpl.mock.calls[0] as [
       string,
       string[],
-      { detached: boolean; stdio: string }
+      { detached: boolean; stdio: string; env: Record<string, string> }
     ];
     expect(cmd).toBe('/bin/bash');
-    expect(args[0]).toMatch(/onereach-lite-installer.*\.sh$/);
+    expect(args[0]).toBe('/fake/install-update.sh');
     expect(options.detached).toBe(true);
     expect(options.stdio).toBe('ignore');
   });
 
-  it('helper script targets the lite-specific bundle name + cache paths', async () => {
+  it('passes all helper inputs through env vars (no string templating)', async () => {
     const seams = makeBypassSeams();
     await performUpdateInstall(
       {
@@ -346,22 +343,60 @@ describe('performUpdateInstall', () => {
         appQuit: seams.appQuit,
         spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
         fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+        getHelperScriptPath: seams.getHelperScriptPath,
       },
       '2.0.0'
     );
-    const script = seams.capturedScript();
-    expect(script).toBeDefined();
-    // Lite-specific identifiers must appear in the script body so the
-    // helper finds the correct ShipIt cache / updater cache / bundle
-    // name. A future refactor that accidentally falls back to the full
-    // app's strings (com.gsx.poweruser / "Onereach.ai.app") would
-    // silently target the wrong bundle.
-    expect(script).toMatch(/com\.onereach\.lite\.ShipIt/);
-    expect(script).toMatch(/onereach-lite-updater\/pending/);
-    expect(script).toMatch(/Onereach\.ai Lite\.app/);
-    // The codesign-verify gate is what stops a corrupted download from
-    // overwriting /Applications. Pin its presence.
-    expect(script).toMatch(/codesign --verify/);
+    // The script itself lives in source control (scripts/install-update.sh)
+    // and isn't generated at runtime any more -- all per-install inputs
+    // pass through ONEREACH_* env vars. This pins the env shape so a
+    // future refactor that accidentally drops a variable (the script
+    // would then fail at the env-validation step) gets caught here
+    // rather than in production.
+    const [, , options] = seams.spawnImpl.mock.calls[0] as [
+      string,
+      string[],
+      { env: Record<string, string> }
+    ];
+    expect(options.env.ONEREACH_PARENT_PID).toBe(String(process.pid));
+    expect(options.env.ONEREACH_TARGET_VERSION).toBe('2.0.0');
+    // APP_PATH must point at a path whose basename matches the lite
+    // bundle name so the script's `basename "$APP_PATH"` derivation
+    // resolves to "Onereach.ai Lite.app".
+    expect(options.env.ONEREACH_APP_PATH).toMatch(/Onereach\.ai Lite\.app$/);
+    // Lite-specific cache paths. A regression to the full app's
+    // `com.gsx.poweruser.ShipIt` / `gsx-power-user-updater` would
+    // silently search the wrong cache dirs and find nothing to swap.
+    expect(options.env.ONEREACH_SHIPIT_CACHE).toMatch(/com\.onereach\.lite\.ShipIt$/);
+    expect(options.env.ONEREACH_UPDATER_CACHE).toMatch(/onereach-lite-updater\/pending$/);
+    // Status file lives under userData so the next boot's
+    // verify-startup hook can read the outcome.
+    expect(options.env.ONEREACH_STATUS_FILE).toContain('last-install-result.json');
+    expect(options.env.ONEREACH_LOG).toMatch(/onereach-lite-installer-\d+\.log$/);
+  });
+
+  it('aborts the install (no spawn, no app.quit) when the helper script is missing', async () => {
+    const seams = makeBypassSeams({ scriptExists: false });
+    await performUpdateInstall(
+      {
+        autoUpdater: fakeUpdater(),
+        ui: fakeUi(),
+        userDataPath: userDataDir,
+        isPackaged: () => false,
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+        // Deliberately omit getHelperScriptPath so the production
+        // resolver runs through fsImpl.existsSync (stubbed to return
+        // false). A missing script must NOT quit the app -- the user
+        // keeps the running session.
+      },
+      '2.0.0'
+    );
+    expect(seams.spawnImpl).not.toHaveBeenCalled();
+    expect(seams.appQuit).not.toHaveBeenCalled();
   });
 
   it('calls app.quit() after the helper is spawned', async () => {
@@ -377,6 +412,7 @@ describe('performUpdateInstall', () => {
         appQuit: seams.appQuit,
         spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
         fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+        getHelperScriptPath: seams.getHelperScriptPath,
       },
       '2.0.0'
     );

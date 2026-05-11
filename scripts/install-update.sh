@@ -103,6 +103,14 @@ echo "  app path:      $APP_PATH"
 echo "  ShipIt cache:  $SHIPIT_CACHE"
 echo "  updater cache: $UPDATER_CACHE"
 
+# Derive the bundle filename from APP_PATH so the same script serves
+# both the full app ("Onereach.ai.app") and Lite ("Onereach.ai Lite.app")
+# without a separate env var. Squirrel.Mac unpacks the staged bundle
+# under the same filename as the installed one, so this matches both
+# the Squirrel-cache and updater-cache extraction paths.
+BUNDLE_NAME="$(basename "$APP_PATH")"
+echo "  bundle name:   $BUNDLE_NAME"
+
 # ---------------------------------------------------------------------------
 # 1. Wait for parent (Electron process) to fully exit. Up to 30s.
 # ---------------------------------------------------------------------------
@@ -128,8 +136,8 @@ fi
 write_status pending find_bundle ""
 NEW_APP=""
 for d in "$SHIPIT_CACHE"/update.*; do
-    if [ -d "$d/Onereach.ai.app" ]; then
-        NEW_APP="$d/Onereach.ai.app"
+    if [ -d "$d/$BUNDLE_NAME" ]; then
+        NEW_APP="$d/$BUNDLE_NAME"
         break
     fi
 done
@@ -155,7 +163,7 @@ if [ -z "$NEW_APP" ]; then
         EXPECTED_EXIT=1
         exit 1
     fi
-    NEW_APP="$EXTRACT_DIR/Onereach.ai.app"
+    NEW_APP="$EXTRACT_DIR/$BUNDLE_NAME"
 fi
 
 if [ ! -d "$NEW_APP" ]; then

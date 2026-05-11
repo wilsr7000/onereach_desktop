@@ -101,6 +101,12 @@
     "owner": "wilsr7000",
     "repo": "Onereach_Lite_Desktop_App"
   },
+  "extraResources": [
+    {
+      "from": "scripts/install-update.sh",
+      "to": "install-update.sh"
+    }
+  ],
   "npmRebuild": false,
   "mac": {
     "category": "public.app-category.productivity",
