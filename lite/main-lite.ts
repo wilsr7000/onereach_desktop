@@ -39,6 +39,7 @@ import { openBugReportModal, initBugReport } from './bug-report/main.js';
 import { initAuth, type AuthHandle } from './auth/main.js';
 import { initTotp, type TotpHandle } from './totp/main.js';
 import { initSettings, type SettingsHandle } from './settings/main.js';
+import { initHelp, type HelpHandle } from './help/main.js';
 import { initApiDocs, type ApiDocsHandle } from './api-docs/main.js';
 import { initHealth, type HealthHandle } from './health/main.js';
 import { initNeon, type NeonHandle } from './neon/main.js';
@@ -205,6 +206,7 @@ let updaterHandle: UpdaterHandle | null = null;
 let authHandle: AuthHandle | null = null;
 let totpHandle: TotpHandle | null = null;
 let settingsHandle: SettingsHandle | null = null;
+let helpHandle: HelpHandle | null = null;
 let apiDocsHandle: ApiDocsHandle | null = null;
 let healthHandle: HealthHandle | null = null;
 let neonHandle: NeonHandle | null = null;
@@ -599,6 +601,28 @@ app
       });
     } catch (err) {
       getLoggingApi().error('settings', 'initSettings threw', {
+        error: (err as Error).message,
+      });
+    }
+
+    // Initialize Help (User Guide). Adds the "Onereach.ai Lite Help"
+    // entry under the Help menu. Single-instance window loading
+    // help.html. Registers its own menu entry via initHelp() (matches
+    // the updater pattern -- the kernel seed only owns top:help, child
+    // owners attach their items themselves).
+    try {
+      helpHandle = initHelp({
+        preloadPath,
+        htmlPath: path.join(__dirname, 'help.html'),
+        getParentWindow: () => mainWindow,
+        logger: {
+          info: (msg, data) => logQueue.info('help', msg, data),
+          warn: (msg, data) => logQueue.warn('help', msg, data),
+          error: (msg, data) => logQueue.error('help', msg, data),
+        },
+      });
+    } catch (err) {
+      getLoggingApi().error('help', 'initHelp threw', {
         error: (err as Error).message,
       });
     }
@@ -1095,6 +1119,11 @@ app.on('before-quit', () => {
   }
   try {
     settingsHandle?.teardown();
+  } catch {
+    /* shutdown best-effort */
+  }
+  try {
+    helpHandle?.teardown();
   } catch {
     /* shutdown best-effort */
   }

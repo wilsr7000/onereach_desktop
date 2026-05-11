@@ -21,9 +21,9 @@
  * Source of truth for `dependencies` and `version`: lite/package.json.
  * Per ADR-047, lite ships with only its 4 declared deps -- the override
  * makes the version + name correct in the packaged metadata, and the
- * `!node_modules/<pkg>/**/*` exclude list in lite/electron-builder.json
- * does the actual file-copy filtering that drops the bundle from 283MB
- * to ~165MB.
+ * exclude list ("!node_modules/<pkg>/all-files") in
+ * lite/electron-builder.json does the actual file-copy filtering that
+ * drops the bundle from 283MB to ~165MB.
  */
 
 import { execSync, spawnSync } from 'node:child_process';
@@ -76,6 +76,18 @@ const merged = {
     dependencies,
   },
 };
+
+// When skipping notarization (e.g. Apple's timestamp.apple.com:443 is down or
+// credentials missing), also disable codesign's --timestamp flag. Without this
+// codesign tries to contact Apple's timestamp authority and fails with
+// "A timestamp was expected but was not found" when the service is unreachable.
+// The resulting bundle has a signature with no embedded secure timestamp,
+// which is fine for unnotarized distribution; we just re-enable timestamping
+// (default Apple URL) for the next release once the service is back up.
+if (process.env.SKIP_NOTARIZE === '1') {
+  merged.mac = { ...(baseConfig.mac || {}), timestamp: 'none' };
+  console.log('[electron-builder-mac] SKIP_NOTARIZE=1 -- mac.timestamp set to "none" (no Apple timestamp server)');
+}
 const tempConfigPath = path.join(distLite, 'build-config.json');
 await fs.writeFile(tempConfigPath, JSON.stringify(merged, null, 2));
 console.log(`[electron-builder-mac] wrote merged config to ${tempConfigPath}`);

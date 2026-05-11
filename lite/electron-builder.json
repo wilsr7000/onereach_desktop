@@ -16,6 +16,8 @@
     "lite/about.html",
     "lite/bug-report/modal.html",
     "lite/bug-report/modal.css",
+    "lite/help/help.html",
+    "lite/help/help.css",
     "lite/package.json",
     "lib/**/*",
     "package.json",

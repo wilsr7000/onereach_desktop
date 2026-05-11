@@ -42,8 +42,16 @@ function signItem(itemPath, options) {
     options.identity,
     '--options',
     'runtime',
-    '--timestamp',
   ];
+  // --timestamp asks codesign to contact Apple's timestamp authority
+  // (timestamp.apple.com). That service goes down periodically; when it's
+  // unreachable, codesign exits with "A timestamp was expected but was not
+  // found" and the re-sign aborts mid-bundle. Skip the flag when the caller
+  // sets `timestamp: false` so we can still produce a structurally-valid
+  // (just not Apple-timestamped) signature for unnotarized distribution.
+  if (options.timestamp !== false) {
+    args.push('--timestamp');
+  }
   // Hardened runtime requires entitlements on items that have an
   // executable. Frameworks without an executable inherit their parent's
   // entitlements, so attaching entitlements to leaf .dylib files is a no-op.
@@ -140,12 +148,17 @@ function findSignableItems(rootDir, results = []) {
  * @param {string} [options.identity]      - Code-signing identity (CN). Defaults to OneReach Developer ID.
  * @param {string} [options.entitlements]  - Path to entitlements plist. Defaults to build/entitlements.mac.plist.
  * @param {boolean} [options.verify=true]  - Run codesign --verify --deep --strict after.
+ * @param {boolean} [options.timestamp=true] - Pass --timestamp to codesign. Set false when Apple's
+ *                                              timestamp.apple.com:443 is unreachable (the resign aborts
+ *                                              otherwise). Bundles signed without --timestamp are valid
+ *                                              for Gatekeeper but cannot be notarized.
  * @param {(msg: string) => void} [options.log] - Logger; defaults to console.log.
  */
 async function resignDeep(appPath, options = {}) {
   const identity = options.identity || process.env.SIGN_IDENTITY || DEFAULT_IDENTITY;
   const entitlements = options.entitlements || DEFAULT_ENTITLEMENTS;
   const verify = options.verify !== false;
+  const timestamp = options.timestamp !== false;
   const log = options.log || ((m) => console.log(m));
 
   if (!fs.existsSync(appPath)) {
@@ -158,6 +171,7 @@ async function resignDeep(appPath, options = {}) {
   log(`[resign-deep] target app: ${appPath}`);
   log(`[resign-deep] identity:   ${identity}`);
   log(`[resign-deep] entitlements: ${entitlements}`);
+  log(`[resign-deep] timestamp:  ${timestamp ? 'enabled (Apple TSA)' : 'DISABLED'}`);
 
   // 1. Collect every nested signable item from inside the .app, sorted
   //    deepest-first. The outer .app itself is signed at the very end.
@@ -173,6 +187,7 @@ async function resignDeep(appPath, options = {}) {
     signItem(item, {
       identity,
       entitlements,
+      timestamp,
       attachEntitlements: shouldAttachEntitlements(item),
     });
     signedCount += 1;
@@ -187,6 +202,7 @@ async function resignDeep(appPath, options = {}) {
   signItem(appPath, {
     identity,
     entitlements,
+    timestamp,
     attachEntitlements: true,
   });
   log(`[resign-deep] signed outer .app`);

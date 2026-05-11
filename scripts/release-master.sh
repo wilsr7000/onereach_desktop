@@ -87,7 +87,27 @@ if [ -f ".env.notarization" ]; then
 fi
 
 if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
-    echo -e "${GREEN}Notarization enabled (Apple ID: $APPLE_ID, Team: $APPLE_TEAM_ID)${NC}"
+    echo -e "${GREEN}Notarization creds present (Apple ID: $APPLE_ID, Team: $APPLE_TEAM_ID)${NC}"
+    # Probe Apple's RFC 3161 Timestamp Authority at timestamp.apple.com.
+    # IMPORTANT: This is an HTTP service on port 80 (not HTTPS on 443).
+    # HEAD without a TSQ payload returns 401, which is the "service up"
+    # signal -- only POST with application/timestamp-query is accepted.
+    # A connection failure or DNS error here means a real outage / proxy /
+    # firewall block; only then do we fall back to unnotarized + xattr.
+    # When the TSA is down, codesign aborts with "A timestamp was expected
+    # but was not found" mid-bundle. The probe lets us detect that BEFORE
+    # the multi-minute build, and gracefully ship signed-but-not-notarized
+    # rather than producing a broken bundle. Borrowed from
+    # lite/scripts/release-lite.sh.
+    TS_PROBE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 5 -X HEAD http://timestamp.apple.com/ts01 2>/dev/null || echo "000")
+    if [ "$TS_PROBE" = "401" ] || [ "$TS_PROBE" = "200" ] || [ "$TS_PROBE" = "400" ] || [ "$TS_PROBE" = "405" ]; then
+        echo -e "${GREEN}timestamp.apple.com reachable (HTTP $TS_PROBE) -- signing with timestamps + notarizing.${NC}"
+    else
+        echo -e "${YELLOW}timestamp.apple.com unreachable (got '$TS_PROBE'; check proxy/firewall).${NC}"
+        echo -e "${YELLOW}Forcing SKIP_NOTARIZE=1 -- bundle will be signed but not notarized.${NC}"
+        echo -e "${YELLOW}Users install with one-line xattr command (see release notes).${NC}"
+        export SKIP_NOTARIZE=1
+    fi
 else
     echo -e "${YELLOW}WARNING: Notarization credentials missing -- build will be signed but NOT notarized.${NC}"
     echo -e "${YELLOW}  macOS will NOT persist microphone/camera permissions on unnotarized builds.${NC}"
@@ -97,6 +117,7 @@ else
         echo -e "${RED}Aborting; set up notarization credentials first.${NC}"
         exit 1
     fi
+    export SKIP_NOTARIZE=1
 fi
 
 # Check prerequisites
@@ -542,11 +563,49 @@ Download: \`Onereach.ai-${NEW_VERSION}.dmg\`"
         ;;
 esac
 
+# Install instructions vary depending on whether the bundle was successfully
+# notarized. Notarized bundles install cleanly with no Gatekeeper prompts;
+# signed-but-not-notarized bundles need a one-line xattr command to bypass
+# the "App cannot be opened" warning. Borrowed pattern from
+# lite/scripts/release-lite.sh.
+if [ "$SKIP_NOTARIZE" = "1" ]; then
+INSTALL_BLOCK="## Install (signed, not notarized -- one-time setup)
+
+This release is signed with Onereach's Apple Developer ID but could not
+be notarized at build time (likely a transient Apple notary or timestamp
+outage). To install:
+
+1. Download the .dmg above
+2. Open it and drag **Onereach.ai** to /Applications
+3. Open Terminal and paste this one-line command:
+
+\`\`\`
+xattr -dr com.apple.quarantine \"/Applications/Onereach.ai.app\"
+\`\`\`
+
+4. Launch Onereach.ai from /Applications. No further prompts."
+else
+INSTALL_BLOCK="## Install
+
+1. Download the .dmg above
+2. Open it and drag **Onereach.ai** to /Applications
+3. Launch Onereach.ai from /Applications
+
+This release is signed with Onereach's Apple Developer ID and
+notarized by Apple. macOS will not show any \"unidentified developer\"
+or \"App cannot be opened\" warnings.
+
+Note: macOS persists microphone/camera permissions across launches
+only on notarized builds, which this is."
+fi
+
 PUBLIC_NOTES="# Onereach.ai Desktop v${NEW_VERSION}
 
 ## Download Instructions
 
 ${DOWNLOAD_INSTRUCTIONS}
+
+${INSTALL_BLOCK}
 
 ${RELEASE_NOTES}
 

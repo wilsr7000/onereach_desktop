@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>Onereach.ai Lite Help</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./help.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="toc" aria-label="Table of contents">
+        <div class="toc-brand">
+          <div class="toc-brand-name">Onereach.ai Lite</div>
+          <div class="toc-brand-version" id="version">User Guide</div>
+        </div>
+        <nav class="toc-nav" id="toc-nav">
+          <a href="#welcome" class="toc-link">Welcome</a>
+          <a href="#getting-started" class="toc-link">Getting Started</a>
+          <a href="#signing-in" class="toc-link">Signing In &amp; Out</a>
+          <a href="#two-factor" class="toc-link">Two-Factor (TOTP)</a>
+          <a href="#settings" class="toc-link">Settings</a>
+          <a href="#ai-roster" class="toc-link">Your AI Roster</a>
+          <a href="#tools" class="toc-link">Tools</a>
+          <a href="#ai-run-times" class="toc-link">AI Run Times</a>
+          <a href="#university" class="toc-link">University</a>
+          <a href="#bug-reports" class="toc-link">Bug Reports</a>
+          <a href="#auto-update" class="toc-link">Auto-Update</a>
+          <a href="#diagnostics" class="toc-link">Logs &amp; Diagnostics</a>
+          <a href="#keyboard" class="toc-link">Keyboard Input</a>
+          <a href="#privacy" class="toc-link">Privacy &amp; Security</a>
+          <a href="#troubleshooting" class="toc-link">Troubleshooting</a>
+          <a href="#about" class="toc-link">About</a>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section id="welcome">
+          <h1>Onereach.ai Lite</h1>
+          <p class="lede">
+            A slim desktop kernel that signs you in to Onereach.ai once and gives you a
+            single home for the AIs you actually use. Lite is intentionally small:
+            sign-in, your AI roster, a tools menu, articles, tutorials, and bug
+            reporting &mdash; with everything else loaded on demand or deferred to the
+            full app.
+          </p>
+          <p>
+            This guide walks through every feature in the order you&rsquo;ll meet them.
+            If you only have a minute, the
+            <a href="#getting-started">Getting Started</a> section gets you signed in
+            and your first AI added.
+          </p>
+        </section>
+
+        <section id="getting-started">
+          <h2>Getting Started</h2>
+          <p>
+            On first launch you&rsquo;ll see a small placeholder window with a
+            <strong>Sign in</strong> button. Three steps from there to a working
+            install:
+          </p>
+          <ol>
+            <li>
+              <strong>Sign in to Onereach.</strong> Click <em>Sign in</em>. An auth
+              window opens at <code>auth.&lt;env&gt;.onereach.ai</code>; type your
+              email and password as you would in a browser.
+            </li>
+            <li>
+              <strong>Save a 2FA secret (optional but recommended).</strong> Open
+              <em>Onereach.ai Lite &rarr; Settings&hellip; &rarr; Two-Factor</em> and
+              scan or paste your TOTP secret. Lite generates the 6-digit code itself
+              and auto-fills it the next time OneReach asks &mdash; no copy/paste
+              from your phone. See <a href="#two-factor">Two-Factor</a>.
+            </li>
+            <li>
+              <strong>Add an AI key.</strong> Open <em>Settings&hellip; &rarr; AI</em>
+              and paste an OpenAI / Anthropic key (or whichever providers you use).
+              Without a key, the AI features show a banner pointing to this section.
+            </li>
+          </ol>
+          <p class="callout">
+            Lite reuses the OneReach session you sign in to, so you don&rsquo;t need
+            to re-authenticate every time you open the app. The auth token never
+            leaves the main process &mdash; renderers only see session metadata.
+          </p>
+        </section>
+
+        <section id="signing-in">
+          <h2>Signing In &amp; Out</h2>
+
+          <h3>Sign-in flow</h3>
+          <p>
+            Clicking <strong>Sign in</strong> opens a separate auth window in its own
+            session partition. Email and password are entered there as on any web
+            login. When OneReach prompts for a 2FA code, Lite fills it for you if a
+            TOTP secret is saved (otherwise you type the code from your phone).
+            Once both authentication cookies (<code>mult</code> and <code>or</code>)
+            are captured, the auth window closes and Lite is ready.
+          </p>
+          <p>
+            Sign-in completes typically within a few seconds. If something stalls,
+            close the auth window and try again &mdash; nothing is partially
+            persisted until both cookies arrive.
+          </p>
+
+          <h3>Sign out</h3>
+          <p>
+            Click <em>Sign out</em> in the placeholder. Lite clears in-memory tokens,
+            removes every OneReach cookie from its partition, and deletes the
+            persisted session record. The next launch starts fully signed-out.
+          </p>
+
+          <h3>If your session expires</h3>
+          <p>
+            OneReach sessions can expire on the server side. When Lite detects an
+            expired session, it shows a re-sign-in prompt. Accept it to repeat the
+            sign-in flow without losing local state (TOTP secrets, AI keys, IDWs all
+            stay).
+          </p>
+
+          <h3>Account picker</h3>
+          <p>
+            If your OneReach login has access to multiple accounts, the auth window
+            shows an account picker. If a target account id is set (via the IDW you
+            opened from), Lite auto-selects it; otherwise pick manually.
+          </p>
+        </section>
+
+        <section id="two-factor">
+          <h2>Two-Factor (TOTP)</h2>
+          <p>
+            Lite includes a built-in TOTP authenticator. Once you save your
+            OneReach 2FA secret, Lite both <em>shows</em> the live 6-digit code
+            (so you can read it like Google Authenticator) and <em>auto-fills</em>
+            it whenever the OneReach 2FA prompt appears.
+          </p>
+
+          <h3>Adding a secret</h3>
+          <ol>
+            <li>Open <em>Settings&hellip; &rarr; Two-Factor</em>.</li>
+            <li>Either scan the QR code on your OneReach 2FA setup page or paste the
+              <code>otpauth://</code> URI / Base32 secret.</li>
+            <li>Lite confirms the secret matches by showing the current code; the
+              same code on OneReach&rsquo;s screen means it&rsquo;s working.</li>
+          </ol>
+          <p>
+            Secrets live in your platform keychain (Keychain Access on macOS).
+            They never leave your machine and are never logged. The 6-digit code
+            itself is never logged either &mdash; only the fact that an attempt was
+            made.
+          </p>
+
+          <h3>Auto-fill</h3>
+          <p>
+            When the OneReach auth window shows the 2FA prompt, Lite injects a
+            MutationObserver that waits for the input to render, fills the current
+            code, and clicks the verify button. If the secret isn&rsquo;t saved yet,
+            you&rsquo;ll see a banner pointing to Settings instead.
+          </p>
+
+          <h3>Multiple secrets</h3>
+          <p>
+            If you have multiple OneReach accounts with separate 2FA secrets, save
+            them in the same Two-Factor section. Lite picks the right one based on
+            the account id in the URL of the prompt.
+          </p>
+        </section>
+
+        <section id="settings">
+          <h2>Settings</h2>
+          <p>
+            Open <em>Onereach.ai Lite &rarr; Settings&hellip;</em> from the menu (no
+            shortcut by default; see <a href="#keyboard">Keyboard Input</a>). The
+            window is sectioned:
+          </p>
+          <ul class="def-list">
+            <li><strong>Account.</strong> Current sign-in info, sign-out, switch
+              environment.</li>
+            <li><strong>Two-Factor.</strong> TOTP secret management (see above).</li>
+            <li><strong>AI.</strong> API keys for OpenAI, Anthropic, etc. Stored in
+              the keychain.</li>
+            <li><strong>IDWs.</strong> Manage your AI roster &mdash; presets and
+              custom URLs (see <a href="#ai-roster">Your AI Roster</a>).</li>
+            <li><strong>OAGI.</strong> Connection settings for the OAGI / Neon graph
+              backend used for some Onereach features.</li>
+            <li><strong>Updates.</strong> Auto-update behavior summary, channel,
+              link to the releases page.</li>
+            <li><strong>Diagnostics.</strong> Quick links to log files and the
+              <code>/logs</code> stream &mdash; useful when reporting bugs.</li>
+            <li><strong>Developer.</strong> Opens the API Reference window listing
+              every documented Lite module + its events. Hidden behind a small
+              expander.</li>
+            <li><strong>About.</strong> Version, build info, source link.</li>
+          </ul>
+          <p>
+            The Settings window remembers which section you opened last. Some other
+            parts of the app deep-link directly to a section (for example, the
+            &ldquo;needs setup&rdquo; banner deep-links to Two-Factor).
+          </p>
+        </section>
+
+        <section id="ai-roster">
+          <h2>Your AI Roster (IDWs)</h2>
+          <p>
+            An <strong>IDW</strong> (&ldquo;intelligent digital worker&rdquo;) is any
+            AI you call up by name in Lite. The roster holds the AIs you use most
+            so they&rsquo;re one click away. Lite ships with quick-add presets for
+            ChatGPT, Claude, Gemini, Perplexity, and Grok &mdash; click any of them
+            in <em>Settings &rarr; IDWs &rarr; Add</em> and they appear in your
+            roster immediately. You can also add a fully custom IDW by URL.
+          </p>
+
+          <h3>Adding an IDW</h3>
+          <ol>
+            <li>Open <em>Settings &rarr; IDWs</em>.</li>
+            <li>Click <em>Add</em>. The form shows quick-add buttons for the
+              common ones; click a button to fill the form, or pick a kind manually
+              and fill the URL.</li>
+            <li>Save. The IDW appears as a row in your roster and in the catalog.</li>
+          </ol>
+
+          <h3>The catalog</h3>
+          <p>
+            Each IDW opens in its own browser window when clicked from the roster
+            or catalog. Cookies and local storage stay isolated per IDW so signing
+            in to ChatGPT doesn&rsquo;t affect your Claude session. Some IDWs
+            (those marked <em>OneReach-aware</em>) automatically ride your
+            OneReach session.
+          </p>
+
+          <h3>Editing &amp; removing</h3>
+          <p>
+            In <em>Settings &rarr; IDWs</em>, each row has an inline edit form.
+            Removal asks for a confirmation; the confirmation is animated to give
+            you a half-beat to change your mind.
+          </p>
+        </section>
+
+        <section id="tools">
+          <h2>Tools</h2>
+          <p>
+            The <em>Tools</em> menu is a user-curated list of label + URL shortcuts
+            &mdash; think bookmarks tailored for the work you do here. Open
+            <em>Tools &rarr; Manage Tools&hellip;</em> to add, rename, reorder, or
+            remove entries. Each entry becomes a top-level item in the Tools menu.
+          </p>
+          <p>
+            Tools open in your default browser, not inside Lite. They&rsquo;re for
+            quick access to dashboards, docs, or external apps you reference often.
+          </p>
+        </section>
+
+        <section id="ai-run-times">
+          <h2>AI Run Times</h2>
+          <p>
+            <em>AI Run Times</em> is Lite&rsquo;s built-in feed reader for AI news,
+            announcements, and articles. It pulls from RSS-like sources and presents
+            them in a tile grid; clicking a tile reads the article in a focused
+            view, with optional text-to-speech for hands-free listening.
+          </p>
+
+          <h3>Adding sources</h3>
+          <p>
+            Open AI Run Times from the dock or the main window. Use the
+            <em>Add source</em> control to point Lite at a feed URL; presets cover
+            the common AI news sites.
+          </p>
+
+          <h3>Reading</h3>
+          <p>
+            Click a tile to open the article. The body fetches on demand from the
+            source. The TTS button reads the article aloud using the system voice;
+            the spoken audio is cached locally so re-reads are instant.
+          </p>
+        </section>
+
+        <section id="university">
+          <h2>University</h2>
+          <p>
+            <em>University</em> is a curated list of short tutorials covering Lite
+            features. Open it from the main window. Each tutorial is a single
+            scroll &mdash; no quizzes, no logins, just the basics of a feature with
+            screenshots.
+          </p>
+          <p>
+            New tutorials are added with releases. The list updates when you
+            relaunch Lite after an update.
+          </p>
+        </section>
+
+        <section id="bug-reports">
+          <h2>Bug Reports</h2>
+          <p>
+            <em>Help &rarr; Report a Bug&hellip;</em> opens a small modal. Fill in
+            what happened, what you expected, and any reproduction steps. Lite
+            automatically attaches diagnostic context:
+          </p>
+          <ul class="def-list">
+            <li>The Lite version and build hash.</li>
+            <li>Recent log lines from the local log queue (port 47392).</li>
+            <li>Recent structured events (sign-in attempts, IPC calls, etc.).</li>
+            <li>OS / Electron version metadata.</li>
+          </ul>
+          <p>
+            Sensitive values are redacted before attachment: API keys (OpenAI,
+            AWS, GitHub), JWTs, bearer tokens, and known credential patterns are
+            replaced with <code>[REDACTED:KIND]</code>. TOTP codes and cookies
+            were never logged in the first place. You can review and edit the
+            attached payload before submitting.
+          </p>
+          <p>
+            Submitted reports go to the Onereach support queue.
+          </p>
+        </section>
+
+        <section id="auto-update">
+          <h2>Auto-Update</h2>
+          <p>
+            Lite checks for updates every 6 hours in the background and on demand
+            via <em>Help &rarr; Check for Updates&hellip;</em>. Updates are
+            distributed via GitHub releases at
+            <code>wilsr7000/Onereach_Lite_Desktop_App</code>.
+          </p>
+
+          <h3>How an update flows</h3>
+          <ol>
+            <li>Lite checks the GitHub release feed.</li>
+            <li>If a newer version is available, you&rsquo;re asked whether to
+              download. The download itself doesn&rsquo;t install &mdash; it stages
+              the new version.</li>
+            <li>You&rsquo;re asked whether to <em>Install and Restart</em> now or
+              defer until quit. Either way, the next launch runs the new version.</li>
+            <li>On the next launch, Lite verifies the install actually took effect.
+              If the version on disk doesn&rsquo;t match what was downloaded, you
+              get a dialog explaining the failure and offering a manual download.</li>
+          </ol>
+
+          <h3>If a version repeatedly fails to install</h3>
+          <p>
+            After three consecutive failures on the same version, Lite stops
+            offering automatic install for that version and steers you to manual
+            download. The next <em>different</em> version released retries
+            auto-update normally. This keeps a single broken release from
+            re-prompting you forever.
+          </p>
+
+          <h3>Dev builds</h3>
+          <p>
+            If you&rsquo;re running Lite from source (e.g.&nbsp;<code>npm start</code>),
+            <em>Check for Updates&hellip;</em> shows a dialog explaining that
+            updates only run in packaged builds. Real checks happen against
+            packaged installs.
+          </p>
+        </section>
+
+        <section id="diagnostics">
+          <h2>Logs &amp; Diagnostics</h2>
+          <p>
+            Lite runs a local log server on port <code>47392</code>. Every module
+            writes structured log lines and events there:
+          </p>
+          <ul class="def-list">
+            <li><strong>Logs.</strong> Level + category + message lines (e.g.
+              <code>[info] auth: hydrate complete</code>).</li>
+            <li><strong>Events.</strong> Typed structured records with names like
+              <code>auth.signIn.start</code>, <code>updater.check.finish</code>,
+              <code>kv.set.fail</code>. Each event carries elapsed duration for
+              spans, plus operation-specific data.</li>
+          </ul>
+
+          <h3>Viewing logs</h3>
+          <p>
+            Open <em>Settings &rarr; Diagnostics</em> for a quick browser link to
+            the local log server. The endpoint streams via WebSocket so logs
+            update live. Bug reports automatically grab the last few hundred
+            recent entries.
+          </p>
+
+          <h3>Categories</h3>
+          <p>
+            Each log line carries a category &mdash; <code>auth</code>,
+            <code>kv</code>, <code>updater</code>, <code>idw</code>,
+            <code>tools</code>, <code>university</code>, <code>ai-run-times</code>,
+            <code>neon</code>, <code>bug-report</code>, <code>menu</code>,
+            <code>main-lite</code>, <code>logging</code>. Filter by category in
+            the log viewer to focus on one subsystem.
+          </p>
+        </section>
+
+        <section id="keyboard">
+          <h2>Keyboard Input</h2>
+          <p>
+            Lite ships with <strong>no keyboard shortcuts by default</strong>
+            (per ADR-015). Menus exist for discoverability, not muscle memory.
+            The thinking: shortcuts are personal, and an opinionated set baked
+            in usually clashes with whatever the user already has.
+          </p>
+          <p>
+            <strong>The single exception is the Edit menu.</strong> Cmd+C / Cmd+V
+            / Cmd+X / Cmd+Z / Cmd+A and their Ctrl-equivalents on Windows /
+            Linux are role-driven and dispatch automatically to whichever input
+            has focus. Without these, copy-paste wouldn&rsquo;t work in Settings
+            forms, agent windows, or the Bug Report modal &mdash; so the Edit
+            menu items keep their platform-default shortcuts.
+          </p>
+          <p>
+            To add custom shortcuts: edit <code>~/.config/Onereach.ai
+            Lite/Preferences</code> manually, or wait for the planned
+            keybindings UI in a future release.
+          </p>
+        </section>
+
+        <section id="privacy">
+          <h2>Privacy &amp; Security</h2>
+          <p>
+            Lite is designed so secrets stay local and never appear in logs or
+            telemetry.
+          </p>
+          <ul class="def-list">
+            <li><strong>OneReach session tokens</strong> live in the auth window&rsquo;s
+              partition (cookie jar) and main-process memory. The renderer never
+              sees the token directly &mdash; only session metadata
+              (<code>accountId</code>, <code>email</code>).</li>
+            <li><strong>API keys</strong> (OpenAI, Anthropic, etc.) live in your
+              platform keychain via <code>keytar</code>. They are never written
+              to disk in plaintext.</li>
+            <li><strong>TOTP secrets</strong> live in the keychain. Lite generates
+              the 6-digit code from the secret in main-process memory; the code
+              and the secret are never logged.</li>
+            <li><strong>Per-IDW partitions</strong> isolate each AI&rsquo;s
+              cookies and storage. Signing in to one IDW doesn&rsquo;t affect
+              others.</li>
+            <li><strong>Bug-report redaction</strong> scrubs known credential
+              patterns from log attachments before submission. You also see the
+              attached payload before sending.</li>
+          </ul>
+
+          <h3>Code signing</h3>
+          <p>
+            Current Lite builds ship with a signed-but-not-notarized bundle,
+            same posture as the full Onereach.ai app. On first install you see
+            a one-time &ldquo;Apple cannot check this app&rdquo; warning;
+            right-click the app and choose <em>Open</em> to bypass it. Auto-update
+            works without prompts after that. Notarization is on the pre-launch
+            roadmap (ADR-029).
+          </p>
+        </section>
+
+        <section id="troubleshooting">
+          <h2>Troubleshooting</h2>
+
+          <h3>The app shows &ldquo;Apple cannot check&rdquo; on first launch</h3>
+          <p>
+            Right-click the app in <code>/Applications</code> and choose
+            <em>Open</em>. Confirm the second prompt. macOS remembers your
+            choice; subsequent launches start normally and auto-updates work
+            without further prompts.
+          </p>
+
+          <h3>Sign-in stalls on the 2FA page</h3>
+          <p>
+            Two common causes: (1) no TOTP secret saved (check Settings
+            &rarr; Two-Factor); (2) account picker page that wasn&rsquo;t
+            auto-selected (just click the right account). If neither applies,
+            check the log stream for <code>auth.totp.*</code> events.
+          </p>
+
+          <h3>Cmd+C / Cmd+V doesn&rsquo;t work</h3>
+          <p>
+            That means the Edit menu isn&rsquo;t built &mdash; usually a sign of
+            a broken kernel boot. Check the log for menu-related errors at
+            startup.
+          </p>
+
+          <h3>Auto-update never finds a new version</h3>
+          <p>
+            Confirm <em>Help &rarr; Check for Updates&hellip;</em> opens a real
+            check (in dev mode it shows a &ldquo;dev build&rdquo; dialog instead).
+            Confirm the GitHub releases page is reachable from your network. Logs
+            under category <code>updater</code> show the response headers.
+          </p>
+
+          <h3>An IDW won&rsquo;t open / shows blank</h3>
+          <p>
+            IDW windows are isolated per partition. If the AI&rsquo;s site has
+            changed its login flow, you may need to delete the IDW and re-add it
+            so cookies start fresh. Settings &rarr; IDWs &rarr; remove + add again.
+          </p>
+
+          <h3>The placeholder window is stuck on &ldquo;Signing in&hellip;&rdquo;</h3>
+          <p>
+            Quit and relaunch the app. The placeholder hydrates from the persisted
+            session on boot &mdash; if hydration is partial, the next clean boot
+            usually resolves it.
+          </p>
+        </section>
+
+        <section id="about">
+          <h2>About</h2>
+          <p>
+            Onereach.ai Lite is the slim companion to the full Onereach.ai
+            desktop app. It started as a strangler-pattern rewrite of the
+            sign-in / settings / IDW surface as a small kernel that ships
+            independently. Both apps share <code>lib/</code> and follow the
+            same design language.
+          </p>
+          <p>
+            Source &amp; releases:
+            <a href="https://github.com/wilsr7000/Onereach_Lite_Desktop_App">github.com/wilsr7000/Onereach_Lite_Desktop_App</a>.
+          </p>
+          <p>
+            For deeper architectural context, every non-trivial decision is
+            recorded as an ADR in <code>lite/DECISIONS.md</code>. Module APIs are
+            documented in the API Reference window
+            (<em>Settings &rarr; Developer &rarr; Open API Reference</em>).
+          </p>
+        </section>
+      </main>
+    </div>
+
+    <script src="./help.js"></script>
+  </body>
+</html>

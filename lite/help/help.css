@@ -1,0 +1,271 @@
+/*
+ * Onereach.ai Lite -- Help window styles.
+ *
+ * Companion to ./help.html. Pulls design tokens from signature.css and adds
+ * the layout for a TOC-sidebar + scrolling-content document. Dark theme by
+ * default to match the rest of the kernel; scrollbar styles inherit from
+ * signature.css's webkit-scrollbar block.
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  background:
+    radial-gradient(circle at 14% 0%, rgba(79, 140, 255, 0.08), transparent 36%),
+    var(--or-bg-canvas);
+  color: var(--or-text-primary);
+  font-family: var(--or-font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--or-accent);
+  text-decoration: none;
+  transition: color var(--or-transition-fast);
+}
+
+a:hover {
+  color: var(--or-accent-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+code {
+  font-family: var(--or-font-mono);
+  font-size: 0.875em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--or-border-subtle);
+  color: var(--or-text-primary);
+}
+
+strong {
+  color: var(--or-text-primary);
+  font-weight: 600;
+}
+
+em {
+  font-style: italic;
+  color: var(--or-text-primary);
+}
+
+/* ───────────────────────────────────────────────────────────────────────
+   Layout: sticky TOC sidebar + scrolling main content
+   ─────────────────────────────────────────────────────────────────────── */
+
+.layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  border-right: 1px solid var(--or-border-subtle);
+  background: var(--or-bg-shell);
+  padding: 24px 0 32px 0;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.toc-brand {
+  padding: 0 20px 18px 20px;
+  border-bottom: 1px solid var(--or-border-subtle);
+  margin-bottom: 12px;
+}
+
+.toc-brand-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--or-text-primary);
+}
+
+.toc-brand-version {
+  font-size: 11px;
+  color: var(--or-text-faint);
+  margin-top: 4px;
+  font-family: var(--or-font-mono);
+  letter-spacing: 0.2px;
+}
+
+.toc-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+}
+
+.toc-link {
+  display: block;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: var(--or-text-secondary);
+  border-radius: var(--or-radius-sm);
+  transition:
+    background var(--or-transition-fast),
+    color var(--or-transition-fast);
+}
+
+.toc-link:hover {
+  background: var(--or-bg-hover);
+  color: var(--or-text-primary);
+  text-decoration: none;
+}
+
+.toc-link.is-active {
+  background: var(--or-accent-soft);
+  color: var(--or-accent-hover);
+}
+
+/* ───────────────────────────────────────────────────────────────────────
+   Main content
+   ─────────────────────────────────────────────────────────────────────── */
+
+.content {
+  overflow-y: auto;
+  padding: 48px 56px 96px 56px;
+  scroll-behavior: smooth;
+}
+
+.content > section {
+  max-width: 720px;
+  margin: 0 auto;
+  padding-top: 24px;
+  padding-bottom: 24px;
+  scroll-margin-top: 24px;
+}
+
+.content > section + section {
+  border-top: 1px solid var(--or-border-subtle);
+  margin-top: 32px;
+  padding-top: 40px;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  margin-bottom: 12px;
+  color: var(--or-text-primary);
+}
+
+h2 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  margin-bottom: 16px;
+  color: var(--or-text-primary);
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  margin-top: 24px;
+  margin-bottom: 8px;
+  color: var(--or-text-primary);
+}
+
+.lede {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--or-text-secondary);
+  margin-bottom: 16px;
+}
+
+p {
+  color: var(--or-text-secondary);
+  margin-bottom: 14px;
+}
+
+ul,
+ol {
+  margin-bottom: 14px;
+  padding-left: 22px;
+  color: var(--or-text-secondary);
+}
+
+li {
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+li > strong {
+  color: var(--or-text-primary);
+}
+
+ul.def-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+ul.def-list li {
+  padding: 8px 14px;
+  border-left: 2px solid var(--or-border-subtle);
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.015);
+  border-radius: 0 var(--or-radius-sm) var(--or-radius-sm) 0;
+}
+
+ul.def-list li:hover {
+  border-left-color: var(--or-accent);
+  background: rgba(79, 140, 255, 0.04);
+}
+
+.callout {
+  background:
+    radial-gradient(circle at 14% 0%, rgba(79, 140, 255, 0.1), transparent 40%),
+    var(--or-bg-elevated);
+  border: 1px solid var(--or-border-subtle);
+  border-left: 3px solid var(--or-accent);
+  border-radius: var(--or-radius-sm);
+  padding: 14px 18px;
+  margin: 16px 0;
+  color: var(--or-text-secondary);
+  font-size: 13.5px;
+}
+
+/* ───────────────────────────────────────────────────────────────────────
+   Responsive: collapse TOC on narrow widths
+   ─────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .toc {
+    position: relative;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--or-border-subtle);
+    padding: 16px 0;
+  }
+
+  .toc-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .toc-link {
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+
+  .content {
+    padding: 24px 20px 60px 20px;
+  }
+}

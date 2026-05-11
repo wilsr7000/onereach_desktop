@@ -9,8 +9,10 @@
  *     |    |- Undo / Redo / Cut / Copy / Paste / Select All (role-driven)
  *     |- Quit Onereach.ai Lite  (app:quit,  click)
  *
- *   Help (top:help, role: help)
- *     |- Report a Bug...        (help:report-bug, click)
+ *   Help (top:help)
+ *     |- Onereach.ai Lite Help  (help:user-guide,        click) -- owned by lite/help
+ *     |- Report a Bug...        (help:report-bug,        click)
+ *     |- Check for Updates...   (help:check-for-updates, click) -- owned by lite/updater
  *
  *   Dev Tools (top:dev-tools)
  *     |- Open DevTools for Focused Window
@@ -256,12 +258,19 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
   }
 
   // Help menu items.
+  // Order is reserved as follows so each Help-menu owner can register
+  // its entry without colliding:
+  //   10  - help:user-guide          (lite/help -- "Onereach.ai Lite Help")
+  //   30  - help:report-bug          (this file)
+  //   50  - help:check-for-updates   (lite/updater)
+  // User Guide goes first per macOS convention (the primary help item
+  // at the top of the menu); Report a Bug and Check for Updates follow.
   registry.upsert({
     id: 'help:report-bug',
     type: 'item',
     parentId: 'top:help',
     label: 'Report a Bug...',
-    order: 0,
+    order: 30,
     click: handlers.onReportBug,
   });
 

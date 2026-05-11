@@ -89,11 +89,12 @@ describe('seedKernelMenu', () => {
     expect(appMenu.map((e) => e.id)).toEqual(['app:about', 'top:edit', 'app:quit']);
   });
 
-  it('help menu has Report a Bug', () => {
+  it('help menu has Report a Bug at order 30 (room above for help:user-guide at 10)', () => {
     seedKernelMenu(handlers);
     const helpMenu = registry.getChildren('top:help');
     expect(helpMenu.map((e) => e.id)).toEqual(['help:report-bug']);
     expect(helpMenu[0]?.label).toBe('Report a Bug...');
+    expect(helpMenu[0]?.order).toBe(30);
   });
 
   it('NO accelerators are bound on any item (per ADR-015)', () => {

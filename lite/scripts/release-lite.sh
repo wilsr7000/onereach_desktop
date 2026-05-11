@@ -83,11 +83,25 @@ fi
 
 if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
     echo -e "${GREEN}Notarization creds present (Apple ID: $APPLE_ID, Team: $APPLE_TEAM_ID)${NC}"
-    echo -e "${YELLOW}NOTE: per ADR-029, notarization is currently disabled in lite/electron-builder.json"
-    echo -e "(notarize=false). Setting NOTARIZE=true is a separate decision.${NC}"
+    # Probe Apple's RFC 3161 Timestamp Authority at timestamp.apple.com.
+    # IMPORTANT: This is an HTTP service on port 80 (not HTTPS on 443).
+    # HEAD without a TSQ payload returns 401, which is the "service up"
+    # signal -- only POST with application/timestamp-query is accepted.
+    # A connection failure or DNS error here means a real outage / proxy /
+    # firewall block; only then do we fall back to unnotarized + xattr.
+    TS_PROBE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 5 -X HEAD http://timestamp.apple.com/ts01 2>/dev/null || echo "000")
+    if [ "$TS_PROBE" = "401" ] || [ "$TS_PROBE" = "200" ] || [ "$TS_PROBE" = "400" ] || [ "$TS_PROBE" = "405" ]; then
+        echo -e "${GREEN}timestamp.apple.com reachable (HTTP $TS_PROBE) -- signing with timestamps + notarizing.${NC}"
+    else
+        echo -e "${YELLOW}timestamp.apple.com unreachable (got '$TS_PROBE'; check proxy/firewall).${NC}"
+        echo -e "${YELLOW}Forcing SKIP_NOTARIZE=1 -- bundle will be signed but not notarized.${NC}"
+        echo -e "${YELLOW}Users install with one-line xattr command (see release notes).${NC}"
+        export SKIP_NOTARIZE=1
+    fi
 else
     echo -e "${YELLOW}Notarization creds NOT set -- bundle will be signed but not notarized.${NC}"
-    echo -e "${YELLOW}First-time install requires right-click -> Open (Gatekeeper bypass).${NC}"
+    echo -e "${YELLOW}Users install with one-line xattr command (see release notes).${NC}"
+    export SKIP_NOTARIZE=1
 fi
 
 # ---------------------------------------------------------------------------
@@ -240,26 +254,53 @@ else
     COMMITS=$(git log -10 --pretty=format:"- %s" --no-merges -- lite/ lib/ scripts/ 2>/dev/null || echo "")
 fi
 
+# Release notes template -- the install instructions differ depending on
+# whether the bundle is notarized (the normal path) or signed-but-not-notarized
+# (the degraded path when Apple's notary service or TSA is unreachable at
+# build time). Notarized bundles install cleanly with no Gatekeeper prompts;
+# unnotarized bundles need the one-line xattr command to bypass the
+# "App cannot be opened" warning.
+if [ "$SKIP_NOTARIZE" = "1" ]; then
+INSTALL_BLOCK="## Install (signed, not notarized -- one-time setup)
+
+This release is signed with Onereach's Apple Developer ID but could not
+be notarized at build time (likely a transient Apple notary or timestamp
+outage). To install:
+
+1. Download the .dmg above
+2. Open it and drag **Onereach.ai Lite** to /Applications
+3. Open Terminal and paste this one-line command:
+
+\`\`\`
+xattr -dr com.apple.quarantine \"/Applications/Onereach.ai Lite.app\"
+\`\`\`
+
+4. Launch Onereach.ai Lite from /Applications. No further prompts."
+else
+INSTALL_BLOCK="## Install
+
+1. Download the .dmg above
+2. Open it and drag **Onereach.ai Lite** to /Applications
+3. Launch Onereach.ai Lite from /Applications
+
+This release is signed with Onereach's Apple Developer ID and
+notarized by Apple. macOS will not show any \"unidentified developer\"
+or \"App cannot be opened\" warnings."
+fi
+
 PUBLIC_NOTES="# Onereach.ai Lite ${LITE_TAG}
 
 ## Download
 
 For Apple Silicon Macs (M1/M2/M3/M4):
-${LITE_PRODUCT_NAME}-${NEW_VERSION}-arm64.dmg
+${LITE_PRODUCT_NAME}-${NEW_VERSION}-arm64-mac.dmg
 
-## First-Time Install
-
-Until notarization is enabled, macOS Gatekeeper requires a one-time bypass:
-
-1. Download the .dmg
-2. Open the DMG and drag Onereach.ai Lite.app to /Applications
-3. Right-click the app and choose Open (the warning only appears the first time)
-
-After the first launch, subsequent launches and auto-updates work without prompts.
+${INSTALL_BLOCK}
 
 ## Auto-Updates
 
-Existing installs detect this release via electron-updater and prompt to upgrade.
+Existing installs detect this release via electron-updater and prompt
+to upgrade automatically. No reinstall needed.
 
 ## What Changed
 ${COMMITS}
