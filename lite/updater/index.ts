@@ -239,6 +239,10 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
             setUpdatingFlag: (value) => {
               (global as { isUpdatingApp?: boolean }).isUpdatingApp = value;
             },
+            // Bypass Squirrel.Mac on macOS 26.4 (see install.ts header).
+            // The detached helper waits on our PID and then swaps the
+            // bundle; we need to actually quit so it can proceed.
+            appQuit: () => app.quit(),
           },
           targetVersion
         );
@@ -340,11 +344,15 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
               }
             }
           },
-          cancelPeriodicCheck: () => lifecycle.teardown(),
+          cancelPeriodicCheck: () => lifecycle.cancelPeriodicCheck(),
           logger: log,
           setUpdatingFlag: (value) => {
             (global as { isUpdatingApp?: boolean }).isUpdatingApp = value;
           },
+          // Bypass Squirrel.Mac on macOS 26.4 (see install.ts header).
+          // The detached helper waits on our PID and then swaps the
+          // bundle; we need to actually quit so it can proceed.
+          appQuit: () => app.quit(),
         },
         targetVersion
       );

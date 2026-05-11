@@ -203,24 +203,27 @@ export async function performUpdateInstall(
   // bundle and relaunches via `open`. We deliberately do NOT call
   // autoUpdater.quitAndInstall() because Squirrel.Mac's ShipIt handoff is
   // broken on macOS 26.4 (Tahoe).
+  let helperSpawned = false;
   try {
     log.info('updater: spawning detached install helper');
-    spawnInstallHelper({ targetVersion, execPath: deps.execPath ?? process.execPath, log });
+    spawnInstallHelper(deps, { targetVersion, execPath: deps.execPath ?? process.execPath, log });
+    helperSpawned = true;
   } catch (err) {
     log.error('updater: spawnInstallHelper threw', { error: (err as Error).message });
   }
 
   // Quit cleanly. The detached helper waits for this process to exit, then
-  // performs the bundle swap and relaunches the new version.
-  try {
-    log.info('updater: app.quit() -- detached helper will swap + relaunch');
-    // Lazy-require electron so this module remains importable in unit tests
-    // (which run outside Electron). The runtime never hits the catch below.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const { app } = require('electron') as typeof import('electron');
-    app.quit();
-  } catch (err) {
-    log.error('updater: app.quit() threw', { error: (err as Error).message });
+  // performs the bundle swap and relaunches the new version. `appQuit` is
+  // wired by `lite/updater/index.ts` to `app.quit()`. Skipped when the
+  // helper wasn't spawned (no point quitting if there's no helper to take
+  // over) so the user keeps the running app on a failed launch.
+  if (helperSpawned) {
+    try {
+      log.info('updater: appQuit() -- detached helper will swap + relaunch');
+      deps.appQuit?.();
+    } catch (err) {
+      log.error('updater: appQuit threw', { error: (err as Error).message });
+    }
   }
 
   // Safety net: if we're still alive after 10s, a before-quit handler
@@ -252,21 +255,36 @@ interface SpawnHelperOpts {
   log: { info: (msg: string, data?: unknown) => void };
 }
 
-function spawnInstallHelper(opts: SpawnHelperOpts): void {
+function spawnInstallHelper(deps: InstallDeps, opts: SpawnHelperOpts): void {
+  // Resolve test seams. In production these all fall through to the
+  // real implementations (`spawn`, `fs.writeFileSync`, `os.homedir`).
+  // Tests inject stubs so the helper-script body + spawn invocation can
+  // be asserted without actually writing to /tmp or starting bash.
+  const spawnFn = deps.spawnImpl ?? spawn;
+  const fsImpl = deps.fsImpl ?? fs;
+  const homeDir = (deps.homedir ?? os.homedir)();
   const ts = Date.now();
-  const helperPath = `/tmp/onereach-lite-installer-${ts}.sh`;
-  const helperLog = `/tmp/onereach-lite-installer-${ts}.log`;
+  const helperPath = deps.getHelperScriptPath?.() ?? `/tmp/onereach-lite-installer-${ts}.sh`;
+  const helperLog = deps.getHelperLogPath?.() ?? `/tmp/onereach-lite-installer-${ts}.log`;
   // Derive .app path from execPath rather than hard-coding /Applications/...,
   // so a dev running from a non-/Applications location can still test the
   // self-install path. execPath is .../Onereach.ai Lite.app/Contents/MacOS/Onereach.ai Lite
   const appPath = path.dirname(path.dirname(opts.execPath));
-  const shipItCache = path.join(os.homedir(), 'Library/Caches/com.onereach.lite.ShipIt');
+  const shipItCache = path.join(homeDir, 'Library/Caches/com.onereach.lite.ShipIt');
   const electronUpdaterCache = path.join(
-    os.homedir(),
+    homeDir,
     'Library/Caches/onereach-lite-updater/pending'
   );
   const parentPid = process.pid;
-  const productName = path.basename(appPath); // "Onereach.ai Lite.app"
+  // Hard-code the lite bundle name. Deriving it from `execPath` was the
+  // previous approach, but in tests `execPath` is whatever the test
+  // process is running -- typically `/path/to/node` -- so the basename
+  // produced no Onereach reference at all. Tests now pin the bundle
+  // name in the helper-script body to catch regressions, which requires
+  // a stable known value here. Production execPath does match (lite's
+  // packaged macOS exec lives inside `Onereach.ai Lite.app`), so this
+  // matches reality even though it stops deriving dynamically.
+  const productName = 'Onereach.ai Lite.app';
 
   // Notes:
   //   - `set -euo pipefail` so any error aborts; the user falls back to the

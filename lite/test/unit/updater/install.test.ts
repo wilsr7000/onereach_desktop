@@ -89,9 +89,9 @@ describe('checkAppBundleWritable', () => {
 function makeBypassSeams(): {
   spawnImpl: ReturnType<typeof vi.fn>;
   fsImpl: { writeFileSync: ReturnType<typeof vi.fn> };
-  appQuit: ReturnType<typeof vi.fn>;
-  forceExit: ReturnType<typeof vi.fn>;
-  destroyAllWindows: ReturnType<typeof vi.fn>;
+  appQuit: ReturnType<typeof vi.fn> & (() => void);
+  forceExit: ReturnType<typeof vi.fn> & (() => void);
+  destroyAllWindows: ReturnType<typeof vi.fn> & (() => void);
   capturedScript: () => string | undefined;
   capturedScriptPath: () => string | undefined;
 } {
@@ -107,9 +107,9 @@ function makeBypassSeams(): {
   return {
     spawnImpl,
     fsImpl,
-    appQuit: vi.fn(),
-    forceExit: vi.fn(),
-    destroyAllWindows: vi.fn(),
+    appQuit: vi.fn() as ReturnType<typeof vi.fn> & (() => void),
+    forceExit: vi.fn() as ReturnType<typeof vi.fn> & (() => void),
+    destroyAllWindows: vi.fn() as ReturnType<typeof vi.fn> & (() => void),
     capturedScript: () => capturedScriptBody,
     capturedScriptPath: () => capturedScriptPath,
   };
@@ -128,8 +128,8 @@ describe('performUpdateInstall', () => {
         destroyAllWindows: seams.destroyAllWindows,
         forceExit: seams.forceExit,
         appQuit: seams.appQuit,
-        spawnImpl: seams.spawnImpl as unknown as InstallDeps['spawnImpl'],
-        fsImpl: seams.fsImpl as unknown as InstallDeps['fsImpl'],
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
       },
       '2.0.0'
     );
@@ -154,8 +154,8 @@ describe('performUpdateInstall', () => {
         destroyAllWindows: seams.destroyAllWindows,
         forceExit: seams.forceExit,
         appQuit: seams.appQuit,
-        spawnImpl: seams.spawnImpl as unknown as InstallDeps['spawnImpl'],
-        fsImpl: seams.fsImpl as unknown as InstallDeps['fsImpl'],
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
       },
       null
     );
@@ -188,8 +188,8 @@ describe('performUpdateInstall', () => {
         destroyAllWindows: seams.destroyAllWindows,
         forceExit: seams.forceExit,
         appQuit: seams.appQuit,
-        spawnImpl: seams.spawnImpl as unknown as InstallDeps['spawnImpl'],
-        fsImpl: seams.fsImpl as unknown as InstallDeps['fsImpl'],
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
       },
       '2.0.0'
     );
@@ -224,8 +224,8 @@ describe('performUpdateInstall', () => {
           destroyAllWindows: seams.destroyAllWindows,
           forceExit: seams.forceExit,
           appQuit: seams.appQuit,
-          spawnImpl: seams.spawnImpl as unknown as InstallDeps['spawnImpl'],
-          fsImpl: seams.fsImpl as unknown as InstallDeps['fsImpl'],
+          spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+          fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
         },
         '2.0.0'
       );
@@ -236,15 +236,19 @@ describe('performUpdateInstall', () => {
 
   it('cancelPeriodicCheck is invoked when supplied', async () => {
     const cancel = vi.fn();
+    const seams = makeBypassSeams();
     await performUpdateInstall(
       {
         autoUpdater: fakeUpdater(),
         ui: fakeUi(),
         userDataPath: userDataDir,
         isPackaged: () => false,
-        destroyAllWindows: () => {},
+        destroyAllWindows: seams.destroyAllWindows,
         cancelPeriodicCheck: cancel,
-        forceExit: () => {},
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
       },
       '2.0.0'
     );
@@ -253,15 +257,19 @@ describe('performUpdateInstall', () => {
 
   it('setUpdatingFlag(true) is called before save-state', async () => {
     const flag = vi.fn();
+    const seams = makeBypassSeams();
     await performUpdateInstall(
       {
         autoUpdater: fakeUpdater(),
         ui: fakeUi(),
         userDataPath: userDataDir,
         isPackaged: () => false,
-        destroyAllWindows: () => {},
+        destroyAllWindows: seams.destroyAllWindows,
         setUpdatingFlag: flag,
-        forceExit: () => {},
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
       },
       '2.0.0'
     );
@@ -269,18 +277,116 @@ describe('performUpdateInstall', () => {
   });
 
   it('returns attempted=true with saveStateMs when install ran', async () => {
+    const seams = makeBypassSeams();
     const result = await performUpdateInstall(
       {
         autoUpdater: fakeUpdater(),
         ui: fakeUi(),
         userDataPath: userDataDir,
         isPackaged: () => false,
-        destroyAllWindows: () => {},
-        forceExit: () => {},
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
       },
       '2.0.0'
     );
     expect(result.attempted).toBe(true);
     expect(result.saveStateMs).toBeDefined();
+  });
+
+  // ─── bypass-specific tests ──────────────────────────────────────────────
+  //
+  // The install path replaces autoUpdater.quitAndInstall() with a
+  // detached bash helper because Squirrel.Mac is broken on macOS 26.4.
+  // These tests pin the helper-spawn contract so a future refactor can't
+  // regress back to the broken Squirrel path.
+
+  it('writes a /bin/bash helper script and spawns it detached', async () => {
+    const seams = makeBypassSeams();
+    await performUpdateInstall(
+      {
+        autoUpdater: fakeUpdater(),
+        ui: fakeUi(),
+        userDataPath: userDataDir,
+        isPackaged: () => false,
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+      },
+      '2.0.0'
+    );
+    expect(seams.fsImpl.writeFileSync).toHaveBeenCalledOnce();
+    expect(seams.capturedScriptPath()).toMatch(/onereach-lite-installer.*\.sh$/);
+    expect(seams.spawnImpl).toHaveBeenCalledOnce();
+    const [cmd, args, options] = seams.spawnImpl.mock.calls[0] as [
+      string,
+      string[],
+      { detached: boolean; stdio: string }
+    ];
+    expect(cmd).toBe('/bin/bash');
+    expect(args[0]).toMatch(/onereach-lite-installer.*\.sh$/);
+    expect(options.detached).toBe(true);
+    expect(options.stdio).toBe('ignore');
+  });
+
+  it('helper script targets the lite-specific bundle name + cache paths', async () => {
+    const seams = makeBypassSeams();
+    await performUpdateInstall(
+      {
+        autoUpdater: fakeUpdater(),
+        ui: fakeUi(),
+        userDataPath: userDataDir,
+        isPackaged: () => false,
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+      },
+      '2.0.0'
+    );
+    const script = seams.capturedScript();
+    expect(script).toBeDefined();
+    // Lite-specific identifiers must appear in the script body so the
+    // helper finds the correct ShipIt cache / updater cache / bundle
+    // name. A future refactor that accidentally falls back to the full
+    // app's strings (com.gsx.poweruser / "Onereach.ai.app") would
+    // silently target the wrong bundle.
+    expect(script).toMatch(/com\.onereach\.lite\.ShipIt/);
+    expect(script).toMatch(/onereach-lite-updater\/pending/);
+    expect(script).toMatch(/Onereach\.ai Lite\.app/);
+    // The codesign-verify gate is what stops a corrupted download from
+    // overwriting /Applications. Pin its presence.
+    expect(script).toMatch(/codesign --verify/);
+  });
+
+  it('calls app.quit() after the helper is spawned', async () => {
+    const seams = makeBypassSeams();
+    await performUpdateInstall(
+      {
+        autoUpdater: fakeUpdater(),
+        ui: fakeUi(),
+        userDataPath: userDataDir,
+        isPackaged: () => false,
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+      },
+      '2.0.0'
+    );
+    expect(seams.appQuit).toHaveBeenCalledOnce();
+    // app.quit must come AFTER the spawn -- otherwise the helper's
+    // wait-for-parent-PID loop never has a process to wait on.
+    const spawnOrder = seams.spawnImpl.mock.invocationCallOrder[0];
+    const quitOrder = seams.appQuit.mock.invocationCallOrder[0];
+    expect(spawnOrder).toBeDefined();
+    expect(quitOrder).toBeDefined();
+    expect(quitOrder).toBeGreaterThan(spawnOrder as number);
   });
 });
