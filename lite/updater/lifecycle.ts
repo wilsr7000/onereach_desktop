@@ -22,7 +22,27 @@ import type { BackupManager } from './backups.js';
 import type { CheckRunner } from './check.js';
 import type { UpdaterInfo, UpdaterStatusEvent } from './types.js';
 
-const PERIODIC_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+/**
+ * Once a day. The previous 6-hour cadence ran four times per workday;
+ * users who keep Lite open across multiple days don't need that
+ * frequency, and a 24h cadence cuts background traffic to the
+ * publish feed by 4x without changing the "user always sees the new
+ * version within a day of release" guarantee.
+ */
+export const PERIODIC_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Delay before the deferred boot-time check fires. Matches the full
+ * app pattern at `main.js:1850`. Long enough that the user's first
+ * meaningful interaction isn't blocked by network I/O on a slow
+ * connection, short enough that an update is offered while they're
+ * still focused on the app.
+ *
+ * Without this hook, Lite never checked at boot -- the periodic
+ * interval was the only trigger, so a user who launched and quit
+ * within 24h would never see an update prompt.
+ */
+export const STARTUP_CHECK_DELAY_MS = 5_000;
 
 export interface DialogResult {
   response: number;
@@ -327,7 +347,30 @@ export function attachLifecycle(deps: LifecycleDeps): LifecycleHandle {
     })();
   });
 
-  // Periodic background check (only when packaged).
+  // Deferred boot-time silent check. Without this, Lite has no
+  // trigger to check for updates until the periodic interval (now
+  // 24h, see PERIODIC_CHECK_INTERVAL_MS) -- so a user who launches
+  // and quits within a day would never be offered an update. Matches
+  // the full app's pattern (`main.js:1850`). Gated on isPackaged so
+  // dev runs aren't spammed; `manual:false` keeps it silent (no
+  // "no updates available" dialog when the user is up to date).
+  //
+  // We hold the timer handle on a separate variable from
+  // `intervalHandle` (which tracks the periodic check) so the
+  // narrow `cancelPeriodicCheck()` can clear both without removing
+  // event listeners.
+  const startupTimer = setTimeout(() => {
+    if (deps.isPackaged() && !deps.checkRunner.isCheckInFlight()) {
+      log.info('updater: startup check');
+      void deps.checkRunner.check({ manual: false });
+    }
+  }, STARTUP_CHECK_DELAY_MS);
+  // `unref` so the timer doesn't keep the event loop alive if the
+  // process is otherwise idle on a unit-test path.
+  startupTimer.unref?.();
+
+  // Periodic background check (only when packaged). Fires once every
+  // 24 hours after the startup check.
   intervalHandle = setInterval(() => {
     if (deps.isPackaged() && !deps.checkRunner.isCheckInFlight()) {
       log.info('updater: periodic check');
@@ -339,6 +382,7 @@ export function attachLifecycle(deps: LifecycleDeps): LifecycleHandle {
     teardown(): void {
       if (intervalHandle !== null) clearInterval(intervalHandle);
       intervalHandle = null;
+      clearTimeout(startupTimer);
       try {
         deps.autoUpdater.removeAllListeners?.();
       } catch {
@@ -348,6 +392,10 @@ export function attachLifecycle(deps: LifecycleDeps): LifecycleHandle {
     cancelPeriodicCheck(): void {
       if (intervalHandle !== null) clearInterval(intervalHandle);
       intervalHandle = null;
+      // Also stop the boot-time check timer if it hasn't fired yet.
+      // The install flow calls this pre-`quitAndInstall` and a
+      // boot-check firing mid-handoff would race the install.
+      clearTimeout(startupTimer);
     },
     getLastDownloadedUpdate(): { version: string; info: UpdaterInfo } | null {
       return lastDownloaded;

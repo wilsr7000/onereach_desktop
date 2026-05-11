@@ -7,7 +7,12 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { EventEmitter } from 'node:events';
-import { attachLifecycle, type UpdaterUiSurface } from '../../../updater/lifecycle.js';
+import {
+  attachLifecycle,
+  PERIODIC_CHECK_INTERVAL_MS,
+  STARTUP_CHECK_DELAY_MS,
+  type UpdaterUiSurface,
+} from '../../../updater/lifecycle.js';
 import type { AutoUpdaterLike } from '../../../updater/init.js';
 import type { CheckRunner } from '../../../updater/check.js';
 import { BackupManager } from '../../../updater/backups.js';
@@ -70,7 +75,7 @@ function makeUi(responses: number[] = []): UpdaterUiSurface & { calls: unknown[]
 function makeCheckRunner(wasManual: boolean): CheckRunner {
   return {
     check: vi.fn().mockResolvedValue({ inFlight: false, timedOut: false, manual: wasManual }),
-    isCheckInFlight: () => false,
+    isCheckInFlight: vi.fn().mockReturnValue(false),
     wasLastManual: () => wasManual,
   };
 }
@@ -322,5 +327,154 @@ describe('attachLifecycle', () => {
     handle.cancelPeriodicCheck();
     expect(() => handle.cancelPeriodicCheck()).not.toThrow();
     handle.teardown();
+  });
+
+  describe('periodic + startup check timing', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('periodic interval is 24 hours (once-a-day cadence)', () => {
+      // The constant is what the user feels; pin its value here so a
+      // refactor can't quietly drop us back to the 6-hour cadence (or
+      // bump it to a week without an intentional change).
+      expect(PERIODIC_CHECK_INTERVAL_MS).toBe(24 * 60 * 60 * 1000);
+    });
+
+    it('schedules a startup check ~5s after attach (packaged build)', async () => {
+      const updater = makeFakeUpdater();
+      const checkRunner = makeCheckRunner(true);
+      const handle = attachLifecycle({
+        autoUpdater: updater,
+        ui: makeUi(),
+        backups: new BackupManager({ userDataPath: userDataDir }),
+        getCurrentVersion: () => '1.0.0',
+        performUpdateInstall: vi.fn(),
+        emitStatus: vi.fn(),
+        getFailedAttemptsForVersion: () => 0,
+        isVersionBroken: () => false,
+        isPackaged: () => true,
+        checkRunner,
+      });
+
+      // No check before the delay elapses.
+      vi.advanceTimersByTime(STARTUP_CHECK_DELAY_MS - 1);
+      expect(checkRunner.check).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(2);
+      expect(checkRunner.check).toHaveBeenCalledWith({ manual: false });
+
+      handle.teardown();
+    });
+
+    it('does NOT run the startup check in unpacked builds (dev runs)', async () => {
+      const updater = makeFakeUpdater();
+      const checkRunner = makeCheckRunner(true);
+      const handle = attachLifecycle({
+        autoUpdater: updater,
+        ui: makeUi(),
+        backups: new BackupManager({ userDataPath: userDataDir }),
+        getCurrentVersion: () => '1.0.0',
+        performUpdateInstall: vi.fn(),
+        emitStatus: vi.fn(),
+        getFailedAttemptsForVersion: () => 0,
+        isVersionBroken: () => false,
+        isPackaged: () => false, // ← unpacked
+        checkRunner,
+      });
+
+      vi.advanceTimersByTime(STARTUP_CHECK_DELAY_MS + 100);
+      expect(checkRunner.check).not.toHaveBeenCalled();
+
+      handle.teardown();
+    });
+
+    it('fires the periodic check at the 24h mark and again at 48h', () => {
+      const updater = makeFakeUpdater();
+      const checkRunner = makeCheckRunner(true);
+      const handle = attachLifecycle({
+        autoUpdater: updater,
+        ui: makeUi(),
+        backups: new BackupManager({ userDataPath: userDataDir }),
+        getCurrentVersion: () => '1.0.0',
+        performUpdateInstall: vi.fn(),
+        emitStatus: vi.fn(),
+        getFailedAttemptsForVersion: () => 0,
+        isVersionBroken: () => false,
+        isPackaged: () => true,
+        checkRunner,
+      });
+
+      // Consume the startup check first (5s in).
+      vi.advanceTimersByTime(STARTUP_CHECK_DELAY_MS + 10);
+      expect(checkRunner.check).toHaveBeenCalledTimes(1);
+
+      // Periodic at 24h.
+      vi.advanceTimersByTime(PERIODIC_CHECK_INTERVAL_MS);
+      expect(checkRunner.check).toHaveBeenCalledTimes(2);
+
+      // And again at 48h -- the interval keeps repeating.
+      vi.advanceTimersByTime(PERIODIC_CHECK_INTERVAL_MS);
+      expect(checkRunner.check).toHaveBeenCalledTimes(3);
+
+      handle.teardown();
+    });
+
+    it('cancelPeriodicCheck cancels both the startup timer and the periodic interval', () => {
+      const updater = makeFakeUpdater();
+      const checkRunner = makeCheckRunner(true);
+      const handle = attachLifecycle({
+        autoUpdater: updater,
+        ui: makeUi(),
+        backups: new BackupManager({ userDataPath: userDataDir }),
+        getCurrentVersion: () => '1.0.0',
+        performUpdateInstall: vi.fn(),
+        emitStatus: vi.fn(),
+        getFailedAttemptsForVersion: () => 0,
+        isVersionBroken: () => false,
+        isPackaged: () => true,
+        checkRunner,
+      });
+
+      // Cancel before either timer fires.
+      handle.cancelPeriodicCheck();
+
+      // Neither the startup check nor the periodic interval should
+      // fire after the cancel, even after we advance well past both
+      // schedules.
+      vi.advanceTimersByTime(PERIODIC_CHECK_INTERVAL_MS * 2);
+      expect(checkRunner.check).not.toHaveBeenCalled();
+
+      handle.teardown();
+    });
+
+    it('startup check is skipped when another check is already in flight', () => {
+      const updater = makeFakeUpdater();
+      const checkRunner = makeCheckRunner(true);
+      // Force the in-flight gate to report true so the startup check
+      // skips itself rather than racing the in-flight one.
+      (checkRunner.isCheckInFlight as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+      const handle = attachLifecycle({
+        autoUpdater: updater,
+        ui: makeUi(),
+        backups: new BackupManager({ userDataPath: userDataDir }),
+        getCurrentVersion: () => '1.0.0',
+        performUpdateInstall: vi.fn(),
+        emitStatus: vi.fn(),
+        getFailedAttemptsForVersion: () => 0,
+        isVersionBroken: () => false,
+        isPackaged: () => true,
+        checkRunner,
+      });
+
+      vi.advanceTimersByTime(STARTUP_CHECK_DELAY_MS + 10);
+      expect(checkRunner.check).not.toHaveBeenCalled();
+
+      handle.teardown();
+    });
   });
 });

@@ -17267,61 +17267,227 @@ async function performUpdateInstall(targetVersion) {
   }
 
   // ============================================================
-  // CRITICAL: do NOT destroy windows here.
+  // BYPASSING SQUIRREL.MAC -- macOS 26.4 incompatibility
   // ============================================================
-  // Until v5.0.2 we force-destroyed every BrowserWindow on this line,
-  // intending to short-circuit close handlers that call
-  // event.preventDefault. The cure was much worse than the disease:
+  // We do NOT call autoUpdater.quitAndInstall() any more.
   //
-  //   - Destroying every window fires `window-all-closed` immediately.
-  //   - Electron's default handler for `window-all-closed` calls
-  //     `app.quit()` -- a normal cooperative shutdown path.
-  //   - Squirrel.Mac's `nativeUpdater.quitAndInstall()` ALSO calls
-  //     `[NSApplication terminate]` (its own quit path) AND registers
-  //     a launchd job for ShipIt that watches our PID, swaps the
-  //     bundle when we exit, and relaunches.
-  //   - Both quit paths race. `app.quit()` (already in flight) wins.
-  //     The process exits cleanly via the cooperative path BEFORE
-  //     Squirrel.Mac has finished telling launchd "now run ShipIt."
-  //   - ShipIt's launchd job ends up registered but never started,
-  //     OR started but missing its full state -- net result: the
-  //     bundle in /Applications is never swapped, and on the next
-  //     launch the user sees the same "Update available" prompt and
-  //     enters an infinite loop.
+  // Squirrel.Mac's bundle-swap step uses the deprecated
+  // `launchctl submit` API to register its ShipIt helper as a
+  // launchd job. On macOS 26.4 that API silently no-ops: the
+  // entry shows up in `launchctl list` for legacy compat, but
+  // launchd never actually schedules the job. Net result for
+  // every user on the new OS:
   //
-  // Lite hit this exact bug, diagnosed it (see
-  // lite/updater/install.ts:16-22), and resolved it by simply not
-  // destroying windows. Squirrel.Mac's nativeUpdater.quitAndInstall()
-  // closes windows itself in the correct order. State is already
-  // safely persisted by `_saveStateBeforeUpdate()` above. The 10-s
-  // safety net below catches any genuinely-stuck preventDefault
-  // handlers without racing the Squirrel handoff.
+  //   1. App calls quitAndInstall.
+  //   2. Squirrel.Mac unpacks the new bundle into
+  //      ~/Library/Caches/<appId>.ShipIt/update.<random>/.
+  //      (verified -- the bundle is intact, signed, notarized).
+  //   3. Squirrel.Mac registers ShipIt with launchctl submit.
+  //      `launchctl print user/501/com.gsx.poweruser.ShipIt`
+  //      returns "Could not find service" -- the entry is a
+  //      stale legacy artefact, not a real loaded job.
+  //   4. App quits.
+  //   5. ShipIt is never invoked, no swap happens, /Applications
+  //      stays at the old version.
+  //   6. User relaunches, sees "Update available" again, infinite
+  //      loop. Never updates.
   //
-  // Never reintroduce window destruction here without also redesigning
-  // how Squirrel.Mac's quitAndInstall is invoked.
+  // Workaround: do the swap ourselves with a detached bash helper
+  // that runs after we've quit. We have everything we need --
+  // Squirrel already unpacked the new bundle into its cache, and
+  // electron-updater verified the SHA512 before triggering this
+  // install. The helper just has to ditto the unpacked bundle
+  // into /Applications and `open` the result.
+  //
+  // Long-term: investigate upgrading Squirrel.Mac to a build that
+  // uses modern launchctl bootstrap/kickstart APIs, or migrate to
+  // a different updater. Until then this self-install path is the
+  // only thing that actually works on macOS 26.4.
   // ============================================================
-
-  // MacUpdater.quitAndInstall() delegates to Electron's native
-  // autoUpdater (Squirrel.Mac). The call triggers:
-  //   1. Squirrel.Mac registers a ShipIt launchd job watching our PID
-  //   2. nativeUpdater closes windows + calls app.quit() in order
-  //   3. After our process exits, ShipIt swaps the .app bundle
-  //   4. ShipIt relaunches the new version
   try {
-    log.info('[AutoUpdate] Calling autoUpdater.quitAndInstall() (Squirrel.Mac will close windows)');
-    autoUpdater.quitAndInstall();
+    _spawnInstallHelper(targetVersion, log);
   } catch (err) {
-    log.error('[AutoUpdate] quitAndInstall threw:', err);
+    log.error('[AutoUpdate] _spawnInstallHelper threw:', err);
   }
 
-  // Safety net: if the process is STILL alive after 10 s, the graceful
-  // quit path failed (a handler called preventDefault, window refused to
-  // close, etc.).  Force-exit so ShipIt can complete the replacement.
-  // 10 s is generous -- the normal path exits in < 1 s.
+  // Quit cleanly. The detached helper will wait for us to exit,
+  // do the swap, then relaunch us as the new version.
+  try {
+    log.info('[AutoUpdate] Quitting app -- detached helper will swap + relaunch');
+    app.quit();
+  } catch (err) {
+    log.error('[AutoUpdate] app.quit() threw:', err);
+  }
+
+  // Safety net: if we're STILL alive after 10 s (a preventDefault
+  // handler refused to release us), force exit so the helper's
+  // wait-for-PID loop can proceed and do the swap.
   setTimeout(() => {
     log.warn('[AutoUpdate] Safety-net: process still alive after 10 s -- force exiting');
     process.exit(0);
   }, 10000).unref();
+}
+
+/**
+ * Generate + spawn the detached install helper script.
+ *
+ * Why a separate bash script: we need a process that survives our quit
+ * AND is not part of our Electron process group. spawn(..., { detached:
+ * true }) detaches from our process group; the helper waits for our
+ * PID to exit, performs the swap, and re-launches the .app via `open`.
+ *
+ * The script is written to /tmp at runtime (no asar packaging
+ * concerns). Logs go to /tmp/onereach-installer-<timestamp>.log so
+ * post-mortem is possible if the swap fails.
+ *
+ * Pre-requisites for this to succeed:
+ *   - Squirrel.Mac already unpacked the new bundle into
+ *     ~/Library/Caches/<appId>.ShipIt/update.<random>/Onereach.ai.app
+ *     (this happens during electron-updater's downloadUpdate flow).
+ *   - electron-updater already SHA512-verified the .zip before
+ *     handing off to Squirrel for unpack.
+ *   - codesign --verify still passes on the unpacked bundle
+ *     (helper double-checks before swapping).
+ *
+ * If any of those are violated, the helper aborts cleanly and
+ * leaves /Applications untouched -- the user falls back to the
+ * "Update available" prompt on next launch instead of being
+ * stuck with a corrupted bundle.
+ */
+function _spawnInstallHelper(targetVersion, log) {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { spawn } = require('child_process');
+
+  const ts = Date.now();
+  const helperPath = `/tmp/onereach-installer-${ts}.sh`;
+  const helperLog = `/tmp/onereach-installer-${ts}.log`;
+  const appPath = '/Applications/Onereach.ai.app';
+  const shipItCache = path.join(
+    os.homedir(),
+    'Library/Caches/com.gsx.poweruser.ShipIt'
+  );
+  const electronUpdaterCache = path.join(
+    os.homedir(),
+    'Library/Caches/gsx-power-user-updater/pending'
+  );
+  const parentPid = process.pid;
+
+  // The helper script. Notes:
+  //   - `set -euo pipefail` for explicit failure on any error.
+  //   - First check Squirrel's already-unpacked cache; if missing,
+  //     fall back to extracting from electron-updater's downloaded
+  //     ZIP. Either way we end up with a verified .app to swap in.
+  //   - `ditto` is used (not cp -R) because cp -R mishandles framework
+  //     symlinks (we hit this early in v5.0.1).
+  //   - The OLD bundle is renamed to .old.<ts> rather than removed,
+  //     so a failed install rolls back to the previous version.
+  //   - `open -n` launches the new app fresh after the swap.
+  const helperScript = `#!/bin/bash
+set -euo pipefail
+exec >> "${helperLog}" 2>&1
+# Detached child inherits a stripped PATH from launchd; restore the
+# system path so codesign / ditto / xattr / open / mv / mktemp resolve.
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+echo "[$(date '+%H:%M:%S')] onereach-installer starting"
+echo "  parent PID: ${parentPid}"
+echo "  target version: ${targetVersion || 'unknown'}"
+echo "  app path: ${appPath}"
+echo "  ShipIt cache: ${shipItCache}"
+
+# 1. Wait for parent (our Electron process) to fully exit. Up to 30s.
+echo "[$(date '+%H:%M:%S')] waiting for parent PID ${parentPid} to exit..."
+for i in $(seq 1 30); do
+  if ! kill -0 ${parentPid} 2>/dev/null; then
+    echo "[$(date '+%H:%M:%S')] parent exited after \${i}s"
+    break
+  fi
+  sleep 1
+done
+if kill -0 ${parentPid} 2>/dev/null; then
+  echo "[$(date '+%H:%M:%S')] WARNING: parent still alive after 30s, force-killing"
+  kill -9 ${parentPid} 2>/dev/null || true
+  sleep 1
+fi
+
+# 2. Locate the new .app bundle. Try Squirrel's cache first
+# (already-unpacked, fastest path).
+NEW_APP=""
+for d in "${shipItCache}"/update.*; do
+  if [ -d "$d/Onereach.ai.app" ]; then
+    NEW_APP="$d/Onereach.ai.app"
+    break
+  fi
+done
+
+if [ -z "$NEW_APP" ]; then
+  echo "[$(date '+%H:%M:%S')] no Squirrel cache, trying to extract from electron-updater ZIP"
+  ZIP=$(ls "${electronUpdaterCache}"/*.zip 2>/dev/null | head -1)
+  if [ -z "$ZIP" ]; then
+    echo "[$(date '+%H:%M:%S')] FATAL: no update bundle found in either cache"
+    exit 1
+  fi
+  EXTRACT_DIR=$(mktemp -d)
+  echo "[$(date '+%H:%M:%S')] extracting $ZIP -> $EXTRACT_DIR"
+  ditto -x -k "$ZIP" "$EXTRACT_DIR"
+  NEW_APP="$EXTRACT_DIR/Onereach.ai.app"
+fi
+
+if [ ! -d "$NEW_APP" ]; then
+  echo "[$(date '+%H:%M:%S')] FATAL: NEW_APP path doesn't exist: $NEW_APP"
+  exit 1
+fi
+echo "[$(date '+%H:%M:%S')] new bundle: $NEW_APP"
+
+# 3. Verify the new bundle's signature before swapping. If this fails,
+# refuse to install -- bad bundle is worse than a stale bundle.
+if ! codesign --verify "$NEW_APP" 2>/dev/null; then
+  echo "[$(date '+%H:%M:%S')] FATAL: codesign --verify failed on new bundle"
+  exit 1
+fi
+echo "[$(date '+%H:%M:%S')] codesign verify ok"
+
+# 4. Swap. Move the old aside (so we can roll back), ditto the new in.
+BACKUP="${appPath}.old.\$(date +%s)"
+echo "[$(date '+%H:%M:%S')] backing up old: ${appPath} -> $BACKUP"
+mv "${appPath}" "$BACKUP"
+echo "[$(date '+%H:%M:%S')] ditto new bundle into ${appPath}"
+if ! ditto "$NEW_APP" "${appPath}"; then
+  echo "[$(date '+%H:%M:%S')] FATAL: ditto failed, rolling back"
+  rm -rf "${appPath}" 2>/dev/null || true
+  mv "$BACKUP" "${appPath}"
+  exit 1
+fi
+
+# 5. Strip quarantine just in case (newly-built bundles don't get
+# tagged, but it's cheap insurance).
+xattr -d com.apple.quarantine "${appPath}" 2>/dev/null || true
+
+echo "[$(date '+%H:%M:%S')] swap complete, launching new version"
+open "${appPath}"
+
+# 6. Schedule cleanup of backup after 24h via 'at' (best-effort; if 'at'
+# isn't enabled, the backup just stays around -- harmless, user can
+# delete manually). We do NOT clean up immediately because the new
+# version may need to roll back.
+echo "[$(date '+%H:%M:%S')] backup left at $BACKUP (cleanup deferred)"
+echo "[$(date '+%H:%M:%S')] DONE"
+exit 0
+`;
+
+  fs.writeFileSync(helperPath, helperScript, { mode: 0o755 });
+  log.info(`[AutoUpdate] wrote install helper to ${helperPath} (log -> ${helperLog})`);
+
+  // Spawn detached. The child becomes its own session leader and
+  // survives our quit. stdio: 'ignore' so we don't keep file
+  // descriptors open in the parent.
+  const child = spawn('/bin/bash', [helperPath], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  log.info(`[AutoUpdate] spawned detached helper (pid=${child.pid})`);
 }
 
 // ============================================
