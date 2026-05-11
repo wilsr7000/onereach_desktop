@@ -41,108 +41,23 @@ class VoiceListener {
     this.pendingFunctionCallId = null;
     this.pendingFunctionItemId = null;
 
-    // ==================== PAUSE DETECTOR (Phase 3.5) ====================
-    // Lazy-initialized on first speech burst when the pauseDetection
-    // flag is on. Holds per-turn accumulated partial transcript and a
-    // silence ticker that re-evaluates the commit policy every
-    // PAUSE_TICK_MS. When the detector decides the turn is over, it
-    // calls commitAudio() earlier than the server VAD's 1200ms floor.
-    this.pauseDetector = null;
-    this._silenceTimer = null;
-    this._silenceStartedAt = null;
-    this._accumulatedPartial = '';
-    this._evaluatingSilence = false;
-
     // Track whether any audio has been appended to the server buffer
     // since the last commit/clear. `input_audio_buffer.commit` on a
     // buffer with <100ms of audio returns a hard API error that tears
-    // down the Realtime session. Both the pause-detector's
-    // onCommitReady and function-call paths can race the server-side
-    // VAD auto-commit, so we need an explicit guard.
+    // down the Realtime session. The semantic_vad auto-commit can race
+    // explicit commits from the function-call path, so we keep this
+    // guard to make both sides idempotent.
     this._bufferHasAudio = false;
 
+    // ==================== PHASE 3.5 PAUSE DETECTOR (RETIRED) ====================
+    // The orb previously ran a custom pause detector + 100ms silence
+    // ticker to commit utterances earlier than the preview API's 1200ms
+    // server_vad floor. The GA Realtime API 2 ships semantic_vad which
+    // does this model-side, so the custom path is no longer wired here.
+    // lib/naturalness/pause-detector.js remains in the tree for unit
+    // tests and potential reuse; it just isn't called from this listener.
+
     log.info('voice', 'Initialized');
-  }
-
-  // ==================== PAUSE DETECTOR HELPERS (Phase 3.5) ====================
-
-  /**
-   * Lazy-initialize the pause detector on first speech burst.
-   * @private
-   */
-  _ensurePauseDetector() {
-    if (this.pauseDetector) return this.pauseDetector;
-
-    const { createPauseDetector } = require('./lib/naturalness/pause-detector');
-    const aiService = require('./lib/ai-service');
-
-    this.pauseDetector = createPauseDetector({
-      ai: (args) => aiService.chat(args),
-      onCommitReady: (text, meta) => {
-        log.info('voice', '[PauseDetector] commit-ready', {
-          text: (text || '').slice(0, 60),
-          reason: meta.reason,
-          silenceMs: meta.silenceMs,
-          classification: meta.classification,
-          hitMaxWait: meta.hitMaxWait,
-        });
-        this._stopSilenceTicker();
-        this._accumulatedPartial = '';
-        // Commit the audio buffer so the Realtime API closes the turn.
-        // The server will also eventually commit at its 1200ms floor;
-        // doing it here just fires earlier for complete utterances.
-        this.commitAudio();
-      },
-      onClassifyNeeded: () => {
-        log.info('voice', '[PauseDetector] consulting LLM classifier');
-      },
-    });
-    return this.pauseDetector;
-  }
-
-  /**
-   * Start the silence ticker. Runs every PAUSE_TICK_MS and asks the
-   * detector to evaluate. The detector is guarded by a single-flight
-   * lock so slow LLM calls don't queue up.
-   * @private
-   */
-  _startSilenceTicker() {
-    this._stopSilenceTicker();
-    if (!this.pauseDetector) return;
-
-    const PAUSE_TICK_MS = 100;
-    this._silenceStartedAt = Date.now();
-    this._silenceTimer = setInterval(async () => {
-      if (this._evaluatingSilence) return;
-      this._evaluatingSilence = true;
-      try {
-        const elapsed = Date.now() - this._silenceStartedAt;
-        this.pauseDetector.setSilence(elapsed);
-        await this.pauseDetector.evaluate();
-      } catch (err) {
-        log.warn('voice', '[PauseDetector] evaluate error', { error: err.message });
-      } finally {
-        this._evaluatingSilence = false;
-      }
-    }, PAUSE_TICK_MS);
-
-    // Never prevent process exit because of this timer.
-    if (this._silenceTimer && typeof this._silenceTimer.unref === 'function') {
-      this._silenceTimer.unref();
-    }
-  }
-
-  /**
-   * Stop the silence ticker. Safe to call any time, including when
-   * no ticker is running.
-   * @private
-   */
-  _stopSilenceTicker() {
-    if (this._silenceTimer) {
-      clearInterval(this._silenceTimer);
-      this._silenceTimer = null;
-    }
-    this._silenceStartedAt = null;
   }
 
   /**
@@ -238,25 +153,30 @@ class VoiceListener {
           this._isConnecting = false;
           this.reconnectAttempts = 0;
 
-          // Configure session for transcription with function calling
+          // Configure session for transcription with function calling.
+          // GA Realtime API 2 shape: session.type='realtime' is required,
+          // audio.input wraps the format/transcription/turn_detection block,
+          // and output_modalities replaces the old top-level modalities array.
+          // We lock output to ['text'] because voice-speaker.js handles TTS
+          // separately via tts-1 -- the realtime model never produces audio
+          // bytes back to us in this configuration.
           this.sendEvent({
             type: 'session.update',
             session: {
-              modalities: ['text', 'audio'],
+              type: 'realtime',
+              model: 'gpt-realtime-2',
+              output_modalities: ['text'],
               instructions: `You are a voice command router. Your ONLY job is to call the handle_user_request function.
 ABSOLUTE RULES - NO EXCEPTIONS:
 1. IMMEDIATELY call handle_user_request for EVERY input
 2. NEVER speak directly - the function provides ALL responses
 3. Do NOT ask clarifying questions - just pass the transcript to the function`,
-              input_audio_format: 'pcm16',
-              input_audio_transcription: {
-                model: 'whisper-1',
-              },
-              turn_detection: {
-                type: 'server_vad',
-                threshold: 0.6,
-                prefix_padding_ms: 500,
-                silence_duration_ms: 1200,
+              audio: {
+                input: {
+                  format: { type: 'audio/pcm', rate: 24000 },
+                  transcription: { model: 'gpt-realtime-whisper' },
+                  turn_detection: { type: 'semantic_vad' },
+                },
               },
               tools: [
                 {
@@ -331,41 +251,24 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         }
         log.info('voice', 'Speech started');
         this.broadcast({ type: 'speech_started' });
-        // Phase 3.5: reset the pause detector for a fresh turn.
-        // Lazy-inits on first speech burst when flag is on.
-        {
-          const detector = this._ensurePauseDetector();
-          if (detector) {
-            detector.resetOnSpeech();
-            this._accumulatedPartial = '';
-            this._stopSilenceTicker();
-          }
-        }
-        // Phase 4.5: reset the barge partial too -- a new speech
-        // burst means a fresh interrupt candidate.
+        // Phase 4.5: reset the barge partial -- a new speech burst
+        // means a fresh interrupt candidate.
         this._bargePartial = '';
         break;
 
       case 'input_audio_buffer.speech_stopped':
         // Process normally whether or not TTS is playing; the barge
         // detector decides whether the captured speech was a genuine
-        // interrupt.
+        // interrupt. The GA semantic_vad commits the turn on its own
+        // once it decides the user finished, so no client ticker here.
         log.info('voice', 'Speech stopped', { duringTts: hudApi.isSpeaking() });
         this.broadcast({ type: 'speech_stopped' });
-        // Phase 3.5: begin the silence ticker so the detector can
-        // decide to commit earlier than the 1200ms server VAD.
-        if (this.pauseDetector) {
-          this._startSilenceTicker();
-        }
         break;
 
       case 'input_audio_buffer.committed':
-        // The server's own VAD (or an earlier client commit) has
-        // closed the turn. Flip the audio-buffer flag so any lingering
-        // pause-detector commit races become no-ops instead of empty-
-        // commit API errors.
+        // The server's semantic_vad (or an explicit client commit) has
+        // closed the turn. Reset the audio-buffer flag.
         this._bufferHasAudio = false;
-        this._stopSilenceTicker();
         break;
 
       case 'input_audio_buffer.cleared':
@@ -374,14 +277,8 @@ ABSOLUTE RULES - NO EXCEPTIONS:
 
       case 'conversation.item.input_audio_transcription.delta':
         if (event.delta) {
-          // Feed the growing partial into the pause detector so it
-          // can commit early when the user clearly finished talking.
-          if (this.pauseDetector) {
-            this._accumulatedPartial += event.delta;
-            this.pauseDetector.onPartial(this._accumulatedPartial);
-          }
-          // During TTS playback, also feed the partial to the barge
-          // detector so it can decide whether the user is interrupting.
+          // During TTS playback, feed the partial to the barge detector
+          // so it can decide whether the user is interrupting.
           try {
             if (hudApi.isSpeaking()) {
               if (!this._bargePartial) this._bargePartial = '';
@@ -429,17 +326,9 @@ ABSOLUTE RULES - NO EXCEPTIONS:
             isFinal: true,
           });
         }
-        // Phase 3.5: the server committed the turn. Our detector may
-        // or may not have committed first; either way stop the ticker
-        // and reset for the next speech burst.
-        this._stopSilenceTicker();
-        this._accumulatedPartial = '';
-        // Phase 4.5: also reset the barge partial so the next TTS
-        // session starts with a clean buffer.
+        // Phase 4.5: reset the barge partial so the next TTS session
+        // starts with a clean buffer.
         this._bargePartial = '';
-        if (this.pauseDetector) {
-          this.pauseDetector.reset();
-        }
         break;
 
       case 'error':
@@ -466,7 +355,8 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         }
         // Note: We no longer cancel unsanctioned responses here because that
         // prevents the function call from happening. Audio blocking happens
-        // in response.audio.delta if needed.
+        // in response.output_audio.delta if needed (but with
+        // output_modalities: ['text'] the server shouldn't emit audio at all).
         log.info('voice', 'Response created', { detail: event.response?.id });
         break;
 
@@ -477,18 +367,33 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         }
         this.activeResponseId = null;
 
-        // Track API usage
+        // Track API usage. GA Realtime API 2 reports usage with text and audio
+        // token buckets split out under input_token_details / output_token_details.
+        // We forward both pairs so pricing-config can apply the per-bucket rates
+        // ($4 / $24 text vs $32 / $64 audio per 1M tokens).
         if (event.response?.usage) {
           try {
             const usage = event.response.usage;
+            const inputAudio = usage.input_token_details?.audio_tokens || 0;
+            const outputAudio = usage.output_token_details?.audio_tokens || 0;
+            const inputText =
+              usage.input_token_details?.text_tokens ??
+              Math.max(0, (usage.input_tokens || 0) - inputAudio);
+            const outputText =
+              usage.output_token_details?.text_tokens ??
+              Math.max(0, (usage.output_tokens || 0) - outputAudio);
             const budgetManager = getBudgetManager();
             budgetManager.trackUsage({
               provider: 'openai',
-              model: 'gpt-4o-realtime-preview',
-              inputTokens: usage.input_tokens || 0,
-              outputTokens: usage.output_tokens || 0,
+              model: 'gpt-realtime-2',
+              inputTokens: inputText,
+              outputTokens: outputText,
               feature: 'realtime-voice',
               operation: 'voice-transcription',
+              options: {
+                inputAudioTokens: inputAudio,
+                outputAudioTokens: outputAudio,
+              },
             });
           } catch (e) {
             log.warn('voice', 'Failed to track usage', { error: e.message });
@@ -502,17 +407,19 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         this.broadcast({ type: 'response_cancelled' });
         break;
 
-      case 'response.audio.delta':
-        // Block any audio from the Realtime API - we use voice-speaker.js for TTS
-        // With tool_choice: "required", this shouldn't happen, but just in case
+      case 'response.output_audio.delta':
+        // Block any audio from the Realtime API - we use voice-speaker.js for TTS.
+        // With output_modalities: ['text'] and tool_choice: 'required' this
+        // shouldn't fire at all on the GA API, but keep the guard in case the
+        // server emits a stray frame during edge cases (e.g. pre-tool-call
+        // audio while it decides to call handle_user_request).
         if (!this.sanctionedResponseIds.has(event.response_id)) {
-          // Silently drop - don't forward audio
           log.info('voice', 'Blocking unsanctioned audio');
         }
         break;
 
-      case 'response.audio_transcript.delta':
-        // Also block audio transcripts from unsanctioned responses
+      case 'response.output_audio_transcript.delta':
+        // Also block audio transcripts from unsanctioned responses.
         if (!this.sanctionedResponseIds.has(event.response_id)) {
           // Silently drop
         }
@@ -718,17 +625,8 @@ ABSOLUTE RULES - NO EXCEPTIONS:
       this._reconnectTimer = null;
     }
 
-    // Phase 3.5: stop the pause-detector silence ticker and reset its
-    // internal state. Without this, a disconnect mid-turn (error,
-    // user-stop, session timeout) left the 100 ms interval running
-    // forever -- re-evaluating the classifier on stale partials and
-    // occasionally triggering downstream state transitions (and tones).
-    this._stopSilenceTicker();
-    this._accumulatedPartial = '';
+    // Reset barge-detector partial so the next session starts clean.
     this._bargePartial = '';
-    if (this.pauseDetector) {
-      try { this.pauseDetector.reset(); } catch (_e) { /* detector optional */ }
-    }
 
     // Clear pending function call state
     this.pendingFunctionCallId = null;

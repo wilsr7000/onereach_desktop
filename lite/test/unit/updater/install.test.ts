@@ -6,7 +6,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
-import { performUpdateInstall, checkAppBundleWritable } from '../../../updater/install.js';
+import {
+  performUpdateInstall,
+  checkAppBundleWritable,
+  type InstallDeps,
+} from '../../../updater/install.js';
 import type { AutoUpdaterLike } from '../../../updater/init.js';
 import type { UpdaterUiSurface } from '../../../updater/lifecycle.js';
 import { readUpdateState } from '../../../updater/state.js';
@@ -72,45 +76,96 @@ describe('checkAppBundleWritable', () => {
   });
 });
 
+/**
+ * Build the test-seam set the install flow needs to run without
+ * actually spawning a child process or writing to /tmp. Returns the
+ * captured spawn call + the helper-script body that would have been
+ * written, so tests can assert on either.
+ *
+ * Default `appQuit` is a spy so tests can verify it fired. Default
+ * `forceExit` is a no-op so the safety-net timer doesn't try to
+ * exit the test process.
+ */
+function makeBypassSeams(): {
+  spawnImpl: ReturnType<typeof vi.fn>;
+  fsImpl: { writeFileSync: ReturnType<typeof vi.fn> };
+  appQuit: ReturnType<typeof vi.fn>;
+  forceExit: ReturnType<typeof vi.fn>;
+  destroyAllWindows: ReturnType<typeof vi.fn>;
+  capturedScript: () => string | undefined;
+  capturedScriptPath: () => string | undefined;
+} {
+  let capturedScriptBody: string | undefined;
+  let capturedScriptPath: string | undefined;
+  const fsImpl = {
+    writeFileSync: vi.fn((p: string, contents: string) => {
+      capturedScriptPath = p;
+      capturedScriptBody = contents;
+    }),
+  };
+  const spawnImpl = vi.fn(() => ({ pid: 12345, unref: vi.fn() }));
+  return {
+    spawnImpl,
+    fsImpl,
+    appQuit: vi.fn(),
+    forceExit: vi.fn(),
+    destroyAllWindows: vi.fn(),
+    capturedScript: () => capturedScriptBody,
+    capturedScriptPath: () => capturedScriptPath,
+  };
+}
+
 describe('performUpdateInstall', () => {
   it('writes lastAttemptVersion + lastAttemptTime when targetVersion is provided', async () => {
     const updater = fakeUpdater();
+    const seams = makeBypassSeams();
     await performUpdateInstall(
       {
         autoUpdater: updater,
         ui: fakeUi(),
         userDataPath: userDataDir,
         isPackaged: () => false, // skip writability check in test
-        destroyAllWindows: () => {},
-        forceExit: () => {}, // noop instead of process.exit
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as InstallDeps['spawnImpl'],
+        fsImpl: seams.fsImpl as unknown as InstallDeps['fsImpl'],
       },
       '2.0.0'
     );
     const state = readUpdateState(userDataDir);
     expect(state.lastAttemptVersion).toBe('2.0.0');
     expect(state.lastAttemptTime).toBeTruthy();
-    expect(updater.quitAndInstall).toHaveBeenCalled();
+    // Bypass Squirrel.Mac on macOS 26.4: install spawns the detached
+    // bash helper instead of calling autoUpdater.quitAndInstall().
+    expect(seams.spawnImpl).toHaveBeenCalled();
+    expect(updater.quitAndInstall).not.toHaveBeenCalled();
   });
 
   it('does NOT write state when targetVersion is null', async () => {
     const updater = fakeUpdater();
+    const seams = makeBypassSeams();
     await performUpdateInstall(
       {
         autoUpdater: updater,
         ui: fakeUi(),
         userDataPath: userDataDir,
         isPackaged: () => false,
-        destroyAllWindows: () => {},
-        forceExit: () => {},
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as InstallDeps['spawnImpl'],
+        fsImpl: seams.fsImpl as unknown as InstallDeps['fsImpl'],
       },
       null
     );
     const state = readUpdateState(userDataDir);
     expect(state.lastAttemptVersion).toBeNull();
-    expect(updater.quitAndInstall).toHaveBeenCalled();
+    expect(seams.spawnImpl).toHaveBeenCalled();
+    expect(updater.quitAndInstall).not.toHaveBeenCalled();
   });
 
-  it('runs registered save hooks before quitAndInstall', async () => {
+  it('runs registered save hooks before spawning the install helper', async () => {
     const calls: string[] = [];
     registerSaveHook({
       id: 'first',
@@ -119,8 +174,10 @@ describe('performUpdateInstall', () => {
       },
     });
     const updater = fakeUpdater();
-    (updater.quitAndInstall as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      calls.push('quit');
+    const seams = makeBypassSeams();
+    seams.spawnImpl.mockImplementation(() => {
+      calls.push('spawn-helper');
+      return { pid: 12345, unref: vi.fn() };
     });
     await performUpdateInstall(
       {
@@ -128,32 +185,35 @@ describe('performUpdateInstall', () => {
         ui: fakeUi(),
         userDataPath: userDataDir,
         isPackaged: () => false,
-        destroyAllWindows: () => {},
-        forceExit: () => {},
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as InstallDeps['spawnImpl'],
+        fsImpl: seams.fsImpl as unknown as InstallDeps['fsImpl'],
       },
       '2.0.0'
     );
-    expect(calls).toEqual(['first', 'quit']);
+    expect(calls).toEqual(['first', 'spawn-helper']);
   });
 
   it(
-    'does NOT call destroyAllWindows before quitAndInstall (Squirrel.Mac closes windows itself)',
+    'does NOT call destroyAllWindows before spawning the install helper',
     async () => {
-      // Regression: until install.ts:16-22 this code force-destroyed
-      // every BrowserWindow, which triggered `window-all-closed` ->
-      // `app.quit()`. That cooperative quit raced Squirrel.Mac's
-      // nativeUpdater.quitAndInstall(), the process exited before
-      // ShipIt could register the relaunch, and the bundle in
-      // /Applications was never swapped -- exactly the user's
-      // "Install and Relaunch" failure mode.
-      //
-      // The production code now relies on Squirrel.Mac's own window
-      // close + app.quit ordering. This test pins that contract so
-      // a future refactor can't quietly re-introduce the regression.
+      // Regression: the legacy Squirrel.Mac path force-destroyed
+      // every BrowserWindow before quitAndInstall, which raced the
+      // Squirrel terminate path. The bypass avoids that whole race
+      // by spawning a detached bash helper and calling app.quit().
+      // Destroying windows here is still the wrong thing -- the
+      // before-quit guard handles the rest.
       const events: string[] = [];
       const updater = fakeUpdater();
-      (updater.quitAndInstall as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        events.push('quit');
+      const seams = makeBypassSeams();
+      seams.spawnImpl.mockImplementation(() => {
+        events.push('spawn-helper');
+        return { pid: 12345, unref: vi.fn() };
+      });
+      seams.destroyAllWindows.mockImplementation(() => {
+        events.push('destroy');
       });
       await performUpdateInstall(
         {
@@ -161,15 +221,16 @@ describe('performUpdateInstall', () => {
           ui: fakeUi(),
           userDataPath: userDataDir,
           isPackaged: () => false,
-          destroyAllWindows: () => {
-            events.push('destroy');
-          },
-          forceExit: () => {},
+          destroyAllWindows: seams.destroyAllWindows,
+          forceExit: seams.forceExit,
+          appQuit: seams.appQuit,
+          spawnImpl: seams.spawnImpl as unknown as InstallDeps['spawnImpl'],
+          fsImpl: seams.fsImpl as unknown as InstallDeps['fsImpl'],
         },
         '2.0.0'
       );
-      // quitAndInstall fired; destroy did NOT.
-      expect(events).toEqual(['quit']);
+      // helper fired; destroy did NOT.
+      expect(events).toEqual(['spawn-helper']);
     }
   );
 

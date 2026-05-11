@@ -72,6 +72,34 @@ const PRICING = {
   'tts-1': { per1KChars: 0.015, provider: 'openai' },
   'tts-1-hd': { per1KChars: 0.03, provider: 'openai' },
 
+  // =========== REALTIME MODELS (GA 2026) ===========
+  // gpt-realtime-2 has separate text and audio token rates. Set both pairs;
+  // calculateCost adds them when callers pass inputAudioTokens/outputAudioTokens
+  // in options. Cached input is billed at $0.40/1M (not modeled here yet).
+  'gpt-realtime-2': {
+    input: 4.0,
+    output: 24.0,
+    inputAudio: 32.0,
+    outputAudio: 64.0,
+    provider: 'openai',
+  },
+  // Transcription-only realtime model. Configurable latency vs quality.
+  // Same audio input rate as gpt-realtime-2; no model-generated audio output.
+  'gpt-realtime-whisper': {
+    input: 4.0,
+    output: 24.0,
+    inputAudio: 32.0,
+    provider: 'openai',
+  },
+  // Translation-only realtime model.
+  'gpt-realtime-translate': {
+    input: 4.0,
+    output: 24.0,
+    inputAudio: 32.0,
+    outputAudio: 64.0,
+    provider: 'openai',
+  },
+
   // ElevenLabs
   elevenlabs: { per1KChars: 0.3, provider: 'elevenlabs' },
   'elevenlabs-sfx': { perGeneration: 0.2, provider: 'elevenlabs' },
@@ -106,6 +134,13 @@ const MODEL_ALIASES = {
   'gpt4-turbo': 'gpt-4-turbo',
   gpt35: 'gpt-3.5-turbo',
   'gpt-3.5': 'gpt-3.5-turbo',
+
+  // Realtime aliases - retire the preview name onto the GA model so any
+  // stragglers in user data or third-party callers keep tracking correctly.
+  'gpt-4o-realtime-preview': 'gpt-realtime-2',
+  'gpt-4o-realtime-preview-2024-10-01': 'gpt-realtime-2',
+  'gpt-4o-realtime-preview-2024-12-17': 'gpt-realtime-2',
+  'gpt-realtime': 'gpt-realtime-2',
 
   // Generic
   default: 'claude-sonnet-4-5-20250929',
@@ -158,7 +193,7 @@ function getPricingForModel(model) {
  * @param {string} model - Model name
  * @param {number} inputTokens - Number of input tokens
  * @param {number} outputTokens - Number of output tokens
- * @param {object} options - Additional options { imageCount, audioMinutes, chars }
+ * @param {object} options - Additional options { imageCount, audioMinutes, chars, inputAudioTokens, outputAudioTokens }
  * @returns {object} Cost breakdown
  */
 function calculateCost(model, inputTokens = 0, outputTokens = 0, options = {}) {
@@ -168,6 +203,19 @@ function calculateCost(model, inputTokens = 0, outputTokens = 0, options = {}) {
   // Token costs (per 1M tokens)
   const inputCost = pricing.input ? (inputTokens / 1000000) * pricing.input : 0;
   const outputCost = pricing.output ? (outputTokens / 1000000) * pricing.output : 0;
+
+  // Realtime models bill audio and text tokens at different rates. When
+  // callers pass inputAudioTokens / outputAudioTokens (e.g. voice-listener
+  // splitting realtime usage), price them against the per-model audio rate
+  // and surface the breakdown so the budget dashboard can display it.
+  const inputAudioTokens = options.inputAudioTokens || 0;
+  const outputAudioTokens = options.outputAudioTokens || 0;
+  const inputAudioCost = pricing.inputAudio
+    ? (inputAudioTokens / 1000000) * pricing.inputAudio
+    : 0;
+  const outputAudioCost = pricing.outputAudio
+    ? (outputAudioTokens / 1000000) * pricing.outputAudio
+    : 0;
 
   // Additional costs
   let imageCost = 0;
@@ -186,15 +234,20 @@ function calculateCost(model, inputTokens = 0, outputTokens = 0, options = {}) {
     charCost = (options.chars / 1000) * pricing.per1KChars;
   }
 
-  const totalCost = inputCost + outputCost + imageCost + audioCost + charCost;
+  const totalCost =
+    inputCost + outputCost + inputAudioCost + outputAudioCost + imageCost + audioCost + charCost;
 
   return {
     model: resolvedModel,
     provider: pricing.provider || 'unknown',
     inputTokens,
     outputTokens,
+    inputAudioTokens,
+    outputAudioTokens,
     inputCost: roundCost(inputCost),
     outputCost: roundCost(outputCost),
+    inputAudioCost: roundCost(inputAudioCost),
+    outputAudioCost: roundCost(outputAudioCost),
     imageCost: roundCost(imageCost),
     audioCost: roundCost(audioCost),
     charCost: roundCost(charCost),
@@ -202,6 +255,8 @@ function calculateCost(model, inputTokens = 0, outputTokens = 0, options = {}) {
     pricing: {
       inputPer1M: pricing.input || 0,
       outputPer1M: pricing.output || 0,
+      inputAudioPer1M: pricing.inputAudio || 0,
+      outputAudioPer1M: pricing.outputAudio || 0,
     },
   };
 }

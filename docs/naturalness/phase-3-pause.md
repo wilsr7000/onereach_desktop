@@ -1,10 +1,22 @@
 # Phase 3 — Natural Pause Detection
 
-Ship status: **shipped, always on** (flag removed at the always-on cutover).
+Ship status: **retired in the GA Realtime API 2 migration (May 2026)**.
 
-> **Note (always-on cutover):** The `pauseDetection` flag is gone.
-> The detector is always engaged in `voice-listener.js`. `NATURAL_PAUSE_DETECTION`
-> env vars / settings are no longer read.
+> **Note (Realtime API 2 cutover):** The custom pause detector is no longer
+> wired into `voice-listener.js`. The GA Realtime API ships `semantic_vad`
+> which decides turn boundaries model-side, removing the need for our
+> 100 ms silence ticker and LLM classifier path. The detector code at
+> `lib/naturalness/pause-detector.js` remains in the tree for unit tests
+> and possible reuse but is dead code for the orb's listener path.
+>
+> If `semantic_vad` ever regresses, swap `audio.input.turn_detection` in
+> `voice-listener.js` back to `{ type: 'server_vad', threshold: 0.6,
+> silence_duration_ms: 1200 }` and re-wire `_ensurePauseDetector` /
+> `_startSilenceTicker` calls from the git history (commit before the
+> Realtime 2 migration).
+>
+> The historical notes below are kept verbatim so the design intent isn't
+> lost.
 
 ## What this phase does
 

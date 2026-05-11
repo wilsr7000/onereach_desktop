@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-04-30T00:13:25.967Z",
+  "timestamp": "2026-05-11T22:00:35.854Z",
   "summary": {
     "total": 63,
     "passed": 38,
@@ -14,7 +14,7 @@
       "user": "What time is it?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 5:12 PM"
+      "response": "It's 3:00 PM"
     },
     {
       "conversation": "Time: basic queries",
@@ -22,7 +22,7 @@
       "user": "And what day is it today?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Wednesday, April 29, 2026"
+      "response": "It's Monday, May 11, 2026"
     },
     {
       "conversation": "Time: basic queries",
@@ -30,7 +30,7 @@
       "user": "What is the date?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Wednesday, April 29, 2026"
+      "response": "It's Monday, May 11, 2026"
     },
     {
       "conversation": "Time: timezone awareness",
@@ -46,7 +46,7 @@
       "user": "And in London?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 5:12 PM"
+      "response": "It's 3:00 PM"
     },
     {
       "conversation": "Weather: city provided",
@@ -54,7 +54,7 @@
       "user": "What is the weather in Denver?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 53°F and partly cloudy in Denver"
+      "response": "It's 78°F and sunny in Denver"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -62,7 +62,7 @@
       "user": "What's the weather?",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "It's 66°F and sunny in San Francisco"
+      "response": "It's 65°F and partly cloudy in San Francisco"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -70,7 +70,7 @@
       "user": "San Francisco",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 66°F and sunny in San Francisco"
+      "response": "It's 65°F and partly cloudy in San Francisco"
     },
     {
       "conversation": "Weather: forecast request",
@@ -78,7 +78,7 @@
       "user": "Will it rain tomorrow in Seattle?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 66°F and sunny in San Francisco"
+      "response": "It's 65°F and partly cloudy in San Francisco"
     },
     {
       "conversation": "Spelling: common words",
@@ -126,7 +126,7 @@
       "user": "Hello there",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I'm here to help! Just let me know what you need."
+      "response": "What can I do for you?"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -142,7 +142,7 @@
       "user": "Thanks for your help",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "You're welcome!"
+      "response": "Anytime!"
     },
     {
       "conversation": "Smalltalk: greeting flow",
@@ -150,7 +150,7 @@
       "user": "Goodbye",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Take care, Robb!"
+      "response": "Goodbye, Robb! Have a great afternoon!"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -158,7 +158,7 @@
       "user": "Hey",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Hey Robb! How can I help you?"
+      "response": "Hello Robb! What can I do for you?"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -294,7 +294,7 @@
       "user": "Find documents about project alpha",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Here's what I found: The Project Alpha Papers. Welcome to The Project Alpha Papers, an archive of ar"
+      "response": "Here's what I found: The Project Alpha Papers - Washington University. Welcome to The Project Alpha "
     },
     {
       "conversation": "Email: compose flow",
@@ -398,7 +398,7 @@
       "user": "Give me my morning briefing",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good evening, Robb. Current time: 5:13 PM. Date: Wednesday, April 29, 2026. Time of day: evening. It"
+      "response": "Good afternoon, Robb. Current time: 3:00 PM. Date: Monday, May 11, 2026. Time of day: afternoon. It'"
     },
     {
       "conversation": "Memory: store and recall preferences",
@@ -437,8 +437,8 @@
       "agentId": "browser-agent",
       "user": "Go to google.com and search for weather",
       "grade": "partial",
-      "reason": "success: false but has message: \"Could not read the page: Cannot read properties of undefined\"",
-      "response": "Could not read the page: Cannot read properties of undefined (reading 'snapshot')"
+      "reason": "success: false but has message: \"Could not start the browser: browserType.launchPersistentCon\"",
+      "response": "Could not start the browser: browserType.launchPersistentContext: Executable doesn't exist at /var/f"
     },
     {
       "conversation": "App: navigation commands",
@@ -494,7 +494,7 @@
       "user": "asdfghjkl",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Hmm?"
+      "response": "Could you say that again?"
     },
     {
       "conversation": "Edge: single word",

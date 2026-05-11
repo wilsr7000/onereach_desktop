@@ -13,7 +13,9 @@
 import type { SpeechService, RealtimeConfig, VoiceState } from '../types'
 
 const DEFAULT_REALTIME_API_URL = 'wss://api.openai.com/v1/realtime'
-const DEFAULT_MODEL = 'gpt-4o-realtime-preview-2024-10-01'
+// GA Realtime API 2 (May 2026). Preview-era snapshots are routed to
+// gpt-realtime-2 via the pricing-config alias table.
+const DEFAULT_MODEL = 'gpt-realtime-2'
 
 export interface RealtimeSpeechService extends SpeechService {
   send: (message: unknown) => void
@@ -77,7 +79,7 @@ export function createRealtimeSpeechService(config: RealtimeConfig): RealtimeSpe
           }
           break
 
-        case 'response.audio_transcript.delta':
+        case 'response.output_audio_transcript.delta':
           if (message.delta) {
             onTranscript?.(message.delta, false)
           }
@@ -95,20 +97,24 @@ export function createRealtimeSpeechService(config: RealtimeConfig): RealtimeSpe
   function configureSession(): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) return
 
-    // Configure session for transcription
+    // GA Realtime API 2 session shape: session.type='realtime',
+    // output_modalities replaces top-level modalities, and audio.input
+    // wraps format/transcription/turn_detection. semantic_vad supersedes
+    // the tuned server_vad parameters; setting turn_detection to null
+    // still disables VAD entirely (push-to-talk).
     send({
       type: 'session.update',
       session: {
-        modalities: ['text', 'audio'],
-        input_audio_format: 'pcm16',
-        input_audio_transcription: {
-          model: 'whisper-1',
+        type: 'realtime',
+        model,
+        output_modalities: ['text'],
+        audio: {
+          input: {
+            format: { type: 'audio/pcm', rate: 24000 },
+            transcription: { model: 'gpt-realtime-whisper' },
+            turn_detection: voiceActivityDetection ? { type: 'semantic_vad' } : null,
+          },
         },
-        turn_detection: voiceActivityDetection ? {
-          type: 'server_vad',
-          threshold: vadThreshold,
-          silence_duration_ms: silenceTimeout,
-        } : null,
       },
     })
   }
@@ -125,10 +131,10 @@ export function createRealtimeSpeechService(config: RealtimeConfig): RealtimeSpe
         updateState({ connectionState: 'connecting' })
 
         const url = `${DEFAULT_REALTIME_API_URL}?model=${model}`
+        // GA Realtime API 2 drops the `openai-beta.realtime-v1` subprotocol.
         ws = new WebSocket(url, [
           'realtime',
           `openai-insecure-api-key.${apiKey}`,
-          'openai-beta.realtime-v1',
         ])
 
         ws.onopen = () => {

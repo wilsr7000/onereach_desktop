@@ -17,8 +17,9 @@
 // Note: Use max_completion_tokens (not max_tokens) with this model
 export const MODEL_CHAT = 'gpt-5.2'
 
-// Realtime voice model for live conversations (WebSocket API)
-export const MODEL_REALTIME = 'gpt-4o-realtime-preview-2024-12-17'
+// Realtime voice model for live conversations (WebSocket API).
+// GA Realtime API 2 model (May 2026).
+export const MODEL_REALTIME = 'gpt-realtime-2'
 
 // Image generation model
 export const MODEL_IMAGE = 'gpt-image-1.5'

@@ -1846,6 +1846,28 @@ app.whenReady().then(() => {
   // Check if a previous update install failed (detects version mismatch)
   verifyUpdateOnStartup();
 
+  // ----- Self-install helper hardening (added v5.0.7) -----
+  // 1. Read the bash helper's last-install-result.json. If the previous
+  //    install attempt failed (e.g. ditto rejected by permissions, codesign
+  //    verify failed on the new bundle), surface the failure with a dialog
+  //    explaining what happened and offering "Open Releases Page / Try
+  //    Again / Continue". Without this, helper failures were silent.
+  try {
+    _checkPreviousInstallResult();
+  } catch (err) {
+    log.warn('[AutoUpdate] _checkPreviousInstallResult threw:', err.message);
+  }
+
+  // 2. Reclaim disk space from old install backups
+  //    (/Applications/Onereach.ai.app.old.<unix-ts>) older than 7 days.
+  //    Each backup is ~1-2 GB; without this, /Applications fills up over
+  //    a few release cycles.
+  try {
+    _cleanOldInstallBackups();
+  } catch (err) {
+    log.warn('[AutoUpdate] _cleanOldInstallBackups threw:', err.message);
+  }
+
   // Deferred silent update check -- no dialogs unless an update is found
   setTimeout(() => {
     if (app.isPackaged) {
@@ -17133,6 +17155,46 @@ function _checkAppBundleWritable() {
     // Also verify the parent (/Applications) is writable
     const parent = path.dirname(appPath);
     fs.accessSync(parent, fs.constants.W_OK);
+
+    // Disk-space pre-flight (added v5.0.7). The install helper's flow:
+    //   1. mv /Applications/Onereach.ai.app -> backup (no extra space)
+    //   2. ditto NEW_APP -> /Applications/Onereach.ai.app (~1.6 GB)
+    //   3. backup is preserved for 7 days for rollback (another ~1.6 GB)
+    // So we need ~3 GB free on the /Applications mount. If less is
+    // available, ditto fails mid-swap and the helper rolls back -- the
+    // user has wasted bandwidth + time + sees a confusing failure dialog.
+    // Catching it here lets us tell them up-front what's wrong.
+    try {
+      const { execSync } = require('child_process');
+      const out = execSync('df -k /Applications', { timeout: 3000 }).toString();
+      const dataLine = (out.split('\n')[1] || '').trim();
+      const cols = dataLine.split(/\s+/);
+      const availableKB = parseInt(cols[3], 10);
+      const REQUIRED_KB = 3 * 1024 * 1024; // 3 GB
+      if (Number.isFinite(availableKB) && availableKB < REQUIRED_KB) {
+        const availGB = (availableKB / 1024 / 1024).toFixed(2);
+        log.warn(`[AutoUpdate] insufficient disk space: ${availGB}G free, need 3G`);
+        const parentWin = getDialogParent();
+        dialog
+          .showMessageBox(parentWin || undefined, {
+            type: 'error',
+            title: 'Cannot Install Update',
+            message: 'Not enough free disk space',
+            detail:
+              `The auto-updater needs about 3 GB of free space to install the update safely (one copy for the new bundle, one for a rollback backup).\n\n` +
+              `Currently available: ${availGB} GB.\n\nFree up some space and try again.`,
+            buttons: ['OK'],
+            defaultId: 0,
+          })
+          .catch(() => {});
+        return false;
+      }
+    } catch (dfErr) {
+      // df failure is non-fatal -- if we can't measure, just proceed and
+      // let the helper handle a real out-of-space failure with rollback.
+      log.warn('[AutoUpdate] df check failed (non-fatal):', dfErr.message);
+    }
+
     return true;
   } catch (err) {
     log.warn('[AutoUpdate] App bundle not writable:', err.message);
@@ -17329,165 +17391,250 @@ async function performUpdateInstall(targetVersion) {
 }
 
 /**
- * Generate + spawn the detached install helper script.
+ * Spawn the detached install helper.
  *
- * Why a separate bash script: we need a process that survives our quit
- * AND is not part of our Electron process group. spawn(..., { detached:
- * true }) detaches from our process group; the helper waits for our
- * PID to exit, performs the swap, and re-launches the .app via `open`.
+ * Why a separate bash script: we need a process that survives our quit AND
+ * is not part of our Electron process group. spawn(..., { detached: true })
+ * detaches from our process group; the helper waits for our PID to exit,
+ * performs the swap, and re-launches the .app via `open`.
  *
- * The script is written to /tmp at runtime (no asar packaging
- * concerns). Logs go to /tmp/onereach-installer-<timestamp>.log so
- * post-mortem is possible if the swap fails.
+ * Helper lives at scripts/install-update.sh in the source tree and is
+ * packaged into Contents/Resources/install-update.sh via electron-builder's
+ * extraResources. Was a runtime-generated string template up to v5.0.6 --
+ * promoted to a real file in v5.0.7 so it's source-controlled, lint-able,
+ * and unit-testable (test/unit/install-helper.test.js validates bash
+ * syntax). All inputs are passed via env vars (ONEREACH_* prefix) so the
+ * script is hermetic and the JS-side has no string-substitution surface.
  *
- * Pre-requisites for this to succeed:
+ * Pre-requisites for the helper to succeed:
  *   - Squirrel.Mac already unpacked the new bundle into
  *     ~/Library/Caches/<appId>.ShipIt/update.<random>/Onereach.ai.app
- *     (this happens during electron-updater's downloadUpdate flow).
- *   - electron-updater already SHA512-verified the .zip before
- *     handing off to Squirrel for unpack.
- *   - codesign --verify still passes on the unpacked bundle
- *     (helper double-checks before swapping).
+ *     (this happens during electron-updater's downloadUpdate flow,
+ *      which still works on macOS 26.4 -- only the swap step is broken).
+ *   - electron-updater already SHA512-verified the .zip before handing
+ *     off to Squirrel for unpack.
+ *   - codesign --verify passes on the unpacked bundle (the helper
+ *     double-checks before swapping; a bad bundle is worse than a
+ *     stale bundle).
  *
- * If any of those are violated, the helper aborts cleanly and
- * leaves /Applications untouched -- the user falls back to the
- * "Update available" prompt on next launch instead of being
- * stuck with a corrupted bundle.
+ * On failure the helper writes status to ~/Library/Application Support/
+ * Onereach.ai/last-install-result.json and returns the previous bundle to
+ * /Applications. main.js's _checkPreviousInstallResult() reads that file
+ * on next boot and surfaces a dialog to the user.
  */
 function _spawnInstallHelper(targetVersion, log) {
-  const fs = require('fs');
   const os = require('os');
   const path = require('path');
+  const fs = require('fs');
   const { spawn } = require('child_process');
 
   const ts = Date.now();
-  const helperPath = `/tmp/onereach-installer-${ts}.sh`;
   const helperLog = `/tmp/onereach-installer-${ts}.log`;
   const appPath = '/Applications/Onereach.ai.app';
-  const shipItCache = path.join(
-    os.homedir(),
-    'Library/Caches/com.gsx.poweruser.ShipIt'
+  const shipItCache = path.join(os.homedir(), 'Library/Caches/com.gsx.poweruser.ShipIt');
+  const updaterCache = path.join(os.homedir(), 'Library/Caches/gsx-power-user-updater/pending');
+  const statusFile = path.join(
+    app.getPath('userData'),
+    'last-install-result.json'
   );
-  const electronUpdaterCache = path.join(
-    os.homedir(),
-    'Library/Caches/gsx-power-user-updater/pending'
-  );
-  const parentPid = process.pid;
 
-  // The helper script. Notes:
-  //   - `set -euo pipefail` for explicit failure on any error.
-  //   - First check Squirrel's already-unpacked cache; if missing,
-  //     fall back to extracting from electron-updater's downloaded
-  //     ZIP. Either way we end up with a verified .app to swap in.
-  //   - `ditto` is used (not cp -R) because cp -R mishandles framework
-  //     symlinks (we hit this early in v5.0.1).
-  //   - The OLD bundle is renamed to .old.<ts> rather than removed,
-  //     so a failed install rolls back to the previous version.
-  //   - `open -n` launches the new app fresh after the swap.
-  const helperScript = `#!/bin/bash
-set -euo pipefail
-exec >> "${helperLog}" 2>&1
-# Detached child inherits a stripped PATH from launchd; restore the
-# system path so codesign / ditto / xattr / open / mv / mktemp resolve.
-export PATH=/usr/bin:/bin:/usr/sbin:/sbin
-echo "[$(date '+%H:%M:%S')] onereach-installer starting"
-echo "  parent PID: ${parentPid}"
-echo "  target version: ${targetVersion || 'unknown'}"
-echo "  app path: ${appPath}"
-echo "  ShipIt cache: ${shipItCache}"
+  // Locate the packaged helper. In a packaged app it lives at
+  // Contents/Resources/install-update.sh (per package.json's extraResources
+  // entry). In dev mode (npm start) we fall back to scripts/install-update.sh
+  // relative to main.js.
+  let helperPath = path.join(process.resourcesPath, 'install-update.sh');
+  if (!fs.existsSync(helperPath)) {
+    helperPath = path.join(__dirname, 'scripts', 'install-update.sh');
+  }
+  if (!fs.existsSync(helperPath)) {
+    log.error(`[AutoUpdate] install helper not found at ${helperPath}`);
+    return;
+  }
 
-# 1. Wait for parent (our Electron process) to fully exit. Up to 30s.
-echo "[$(date '+%H:%M:%S')] waiting for parent PID ${parentPid} to exit..."
-for i in $(seq 1 30); do
-  if ! kill -0 ${parentPid} 2>/dev/null; then
-    echo "[$(date '+%H:%M:%S')] parent exited after \${i}s"
-    break
-  fi
-  sleep 1
-done
-if kill -0 ${parentPid} 2>/dev/null; then
-  echo "[$(date '+%H:%M:%S')] WARNING: parent still alive after 30s, force-killing"
-  kill -9 ${parentPid} 2>/dev/null || true
-  sleep 1
-fi
+  log.info(`[AutoUpdate] spawning install helper: ${helperPath}`);
+  log.info(`[AutoUpdate]   helperLog=${helperLog}`);
+  log.info(`[AutoUpdate]   statusFile=${statusFile}`);
 
-# 2. Locate the new .app bundle. Try Squirrel's cache first
-# (already-unpacked, fastest path).
-NEW_APP=""
-for d in "${shipItCache}"/update.*; do
-  if [ -d "$d/Onereach.ai.app" ]; then
-    NEW_APP="$d/Onereach.ai.app"
-    break
-  fi
-done
-
-if [ -z "$NEW_APP" ]; then
-  echo "[$(date '+%H:%M:%S')] no Squirrel cache, trying to extract from electron-updater ZIP"
-  ZIP=$(ls "${electronUpdaterCache}"/*.zip 2>/dev/null | head -1)
-  if [ -z "$ZIP" ]; then
-    echo "[$(date '+%H:%M:%S')] FATAL: no update bundle found in either cache"
-    exit 1
-  fi
-  EXTRACT_DIR=$(mktemp -d)
-  echo "[$(date '+%H:%M:%S')] extracting $ZIP -> $EXTRACT_DIR"
-  ditto -x -k "$ZIP" "$EXTRACT_DIR"
-  NEW_APP="$EXTRACT_DIR/Onereach.ai.app"
-fi
-
-if [ ! -d "$NEW_APP" ]; then
-  echo "[$(date '+%H:%M:%S')] FATAL: NEW_APP path doesn't exist: $NEW_APP"
-  exit 1
-fi
-echo "[$(date '+%H:%M:%S')] new bundle: $NEW_APP"
-
-# 3. Verify the new bundle's signature before swapping. If this fails,
-# refuse to install -- bad bundle is worse than a stale bundle.
-if ! codesign --verify "$NEW_APP" 2>/dev/null; then
-  echo "[$(date '+%H:%M:%S')] FATAL: codesign --verify failed on new bundle"
-  exit 1
-fi
-echo "[$(date '+%H:%M:%S')] codesign verify ok"
-
-# 4. Swap. Move the old aside (so we can roll back), ditto the new in.
-BACKUP="${appPath}.old.\$(date +%s)"
-echo "[$(date '+%H:%M:%S')] backing up old: ${appPath} -> $BACKUP"
-mv "${appPath}" "$BACKUP"
-echo "[$(date '+%H:%M:%S')] ditto new bundle into ${appPath}"
-if ! ditto "$NEW_APP" "${appPath}"; then
-  echo "[$(date '+%H:%M:%S')] FATAL: ditto failed, rolling back"
-  rm -rf "${appPath}" 2>/dev/null || true
-  mv "$BACKUP" "${appPath}"
-  exit 1
-fi
-
-# 5. Strip quarantine just in case (newly-built bundles don't get
-# tagged, but it's cheap insurance).
-xattr -d com.apple.quarantine "${appPath}" 2>/dev/null || true
-
-echo "[$(date '+%H:%M:%S')] swap complete, launching new version"
-open "${appPath}"
-
-# 6. Schedule cleanup of backup after 24h via 'at' (best-effort; if 'at'
-# isn't enabled, the backup just stays around -- harmless, user can
-# delete manually). We do NOT clean up immediately because the new
-# version may need to roll back.
-echo "[$(date '+%H:%M:%S')] backup left at $BACKUP (cleanup deferred)"
-echo "[$(date '+%H:%M:%S')] DONE"
-exit 0
-`;
-
-  fs.writeFileSync(helperPath, helperScript, { mode: 0o755 });
-  log.info(`[AutoUpdate] wrote install helper to ${helperPath} (log -> ${helperLog})`);
-
-  // Spawn detached. The child becomes its own session leader and
-  // survives our quit. stdio: 'ignore' so we don't keep file
-  // descriptors open in the parent.
+  // Spawn detached with all inputs as env vars. The child becomes its
+  // own session leader and survives our quit. stdio: 'ignore' so we
+  // don't keep file descriptors open in the parent.
   const child = spawn('/bin/bash', [helperPath], {
     detached: true,
     stdio: 'ignore',
+    env: {
+      ...process.env,
+      ONEREACH_PARENT_PID: String(process.pid),
+      ONEREACH_TARGET_VERSION: targetVersion || 'unknown',
+      ONEREACH_APP_PATH: appPath,
+      ONEREACH_SHIPIT_CACHE: shipItCache,
+      ONEREACH_UPDATER_CACHE: updaterCache,
+      ONEREACH_LOG: helperLog,
+      ONEREACH_STATUS_FILE: statusFile,
+    },
   });
   child.unref();
   log.info(`[AutoUpdate] spawned detached helper (pid=${child.pid})`);
+}
+
+/**
+ * Boot-time hook: read the install helper's last-install-result.json to
+ * detect failed updates from the previous run.
+ *
+ * Cases:
+ *   - File doesn't exist or is older than 24h -> nothing to surface.
+ *   - outcome=success and version matches our current version -> install
+ *     succeeded, log + delete the status file.
+ *   - outcome=success but version doesn't match -> the user manually
+ *     downgraded or some other shenanigan; log a warning and delete.
+ *   - outcome=failed -> show a dialog with the error message + a button
+ *     to open the GitHub releases page so the user can install manually.
+ *
+ * Called from app.whenReady. Synchronous read so it doesn't race the
+ * rest of startup.
+ */
+function _checkPreviousInstallResult() {
+  const fs = require('fs');
+  const path = require('path');
+  const statusFile = path.join(app.getPath('userData'), 'last-install-result.json');
+
+  let raw;
+  try {
+    raw = fs.readFileSync(statusFile, 'utf-8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      log.warn('[AutoUpdate] could not read last-install-result.json:', err.message);
+    }
+    return;
+  }
+
+  let result;
+  try {
+    result = JSON.parse(raw);
+  } catch (err) {
+    log.warn('[AutoUpdate] last-install-result.json is malformed JSON:', err.message);
+    try {
+      fs.unlinkSync(statusFile);
+    } catch (_) {
+      /* ignore */
+    }
+    return;
+  }
+
+  // Stale check: anything older than 24h is forgotten so the dialog
+  // doesn't haunt the user across reboots a week later.
+  const ageMs = Date.now() - new Date(result.time || 0).getTime();
+  if (Number.isNaN(ageMs) || ageMs > 24 * 60 * 60 * 1000) {
+    try {
+      fs.unlinkSync(statusFile);
+    } catch (_) {
+      /* ignore */
+    }
+    return;
+  }
+
+  const currentVersion = app.getVersion();
+  if (result.outcome === 'success') {
+    if (result.version === currentVersion) {
+      log.info(`[AutoUpdate] previous install succeeded -> v${currentVersion}`);
+    } else {
+      log.warn(
+        `[AutoUpdate] previous install reported success for v${result.version} but we're on v${currentVersion}`
+      );
+    }
+    try {
+      fs.unlinkSync(statusFile);
+    } catch (_) {
+      /* ignore */
+    }
+    return;
+  }
+
+  // Failure path. Surface the result to the user with a dialog.
+  log.error(
+    `[AutoUpdate] previous install of v${result.version} FAILED at step "${result.step}": ${result.errorMessage}`
+  );
+
+  // Defer the dialog so the rest of boot completes first.
+  setTimeout(() => {
+    const { dialog, shell } = require('electron');
+    const helperLogHint =
+      'Detailed log: open Terminal and run `cat /tmp/onereach-installer-*.log | tail -50`';
+    const choice = dialog.showMessageBoxSync({
+      type: 'error',
+      title: 'Update did not install',
+      message: `Update to version ${result.version} failed.`,
+      detail:
+        `The auto-installer reached step "${result.step}" and reported:\n  ${result.errorMessage}\n\n` +
+        `Onereach.ai is still on v${currentVersion}. You can keep using this version, ` +
+        `try Help -> Check for Updates again, or download the latest release manually.\n\n` +
+        helperLogHint,
+      buttons: ['Open Releases Page', 'Try Again', 'Continue with v' + currentVersion],
+      defaultId: 1,
+      cancelId: 2,
+    });
+    if (choice === 0) {
+      void shell.openExternal(
+        'https://github.com/wilsr7000/Onereach_Desktop_App/releases/latest'
+      );
+    } else if (choice === 1 && autoUpdater) {
+      try {
+        autoUpdater.checkForUpdates();
+      } catch (err) {
+        log.warn('[AutoUpdate] re-check after failure dialog threw:', err.message);
+      }
+    }
+    try {
+      fs.unlinkSync(statusFile);
+    } catch (_) {
+      /* ignore */
+    }
+  }, 3000);
+}
+
+/**
+ * Boot-time cleanup: delete `/Applications/Onereach.ai.app.old.<unix-ts>`
+ * backups left behind by the install helper that are older than 7 days.
+ * Each backup is ~1-2 GB; a few releases without cleanup balloon disk use.
+ *
+ * Conservative pattern match: only directories matching exactly
+ * `Onereach.ai.app.old.<digits>`. Won't touch user-renamed apps or other
+ * .old. variants.
+ */
+function _cleanOldInstallBackups() {
+  const fs = require('fs');
+  const path = require('path');
+  const APP_DIR = '/Applications';
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const PATTERN = /^Onereach\.ai\.app\.old\.(\d+)$/;
+
+  let entries;
+  try {
+    entries = fs.readdirSync(APP_DIR);
+  } catch (err) {
+    log.warn('[AutoUpdate] backup cleanup: could not read /Applications:', err.message);
+    return;
+  }
+
+  let deleted = 0;
+  for (const name of entries) {
+    const m = name.match(PATTERN);
+    if (!m) continue;
+    const tsSec = parseInt(m[1], 10);
+    if (!Number.isFinite(tsSec)) continue;
+    const ageMs = Date.now() - tsSec * 1000;
+    if (ageMs < SEVEN_DAYS_MS) continue;
+    const fullPath = path.join(APP_DIR, name);
+    try {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+      log.info(`[AutoUpdate] cleaned up stale backup: ${name} (age: ${Math.round(ageMs / 86400000)}d)`);
+      deleted++;
+    } catch (err) {
+      log.warn(`[AutoUpdate] failed to remove ${fullPath}: ${err.message}`);
+    }
+  }
+  if (deleted > 0) {
+    log.info(`[AutoUpdate] backup cleanup: removed ${deleted} stale install backup(s)`);
+  }
 }
 
 // ============================================

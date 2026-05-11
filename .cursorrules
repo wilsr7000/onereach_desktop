@@ -146,7 +146,7 @@ const result = await window.ai.chat({ profile: 'fast', messages: [...] });
 - `powerful` = Claude 4.7 Opus with adaptive thinking (fallback: gpt-4o)
 - `large` = gpt-4o (fallback: Claude 4.7 Opus)
 - `vision` = Claude Sonnet (vision)
-- `realtime` = gpt-4o-realtime-preview
+- `realtime` = gpt-realtime-2 (GA Realtime API 2, May 2026)
 - `embedding` = text-embedding-3-small
 - `transcription` = whisper-1
 

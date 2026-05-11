@@ -211,6 +211,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "scripts/install-update.sh",
+        "to": "install-update.sh"
       }
     ],
     "publish": [

@@ -10,7 +10,7 @@
  * and model are provided via config from the centralized service.
  */
 
-import { MODEL_REALTIME } from '../config/models'
+import { MODEL_REALTIME } from './models'
 
 export type RealtimeEventType = 
   | 'connected'
@@ -94,12 +94,12 @@ export class RealtimeSpeechService {
       // Use the model that supports audio transcription
       const wsUrl = `wss://api.openai.com/v1/realtime?model=${MODEL_REALTIME}`
       
-      // Browser WebSockets don't support custom headers, so we use the 
-      // subprotocol array to pass authentication (OpenAI supports this)
+      // Browser WebSockets don't support custom headers, so we use the
+      // subprotocol array to pass authentication (OpenAI supports this).
+      // GA Realtime API 2 drops the `openai-beta.realtime-v1` entry.
       const protocols = [
         'realtime',
-        `openai-insecure-api-key.${this.config.apiKey}`,
-        'openai-beta.realtime-v1'
+        `openai-insecure-api-key.${this.config.apiKey}`
       ]
       
       console.log('[RealtimeSpeech] Connecting to:', wsUrl)
@@ -177,25 +177,31 @@ export class RealtimeSpeechService {
   private sendSessionConfig() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
 
-    // Configure for TRANSCRIPTION ONLY - no AI responses
+    // GA Realtime API 2: transcription-only session. output_modalities
+    // replaces top-level `modalities`, audio.input wraps the format and
+    // transcription block, and `turn_detection.create_response: false`
+    // keeps the model from emitting spoken responses.
     const sessionConfig = {
       type: 'session.update',
       session: {
-        modalities: ['text'],  // Text only - no audio output
+        type: 'realtime',
+        model: MODEL_REALTIME,
+        output_modalities: ['text'],
         instructions: 'Transcribe audio only. Do not respond.',
-        input_audio_format: 'pcm16',
-        input_audio_transcription: {
-          model: 'whisper-1',
-          language: 'en'  // Force English to prevent incorrect language detection
+        audio: {
+          input: {
+            format: { type: 'audio/pcm', rate: 24000 },
+            transcription: {
+              model: 'gpt-realtime-whisper',
+              language: 'en',
+            },
+            turn_detection: {
+              type: 'semantic_vad',
+              create_response: false,
+            },
+          },
         },
-        turn_detection: {
-          type: 'server_vad',
-          threshold: 0.5,  // Higher threshold = less sensitive, reduces false triggers from background noise
-          prefix_padding_ms: 500,  // 500ms of audio before speech detection
-          silence_duration_ms: 1500,  // 1.5 seconds of silence before considering speech ended (was 600ms - too aggressive)
-          create_response: false  // Don't generate AI responses
-        }
-      }
+      },
     }
 
     this.ws.send(JSON.stringify(sessionConfig))
@@ -315,8 +321,10 @@ export class RealtimeSpeechService {
           }
           break
 
-        // Response text transcription (AI speaking back)
-        case 'response.audio_transcript.delta':
+        // Response text transcription (AI speaking back). With
+        // output_modalities=['text'] the GA model shouldn't emit this,
+        // but keep the case for diagnostics if it ever fires.
+        case 'response.output_audio_transcript.delta':
           if (data.delta) {
             console.log('[RealtimeSpeech] Response transcript:', data.delta)
           }

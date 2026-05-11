@@ -7701,9 +7701,9 @@
 
             const apiKey = keyResult.key;
 
-            // Get realtime model from centralized AI service profiles
-            // Direct WebSocket is required here for low-latency audio streaming
-            let realtimeModel = 'gpt-4o-realtime-preview';
+            // Get realtime model from centralized AI service profiles.
+            // Direct WebSocket is required here for low-latency audio streaming.
+            let realtimeModel = 'gpt-realtime-2';
             try {
               const profiles = await window.ai?.getProfiles?.();
               if (profiles?.realtime?.model) {
@@ -7714,31 +7714,33 @@
             }
             const wsUrl = `wss://api.openai.com/v1/realtime?model=${realtimeModel}`;
 
-            // Connect via WebSocket (browser uses subprotocols for auth)
+            // Connect via WebSocket. The GA Realtime API 2 drops the
+            // `openai-beta.realtime-v1` subprotocol -- browser auth is
+            // now just `realtime` + `openai-insecure-api-key.<key>`.
             this.transcriptionWs = new WebSocket(wsUrl, [
               'realtime',
               `openai-insecure-api-key.${apiKey}`,
-              'openai-beta.realtime-v1',
             ]);
 
             this.transcriptionWs.onopen = () => {
               console.log('[Transcription] WebSocket connected');
 
-              // Configure session for transcription only
+              // Configure session for transcription only. GA shape nests
+              // format/transcription/turn_detection under audio.input,
+              // and replaces top-level `modalities` with `output_modalities`.
               this.transcriptionWs.send(
                 JSON.stringify({
                   type: 'session.update',
                   session: {
-                    modalities: ['text'],
-                    input_audio_format: 'pcm16',
-                    input_audio_transcription: {
-                      model: 'whisper-1',
-                    },
-                    turn_detection: {
-                      type: 'server_vad',
-                      threshold: 0.5,
-                      prefix_padding_ms: 400,
-                      silence_duration_ms: 1000,
+                    type: 'realtime',
+                    model: realtimeModel,
+                    output_modalities: ['text'],
+                    audio: {
+                      input: {
+                        format: { type: 'audio/pcm', rate: 24000 },
+                        transcription: { model: 'gpt-realtime-whisper' },
+                        turn_detection: { type: 'semantic_vad' },
+                      },
                     },
                   },
                 })
