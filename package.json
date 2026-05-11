@@ -145,7 +145,6 @@
       "category": "public.app-category.productivity",
       "icon": "assets/icon.icns",
       "target": [
-        "dmg",
         "zip"
       ],
       "darkModeSupport": true,

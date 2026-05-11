@@ -1,6 +1,6 @@
 {
   "name": "onereach-lite",
-  "version": "0.0.8",
+  "version": "0.0.10",
   "description": "Onereach.ai Lite -- slim Electron kernel that ships independently from the full Onereach.ai app.",
   "private": true,
   "comment": "Standalone version source for Lite. The full app's package.json at the repo root tracks its OWN version (currently 5.x); Lite reads from THIS file first via readLiteVersion() in main-lite.ts. Bump independently from the full app per its own release cadence.",

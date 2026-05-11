@@ -93,6 +93,15 @@ export interface LifecycleDeps {
 export interface LifecycleHandle {
   /** Stop periodic checks + remove all event listeners. For teardown. */
   teardown(): void;
+  /**
+   * Stop ONLY the periodic background-check interval, without
+   * removing any autoUpdater listeners. The install flow calls this
+   * pre-`quitAndInstall` so the timer doesn't fire mid-handoff; the
+   * full `teardown()` would also strip every listener off the
+   * autoUpdater EventEmitter, which can confuse electron-updater's
+   * Squirrel.Mac driver while the install is in progress.
+   */
+  cancelPeriodicCheck(): void;
   /** The current download tracking, if any. */
   getLastDownloadedUpdate(): { version: string; info: UpdaterInfo } | null;
 }
@@ -335,6 +344,10 @@ export function attachLifecycle(deps: LifecycleDeps): LifecycleHandle {
       } catch {
         /* may not be implemented on the mock */
       }
+    },
+    cancelPeriodicCheck(): void {
+      if (intervalHandle !== null) clearInterval(intervalHandle);
+      intervalHandle = null;
     },
     getLastDownloadedUpdate(): { version: string; info: UpdaterInfo } | null {
       return lastDownloaded;

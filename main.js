@@ -17266,26 +17266,49 @@ async function performUpdateInstall(targetVersion) {
     log.warn('[AutoUpdate] state save threw:', err.message);
   }
 
-  // Force-destroy every BrowserWindow so close handlers (which call
-  // event.preventDefault with a 1.5 s delay) don't race with Squirrel.
-  const allWindows = BrowserWindow.getAllWindows();
-  log.info(`[AutoUpdate] Destroying ${allWindows.length} window(s) before install`);
-  for (const win of allWindows) {
-    try {
-      if (!win.isDestroyed()) win.destroy();
-    } catch (e) {
-      log.warn('[AutoUpdate] Error destroying window:', e.message);
-    }
-  }
+  // ============================================================
+  // CRITICAL: do NOT destroy windows here.
+  // ============================================================
+  // Until v5.0.2 we force-destroyed every BrowserWindow on this line,
+  // intending to short-circuit close handlers that call
+  // event.preventDefault. The cure was much worse than the disease:
+  //
+  //   - Destroying every window fires `window-all-closed` immediately.
+  //   - Electron's default handler for `window-all-closed` calls
+  //     `app.quit()` -- a normal cooperative shutdown path.
+  //   - Squirrel.Mac's `nativeUpdater.quitAndInstall()` ALSO calls
+  //     `[NSApplication terminate]` (its own quit path) AND registers
+  //     a launchd job for ShipIt that watches our PID, swaps the
+  //     bundle when we exit, and relaunches.
+  //   - Both quit paths race. `app.quit()` (already in flight) wins.
+  //     The process exits cleanly via the cooperative path BEFORE
+  //     Squirrel.Mac has finished telling launchd "now run ShipIt."
+  //   - ShipIt's launchd job ends up registered but never started,
+  //     OR started but missing its full state -- net result: the
+  //     bundle in /Applications is never swapped, and on the next
+  //     launch the user sees the same "Update available" prompt and
+  //     enters an infinite loop.
+  //
+  // Lite hit this exact bug, diagnosed it (see
+  // lite/updater/install.ts:16-22), and resolved it by simply not
+  // destroying windows. Squirrel.Mac's nativeUpdater.quitAndInstall()
+  // closes windows itself in the correct order. State is already
+  // safely persisted by `_saveStateBeforeUpdate()` above. The 10-s
+  // safety net below catches any genuinely-stuck preventDefault
+  // handlers without racing the Squirrel handoff.
+  //
+  // Never reintroduce window destruction here without also redesigning
+  // how Squirrel.Mac's quitAndInstall is invoked.
+  // ============================================================
 
-  // MacUpdater.quitAndInstall() ignores arguments -- it delegates to
-  // Electron's native autoUpdater (Squirrel.Mac).  The call triggers:
-  //   1. Squirrel.Mac/ShipIt starts monitoring our PID
-  //   2. nativeUpdater.quitAndInstall() closes windows + app.quit()
+  // MacUpdater.quitAndInstall() delegates to Electron's native
+  // autoUpdater (Squirrel.Mac). The call triggers:
+  //   1. Squirrel.Mac registers a ShipIt launchd job watching our PID
+  //   2. nativeUpdater closes windows + calls app.quit() in order
   //   3. After our process exits, ShipIt swaps the .app bundle
   //   4. ShipIt relaunches the new version
   try {
-    log.info('[AutoUpdate] Calling autoUpdater.quitAndInstall()');
+    log.info('[AutoUpdate] Calling autoUpdater.quitAndInstall() (Squirrel.Mac will close windows)');
     autoUpdater.quitAndInstall();
   } catch (err) {
     log.error('[AutoUpdate] quitAndInstall threw:', err);

@@ -234,7 +234,7 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
                 }
               }
             },
-            cancelPeriodicCheck: () => lifecycle.teardown(),
+            cancelPeriodicCheck: () => lifecycle.cancelPeriodicCheck(),
             logger: log,
             setUpdatingFlag: (value) => {
               (global as { isUpdatingApp?: boolean }).isUpdatingApp = value;

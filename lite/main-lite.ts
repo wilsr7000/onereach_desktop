@@ -1102,6 +1102,43 @@ app.on('before-quit', () => {
   } catch {
     // intentional silent fallback during shutdown
   }
+
+  // CRITICAL: when an auto-update install is in flight, Squirrel.Mac's
+  // `nativeUpdater.quitAndInstall()` triggered this `before-quit`
+  // event mid-handoff. Running our normal module teardowns here
+  // breaks the install in two ways:
+  //
+  //  1. `updaterHandle.teardown()` calls `lifecycle.teardown()` which
+  //     calls `autoUpdater.removeAllListeners()`. Stripping every
+  //     listener off the autoUpdater EventEmitter mid-flight can
+  //     leave electron-updater unable to drive the handoff to ShipIt
+  //     (and even when ShipIt does start, the renderer's
+  //     `update-downloaded` UI state may already have been thrown
+  //     away by our teardown).
+  //  2. The 14+ other teardowns below (auth/totp/settings/...) all
+  //     do real work -- KV flushes, cookie clears, window-close
+  //     callbacks. Each consumes part of the 10s safety-net budget
+  //     in `lite/updater/install.ts`. If we burn that budget,
+  //     `process.exit(0)` fires BEFORE Squirrel.Mac finishes
+  //     swapping `/Applications/Onereach.ai Lite.app`. The user
+  //     reboots into the OLD bundle and sees "fails to replace the
+  //     code and relaunch when user clicks install and relaunch".
+  //
+  // The full app handles this with the same guard at
+  // `main.js:1884` (`if (global.isUpdatingApp) return`). Lite's
+  // `lite/updater/install.ts` sets the same flag via
+  // `setUpdatingFlag(true)` before `quitAndInstall()`; we honor it
+  // here so the Squirrel handoff runs unobstructed and the system
+  // teardowns are left to the OS as the process exits.
+  if ((global as { isUpdatingApp?: boolean }).isUpdatingApp === true) {
+    try {
+      getLoggingApi().event('app.before-quit.skip-teardown', { reason: 'updating' });
+    } catch {
+      // intentional silent fallback during shutdown
+    }
+    return;
+  }
+
   try {
     updaterHandle?.teardown();
   } catch {

@@ -7,12 +7,19 @@
  *   2. Persist the target version so verify.ts can detect failed installs.
  *   3. Stop periodic check timer.
  *   4. Run save-state hooks within budget.
- *   5. Force-destroy windows so close handlers don't race ShipIt.
- *   6. Call autoUpdater.quitAndInstall().
- *   7. 10s safety net: process.exit(0) if we're still alive.
+ *   5. Call autoUpdater.quitAndInstall() -- Squirrel.Mac handles windows + quit.
+ *   6. 10s safety net: process.exit(0) if we're still alive.
  *
  * Borrowed pattern: main.js _checkAppBundleWritable + performUpdateInstall
  * (lines 17120-17302).
+ *
+ * IMPORTANT: do NOT call destroyAllWindows() before quitAndInstall().
+ * That triggers `window-all-closed` -> `app.quit()` which starts a normal
+ * shutdown in parallel with Squirrel.Mac's relaunch handoff. The two race,
+ * `app.quit()` wins, the process exits cleanly, ShipIt never gets the
+ * relaunch signal, and the user is left with the old bundle in /Applications.
+ * Squirrel.Mac's nativeUpdater.quitAndInstall() already closes all windows
+ * and calls app.quit() in the correct order (see main.js#L17283-L17286).
  */
 
 import * as fs from 'node:fs';
@@ -33,7 +40,12 @@ export interface InstallDeps {
   execPath?: string;
   /** True iff the app is packaged. Skips writability check in dev. */
   isPackaged: () => boolean;
-  /** Force-close all BrowserWindows. Tests pass a no-op. */
+  /**
+   * Force-close all BrowserWindows. NO LONGER CALLED -- preserved on the
+   * interface for backwards compatibility with existing call sites, but the
+   * production install flow skips it (Squirrel.Mac closes windows itself).
+   * Tests may still observe it as unused.
+   */
   destroyAllWindows: () => void;
   /** Optional: stop the periodic check interval. Tests pass a no-op. */
   cancelPeriodicCheck?: () => void;
@@ -131,12 +143,11 @@ export async function performUpdateInstall(
     log.warn('updater: save-state phase threw', { error: (err as Error).message });
   }
 
-  try {
-    deps.destroyAllWindows();
-  } catch (err) {
-    log.warn('updater: destroyAllWindows threw', { error: (err as Error).message });
-  }
-
+  // Do NOT call destroyAllWindows here -- see file header. Squirrel.Mac's
+  // nativeUpdater.quitAndInstall() will close all windows and call app.quit()
+  // in the correct order. Destroying windows ourselves races with that flow
+  // and ends with the process exiting via window-all-closed before Squirrel
+  // can register the relaunch.
   try {
     log.info('updater: calling autoUpdater.quitAndInstall()');
     deps.autoUpdater.quitAndInstall();

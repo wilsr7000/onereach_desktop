@@ -366,24 +366,26 @@ echo -e "${YELLOW}Step 6: Verifying build files...${NC}"
 
 declare -a FILES
 
+# NOTE: DMG output was disabled in package.json (mac.target = ["zip"]) on
+# 2026-05-11 because electron-builder 26.9.0 + Electron 41.2.1 + macOS 26.4
+# produces DMGs that silently omit the 375 MB Electron Framework binary
+# (see PUNCH-LIST). ZIP works for both auto-update (electron-updater
+# downloads the .zip + sha-verifies + Squirrel.Mac swaps) and fresh
+# installs (double-click the .zip in Finder to expand, drag to /Applications).
 case $BUILD_MODE in
     universal)
         FILES=(
-            "dist/Onereach.ai-${NEW_VERSION}-universal.dmg"
             "dist/Onereach.ai-${NEW_VERSION}-universal-mac.zip"
         )
         ;;
     arm64-only)
         FILES=(
-            "dist/Onereach.ai-${NEW_VERSION}-arm64.dmg"
             "dist/Onereach.ai-${NEW_VERSION}-arm64-mac.zip"
         )
         ;;
     dual-arch)
         FILES=(
-            "dist/Onereach.ai-${NEW_VERSION}-arm64.dmg"
             "dist/Onereach.ai-${NEW_VERSION}-arm64-mac.zip"
-            "dist/Onereach.ai-${NEW_VERSION}.dmg"
             "dist/Onereach.ai-${NEW_VERSION}-mac.zip"
         )
         ;;
@@ -412,15 +414,16 @@ echo -e "${YELLOW}Step 7: Generating verified checksums for auto-updater...${NC}
 
 RELEASE_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
 
+# NOTE: DMG entries removed from latest-mac.yml on 2026-05-11 along with
+# the DMG build target itself. electron-updater is happy with a YAML that
+# only references the zip -- it picks the .zip on macOS regardless of
+# whether a .dmg is also present, so dropping the .dmg has zero effect on
+# auto-update behaviour but eliminates the broken-binary download path.
 case $BUILD_MODE in
     universal)
         UNIVERSAL_ZIP="dist/Onereach.ai-${NEW_VERSION}-universal-mac.zip"
-        UNIVERSAL_DMG="dist/Onereach.ai-${NEW_VERSION}-universal.dmg"
-        
         UNIVERSAL_ZIP_SHA512=$(shasum -a 512 "$UNIVERSAL_ZIP" | awk '{print $1}' | xxd -r -p | base64)
-        UNIVERSAL_DMG_SHA512=$(shasum -a 512 "$UNIVERSAL_DMG" | awk '{print $1}' | xxd -r -p | base64)
         UNIVERSAL_ZIP_SIZE=$(stat -f%z "$UNIVERSAL_ZIP")
-        UNIVERSAL_DMG_SIZE=$(stat -f%z "$UNIVERSAL_DMG")
 
         cat > dist/latest-mac.yml << EOF
 version: ${NEW_VERSION}
@@ -428,9 +431,6 @@ files:
   - url: Onereach.ai-${NEW_VERSION}-universal-mac.zip
     sha512: ${UNIVERSAL_ZIP_SHA512}
     size: ${UNIVERSAL_ZIP_SIZE}
-  - url: Onereach.ai-${NEW_VERSION}-universal.dmg
-    sha512: ${UNIVERSAL_DMG_SHA512}
-    size: ${UNIVERSAL_DMG_SIZE}
 path: Onereach.ai-${NEW_VERSION}-universal-mac.zip
 sha512: ${UNIVERSAL_ZIP_SHA512}
 releaseDate: '${RELEASE_DATE}'
@@ -439,12 +439,8 @@ EOF
     
     arm64-only)
         ARM64_ZIP="dist/Onereach.ai-${NEW_VERSION}-arm64-mac.zip"
-        ARM64_DMG="dist/Onereach.ai-${NEW_VERSION}-arm64.dmg"
-        
         ARM64_ZIP_SHA512=$(shasum -a 512 "$ARM64_ZIP" | awk '{print $1}' | xxd -r -p | base64)
-        ARM64_DMG_SHA512=$(shasum -a 512 "$ARM64_DMG" | awk '{print $1}' | xxd -r -p | base64)
         ARM64_ZIP_SIZE=$(stat -f%z "$ARM64_ZIP")
-        ARM64_DMG_SIZE=$(stat -f%z "$ARM64_DMG")
 
         cat > dist/latest-mac.yml << EOF
 version: ${NEW_VERSION}
@@ -452,9 +448,6 @@ files:
   - url: Onereach.ai-${NEW_VERSION}-arm64-mac.zip
     sha512: ${ARM64_ZIP_SHA512}
     size: ${ARM64_ZIP_SIZE}
-  - url: Onereach.ai-${NEW_VERSION}-arm64.dmg
-    sha512: ${ARM64_DMG_SHA512}
-    size: ${ARM64_DMG_SIZE}
 path: Onereach.ai-${NEW_VERSION}-arm64-mac.zip
 sha512: ${ARM64_ZIP_SHA512}
 releaseDate: '${RELEASE_DATE}'
@@ -463,19 +456,13 @@ EOF
     
     dual-arch)
         ARM64_ZIP="dist/Onereach.ai-${NEW_VERSION}-arm64-mac.zip"
-        ARM64_DMG="dist/Onereach.ai-${NEW_VERSION}-arm64.dmg"
         X64_ZIP="dist/Onereach.ai-${NEW_VERSION}-mac.zip"
-        X64_DMG="dist/Onereach.ai-${NEW_VERSION}.dmg"
 
         ARM64_ZIP_SHA512=$(shasum -a 512 "$ARM64_ZIP" | awk '{print $1}' | xxd -r -p | base64)
-        ARM64_DMG_SHA512=$(shasum -a 512 "$ARM64_DMG" | awk '{print $1}' | xxd -r -p | base64)
         X64_ZIP_SHA512=$(shasum -a 512 "$X64_ZIP" | awk '{print $1}' | xxd -r -p | base64)
-        X64_DMG_SHA512=$(shasum -a 512 "$X64_DMG" | awk '{print $1}' | xxd -r -p | base64)
 
         ARM64_ZIP_SIZE=$(stat -f%z "$ARM64_ZIP")
-        ARM64_DMG_SIZE=$(stat -f%z "$ARM64_DMG")
         X64_ZIP_SIZE=$(stat -f%z "$X64_ZIP")
-        X64_DMG_SIZE=$(stat -f%z "$X64_DMG")
 
         cat > dist/latest-mac.yml << EOF
 version: ${NEW_VERSION}
@@ -483,15 +470,9 @@ files:
   - url: Onereach.ai-${NEW_VERSION}-arm64-mac.zip
     sha512: ${ARM64_ZIP_SHA512}
     size: ${ARM64_ZIP_SIZE}
-  - url: Onereach.ai-${NEW_VERSION}-arm64.dmg
-    sha512: ${ARM64_DMG_SHA512}
-    size: ${ARM64_DMG_SIZE}
   - url: Onereach.ai-${NEW_VERSION}-mac.zip
     sha512: ${X64_ZIP_SHA512}
     size: ${X64_ZIP_SIZE}
-  - url: Onereach.ai-${NEW_VERSION}.dmg
-    sha512: ${X64_DMG_SHA512}
-    size: ${X64_DMG_SIZE}
 path: Onereach.ai-${NEW_VERSION}-arm64-mac.zip
 sha512: ${ARM64_ZIP_SHA512}
 releaseDate: '${RELEASE_DATE}'
@@ -546,26 +527,31 @@ fi
 echo ""
 echo -e "${YELLOW}Publishing to public repository...${NC}"
 
-# Format release notes for public based on build mode
+# Format release notes for public based on build mode. We ship .zip
+# only (DMG was disabled on 2026-05-11 due to an electron-builder bug
+# that silently dropped the 375 MB Electron Framework binary from the
+# DMG output). Double-clicking a .zip in Finder expands it natively;
+# the user then drags the .app to /Applications. Same UX as a DMG,
+# without the broken-binary download path.
 case $BUILD_MODE in
     universal)
         DOWNLOAD_INSTRUCTIONS="**For All Macs (Apple Silicon & Intel):**
-Download: \`Onereach.ai-${NEW_VERSION}-universal.dmg\`
+Download: \`Onereach.ai-${NEW_VERSION}-universal-mac.zip\`
 
 This universal build works on all Mac computers."
         ;;
     arm64-only)
         DOWNLOAD_INSTRUCTIONS="**For Apple Silicon Macs (M1/M2/M3/M4):**
-Download: \`Onereach.ai-${NEW_VERSION}-arm64.dmg\`
+Download: \`Onereach.ai-${NEW_VERSION}-arm64-mac.zip\`
 
 Note: This release is optimized for Apple Silicon. Intel Mac users should wait for the next full release or use a previous version."
         ;;
     dual-arch)
         DOWNLOAD_INSTRUCTIONS="**For Apple Silicon Macs (M1/M2/M3/M4):**
-Download: \`Onereach.ai-${NEW_VERSION}-arm64.dmg\`
+Download: \`Onereach.ai-${NEW_VERSION}-arm64-mac.zip\`
 
 **For Intel Macs:**
-Download: \`Onereach.ai-${NEW_VERSION}.dmg\`"
+Download: \`Onereach.ai-${NEW_VERSION}-mac.zip\`"
         ;;
 esac
 
@@ -581,21 +567,23 @@ This release is signed with Onereach's Apple Developer ID but could not
 be notarized at build time (likely a transient Apple notary or timestamp
 outage). To install:
 
-1. Download the .dmg above
-2. Open it and drag **Onereach.ai** to /Applications
-3. Open Terminal and paste this one-line command:
+1. Download the .zip above
+2. Double-click the .zip in Finder to expand the app
+3. Drag **Onereach.ai** to /Applications
+4. Open Terminal and paste this one-line command:
 
 \`\`\`
 xattr -dr com.apple.quarantine \"/Applications/Onereach.ai.app\"
 \`\`\`
 
-4. Launch Onereach.ai from /Applications. No further prompts."
+5. Launch Onereach.ai from /Applications. No further prompts."
 else
 INSTALL_BLOCK="## Install
 
-1. Download the .dmg above
-2. Open it and drag **Onereach.ai** to /Applications
-3. Launch Onereach.ai from /Applications
+1. Download the .zip above
+2. Double-click the .zip in Finder to expand the app
+3. Drag **Onereach.ai** to /Applications
+4. Launch Onereach.ai from /Applications
 
 This release is signed with Onereach's Apple Developer ID and
 notarized by Apple. macOS will not show any \"unidentified developer\"

@@ -268,4 +268,59 @@ describe('attachLifecycle', () => {
     handle.teardown();
     expect(updater.emitter.eventNames().length).toBe(0);
   });
+
+  it(
+    'cancelPeriodicCheck stops the periodic timer WITHOUT removing autoUpdater listeners',
+    () => {
+      // Regression: the install flow used to call lifecycle.teardown()
+      // pre-`quitAndInstall` to stop the periodic check. That also
+      // stripped every listener off the autoUpdater EventEmitter,
+      // which confused electron-updater's Squirrel.Mac driver and
+      // caused the user-reported "Install and Relaunch" failure
+      // (bundle never replaced, app relaunched into the old version).
+      // The narrow `cancelPeriodicCheck` method is the install flow's
+      // proper hook -- listeners stay intact during the handoff.
+      const updater = makeFakeUpdater();
+      const handle = attachLifecycle({
+        autoUpdater: updater,
+        ui: makeUi(),
+        backups: new BackupManager({ userDataPath: userDataDir }),
+        getCurrentVersion: () => '1.0.0',
+        performUpdateInstall: vi.fn(),
+        emitStatus: vi.fn(),
+        getFailedAttemptsForVersion: () => 0,
+        isVersionBroken: () => false,
+        isPackaged: () => true,
+        checkRunner: makeCheckRunner(true),
+      });
+      const listenersBefore = updater.emitter.eventNames().length;
+      expect(listenersBefore).toBeGreaterThan(0);
+
+      handle.cancelPeriodicCheck();
+
+      // Listeners must still be present so Squirrel.Mac /
+      // electron-updater can drive the rest of the install.
+      expect(updater.emitter.eventNames().length).toBe(listenersBefore);
+      handle.teardown();
+    }
+  );
+
+  it('cancelPeriodicCheck is idempotent (can be called twice)', () => {
+    const updater = makeFakeUpdater();
+    const handle = attachLifecycle({
+      autoUpdater: updater,
+      ui: makeUi(),
+      backups: new BackupManager({ userDataPath: userDataDir }),
+      getCurrentVersion: () => '1.0.0',
+      performUpdateInstall: vi.fn(),
+      emitStatus: vi.fn(),
+      getFailedAttemptsForVersion: () => 0,
+      isVersionBroken: () => false,
+      isPackaged: () => true,
+      checkRunner: makeCheckRunner(true),
+    });
+    handle.cancelPeriodicCheck();
+    expect(() => handle.cancelPeriodicCheck()).not.toThrow();
+    handle.teardown();
+  });
 });
