@@ -136,27 +136,42 @@ describe('performUpdateInstall', () => {
     expect(calls).toEqual(['first', 'quit']);
   });
 
-  it('calls destroyAllWindows before quitAndInstall', async () => {
-    const events: string[] = [];
-    const updater = fakeUpdater();
-    (updater.quitAndInstall as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      events.push('quit');
-    });
-    await performUpdateInstall(
-      {
-        autoUpdater: updater,
-        ui: fakeUi(),
-        userDataPath: userDataDir,
-        isPackaged: () => false,
-        destroyAllWindows: () => {
-          events.push('destroy');
+  it(
+    'does NOT call destroyAllWindows before quitAndInstall (Squirrel.Mac closes windows itself)',
+    async () => {
+      // Regression: until install.ts:16-22 this code force-destroyed
+      // every BrowserWindow, which triggered `window-all-closed` ->
+      // `app.quit()`. That cooperative quit raced Squirrel.Mac's
+      // nativeUpdater.quitAndInstall(), the process exited before
+      // ShipIt could register the relaunch, and the bundle in
+      // /Applications was never swapped -- exactly the user's
+      // "Install and Relaunch" failure mode.
+      //
+      // The production code now relies on Squirrel.Mac's own window
+      // close + app.quit ordering. This test pins that contract so
+      // a future refactor can't quietly re-introduce the regression.
+      const events: string[] = [];
+      const updater = fakeUpdater();
+      (updater.quitAndInstall as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        events.push('quit');
+      });
+      await performUpdateInstall(
+        {
+          autoUpdater: updater,
+          ui: fakeUi(),
+          userDataPath: userDataDir,
+          isPackaged: () => false,
+          destroyAllWindows: () => {
+            events.push('destroy');
+          },
+          forceExit: () => {},
         },
-        forceExit: () => {},
-      },
-      '2.0.0'
-    );
-    expect(events).toEqual(['destroy', 'quit']);
-  });
+        '2.0.0'
+      );
+      // quitAndInstall fired; destroy did NOT.
+      expect(events).toEqual(['quit']);
+    }
+  );
 
   it('cancelPeriodicCheck is invoked when supplied', async () => {
     const cancel = vi.fn();
