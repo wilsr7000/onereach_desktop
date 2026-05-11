@@ -1093,6 +1093,24 @@ app.on('window-all-closed', () => {
   } catch {
     // intentional silent fallback during shutdown
   }
+  // Skip the explicit quit when an auto-update install is in flight.
+  // Squirrel.Mac's `nativeUpdater.quitAndInstall()` closes all
+  // windows itself as part of its handoff to ShipIt; if we ALSO
+  // call `app.quit()` here, Electron's cooperative quit races
+  // Squirrel's terminate path. The race is the exact scenario the
+  // install.ts header warns about (lines 16-22), and the user's
+  // "Install and Relaunch" still produced the old bundle until the
+  // before-quit guard skipped the teardowns AND we stopped the
+  // redundant quit. Squirrel will drive the process to exit
+  // cleanly on its own.
+  if ((global as { isUpdatingApp?: boolean }).isUpdatingApp === true) {
+    try {
+      getLoggingApi().event('app.window-all-closed.skip-quit', { reason: 'updating' });
+    } catch {
+      // intentional silent fallback during shutdown
+    }
+    return;
+  }
   app.quit();
 });
 
