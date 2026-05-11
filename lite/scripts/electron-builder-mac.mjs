@@ -50,12 +50,28 @@ for (const a of args) {
 }
 
 // ---------------------------------------------------------------------------
-// Read lite/package.json (source of truth for version + runtime deps)
+// Read lite/package.json (source of truth for version + runtime deps + name)
+// and lite/electron-builder.json (source of truth for productName).
 // ---------------------------------------------------------------------------
 const litePkg = JSON.parse(await fs.readFile(path.join(liteDir, 'package.json'), 'utf-8'));
 if (version === null) version = litePkg.version;
 const dependencies = litePkg.dependencies || {};
+// The bundled package.json identity must match lite, not full. electron-updater
+// derives its cache dir from app.getName() which is `productName || name` from
+// the bundled package.json. Without these overrides the bundled package.json
+// inherits the root's `name: gsx-power-user`, so electron-updater stages the
+// downloaded update under ~/Library/Caches/gsx-power-user-updater/pending/.
+// That path mismatch breaks the post-quit handoff to Squirrel.Mac and the app
+// never restarts into the new version even though the download succeeded.
+const _builderCfg = JSON.parse(
+  await fs.readFile(path.join(liteDir, 'electron-builder.json'), 'utf-8')
+);
+const name = litePkg.name || 'onereach-lite';
+const productName = _builderCfg.productName || 'Onereach.ai Lite';
+const description = litePkg.description || 'Onereach.ai Lite';
 
+console.log(`[electron-builder-mac] name: ${name}`);
+console.log(`[electron-builder-mac] productName: ${productName}`);
 console.log(`[electron-builder-mac] version: ${version}`);
 console.log(`[electron-builder-mac] runtime deps: ${JSON.stringify(dependencies)}`);
 console.log(`[electron-builder-mac] publish: ${publish}`);
@@ -72,6 +88,13 @@ const merged = {
   ...baseConfig,
   extraMetadata: {
     ...(baseConfig.extraMetadata || {}),
+    // Identity (overrides root package.json's "gsx-power-user" identity).
+    // See ADR note in lite/PORTING.md: the bundled package.json must look
+    // like lite, not full, or electron-updater + Squirrel.Mac install
+    // pathing breaks.
+    name,
+    productName,
+    description,
     version,
     dependencies,
   },
