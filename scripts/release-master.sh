@@ -90,20 +90,26 @@ if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PA
     echo -e "${GREEN}Notarization creds present (Apple ID: $APPLE_ID, Team: $APPLE_TEAM_ID)${NC}"
     # Probe Apple's RFC 3161 Timestamp Authority at timestamp.apple.com.
     # IMPORTANT: This is an HTTP service on port 80 (not HTTPS on 443).
-    # HEAD without a TSQ payload returns 401, which is the "service up"
-    # signal -- only POST with application/timestamp-query is accepted.
-    # A connection failure or DNS error here means a real outage / proxy /
-    # firewall block; only then do we fall back to unnotarized + xattr.
-    # When the TSA is down, codesign aborts with "A timestamp was expected
-    # but was not found" mid-bundle. The probe lets us detect that BEFORE
-    # the multi-minute build, and gracefully ship signed-but-not-notarized
-    # rather than producing a broken bundle. Borrowed from
-    # lite/scripts/release-lite.sh.
-    TS_PROBE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 5 -X HEAD http://timestamp.apple.com/ts01 2>/dev/null || echo "000")
-    if [ "$TS_PROBE" = "401" ] || [ "$TS_PROBE" = "200" ] || [ "$TS_PROBE" = "400" ] || [ "$TS_PROBE" = "405" ]; then
+    # The TSA only accepts POST with application/timestamp-query bodies, so
+    # plain GET/HEAD requests legitimately return 401 / 400 / 405 -- all of
+    # those are "service up" signals. Only a connection failure (HTTP code
+    # "000" or empty) means the service or routing is genuinely broken.
+    # We don't filter by specific HTTP code because curl can occasionally
+    # write multiple status codes (e.g. "401000") when its own exit code
+    # is non-zero -- so we just extract the first 3-digit code and treat
+    # anything that isn't "000" as up.
+    #
+    # NOTE: v5.0.1's release shipped unnotarized because the previous
+    # whitelist version of this probe ("401" exactly) didn't match the
+    # actual "401000" curl output. This loose-match version is the one
+    # lite/scripts/release-lite.sh uses (the other chat fixed it there
+    # first); harmonized here so both scripts behave identically.
+    TS_RAW=$(curl -sS -o /dev/null --connect-timeout 5 --max-time 8 -w "%{http_code}" http://timestamp.apple.com/ts01 2>/dev/null || echo "")
+    TS_PROBE="${TS_RAW:0:3}"
+    if [ -n "$TS_PROBE" ] && [ "$TS_PROBE" != "000" ]; then
         echo -e "${GREEN}timestamp.apple.com reachable (HTTP $TS_PROBE) -- signing with timestamps + notarizing.${NC}"
     else
-        echo -e "${YELLOW}timestamp.apple.com unreachable (got '$TS_PROBE'; check proxy/firewall).${NC}"
+        echo -e "${YELLOW}timestamp.apple.com unreachable (raw='$TS_RAW'; check proxy/firewall).${NC}"
         echo -e "${YELLOW}Forcing SKIP_NOTARIZE=1 -- bundle will be signed but not notarized.${NC}"
         echo -e "${YELLOW}Users install with one-line xattr command (see release notes).${NC}"
         export SKIP_NOTARIZE=1
