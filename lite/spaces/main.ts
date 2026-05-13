@@ -30,6 +30,7 @@ import { SpacesError } from './errors.js';
 import { openSpacesWindow, closeSpacesWindow } from './window.js';
 import { registerSpacesIpc, unregisterSpacesIpc } from './ipc.js';
 import { SdkSpacesClient } from './sdk-client.js';
+import { getNeonApi } from '../neon/api.js';
 import type {
   Item,
   ItemSummary,
@@ -176,7 +177,13 @@ export function _resetSpacesRegistrationForTesting(): void {
  * `getNeonApi().query(...)` under the hood.
  */
 function createPhase0Api(handle: SpacesHandle): SpacesApi {
-  const client = new SdkSpacesClient();
+  // Phase 1: the SDK client now executes real Cypher via the Neon
+  // module. `getNeonApi()` lazily instantiates so we can pass the
+  // bound `query` method without forcing the neon singleton to
+  // initialize before this point.
+  const client = new SdkSpacesClient({
+    query: (cypher, parameters) => getNeonApi().query(cypher, parameters),
+  });
 
   const items: SpacesItemsApi = {
     list(scope: SpaceScope, opts?: ListOpts): Promise<ItemSummary[]> {

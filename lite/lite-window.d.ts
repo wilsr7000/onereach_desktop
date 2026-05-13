@@ -554,18 +554,69 @@ interface LiteSpacesDiscoveryResultsView {
   results: LiteSpacesDiscoveryQueryResultView[];
 }
 
+type LiteSpaceItemKind =
+  | 'document'
+  | 'image'
+  | 'url'
+  | 'text'
+  | 'audio'
+  | 'video'
+  | 'other';
+
+interface LiteSpace {
+  id: string;
+  name: string;
+  description?: string;
+  color?: string;
+  iconKey?: string;
+  itemCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface LiteSpaceChipRef {
+  id: string;
+  name: string;
+  color?: string;
+  iconKey?: string;
+}
+
+interface LiteSpaceItemProvenance {
+  kind: string;
+  name: string;
+  id: string;
+}
+
+interface LiteSpaceItemSummary {
+  id: string;
+  title: string;
+  kind: LiteSpaceItemKind;
+  fileKey?: string;
+  sourceUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  excerpt?: string;
+  otherSpaces: LiteSpaceChipRef[];
+  producedBy: LiteSpaceItemProvenance | null;
+}
+
+interface LiteSpaceItem extends LiteSpaceItemSummary {
+  content?: string;
+  metadata?: Record<string, unknown>;
+}
+
 interface LiteSpacesItemsBridge {
   list(
     scopeId: string,
     opts?: { limit?: number; offset?: number }
-  ): Promise<LiteSpacesIpcResult<unknown[]>>;
-  get(id: string): Promise<LiteSpacesIpcResult<unknown | null>>;
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItemSummary[]>>;
+  get(id: string): Promise<LiteSpacesIpcResult<LiteSpaceItem | null>>;
 }
 
 interface LiteSpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
-  listSpaces(): Promise<LiteSpacesIpcResult<unknown[]>>;
+  listSpaces(): Promise<LiteSpacesIpcResult<LiteSpace[]>>;
   getUncategorizedCount(): Promise<LiteSpacesIpcResult<number>>;
   items: LiteSpacesItemsBridge;
   /** Phase 0.5 -- run Q1-Q4 verification queries. */
