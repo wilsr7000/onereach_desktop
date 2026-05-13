@@ -477,4 +477,108 @@ describe('attachLifecycle', () => {
       handle.teardown();
     });
   });
+
+  // ─── silent-check-still-prompts ─────────────────────────────────────────
+  //
+  // End-to-end pinning for the user-facing behavior: Lite checks in the
+  // background (startup + daily), and when a check finds a new version
+  // it MUST surface the "Update Available" dialog -- regardless of
+  // whether the triggering check was manual (user clicked "Check for
+  // updates") or silent (the 5s startup timer / 24h interval).
+  //
+  // Symmetrically, when a silent check finds NOTHING new, the user must
+  // NOT see a "You're up to date" dialog -- that would defeat the
+  // "silent in the background" contract. Manual checks DO get the
+  // confirmation dialog so the user knows their click did something.
+  //
+  // A future refactor that accidentally gates the update-available
+  // dialog on `wasLastManual()` (the way update-not-available is
+  // gated) would silently break daily auto-checks for everyone --
+  // updates would still download but the user would never be told.
+  describe('silent background check + new-version prompt', () => {
+    it(
+      'silent check that finds an update STILL shows the "Update Available" dialog',
+      async () => {
+        const updater = makeFakeUpdater();
+        const ui = makeUi([1]); // click Later
+        // wasLastManual = false simulates an auto check (startup timer
+        // or 24h periodic interval).
+        const checkRunner = makeCheckRunner(false);
+        const handle = attachLifecycle({
+          autoUpdater: updater,
+          ui,
+          backups: new BackupManager({ userDataPath: userDataDir }),
+          getCurrentVersion: () => '1.0.0',
+          performUpdateInstall: vi.fn(),
+          emitStatus: vi.fn(),
+          getFailedAttemptsForVersion: () => 0,
+          isVersionBroken: () => false,
+          isPackaged: () => true,
+          checkRunner,
+        });
+
+        updater.emitter.emit('update-available', { version: '2.0.0' });
+        // Let the .then() handler attached inside the lifecycle resolve.
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(ui.showMessageBox).toHaveBeenCalled();
+        expect(ui.calls[0]).toMatchObject({
+          title: 'Update Available',
+          buttons: ['Download', 'Later'],
+        });
+        handle.teardown();
+      }
+    );
+
+    it('silent check that finds NOTHING new stays silent (no dialog)', () => {
+      const updater = makeFakeUpdater();
+      const ui = makeUi();
+      const checkRunner = makeCheckRunner(false); // auto
+      const handle = attachLifecycle({
+        autoUpdater: updater,
+        ui,
+        backups: new BackupManager({ userDataPath: userDataDir }),
+        getCurrentVersion: () => '1.0.0',
+        performUpdateInstall: vi.fn(),
+        emitStatus: vi.fn(),
+        getFailedAttemptsForVersion: () => 0,
+        isVersionBroken: () => false,
+        isPackaged: () => true,
+        checkRunner,
+      });
+
+      updater.emitter.emit('update-not-available', {});
+
+      expect(ui.showMessageBox).not.toHaveBeenCalled();
+      handle.teardown();
+    });
+
+    it('manual check that finds NOTHING new DOES show "No Updates Available"', () => {
+      // Counterpoint: silent checks suppress the no-updates dialog,
+      // but a manual "Check for Updates..." click should always
+      // confirm to the user that something happened (otherwise the
+      // click looks broken).
+      const updater = makeFakeUpdater();
+      const ui = makeUi();
+      const checkRunner = makeCheckRunner(true); // manual
+      const handle = attachLifecycle({
+        autoUpdater: updater,
+        ui,
+        backups: new BackupManager({ userDataPath: userDataDir }),
+        getCurrentVersion: () => '1.0.0',
+        performUpdateInstall: vi.fn(),
+        emitStatus: vi.fn(),
+        getFailedAttemptsForVersion: () => 0,
+        isVersionBroken: () => false,
+        isPackaged: () => true,
+        checkRunner,
+      });
+
+      updater.emitter.emit('update-not-available', {});
+
+      expect(ui.showMessageBox).toHaveBeenCalled();
+      expect(ui.calls[0]).toMatchObject({ title: 'No Updates Available' });
+      handle.teardown();
+    });
+  });
 });
