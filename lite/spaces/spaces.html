@@ -14,7 +14,7 @@
     <header class="spaces-header">
       <h1>Spaces</h1>
       <div class="spaces-header-spacer"></div>
-      <span class="spaces-phase-badge" title="Module phase indicator">Phase 0 · scaffold</span>
+      <span class="spaces-phase-badge" title="Module phase indicator">Phase 2 · items + detail</span>
     </header>
 
     <div class="spaces-layout">
@@ -24,6 +24,18 @@
         first, always present).
       -->
       <nav id="spaces-sidebar" class="spaces-sidebar" aria-label="Spaces">
+        <div class="spaces-sidebar-search">
+          <input
+            type="search"
+            id="spaces-sidebar-search-input"
+            class="spaces-sidebar-search-input"
+            placeholder="Search Spaces…"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="Filter Spaces by name"
+          />
+        </div>
+
         <div class="spaces-sidebar-section">
           <div class="spaces-sidebar-title">Intake</div>
           <ul class="spaces-list" id="spaces-list-intake">
@@ -38,8 +50,22 @@
         <div class="spaces-sidebar-section">
           <div class="spaces-sidebar-title">Spaces</div>
           <ul class="spaces-list" id="spaces-list-spaces">
-            <li class="spaces-empty-hint" id="spaces-empty-hint">
-              Spaces will populate when Phase&nbsp;1 lands.
+            <!--
+              Loading skeleton: three shimmer rows mirror the typical
+              Space-row shape so first paint shows structure, not text.
+              spaces.ts replaces these once listSpaces() resolves.
+            -->
+            <li class="spaces-skeleton-row" aria-hidden="true">
+              <span class="spaces-skeleton-dot"></span>
+              <span class="spaces-skeleton-name"></span>
+            </li>
+            <li class="spaces-skeleton-row" aria-hidden="true">
+              <span class="spaces-skeleton-dot"></span>
+              <span class="spaces-skeleton-name spaces-skeleton-name-short"></span>
+            </li>
+            <li class="spaces-skeleton-row" aria-hidden="true">
+              <span class="spaces-skeleton-dot"></span>
+              <span class="spaces-skeleton-name"></span>
             </li>
           </ul>
         </div>
@@ -57,17 +83,12 @@
         itself once Phase 1 lands real data lists.
       -->
       <main class="spaces-main" id="spaces-main">
-        <section class="spaces-empty-state">
-          <h2 class="spaces-empty-state-title">No items yet</h2>
-          <p class="spaces-empty-state-body">
-            The Spaces module is scaffolded. Cypher-backed item lists and the
-            multi-space card view land in Phase&nbsp;1 + Phase&nbsp;2.
-          </p>
-          <p class="spaces-empty-state-meta">
-            Active scope:
-            <code id="spaces-active-scope">__uncategorized__</code>
-          </p>
-        </section>
+        <!--
+          Items region populated at runtime by spaces.ts. The Phase-0
+          hero card is gone; the renderer paints loading / empty /
+          error states inline as it fetches.
+        -->
+        <section id="spaces-items-region" class="spaces-items-region"></section>
 
         <section class="spaces-discovery" id="spaces-discovery">
           <header class="spaces-discovery-header">

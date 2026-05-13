@@ -175,6 +175,118 @@ body {
   background: #d0a44c;
 }
 
+/*
+ * Phase 1d/1e treatment for the Uncategorized row: italic name + dim
+ * accent color signal that this isn't a normal user-curated Space.
+ * The pulse animation fires only when `has-count` is set by the
+ * renderer (count > 0) -- silent dot when intake is empty.
+ */
+.spaces-row-intake .spaces-row-name {
+  font-style: italic;
+  color: #c1c1c8;
+}
+
+.spaces-row-intake.is-active .spaces-row-name {
+  color: #f4f4f6;
+}
+
+.spaces-row-dot-intake.has-count {
+  animation: spaces-intake-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes spaces-intake-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(208, 164, 76, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(208, 164, 76, 0);
+  }
+}
+
+.spaces-row.is-hidden {
+  display: none;
+}
+
+/* ── Sidebar search input (Phase 1f) ─────────────────────────────── */
+
+.spaces-sidebar-search {
+  padding: 0 4px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  margin-bottom: 10px;
+}
+
+.spaces-sidebar-search-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #e8e8ea;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 80ms ease, background 80ms ease;
+}
+
+.spaces-sidebar-search-input:focus {
+  border-color: rgba(79, 140, 255, 0.6);
+  background: rgba(79, 140, 255, 0.06);
+}
+
+.spaces-sidebar-search-input::placeholder {
+  color: #6f6f78;
+}
+
+/* ── Loading skeleton (Phase 1 first-paint) ─────────────────────── */
+
+.spaces-skeleton-row {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  list-style: none;
+}
+
+.spaces-skeleton-dot,
+.spaces-skeleton-name {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: spaces-skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+.spaces-skeleton-dot {
+  width: 8px;
+  height: 8px;
+  margin-left: 5px;
+  border-radius: 50%;
+}
+
+.spaces-skeleton-name {
+  height: 12px;
+  width: 80%;
+}
+
+.spaces-skeleton-name-short {
+  width: 55%;
+}
+
+@keyframes spaces-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 .spaces-row-name {
   white-space: nowrap;
   overflow: hidden;
@@ -247,6 +359,197 @@ body {
   color: #c7c7cd;
 }
 
+/* ── Items region (Phase 1+) ─────────────────────────────────────── */
+
+.spaces-items-region {
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.spaces-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.spaces-card {
+  background: #131316;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 80ms ease, transform 80ms ease;
+}
+
+.spaces-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.spaces-card.is-active {
+  border-color: rgba(79, 140, 255, 0.7);
+  background: rgba(79, 140, 255, 0.05);
+}
+
+.spaces-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.spaces-card-kind {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #c7c7cd;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.spaces-card-kind-image {
+  background: rgba(255, 123, 179, 0.1);
+  color: #ff7bb3;
+  border-color: rgba(255, 123, 179, 0.3);
+}
+
+.spaces-card-kind-url {
+  background: rgba(123, 219, 255, 0.1);
+  color: #7bdbff;
+  border-color: rgba(123, 219, 255, 0.3);
+}
+
+.spaces-card-kind-audio {
+  background: rgba(107, 255, 138, 0.1);
+  color: #6bff8a;
+  border-color: rgba(107, 255, 138, 0.3);
+}
+
+.spaces-card-kind-video {
+  background: rgba(255, 156, 74, 0.1);
+  color: #ff9c4a;
+  border-color: rgba(255, 156, 74, 0.3);
+}
+
+.spaces-card-time {
+  font-size: 11px;
+  color: #6f6f78;
+}
+
+.spaces-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f4f4f6;
+  line-height: 1.35;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.spaces-card-excerpt {
+  font-size: 12px;
+  color: #9a9aa3;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.spaces-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.spaces-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: #c7c7cd;
+}
+
+.spaces-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4f8cff;
+}
+
+.spaces-chip-name {
+  max-width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spaces-card-provenance {
+  font-size: 11px;
+  color: #7a7a83;
+  font-style: italic;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+.spaces-banner {
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.spaces-banner-info {
+  background: rgba(79, 140, 255, 0.06);
+  color: #c7c7cd;
+  border: 1px solid rgba(79, 140, 255, 0.12);
+}
+
+.spaces-banner-error {
+  background: rgba(255, 99, 99, 0.06);
+  color: #ff8585;
+  border: 1px solid rgba(255, 99, 99, 0.2);
+}
+
+.spaces-empty-items {
+  max-width: 560px;
+  margin: 40px auto;
+  text-align: center;
+  padding: 28px;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: #131316;
+}
+
+.spaces-empty-items-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f4f4f6;
+  margin-bottom: 8px;
+}
+
+.spaces-empty-items-body {
+  font-size: 12.5px;
+  color: #9a9aa3;
+  line-height: 1.55;
+}
+
+.spaces-empty-hint-error {
+  color: #ff8585;
+}
+
 /* ── Detail rail ─────────────────────────────────────────────────── */
 
 .spaces-detail {
@@ -254,6 +557,114 @@ body {
   border-left: 1px solid rgba(255, 255, 255, 0.06);
   padding: 18px;
   overflow-y: auto;
+}
+
+.spaces-detail-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.spaces-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.spaces-detail-close {
+  background: rgba(255, 255, 255, 0.04);
+  color: #c7c7cd;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spaces-detail-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4f6;
+}
+
+.spaces-detail-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f4f4f6;
+  line-height: 1.35;
+}
+
+.spaces-detail-meta {
+  font-size: 11px;
+  color: #6f6f78;
+}
+
+.spaces-detail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.spaces-detail-provenance {
+  font-size: 12px;
+  color: #9a9aa3;
+  font-style: italic;
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+}
+
+.spaces-detail-content {
+  background: #0a0a0c;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.spaces-detail-content pre {
+  font-family:
+    'SF Mono',
+    Menlo,
+    Consolas,
+    monospace;
+  font-size: 11.5px;
+  color: #d2d2d6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+.spaces-detail-source {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+.spaces-detail-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #6f6f78;
+}
+
+.spaces-detail-source a {
+  font-size: 12px;
+  color: #4f8cff;
+  word-break: break-all;
+  text-decoration: none;
+}
+
+.spaces-detail-source a:hover {
+  text-decoration: underline;
 }
 
 /* ── Discovery panel (Phase 0.5) ─────────────────────────────────── */
