@@ -66,6 +66,7 @@ const SPACES_LIST_SPACES = 'lite:spaces:listSpaces';
 const SPACES_UNCATEGORIZED_COUNT = 'lite:spaces:uncategorizedCount';
 const SPACES_ITEMS_LIST = 'lite:spaces:items:list';
 const SPACES_ITEMS_GET = 'lite:spaces:items:get';
+const SPACES_ITEMS_RESOLVE_FILE_URL = 'lite:spaces:items:resolveFileUrl';
 const SPACES_DISCOVERY_RUN = 'lite:spaces:discovery:run';
 
 const NEON_QUERY = 'lite:neon:query';
@@ -448,6 +449,7 @@ interface SpacesItemsBridge {
     opts?: { limit?: number; offset?: number }
   ): Promise<SpacesIpcResultView<unknown[]>>;
   get(id: string): Promise<SpacesIpcResultView<unknown | null>>;
+  resolveFileUrl(key: string): Promise<SpacesIpcResultView<string | null>>;
 }
 
 // Phase 0.5 discovery: result shape mirrors lite/spaces/discovery.ts.
@@ -1080,6 +1082,10 @@ const spaces: SpacesBridge = {
     get: (id) =>
       ipcRenderer.invoke(SPACES_ITEMS_GET, { id }) as Promise<
         SpacesIpcResultView<unknown | null>
+      >,
+    resolveFileUrl: (key) =>
+      ipcRenderer.invoke(SPACES_ITEMS_RESOLVE_FILE_URL, { key }) as Promise<
+        SpacesIpcResultView<string | null>
       >,
   },
   runDiscovery: () =>

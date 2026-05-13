@@ -30,6 +30,7 @@ export const SPACES_IPC = {
   UNCATEGORIZED_COUNT: 'lite:spaces:uncategorizedCount',
   ITEMS_LIST: 'lite:spaces:items:list',
   ITEMS_GET: 'lite:spaces:items:get',
+  ITEMS_RESOLVE_FILE_URL: 'lite:spaces:items:resolveFileUrl',
   /** Phase 0.5: run the Q1-Q4 verification queries. */
   DISCOVERY_RUN: 'lite:spaces:discovery:run',
 } as const;
@@ -128,6 +129,25 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
             ? payload.id
             : '';
         const value = await getSpacesApi().items.get(id);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_RESOLVE_FILE_URL,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { key?: unknown }
+    ): Promise<SpacesIpcResult<string | null>> => {
+      try {
+        const key =
+          payload !== undefined && typeof payload.key === 'string'
+            ? payload.key
+            : '';
+        const value = await getSpacesApi().items.resolveFileUrl(key);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

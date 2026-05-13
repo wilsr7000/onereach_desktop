@@ -106,6 +106,19 @@ export interface SpacesItemsApi {
    * failure.
    */
   get(id: string): Promise<Item | null>;
+
+  /**
+   * Resolve a binary `fileKey` (taken off `Item.fileKey`) into a
+   * short-TTL signed download URL via the Files module. Used by the
+   * detail panel to render image previews and offer download links
+   * for non-image binary kinds.
+   *
+   * Returns `null` on any failure (missing key, no auth, network
+   * error). Consumers treat `null` as "no preview available" rather
+   * than surface an error toast -- the detail pane already shows the
+   * item; the missing preview is a soft degrade.
+   */
+  resolveFileUrl(key: string): Promise<string | null>;
 }
 
 /**
@@ -162,6 +175,12 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async get(_id: string): Promise<Item | null> {
       throw notInitialized('items.get');
+    },
+    async resolveFileUrl(_key: string): Promise<string | null> {
+      // Soft contract: the resolver never throws even in the uninit
+      // state -- it just returns null so the detail pane degrades to
+      // "no preview" instead of an error banner.
+      return null;
     },
   };
 

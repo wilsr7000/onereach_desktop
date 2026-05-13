@@ -611,6 +611,14 @@ interface LiteSpacesItemsBridge {
     opts?: { limit?: number; offset?: number }
   ): Promise<LiteSpacesIpcResult<LiteSpaceItemSummary[]>>;
   get(id: string): Promise<LiteSpacesIpcResult<LiteSpaceItem | null>>;
+  /**
+   * Resolve a binary `fileKey` (from `LiteSpaceItem.fileKey`) into a
+   * short-TTL signed URL via the Files module. Returns `null` in the
+   * envelope when the item has no fileKey or the resolver could not
+   * mint a URL. Used by the detail panel to render image previews +
+   * binary download links.
+   */
+  resolveFileUrl(key: string): Promise<LiteSpacesIpcResult<string | null>>;
 }
 
 interface LiteSpacesBridge {

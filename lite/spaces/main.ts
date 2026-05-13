@@ -27,10 +27,11 @@ import {
   type SpacesItemsApi,
 } from './api.js';
 import { SpacesError } from './errors.js';
-import { openSpacesWindow, closeSpacesWindow } from './window.js';
+import { createSpacesWindow, closeSpacesWindow } from './window.js';
 import { registerSpacesIpc, unregisterSpacesIpc } from './ipc.js';
 import { SdkSpacesClient } from './sdk-client.js';
 import { getNeonApi } from '../neon/api.js';
+import { getFilesApi } from '../files/api.js';
 import type {
   Item,
   ItemSummary,
@@ -105,7 +106,7 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
         return;
       }
       try {
-        openSpacesWindow({
+        createSpacesWindow({
           parent: initOptions.getParentWindow(),
           htmlPath: initOptions.htmlPath,
           preloadPath: initOptions.preloadPath,
@@ -199,6 +200,18 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
         });
       }
       return client.getItem(id);
+    },
+    async resolveFileUrl(key: string): Promise<string | null> {
+      // Soft API: missing/empty key, no auth, or any Files error
+      // returns null so the detail panel degrades to "no preview" --
+      // never an error banner. Real callers can still inspect the
+      // logging stream if they care about the failure reason.
+      if (typeof key !== 'string' || key.length === 0) return null;
+      try {
+        return await getFilesApi().getDownloadUrl(key);
+      } catch {
+        return null;
+      }
     },
   };
 

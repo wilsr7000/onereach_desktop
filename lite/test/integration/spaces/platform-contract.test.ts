@@ -74,7 +74,7 @@ import {
   // Generic base from the platform error hierarchy
   LiteError,
   isLiteError,
-} from '../../spaces/api.js';
+} from '../../../spaces/api.js';
 
 // ────────────────────────────────────────────────────────────────────────
 // Stub consumer: implements `SpacesApi` end-to-end. A real second
@@ -89,6 +89,7 @@ interface StubCalls {
   getUncategorizedCount: number;
   itemsList: Array<{ scope: SpaceScope; opts: ListOpts | undefined }>;
   itemsGet: string[];
+  itemsResolveFileUrl: string[];
 }
 
 function buildStubConsumer(): {
@@ -97,6 +98,7 @@ function buildStubConsumer(): {
   setSpaces(spaces: Space[]): void;
   setItems(items: ItemSummary[]): void;
   setItem(id: string, item: Item | null): void;
+  setFileUrl(key: string, url: string | null): void;
   setNextError(err: SpacesError): void;
 } {
   const calls: StubCalls = {
@@ -105,10 +107,12 @@ function buildStubConsumer(): {
     getUncategorizedCount: 0,
     itemsList: [],
     itemsGet: [],
+    itemsResolveFileUrl: [],
   };
   let spaces: Space[] = [];
   let items: ItemSummary[] = [];
   const itemMap = new Map<string, Item | null>();
+  const fileUrlMap = new Map<string, string | null>();
   let nextError: SpacesError | null = null;
 
   function maybeFail<T>(fallback: T): T {
@@ -141,6 +145,10 @@ function buildStubConsumer(): {
         calls.itemsGet.push(id);
         return maybeFail(itemMap.get(id) ?? null);
       },
+      resolveFileUrl: async (key) => {
+        calls.itemsResolveFileUrl.push(key);
+        return maybeFail(fileUrlMap.get(key) ?? null);
+      },
     },
   };
 
@@ -155,6 +163,9 @@ function buildStubConsumer(): {
     },
     setItem: (id, item) => {
       itemMap.set(id, item);
+    },
+    setFileUrl: (key, url) => {
+      fileUrlMap.set(key, url);
     },
     setNextError: (err) => {
       nextError = err;
@@ -393,6 +404,22 @@ describe('Spaces SDK — consuming the surface end-to-end', () => {
     _setSpacesApiForTesting(stub.api);
     const got = await getSpacesApi().items.get('missing');
     expect(got).toBeNull();
+  });
+
+  it('items.resolveFileUrl passes the key through and returns the signed URL', async () => {
+    const stub = buildStubConsumer();
+    stub.setFileUrl('images/foo.png', 'https://signed.example.com/foo.png');
+    _setSpacesApiForTesting(stub.api);
+    const url = await getSpacesApi().items.resolveFileUrl('images/foo.png');
+    expect(stub.calls.itemsResolveFileUrl).toEqual(['images/foo.png']);
+    expect(url).toBe('https://signed.example.com/foo.png');
+  });
+
+  it('items.resolveFileUrl returns null for unknown keys (soft contract)', async () => {
+    const stub = buildStubConsumer();
+    _setSpacesApiForTesting(stub.api);
+    const url = await getSpacesApi().items.resolveFileUrl('missing/key');
+    expect(url).toBeNull();
   });
 
   it('getUncategorizedCount returns a number through the public surface', async () => {
