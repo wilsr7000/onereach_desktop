@@ -32,10 +32,16 @@ interface RendererTestHandle {
   buildItemCard(item: TestItemSummary, active: boolean): HTMLElement;
   buildSpaceChip(chip: TestChip): HTMLElement;
   buildDetailPane(item: TestItem, onClose: () => void): HTMLElement;
+  buildBinaryPreview(item: TestItem, url: string): HTMLElement;
+  buildItemsToolbar(opts: { busy: boolean }): HTMLElement;
   formatCount(n: number): string;
   formatRelativeTime(iso: string): string;
   normalizeSearchQuery(q: string): string;
   matchesSearchQuery(name: string, query: string): boolean;
+  sortSpaces(
+    spaces: ReadonlyArray<TestSpace & { updatedAt?: string; createdAt?: string }>,
+    mode: 'name' | 'recent'
+  ): Array<TestSpace & { updatedAt?: string; createdAt?: string }>;
 }
 
 interface TestSpace {
@@ -424,6 +430,171 @@ describe('matchesSearchQuery', () => {
 
   it('matches the Uncategorized intake row when query is "uncat"', () => {
     expect(handle().matchesSearchQuery('Uncategorized', 'uncat')).toBe(true);
+  });
+});
+
+describe('buildBinaryPreview', () => {
+  it('renders an <img> for kind=image', () => {
+    const item: TestItem = {
+      id: 'i-1',
+      title: 'A photo',
+      kind: 'image',
+      createdAt: '',
+      updatedAt: '',
+      otherSpaces: [],
+      producedBy: null,
+      fileKey: 'images/foo.png',
+    };
+    const preview = handle().buildBinaryPreview(item, 'https://signed.example.com/foo.png');
+    const img = preview.querySelector<HTMLImageElement>('img.spaces-detail-image');
+    expect(img).not.toBeNull();
+    expect(img?.src).toBe('https://signed.example.com/foo.png');
+    expect(img?.alt).toBe('A photo');
+    expect(img?.loading).toBe('lazy');
+  });
+
+  it('falls back to "Item preview" alt when title is empty', () => {
+    const item: TestItem = {
+      id: 'i-1',
+      title: '',
+      kind: 'image',
+      createdAt: '',
+      updatedAt: '',
+      otherSpaces: [],
+      producedBy: null,
+    };
+    const preview = handle().buildBinaryPreview(item, 'https://x/y.png');
+    expect(preview.querySelector<HTMLImageElement>('img')?.alt).toBe('Item preview');
+  });
+
+  it('renders a download link for non-image binary kinds', () => {
+    for (const kind of ['document', 'audio', 'video', 'other'] as const) {
+      const item: TestItem = {
+        id: 'i-1',
+        title: 'File',
+        kind,
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+      };
+      const preview = handle().buildBinaryPreview(item, 'https://x/y');
+      const link = preview.querySelector<HTMLAnchorElement>('a.spaces-detail-download');
+      expect(link).not.toBeNull();
+      expect(link?.target).toBe('_blank');
+      expect(link?.rel).toBe('noopener noreferrer');
+      expect(link?.textContent).toBe('Download');
+    }
+  });
+
+  it('tags the wrapper with the kind so tests + CSS can branch', () => {
+    const item: TestItem = {
+      id: 'i-1',
+      title: 'F',
+      kind: 'video',
+      createdAt: '',
+      updatedAt: '',
+      otherSpaces: [],
+      producedBy: null,
+    };
+    const preview = handle().buildBinaryPreview(item, 'https://x/y');
+    expect(preview.getAttribute('data-kind')).toBe('video');
+  });
+
+  it('labels audio / video / other clearly in the binary-link header', () => {
+    const make = (kind: TestItem['kind']): TestItem => ({
+      id: 'i',
+      title: 't',
+      kind,
+      createdAt: '',
+      updatedAt: '',
+      otherSpaces: [],
+      producedBy: null,
+    });
+    expect(
+      handle()
+        .buildBinaryPreview(make('audio'), 'https://x')
+        .querySelector('.spaces-detail-label')?.textContent
+    ).toBe('Audio file');
+    expect(
+      handle()
+        .buildBinaryPreview(make('video'), 'https://x')
+        .querySelector('.spaces-detail-label')?.textContent
+    ).toBe('Video file');
+    expect(
+      handle()
+        .buildBinaryPreview(make('document'), 'https://x')
+        .querySelector('.spaces-detail-label')?.textContent
+    ).toBe('File');
+  });
+});
+
+describe('buildItemsToolbar', () => {
+  it('renders a refresh button enabled when busy=false', () => {
+    const bar = handle().buildItemsToolbar({ busy: false });
+    const btn = bar.querySelector<HTMLButtonElement>('button.spaces-items-refresh');
+    expect(btn).not.toBeNull();
+    expect(btn?.disabled).toBe(false);
+    expect(btn?.textContent).toContain('Refresh');
+  });
+
+  it('disables and re-labels the refresh button when busy=true', () => {
+    const bar = handle().buildItemsToolbar({ busy: true });
+    const btn = bar.querySelector<HTMLButtonElement>('button.spaces-items-refresh');
+    expect(btn?.disabled).toBe(true);
+    expect(btn?.textContent).toBe('Refreshing…');
+  });
+});
+
+describe('sortSpaces', () => {
+  const fixture = [
+    { id: 'a', name: 'Engineering', updatedAt: '2026-01-05T00:00:00Z' },
+    { id: 'b', name: 'Audit', updatedAt: '2026-01-10T00:00:00Z' },
+    { id: 'c', name: 'Sales', updatedAt: '2026-01-01T00:00:00Z' },
+  ];
+
+  it('sorts case-insensitively by name when mode=name', () => {
+    const out = handle().sortSpaces(fixture, 'name');
+    expect(out.map((s) => s.id)).toEqual(['b', 'a', 'c']); // Audit, Engineering, Sales
+  });
+
+  it('sorts descending by updatedAt when mode=recent', () => {
+    const out = handle().sortSpaces(fixture, 'recent');
+    expect(out.map((s) => s.id)).toEqual(['b', 'a', 'c']); // 01-10, 01-05, 01-01
+  });
+
+  it('falls back to createdAt when updatedAt is missing', () => {
+    const out = handle().sortSpaces(
+      [
+        { id: 'a', name: 'A', createdAt: '2026-01-10T00:00:00Z' },
+        { id: 'b', name: 'B', updatedAt: '2026-01-05T00:00:00Z' },
+      ],
+      'recent'
+    );
+    expect(out[0]?.id).toBe('a');
+  });
+
+  it('pushes entries with no timestamps to the end in recent mode', () => {
+    const out = handle().sortSpaces(
+      [
+        { id: 'a', name: 'A' }, // no timestamps
+        { id: 'b', name: 'B', updatedAt: '2026-01-05T00:00:00Z' },
+        { id: 'c', name: 'C', updatedAt: '2026-01-10T00:00:00Z' },
+      ],
+      'recent'
+    );
+    expect(out.map((s) => s.id)).toEqual(['c', 'b', 'a']);
+  });
+
+  it('does not mutate the input array', () => {
+    const before = [...fixture];
+    handle().sortSpaces(fixture, 'name');
+    expect(fixture).toEqual(before);
+  });
+
+  it('returns empty array for empty input regardless of mode', () => {
+    expect(handle().sortSpaces([], 'name')).toEqual([]);
+    expect(handle().sortSpaces([], 'recent')).toEqual([]);
   });
 });
 

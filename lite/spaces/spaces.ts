@@ -45,6 +45,8 @@ type RendererItem = LiteSpaceItem;
 
 // ─── State ──────────────────────────────────────────────────────────────
 
+export type SpacesSortMode = 'name' | 'recent';
+
 interface SpacesRendererState {
   activeScopeId: string;
   spaces: RendererSpace[];
@@ -55,6 +57,7 @@ interface SpacesRendererState {
   loadingItems: boolean;
   loadingDetail: boolean;
   searchQuery: string;
+  sortMode: SpacesSortMode;
   lastDiscovery: DiscoveryResults | null;
   discoveryInFlight: boolean;
 }
@@ -69,6 +72,7 @@ const state: SpacesRendererState = {
   loadingItems: false,
   loadingDetail: false,
   searchQuery: '',
+  sortMode: 'name',
   lastDiscovery: null,
   discoveryInFlight: false,
 };
@@ -79,6 +83,7 @@ function init(): void {
   applyActiveRow(state.activeScopeId);
   wireSidebarClicks();
   wireSidebarSearch();
+  wireSidebarSort();
   wireDiscoveryPanel();
   void initialLoad();
 }
@@ -126,7 +131,7 @@ async function loadUncategorizedCount(): Promise<void> {
   }
 }
 
-// ─── Sidebar search (Phase 1f) ──────────────────────────────────────────
+// ─── Sidebar search + sort (Phase 1f) ──────────────────────────────────
 
 function wireSidebarSearch(): void {
   const input = document.getElementById('spaces-sidebar-search-input');
@@ -134,6 +139,18 @@ function wireSidebarSearch(): void {
   input.addEventListener('input', () => {
     state.searchQuery = input.value;
     applySidebarFilter();
+  });
+}
+
+function wireSidebarSort(): void {
+  const select = document.getElementById('spaces-sidebar-sort-select');
+  if (!(select instanceof HTMLSelectElement)) return;
+  select.addEventListener('change', () => {
+    const value = select.value;
+    if (value === 'name' || value === 'recent') {
+      state.sortMode = value;
+      renderSpaceList();
+    }
   });
 }
 
@@ -209,11 +226,92 @@ async function loadItemDetail(itemId: string): Promise<void> {
       renderDetail({ error: 'Item not found or no longer visible.' });
       return;
     }
+    // Render the pane immediately with whatever metadata we have so the
+    // user sees structure right away. If the item carries a binary
+    // fileKey, resolve the signed URL in the background and patch the
+    // pane with the preview / link when it lands.
     renderDetail({ item });
+    if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
+      void resolveAndInjectFileUrl(itemId, item);
+    }
   } catch (err) {
     state.loadingDetail = false;
     renderDetail({ error: messageFrom(err) });
   }
+}
+
+async function resolveAndInjectFileUrl(
+  itemId: string,
+  item: RendererItem
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  if (typeof item.fileKey !== 'string' || item.fileKey.length === 0) return;
+  try {
+    const envelope = await bridge.items.resolveFileUrl(item.fileKey);
+    // Bail if the user switched items mid-flight.
+    if (state.activeItemId !== itemId) return;
+    if (envelope.ok === false) return;
+    const url = envelope.value;
+    if (typeof url !== 'string' || url.length === 0) return;
+    injectBinaryPreview(item, url);
+  } catch {
+    // Soft failure: no preview, no banner. The item is still readable.
+  }
+}
+
+/**
+ * Render an image preview (`kind=image`) or a binary download link
+ * (any other kind with a fileKey) into the active detail pane. Called
+ * after the URL resolves; idempotent if the user re-opens the same
+ * item, since each render rebuilds the pane.
+ */
+function injectBinaryPreview(item: RendererItem, url: string): void {
+  const pane = document.querySelector<HTMLElement>(
+    '#spaces-detail .spaces-detail-pane'
+  );
+  if (pane === null) return;
+  // Drop any existing preview block so re-resolutions don't stack.
+  const existing = pane.querySelector('.spaces-detail-preview');
+  if (existing !== null) existing.remove();
+  pane.appendChild(buildBinaryPreview(item, url));
+}
+
+export function buildBinaryPreview(
+  item: RendererItem,
+  url: string
+): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-preview';
+  wrap.setAttribute('data-kind', item.kind);
+  if (item.kind === 'image') {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = item.title.length > 0 ? item.title : 'Item preview';
+    img.loading = 'lazy';
+    img.className = 'spaces-detail-image';
+    wrap.appendChild(img);
+    return wrap;
+  }
+  // Non-image binary: render a download link so the user can fetch
+  // the file in their browser of choice. We deliberately don't auto-
+  // play audio / video here -- that's a future micro-phase decision.
+  const label = document.createElement('span');
+  label.className = 'spaces-detail-label';
+  label.textContent = item.kind === 'audio'
+    ? 'Audio file'
+    : item.kind === 'video'
+    ? 'Video file'
+    : 'File';
+  wrap.appendChild(label);
+  const link = document.createElement('a');
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.className = 'spaces-detail-download';
+  link.textContent = 'Download';
+  wrap.appendChild(link);
+  return wrap;
 }
 
 // ─── Scope wiring ───────────────────────────────────────────────────────
@@ -264,12 +362,58 @@ function renderSpaceList(): void {
     list.appendChild(hint);
     return;
   }
-  for (const space of state.spaces) {
+  // Sort BEFORE row construction so the DOM order matches state.
+  // Uncategorized is its own pinned row in a separate list and isn't
+  // touched by the sort.
+  const ordered = sortSpaces(state.spaces, state.sortMode);
+  for (const space of ordered) {
     list.appendChild(buildSpaceRow(space, space.id === state.activeScopeId));
   }
   // Re-apply any standing search filter so a load doesn't break the
   // currently-typed query.
   applySidebarFilter();
+}
+
+/**
+ * Pure sort for the Spaces sidebar. Stable across re-renders. Exposed
+ * as an export so jsdom tests can pin the rule without driving the
+ * DOM.
+ *
+ *   - `name`: case-insensitive ascending by display name.
+ *   - `recent`: descending by `updatedAt` (falls back to `createdAt`
+ *     when updatedAt is absent). Items missing both fall to the end
+ *     so partial graph data doesn't push them above well-formed ones.
+ */
+export function sortSpaces(
+  spaces: ReadonlyArray<RendererSpace>,
+  mode: SpacesSortMode
+): RendererSpace[] {
+  const copy = [...spaces];
+  if (mode === 'recent') {
+    copy.sort((a, b) => {
+      const ta = parseTimestamp(a.updatedAt ?? a.createdAt);
+      const tb = parseTimestamp(b.updatedAt ?? b.createdAt);
+      if (ta === null && tb === null) return 0;
+      if (ta === null) return 1;
+      if (tb === null) return -1;
+      return tb - ta;
+    });
+    return copy;
+  }
+  copy.sort((a, b) => {
+    const na = (a.name ?? '').toLowerCase();
+    const nb = (b.name ?? '').toLowerCase();
+    if (na < nb) return -1;
+    if (na > nb) return 1;
+    return 0;
+  });
+  return copy;
+}
+
+function parseTimestamp(iso: string | undefined): number | null {
+  if (typeof iso !== 'string' || iso.length === 0) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
 }
 
 function renderSpaceListError(message: string): void {
@@ -339,6 +483,11 @@ function renderItemList(opts: RenderItemListOpts): void {
   const wrap = ensureItemsRegion(main);
   wrap.replaceChildren();
 
+  // Toolbar (Phase 2f): refresh button + count summary. Always
+  // rendered above the items area so the user has a consistent
+  // affordance during loading / empty / populated states.
+  wrap.appendChild(buildItemsToolbar({ busy: opts.loading === true }));
+
   if (opts.error !== undefined) {
     wrap.appendChild(buildBanner('error', opts.error));
     return;
@@ -359,6 +508,42 @@ function renderItemList(opts: RenderItemListOpts): void {
   }
   wrap.appendChild(grid);
   wireCardClicks(grid);
+}
+
+interface ItemsToolbarOpts {
+  busy: boolean;
+}
+
+export function buildItemsToolbar(opts: ItemsToolbarOpts): HTMLElement {
+  const bar = document.createElement('div');
+  bar.className = 'spaces-items-toolbar';
+
+  const summary = document.createElement('span');
+  summary.className = 'spaces-items-summary';
+  // Caller renders before items are guaranteed in state; safe to read.
+  summary.textContent =
+    state.items.length === 0
+      ? ''
+      : `${state.items.length} item${state.items.length === 1 ? '' : 's'}`;
+  bar.appendChild(summary);
+
+  const refreshBtn = document.createElement('button');
+  refreshBtn.type = 'button';
+  refreshBtn.className = 'spaces-items-refresh';
+  refreshBtn.id = 'spaces-items-refresh';
+  refreshBtn.title = 'Refresh items for this Space';
+  refreshBtn.setAttribute('aria-label', 'Refresh items');
+  refreshBtn.disabled = opts.busy;
+  // The two-state label keeps the affordance obvious while a fetch
+  // is in flight; the icon character is a clockwise circular arrow.
+  refreshBtn.textContent = opts.busy ? 'Refreshing…' : '↻ Refresh';
+  refreshBtn.addEventListener('click', () => {
+    if (state.loadingItems) return;
+    void loadItems();
+  });
+  bar.appendChild(refreshBtn);
+
+  return bar;
 }
 
 function ensureItemsRegion(main: HTMLElement): HTMLElement {
@@ -924,10 +1109,13 @@ function messageFrom(err: unknown): string {
   buildItemCard,
   buildSpaceChip,
   buildDetailPane,
+  buildBinaryPreview,
+  buildItemsToolbar,
   formatCount,
   formatRelativeTime,
   normalizeSearchQuery,
   matchesSearchQuery,
+  sortSpaces,
   /**
    * Re-run the renderer's boot sequence. Tests use this to drive a
    * scenario by:
