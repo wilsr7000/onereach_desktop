@@ -113,7 +113,7 @@ When a port adds a menu item, register it in the menu registry. Copy this patter
 ```typescript
 // In your port's main-process bootstrap (e.g. lite/spaces/init.ts)
 import { registry } from '../menu/registry';
-import { openSpacesWindow } from './window';
+import { createSpacesWindow } from './window';
 
 // Top-level placeholder appears automatically when the first child registers
 registry.register({
@@ -130,7 +130,7 @@ registry.register({
   parentId: 'top:tools',
   label: 'Spaces...',
   accelerator: 'CmdOrCtrl+Shift+V',
-  click: () => openSpacesWindow(),
+  click: () => createSpacesWindow(),
   order: 0,
 });
 ```
