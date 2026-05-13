@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:"
+    />
+    <title>Spaces</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./spaces.css" />
+  </head>
+  <body>
+    <header class="spaces-header">
+      <h1>Spaces</h1>
+      <div class="spaces-header-spacer"></div>
+      <span class="spaces-phase-badge" title="Module phase indicator">Phase 0 · scaffold</span>
+    </header>
+
+    <div class="spaces-layout">
+      <!--
+        Left rail: dynamic Spaces navigator (populated in Phase 1).
+        The 'Uncategorized' row is the intake + exception zone (always
+        first, always present).
+      -->
+      <nav id="spaces-sidebar" class="spaces-sidebar" aria-label="Spaces">
+        <div class="spaces-sidebar-section">
+          <div class="spaces-sidebar-title">Intake</div>
+          <ul class="spaces-list" id="spaces-list-intake">
+            <li class="spaces-row spaces-row-intake" data-scope-id="__uncategorized__">
+              <span class="spaces-row-dot spaces-row-dot-intake"></span>
+              <span class="spaces-row-name">Uncategorized</span>
+              <span class="spaces-row-count" data-count-target="uncategorized">—</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="spaces-sidebar-section">
+          <div class="spaces-sidebar-title">Spaces</div>
+          <ul class="spaces-list" id="spaces-list-spaces">
+            <li class="spaces-empty-hint" id="spaces-empty-hint">
+              Spaces will populate when Phase&nbsp;1 lands.
+            </li>
+          </ul>
+        </div>
+      </nav>
+
+      <!--
+        Main pane: item canvas (cards / list). Empty in Phase 0; the
+        Phase 0 view explicitly tells the user the module is wired but
+        not yet fetching data, with the active scope label echoed back
+        so the wiring is observable.
+
+        Phase 0.5 inserts a Discovery panel under the empty-state card
+        with a button that runs the 4 auto-runnable verification
+        queries (Q1-Q4) and renders results inline. The panel hides
+        itself once Phase 1 lands real data lists.
+      -->
+      <main class="spaces-main" id="spaces-main">
+        <section class="spaces-empty-state">
+          <h2 class="spaces-empty-state-title">No items yet</h2>
+          <p class="spaces-empty-state-body">
+            The Spaces module is scaffolded. Cypher-backed item lists and the
+            multi-space card view land in Phase&nbsp;1 + Phase&nbsp;2.
+          </p>
+          <p class="spaces-empty-state-meta">
+            Active scope:
+            <code id="spaces-active-scope">__uncategorized__</code>
+          </p>
+        </section>
+
+        <section class="spaces-discovery" id="spaces-discovery">
+          <header class="spaces-discovery-header">
+            <div>
+              <h3 class="spaces-discovery-title">Phase 0.5 — Discovery</h3>
+              <p class="spaces-discovery-subtitle">
+                Runs Q1–Q4 verification queries against the configured Neon
+                endpoint. Q5 and Q6 are operational questions for the Edison
+                team and are tracked in
+                <code>lite/spaces/DISCOVERY.md</code>.
+              </p>
+            </div>
+            <div class="spaces-discovery-actions">
+              <button
+                type="button"
+                class="spaces-btn spaces-btn-primary"
+                id="spaces-discovery-run"
+              >
+                Run Discovery
+              </button>
+              <button
+                type="button"
+                class="spaces-btn spaces-btn-secondary"
+                id="spaces-discovery-copy"
+                disabled
+              >
+                Copy as Markdown
+              </button>
+            </div>
+          </header>
+
+          <div
+            class="spaces-discovery-summary"
+            id="spaces-discovery-summary"
+            hidden
+          ></div>
+
+          <div
+            class="spaces-discovery-results"
+            id="spaces-discovery-results"
+          ></div>
+        </section>
+      </main>
+
+      <!--
+        Right rail: item detail panel. Hidden in Phase 0 (no items to
+        select); placeholder kept in the DOM so the Phase 2 wiring has
+        a stable mount target.
+      -->
+      <aside class="spaces-detail" id="spaces-detail" hidden></aside>
+    </div>
+
+    <script src="./spaces.js"></script>
+  </body>
+</html>

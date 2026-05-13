@@ -515,6 +515,64 @@ interface LiteSettingsBridge {
 }
 
 // ---------------------------------------------------------------------------
+// Spaces bridge -- mirrors lite/spaces/api.ts SpacesApi (Phase 0+).
+// Phase 0 ships `open()` + structured-envelope data methods; the data
+// methods return `SPACES_NOT_INITIALIZED` envelopes until Phase 1.
+// Phase 0.5 adds `runDiscovery()` for the verification queries.
+// ---------------------------------------------------------------------------
+
+interface LiteSpacesIpcError {
+  code: string;
+  message: string;
+  remediation?: string;
+  context?: Record<string, unknown>;
+}
+
+type LiteSpacesIpcResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: LiteSpacesIpcError };
+
+interface LiteSpacesDiscoveryQueryResultView {
+  id: 'Q1' | 'Q2' | 'Q3' | 'Q4';
+  title: string;
+  gating: 'GATING' | 'INFORMATIONAL';
+  rationale: string;
+  ok: boolean;
+  durationMs: number;
+  cypher: string;
+  rows: Array<Record<string, unknown>>;
+  summary?: string;
+  error?: { code: string; message: string };
+  notes: string[];
+}
+
+interface LiteSpacesDiscoveryResultsView {
+  startedAt: string;
+  finishedAt: string;
+  anyFailures: boolean;
+  gatingFailures: boolean;
+  results: LiteSpacesDiscoveryQueryResultView[];
+}
+
+interface LiteSpacesItemsBridge {
+  list(
+    scopeId: string,
+    opts?: { limit?: number; offset?: number }
+  ): Promise<LiteSpacesIpcResult<unknown[]>>;
+  get(id: string): Promise<LiteSpacesIpcResult<unknown | null>>;
+}
+
+interface LiteSpacesBridge {
+  /** Open (or focus) the Spaces window. */
+  open(): Promise<{ ok: true }>;
+  listSpaces(): Promise<LiteSpacesIpcResult<unknown[]>>;
+  getUncategorizedCount(): Promise<LiteSpacesIpcResult<number>>;
+  items: LiteSpacesItemsBridge;
+  /** Phase 0.5 -- run Q1-Q4 verification queries. */
+  runDiscovery(): Promise<LiteSpacesIpcResult<LiteSpacesDiscoveryResultsView>>;
+}
+
+// ---------------------------------------------------------------------------
 // University bridge -- mirrors lite/university/api.ts UniversityApi.
 //
 // Hosts the top-level "Agentic University" menu (Open LMS, Quick
@@ -685,6 +743,7 @@ interface LiteWindowBridge {
   auth?: LiteAuthBridge;
   totp?: LiteTotpBridge;
   settings?: LiteSettingsBridge;
+  spaces?: LiteSpacesBridge;
   apiDocs?: LiteApiDocsBridge;
   health?: LiteHealthBridge;
   neon?: LiteNeonBridge;

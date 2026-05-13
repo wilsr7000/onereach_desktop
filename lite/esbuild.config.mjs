@@ -49,6 +49,8 @@ const ASSETS_TO_COPY = [
   { from: 'lite/ai-run-times/feed.css', to: 'ai-run-times.css' },
   { from: 'lite/help/help.html', to: 'help.html' },
   { from: 'lite/help/help.css', to: 'help.css' },
+  { from: 'lite/spaces/spaces.html', to: 'spaces.html' },
+  { from: 'lite/spaces/spaces.css', to: 'spaces.css' },
 ];
 
 async function copyAssets() {
@@ -208,6 +210,17 @@ const helpOptions = {
   globalName: 'OnereachLiteHelp',
 };
 
+/** @type {esbuild.BuildOptions} */
+const spacesOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'spaces/spaces.ts')],
+  outfile: resolve(outDir, 'spaces.js'),
+  platform: 'browser',
+  target: 'chrome130',
+  format: 'iife',
+  globalName: 'OnereachLiteSpaces',
+};
+
 const allConfigs = [
   mainProcessOptions,
   preloadOptions,
@@ -221,6 +234,7 @@ const allConfigs = [
   chromeOptions,
   aiRunTimesOptions,
   helpOptions,
+  spacesOptions,
 ];
 
 if (isWatch) {

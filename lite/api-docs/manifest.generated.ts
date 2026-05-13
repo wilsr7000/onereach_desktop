@@ -2291,6 +2291,98 @@ export const MANIFEST: Manifest = {
       "readme": "# `lite/settings/` — Settings window\n\nA small Settings window opened from `Onereach.ai Lite -> Settings...`. v1 ships one section — Two-Factor — which re-hosts the existing TOTP authenticator UI inside the Settings shell. Future sections (Account, Updates, Diagnostics, About) land as additional `mount(el)` functions in `lite/settings/sections/`.\n\n- **Public API**: [`api.ts`](api.ts) — `SettingsApi` interface, `getSettingsApi()` singleton\n- **Internal**:\n  - [`main.ts`](main.ts) — IPC + `initSettings` / `teardown` handle (`@internal`)\n  - [`window.ts`](window.ts) — single-instance `BrowserWindow` factory (`@internal`)\n  - [`types.ts`](types.ts) — `SectionDescriptor` shape\n  - [`settings.html`](settings.html) / [`settings.css`](settings.css) / [`settings.ts`](settings.ts) — renderer shell\n  - [`sections/two-factor.ts`](sections/two-factor.ts) — Two-Factor section renderer (consumes `getTotpApi()` via `window.lite.totp.*`)\n- **Tests**: [`../test/unit/settings-api.test.ts`](../test/unit/settings-api.test.ts)\n- **Decision rationale**: [DECISIONS.md ADR-031](../DECISIONS.md#adr-031-settings-window-with-one-section-per-adr-019-two-factor-migrates-from-standalone-tools-window)\n\n---\n\n## What it is\n\nThe Settings window is the canonical home for configurable surfaces in lite. Its first complete section is Two-Factor, which generates the current GSX / OneReach 2FA code from a saved authenticator secret. Subsequent sections (Account, Updates, Diagnostics, About) are appended to a hand-written list in [`settings.ts`](settings.ts) without changing the shell.\n\nTwo-Factor workflow:\n\n1. Add the OneReach authenticator secret once (scan the setup QR, paste a QR image, or enter the long Base32 secret key).\n2. Settings stores that secret in the OS keychain via `lite/totp/`.\n3. Settings generates the rotating six-digit code (`847 293` style).\n4. During Lite sign-in, the auth popup can auto-fill that generated code when OneReach asks for 2FA. The user can still copy it manually from Settings as a fallback.\n\nThe Two-Factor section does **not** accept the current six-digit login code as input. It accepts the long-lived authenticator secret and then generates the login code used by Lite's sign-in flow.\n\nSecurity notes shown in the UI:\n\n- The authenticator secret is stored in the macOS Keychain / system credential vault.\n- The secret is not written to app settings, logs, bug reports, or KV storage.\n- Lite never shows the saved secret again after setup.\n- Lite only displays the temporary six-digit code, which expires every 30 seconds.\n- Lite reads the same OneReach authenticator secret used by the full Onereach.ai app, so existing full-app 2FA setup can generate codes here too.\n\nThe window opens from `Onereach.ai Lite -> Settings...` (macOS app-menu convention), positioned between About and Quit. No accelerator is bound (`Cmd+,` is the macOS convention but per `.cursorrules` accelerators are user-named, not added speculatively).\n\n```typescript\n// Main-process consumer\nimport { getSettingsApi } from '../settings/api.js';\ngetSettingsApi().open();   // open or focus the Settings window\n```\n\n```typescript\n// Renderer\nawait window.lite.settings.open();\n```\n\n---\n\n## Sections shipped in v1\n\nThe shell renders a sidebar tab + content pane per entry in the `SECTIONS` list (see [`settings.ts`](settings.ts)). Tabs are lazily mounted on first activation and disposed on window close.\n\n| Section id | Title | Implementation |\n|---|---|---|\n| `account` | Account | [`sections/account.ts`](sections/account.ts) -- consumes `window.lite.auth.*`. Sign in / sign out for OneReach Edison. |\n| `two-factor` | Two-Factor | [`sections/two-factor.ts`](sections/two-factor.ts) -- consumes `window.lite.totp.*` to configure the authenticator secret and generate the current GSX / OneReach 2FA code. |\n| `oagi` | OAGI | [`sections/neon.ts`](sections/neon.ts) -- consumes `window.lite.neon.*`. Configure the OAGI / Neon endpoint, Neo4j Aura URI, and credentials. |\n| `updates` | Updates | placeholder copy; auto-update mechanics live in [`lite/updater/`](../updater/) |\n| `diagnostics` | Diagnostics | [`sections/diagnostics.ts`](sections/diagnostics.ts) -- consumes `window.lite.health.snapshot()` (ADR-036). Renders a current-state snapshot across documented Lite modules: app metadata, open windows, auth / TOTP / Neon / updater state, recent error/warn counts. Refresh + Copy as JSON. Snapshot type cannot carry secrets. |\n| `developer` | Developer | [`sections/developer.ts`](sections/developer.ts) -- one button: Open API Reference. |\n| `about` | About | placeholder copy |\n\n---\n\n## API quick reference\n\n| Method | Returns | Throws? | Notes |\n|---|---|---|---|\n| `open()` | `void` | No | Idempotent. Opens or focuses the Settings window. No-op until `initSettings()` runs at boot. |\n\nSee [`api.ts`](api.ts) for full JSDoc.\n\n---\n\n## How to add a new section\n\nThe shell auto-builds the sidebar tab and content pane from the section descriptor — you don't touch [`settings.html`](settings.html). To add a new section:\n\n1. **Write** the renderer logic in `lite/settings/sections/<id>.ts` exporting a `mount<Id>(container) -> disposer | undefined` function. Use the [`SectionDescriptor['mount']`](types.ts) type.\n\n2. **Append** to the section list in [`settings.ts`](settings.ts):\n\n   ```typescript\n   const SECTIONS: SectionDescriptor[] = [\n     // ...existing entries...\n     {\n       id: 'general',\n       title: 'General',\n       icon: ICON_GENERAL,        // 16x16 inline SVG, currentColor stroke\n       mount: mountGeneral,\n     },\n   ];\n   ```\n\n3. **Add** any section-specific styles to [`settings.css`](settings.css) under a section-prefixed class (e.g. `.gen-something` for \"general\"). Shell styles (`.btn-primary`, `.btn-secondary`, `.banner.*`, `.pane-*`) are shared.\n\n4. **Add** a section-specific README block here if the section consumes a non-trivial backing module.\n\nThe list is still hand-written rather than a runtime registry; promote when 3+ sections need conditional visibility / order overrides (per ADR-031 \"registry deferred until needed\").\n\n---\n\n## Renderer bridge (`window.lite.settings`)\n\nThe preload exposes a single method:\n\n```typescript\nawait window.lite.settings.open();   // opens or focuses Settings\n```\n\nThe bridge is shared between renderers — the placeholder window can call `window.lite.settings.open()` to deep-link future \"Manage 2FA\" or \"Configure\" affordances directly into Settings.\n\n---\n\n## Persistence\n\nNone in v1. The TOTP secret already lives in keychain via `lite/totp/store.ts`; Settings has no own state.\n\nWhen future sections need persistence, they will use [`lite/kv/`](../kv/) under collection `lite-settings` — non-secrets only. Secrets continue to use the OS keychain via `keytar` per the pattern in `lite/totp/` and `lite/auth/`.\n\n---\n\n## Why no real \"section registry\" yet?\n\nADR-031 picks the simplest forward-compatible shape: a hand-written list of `SectionDescriptor` in [`settings.ts`](settings.ts). Adding a section means appending to a list and adding a mount point in HTML — about 5 lines per section. A real registry (with order, conditional visibility, lazy loading, etc.) becomes worth it when there are 3+ sections; until then, the indirection costs more than it saves.\n\n---\n\n## Testing\n\nPer Rule 12 (LITE-RULES.md / ADR-024):\n\n- **API conformance** -- [`settings-api.test.ts`](../test/unit/settings-api.test.ts) runs `runApiConformanceContract` with `expectedMethods: ['open']`.\n- **Section behavior** -- exercised via `lite/totp/` tests since the Two-Factor section is a thin renderer over `getTotpApi()`. Settings does not own the data path.\n- **`window.ts` coverage** -- manual smoke only in v1 (the BrowserWindow factory is the same shape as `lite/auth/window.ts`). E2E is tracked as `settings-e2e` in `PORTING.md` deferred queue.\n\n---\n\n## Borrowed patterns (studied, never imported)\n\nPer LITE-RULES.md cherry-pick discipline:\n\n- Full app `settings.html:36-101` -- sidebar + content-area layout (lite mirrors this with sidebar tabs + lazy-mounted panes; full's `onclick=\"...\"` handlers are replaced with `addEventListener` because lite's CSP forbids inline scripts)\n- Full app `settings.html:481-551` -- sidebar tab markup (icon + label, active-state border)\n- Full app `settings.html:943-1026` -- two-factor UI shape, already adapted in ADR-027 and now relocated into [`sections/two-factor.ts`](sections/two-factor.ts)\n- Single-instance window pattern from the deleted `lite/totp/window.ts` and `lite/bug-report/main.ts`\n\nAll rewritten in TS-strict within `lite/settings/`. No `import` from full's root files or `packages/`.\n"
     },
     {
+      "slug": "spaces",
+      "title": "Spaces",
+      "summary": "Spaces module -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports\ngo through `<module>/api.ts` -- never reach into `sdk-client.ts`,\n`window.ts`, `main.ts`, or any other internal file.\n\nPer the Spaces plan (\"Spaces as Platform Primitive\" section), the\nmethods declared here ARE the platform contract -- the same surface\nGSX agents, Cowork integrations, and the renderer all consume. The\nLite UI is just the first consumer.\n\nPhase 0 ships:\n  - The singleton swap pattern (`getSpacesApi` + `_setSpacesApiForTesting`)\n  - Method signatures (every method throws `SPACES_NOT_INITIALIZED`\n    in the default implementation)\n  - `open()` to launch the Spaces window\n\nPhase 1 wires the BrowserWindow-backed implementation via\n`initSpaces()` and lands the real `listSpaces` + `items.list` queries.\n\nTests: `_setSpacesApiForTesting(stub)` to inject a custom\nimplementation, `_resetSpacesApiForTesting()` to clear the singleton.",
+      "surface": {
+        "interfaceName": "SpacesItemsApi",
+        "interfaceDescription": "Items sub-surface, scoped to a Space. Mirrored on the renderer side\nas `window.lite.spaces.items.*`.\n\n**Error contract**: every method throws `SpacesError` on failure.\nInspect `.code`: `SPACES_NOT_AUTHENTICATED`, `SPACES_NOT_FOUND`,\n`SPACES_FORBIDDEN`, `SPACES_CYPHER`, `SPACES_NETWORK`,\n`SPACES_INVALID_INPUT`, `SPACES_NOT_INITIALIZED`. `get()` soft-fails\nnot-found (returns `null`).",
+        "methods": [
+          {
+            "name": "list",
+            "signature": "list(scope: SpaceScope, opts?: ListOpts): Promise<ItemSummary[]>",
+            "description": "List items in the given scope. When `scope.kind === 'uncategorized'`,\nreturns items NOT participating in any `:Space` (the intake +\nexception zone). Permission-filtered server-side.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "get",
+            "signature": "get(id: string): Promise<Item | null>",
+            "description": "Fetch a single item by id. Returns `null` when the item doesn't\nexist or is filtered out by ACL. Throws on auth / network / Cypher\nfailure.",
+            "tags": [],
+            "examples": []
+          }
+        ]
+      },
+      "events": {
+        "constantName": "SPACES_EVENTS",
+        "count": 12,
+        "entries": [
+          {
+            "constantKey": "LIST_SPACES_START",
+            "name": "spaces.listSpaces.start",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_SPACES_FINISH",
+            "name": "spaces.listSpaces.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_SPACES_FAIL",
+            "name": "spaces.listSpaces.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_LIST_START",
+            "name": "spaces.items.list.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_LIST_FINISH",
+            "name": "spaces.items.list.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_LIST_FAIL",
+            "name": "spaces.items.list.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_GET_START",
+            "name": "spaces.items.get.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_GET_FINISH",
+            "name": "spaces.items.get.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_GET_FAIL",
+            "name": "spaces.items.get.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "UNCATEGORIZED_COUNT_START",
+            "name": "spaces.uncategorizedCount.start",
+            "description": ""
+          },
+          {
+            "constantKey": "UNCATEGORIZED_COUNT_FINISH",
+            "name": "spaces.uncategorizedCount.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "UNCATEGORIZED_COUNT_FAIL",
+            "name": "spaces.uncategorizedCount.fail",
+            "description": ""
+          }
+        ]
+      },
+      "readme": "# Spaces Module\n\n**Status**: Phase 0 scaffold. The module compiles, the window opens, the IPC surface is wired, and the renderer chrome shows a Phase-0 placeholder. Cypher-backed data lands in Phase 1.\n\n> Spaces is a **platform primitive**, not a Lite-only feature. The Lite UI in this module is the first consumer of the SDK; future consumers include GSX agents, Cowork integrations, and the Approval + Audit event stream. The methods on `SpacesApi` ARE the platform contract -- treat them with that level of stability discipline. See the spaces plan (\"Spaces as Platform Primitive\" section).\n\n## Public surface (`api.ts`)\n\n```ts\nimport { getSpacesApi } from '../spaces/api.js';\n\nconst api = getSpacesApi();\napi.open();                                    // launch / focus the window\nawait api.listSpaces();                        // Phase 1\nawait api.getUncategorizedCount();             // Phase 1\nawait api.items.list({ kind: 'uncategorized' }); // Phase 1\nawait api.items.list({ kind: 'space', spaceId: '…' }); // Phase 2\nawait api.items.get(itemId);                   // Phase 2\n```\n\nUse `resolveSpaceScope(id)` at any UI/IPC boundary that hands a plain id into the SDK. The synthetic Uncategorized id is exported as `UNCATEGORIZED_SPACE_ID` and is the only string the renderer/IPC layer ever uses; the typed `SpaceScope` union is what every internal call site sees.\n\n### Phase 0 → Phase 1 promotion\n\nThe Phase 0 stub backs every data method with `SPACES_NOT_INITIALIZED`. To promote, replace `lite/spaces/sdk-client.ts` with the real Neon-backed implementation and the surface here stays unchanged.\n\n## Internal layout\n\n| File                  | Role                                                                |\n| --------------------- | ------------------------------------------------------------------- |\n| `api.ts`              | Public surface + singleton swap pattern. The only allowed importer. |\n| `types.ts`            | `Space`, `Item`, `ItemSummary`, `ListOpts`, etc.                    |\n| `scope.ts`            | `SpaceScope` union + `resolveSpaceScope` helper.                    |\n| `errors.ts`           | `SpacesError` + `SPACES_ERROR_CODES`.                               |\n| `events.ts`           | `SpacesEvent` taxonomy + `SPACES_EVENTS` catalog.                   |\n| `sdk-client.ts`       | Cypher wrapper. Phase 0 = stub. Phase 1 = real Neon calls.          |\n| `discovery.ts`        | Phase 0.5 query runner (main-process; uses `getNeonApi()`).         |\n| `discovery-format.ts` | Renderer-safe types + Markdown formatter for discovery results.     |\n| `window.ts`           | Single-instance `BrowserWindow` factory.                            |\n| `ipc.ts`              | `lite:spaces:*` IPC handler registration.                           |\n| `main.ts`             | `initSpaces()` orchestrator + Tools-menu wiring.                    |\n| `spaces.html/css`     | Renderer chrome (incl. Phase 0.5 Discovery panel).                  |\n| `spaces.ts`           | Renderer entrypoint (IIFE bundled by esbuild).                      |\n| `DISCOVERY.md`        | Phase 0.5 reference: Q1–Q6 queries + Q5/Q6 operational template.    |\n\n## Error catalog\n\n| Code                          | Trigger                                                          |\n| ----------------------------- | ---------------------------------------------------------------- |\n| `SPACES_NOT_AUTHENTICATED`    | No `mult` token / no active account.                             |\n| `SPACES_NOT_FOUND`            | Space / item missing, or filtered out by ACL.                    |\n| `SPACES_FORBIDDEN`            | Caller lacks read/mutate permission on the target.               |\n| `SPACES_CYPHER`               | Neon query failed (transient or syntax).                         |\n| `SPACES_NETWORK`              | DNS / TCP / TLS / fetch reject on the way to Edison.             |\n| `SPACES_INVALID_INPUT`        | Empty id, bad limit, malformed payload.                          |\n| `SPACES_NOT_INITIALIZED`      | SDK called before `initSpaces()` ran (Phase 0 stub also throws). |\n\n## Conformance\n\n`lite/test/unit/spaces-api.test.ts` runs `runApiConformanceContract` per Rule 12. Required surface: `['open', 'listSpaces', 'getUncategorizedCount', 'items']`.\n\n## Out of scope (this phase)\n\n- `Cypher` reads / writes (Phase 1+)\n- Multi-Space chips on item cards (Phase 2)\n- Item-detail rail population (Phase 2)\n- `addToSpace` / `removeToSpace` mutations (Phase 3)\n- Suggestions / Librarian agents (Phase 4)\n"
+    },
+    {
       "slug": "tools",
       "title": "Tools",
       "summary": "Tools module -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports\ngo through `<module>/api.ts`.\n\nThe Tools module hosts the top-level \"Tools\" menu and the persistence\nlayer behind it. Each entry is a simple `{ label, url }` shortcut --\nclicking it opens the URL in the user's default browser.\n\nTests: `_setToolsApiForTesting(stub)` to inject a custom\nimplementation, `_resetToolsApiForTesting()` to clear the singleton.",
@@ -2664,5 +2756,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-05-11T22:18:02.633Z"
+  "generatedAt": "2026-05-12T14:15:01.062Z"
 } as const;

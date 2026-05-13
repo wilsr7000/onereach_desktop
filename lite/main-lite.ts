@@ -40,6 +40,7 @@ import { initAuth, type AuthHandle } from './auth/main.js';
 import { initTotp, type TotpHandle } from './totp/main.js';
 import { initSettings, type SettingsHandle } from './settings/main.js';
 import { initHelp, type HelpHandle } from './help/main.js';
+import { initSpaces, type SpacesHandle } from './spaces/main.js';
 import { initApiDocs, type ApiDocsHandle } from './api-docs/main.js';
 import { initHealth, type HealthHandle } from './health/main.js';
 import { initNeon, type NeonHandle } from './neon/main.js';
@@ -207,6 +208,7 @@ let authHandle: AuthHandle | null = null;
 let totpHandle: TotpHandle | null = null;
 let settingsHandle: SettingsHandle | null = null;
 let helpHandle: HelpHandle | null = null;
+let spacesHandle: SpacesHandle | null = null;
 let apiDocsHandle: ApiDocsHandle | null = null;
 let healthHandle: HealthHandle | null = null;
 let neonHandle: NeonHandle | null = null;
@@ -623,6 +625,29 @@ app
       });
     } catch (err) {
       getLoggingApi().error('help', 'initHelp threw', {
+        error: (err as Error).message,
+      });
+    }
+
+    // Initialize Spaces (Phase 0 scaffold). Registers `lite:spaces:*` IPC
+    // handlers, the Tools -> Spaces... menu entry, and the single-instance
+    // BrowserWindow factory. Data methods (listSpaces, items.list, ...)
+    // throw `SPACES_NOT_INITIALIZED` until Phase 1 wires the Neon-backed
+    // implementation -- the window opens but renders the Phase 0 empty
+    // state. See `lite/spaces/README.md` and the spaces plan.
+    try {
+      spacesHandle = initSpaces({
+        preloadPath,
+        htmlPath: path.join(__dirname, 'spaces.html'),
+        getParentWindow: () => mainWindow,
+        logger: {
+          info: (msg, data) => getLoggingApi().info('spaces', msg, data),
+          warn: (msg, data) => getLoggingApi().warn('spaces', msg, data),
+          error: (msg, data) => getLoggingApi().error('spaces', msg, data),
+        },
+      });
+    } catch (err) {
+      getLoggingApi().error('spaces', 'initSpaces threw', {
         error: (err as Error).message,
       });
     }
@@ -1179,6 +1204,11 @@ app.on('before-quit', () => {
   }
   try {
     helpHandle?.teardown();
+  } catch {
+    /* shutdown best-effort */
+  }
+  try {
+    spacesHandle?.teardown();
   } catch {
     /* shutdown best-effort */
   }

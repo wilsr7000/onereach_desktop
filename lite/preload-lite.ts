@@ -56,6 +56,18 @@ const SETTINGS_OPEN = 'lite:settings:open';
 const API_DOCS_OPEN = 'lite:api-docs:open';
 const HEALTH_SNAPSHOT = 'lite:health:snapshot';
 
+// Spaces (Phase 0): only OPEN is bridged for the renderer today. The
+// data methods (LIST_SPACES, UNCATEGORIZED_COUNT, ITEMS_LIST, ITEMS_GET)
+// are registered main-side now so the Phase 1 wiring is a pure
+// renderer-bridge addition with no main-process churn. The renderer
+// surface is bridged once Phase 1 lands real fetches.
+const SPACES_OPEN = 'lite:spaces:open';
+const SPACES_LIST_SPACES = 'lite:spaces:listSpaces';
+const SPACES_UNCATEGORIZED_COUNT = 'lite:spaces:uncategorizedCount';
+const SPACES_ITEMS_LIST = 'lite:spaces:items:list';
+const SPACES_ITEMS_GET = 'lite:spaces:items:get';
+const SPACES_DISCOVERY_RUN = 'lite:spaces:discovery:run';
+
 const NEON_QUERY = 'lite:neon:query';
 const NEON_STATUS = 'lite:neon:status';
 const NEON_TEST_CONNECTION = 'lite:neon:test-connection';
@@ -403,6 +415,79 @@ interface ApiDocsBridge {
    * duplicate. ADR-035.
    */
   open(): Promise<{ ok: true }>;
+}
+
+// ---------------------------------------------------------------------------
+// Spaces bridge (Phase 0 surface).
+//
+// Per the Spaces plan ("Spaces as Platform Primitive"), the Lite UI is
+// the first consumer of the SpacesApi -- the SDK shape is the platform
+// contract. The bridge mirrors `SpacesApi` from `lite/spaces/api.ts`.
+//
+// Phase 0 ships only `open()` calls that actually hit the wire. The
+// data methods are stubbed wire-side: every call resolves with a
+// `SpacesIpcResult` envelope where `ok === false` and the error code is
+// `SPACES_NOT_INITIALIZED`. The renderer can already use the same call
+// pattern -- Phase 1 just replaces the SDK implementation.
+// ---------------------------------------------------------------------------
+
+interface SpacesIpcErrorView {
+  code: string;
+  message: string;
+  remediation?: string;
+  context?: Record<string, unknown>;
+}
+
+type SpacesIpcResultView<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: SpacesIpcErrorView };
+
+interface SpacesItemsBridge {
+  list(
+    scopeId: string,
+    opts?: { limit?: number; offset?: number }
+  ): Promise<SpacesIpcResultView<unknown[]>>;
+  get(id: string): Promise<SpacesIpcResultView<unknown | null>>;
+}
+
+// Phase 0.5 discovery: result shape mirrors lite/spaces/discovery.ts.
+// Wide-typed at the bridge boundary so the renderer can evolve without
+// preload changes; the source-of-truth type lives in
+// lite/spaces/discovery.ts and is re-imported there.
+interface SpacesDiscoveryQueryResultView {
+  id: 'Q1' | 'Q2' | 'Q3' | 'Q4';
+  title: string;
+  gating: 'GATING' | 'INFORMATIONAL';
+  rationale: string;
+  ok: boolean;
+  durationMs: number;
+  cypher: string;
+  rows: Array<Record<string, unknown>>;
+  summary?: string;
+  error?: { code: string; message: string };
+  notes: string[];
+}
+
+interface SpacesDiscoveryResultsView {
+  startedAt: string;
+  finishedAt: string;
+  anyFailures: boolean;
+  gatingFailures: boolean;
+  results: SpacesDiscoveryQueryResultView[];
+}
+
+interface SpacesBridge {
+  /** Open (or focus) the Spaces window. */
+  open(): Promise<{ ok: true }>;
+  listSpaces(): Promise<SpacesIpcResultView<unknown[]>>;
+  getUncategorizedCount(): Promise<SpacesIpcResultView<number>>;
+  items: SpacesItemsBridge;
+  /**
+   * Phase 0.5 discovery -- run Q1-Q4 verification queries against the
+   * configured Neon endpoint. Never throws; per-query failures land in
+   * the envelope's `results[i].error`.
+   */
+  runDiscovery(): Promise<SpacesIpcResultView<SpacesDiscoveryResultsView>>;
 }
 
 interface HealthBridge {
@@ -980,6 +1065,29 @@ const apiDocs: ApiDocsBridge = {
   open: () => ipcRenderer.invoke(API_DOCS_OPEN) as Promise<{ ok: true }>,
 };
 
+const spaces: SpacesBridge = {
+  open: () => ipcRenderer.invoke(SPACES_OPEN) as Promise<{ ok: true }>,
+  listSpaces: () =>
+    ipcRenderer.invoke(SPACES_LIST_SPACES) as Promise<SpacesIpcResultView<unknown[]>>,
+  getUncategorizedCount: () =>
+    ipcRenderer.invoke(SPACES_UNCATEGORIZED_COUNT) as Promise<SpacesIpcResultView<number>>,
+  items: {
+    list: (scopeId, opts) =>
+      ipcRenderer.invoke(SPACES_ITEMS_LIST, {
+        scopeId,
+        ...(opts !== undefined ? { opts } : {}),
+      }) as Promise<SpacesIpcResultView<unknown[]>>,
+    get: (id) =>
+      ipcRenderer.invoke(SPACES_ITEMS_GET, { id }) as Promise<
+        SpacesIpcResultView<unknown | null>
+      >,
+  },
+  runDiscovery: () =>
+    ipcRenderer.invoke(SPACES_DISCOVERY_RUN) as Promise<
+      SpacesIpcResultView<SpacesDiscoveryResultsView>
+    >,
+};
+
 const health: HealthBridge = {
   snapshot: () => ipcRenderer.invoke(HEALTH_SNAPSHOT) as Promise<LiteAppHealthSnapshotView>,
 };
@@ -1410,6 +1518,7 @@ contextBridge.exposeInMainWorld('lite', {
   totp,
   settings,
   apiDocs,
+  spaces,
   health,
   neon,
   idw,
