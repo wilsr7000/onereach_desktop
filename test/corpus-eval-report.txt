@@ -1,10 +1,10 @@
 ======================================================================
   CORPUS EVALUATION SUMMARY
 ======================================================================
-  Total turns evaluated: 63
-  Pass:    38  (60%)
-  Partial: 19  (30%)
-  Fail:    6  (10%)
+  Total turns evaluated: 70
+  Pass:    45  (64%)
+  Partial: 19  (27%)
+  Fail:    6  (9%)
   Crash:   0  (0%)
 ======================================================================
 
@@ -41,19 +41,19 @@
   PER-CONVERSATION RESULTS
 ----------------------------------------------------------------------
   [PASS] Time: basic queries (time-agent)
-    + "What time is it?" -> "It's 3:00 PM"
-    + "And what day is it today?" -> "It's Monday, May 11, 2026"
-    + "What is the date?" -> "It's Monday, May 11, 2026"
+    + "What time is it?" -> "It's 7:17 AM"
+    + "And what day is it today?" -> "It's Tuesday, May 12, 2026"
+    + "What is the date?" -> "It's Tuesday, May 12, 2026"
   [PASS] Time: timezone awareness (time-agent)
     + "What time is it in Tokyo?" -> "Which timezone would you like? Your saved timezones are"
-    + "And in London?" -> "It's 3:00 PM"
+    + "And in London?" -> "It's 7:17 AM"
   [PASS] Weather: city provided (weather-agent)
-    + "What is the weather in Denver?" -> "It's 78°F and sunny in Denver"
+    + "What is the weather in Denver?" -> "It's 58°F and sunny in Denver"
   [FAIL] Weather: no city triggers follow-up (weather-agent)
-    - "What's the weather?" -> "It's 65°F and partly cloudy in San Francisco"
-    + "San Francisco" -> "It's 65°F and partly cloudy in San Francisco"
+    - "What's the weather?" -> "It's 53°F and overcast in San Francisco. Humidity is 93"
+    + "San Francisco" -> "It's 53°F and overcast in San Francisco. Humidity is 93"
   [PASS] Weather: forecast request (weather-agent)
-    + "Will it rain tomorrow in Seattle?" -> "It's 65°F and partly cloudy in San Francisco"
+    + "Will it rain tomorrow in Seattle?" -> "It's 53°F and overcast in San Francisco. Humidity is 93"
   [PARTIAL] Spelling: common words (spelling-agent)
     ~ "How do you spell necessary?" -> "NECESSARY: N - E - C - E - S - S - A - R - Y"
     ~ "And accommodation?" -> "ACCOMMODATION: A - C - C - O - M - M - O - D - A - T - "
@@ -65,14 +65,14 @@
     + "Hello there" -> "What can I do for you?"
     + "How are you doing?" -> "I'm doing well, Robb! How can I help you?"
     + "Thanks for your help" -> "Anytime!"
-    + "Goodbye" -> "Goodbye, Robb! Have a great afternoon!"
+    + "Goodbye" -> "Take care, Robb!"
   [PASS] Smalltalk: casual greetings (smalltalk-agent)
-    + "Hey" -> "Hello Robb! What can I do for you?"
+    + "Hey" -> "Hi Robb! I'm here to help."
     + "Good morning" -> "Good morning, Robb! How can I help you today?"
     + "Good night" -> "Good night, Robb! Sleep well."
   [PASS] Help: capabilities inquiry (help-agent)
-    + "What can you do?" -> "I have 30 capabilities across several areas. I can help"
-    + "Tell me more about the agents" -> "I have 30 capabilities across several areas. I can help"
+    + "What can you do?" -> "I have 33 capabilities across several areas. I can help"
+    + "Tell me more about the agents" -> "I have 33 capabilities across several areas. I can help"
   [PASS] Help: feature questions (help-agent)
     + "Help" -> "What would you like help with? I can tell you about sch"
     + "How do I use voice commands?" -> "Say 'cancel' to stop, 'repeat' to hear my last response"
@@ -113,7 +113,7 @@
     ~ "How do I configure the AI service?" -> "I had trouble searching the documentation. Please try a"
     ~ "What are the keyboard shortcuts?" -> "I had trouble searching the documentation. Please try a"
   [PASS] Daily brief: morning briefing (daily-brief-agent)
-    + "Give me my morning briefing" -> "Good afternoon, Robb. Current time: 3:00 PM. Date: Mond"
+    + "Give me my morning briefing" -> "Good morning, Robb. Current time: 7:18 AM. Date: Tuesda"
   [PARTIAL] Memory: store and recall preferences (memory-agent)
     ~ "Remember that I prefer dark mode" -> "Sorry, I had trouble managing your memory. Please try a"
     ~ "My favorite programming language is Rust" -> "Sorry, I had trouble managing your memory. Please try a"
@@ -133,8 +133,20 @@
   [PARTIAL] Orchestrator: composite request (orchestrator-agent)
     ~ "Check the weather and my calendar for today" -> "I'm not sure how to help with that."
   [PASS] Edge: garbled input (smalltalk-agent)
-    + "asdfghjkl" -> "Could you say that again?"
+    + "asdfghjkl" -> "What was that?"
   [PASS] Edge: single word (help-agent)
     + "help" -> "What would you like help with? I can tell you about sch"
   [PASS] Edge: very long input (help-agent)
     + "I need help understanding how to use all the diffe" -> "I can manage your calendar. Ask 'what's on my schedule'"
+  [PASS] Screen Vision: visual referent intents (HIGH confidence) (screen-vision-agent)
+    + "What is this error?" -> "There is a red button labelled Save next to an error."
+    + "Read what is on my screen" -> "A text editor is on screen."
+    + "Summarize this article" -> "The article describes a release."
+  [PASS] Live Translate: start session (HIGH confidence) (live-translate-agent)
+    + "Translate what I am saying to Spanish" -> "Live translation stopped."
+  [PASS] Live Translate: stop session (live-translate-agent)
+    + "Stop translating" -> "Live translation stopped."
+  [PASS] MCP Bridge: matches a registered tool (HIGH confidence) (mcp-bridge-agent)
+    + "Echo hello back to me" -> "echoed"
+  [PASS] MCP Bridge: abstains when no tool matches (LOW confidence) (mcp-bridge-agent)
+    + "do something random" -> "echoed"

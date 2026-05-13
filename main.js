@@ -8727,6 +8727,136 @@ function setupIPC() {
     }
   });
 
+  // ==================== MCP SERVERS (Realtime API 2 follow-up) ====================
+  // Settings UI for the mcp-bridge-agent's registered MCP servers.
+  // The agent reloads its tool list whenever the list changes so users
+  // don't have to restart the app to add/remove a server.
+
+  ipcMain.handle('mcp:save-servers', async (_event, servers) => {
+    try {
+      const list = Array.isArray(servers) ? servers : [];
+      const sm = global.settingsManager || require('./settings-manager').getSettingsManager();
+      sm.set('mcp.servers', list);
+
+      // Hot-reload the bridge agent so the bidder prompt + tool list refresh.
+      try {
+        const { getAgent } = require('./packages/agents/agent-registry');
+        const agent = getAgent('mcp-bridge-agent');
+        if (agent && typeof agent.reload === 'function') {
+          await agent.reload();
+        }
+      } catch (reloadErr) {
+        log.warn('app', 'mcp-bridge-agent reload after save failed', { error: reloadErr.message });
+      }
+      return { success: true, count: list.length };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Live Translate bridge: forwards lib/live-translate-service caption
+  // events to every renderer that has subscribed via the
+  // `live-translate:subscribe` IPC. The bridge attaches a single service
+  // subscriber once, then fans out per-renderer. webContents are pruned
+  // automatically when destroyed.
+  // ──────────────────────────────────────────────────────────────────
+  const _liveTranslateSubscribers = new Set();
+  let _liveTranslateBridgeAttached = false;
+
+  function _ensureLiveTranslateBridge() {
+    if (_liveTranslateBridgeAttached) return;
+    try {
+      const { getLiveTranslateService } = require('./lib/live-translate-service');
+      const svc = getLiveTranslateService();
+      svc.subscribe((evt) => {
+        for (const wc of [..._liveTranslateSubscribers]) {
+          try {
+            if (wc.isDestroyed && wc.isDestroyed()) {
+              _liveTranslateSubscribers.delete(wc);
+              continue;
+            }
+            wc.send('live-translate:event', evt);
+          } catch (sendErr) {
+            log.warn('app', 'live-translate forward failed', { error: sendErr.message });
+            _liveTranslateSubscribers.delete(wc);
+          }
+        }
+      });
+      _liveTranslateBridgeAttached = true;
+    } catch (err) {
+      log.warn('app', 'live-translate bridge attach failed', { error: err.message });
+    }
+  }
+
+  ipcMain.handle('live-translate:subscribe', (event) => {
+    _ensureLiveTranslateBridge();
+    const wc = event.sender;
+    _liveTranslateSubscribers.add(wc);
+    wc.once('destroyed', () => _liveTranslateSubscribers.delete(wc));
+    return { success: true };
+  });
+
+  ipcMain.handle('live-translate:unsubscribe', (event) => {
+    _liveTranslateSubscribers.delete(event.sender);
+    return { success: true };
+  });
+
+  ipcMain.handle('live-translate:status', () => {
+    try {
+      const { getLiveTranslateService } = require('./lib/live-translate-service');
+      return getLiveTranslateService().getStatus();
+    } catch (err) {
+      return { active: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('mcp:test-connection', async (_event, payload) => {
+    try {
+      if (!payload) return { ok: false, error: 'No connection details provided' };
+      const transport = payload.transport === 'stdio' ? 'stdio' : 'http';
+      const { createClient } = require('./lib/mcp-client');
+
+      let clientConfig;
+      if (transport === 'stdio') {
+        if (!payload.command) return { ok: false, error: 'Command is required for stdio transport' };
+        clientConfig = {
+          transport: 'stdio',
+          label: payload.label || payload.command,
+          command: payload.command,
+          args: Array.isArray(payload.args) ? payload.args : [],
+          env: payload.env || {},
+          cwd: payload.cwd,
+          timeoutMs: 5000,
+        };
+      } else {
+        if (!payload.url) return { ok: false, error: 'URL is required for http transport' };
+        clientConfig = {
+          transport: 'http',
+          label: payload.label || payload.url,
+          url: payload.url,
+          headers: payload.headers || {},
+          timeoutMs: 5000,
+        };
+      }
+
+      const client = createClient(clientConfig);
+      try {
+        const health = await client.health();
+        if (!health.ok) {
+          return { ok: false, error: health.error, latencyMs: health.latencyMs };
+        }
+        const tools = await client.listTools({ refresh: true }).catch(() => []);
+        return { ok: true, toolCount: tools.length, latencyMs: health.latencyMs };
+      } finally {
+        // stdio: kill the test subprocess; http: no-op.
+        try { client.close(); } catch (_e) { /* ignore */ }
+      }
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // ==================== EDISON SDK MANAGEMENT ====================
 
   const edisonSdkManager = require('./lib/edison-sdk-manager');
@@ -18320,7 +18450,9 @@ async function startBuiltInAgents(exchangeUrl) {
     console.log('[VoiceOrb] Make sure packages are compiled: cd packages && npm run build');
   }
 
-  // Start user-defined dynamic agents
+  // Start user-defined dynamic agents (graceful degradation if the
+  // task-agent SDK isn't loadable -- e.g. workspace symlink missing in
+  // packaged build; see dynamic-agent.js for context).
   try {
     const { startDynamicAgent } = require('./packages/agents/dynamic-agent');
     const dynamicAgent = await startDynamicAgent(exchangeUrl);
@@ -18329,7 +18461,7 @@ async function startBuiltInAgents(exchangeUrl) {
       console.log('[VoiceOrb] Dynamic user-defined agent started');
     }
   } catch (error) {
-    console.warn('[VoiceOrb] Could not start dynamic agent:', error.message);
+    console.log('[VoiceOrb] Dynamic agents disabled:', error.message);
   }
 
   // Start GSX/MCS connections

@@ -48,8 +48,15 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, _llmClient) {
     const agentPkg = require('../task-agent/dist/index.js');
     createAgent = agentPkg.createAgent;
   } catch (error) {
-    log.error('agent', 'Failed to load task-agent package', { error: error.message });
-    log.info('agent', 'Make sure to run: cd packages/task-agent && npm run build');
+    // Known packaging issue: the workspace symlink for
+    // `@onereach/task-exchange` is not always materialized inside the
+    // app.asar, so the task-agent SDK can fail to resolve its peer
+    // package in production builds. The caller (startDynamicAgent in
+    // main.js) wraps this in its own try/catch and continues without
+    // dynamic agents; this is a graceful degradation, not a crash.
+    // Logged at warn so the boot log doesn't flag a red error for a
+    // benign condition. Tracked separately for a proper packaging fix.
+    log.warn('agent', 'task-agent SDK unavailable (dynamic agents disabled)', { reason: error.message });
     throw error;
   }
 

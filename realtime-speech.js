@@ -126,23 +126,21 @@ class RealtimeSpeech {
         await this.connect();
 
         const webContentsId = event.sender.id;
-        // Subscribe to voice-listener events (transcripts, lifecycle)
+        // Subscribe to voice-listener events (transcripts, lifecycle, AND
+        // model audio_delta/audio_done events forwarded from the GA
+        // Realtime API since Phase 3 of the realtime-2 capabilities plan).
         this.subscribe(webContentsId, (speechEvent) => {
           if (!event.sender.isDestroyed()) {
             event.sender.send('realtime-speech:event', speechEvent);
           }
         });
 
-        // Also subscribe to voice-speaker events (TTS audio) for this session.
-        // This replaces the old _ensureOrbSubscribed() auto-subscribe that would
-        // re-subscribe even after the orb explicitly disconnected.
-        if (!this.speaker.subscribers.has(webContentsId)) {
-          this.speaker.subscribe(webContentsId, (speechEvent) => {
-            if (!event.sender.isDestroyed()) {
-              event.sender.send('realtime-speech:event', speechEvent);
-            }
-          });
-        }
+        // Phase 3 (audio output hard cut): we no longer auto-subscribe the
+        // orb's webContents to voice-speaker.js. The orb gets its audio
+        // directly from the realtime API stream via voice-listener's
+        // broadcast. voice-speaker.js is kept alive for non-orb proactive
+        // callers (critical-meeting alarms, etc.) which subscribe to it
+        // explicitly via their own paths.
 
         return { success: true, sessionId: this.sessionId };
       } catch (err) {

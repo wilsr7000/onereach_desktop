@@ -4095,24 +4095,38 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
       }
     }
 
+    // Forward panel sizing hints so the HUD can grow to fit rich UIs
+    // (daily-brief dayView is 480x540..900). Without these, command-hud
+    // calls addAgentUIPanel({width: undefined, height: undefined}) and
+    // recalculateHUDSize falls back to the 340x420 default -- the
+    // dayView's tall card stack (right-now, insights, timeline,
+    // briefing, smart actions, focus window) gets clipped below the
+    // fold. `ui` is forwarded for completeness so any listener that
+    // wants to re-render from the spec still can.
     if (global.sendCommandHUDResult) {
       global.sendCommandHUDResult({
         success: true,
         message: message || 'Task completed',
         html: result.html,
+        ui: result.ui,
+        panelWidth: result.panelWidth,
+        panelHeight: result.panelHeight,
         data: result.data,
         agentId,
         agentName: agentId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
       });
     }
 
-    // Emit to HUD API (include html so all listeners can render rich UI)
+    // Emit to HUD API (include html + panel sizing so listeners can render rich UI)
     hudApi.emitResult({
       taskId: task.id,
       success: true,
       message: message || 'Task completed',
       data: result.data,
       html: result.html,
+      ui: result.ui,
+      panelWidth: result.panelWidth,
+      panelHeight: result.panelHeight,
       agentId,
     });
 

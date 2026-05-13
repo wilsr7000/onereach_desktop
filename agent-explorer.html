@@ -1964,8 +1964,14 @@
         };
 
         const result = await window.agentExplorer.addIDWEnvironment(env);
+        // menu-data-manager returns { success: false, error } on save failures
+        // and { success: false, errors: [...] } on validation failures.
+        // Surface either to the user so they don't see a generic message.
         if (result && result.success === false) {
-          if (errEl) { errEl.textContent = result.error || 'Failed to add IDW.'; errEl.style.display = 'block'; }
+          const detail = result.error
+            || (Array.isArray(result.errors) && result.errors.length > 0 ? result.errors.join('; ') : null)
+            || 'Failed to add IDW.';
+          if (errEl) { errEl.textContent = detail; errEl.style.display = 'block'; }
           return;
         }
 

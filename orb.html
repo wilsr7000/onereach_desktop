@@ -1604,6 +1604,18 @@
 
       // Constants
       const FUNCTION_CALL_DEDUP_MS = 5000;
+      // Time-only dedup window for the SAME user turn. The realtime API
+      // fires both a Whisper transcript event AND a handle_user_request
+      // function call for each user utterance; with gpt-realtime-2 the
+      // model often paraphrases the user's words (e.g. "brief" ->
+      // "debrief", trailing emoji), so text-equality dedup misses and
+      // both events end up submitting separate tasks. If the two events
+      // fire within this window, they refer to the same user turn --
+      // dedup unconditionally regardless of text content. 1500ms is a
+      // safe ceiling because Whisper transcription and model function
+      // calls for the same turn are emitted within a few hundred ms of
+      // each other.
+      const SAME_TURN_DEDUP_MS = 1500;
       const TTS_COOLDOWN_MS = 2500;
       const SILENCE_AFTER_SPEECH_MS = 5000;
       const NO_SPEECH_TIMEOUT_MS = 60000;
@@ -3524,6 +3536,36 @@
         const transcript = event.transcript;
         const callId = event.callId;
 
+        // Always stamp the dedup fields FIRST so the reciprocal check in
+        // the transcript handler can see them. (We do this even if we
+        // dedup below -- that way a delayed transcript event that fires
+        // a few hundred ms later still gets blocked.)
+        S.set('lastFunctionCallTranscript', transcript?.toLowerCase() || '');
+        S.set('lastFunctionCallTime', Date.now());
+
+        // ── SAME-TURN DEDUP (time-only, reciprocal) ──
+        // If a regular transcript event already submitted this turn
+        // within SAME_TURN_DEDUP_MS, the task is already in flight and
+        // we should NOT submit again -- but we MUST still acknowledge
+        // the function call to OpenAI or the realtime session hangs on
+        // a pending tool call. Silently ack with empty result; the
+        // listener path already treats empty as a silent ack (won't
+        // trigger a model response.create -- see voice-listener.js).
+        const lastTTime = S.get('lastTranscriptTime') || 0;
+        if (lastTTime > 0 && Date.now() - lastTTime < SAME_TURN_DEDUP_MS) {
+          console.log('[Orb] Skipping function call - transcript already handling this turn:', transcript);
+          showTranscript(transcript, false);
+          try {
+            if (callId && window.orbAPI?.respondToFunction) {
+              await window.orbAPI.respondToFunction(callId, '');
+            }
+          } catch (ackErr) {
+            console.warn('[Orb] Failed to ack deduped function call:', ackErr);
+          }
+          S.set('pendingFunctionCallId', null);
+          return;
+        }
+
         S.transition('processing', 'function-call');
         S.update({
           lastProcessedTranscript: transcript,
@@ -3531,9 +3573,6 @@
           pendingFunctionCallId: callId,
           pendingSubmitCount: (S.get('pendingSubmitCount') || 0) + 1,
         });
-        // Track for dedup with regular transcript event
-        S.set('lastFunctionCallTranscript', transcript?.toLowerCase() || '');
-        S.set('lastFunctionCallTime', Date.now());
 
         // Mark that speech ended
         onSpeechEnded();
@@ -3849,18 +3888,42 @@
               const text = e.text?.trim();
               if (!text) return;
 
-              // Skip if already processed via function call
-              const stripPunctuation = (s) => s.replace(/[.,!?;:'"]/g, '').trim();
-              const lastFCT = S.get('lastFunctionCallTranscript') || '';
+              // ── SAME-TURN DEDUP (time-only) ──
+              // If a function_call_transcript event fired for the same
+              // user turn within SAME_TURN_DEDUP_MS, skip this transcript
+              // unconditionally -- the function call handler is already
+              // submitting a task and ack'ing OpenAI. Without this, the
+              // realtime model's tendency to paraphrase the Whisper
+              // transcript (e.g. "brief" -> "debrief") gets both events
+              // past the text-equality check and both submit tasks for
+              // the SAME utterance -- the user then hears the agent
+              // response twice.
               const lastFCTime = S.get('lastFunctionCallTime') || 0;
-              const normalizedText = stripPunctuation(text.toLowerCase());
-              const normalizedFuncCall = stripPunctuation(lastFCT);
-              if (normalizedText === normalizedFuncCall && Date.now() - lastFCTime < FUNCTION_CALL_DEDUP_MS) {
-                console.log('[Orb] Skipping transcript - already handled via function call:', text);
+              if (lastFCTime > 0 && Date.now() - lastFCTime < SAME_TURN_DEDUP_MS) {
+                console.log('[Orb] Skipping transcript - function call already handling this turn:', text);
+                // Still mark speech ended so the UI advances out of listening.
+                onSpeechEnded();
+                showTranscript(text, false);
+                setTimeout(hideTranscript, 3000);
                 return;
               }
 
-              // Update dedup tracking
+              // ── TEXT-EQUALITY DEDUP (longer window) ──
+              // Belt-and-suspenders for the case where the function call
+              // fired earlier and verbatim transcripts match.
+              const stripPunctuation = (s) => s.replace(/[.,!?;:'"]/g, '').trim();
+              const lastFCT = S.get('lastFunctionCallTranscript') || '';
+              const normalizedText = stripPunctuation(text.toLowerCase());
+              const normalizedFuncCall = stripPunctuation(lastFCT);
+              if (normalizedText === normalizedFuncCall && Date.now() - lastFCTime < FUNCTION_CALL_DEDUP_MS) {
+                console.log('[Orb] Skipping transcript - already handled via function call (text match):', text);
+                return;
+              }
+
+              // Update dedup tracking (used by handleFunctionCallTranscript
+              // for the reciprocal check when transcript fires first).
+              S.set('lastTranscriptText', text);
+              S.set('lastTranscriptTime', Date.now());
               S.set('lastProcessedTranscript', text);
               S.set('lastProcessedTime', Date.now());
 

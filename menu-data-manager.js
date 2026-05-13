@@ -609,6 +609,19 @@ class MenuDataManager extends EventEmitter {
         // Ensure type
         env.type = env.type || 'idw';
 
+        // Backfill required `environment` field for legacy entries that
+        // were saved before the agent-explorer "Add IDW" form started
+        // stamping `environment: 'custom'`. Without this, the menu
+        // builder (lib/menu-sections/idw-gsx-builder.js) silently drops
+        // the entry with the warning "Skipping IDW Env due to missing
+        // properties" -- the IDW exists in storage but disappears from
+        // the menu, which the user (correctly) reads as "can't add a
+        // new IDW". The backfill heals on next save; no data migration
+        // needed.
+        if (!env.environment) {
+          env.environment = 'custom';
+        }
+
         return env;
       })
       .filter(Boolean);

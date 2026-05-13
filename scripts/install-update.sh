@@ -79,9 +79,16 @@ write_status() {
 EOF
 }
 
-# Trap to catch unexpected exits. write_status default = failed/unknown.
-EXPECTED_EXIT=0
-trap 'if [ "$EXPECTED_EXIT" = "0" ]; then write_status failed unknown "helper exited unexpectedly"; fi' EXIT
+# Trap to catch unexpected exits. The flag flips to "expected" only when we
+# reach an explicit success or fail step that has already written the status
+# file. If the script dies in between (uncaught error, kill -9, OOM, etc.) the
+# flag is still "unexpected" and the trap writes a clear status. Inverting the
+# previous logic: the old version checked `EXPECTED_EXIT = "0"` which was the
+# default AND the success path's value, so the trap fired on success and
+# overwrote the "success" status file with "failed unknown". Cosmetic but
+# visible bug -- fixed here.
+REACHED_EXPECTED_EXIT=0
+trap 'if [ "$REACHED_EXPECTED_EXIT" = "0" ]; then write_status failed unknown "helper exited unexpectedly"; fi' EXIT
 
 # ---------------------------------------------------------------------------
 # Pre-flight env validation
@@ -92,7 +99,7 @@ if [ -z "$PARENT_PID" ] || [ -z "$APP_PATH" ] || [ -z "$SHIPIT_CACHE" ]; then
     echo "  APP_PATH=$APP_PATH"
     echo "  SHIPIT_CACHE=$SHIPIT_CACHE"
     write_status failed starting "missing required env vars"
-    EXPECTED_EXIT=1
+    REACHED_EXPECTED_EXIT=1
     exit 1
 fi
 
@@ -110,6 +117,34 @@ echo "  updater cache: $UPDATER_CACHE"
 # the Squirrel-cache and updater-cache extraction paths.
 BUNDLE_NAME="$(basename "$APP_PATH")"
 echo "  bundle name:   $BUNDLE_NAME"
+
+# ---------------------------------------------------------------------------
+# Concurrent-install lock. If two helpers race (e.g. user double-clicked
+# "Install and Restart" in the dialog), both would try to mv the same
+# /Applications/<bundle>.app aside and ditto over it, with non-deterministic
+# results. Use flock-style locking via mkdir (atomic on macOS) on a path
+# derived from the bundle so two installs to different bundles can coexist.
+# ---------------------------------------------------------------------------
+LOCK_DIR="/tmp/onereach-lite-installer.$(echo "$APP_PATH" | tr '/' '_' | tr ' ' '_').lock"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    # Another helper already holds the lock. Check if its parent is still
+    # alive. If the holder is dead, we steal the lock; otherwise we bail
+    # so we don't double-install.
+    LOCK_AGE=$(($(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0)))
+    if [ "$LOCK_AGE" -gt 300 ]; then
+        echo "[$(ts)] stale lock dir (${LOCK_AGE}s old) -- stealing it"
+        rm -rf "$LOCK_DIR" 2>/dev/null || true
+        mkdir "$LOCK_DIR" 2>/dev/null || true
+    else
+        echo "[$(ts)] another helper is already running (lock held ${LOCK_AGE}s), bailing"
+        write_status failed starting "another install helper is already running"
+        REACHED_EXPECTED_EXIT=1
+        exit 1
+    fi
+fi
+# Best-effort lock release on exit (any exit, success or failure).
+trap 'rm -rf "$LOCK_DIR" 2>/dev/null || true; if [ "$REACHED_EXPECTED_EXIT" = "0" ]; then write_status failed unknown "helper exited unexpectedly"; fi' EXIT
+echo "[$(ts)] acquired install lock at $LOCK_DIR"
 
 # ---------------------------------------------------------------------------
 # 1. Wait for parent (Electron process) to fully exit. Up to 30s.
@@ -132,35 +167,61 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Locate the new .app bundle. Try Squirrel's already-unpacked cache
 # first (fastest path); fall back to extracting the electron-updater ZIP.
+#
+# When multiple `update.*` directories exist (e.g. from previous failed
+# attempts that left stale staging), iterate over them NEWEST FIRST and
+# validate the version inside each one matches TARGET_VERSION. This
+# prevents installing a stale bundle that happens to have the right
+# bundle name but wrong version.
 # ---------------------------------------------------------------------------
 write_status pending find_bundle ""
+
+# Helper: read CFBundleShortVersionString from an .app's Info.plist. Returns
+# "" if the file is missing or the key isn't readable.
+bundle_version() {
+    local app="$1"
+    /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null || echo ""
+}
+
 NEW_APP=""
-for d in "$SHIPIT_CACHE"/update.*; do
-    if [ -d "$d/$BUNDLE_NAME" ]; then
-        NEW_APP="$d/$BUNDLE_NAME"
-        break
-    fi
-done
+# Sort by modification time, newest first. Without this we'd just pick
+# the first alphabetical match which could be the oldest stale dir.
+if compgen -G "$SHIPIT_CACHE/update.*" >/dev/null 2>&1; then
+    while IFS= read -r d; do
+        candidate="$d/$BUNDLE_NAME"
+        if [ -d "$candidate" ]; then
+            ver=$(bundle_version "$candidate")
+            if [ -n "$TARGET_VERSION" ] && [ "$TARGET_VERSION" != "unknown" ] && [ -n "$ver" ] && [ "$ver" != "$TARGET_VERSION" ]; then
+                echo "[$(ts)] skipping stale Squirrel cache $candidate (version $ver != $TARGET_VERSION)"
+                continue
+            fi
+            NEW_APP="$candidate"
+            echo "[$(ts)] picked Squirrel cache: $NEW_APP (version $ver)"
+            break
+        fi
+    done < <(ls -t -d "$SHIPIT_CACHE"/update.* 2>/dev/null)
+fi
 
 if [ -z "$NEW_APP" ]; then
-    echo "[$(ts)] no Squirrel cache, extracting from electron-updater ZIP"
+    echo "[$(ts)] no usable Squirrel cache, extracting from electron-updater ZIP"
     if [ -z "$UPDATER_CACHE" ]; then
         write_status failed find_bundle "no Squirrel cache and no UPDATER_CACHE provided"
-        EXPECTED_EXIT=1
+        REACHED_EXPECTED_EXIT=1
         exit 1
     fi
-    ZIP=$(ls "$UPDATER_CACHE"/*.zip 2>/dev/null | head -1)
+    # Pick the NEWEST zip in the cache, not the first alphabetical.
+    ZIP=$(ls -t "$UPDATER_CACHE"/*.zip 2>/dev/null | head -1)
     if [ -z "$ZIP" ]; then
         echo "[$(ts)] FATAL: no update bundle found in either cache"
         write_status failed find_bundle "no update bundle found in Squirrel cache or updater cache"
-        EXPECTED_EXIT=1
+        REACHED_EXPECTED_EXIT=1
         exit 1
     fi
     EXTRACT_DIR=$(mktemp -d)
     echo "[$(ts)] extracting $ZIP -> $EXTRACT_DIR"
     if ! ditto -x -k "$ZIP" "$EXTRACT_DIR"; then
         write_status failed find_bundle "ditto -x failed extracting ZIP"
-        EXPECTED_EXIT=1
+        REACHED_EXPECTED_EXIT=1
         exit 1
     fi
     NEW_APP="$EXTRACT_DIR/$BUNDLE_NAME"
@@ -169,10 +230,22 @@ fi
 if [ ! -d "$NEW_APP" ]; then
     echo "[$(ts)] FATAL: NEW_APP path doesn't exist: $NEW_APP"
     write_status failed find_bundle "resolved bundle path does not exist: $NEW_APP"
-    EXPECTED_EXIT=1
+    REACHED_EXPECTED_EXIT=1
     exit 1
 fi
-echo "[$(ts)] new bundle: $NEW_APP"
+
+# Final version sanity check. If the bundle we located doesn't match the
+# target version, refuse rather than silently installing the wrong one.
+# Skipped when TARGET_VERSION is "unknown" (rare edge case where the
+# performUpdateInstall call didn't pass a target).
+NEW_VER=$(bundle_version "$NEW_APP")
+if [ -n "$TARGET_VERSION" ] && [ "$TARGET_VERSION" != "unknown" ] && [ -n "$NEW_VER" ] && [ "$NEW_VER" != "$TARGET_VERSION" ]; then
+    echo "[$(ts)] FATAL: bundle version mismatch ($NEW_VER != $TARGET_VERSION)"
+    write_status failed find_bundle "located bundle version $NEW_VER does not match target $TARGET_VERSION"
+    REACHED_EXPECTED_EXIT=1
+    exit 1
+fi
+echo "[$(ts)] new bundle: $NEW_APP (version $NEW_VER)"
 
 # ---------------------------------------------------------------------------
 # 3. Verify the new bundle's signature before swapping. If this fails,
@@ -182,7 +255,7 @@ write_status pending verify_codesign ""
 if ! codesign --verify "$NEW_APP" 2>/dev/null; then
     echo "[$(ts)] FATAL: codesign --verify failed on new bundle"
     write_status failed verify_codesign "codesign --verify failed on new bundle"
-    EXPECTED_EXIT=1
+    REACHED_EXPECTED_EXIT=1
     exit 1
 fi
 echo "[$(ts)] codesign verify ok"
@@ -196,7 +269,7 @@ echo "[$(ts)] backing up old: $APP_PATH -> $BACKUP"
 if ! mv "$APP_PATH" "$BACKUP"; then
     echo "[$(ts)] FATAL: failed to rename old bundle (permissions?)"
     write_status failed swap "failed to rename old bundle to backup (permissions?)"
-    EXPECTED_EXIT=1
+    REACHED_EXPECTED_EXIT=1
     exit 1
 fi
 
@@ -206,13 +279,29 @@ if ! ditto "$NEW_APP" "$APP_PATH"; then
     rm -rf "$APP_PATH" 2>/dev/null || true
     mv "$BACKUP" "$APP_PATH" 2>/dev/null || true
     write_status failed swap "ditto into /Applications failed, rolled back to previous version"
-    EXPECTED_EXIT=1
+    REACHED_EXPECTED_EXIT=1
     exit 1
 fi
 
 # Strip quarantine just in case (newly-built bundles don't get tagged,
 # but it's cheap insurance).
 xattr -d com.apple.quarantine "$APP_PATH" 2>/dev/null || true
+
+# Post-install version verification. Read the version from the just-installed
+# bundle's Info.plist. If it doesn't match the target, something went badly
+# wrong during ditto -- roll back to the backup and report. This catches the
+# case where Squirrel.Mac left a stale staging dir that passed find_bundle's
+# version check but was actually a different bundle than ditto saw.
+INSTALLED_VER=$(bundle_version "$APP_PATH")
+if [ -n "$TARGET_VERSION" ] && [ "$TARGET_VERSION" != "unknown" ] && [ -n "$INSTALLED_VER" ] && [ "$INSTALLED_VER" != "$TARGET_VERSION" ]; then
+    echo "[$(ts)] FATAL: post-install version mismatch ($INSTALLED_VER != $TARGET_VERSION), rolling back"
+    rm -rf "$APP_PATH" 2>/dev/null || true
+    mv "$BACKUP" "$APP_PATH" 2>/dev/null || true
+    write_status failed swap "post-install version mismatch: got $INSTALLED_VER, expected $TARGET_VERSION (rolled back)"
+    REACHED_EXPECTED_EXIT=1
+    exit 1
+fi
+echo "[$(ts)] installed version verified: $INSTALLED_VER"
 
 # ---------------------------------------------------------------------------
 # 5. Launch the new version. The status file is written as `success` BEFORE
@@ -231,11 +320,20 @@ if ! open "$APP_PATH"; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Done. Backup left in place; main.js's boot-time cleanup deletes
-# backups older than 7 days on the next launch.
+# 6. Cleanup. Old backups (.app.old.<ts>) accumulate after every successful
+# install. Delete the ones older than 7 days; keep more recent ones in case
+# the user needs to roll back manually. Best-effort -- failure to clean up
+# does not affect the install outcome.
 # ---------------------------------------------------------------------------
+CLEANUP_PARENT="$(dirname "$APP_PATH")"
+CLEANUP_PATTERN="$(basename "$APP_PATH").old."
+echo "[$(ts)] cleaning backups older than 7 days in $CLEANUP_PARENT"
+# Use find -mtime +7 (older than 7 days). The pattern is escaped via
+# -name "<basename>.old.*" to handle the space in "Onereach.ai Lite.app".
+find "$CLEANUP_PARENT" -maxdepth 1 -name "$CLEANUP_PATTERN*" -type d -mtime +7 -print -exec rm -rf {} + 2>/dev/null || true
+
 write_status success done ""
 echo "[$(ts)] backup preserved at $BACKUP (auto-cleanup after 7 days)"
 echo "[$(ts)] DONE"
-EXPECTED_EXIT=0
+REACHED_EXPECTED_EXIT=1
 exit 0

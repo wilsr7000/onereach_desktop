@@ -1,8 +1,8 @@
 {
-  "timestamp": "2026-05-11T22:00:35.854Z",
+  "timestamp": "2026-05-12T14:18:15.490Z",
   "summary": {
-    "total": 63,
-    "passed": 38,
+    "total": 70,
+    "passed": 45,
     "partial": 19,
     "failed": 6,
     "crashed": 0
@@ -14,7 +14,7 @@
       "user": "What time is it?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 3:00 PM"
+      "response": "It's 7:17 AM"
     },
     {
       "conversation": "Time: basic queries",
@@ -22,7 +22,7 @@
       "user": "And what day is it today?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Monday, May 11, 2026"
+      "response": "It's Tuesday, May 12, 2026"
     },
     {
       "conversation": "Time: basic queries",
@@ -30,7 +30,7 @@
       "user": "What is the date?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's Monday, May 11, 2026"
+      "response": "It's Tuesday, May 12, 2026"
     },
     {
       "conversation": "Time: timezone awareness",
@@ -46,7 +46,7 @@
       "user": "And in London?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 3:00 PM"
+      "response": "It's 7:17 AM"
     },
     {
       "conversation": "Weather: city provided",
@@ -54,7 +54,7 @@
       "user": "What is the weather in Denver?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 78°F and sunny in Denver"
+      "response": "It's 58°F and sunny in Denver"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -62,7 +62,7 @@
       "user": "What's the weather?",
       "grade": "fail",
       "reason": "Expected needsInput but agent returned a final response",
-      "response": "It's 65°F and partly cloudy in San Francisco"
+      "response": "It's 53°F and overcast in San Francisco. Humidity is 93%"
     },
     {
       "conversation": "Weather: no city triggers follow-up",
@@ -70,7 +70,7 @@
       "user": "San Francisco",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 65°F and partly cloudy in San Francisco"
+      "response": "It's 53°F and overcast in San Francisco. Humidity is 93%"
     },
     {
       "conversation": "Weather: forecast request",
@@ -78,7 +78,7 @@
       "user": "Will it rain tomorrow in Seattle?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "It's 65°F and partly cloudy in San Francisco"
+      "response": "It's 53°F and overcast in San Francisco. Humidity is 93%"
     },
     {
       "conversation": "Spelling: common words",
@@ -150,7 +150,7 @@
       "user": "Goodbye",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Goodbye, Robb! Have a great afternoon!"
+      "response": "Take care, Robb!"
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -158,7 +158,7 @@
       "user": "Hey",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Hello Robb! What can I do for you?"
+      "response": "Hi Robb! I'm here to help."
     },
     {
       "conversation": "Smalltalk: casual greetings",
@@ -182,7 +182,7 @@
       "user": "What can you do?",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I have 30 capabilities across several areas. I can help with calendar management and daily briefings"
+      "response": "I have 33 capabilities across several areas. I can help with calendar management and daily briefings"
     },
     {
       "conversation": "Help: capabilities inquiry",
@@ -190,7 +190,7 @@
       "user": "Tell me more about the agents",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "I have 30 capabilities across several areas. I can help with calendar management and daily briefings"
+      "response": "I have 33 capabilities across several areas. I can help with calendar management and daily briefings"
     },
     {
       "conversation": "Help: feature questions",
@@ -398,7 +398,7 @@
       "user": "Give me my morning briefing",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Good afternoon, Robb. Current time: 3:00 PM. Date: Monday, May 11, 2026. Time of day: afternoon. It'"
+      "response": "Good morning, Robb. Current time: 7:18 AM. Date: Tuesday, May 12, 2026. Time of day: morning. It's 5"
     },
     {
       "conversation": "Memory: store and recall preferences",
@@ -494,7 +494,7 @@
       "user": "asdfghjkl",
       "grade": "pass",
       "reason": "Response meets expectations",
-      "response": "Could you say that again?"
+      "response": "What was that?"
     },
     {
       "conversation": "Edge: single word",
@@ -511,6 +511,62 @@
       "grade": "pass",
       "reason": "Response meets expectations",
       "response": "I can manage your calendar. Ask 'what's on my schedule', 'add a meeting', 'cancel the standup', or '"
+    },
+    {
+      "conversation": "Screen Vision: visual referent intents (HIGH confidence)",
+      "agentId": "screen-vision-agent",
+      "user": "What is this error?",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "There is a red button labelled Save next to an error."
+    },
+    {
+      "conversation": "Screen Vision: visual referent intents (HIGH confidence)",
+      "agentId": "screen-vision-agent",
+      "user": "Read what is on my screen",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "A text editor is on screen."
+    },
+    {
+      "conversation": "Screen Vision: visual referent intents (HIGH confidence)",
+      "agentId": "screen-vision-agent",
+      "user": "Summarize this article",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "The article describes a release."
+    },
+    {
+      "conversation": "Live Translate: start session (HIGH confidence)",
+      "agentId": "live-translate-agent",
+      "user": "Translate what I am saying to Spanish",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Live translation stopped."
+    },
+    {
+      "conversation": "Live Translate: stop session",
+      "agentId": "live-translate-agent",
+      "user": "Stop translating",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "Live translation stopped."
+    },
+    {
+      "conversation": "MCP Bridge: matches a registered tool (HIGH confidence)",
+      "agentId": "mcp-bridge-agent",
+      "user": "Echo hello back to me",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "echoed"
+    },
+    {
+      "conversation": "MCP Bridge: abstains when no tool matches (LOW confidence)",
+      "agentId": "mcp-bridge-agent",
+      "user": "do something random",
+      "grade": "pass",
+      "reason": "Response meets expectations",
+      "response": "echoed"
     }
   ]
 }

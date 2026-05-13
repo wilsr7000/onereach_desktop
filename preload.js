@@ -542,6 +542,9 @@ contextBridge.exposeInMainWorld('api', {
       'settings:neo4j:test-connection',
       // One-shot bulk push of all local spaces to the freshly-configured graph
       'app:seed-graph',
+      // MCP servers settings UI (Realtime API 2 follow-up)
+      'mcp:save-servers',
+      'mcp:test-connection',
     ];
     if (validChannels.includes(channel)) {
       return ipcRenderer.invoke(channel, ...args);

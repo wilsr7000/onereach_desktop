@@ -73,6 +73,9 @@ const BUILT_IN_AGENT_IDS = [
   'tickets-agent', // Ticket manager - full CRUD for Agentic TMS tickets via Edison KV
   'playbooks-launch-agent', // Playbooks launcher - opens WISER Playbooks with AI space matching
   'agent-builder-agent', // Agent builder - conversational feasibility assessment + WISER Playbooks drafting
+  'mcp-bridge-agent', // MCP bridge - routes voice requests to user-configured MCP servers via lib/mcp-client.js
+  'screen-vision-agent', // Screen vision - captures the active screen and answers questions via ai.vision
+  'live-translate-agent', // Live translate - starts/stops speech translation via /v1/realtime/translations
 ];
 
 // ==================== VALIDATION ====================

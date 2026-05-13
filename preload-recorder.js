@@ -123,6 +123,27 @@ contextBridge.exposeInMainWorld('recorder', {
     ipcRenderer.removeAllListeners('recorder:merge-progress');
     ipcRenderer.on('recorder:merge-progress', (event, progress) => callback(progress));
   },
+
+  // ==========================================
+  // LIVE TRANSLATE (Realtime API 2 follow-up)
+  // ==========================================
+  // Subscribe to caption events emitted by lib/live-translate-service when
+  // the live-translate-agent starts a translation session. The bridge in
+  // main.js forwards each service event to this renderer as a
+  // `live-translate:event` message. Callers get { type, sourceText?,
+  // targetText?, isFinal?, sourceLang?, targetLang?, message? }.
+  liveTranslate: {
+    subscribe: (callback) => {
+      ipcRenderer.removeAllListeners('live-translate:event');
+      ipcRenderer.on('live-translate:event', (_event, payload) => callback(payload));
+      return ipcRenderer.invoke('live-translate:subscribe');
+    },
+    unsubscribe: () => {
+      ipcRenderer.removeAllListeners('live-translate:event');
+      return ipcRenderer.invoke('live-translate:unsubscribe');
+    },
+    getStatus: () => ipcRenderer.invoke('live-translate:status'),
+  },
 });
 
 // Expose electron shell for external links

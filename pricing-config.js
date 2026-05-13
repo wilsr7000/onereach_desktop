@@ -73,14 +73,16 @@ const PRICING = {
   'tts-1-hd': { per1KChars: 0.03, provider: 'openai' },
 
   // =========== REALTIME MODELS (GA 2026) ===========
-  // gpt-realtime-2 has separate text and audio token rates. Set both pairs;
-  // calculateCost adds them when callers pass inputAudioTokens/outputAudioTokens
-  // in options. Cached input is billed at $0.40/1M (not modeled here yet).
+  // gpt-realtime-2 has separate text and audio token rates plus cached
+  // input. The GA realtime API caches the session prefix automatically;
+  // we just need to read usage.input_token_details.cached_tokens off
+  // response.done and price it at the inputCached rate.
   'gpt-realtime-2': {
     input: 4.0,
     output: 24.0,
     inputAudio: 32.0,
     outputAudio: 64.0,
+    inputCached: 0.4,
     provider: 'openai',
   },
   // Transcription-only realtime model. Configurable latency vs quality.
@@ -89,6 +91,7 @@ const PRICING = {
     input: 4.0,
     output: 24.0,
     inputAudio: 32.0,
+    inputCached: 0.4,
     provider: 'openai',
   },
   // Translation-only realtime model.
@@ -97,6 +100,7 @@ const PRICING = {
     output: 24.0,
     inputAudio: 32.0,
     outputAudio: 64.0,
+    inputCached: 0.4,
     provider: 'openai',
   },
 
@@ -217,6 +221,18 @@ function calculateCost(model, inputTokens = 0, outputTokens = 0, options = {}) {
     ? (outputAudioTokens / 1000000) * pricing.outputAudio
     : 0;
 
+  // Cached input tokens (realtime API caches the session prefix automatically).
+  // Subtract cached portion from inputTokens before pricing -- the model
+  // bills cached tokens at the discounted inputCached rate, not the full input rate.
+  const cachedInputTokens = options.cachedInputTokens || 0;
+  const billedInputTokens = Math.max(0, inputTokens - cachedInputTokens);
+  const billedInputCost = pricing.input
+    ? (billedInputTokens / 1000000) * pricing.input
+    : 0;
+  const cachedInputCost = pricing.inputCached
+    ? (cachedInputTokens / 1000000) * pricing.inputCached
+    : 0;
+
   // Additional costs
   let imageCost = 0;
   let audioCost = 0;
@@ -234,8 +250,18 @@ function calculateCost(model, inputTokens = 0, outputTokens = 0, options = {}) {
     charCost = (options.chars / 1000) * pricing.per1KChars;
   }
 
+  // When cachedInputTokens is provided we replace the flat inputCost with the
+  // split (billedInputCost + cachedInputCost). Otherwise inputCost stands.
+  const effectiveInputCost = cachedInputTokens > 0 ? billedInputCost + cachedInputCost : inputCost;
+
   const totalCost =
-    inputCost + outputCost + inputAudioCost + outputAudioCost + imageCost + audioCost + charCost;
+    effectiveInputCost +
+    outputCost +
+    inputAudioCost +
+    outputAudioCost +
+    imageCost +
+    audioCost +
+    charCost;
 
   return {
     model: resolvedModel,
@@ -244,10 +270,12 @@ function calculateCost(model, inputTokens = 0, outputTokens = 0, options = {}) {
     outputTokens,
     inputAudioTokens,
     outputAudioTokens,
-    inputCost: roundCost(inputCost),
+    cachedInputTokens,
+    inputCost: roundCost(effectiveInputCost),
     outputCost: roundCost(outputCost),
     inputAudioCost: roundCost(inputAudioCost),
     outputAudioCost: roundCost(outputAudioCost),
+    cachedInputCost: roundCost(cachedInputCost),
     imageCost: roundCost(imageCost),
     audioCost: roundCost(audioCost),
     charCost: roundCost(charCost),
@@ -257,6 +285,7 @@ function calculateCost(model, inputTokens = 0, outputTokens = 0, options = {}) {
       outputPer1M: pricing.output || 0,
       inputAudioPer1M: pricing.inputAudio || 0,
       outputAudioPer1M: pricing.outputAudio || 0,
+      inputCachedPer1M: pricing.inputCached || 0,
     },
   };
 }

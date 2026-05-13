@@ -18,6 +18,53 @@ const { getTranscriptService } = require('./lib/transcript-service');
 const { getLogQueue } = require('./lib/log-event-queue');
 const log = getLogQueue();
 
+// Phase 3 (audio output): map AffectTracker labels onto short tone
+// directives we splice into response.create instructions. Keeps the
+// vocabulary the model interprets reliably (its preamble guide lists
+// these tones) instead of stuffing raw "frustrated" into the prompt.
+const AFFECT_TONE_MAP = {
+  frustrated: 'calm and empathetic',
+  angry: 'calm and empathetic',
+  upset: 'calm and empathetic',
+  sad: 'gentle and warm',
+  worried: 'reassuring and steady',
+  anxious: 'reassuring and steady',
+  excited: 'upbeat and friendly',
+  happy: 'upbeat and friendly',
+  calm: 'measured and friendly',
+};
+
+// Phase 3 (audio output): production deps for the parts of the listener
+// that drive the orb's speaking lifecycle and barge detector. Tests stub
+// these via VoiceListener.prototype.__setDeps() so the unit tests don't
+// have to fight vitest's path-based mock resolution for the lazy
+// barge-detector-singleton require.
+const _defaultListenerDeps = {
+  hudApi,
+  getBargeDetector: () => {
+    try {
+      return require('./lib/naturalness/barge-detector-singleton').getSharedBargeDetector();
+    } catch (_err) {
+      return null;
+    }
+  },
+  /**
+   * Lazily resolve the AffectTracker. Returns `{ label }` snapshot or null.
+   * Wrapped so tests can stub without mocking the lib/naturalness barrel.
+   */
+  getAffect: () => {
+    try {
+      const naturalness = require('./lib/naturalness');
+      if (!naturalness.flags || !naturalness.flags.isFlagEnabled('affectMatching')) {
+        return null;
+      }
+      return naturalness.affectTracker.getSharedAffectTracker().get();
+    } catch (_err) {
+      return null;
+    }
+  },
+};
+
 class VoiceListener {
   constructor() {
     this.ws = null;
@@ -49,6 +96,13 @@ class VoiceListener {
     // guard to make both sides idempotent.
     this._bufferHasAudio = false;
 
+    // Phase 3 (audio output): rolling state per assistant response.
+    this._modelTranscript = ''; // accumulated text from output_audio_transcript deltas
+    this._audioStartedForResponseId = null; // first audio_delta flips this on; response.done releases it
+
+    // Test seam for hud-api + barge-detector. See _defaultListenerDeps.
+    this._deps = _defaultListenerDeps;
+
     // ==================== PHASE 3.5 PAUSE DETECTOR (RETIRED) ====================
     // The orb previously ran a custom pause detector + 100ms silence
     // ticker to commit utterances earlier than the preview API's 1200ms
@@ -58,6 +112,18 @@ class VoiceListener {
     // tests and potential reuse; it just isn't called from this listener.
 
     log.info('voice', 'Initialized');
+  }
+
+  /**
+   * Test seam: override hud-api + barge-detector dependencies. Production
+   * callers never use this.
+   */
+  __setDeps(deps) {
+    this._deps = { ..._defaultListenerDeps, ...(deps || {}) };
+  }
+
+  __resetDeps() {
+    this._deps = _defaultListenerDeps;
   }
 
   /**
@@ -153,51 +219,7 @@ class VoiceListener {
           this._isConnecting = false;
           this.reconnectAttempts = 0;
 
-          // Configure session for transcription with function calling.
-          // GA Realtime API 2 shape: session.type='realtime' is required,
-          // audio.input wraps the format/transcription/turn_detection block,
-          // and output_modalities replaces the old top-level modalities array.
-          // We lock output to ['text'] because voice-speaker.js handles TTS
-          // separately via tts-1 -- the realtime model never produces audio
-          // bytes back to us in this configuration.
-          this.sendEvent({
-            type: 'session.update',
-            session: {
-              type: 'realtime',
-              model: 'gpt-realtime-2',
-              output_modalities: ['text'],
-              instructions: `You are a voice command router. Your ONLY job is to call the handle_user_request function.
-ABSOLUTE RULES - NO EXCEPTIONS:
-1. IMMEDIATELY call handle_user_request for EVERY input
-2. NEVER speak directly - the function provides ALL responses
-3. Do NOT ask clarifying questions - just pass the transcript to the function`,
-              audio: {
-                input: {
-                  format: { type: 'audio/pcm', rate: 24000 },
-                  transcription: { model: 'gpt-realtime-whisper' },
-                  turn_detection: { type: 'semantic_vad' },
-                },
-              },
-              tools: [
-                {
-                  type: 'function',
-                  name: 'handle_user_request',
-                  description: 'REQUIRED: Process ALL user requests.',
-                  parameters: {
-                    type: 'object',
-                    properties: {
-                      transcript: {
-                        type: 'string',
-                        description: 'The exact text of what the user said',
-                      },
-                    },
-                    required: ['transcript'],
-                  },
-                },
-              ],
-              tool_choice: 'required',
-            },
-          });
+          this.sendEvent(this.buildSessionUpdate());
 
           resolve(true);
         });
@@ -206,6 +228,77 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         reject(err);
       }
     });
+  }
+
+  /**
+   * Build the initial session.update payload sent to the GA Realtime API
+   * after the WebSocket opens.
+   *
+   * Extracted as a method so the payload can be asserted by unit tests
+   * without spinning up the full connect() flow (which has many side
+   * effects -- WebSocket, repair-memory load, retry timers, etc.).
+   *
+   * Phase 3 (audio output hard cut) notes:
+   *   - `output_modalities: ['audio', 'text']` lets the model voice agent
+   *     responses natively. voice-speaker.js's tts-1 pipeline is kept
+   *     alive for non-orb proactive callers (critical-meeting alarms etc.)
+   *     so we don't have a coordination bug between two audio paths in
+   *     the orb itself.
+   *   - `audio.output.voice` is locked to `marin` for the whole session.
+   *     The GA API forbids voice changes after the first audio response,
+   *     so per-agent voices (the preview behavior) require custom voice
+   *     uploads -- documented as follow-up. `marin` is OpenAI's
+   *     recommended default for production voice agents.
+   *   - `tool_choice: 'auto'` (down from 'required') so the model can
+   *     speak the agent result after function_call_output without trying
+   *     to call the tool again. The instructions still route every
+   *     utterance through handle_user_request reliably.
+   *   - `reasoning: { effort: 'low' }` -- recommended default for
+   *     production voice agents.
+   */
+  buildSessionUpdate() {
+    return {
+      type: 'session.update',
+      session: {
+        type: 'realtime',
+        model: 'gpt-realtime-2',
+        output_modalities: ['audio', 'text'],
+        reasoning: { effort: 'low' },
+        instructions:
+          'Every time the user speaks, call handle_user_request with their verbatim transcript. ' +
+          'After the function returns, speak the function output verbatim and stop. ' +
+          'Do not invent answers; a brief preamble like "one moment" before calling the tool is fine.',
+        audio: {
+          input: {
+            format: { type: 'audio/pcm', rate: 24000 },
+            transcription: { model: 'gpt-realtime-whisper' },
+            turn_detection: { type: 'semantic_vad' },
+          },
+          output: {
+            format: { type: 'audio/pcm', rate: 24000 },
+            voice: 'marin',
+          },
+        },
+        tools: [
+          {
+            type: 'function',
+            name: 'handle_user_request',
+            description: 'REQUIRED: Process every user utterance.',
+            parameters: {
+              type: 'object',
+              properties: {
+                transcript: {
+                  type: 'string',
+                  description: 'The exact text of what the user said',
+                },
+              },
+              required: ['transcript'],
+            },
+          },
+        ],
+        tool_choice: 'auto',
+      },
+    };
   }
 
   /**
@@ -345,19 +438,17 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         this.hasActiveResponse = true;
         this.activeResponseId = event.response?.id;
 
-        // DON'T cancel auto-triggered responses - they need to call our function
-        // The Realtime API creates responses automatically when user stops speaking
-        // With tool_choice: "required", these responses will call handle_user_request
-        // We only track sanctioned responses for explicit speak requests
         if (this.pendingResponseCreate) {
           this.sanctionedResponseIds.add(event.response?.id);
           this.pendingResponseCreate = false;
         }
-        // Note: We no longer cancel unsanctioned responses here because that
-        // prevents the function call from happening. Audio blocking happens
-        // in response.output_audio.delta if needed (but with
-        // output_modalities: ['text'] the server shouldn't emit audio at all).
         log.info('voice', 'Response created', { detail: event.response?.id });
+
+        // Phase 3: reset per-response state; the speaking flag flips on
+        // when we actually receive an audio delta (not here), because
+        // some responses are tool-call-only and have no audio.
+        this._modelTranscript = '';
+        this._audioStartedForResponseId = null;
         break;
 
       case 'response.done':
@@ -367,15 +458,29 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         }
         this.activeResponseId = null;
 
+        // Phase 3 safety net: if this response produced audio and we never
+        // got an output_audio.done event, release the speaking flag here.
+        if (this._audioStartedForResponseId && this._audioStartedForResponseId === event.response?.id) {
+          try { this._deps.hudApi.speechEnded(); } catch (_err) { /* optional */ }
+          try {
+            const barge = this._deps.getBargeDetector();
+            if (barge) barge.onTtsEnd();
+          } catch (_err) { /* optional */ }
+          this._audioStartedForResponseId = null;
+        }
+
         // Track API usage. GA Realtime API 2 reports usage with text and audio
-        // token buckets split out under input_token_details / output_token_details.
-        // We forward both pairs so pricing-config can apply the per-bucket rates
-        // ($4 / $24 text vs $32 / $64 audio per 1M tokens).
+        // token buckets split out under input_token_details / output_token_details,
+        // plus cached_tokens (the realtime API caches the session prefix
+        // automatically -- our long router instructions get cached on subsequent
+        // turns). We forward all three buckets so pricing-config applies the
+        // per-bucket rates ($4 text / $32 audio / $0.40 cached per 1M input).
         if (event.response?.usage) {
           try {
             const usage = event.response.usage;
             const inputAudio = usage.input_token_details?.audio_tokens || 0;
             const outputAudio = usage.output_token_details?.audio_tokens || 0;
+            const cachedInput = usage.input_token_details?.cached_tokens || 0;
             const inputText =
               usage.input_token_details?.text_tokens ??
               Math.max(0, (usage.input_tokens || 0) - inputAudio);
@@ -393,6 +498,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
               options: {
                 inputAudioTokens: inputAudio,
                 outputAudioTokens: outputAudio,
+                cachedInputTokens: cachedInput,
               },
             });
           } catch (e) {
@@ -408,21 +514,74 @@ ABSOLUTE RULES - NO EXCEPTIONS:
         break;
 
       case 'response.output_audio.delta':
-        // Block any audio from the Realtime API - we use voice-speaker.js for TTS.
-        // With output_modalities: ['text'] and tool_choice: 'required' this
-        // shouldn't fire at all on the GA API, but keep the guard in case the
-        // server emits a stray frame during edge cases (e.g. pre-tool-call
-        // audio while it decides to call handle_user_request).
-        if (!this.sanctionedResponseIds.has(event.response_id)) {
-          log.info('voice', 'Blocking unsanctioned audio');
+        // Phase 3 (audio output hard cut): forward the base64-encoded PCM
+        // chunk to orb subscribers as audio_delta. The orb's OrbAudio
+        // module decodes + plays. This replaces the previous voice-speaker
+        // tts-1 pipeline for orb-driven responses.
+        //
+        // First delta of a response flips hudApi.speaking ON (gating the
+        // mic from feedback) and primes the barge detector. We tie this
+        // to the first delta rather than response.created because some
+        // responses (tool-call-only) never emit audio and we'd otherwise
+        // strand the speaking flag forever.
+        if (event.delta) {
+          if (this._audioStartedForResponseId !== event.response_id) {
+            this._audioStartedForResponseId = event.response_id;
+            try { this._deps.hudApi.speechStarted(); } catch (_err) { /* optional */ }
+            try {
+              const barge = this._deps.getBargeDetector();
+              if (barge) barge.onTtsStart('');
+            } catch (_err) { /* optional */ }
+          }
+          this.broadcast({
+            type: 'audio_delta',
+            audio: event.delta,
+            responseId: event.response_id,
+          });
         }
         break;
 
+      case 'response.output_audio.done':
+        // End-of-audio marker -- orb flushes any buffered PCM and clears
+        // its speaking state.
+        this.broadcast({ type: 'audio_done', responseId: event.response_id });
+        try { this._deps.hudApi.speechEnded(); } catch (_err) { /* optional */ }
+        try {
+          const barge = this._deps.getBargeDetector();
+          if (barge) barge.onTtsEnd();
+        } catch (_err) { /* optional */ }
+        break;
+
       case 'response.output_audio_transcript.delta':
-        // Also block audio transcripts from unsanctioned responses.
-        if (!this.sanctionedResponseIds.has(event.response_id)) {
-          // Silently drop
+        // Carry the spoken-text caption to the orb (matches the legacy
+        // speech_text_delta shape from voice-speaker.js). Also feed the
+        // barge detector so it knows what the model is saying for echo
+        // suppression on user partials.
+        if (event.delta) {
+          this._modelTranscript = (this._modelTranscript || '') + event.delta;
+          this.broadcast({
+            type: 'speech_text_delta',
+            text: event.delta,
+            responseId: event.response_id,
+          });
+          try {
+            const barge = this._deps.getBargeDetector();
+            if (barge) barge.onTtsUpdate(this._modelTranscript);
+          } catch (_err) { /* optional */ }
         }
+        break;
+
+      case 'response.output_audio_transcript.done':
+        // Final transcript -- broadcast as speech_text for any consumer
+        // that wants the full sentence (e.g. transcript history, captions).
+        if (event.transcript || this._modelTranscript) {
+          this.broadcast({
+            type: 'speech_text',
+            text: event.transcript || this._modelTranscript || '',
+            responseId: event.response_id,
+          });
+        }
+        this._modelTranscript = '';
         break;
 
       case 'response.function_call_arguments.done':
@@ -521,7 +680,26 @@ ABSOLUTE RULES - NO EXCEPTIONS:
   }
 
   /**
-   * Respond to a function call (acknowledges the call to OpenAI)
+   * Respond to a function call (acknowledges the call to OpenAI).
+   *
+   * Phase 3 (audio output): after sending the function_call_output, emit
+   * an explicit `response.create` so the GA model voices the result --
+   * BUT only when there is a non-empty result to speak. Empty results
+   * are silent acknowledgements: the caller (e.g. orb suppressAIResponse
+   * path, or the realtime-speech.js wrapper that delegates to
+   * voice-speaker) has already handled TTS through another channel and
+   * just needs us to satisfy OpenAI's pending function_call slot without
+   * producing competing audio. Triggering response.create on an empty
+   * output made the model hallucinate a spoken reply that collided with
+   * the real TTS stream -- breaking the daily-brief flow (panel rendered
+   * but audio was either silent or garbled).
+   *
+   * When response.create IS sent, its instructions are affect-tuned --
+   * if AffectTracker has a non-neutral user state (frustrated, calm,
+   * excited), we steer the model's vocal tone to match. This is the
+   * Phase 3 port of the previous voice-speaker affect-matching layer,
+   * which post-edited the text -- realtime audio is generated on the
+   * fly, so we steer via instructions instead.
    */
   respondToFunctionCall(callId, result = '') {
     if (!this.isConnected) {
@@ -529,7 +707,8 @@ ABSOLUTE RULES - NO EXCEPTIONS:
       return false;
     }
 
-    log.info('voice', 'Responding to function call', { callId });
+    const speakResult = typeof result === 'string' && result.trim().length > 0;
+    log.info('voice', 'Responding to function call', { callId, speakResult });
 
     this.sendEvent({
       type: 'conversation.item.create',
@@ -540,7 +719,46 @@ ABSOLUTE RULES - NO EXCEPTIONS:
       },
     });
 
+    if (!speakResult) {
+      // Silent acknowledgement: caller is handling TTS through another
+      // path (voice-speaker, panel-only response, etc.). Don't make the
+      // model speak from empty output -- it collides with the real audio.
+      return true;
+    }
+
+    // Phase 3: trigger an audio response with optionally-affect-tuned
+    // instructions. The model speaks `result` aloud using the session's
+    // configured voice + the tone we steer to here.
+    const affectInstructions = this._buildAffectInstructions();
+    const responseCreate = { type: 'response.create' };
+    if (affectInstructions) {
+      responseCreate.response = { instructions: affectInstructions };
+    }
+    this.sendEvent(responseCreate);
+    this.pendingResponseCreate = true;
+
     return true;
+  }
+
+  /**
+   * Read the AffectTracker via the injectable getAffect dep and produce
+   * a short tone-steering instruction string, or null if affect is
+   * neutral / unavailable / the affectMatching flag is off. Mirrors the
+   * legacy affect-adjust behavior from voice-speaker._doSpeak.
+   *
+   * Returns: e.g. "Speak in a calm, empathetic tone." or null.
+   */
+  _buildAffectInstructions() {
+    let affect;
+    try {
+      affect = this._deps.getAffect();
+    } catch (_err) {
+      return null;
+    }
+    if (!affect || !affect.label || affect.label === 'neutral') return null;
+    const tone = AFFECT_TONE_MAP[affect.label];
+    if (!tone) return null;
+    return `Speak the function output verbatim in a ${tone} tone.`;
   }
 
   /**

@@ -617,6 +617,51 @@ const CORPUS = [
 ];
 
 // ═════════════════════════════════════════════════════════════════════════════
+// New Phase 2 agents -- corpus entries for the realtime-2 capabilities
+// migration. These agents take external dependencies (desktopCapturer,
+// MCP servers, the live translate service); we wire deterministic stubs
+// via their __setDeps() seams before the corpus runs so the harness
+// evaluates response quality without hitting real systems.
+// ═════════════════════════════════════════════════════════════════════════════
+
+CORPUS.push(
+  // ── Screen Vision ────────────────────────────────────────────
+  {
+    name: 'Screen Vision: visual referent intents (HIGH confidence)',
+    agentId: 'screen-vision-agent',
+    turns: [
+      { user: 'What is this error?', expect: { success: true, pattern: /error|red button|screen/i } },
+      { user: 'Read what is on my screen', expect: { success: true } },
+      { user: 'Summarize this article', expect: { success: true } },
+    ],
+  },
+  // ── Live Translate ───────────────────────────────────────────
+  {
+    name: 'Live Translate: start session (HIGH confidence)',
+    agentId: 'live-translate-agent',
+    turns: [
+      { user: 'Translate what I am saying to Spanish', expect: { success: true, pattern: /translation/i } },
+    ],
+  },
+  {
+    name: 'Live Translate: stop session',
+    agentId: 'live-translate-agent',
+    turns: [{ user: 'Stop translating', expect: { success: true, pattern: /stopped/i } }],
+  },
+  // ── MCP Bridge ───────────────────────────────────────────────
+  {
+    name: 'MCP Bridge: matches a registered tool (HIGH confidence)',
+    agentId: 'mcp-bridge-agent',
+    turns: [{ user: 'Echo hello back to me', expect: { success: true, pattern: /echoed/i } }],
+  },
+  {
+    name: 'MCP Bridge: abstains when no tool matches (LOW confidence)',
+    agentId: 'mcp-bridge-agent',
+    turns: [{ user: 'do something random', expect: { success: false } }],
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
 // TESTS
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -639,6 +684,80 @@ describe('Agent Corpus Evaluation', () => {
       }
     } catch (_) {
       /* registry failed */
+    }
+  })();
+
+  // Wire deterministic stubs on the Phase 2 agents via their test seams,
+  // matching the corpus entries above.
+  (() => {
+    try {
+      if (loadableAgents.has('screen-vision-agent')) {
+        const vision = require('../../packages/agents/screen-vision-agent');
+        vision.__setDeps({
+          captureScreenSource: async () => ({
+            source: { thumbnail: { toDataURL: () => 'data:image/png;base64,FAKE' } },
+            display: { id: 1 },
+          }),
+          visionAnswer: async (_b64, prompt) => {
+            const ask = String(prompt || '').toLowerCase();
+            if (ask.includes('error')) return 'There is a red button labelled Save next to an error.';
+            if (ask.includes('summarize')) return 'The article describes a release.';
+            return 'A text editor is on screen.';
+          },
+        });
+      }
+      if (loadableAgents.has('live-translate-agent')) {
+        const translate = require('../../packages/agents/live-translate-agent');
+        const fakeService = {
+          _active: false,
+          isActive() { return this._active; },
+          getStatus() {
+            return { active: this._active, sourceLang: null, targetLang: null, subscriberCount: 0 };
+          },
+          start({ sourceLang, targetLang }) {
+            this._active = true;
+            this._sl = sourceLang;
+            this._tl = targetLang;
+            return { success: true, message: 'started' };
+          },
+          stop() { this._active = false; },
+        };
+        translate.__setDeps({
+          service: () => fakeService,
+          aiJson: async (prompt) => {
+            const p = String(prompt || '').toLowerCase();
+            if (p.includes('stop translating') || p.includes('"stop translating"')) {
+              return { action: 'stop' };
+            }
+            if (p.includes('spanish')) {
+              return { action: 'start', sourceLang: 'auto', targetLang: 'es' };
+            }
+            return { action: 'unknown', reason: 'no match' };
+          },
+        });
+      }
+      if (loadableAgents.has('mcp-bridge-agent')) {
+        const mcp = require('../../packages/agents/mcp-bridge-agent');
+        mcp.__setDeps({
+          loadServers: () => [{ id: 's1', label: 'Echo', url: 'http://echo', enabled: true }],
+          createClient: () => ({
+            label: 'Echo',
+            listTools: async () => [
+              { name: 'echo', description: 'Echo back input', inputSchema: {} },
+            ],
+            callTool: async () => 'echoed',
+          }),
+          aiJson: async (prompt) => {
+            const p = String(prompt || '').toLowerCase();
+            if (p.includes('echo')) {
+              return { server: 'Echo', tool: 'echo', args: {}, confidence: 0.9 };
+            }
+            return { abstain: true, reason: 'no matching MCP tool' };
+          },
+        });
+      }
+    } catch (_err) {
+      /* corpus stubs are best-effort */
     }
   })();
 

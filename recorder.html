@@ -6290,6 +6290,15 @@
                 this.pushOverlay(overlay);
               });
             }
+
+            // Subscribe to live-translate caption events. When the
+            // live-translate-agent starts a session, the realtime
+            // translation captions stream into our caption overlay.
+            // We auto-enable captions when a session starts and surface
+            // both source + target text in the existing overlay.
+            if (window.recorder.liveTranslate) {
+              window.recorder.liveTranslate.subscribe((evt) => this.handleLiveTranslateEvent(evt));
+            }
           }
 
           // Initialize Meeting HUD
@@ -7676,6 +7685,51 @@
           if (!this.captionsEnabled) return;
           this.elements.captionText.textContent = text;
           this.elements.captionText.classList.toggle('interim', isInterim);
+        },
+
+        // Handles caption / lifecycle events from live-translate-service.
+        // Emitted whenever the live-translate-agent starts a session and
+        // forwarded to this window by the main-process bridge.
+        handleLiveTranslateEvent(evt) {
+          if (!evt || typeof evt.type !== 'string') return;
+          switch (evt.type) {
+            case 'session_started': {
+              // Auto-enable captions so the user sees the translation.
+              if (!this.captionsEnabled && this.elements.captionToggle) {
+                this.captionsEnabled = true;
+                this.elements.captionToggle.classList.add('active');
+                this.elements.captionOverlay.classList.add('visible');
+              }
+              const from = evt.sourceLang && evt.sourceLang !== 'auto' ? evt.sourceLang : 'speech';
+              this.showCaption(`Translating ${from} \u2192 ${evt.targetLang}\u2026`, true);
+              this._liveTranslateActive = true;
+              this._liveTranslateLastFinal = '';
+              break;
+            }
+            case 'session_stopped':
+              this._liveTranslateActive = false;
+              this.showCaption('', false);
+              break;
+            case 'caption_delta':
+            case 'caption_final': {
+              // Prefer translated text (target) when available; fall back to
+              // source-language partials so the user sees responsiveness
+              // even before the model finishes translating.
+              const text = evt.targetText || evt.sourceText || '';
+              if (!text) break;
+              const isFinal = evt.type === 'caption_final';
+              this.showCaption(text, !isFinal);
+              if (isFinal) this._liveTranslateLastFinal = text;
+              break;
+            }
+            case 'error': {
+              const msg = evt.message || 'Translation error';
+              this.showCaption(`Translation error: ${msg}`, true);
+              break;
+            }
+            default:
+              break;
+          }
         },
 
         async startLiveTranscription() {
