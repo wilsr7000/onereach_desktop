@@ -159,8 +159,20 @@ interface SpacesRendererState {
   discoveryInFlight: boolean;
   /** Home view cache. Per Q-Home-3 (60s stale-while-revalidate). */
   home: HomeCardCache;
-  /** Active filter for the unified timeline. */
+  /** Active filter for the unified timeline (shared by Home + Space). */
   homeFilter: HomeFilter;
+  /**
+   * Space-scoped event cache. When the user clicks a real Space, the
+   * renderer fetches commits filtered to `spaceId` via
+   * `recentEvents({ spaceId })` and stashes them here. Items for the
+   * same Space already live in `state.items` (populated by
+   * `loadItems()`); the merged timeline reads from both.
+   *
+   * `forScopeId` is the cache-validity key — we drop stale data when
+   * the user navigates to a different Space.
+   */
+  spaceEvents: HomeCacheEntry<RendererEvent[]>;
+  spaceEventsForScopeId: string | null;
   /**
    * Render-time markers from `localStorage` (preferences live device-
    * locally so they don't round-trip the network). `welcomeDismissed`
@@ -196,6 +208,8 @@ const state: SpacesRendererState = {
     events: emptyCacheEntry<RendererEvent[]>(),
   },
   homeFilter: 'all',
+  spaceEvents: emptyCacheEntry<RendererEvent[]>(),
+  spaceEventsForScopeId: null,
   welcomeDismissed: readWelcomeDismissed(),
   lastVisitMs: readLastVisitMs(),
   currentVisitMs: Date.now(),
@@ -371,6 +385,21 @@ async function loadItems(): Promise<void> {
     renderItemList({ error: 'Bridge unavailable. Reload the window.' });
     return;
   }
+  // Kick off the scoped events fetch in parallel for real Spaces.
+  // Uncategorized has no `spaceId`, so the SDK has no edge to filter
+  // on — we skip the events query there (Uncategorized timeline is
+  // items-only).
+  if (
+    state.activeScopeId !== UNCATEGORIZED_SPACE_ID &&
+    state.activeScopeId !== HOME_SCOPE_ID
+  ) {
+    void loadSpaceEvents(state.activeScopeId);
+  } else {
+    // Clear the events cache so an Uncategorized view doesn't see
+    // leftover Space-scoped rows.
+    state.spaceEvents = emptyCacheEntry<RendererEvent[]>();
+    state.spaceEventsForScopeId = null;
+  }
   try {
     const envelope = await bridge.items.list(state.activeScopeId);
     if (envelope.ok === false) {
@@ -384,6 +413,51 @@ async function loadItems(): Promise<void> {
   } catch (err) {
     state.loadingItems = false;
     renderItemList({ error: messageFrom(err) });
+  }
+}
+
+/**
+ * Fetch commit events scoped to a single Space. Mirrors the Home
+ * timeline's `refreshEvents` shape so the merged-timeline pipeline
+ * (mergeTimeline + filterTimeline + buildTimelineRow) reuses without
+ * branching.
+ *
+ * Caches against `state.spaceEventsForScopeId` so a re-click on the
+ * same Space within the 60s TTL serves from memory.
+ */
+async function loadSpaceEvents(spaceId: string): Promise<void> {
+  const bridge = window.lite?.spaces?.home;
+  if (bridge === undefined) return;
+  const now = Date.now();
+  const fresh =
+    state.spaceEventsForScopeId === spaceId &&
+    state.spaceEvents.value !== null &&
+    now - state.spaceEvents.fetchedAt < HOME_CACHE_TTL_MS;
+  if (fresh) {
+    renderItemList({});
+    return;
+  }
+  // New scope → invalidate the previous Space's cache entry.
+  if (state.spaceEventsForScopeId !== spaceId) {
+    state.spaceEvents = emptyCacheEntry<RendererEvent[]>();
+    state.spaceEventsForScopeId = spaceId;
+  }
+  state.spaceEvents.loading = true;
+  state.spaceEvents.error = null;
+  try {
+    const envelope = await bridge.recentEvents({ limit: 50, spaceId });
+    if (envelope.ok === false) {
+      state.spaceEvents.error = envelope.error.message;
+    } else {
+      state.spaceEvents.value = envelope.value;
+      state.spaceEvents.fetchedAt = Date.now();
+    }
+  } catch (err) {
+    state.spaceEvents.error = messageFrom(err);
+  } finally {
+    state.spaceEvents.loading = false;
+    // Bail if the user switched scope mid-flight.
+    if (state.spaceEventsForScopeId === spaceId) renderItemList({});
   }
 }
 
@@ -681,37 +755,136 @@ interface RenderItemListOpts {
   error?: string;
 }
 
+/**
+ * Render the Space-scoped view: header + filter chips + unified
+ * timeline (items + events). Replaces the prior card-grid view so
+ * every non-Home scope feels like "channel-but-better" (the same
+ * timeline chrome that Home uses, scoped to one Space).
+ *
+ * Uncategorized: timeline shows items only (no Space-scoped events
+ * make sense for the synthetic intake zone). Real Spaces: timeline
+ * shows merged events + items.
+ */
 function renderItemList(opts: RenderItemListOpts): void {
   const main = document.getElementById('spaces-main');
   if (main === null) return;
   const wrap = ensureItemsRegion(main);
   wrap.replaceChildren();
 
-  // Toolbar (Phase 2f): refresh button + count summary. Always
-  // rendered above the items area so the user has a consistent
-  // affordance during loading / empty / populated states.
-  wrap.appendChild(buildItemsToolbar({ busy: opts.loading === true }));
+  // Header: Space name + description + refresh affordance. Lives
+  // outside the timeline so a refresh doesn't cause the header to
+  // shimmer.
+  wrap.appendChild(buildSpaceHeader({ busy: opts.loading === true }));
 
   if (opts.error !== undefined) {
     wrap.appendChild(buildBanner('error', opts.error));
     return;
   }
-  if (opts.loading === true) {
-    wrap.appendChild(buildBanner('info', 'Loading items…'));
+
+  // Filter chips: shared with Home so the user's "Agents-only" or
+  // "24h" preference survives a scope switch.
+  wrap.appendChild(buildFilterChips());
+
+  // Build the timeline rows from items + (scope-matching) events.
+  // For Uncategorized, the events array is empty by design.
+  const events =
+    state.spaceEventsForScopeId === state.activeScopeId &&
+    state.spaceEvents.value !== null
+      ? state.spaceEvents.value
+      : [];
+  const merged = mergeTimeline(events, state.items);
+  const filtered = filterTimeline(merged, state.homeFilter, Date.now());
+
+  if (opts.loading === true && state.items.length === 0) {
+    wrap.appendChild(buildTimelineSkeleton(6));
     return;
   }
-  if (state.items.length === 0) {
+
+  if (filtered.length === 0) {
     wrap.appendChild(buildEmptyItemsState(state.activeScopeId));
     return;
   }
-  const grid = document.createElement('div');
-  grid.className = 'spaces-card-grid';
-  grid.id = 'spaces-card-grid';
-  for (const item of state.items) {
-    grid.appendChild(buildItemCard(item, item.id === state.activeItemId));
+
+  const list = document.createElement('div');
+  list.className = 'home-timeline-list';
+  list.setAttribute('aria-label', 'Activity timeline');
+  for (const row of filtered) {
+    list.appendChild(buildTimelineRow(row));
   }
-  wrap.appendChild(grid);
-  wireCardClicks(grid);
+  wrap.appendChild(list);
+
+  // End-of-feed cue when nothing is filtered out.
+  if (filtered.length >= 5 && filtered.length === merged.length) {
+    const tail = document.createElement('div');
+    tail.className = 'home-timeline-tail';
+    tail.textContent = 'You are all caught up.';
+    wrap.appendChild(tail);
+  }
+}
+
+/**
+ * Per-Space header: name + optional description + refresh button.
+ * Pulled into its own pure builder so jsdom tests can exercise the
+ * pattern (name resolution, fallback for missing description) without
+ * driving the full renderer.
+ */
+function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
+  const header = document.createElement('header');
+  header.className = 'spaces-view-header';
+
+  const titleWrap = document.createElement('div');
+  titleWrap.className = 'spaces-view-header-title-wrap';
+
+  const title = document.createElement('h2');
+  title.className = 'spaces-view-header-title';
+  if (state.activeScopeId === UNCATEGORIZED_SPACE_ID) {
+    title.textContent = 'Uncategorized';
+  } else {
+    const space = state.spaces.find((s) => s.id === state.activeScopeId);
+    title.textContent =
+      space !== undefined && space.name.length > 0 ? space.name : '(unnamed Space)';
+  }
+  titleWrap.appendChild(title);
+
+  // Optional description (real Spaces only — Uncategorized has a
+  // fixed one-liner below the title).
+  if (state.activeScopeId === UNCATEGORIZED_SPACE_ID) {
+    const sub = document.createElement('p');
+    sub.className = 'spaces-view-header-sub';
+    sub.textContent = 'Items that arrive without a Space land here for triage.';
+    titleWrap.appendChild(sub);
+  } else {
+    const space = state.spaces.find((s) => s.id === state.activeScopeId);
+    if (
+      space !== undefined &&
+      typeof space.description === 'string' &&
+      space.description.length > 0
+    ) {
+      const sub = document.createElement('p');
+      sub.className = 'spaces-view-header-sub';
+      sub.textContent = space.description;
+      titleWrap.appendChild(sub);
+    }
+  }
+
+  header.appendChild(titleWrap);
+
+  // Refresh affordance (replaces the prior toolbar refresh button).
+  const refresh = document.createElement('button');
+  refresh.type = 'button';
+  refresh.className = 'spaces-items-refresh';
+  refresh.id = 'spaces-items-refresh';
+  refresh.title = 'Refresh items + activity';
+  refresh.setAttribute('aria-label', 'Refresh');
+  refresh.disabled = opts.busy;
+  refresh.textContent = opts.busy ? 'Refreshing…' : '↻ Refresh';
+  refresh.addEventListener('click', () => {
+    if (state.loadingItems) return;
+    void loadItems();
+  });
+  header.appendChild(refresh);
+
+  return header;
 }
 
 interface ItemsToolbarOpts {
@@ -768,25 +941,11 @@ function ensureItemsRegion(main: HTMLElement): HTMLElement {
   return region;
 }
 
-function wireCardClicks(grid: HTMLElement): void {
-  grid.addEventListener('click', (event: MouseEvent) => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const card = target.closest<HTMLElement>('.spaces-card');
-    if (card === null) return;
-    const itemId = card.getAttribute('data-item-id');
-    if (typeof itemId !== 'string' || itemId.length === 0) return;
-    // Toggle: clicking the active card collapses the detail rail.
-    if (itemId === state.activeItemId) {
-      state.activeItemId = null;
-      applyActiveCard(grid, null);
-      showDetailRail(false);
-      return;
-    }
-    applyActiveCard(grid, itemId);
-    void loadItemDetail(itemId);
-  });
-}
+// `wireCardClicks` removed when the per-Space view switched from the
+// card grid to the timeline (timeline rows wire their own clicks via
+// `buildTimelineRow`). `applyActiveCard` survives because the close-
+// detail-rail path still calls it through the legacy ID-grid
+// selector — harmless and idempotent.
 
 function applyActiveCard(grid: HTMLElement, itemId: string | null): void {
   for (const card of Array.from(grid.querySelectorAll<HTMLElement>('.spaces-card'))) {
@@ -1439,6 +1598,48 @@ export function looksLikeAgentAuthor(author: string): boolean {
 }
 
 /**
+ * Pretty-print a raw `:Commit.author` string into something a human
+ * wants to read.
+ *
+ * Edison's commit log writes whatever the producer hands it: machine
+ * IDs (`device_mac.lan_mnc5mu8m`), email-shaped identifiers
+ * (`robb+admin/onereach@onereach.com`), agent names (`Audit Agent`),
+ * service principals (`bot-worker-42`). This heuristic doesn't try
+ * to resolve identities to `:Person` / `:Agent` nodes (that's a
+ * Phase 4+ concern); it just translates the most-common gnarly
+ * shapes into something readable, and falls back to the raw author
+ * when no rule fits.
+ *
+ *   device_mac.lan_xxx               -> "Local device"
+ *   service-account.lite.local_xxx   -> "Service account"
+ *   robb+admin/onereach@onereach.com -> "robb"
+ *   robb@onereach.com                -> "robb"
+ *   Audit Agent                      -> "Audit Agent"
+ *   ""                               -> "Someone"
+ *
+ * Pure; exported for tests.
+ */
+export function prettyAuthor(raw: string): string {
+  if (typeof raw !== 'string' || raw.trim().length === 0) return 'Someone';
+  const author = raw.trim();
+  // Machine / device identifiers — collapse to a generic label so the
+  // hex/UUID tail doesn't dominate the headline.
+  if (/^device[._-]/i.test(author)) return 'Local device';
+  if (/^service[._-]?account/i.test(author)) return 'Service account';
+  if (/^system[._-]/i.test(author)) return 'System';
+  // Email-shaped → take the local part, drop +tags / role tails.
+  const at = author.indexOf('@');
+  if (at > 0) {
+    const local = author.slice(0, at);
+    // Strip role tails: "robb+admin/onereach" → "robb"
+    const beforeRole = local.split('/')[0] ?? local;
+    const beforePlus = (beforeRole.split('+')[0] ?? beforeRole).trim();
+    if (beforePlus.length > 0) return beforePlus;
+  }
+  return author;
+}
+
+/**
  * Merge events + items into a unified chronological timeline.
  * Items dedupe against events when an event was emitted for the same
  * item-creation (matched on item.id appearing in event.kind / id).
@@ -1455,7 +1656,10 @@ export function mergeTimeline(
     const row: TimelineRow = {
       kind: 'item',
       id: `item:${item.id}`,
-      author: item.producedBy?.name ?? '',
+      // Items carry a structured `producedBy` (Person|Agent) when the
+      // schema has the edge; for now just pretty-print whatever name
+      // is there so device-shaped values still read clean.
+      author: prettyAuthor(item.producedBy?.name ?? ''),
       verb: 'added',
       object: item.title.length > 0 ? item.title : '(untitled)',
       timestamp: item.updatedAt || item.createdAt,
@@ -1490,7 +1694,13 @@ export function mergeTimeline(
     const row: TimelineRow = {
       kind: 'event',
       id: `event:${e.id}`,
-      author: e.author,
+      // Source-of-truth author lives on the event; the renderer
+      // pretty-prints it so headlines read naturally even when the
+      // raw value is a device ID or an email with role tails. The
+      // `looksLikeAgentAuthor` flag is computed against the RAW
+      // author (the heuristic relies on substrings the pretty-print
+      // might strip).
+      author: prettyAuthor(e.author),
       verb: deriveVerb(e.kind),
       object: deriveObject(e.kind),
       timestamp: e.timestamp,
@@ -1805,7 +2015,8 @@ function buildContextActiveContributors(): HTMLElement {
     li.className = 'home-context-row';
     const name = document.createElement('span');
     name.className = 'home-context-row-name';
-    name.textContent = c.displayName.length > 0 ? c.displayName : c.author;
+    const rawName = c.displayName.length > 0 ? c.displayName : c.author;
+    name.textContent = prettyAuthor(rawName);
     li.appendChild(name);
     const count = document.createElement('span');
     count.className = 'home-context-row-count';
@@ -2289,6 +2500,7 @@ function messageFrom(err: unknown): string {
   formatSinceLastVisit,
   countTimelineSince,
   looksLikeAgentAuthor,
+  prettyAuthor,
   formatBigNumber,
   formatRecency,
   HOME_SCOPE_ID,

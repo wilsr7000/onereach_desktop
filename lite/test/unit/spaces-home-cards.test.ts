@@ -77,6 +77,7 @@ interface RendererTestApi {
   formatSinceLastVisit: (lastVisitMs: number | null, nowMs: number) => string | null;
   countTimelineSince: (rows: ReadonlyArray<TimelineRow>, sinceMs: number) => number;
   looksLikeAgentAuthor: (author: string) => boolean;
+  prettyAuthor: (raw: string) => string;
   formatBigNumber: (n: number) => string;
   formatRecency: (value: string | number) => string;
   HOME_SCOPE_ID: string;
@@ -162,6 +163,53 @@ describe('looksLikeAgentAuthor', () => {
   });
   it('returns false for empty / non-string', () => {
     expect(renderer.looksLikeAgentAuthor('')).toBe(false);
+  });
+});
+
+// ─── prettyAuthor ───────────────────────────────────────────────────────
+
+describe('prettyAuthor', () => {
+  it('returns "Someone" for empty / whitespace-only input', () => {
+    expect(renderer.prettyAuthor('')).toBe('Someone');
+    expect(renderer.prettyAuthor('   ')).toBe('Someone');
+  });
+
+  it('collapses device-shaped identifiers to "Local device"', () => {
+    expect(renderer.prettyAuthor('device_mac.lan_mnc5mu8m')).toBe('Local device');
+    expect(renderer.prettyAuthor('device-windows-pc')).toBe('Local device');
+    expect(renderer.prettyAuthor('Device_mac.lan_xyz')).toBe('Local device');
+  });
+
+  it('collapses service-account identifiers', () => {
+    expect(renderer.prettyAuthor('service-account.lite.local_abc')).toBe(
+      'Service account'
+    );
+    expect(renderer.prettyAuthor('service_account.foo')).toBe('Service account');
+    expect(renderer.prettyAuthor('serviceaccount.bar')).toBe('Service account');
+  });
+
+  it('collapses system identifiers', () => {
+    expect(renderer.prettyAuthor('system_cron')).toBe('System');
+    expect(renderer.prettyAuthor('system-watchdog')).toBe('System');
+  });
+
+  it('extracts the local part of an email and strips role tails', () => {
+    expect(renderer.prettyAuthor('robb@onereach.com')).toBe('robb');
+    expect(renderer.prettyAuthor('robb+admin/onereach@onereach.com')).toBe('robb');
+    expect(renderer.prettyAuthor('alice+test@example.com')).toBe('alice');
+  });
+
+  it('falls through to the raw author when no rule matches', () => {
+    expect(renderer.prettyAuthor('Audit Agent')).toBe('Audit Agent');
+    expect(renderer.prettyAuthor('Quarterly Report Bot')).toBe('Quarterly Report Bot');
+    expect(renderer.prettyAuthor('robb')).toBe('robb');
+  });
+
+  it('does not flag a person email as an agent (looksLikeAgentAuthor still uses RAW)', () => {
+    // prettyAuthor is purely cosmetic. The agent detection runs on
+    // the raw value so the heuristic isn't fooled by stripped tails.
+    expect(renderer.looksLikeAgentAuthor('robb@onereach.com')).toBe(false);
+    expect(renderer.looksLikeAgentAuthor('audit-bot@onereach.com')).toBe(true);
   });
 });
 
