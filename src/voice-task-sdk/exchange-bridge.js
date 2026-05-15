@@ -4269,6 +4269,16 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
             voice: agentVoice,
             // Flag so downstream listeners know this is panel-backed speech
             hasPanel,
+            // taskResult: true tags the broadcast so the orb's idle-state
+            // "phantom audio blocked" guard lets it through. Without this,
+            // async-task results (daily brief etc.) hit the orb after the
+            // active task is cleared -- the orb is in 'idle', no taskId,
+            // not proactive -- and the WAV chunks are silently dropped.
+            // This was the root cause of the original "no audio out"
+            // user report; my v5.0.11 Phase 3 fix gated TTS correctly
+            // but the audio-routing bypass was missed.
+            taskResult: true,
+            agentId,
           });
           log.info('voice', 'Speak result for task completion', { speakResult: speakResult });
         }

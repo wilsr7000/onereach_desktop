@@ -3897,24 +3897,33 @@
             },
             audio_wav: (e) => {
               // Phantom-audio guard: block stray TTS when idle and no task.
-              // Proactive agent speech (e.g. critical-meeting-alarm-agent
-              // enqueued via global.agentMessageQueue) carries e.proactive
-              // and is allowed through because it has no task to attach to
-              // by design -- the orb is the delivery surface for those.
-              if (S.phase === 'idle' && !_activeTaskId && !e.proactive) {
+              // Allowlist:
+              //   - e.proactive: agent-initiated speech (critical-meeting-alarm,
+              //     scheduled brief, monitor agents) -- the orb is the
+              //     delivery surface for those.
+              //   - e.taskResult: TTS for an async task that JUST completed
+              //     (daily brief, calendar query, etc.). The orb has
+              //     cleared activeTaskId by the time audio arrives, but
+              //     this audio is the legitimate result of a turn the
+              //     user initiated -- not phantom. Without this the user
+              //     hears nothing for any agent that takes >1s.
+              if (S.phase === 'idle' && !_activeTaskId && !e.proactive && !e.taskResult) {
                 console.log('[Orb] Ignoring audio_wav while idle (phantom audio blocked)');
                 return;
               }
               if (e.audio) {
                 if (!S.isSpeaking) {
-                  S.transition('speaking', e.proactive ? `audio_wav:${e.agentId || 'proactive'}` : 'audio_wav');
+                  const reason = e.proactive ? `audio_wav:${e.agentId || 'proactive'}`
+                    : e.taskResult ? `audio_wav:taskResult:${e.agentId || 'unknown'}`
+                    : 'audio_wav';
+                  S.transition('speaking', reason);
                 }
                 window._agentResponseText = '';
                 playWAVAudio(e.audio);
               }
             },
             audio_done: (e) => {
-              if (S.phase === 'idle' && !_activeTaskId && !e.proactive) {
+              if (S.phase === 'idle' && !_activeTaskId && !e.proactive && !e.taskResult) {
                 console.log('[Orb] Ignoring audio_done while idle (phantom audio blocked)');
                 return;
               }

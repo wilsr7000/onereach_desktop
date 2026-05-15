@@ -181,6 +181,11 @@ class VoiceSpeaker {
       this._streamTextWithTiming(text, estimatedDurationMs, ttsResponseId);
 
       const proactive = !!metadata?.proactive;
+      // taskResult tags audio that comes from a just-completed user task
+      // (e.g. daily brief) so the orb's "phantom audio blocked" idle
+      // guard lets it through. Without this, async-task TTS audio
+      // arrives after the orb cleared its activeTaskId and gets dropped.
+      const taskResult = !!metadata?.taskResult;
       const agentId = metadata?.agentId;
 
       // Send WAV audio to renderer
@@ -190,6 +195,7 @@ class VoiceSpeaker {
         responseId: ttsResponseId,
         format: 'wav',
         proactive,
+        taskResult,
         agentId,
       });
 
@@ -199,6 +205,7 @@ class VoiceSpeaker {
           type: 'audio_done',
           responseId: ttsResponseId,
           proactive,
+          taskResult,
           agentId,
         });
         this.speechQueue.markComplete();
@@ -210,7 +217,7 @@ class VoiceSpeaker {
       }, estimatedDurationMs + 100);
 
       // Also broadcast full text
-      this.broadcast({ type: 'speech_text', text: text, proactive, agentId });
+      this.broadcast({ type: 'speech_text', text: text, proactive, taskResult, agentId });
 
       return true;
     } catch (err) {
