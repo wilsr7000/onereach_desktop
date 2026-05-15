@@ -242,10 +242,10 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     SPACES_IPC.HOME_RECENT_EVENTS,
     async (
       _event: IpcMainInvokeEvent,
-      payload?: { limit?: unknown; since?: unknown }
+      payload?: { limit?: unknown; since?: unknown; spaceId?: unknown }
     ): Promise<SpacesIpcResult<Event[]>> => {
       try {
-        const opts: { limit?: number; since?: number } = {};
+        const opts: { limit?: number; since?: number; spaceId?: string } = {};
         if (isPositiveInteger(payload?.limit)) opts.limit = payload?.limit as number;
         if (
           typeof payload?.since === 'number' &&
@@ -253,6 +253,9 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
           payload?.since >= 0
         ) {
           opts.since = Math.floor(payload.since as number);
+        }
+        if (typeof payload?.spaceId === 'string' && payload.spaceId.length > 0) {
+          opts.spaceId = payload.spaceId;
         }
         const value = await getSpacesApi().listRecentEvents(opts);
         return { ok: true, value };

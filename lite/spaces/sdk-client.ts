@@ -284,7 +284,8 @@ export const CYPHER = {
   HOME_RECENT_EVENTS: `
     MATCH (c:Commit)
     WHERE ($since IS NULL OR c.timestamp >= $since)
-    OPTIONAL MATCH (c)<-[:IN_SPACE]-(s:Space)
+      AND ($spaceId IS NULL OR c.spaceId = $spaceId)
+    OPTIONAL MATCH (c)-[:IN_SPACE]->(s:Space)
     RETURN c.hash AS id,
            c.author AS author,
            c.message AS kind,
@@ -448,7 +449,13 @@ export class SdkSpacesClient {
       typeof opts.since === 'number' && Number.isFinite(opts.since) && opts.since >= 0
         ? Math.floor(opts.since)
         : null;
-    const rows = await this.run(CYPHER.HOME_RECENT_EVENTS, { limit, since });
+    // Empty / non-string spaceId collapses to null so the Cypher's
+    // optional-equality branch fires (no filter applied). The
+    // canonical scope helper lives in `scope.ts`; this guard is the
+    // SDK-layer twin of the renderer's "is this a real spaceId" check.
+    const spaceId =
+      typeof opts.spaceId === 'string' && opts.spaceId.length > 0 ? opts.spaceId : null;
+    const rows = await this.run(CYPHER.HOME_RECENT_EVENTS, { limit, since, spaceId });
     return rows.map(toEvent).filter((e): e is Event => e !== null);
   }
 

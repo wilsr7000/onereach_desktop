@@ -271,6 +271,12 @@ export interface RecentEventsOpts {
   limit?: number;
   /** Optional epoch ms cutoff; events with `timestamp >= since` only. */
   since?: number;
+  /**
+   * Optional Space scope. When set, the SDK returns only commits
+   * whose `:Commit.spaceId` matches. Powers the per-Space timeline
+   * (the home-page timeline filtered to one Space).
+   */
+  spaceId?: string;
 }
 
 /** Options shape for `listRecentItems()`. */

@@ -674,6 +674,11 @@ interface LiteSpacesHomeBridge {
   recentEvents(opts?: {
     limit?: number;
     since?: number;
+    /**
+     * Optional Space scope. When set, only commits with the matching
+     * `:Commit.spaceId` are returned. Powers the per-Space timeline.
+     */
+    spaceId?: string;
   }): Promise<LiteSpacesIpcResult<LiteSpacesEventView[]>>;
   agentsSample(opts?: {
     limit?: number;

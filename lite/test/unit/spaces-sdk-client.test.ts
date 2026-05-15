@@ -488,3 +488,406 @@ describe('SpaceScope handling', () => {
     expect(UNCATEGORIZED_SPACE_ID).toBe('__uncategorized__');
   });
 });
+
+// ─── Home view (chunk 3k + 3o) ──────────────────────────────────────────
+//
+// Cypher source regression + row-mapping coverage for the 6 new SDK
+// methods that power the Home news-feed cards. See lite/spaces/HOME-V1.md.
+
+describe('CYPHER source strings — Home view', () => {
+  it('HOME_ENTITY_COUNTS uses APOC stats', () => {
+    expect(CYPHER.HOME_ENTITY_COUNTS).toMatch(/CALL apoc\.meta\.stats\(\) YIELD labels/);
+    expect(CYPHER.HOME_ENTITY_COUNTS).toMatch(/RETURN labels/);
+  });
+
+  it('HOME_ENTITY_COUNTS_FALLBACK uses explicit UNION ALL per label', () => {
+    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(s:Space\)/);
+    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(a:Asset\)/);
+    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(p:Person\)/);
+    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(g:Agent\)/);
+    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/UNION ALL/);
+  });
+
+  it('HOME_RECENT_ITEMS uses :Asset label and ItemSummary projection', () => {
+    expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/MATCH \(a:Asset\)/);
+    expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/coalesce\(a\.name, a\.title, a\.id\) AS title/);
+    expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/LIMIT toInteger\(\$limit\)/);
+  });
+
+  it('HOME_TOP_CONTRIBUTORS aggregates :Commit by author with $sinceMs cutoff', () => {
+    expect(CYPHER.HOME_TOP_CONTRIBUTORS).toMatch(/MATCH \(c:Commit\)/);
+    expect(CYPHER.HOME_TOP_CONTRIBUTORS).toMatch(/c\.timestamp >= \$sinceMs/);
+    expect(CYPHER.HOME_TOP_CONTRIBUTORS).toMatch(/count\(c\) AS events/);
+    expect(CYPHER.HOME_TOP_CONTRIBUTORS).toMatch(/LIMIT toInteger\(\$limit\)/);
+  });
+
+  it('HOME_RECENT_EVENTS surfaces c.message verbatim as kind (per Q-Home-4)', () => {
+    expect(CYPHER.HOME_RECENT_EVENTS).toMatch(/MATCH \(c:Commit\)/);
+    expect(CYPHER.HOME_RECENT_EVENTS).toMatch(/c\.message AS kind/);
+    expect(CYPHER.HOME_RECENT_EVENTS).toMatch(/\$since IS NULL OR c\.timestamp >= \$since/);
+  });
+
+  it('HOME_RECENT_EVENTS accepts an optional $spaceId filter (per-Space mini-Home)', () => {
+    // The per-Space view feeds this query the active spaceId so the
+    // timeline shows only commits for that Space. NULL means "no
+    // scope filter" (Home view).
+    expect(CYPHER.HOME_RECENT_EVENTS).toMatch(
+      /\$spaceId IS NULL OR c\.spaceId = \$spaceId/
+    );
+  });
+
+  it('HOME_RECENT_EVENTS uses (:Commit)-[:IN_SPACE]->(:Space) — direction matters', () => {
+    // The actual graph stores the edge as Commit → Space (verified
+    // live: 120 commits forward direction, 0 reverse). The reverse
+    // arrow `(c)<-[:IN_SPACE]-(s:Space)` would silently miss every
+    // edge and the modal would render the spaceId as the spaceName
+    // via the `coalesce(s.name, c.spaceId)` fallback. Pin the
+    // correct direction so future edits don't drift.
+    expect(CYPHER.HOME_RECENT_EVENTS).toMatch(
+      /OPTIONAL MATCH \(c\)-\[:IN_SPACE\]->\(s:Space\)/
+    );
+    expect(CYPHER.HOME_RECENT_EVENTS).not.toMatch(/<-\[:IN_SPACE\]-/);
+  });
+
+  it('HOME_AGENTS_SAMPLE uses :Agent label with name + description fallback', () => {
+    expect(CYPHER.HOME_AGENTS_SAMPLE).toMatch(/MATCH \(a:Agent\)/);
+    expect(CYPHER.HOME_AGENTS_SAMPLE).toMatch(/coalesce\(a\.name, a\.title, a\.id\) AS name/);
+    expect(CYPHER.HOME_AGENTS_SAMPLE).toMatch(/coalesce\(a\.description, a\.summary, ''\) AS description/);
+  });
+
+  it('HOME_PERMISSION_SUMMARY counts visible :Space nodes', () => {
+    expect(CYPHER.HOME_PERMISSION_SUMMARY).toMatch(/MATCH \(s:Space\)/);
+    expect(CYPHER.HOME_PERMISSION_SUMMARY).toMatch(/count\(s\) AS visible/);
+  });
+});
+
+describe('SdkSpacesClient.getEntityCounts', () => {
+  it('normalises APOC labels into a flat counts shape', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('apoc.meta.stats()', [
+      {
+        labels: { Space: 4, Asset: 9, Person: 3, Agent: 159, Heartbeat: 565 },
+      },
+    ]);
+    const client = makeClient(stub);
+    expect(await client.getEntityCounts()).toEqual({
+      spaces: 4,
+      assets: 9,
+      people: 3,
+      agents: 159,
+    });
+  });
+
+  it('falls back to UNION ALL when APOC returns "procedure not found"', async () => {
+    const stub = buildStubQuery();
+    const apocErr = new Error('There is no procedure with the name `apoc.meta.stats` registered');
+    (apocErr as Error & { code?: string }).code = 'NEON_QUERY';
+    stub.setError('apoc.meta.stats()', apocErr);
+    stub.setResponse('UNION ALL', [
+      { kind: 'Space', n: 4 },
+      { kind: 'Asset', n: 9 },
+      { kind: 'Person', n: 3 },
+      { kind: 'Agent', n: 159 },
+    ]);
+    const client = makeClient(stub);
+    expect(await client.getEntityCounts()).toEqual({
+      spaces: 4,
+      assets: 9,
+      people: 3,
+      agents: 159,
+    });
+  });
+
+  it('defaults missing labels to 0 instead of undefined', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('apoc.meta.stats()', [{ labels: { Space: 2 } }]);
+    const client = makeClient(stub);
+    expect(await client.getEntityCounts()).toEqual({
+      spaces: 2,
+      assets: 0,
+      people: 0,
+      agents: 0,
+    });
+  });
+
+  it('propagates non-APOC errors instead of falling back', async () => {
+    const stub = buildStubQuery();
+    const authErr = new Error('not configured');
+    (authErr as Error & { code?: string }).code = 'NEON_NOT_CONFIGURED';
+    stub.setError('apoc.meta.stats()', authErr);
+    const client = makeClient(stub);
+    await expect(client.getEntityCounts()).rejects.toMatchObject({
+      code: 'SPACES_NOT_AUTHENTICATED',
+    });
+  });
+});
+
+describe('SdkSpacesClient.listRecentItems', () => {
+  it('emits HOME_RECENT_ITEMS with the limit parameter', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset)', []);
+    const client = makeClient(stub);
+    await client.listRecentItems({ limit: 5 });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ limit: 5 });
+  });
+
+  it('clamps limit to default 3 when not provided', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset)', []);
+    const client = makeClient(stub);
+    await client.listRecentItems();
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ limit: 3 });
+  });
+
+  it('caps limit at 50 (Home card max-row context)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset)', []);
+    const client = makeClient(stub);
+    await client.listRecentItems({ limit: 999 });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ limit: 50 });
+  });
+
+  it('maps rows to ItemSummary with single-Space chip', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset)', [
+      {
+        id: 'a-1',
+        title: 'Conversation transcript',
+        kind: 'text',
+        createdAt: '2026-05-11T18:00:00Z',
+        updatedAt: '2026-05-11T18:00:00Z',
+        otherSpaces: [
+          { id: 'sp-1', name: 'ChatGPT Conversations', color: '#10a37f' },
+        ],
+        producedBy: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const items = await client.listRecentItems();
+    expect(items[0]?.title).toBe('Conversation transcript');
+    expect(items[0]?.otherSpaces[0]?.name).toBe('ChatGPT Conversations');
+  });
+});
+
+describe('SdkSpacesClient.topContributors', () => {
+  it('passes window=week sinceMs by default', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', []);
+    const client = makeClient(stub);
+    const before = Date.now();
+    await client.topContributors();
+    const after = Date.now();
+    const call = stub.calls[stub.calls.length - 1];
+    const since = (call?.parameters?.['sinceMs'] as number);
+    // 7 days = 604800000 ms; allow 1s slack for clock between calls.
+    expect(since).toBeGreaterThanOrEqual(before - 7 * 24 * 60 * 60 * 1000 - 1000);
+    expect(since).toBeLessThanOrEqual(after - 7 * 24 * 60 * 60 * 1000 + 1000);
+    expect(call?.parameters?.['limit']).toBe(4);
+  });
+
+  it('honours window=day', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', []);
+    const client = makeClient(stub);
+    const before = Date.now();
+    await client.topContributors({ window: 'day', limit: 10 });
+    const after = Date.now();
+    const call = stub.calls[stub.calls.length - 1];
+    const since = (call?.parameters?.['sinceMs'] as number);
+    expect(since).toBeGreaterThanOrEqual(before - 24 * 60 * 60 * 1000 - 1000);
+    expect(since).toBeLessThanOrEqual(after - 24 * 60 * 60 * 1000 + 1000);
+    expect(call?.parameters?.['limit']).toBe(10);
+  });
+
+  it('maps rows; v1 displayName equals author verbatim', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', [
+      { author: 'Audit Agent', events: 47, lastEventAt: '1778691652347' },
+      { author: 'device_mac.lan_xyz', events: 14, lastEventAt: '1778600000000' },
+    ]);
+    const client = makeClient(stub);
+    const rows = await client.topContributors();
+    expect(rows).toEqual([
+      {
+        author: 'Audit Agent',
+        displayName: 'Audit Agent',
+        events: 47,
+        lastEventAt: '1778691652347',
+      },
+      {
+        author: 'device_mac.lan_xyz',
+        displayName: 'device_mac.lan_xyz',
+        events: 14,
+        lastEventAt: '1778600000000',
+      },
+    ]);
+  });
+
+  it('drops malformed rows (missing author)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', [
+      { events: 10 }, // no author
+      { author: 'OK', events: 5, lastEventAt: '0' },
+    ]);
+    const client = makeClient(stub);
+    const rows = await client.topContributors();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.author).toBe('OK');
+  });
+});
+
+describe('SdkSpacesClient.listRecentEvents', () => {
+  it('default limit is 50, since + spaceId both null (Home scope)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', []);
+    const client = makeClient(stub);
+    await client.listRecentEvents();
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ limit: 50, since: null, spaceId: null });
+  });
+
+  it('passes since when provided as a non-negative number', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', []);
+    const client = makeClient(stub);
+    await client.listRecentEvents({ limit: 10, since: 1700000000000 });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({
+      limit: 10,
+      since: 1700000000000,
+      spaceId: null,
+    });
+  });
+
+  it('caps limit at 200', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', []);
+    const client = makeClient(stub);
+    await client.listRecentEvents({ limit: 1_000_000 });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ limit: 200, since: null, spaceId: null });
+  });
+
+  it('passes spaceId when provided (per-Space mini-Home)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', []);
+    const client = makeClient(stub);
+    await client.listRecentEvents({ limit: 20, spaceId: 'sp-77' });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ limit: 20, since: null, spaceId: 'sp-77' });
+  });
+
+  it('treats an empty spaceId as "no scope" (null), not an empty match', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', []);
+    const client = makeClient(stub);
+    await client.listRecentEvents({ spaceId: '' });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ limit: 50, since: null, spaceId: null });
+  });
+
+  it('maps rows; missing spaceId / spaceName drop the optional fields', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (c:Commit)', [
+      {
+        id: 'h1',
+        author: 'Audit Agent',
+        kind: 'item:added',
+        timestamp: '1778691652347',
+        spaceId: 'sp-1',
+        spaceName: 'Engineering',
+      },
+      {
+        id: 'h2',
+        author: 'system',
+        kind: 'item:updated',
+        timestamp: '1778691000000',
+      },
+    ]);
+    const client = makeClient(stub);
+    const rows = await client.listRecentEvents();
+    expect(rows[0]?.spaceName).toBe('Engineering');
+    expect(rows[1]).not.toHaveProperty('spaceName');
+    expect(rows[1]).not.toHaveProperty('spaceId');
+  });
+});
+
+describe('SdkSpacesClient.listAgentsSample', () => {
+  it('default limit is 3, cap is 200', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Agent)', []);
+    const client = makeClient(stub);
+    await client.listAgentsSample();
+    let call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ limit: 3 });
+    await client.listAgentsSample({ limit: 9999 });
+    call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ limit: 200 });
+  });
+
+  it('maps rows; description defaults to empty string', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Agent)', [
+      { id: 'ag-1', name: 'Audit Agent', description: 'Quarterly compliance' },
+      { id: 'ag-2', name: 'No Desc' },
+    ]);
+    const client = makeClient(stub);
+    const rows = await client.listAgentsSample();
+    expect(rows[0]).toEqual({
+      id: 'ag-1',
+      name: 'Audit Agent',
+      description: 'Quarterly compliance',
+    });
+    expect(rows[1]).toEqual({ id: 'ag-2', name: 'No Desc', description: '' });
+  });
+
+  it('drops rows with no id', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Agent)', [
+      { name: 'Orphan', description: '' },
+      { id: 'ag-3', name: 'Valid', description: '' },
+    ]);
+    const client = makeClient(stub);
+    const rows = await client.listAgentsSample();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe('ag-3');
+  });
+});
+
+describe('SdkSpacesClient.getPermissionSummary', () => {
+  it('returns visibleSpaceCount as a non-negative integer', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (s:Space)', [{ visibleSpaceCount: 4 }]);
+    const client = makeClient(stub);
+    expect(await client.getPermissionSummary()).toEqual({ visibleSpaceCount: 4 });
+  });
+
+  it('clamps negative or non-numeric visibleSpaceCount to 0', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (s:Space)', [{ visibleSpaceCount: -3 }]);
+    const client = makeClient(stub);
+    expect(await client.getPermissionSummary()).toEqual({ visibleSpaceCount: 0 });
+  });
+
+  it('exposes totalSpaceCount when present', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (s:Space)', [
+      { visibleSpaceCount: 4, totalSpaceCount: 7 },
+    ]);
+    const client = makeClient(stub);
+    expect(await client.getPermissionSummary()).toEqual({
+      visibleSpaceCount: 4,
+      totalSpaceCount: 7,
+    });
+  });
+
+  it('returns visibleSpaceCount=0 when no rows come back', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (s:Space)', []);
+    const client = makeClient(stub);
+    expect(await client.getPermissionSummary()).toEqual({ visibleSpaceCount: 0 });
+  });
+});

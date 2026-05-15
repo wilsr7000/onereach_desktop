@@ -539,6 +539,7 @@ interface SpacesHomeBridge {
   recentEvents(opts?: {
     limit?: number;
     since?: number;
+    spaceId?: string;
   }): Promise<SpacesIpcResultView<SpacesEventView[]>>;
   agentsSample(opts?: {
     limit?: number;
