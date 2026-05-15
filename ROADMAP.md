@@ -339,7 +339,7 @@ See `.cursor/plans/onereach_lite_strangler_build_*.plan.md` for the full strateg
 
 *Always-on-top floating orb for voice + text agent interaction*
 
-### Current State (v5.0.11)
+### Current State (v5.0.12)
 
 **Realtime API:**
 - ✅ GA Realtime API 2 (`gpt-realtime-2`, May 2026) -- bearer-only auth, semantic VAD, function-tool routing, `marin` voice
@@ -347,7 +347,7 @@ See `.cursor/plans/onereach_lite_strangler_build_*.plan.md` for the full strateg
 - ✅ Same-turn dedup between Whisper transcript + model function-call (paraphrase-resistant)
 - ✅ Cancel/stop voice intents: model classifies "forget it" / "stop talking" / "scratch that" / "shush" via `cancel_in_flight` + `stop_speaking` function tools (zero added latency, no regex)
 
-**Unified UX (Phase 4 -- v5.0.11):**
+**Unified UX (Phase 4 -- v5.0.12):**
 - ✅ **Dual-channel agent contract**: agents return `spokenSummary` (short, voiced) + `visualText` (richer, in chat) + optional `ui` + `displayMode`. Backward-compatible shim ([`lib/agent-result-normalize.js`](lib/agent-result-normalize.js)).
 - ✅ **Chat panel = unified conversation log**: scrollable history of every interaction (user text + voice transcript + agent response + breadcrumbs). Persists to `orb-chat-history.jsonl`, loads last 50 entries on chat open ([`lib/orb-chat-history.js`](lib/orb-chat-history.js)).
 - ✅ **Hybrid agent UI rendering**: small UIs render as in-flow `.chat-agent-card` cards inside chat; rich UIs (`panelWidth >= 400`) pop in their own frameless `BrowserWindow` sized to content ([`lib/agent-ui-modal-manager.js`](lib/agent-ui-modal-manager.js)).
