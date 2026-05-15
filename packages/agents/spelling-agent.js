@@ -153,8 +153,16 @@ function createSpellingAgent(exchangeUrl) {
     const agentPkg = require('../task-agent/dist/index.js');
     createAgent = agentPkg.createAgent;
   } catch (error) {
-    log.error('agent', 'Failed to load task-agent package', { error: error.message });
-    log.info('agent', 'Make sure to run: cd packages/task-agent && npm run build');
+    // Same packaging condition as dynamic-agent.js: the workspace
+    // symlink for `@onereach/task-exchange` doesn't always materialize
+    // inside app.asar for packaged builds. The caller in main.js wraps
+    // this in its own try/catch and continues without spelling -- a
+    // graceful degradation, not a crash. Log at warn (one-liner) so
+    // the boot log doesn't flag a red error for a benign condition.
+    log.warn('agent', 'task-agent SDK unavailable (spelling agent disabled)', { reason: error.message });
+    // Tag the error so the caller in main.js can short-circuit without
+    // dumping the require-stack to console.
+    error.sdkUnavailable = true;
     throw error;
   }
 

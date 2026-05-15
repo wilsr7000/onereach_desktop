@@ -584,7 +584,12 @@ This agent has live weather data. It reports real-time conditions and forecasts.
       }
 
       const soundCue = _weatherSoundCue(desc);
-      return { success: true, message, soundCue };
+      // Phase 7: weather is the canonical Scenario 3 (simple). The
+      // spoken summary IS the visual text -- nothing more to read than
+      // what was just said. Setting both explicitly documents the
+      // intent for future maintainers; the shim would map message ->
+      // both fields anyway.
+      return { success: true, message, spokenSummary: message, visualText: message, soundCue };
     } catch (error) {
       log.info('agent', 'wttr.in failed, trying Open-Meteo fallback', {
         location,

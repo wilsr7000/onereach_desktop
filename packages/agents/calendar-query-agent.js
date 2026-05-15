@@ -557,9 +557,16 @@ Rules:
       }
     }
 
+    // Phase 7 dual-channel migration: calendar-query returns either a
+    // small dayView (single-day) or a longer eventList. Both come with
+    // a spoken summary. The visualText echoes the spoken summary; the
+    // ui carries the actual schedule. The dual-channel shim picks
+    // 'inline' or 'modal' based on the ui's rendered size.
     return {
       success: true,
       message: spoken,
+      spokenSummary: spoken,
+      visualText: spoken,
       ui: uiSpec,
     };
   },

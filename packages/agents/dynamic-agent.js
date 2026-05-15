@@ -57,6 +57,10 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, _llmClient) {
     // Logged at warn so the boot log doesn't flag a red error for a
     // benign condition. Tracked separately for a proper packaging fix.
     log.warn('agent', 'task-agent SDK unavailable (dynamic agents disabled)', { reason: error.message });
+    // Tag the error so the outer catch in startDynamicAgent doesn't
+    // re-log the same condition at error level (was: produced a noisy
+    // duplicate "Failed to start" + requireStack on every boot).
+    error.sdkUnavailable = true;
     throw error;
   }
 
@@ -197,6 +201,11 @@ async function startDynamicAgent(exchangeUrl) {
 
     return agent;
   } catch (error) {
+    // SDK-unavailable was already warned at the inner catch; don't
+    // re-log it as a red error here (benign packaging condition).
+    if (error && error.sdkUnavailable) {
+      return null;
+    }
     log.error('agent', 'Failed to start', { error });
     return null;
   }

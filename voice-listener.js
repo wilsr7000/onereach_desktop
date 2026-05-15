@@ -299,6 +299,48 @@ class VoiceListener {
               required: ['transcript'],
             },
           },
+          // ==================== Phase 5: cancel/stop voice intents ====================
+          // The model classifies cancellation/stop intent server-side
+          // and emits a tool call. This avoids regex/keyword detection
+          // (forbidden by project rules) and adds zero latency since
+          // the realtime session is already processing the audio.
+          //
+          // cancel_in_flight aborts the currently-running task entirely.
+          // Use for "cancel", "forget it", "never mind", "scratch that",
+          // "no you misunderstood", "let's start over", and any phrase
+          // that means the user wants to abandon the in-progress task.
+          {
+            type: 'function',
+            name: 'cancel_in_flight',
+            description:
+              'Call this when the user wants to ABORT the currently-running task and start fresh. ' +
+              'Triggered by phrases like "cancel", "forget it", "never mind", "no you misunderstood", ' +
+              '"scratch that", "let\'s start over", "stop and start again". Do NOT call this for ' +
+              '"stop talking" -- use stop_speaking instead.',
+            parameters: {
+              type: 'object',
+              properties: {
+                reason: {
+                  type: 'string',
+                  description: 'Brief description of why the user is cancelling (for logging).',
+                },
+              },
+              required: [],
+            },
+          },
+          // stop_speaking cuts the current TTS audio without aborting
+          // the underlying task. Use for "stop", "stop talking", "shush",
+          // "be quiet", "wait wait wait", "hush". The orb still keeps
+          // any partial result it received.
+          {
+            type: 'function',
+            name: 'stop_speaking',
+            description:
+              'Call this when the user wants the assistant to STOP TALKING but keep the task. ' +
+              'Triggered by "stop", "stop talking", "shush", "quiet", "be quiet", "wait wait wait", ' +
+              '"hush", "enough". Do NOT call this for "cancel" -- use cancel_in_flight instead.',
+            parameters: { type: 'object', properties: {}, required: [] },
+          },
         ],
         tool_choice: 'auto',
       },
@@ -611,6 +653,91 @@ class VoiceListener {
           } catch (err) {
             log.error('voice', 'Error parsing function arguments', { error: err.message || err });
           }
+        } else if (event.name === 'cancel_in_flight') {
+          // ==================== Phase 5: cancel ====================
+          // The realtime model classified the user's utterance as a
+          // cancellation intent. We:
+          //   1. Silent-ack the function call so the realtime session
+          //      doesn't hang on a pending tool reply.
+          //   2. Cut TTS in main (voice-speaker.cancel) so the user
+          //      gets immediate feedback, regardless of orb state.
+          //   3. Cancel the active task on the exchange (best-effort).
+          //   4. Broadcast a chat-breadcrumb event so the orb can
+          //      append "Cancelled." in the conversation log.
+          let reason = '';
+          try {
+            const args = event.arguments ? JSON.parse(event.arguments) : {};
+            reason = args.reason || '';
+          } catch (_e) { /* OK */ }
+          log.info('voice', 'Cancel intent (cancel_in_flight)', { reason, callId: event.call_id });
+          this.respondToFunctionCall(event.call_id, '');
+
+          // Cut TTS immediately
+          try {
+            const { getVoiceSpeaker } = require('./voice-speaker');
+            const speaker = getVoiceSpeaker();
+            if (speaker && typeof speaker.cancel === 'function') {
+              speaker.cancel().catch((err) =>
+                log.warn('voice', 'speaker.cancel failed during cancel intent', { error: err.message })
+              );
+            }
+          } catch (err) {
+            log.warn('voice', 'voice-speaker unavailable during cancel intent', { error: err.message });
+          }
+
+          // Cancel any in-flight tasks on the exchange. Without an
+          // active-task tracker we cancel ALL in-flight tasks, which
+          // matches the user's intent ("forget it -- start over").
+          try {
+            const { getExchange } = require('./src/voice-task-sdk/exchange-bridge');
+            const exch = getExchange();
+            if (exch?.tasks?.getAll) {
+              const inflight = exch.tasks.getAll().filter(
+                (t) => t.status === 'executing' || t.status === 'queued' || t.status === 'auctioning'
+              );
+              for (const t of inflight) {
+                if (typeof exch.tasks.cancel === 'function') {
+                  exch.tasks.cancel(t.id, 'user-cancel-intent');
+                } else if (typeof exch.cancelTask === 'function') {
+                  exch.cancelTask(t.id);
+                }
+              }
+            }
+          } catch (err) {
+            log.warn('voice', 'exchange cancel failed', { error: err.message });
+          }
+
+          this.broadcast({
+            type: 'voice_intent_cancel',
+            reason,
+            callId: event.call_id,
+            itemId: event.item_id,
+          });
+        } else if (event.name === 'stop_speaking') {
+          // ==================== Phase 5: stop speaking ====================
+          // User wants the TTS to stop but keep the task. Same silent
+          // ack as cancel; cut TTS in main; broadcast for orb UI feedback.
+          // Does NOT abort any in-flight task.
+          log.info('voice', 'Stop intent (stop_speaking)', { callId: event.call_id });
+          this.respondToFunctionCall(event.call_id, '');
+
+          try {
+            const { getVoiceSpeaker } = require('./voice-speaker');
+            const speaker = getVoiceSpeaker();
+            if (speaker && typeof speaker.cancel === 'function') {
+              speaker.cancel().catch((err) =>
+                log.warn('voice', 'speaker.cancel failed during stop intent', { error: err.message })
+              );
+            }
+          } catch (err) {
+            log.warn('voice', 'voice-speaker unavailable during stop intent', { error: err.message });
+          }
+
+          this.broadcast({
+            type: 'voice_intent_stop',
+            callId: event.call_id,
+            itemId: event.item_id,
+          });
         }
         break;
     }

@@ -18469,9 +18469,16 @@ async function startBuiltInAgents(exchangeUrl) {
     builtInAgents.push(spellingAgent);
     console.log('[VoiceOrb] Spelling agent started');
   } catch (error) {
-    console.warn('[VoiceOrb] Could not start spelling agent:', error.message);
-    console.error('[VoiceOrb] Full error:', error.stack);
-    console.log('[VoiceOrb] Make sure packages are compiled: cd packages && npm run build');
+    // SDK-unavailable is a known benign condition (workspace symlink
+    // not in app.asar for packaged builds; same root cause as the
+    // dynamic-agent path above). The inner catch in spelling-agent.js
+    // already logged at warn, so just print a single trace line here
+    // and move on. Real runtime errors still get a stack-trace warning.
+    if (error && error.sdkUnavailable) {
+      console.log('[VoiceOrb] Spelling agent disabled:', error.message);
+    } else {
+      console.warn('[VoiceOrb] Could not start spelling agent:', error.message);
+    }
   }
 
   // Start user-defined dynamic agents (graceful degradation if the
@@ -19830,9 +19837,34 @@ ipcMain.handle('palette:dismiss', async () => {
 let _hudSafetyTimer = null;
 
 /**
+ * Phase 4 of Orb Unified UX redesign: the Command HUD window is retired
+ * by default. The dual-channel pipeline now routes:
+ *   - Task-running indicator   -> chat panel "Processing..." bubble
+ *   - Rich agent UI panels     -> per-agent modal (lib/agent-ui-modal-manager)
+ *                                 OR inline card in chat (small UIs)
+ * The HUD window code stays in tree behind a feature flag so users who
+ * hit a regression in the new surface can fall back via:
+ *   settings.useLegacyHud = true
+ * Default is false (use new pipeline).
+ */
+function _isLegacyHudEnabled() {
+  try {
+    return global.settingsManager?.get('useLegacyHud') === true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+/**
  * Show the Command HUD with a task
  */
 function showCommandHUD(task) {
+  if (!_isLegacyHudEnabled()) {
+    // New UX: chat panel handles the "Processing..." indicator. The
+    // Command HUD window does not pop. We still keep the function as
+    // a no-op so callers (exchange-bridge task:executing) don't crash.
+    return;
+  }
   if (!commandHUDWindow || commandHUDWindow.isDestroyed()) {
     createCommandHUDWindow();
   }
@@ -19878,6 +19910,13 @@ function hideCommandHUD() {
  * Send result to Command HUD
  */
 function sendCommandHUDResult(result) {
+  if (!_isLegacyHudEnabled()) {
+    // New UX: assistant turns flow to the chat panel via the
+    // voice-task:reply broadcast (Phase 1), and rich micro-UIs flow
+    // to the agent-ui-modal-manager (Phase 2). The HUD window does
+    // not receive results.
+    return;
+  }
   if (commandHUDWindow && !commandHUDWindow.isDestroyed()) {
     commandHUDWindow.webContents.send('hud:result', result);
   }

@@ -1032,6 +1032,46 @@
         padding: 8px;
       }
 
+      .chat-message.pending {
+        opacity: 0.6;
+        font-style: italic;
+      }
+
+      .chat-message-agent {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: rgba(255, 255, 255, 0.45);
+        margin-bottom: 4px;
+      }
+
+      .chat-message-text {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+
+      .chat-agent-card {
+        margin-top: 10px;
+        padding: 10px;
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 10px;
+        font-size: 12px;
+        line-height: 1.4;
+        max-width: 100%;
+        overflow-x: auto;
+      }
+
+      .chat-agent-card * {
+        max-width: 100%;
+      }
+
+      .chat-modal-link {
+        margin-top: 8px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.6);
+        font-style: italic;
+      }
+
       .chat-input-container {
         padding: 16px;
         border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -1888,7 +1928,13 @@
 
       let _processCallCount = 0;
       let _isProcessing = false;
-      async function processVoiceCommand(transcript) {
+      // opts.inputModality: 'voice' (default) | 'text'.
+      // Threaded through submitTask so the bridge knows whether to fire
+      // TTS for the response (Phase 3: voice-in only). Voice transcript
+      // callers pass nothing -> defaults to 'voice'. The chat panel's
+      // sendChatMessage explicitly passes 'text'.
+      async function processVoiceCommand(transcript, opts = {}) {
+        const inputModality = opts.inputModality === 'text' ? 'text' : 'voice';
         if (_isProcessing) {
           console.warn('[Orb] Skipping overlapping processVoiceCommand call');
           return;
@@ -1991,6 +2037,7 @@
           const result = await window.agentHUD.submitTask(transcript, {
             toolId: 'orb',
             skipFilter: false,
+            inputModality,
           });
           console.log('[Orb] HUD API submit result:', JSON.stringify(result));
 
@@ -2776,6 +2823,29 @@
         // Show the chat panel
         textChatPanel.classList.add('visible');
         setTimeout(() => chatInput.focus(), 150);
+
+        // Phase 1: hydrate the chat scroll with the most recent N
+        // entries from persistent history (orb-chat-history.jsonl) so
+        // users have scroll-back across orb close/reopen and across
+        // app restarts. Best-effort -- if persistence is unavailable
+        // the chat just opens empty.
+        if (window.orbAPI?.loadChatHistory && chatHistory.length === 0) {
+          try {
+            const entries = await window.orbAPI.loadChatHistory(50);
+            if (Array.isArray(entries) && entries.length > 0) {
+              for (const e of entries) {
+                addChatMessage(e.role === 'user' ? 'user' : e.role === 'system' ? 'system' : 'assistant', e.text, {
+                  agentName: e.agentName || null,
+                  cardHtml: e.cardHtml || null,
+                  modalRef: e.modalAgentId ? { agentId: e.modalAgentId } : null,
+                });
+              }
+            }
+          } catch (err) {
+            console.warn('[TextChat] Failed to hydrate history:', err?.message || err);
+          }
+        }
+
         // Start inactivity timer
         resetChatInactivityTimer();
       }
@@ -2814,7 +2884,7 @@
       chatMessages.addEventListener('scroll', resetChatInactivityTimer);
       textChatPanel.addEventListener('mousemove', resetChatInactivityTimer);
 
-      function addChatMessage(type, text) {
+      function addChatMessage(type, text, opts = {}) {
         // Remove empty state if present
         const emptyState = chatMessages.querySelector('.chat-empty');
         if (emptyState) {
@@ -2823,14 +2893,70 @@
 
         const msg = document.createElement('div');
         msg.className = `chat-message ${type}`;
-        msg.textContent = text;
+        if (opts._ephemeral) {
+          msg.classList.add(opts._ephemeral); // e.g. 'pending'
+        }
+        if (opts.agentName) {
+          const tag = document.createElement('div');
+          tag.className = 'chat-message-agent';
+          tag.textContent = opts.agentName;
+          msg.appendChild(tag);
+        }
+        const body = document.createElement('div');
+        body.className = 'chat-message-text';
+        body.textContent = text;
+        msg.appendChild(body);
+        if (opts.cardHtml) {
+          // Phase 1: inline micro-UI rendered as an in-flow card inside
+          // the assistant turn. Sandboxed visually by .chat-agent-card;
+          // the agent's html is whatever lib/agent-ui-renderer produces.
+          // Modal-displayMode UIs do NOT come through this path
+          // (Phase 2 spawns a separate window).
+          const card = document.createElement('div');
+          card.className = 'chat-agent-card';
+          card.innerHTML = opts.cardHtml;
+          msg.appendChild(card);
+        }
+        if (opts.modalRef) {
+          const link = document.createElement('div');
+          link.className = 'chat-modal-link';
+          link.textContent = `${opts.agentName || 'Panel'} shown in window`;
+          msg.appendChild(link);
+        }
         chatMessages.appendChild(msg);
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
-        chatHistory.push({ type, text, timestamp: Date.now() });
+        chatHistory.push({ type, text, timestamp: Date.now(), agentName: opts.agentName || null });
 
         // Reset inactivity timer when messages are added
         resetChatInactivityTimer();
+        return msg;
+      }
+
+      // Remove any pending "Processing..." bubbles. Called when an
+      // assistant reply arrives via voice-task:reply, or when an error
+      // resolves the pending state.
+      function clearPendingChatMessages() {
+        chatMessages.querySelectorAll('.chat-message.pending').forEach((el) => el.remove());
+      }
+
+      // ==================== Phase 1: voice-task:reply listener ====================
+      // The chat panel renders the assistant turn from the bridge's
+      // dual-channel broadcast. visualText goes into the bubble; if the
+      // agent returned an inline-displayMode micro-UI, it renders as a
+      // chat-agent-card inside the same bubble. Modal-displayMode UIs
+      // do NOT flow through here (Phase 2 spawns a separate window and
+      // this listener just appends a "shown in window" affordance link).
+      if (window.orbAPI?.onChatReply) {
+        window.orbAPI.onChatReply((reply) => {
+          if (!reply || !reply.visualText) return;
+          clearPendingChatMessages();
+          addChatMessage('assistant', reply.visualText, {
+            agentName: reply.agentName || 'Assistant',
+            cardHtml: reply.inlineCardHtml || null,
+            modalRef: reply.modalRef || null,
+          });
+        });
       }
 
       async function sendChatMessage() {
@@ -2844,25 +2970,26 @@
         chatInput.value = '';
         chatSendBtn.disabled = true;
 
-        // Add user message
+        // Add user message to the visible chat
         addChatMessage('user', text);
 
-        // Process through the same command handler as voice
+        // Phase 1: persist the user turn so it survives orb close/reopen
+        // and app restarts. Best-effort -- failures here just mean this
+        // turn won't show up on the next session, no functional impact.
+        if (window.orbAPI?.appendChatUserEntry) {
+          window.orbAPI.appendChatUserEntry({ source: 'text', text }).catch((err) => {
+            console.warn('[TextChat] Failed to persist user turn:', err?.message || err);
+          });
+        }
+
+        // Process through the same command handler as voice, but tag
+        // this turn as text-in so the bridge skips TTS (Phase 3 voice-
+        // in-only audio policy). The assistant turn arrives via the
+        // voice-task:reply IPC and gets appended by the chat-reply
+        // listener -- no more "Got it. Working on that." stub.
         try {
-          // Show processing state
-          addChatMessage('system', 'Processing...');
-
-          // Use the same processVoiceCommand function
-          await processVoiceCommand(text);
-
-          // Remove processing message
-          const processingMsg = chatMessages.querySelector('.chat-message.system:last-child');
-          if (processingMsg && processingMsg.textContent === 'Processing...') {
-            processingMsg.remove();
-          }
-
-          // Add confirmation
-          addChatMessage('assistant', 'Got it. Working on that.');
+          addChatMessage('system', 'Processing...', { _ephemeral: 'pending' });
+          await processVoiceCommand(text, { inputModality: 'text' });
         } catch (error) {
           handleOrbError('text_chat', error, { chatMode: true });
         }
@@ -3585,9 +3712,14 @@
             return;
           }
 
+          // Function-call handler: realtime model classified the user's
+          // voice utterance as a handle_user_request tool call, so this
+          // is voice-in by definition. inputModality threads through to
+          // the bridge for TTS gating + chat-history tagging.
           const result = await window.agentHUD.submitTask(transcript, {
             toolId: 'orb',
             skipFilter: false,
+            inputModality: 'voice',
           });
           console.log('[Orb] HUD API result:', JSON.stringify(result));
 
@@ -3884,6 +4016,36 @@
               showTranscript(e.text, true);
             },
             function_call_transcript: handleFunctionCallTranscript,
+
+            // ==================== Phase 5: cancel/stop intents ====================
+            // The realtime model classified the user's voice as either
+            // a cancel ("forget it", "scratch that", etc.) or a stop
+            // ("stop talking", "shush", etc.) and emitted a tool call.
+            // The voice-listener (main process) already cut TTS and
+            // cancelled in-flight tasks before this event reached us;
+            // here we update the orb UI: clear pending bubbles, append
+            // a chat breadcrumb, reset state.
+            voice_intent_cancel: (e) => {
+              console.log('[Orb] Cancel intent:', e.reason || '');
+              if (typeof clearPendingChatMessages === 'function') clearPendingChatMessages();
+              if (typeof addChatMessage === 'function') {
+                addChatMessage('system', 'Cancelled.', { agentName: null });
+              }
+              try {
+                S.set('activeTaskId', null);
+                S.transition?.('idle', 'cancel-intent');
+              } catch (_e) { /* OK */ }
+              hideTranscript();
+              onSpeechEnded();
+            },
+
+            voice_intent_stop: () => {
+              console.log('[Orb] Stop intent (TTS-only)');
+              // voice-listener already cut TTS in main. Just hide the
+              // transcript bubble; do not touch chat or task state.
+              hideTranscript();
+            },
+
             transcript: (e) => {
               const text = e.text?.trim();
               if (!text) return;

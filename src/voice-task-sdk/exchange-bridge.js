@@ -36,6 +36,18 @@ const { getUserProfile } = require('../../lib/user-profile-store');
 // Centralized HUD API for space-scoped task routing
 const hudApi = require('../../lib/hud-api');
 
+// Dual-channel agent contract shim (Foundation phase of Orb Unified UX
+// redesign). Splits agent results into spokenSummary + visualText so
+// reading bandwidth (visual) and listening bandwidth (spoken) can carry
+// different content. Backward-compatible: legacy { message } agents get
+// spokenSummary == visualText == message. See lib/agent-result-normalize.js.
+const { normalizeAgentResult } = require('../../lib/agent-result-normalize');
+
+// Proactive alert pipeline (Phase 6). Agents push alerts via
+// pushProactiveAlert; we subscribe here and run them through the same
+// post-task:settled pipeline as user-initiated tasks.
+const voiceTaskPush = require('../../lib/voice-task-push');
+
 // Centralized AI service
 const ai = require('../../lib/ai-service');
 const { getLogQueue } = require('../../lib/log-event-queue');
@@ -4080,14 +4092,31 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
       }
     }
 
-    // Add assistant response to conversation history
-    if (message) {
-      addToHistory('assistant', message, agentId);
+    // ==================== DUAL-CHANNEL NORMALIZATION ====================
+    // Foundation phase of the Orb Unified UX redesign. Splits the agent's
+    // single `message` field into spokenSummary (TTS) + visualText (chat),
+    // and computes displayMode (inline | modal | null) from explicit hint
+    // or size heuristic. Legacy agents that only set `message` get
+    // spokenSummary == visualText == message, so behavior is unchanged.
+    // See lib/agent-result-normalize.js for the contract + tests.
+    const normalized = normalizeAgentResult({ ...result, message });
+    const inputModality =
+      task.inputModality ||
+      task.metadata?.inputModality ||
+      task.context?.inputModality ||
+      'voice'; // legacy default: voice-in (matches today's behavior)
+    const isProactive = task.metadata?.origin === 'proactive';
+
+    // Add assistant response to conversation history. Use visualText so
+    // dual-channel agents log their richer text rather than the spoken
+    // summary; legacy agents keep getting `message` via the fallback.
+    if (normalized.visualText) {
+      addToHistory('assistant', normalized.visualText, agentId);
     }
 
-    // Phase 1: Store response for repeat
-    if (message) {
-      responseMemory.setLastResponse(message);
+    // Phase 1: Store response for repeat (use visualText same as history)
+    if (normalized.visualText) {
+      responseMemory.setLastResponse(normalized.visualText);
 
       // Store undo if available
       if (result.data?.undoFn && result.data?.undoDescription) {
@@ -4103,10 +4132,18 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
     // briefing, smart actions, focus window) gets clipped below the
     // fold. `ui` is forwarded for completeness so any listener that
     // wants to re-render from the spec still can.
+    //
+    // Foundation phase additions (additive, backward-compatible): also
+    // forward spokenSummary, visualText, displayMode so subscribers
+    // (chat panel in Phase 1; modal manager in Phase 2) can pick the
+    // right surface without re-running the heuristic themselves.
     if (global.sendCommandHUDResult) {
       global.sendCommandHUDResult({
         success: true,
         message: message || 'Task completed',
+        spokenSummary: normalized.spokenSummary,
+        visualText: normalized.visualText,
+        displayMode: normalized.displayMode,
         html: result.html,
         ui: result.ui,
         panelWidth: result.panelWidth,
@@ -4122,6 +4159,9 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
       taskId: task.id,
       success: true,
       message: message || 'Task completed',
+      spokenSummary: normalized.spokenSummary,
+      visualText: normalized.visualText,
+      displayMode: normalized.displayMode,
       data: result.data,
       html: result.html,
       ui: result.ui,
@@ -4130,13 +4170,88 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
       agentId,
     });
 
-    // DIRECT TTS - Speak the result directly via realtime speech
-    // For async tasks, respondToFunctionCall already completed with empty response
-    // so we need to speak the actual result here.
-    // When a graphical panel (HTML) is present, the panel IS the primary result.
-    // Speak only the short spoken summary -- the visual does the heavy lifting.
+    // ==================== Phase 1: voice-task:reply ====================
+    // New broadcast carrying the dual-channel payload for the orb chat
+    // panel (becomes the unified conversation log). Carries inputModality
+    // so the chat handler can render text-in turns differently from
+    // voice-in turns (e.g. show a paste-ack for text), and origin so
+    // proactive alerts get a badge.
+    const replyAgentName = agentId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const inlineCardHtml = normalized.displayMode === 'inline' ? normalized.html : null;
+    const modalRef = normalized.displayMode === 'modal'
+      ? { agentId, panelWidth: normalized.panelWidth, panelHeight: normalized.panelHeight }
+      : null;
+    broadcastToWindows('voice-task:reply', {
+      taskId: task.id,
+      agentId,
+      agentName: replyAgentName,
+      visualText: normalized.visualText,
+      spokenSummary: normalized.spokenSummary,
+      displayMode: normalized.displayMode,
+      inlineCardHtml,
+      modalRef,
+      inputModality,
+      origin: isProactive ? 'proactive' : 'user',
+    });
+
+    // Persist the assistant turn to the orb chat history (Phase 1).
+    // The orb subscribes to voice-task:reply for live render; the
+    // history persistence runs here so chat scroll-back survives orb
+    // close/reopen cycles and app restarts. Best-effort: failures here
+    // never block the speak/broadcast path.
+    if (normalized.visualText) {
+      try {
+        const { appendEntry: appendChatEntry } = require('../../lib/orb-chat-history');
+        appendChatEntry({
+          role: 'assistant',
+          source: isProactive ? 'agent-proactive' : 'voice',
+          text: normalized.visualText,
+          agentId,
+          agentName: replyAgentName,
+          cardHtml: inlineCardHtml,
+          modalAgentId: modalRef ? agentId : null,
+          inputModality,
+        });
+      } catch (chatErr) {
+        log.warn('voice', 'orb-chat-history append failed', { error: chatErr.message });
+      }
+    }
+
+    // ==================== Phase 2: spawn agent-UI modal ====================
+    // When the dual-channel normalizer flagged displayMode === 'modal'
+    // (panelWidth >= 400 OR panelHeight >= 300, OR explicit override),
+    // pop the panel in its own frameless BrowserWindow sized to content.
+    // One window per agentId; re-firing same agent updates in place.
+    // The modal is NOT alwaysOnTop -- it's there for the user to read
+    // alongside other work.
+    if (normalized.displayMode === 'modal' && normalized.html) {
+      try {
+        const { showAgentUIModal } = require('../../lib/agent-ui-modal-manager');
+        showAgentUIModal({
+          agentId,
+          agentName: replyAgentName,
+          html: normalized.html,
+          panelWidth: normalized.panelWidth,
+          panelHeight: normalized.panelHeight,
+        });
+      } catch (modalErr) {
+        log.warn('voice', 'agent-ui modal spawn failed', { error: modalErr.message, agentId });
+      }
+    }
+
+    // ==================== Phase 3: TTS modality gate ====================
+    // Speak only when input was voice (or proactive, which always speaks).
+    // Text-in tasks render in the chat as text only -- no audio. This
+    // matches the user's stated UX: "user pastes text input, system
+    // acknowledges in text with a summary of what was pasted in and a
+    // micro UI summary. No voice."
+    //
+    // Use spokenSummary (dual-channel), which falls back to message for
+    // legacy agents. The "All done" sentinel still suppresses TTS for
+    // void completions.
     const hasPanel = !!result.html;
-    if (message && message !== 'All done') {
+    const shouldSpeak = (inputModality === 'voice' || isProactive) && normalized.spokenSummary && normalized.spokenSummary !== 'All done';
+    if (shouldSpeak) {
       try {
         const { getVoiceSpeaker } = require('../../voice-speaker');
         const speaker = getVoiceSpeaker();
@@ -4144,11 +4259,13 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
         if (speaker) {
           const agentVoice = getAgentVoice(agentId);
           log.info('voice', 'Speaking task result directly', {
-            messagePreview: message.slice(0, 50),
+            messagePreview: normalized.spokenSummary.slice(0, 50),
             voice: agentVoice,
             hasPanel,
+            inputModality,
+            isProactive,
           });
-          const speakResult = await speaker.speak(message, {
+          const speakResult = await speaker.speak(normalized.spokenSummary, {
             voice: agentVoice,
             // Flag so downstream listeners know this is panel-backed speech
             hasPanel,
@@ -4158,6 +4275,12 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
       } catch (e) {
         log.error('voice', 'Direct TTS for result failed', { arg0: e.message, arg1: e.stack });
       }
+    } else if (normalized.spokenSummary && !shouldSpeak) {
+      log.info('voice', 'TTS skipped (text-in)', {
+        agentId,
+        inputModality,
+        spokenPreview: normalized.spokenSummary.slice(0, 50),
+      });
     }
 
     broadcastToWindows('voice-task:completed', {
@@ -4528,6 +4651,49 @@ function setupExchangeIPC() {
     return Object.fromEntries(summary);
   });
 
+  // ==================== ORB CHAT HISTORY (Phase 1) ====================
+  // The orb chat panel is now the unified conversation log. The orb
+  // calls these IPCs to (a) persist user turns it just received, and
+  // (b) load the last N entries when the chat opens. Assistant turns
+  // are persisted automatically by the task:settled handler so the orb
+  // never has to round-trip them.
+
+  ipcMain.handle('orb-chat:append-user', (_event, entry) => {
+    try {
+      const { appendEntry } = require('../../lib/orb-chat-history');
+      const stamped = appendEntry({
+        role: 'user',
+        source: entry?.source === 'text' ? 'text' : 'voice',
+        text: typeof entry?.text === 'string' ? entry.text : '',
+        inputModality: entry?.source === 'text' ? 'text' : 'voice',
+      });
+      return { success: true, entry: stamped };
+    } catch (err) {
+      log.warn('voice', 'orb-chat:append-user failed', { error: err.message });
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('orb-chat:load-last', (_event, n) => {
+    try {
+      const { loadLast, LOAD_DEFAULT } = require('../../lib/orb-chat-history');
+      const limit = Number.isFinite(n) && n > 0 ? Math.min(n, 500) : LOAD_DEFAULT;
+      return loadLast(limit);
+    } catch (err) {
+      log.warn('voice', 'orb-chat:load-last failed', { error: err.message });
+      return [];
+    }
+  });
+
+  // Agent-UI modal close (called by the modal's X button via preload-agent-ui-modal.js)
+  ipcMain.on('agent-ui:close-self', (event) => {
+    try {
+      const { BrowserWindow } = require('electron');
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (win && !win.isDestroyed()) win.close();
+    } catch (_e) { /* OK */ }
+  });
+
   log.info('voice', 'IPC handlers registered');
 }
 
@@ -4537,6 +4703,134 @@ function setupExchangeIPC() {
 function getExchange() {
   return exchangeInstance;
 }
+
+// ===========================================================================
+// Phase 6: Proactive alert dispatcher
+// ===========================================================================
+//
+// Mirrors the post-normalize portion of the task:settled handler so
+// proactive alerts (critical-meeting alarms, scheduled briefs, monitor
+// agents) reach the SAME UX surfaces as user-initiated tasks: chat
+// history, hybrid inline-card / modal, and TTS. Differences from the
+// task:settled handler:
+//
+//   - No response-guard or re-execution: alerts come from agents that
+//     already chose what to say.
+//   - No sendCommandHUDResult: legacy HUD is retired (Phase 4); the
+//     no-op shim there means the call would be wasted.
+//   - No conversation-history addToHistory call: the orb chat history
+//     is the user-visible scrollback; the legacy conversation history
+//     is for task lookup.
+//   - inputModality forced to 'voice' so the TTS gate fires (alerts
+//     always speak by design).
+
+function dispatchProactiveAlert({ task, result, agentId }) {
+  try {
+    const normalized = normalizeAgentResult({ ...result, message: result.message || result.spokenSummary || result.visualText || '' });
+    const replyAgentName = agentId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const inlineCardHtml = normalized.displayMode === 'inline' ? normalized.html : null;
+    const modalRef = normalized.displayMode === 'modal'
+      ? { agentId, panelWidth: normalized.panelWidth, panelHeight: normalized.panelHeight }
+      : null;
+
+    // hudApi.emitResult so any subscriber that consumes results
+    // (BrowserView relays, future analytics, etc.) sees alerts too.
+    try {
+      hudApi.emitResult({
+        taskId: task.id,
+        success: true,
+        message: normalized.spokenSummary || normalized.visualText || '',
+        spokenSummary: normalized.spokenSummary,
+        visualText: normalized.visualText,
+        displayMode: normalized.displayMode,
+        data: result.data,
+        html: result.html,
+        ui: result.ui,
+        panelWidth: result.panelWidth,
+        panelHeight: result.panelHeight,
+        agentId,
+      });
+    } catch (emitErr) {
+      log.warn('voice', 'proactive hudApi.emitResult failed', { error: emitErr.message });
+    }
+
+    // Chat broadcast (origin: 'proactive' so the orb can render a badge)
+    broadcastToWindows('voice-task:reply', {
+      taskId: task.id,
+      agentId,
+      agentName: replyAgentName,
+      visualText: normalized.visualText,
+      spokenSummary: normalized.spokenSummary,
+      displayMode: normalized.displayMode,
+      inlineCardHtml,
+      modalRef,
+      inputModality: 'voice',
+      origin: 'proactive',
+    });
+
+    // Persist to chat history with proactive source tag
+    if (normalized.visualText) {
+      try {
+        const { appendEntry: appendChatEntry } = require('../../lib/orb-chat-history');
+        appendChatEntry({
+          role: 'assistant',
+          source: 'agent-proactive',
+          text: normalized.visualText,
+          agentId,
+          agentName: replyAgentName,
+          cardHtml: inlineCardHtml,
+          modalAgentId: modalRef ? agentId : null,
+          inputModality: 'voice',
+        });
+      } catch (chatErr) {
+        log.warn('voice', 'proactive chat history append failed', { error: chatErr.message });
+      }
+    }
+
+    // Spawn modal for rich UIs
+    if (normalized.displayMode === 'modal' && normalized.html) {
+      try {
+        const { showAgentUIModal } = require('../../lib/agent-ui-modal-manager');
+        showAgentUIModal({
+          agentId,
+          agentName: replyAgentName,
+          html: normalized.html,
+          panelWidth: normalized.panelWidth,
+          panelHeight: normalized.panelHeight,
+        });
+      } catch (modalErr) {
+        log.warn('voice', 'proactive modal spawn failed', { error: modalErr.message, agentId });
+      }
+    }
+
+    // TTS: alerts always speak (override the voice-in-only gate)
+    if (normalized.spokenSummary && normalized.spokenSummary !== 'All done') {
+      try {
+        const { getVoiceSpeaker } = require('../../voice-speaker');
+        const speaker = getVoiceSpeaker();
+        if (speaker) {
+          const agentVoice = getAgentVoice(agentId);
+          log.info('voice', 'Speaking proactive alert', {
+            agentId,
+            preview: normalized.spokenSummary.slice(0, 60),
+          });
+          speaker.speak(normalized.spokenSummary, { voice: agentVoice, hasPanel: !!normalized.html }).catch(
+            (e) => log.warn('voice', 'proactive TTS failed', { error: e.message })
+          );
+        }
+      } catch (e) {
+        log.warn('voice', 'proactive TTS speaker unavailable', { error: e.message });
+      }
+    }
+  } catch (err) {
+    log.error('voice', 'dispatchProactiveAlert failed', { error: err.message, agentId });
+  }
+}
+
+// Wire the proactive listener once at module load. Multiple bridges
+// re-loading would double-fire; voiceTaskPush._clearListeners() is for
+// tests only.
+voiceTaskPush.setProactiveListener(dispatchProactiveAlert);
 
 /**
  * Check if exchange is running

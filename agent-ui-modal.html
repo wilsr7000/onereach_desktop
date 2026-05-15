@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://*.onereach.ai; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: https:; script-src 'self' 'unsafe-inline'; connect-src 'self'" />
+  <title>Agent Panel</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: rgba(18, 18, 24, 0.96);
+      --bg-titlebar: rgba(28, 28, 36, 0.92);
+      --fg: rgba(255, 255, 255, 0.92);
+      --fg-muted: rgba(255, 255, 255, 0.55);
+      --border: rgba(255, 255, 255, 0.08);
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      overflow: hidden;
+      height: 100vh;
+    }
+
+    .modal-shell {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    .modal-titlebar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--bg-titlebar);
+      border-bottom: 1px solid var(--border);
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+
+    .modal-titlebar-name {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--fg-muted);
+      font-weight: 600;
+    }
+
+    .modal-titlebar-actions {
+      -webkit-app-region: no-drag;
+      display: flex;
+      gap: 6px;
+    }
+
+    .modal-close-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--fg-muted);
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .modal-close-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--fg);
+    }
+
+    .modal-body {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 14px;
+    }
+
+    .modal-empty {
+      color: var(--fg-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 30px 16px;
+    }
+
+    /* Generic styling for agent-supplied content. Most agent-ui-renderer
+       outputs already include their own scoped styles, but we provide
+       sensible defaults so plain HTML doesn't render naked. */
+    #agent-ui-root :is(p, ul, ol) { margin: 0 0 10px; }
+    #agent-ui-root :is(h1, h2, h3, h4) { margin: 0 0 8px; font-weight: 600; }
+    #agent-ui-root a { color: #8ab4f8; text-decoration: none; }
+    #agent-ui-root a:hover { text-decoration: underline; }
+    #agent-ui-root button {
+      font: inherit;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--fg);
+      cursor: pointer;
+    }
+    #agent-ui-root button:hover { background: rgba(255, 255, 255, 0.10); }
+  </style>
+</head>
+<body>
+  <div class="modal-shell">
+    <div class="modal-titlebar">
+      <div class="modal-titlebar-name" id="agentNameLabel">Agent</div>
+      <div class="modal-titlebar-actions">
+        <button class="modal-close-btn" id="closeBtn" title="Close" aria-label="Close panel">&times;</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div id="agent-ui-root">
+        <div class="modal-empty">Loading panel...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+      const params = new URLSearchParams(location.search);
+      const initialAgentName = params.get('agentName') || params.get('agentId') || 'Agent';
+      const nameLabel = document.getElementById('agentNameLabel');
+      nameLabel.textContent = initialAgentName;
+
+      const root = document.getElementById('agent-ui-root');
+
+      function render(payload) {
+        if (!payload) return;
+        if (payload.agentName) {
+          nameLabel.textContent = payload.agentName;
+        }
+        if (typeof payload.html === 'string' && payload.html.length > 0) {
+          // The html comes from lib/agent-ui-renderer.js (declarative
+          // ui spec converted to HTML), so it is trusted-by-construction
+          // for the same reasons command-hud uses innerHTML on it today.
+          root.innerHTML = payload.html;
+        }
+      }
+
+      if (window.modalAPI?.onRender) {
+        window.modalAPI.onRender(render);
+      }
+      if (window.modalAPI?.onUpdate) {
+        window.modalAPI.onUpdate(render);
+      }
+
+      const closeBtn = document.getElementById('closeBtn');
+      closeBtn.addEventListener('click', () => {
+        if (window.modalAPI?.close) {
+          window.modalAPI.close();
+        } else {
+          window.close();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

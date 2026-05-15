@@ -335,6 +335,40 @@ See `.cursor/plans/onereach_lite_strangler_build_*.plan.md` for the full strateg
 
 ---
 
+## 🎙 Voice Orb
+
+*Always-on-top floating orb for voice + text agent interaction*
+
+### Current State (v5.0.11)
+
+**Realtime API:**
+- ✅ GA Realtime API 2 (`gpt-realtime-2`, May 2026) -- bearer-only auth, semantic VAD, function-tool routing, `marin` voice
+- ✅ Phase 3 audio output: model voices function results natively for voice-in turns; `voice-speaker` (tts-1) reserved for proactive callers (alarms, etc.)
+- ✅ Same-turn dedup between Whisper transcript + model function-call (paraphrase-resistant)
+- ✅ Cancel/stop voice intents: model classifies "forget it" / "stop talking" / "scratch that" / "shush" via `cancel_in_flight` + `stop_speaking` function tools (zero added latency, no regex)
+
+**Unified UX (Phase 4 -- v5.0.11):**
+- ✅ **Dual-channel agent contract**: agents return `spokenSummary` (short, voiced) + `visualText` (richer, in chat) + optional `ui` + `displayMode`. Backward-compatible shim ([`lib/agent-result-normalize.js`](lib/agent-result-normalize.js)).
+- ✅ **Chat panel = unified conversation log**: scrollable history of every interaction (user text + voice transcript + agent response + breadcrumbs). Persists to `orb-chat-history.jsonl`, loads last 50 entries on chat open ([`lib/orb-chat-history.js`](lib/orb-chat-history.js)).
+- ✅ **Hybrid agent UI rendering**: small UIs render as in-flow `.chat-agent-card` cards inside chat; rich UIs (`panelWidth >= 400`) pop in their own frameless `BrowserWindow` sized to content ([`lib/agent-ui-modal-manager.js`](lib/agent-ui-modal-manager.js)).
+- ✅ **Voice-in-only TTS**: text-submitted tasks render as text + visual UI, no audio. Voice-in tasks speak the spokenSummary. Proactive alerts always speak.
+- ✅ **Command HUD retired** behind `settings.useLegacyHud` flag (default off). Old window kept in tree for one release for rollback.
+- ✅ **Proactive alert pipeline**: `pushProactiveAlert(...)` routes alerts through the same surfaces as user-initiated tasks (chat history, modal, TTS) ([`lib/voice-task-push.js`](lib/voice-task-push.js)).
+- ✅ **5 agents migrated** to dual-channel: daily-brief, help, weather, calendar-query (smalltalk uses shim). Migration guide at [`docs/internal/AGENT-DUAL-CHANNEL-MIGRATION.md`](docs/internal/AGENT-DUAL-CHANNEL-MIGRATION.md).
+
+### Roadmap
+
+- [ ] **Persistent chat history rollover -- per-day archive files** instead of single rolling JSONL
+- [ ] **In-chat affordances for inline cards**: pop-out button to convert inline → modal on demand
+- [ ] **Per-agent voice via custom voice uploads** (currently locked to `marin` per GA mid-session voice-change restriction)
+- [ ] **Streaming TTS chunking** for long spokenSummaries (currently whole-utterance speak; fine for short summaries but degrades for >15s)
+- [ ] **"Always speak" override toggle** in settings for users who want voice on text-in tasks
+- [ ] **Migrate remaining proactive callers** (critical-meeting-alarm, scheduled-brief, monitor-agents) from direct `voice-speaker.speak()` to `pushProactiveAlert(...)` so they get chat history + visual UI for free
+- [ ] **Per-agent voice profiles** (when custom voice uploads ship)
+- [ ] **Conversation export** -- save chat history as markdown / share
+
+---
+
 ## 🤖 AI Agents & Creators
 
 *Access external AI services and capture your creations*

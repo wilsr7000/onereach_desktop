@@ -197,6 +197,45 @@ contextBridge.exposeInMainWorld('orbAPI', {
   },
 
   // ==========================================================================
+  // CHAT (Phase 1 of Unified UX redesign)
+  //
+  // The chat panel is now the unified conversation log. The orb
+  // subscribes to assistant turns via onChatReply, and persists user
+  // turns + loads scroll-back history via the chatHistory namespace.
+  // Assistant turns are persisted automatically by exchange-bridge so
+  // the orb never has to round-trip them.
+  // ==========================================================================
+
+  /**
+   * Listen for assistant replies emitted by the bridge after a task
+   * settles. Called with the dual-channel payload:
+   *   { taskId, agentId, agentName, visualText, spokenSummary,
+   *     displayMode, inlineCardHtml, modalRef, inputModality, origin }
+   * @param {Function} callback
+   * @returns {Function} Unsubscribe
+   */
+  onChatReply: (callback) => {
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.on('voice-task:reply', handler);
+    return () => ipcRenderer.removeListener('voice-task:reply', handler);
+  },
+
+  /**
+   * Persist a user turn (from text submit or finalized voice transcript).
+   * @param {{ source: 'voice'|'text', text: string }} entry
+   * @returns {Promise<{ success: boolean, entry?: object, error?: string }>}
+   */
+  appendChatUserEntry: (entry) => ipcRenderer.invoke('orb-chat:append-user', entry),
+
+  /**
+   * Load the last N chat history entries (default 50). Returns array of
+   * stamped entries newest-last for direct append into the scroll.
+   * @param {number} [n]
+   * @returns {Promise<Array>}
+   */
+  loadChatHistory: (n) => ipcRenderer.invoke('orb-chat:load-last', n),
+
+  // ==========================================================================
   // WINDOW CONTROLS
   // ==========================================================================
 

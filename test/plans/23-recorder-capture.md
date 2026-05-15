@@ -140,12 +140,16 @@ Screen, camera, and audio recording tool with live transcription, meeting HUD, P
 - [ ] [A] Save operation calls `recorder:save-to-space` IPC
 - [ ] [A] Saved recording appears in the selected Space
 
-### P2P Session Sharing
-- [ ] [A] `recorder:session-create` creates a new session
-- [ ] [A] `recorder:session-find` finds an existing session
-- [ ] [A] `recorder:session-answer` posts an answer
-- [ ] [A] `recorder:session-cleanup-signaling` cleans up
+### Live Session Sharing (LiveKit)
+- [ ] [A] `recorder:livekit-create-room` creates a LiveKit room with host + guest tokens
+- [ ] [A] `recorder:store-meeting-tokens` stores guest tokens for shared meetings
+- [ ] [A] `recorder:session-end` ends the session and resizes the window
 - [ ] [M] Session status displays in UI
+
+> **Note:** The recorder migrated from custom WebRTC peer-signaling
+> (`recorder:session-create`/`-find`/`-answer`/`-cleanup-signaling`) to
+> LiveKit in v4.x. `capture-signaling.js` and the four deprecated IPC
+> handlers were removed; LiveKit handles all signaling client-side.
 
 ### Keyboard Shortcuts
 - [ ] [M] Space bar starts/stops recording

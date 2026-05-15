@@ -321,21 +321,90 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
     const isDayView = ui?.type === 'dayView';
     const panelHeight = isDayView ? this.computePanelHeight(ui) : undefined;
 
+    // ==================== Phase 7: dual-channel migration ====================
+    // The user's UX brief: "the user speaks to the orb, the orb returns
+    // a micro UI or simple text. Users can read faster than the orb can
+    // talk, so the orb should show longer-form responses but ALSO
+    // summarize the response in text -- not read it back in full."
+    //
+    // For daily-brief that means:
+    //   - spokenSummary: a short headline ("Three meetings today, two need prep")
+    //   - visualText: a one-liner pointing at the panel ("Daily brief shown")
+    //   - The dayView modal carries the full detail; the user reads
+    //     it visually while the spokenSummary plays in 2-3 seconds.
+    //
+    // The rich `fullSpeech` is preserved on `data` for any caller that
+    // wants the full text (e.g. transcript export, analytics).
+    const spokenSummary = isDayView
+      ? this._computeShortSpokenSummary(contributions, dateLabel)
+      : fullSpeech;
+    const visualText = isDayView
+      ? `Daily brief for ${dateLabel}`
+      : fullSpeech;
+
     return {
       success: true,
-      message: fullSpeech,
+      // Legacy `message` field kept for any unmigrated subscriber; the
+      // dual-channel shim treats it as a fallback when spokenSummary
+      // and visualText are absent. Both are present here, so message
+      // is unused for the new pipeline.
+      message: spokenSummary,
+      spokenSummary,
+      visualText,
+      // Explicit displayMode pin so the size heuristic doesn't have to
+      // re-derive it (and so a future panelHeight change can't flip it
+      // to inline accidentally).
+      displayMode: isDayView ? 'modal' : null,
       ui,
       panelWidth: isDayView ? 480 : undefined,
       panelHeight,
       soundCue: { type: 'one-shot', name: 'morning-motif', volume: 0.4 },
       data: {
         type: 'morning_brief',
+        fullSpeech,
         contributions: contributions.map((c) => ({ section: c.section, priority: c.priority })),
       },
     };
     } catch (err) {
       log.error('agent', '[DailyBrief] Execute failed', { error: err.message, stack: err.stack });
       return { success: false, message: `I had trouble putting together your briefing: ${err.message}` };
+    }
+  },
+
+  /**
+   * Phase 7 dual-channel migration: produce a short spoken summary
+   * (1 sentence) for the dayView modal case. Reads structured
+   * contribution data instead of paraphrasing the long fullSpeech --
+   * cheaper than another LLM call and gives the user "X meetings,
+   * weather, brief on screen" in 2-3 seconds.
+   */
+  _computeShortSpokenSummary(contributions, dateLabel = 'today') {
+    try {
+      const cal = contributions.find(
+        (c) => c.section === 'calendar' || c.briefData?.timeline?.length > 0
+      );
+      const meetingCount = cal?.briefData?.timeline?.length ?? 0;
+      const weatherContrib = contributions.find((c) => c.section === 'weather');
+      const weatherSnippet =
+        typeof weatherContrib?.content === 'string' && weatherContrib.content.length > 0
+          ? weatherContrib.content.split(/[.!?]/)[0].trim()
+          : '';
+
+      const parts = [];
+      if (meetingCount === 0) {
+        parts.push(`No meetings ${dateLabel === 'today' ? 'today' : dateLabel}`);
+      } else if (meetingCount === 1) {
+        parts.push(`One meeting ${dateLabel === 'today' ? 'today' : dateLabel}`);
+      } else {
+        parts.push(`${meetingCount} meetings ${dateLabel === 'today' ? 'today' : dateLabel}`);
+      }
+      if (weatherSnippet) {
+        parts.push(weatherSnippet);
+      }
+      parts.push('brief on screen');
+      return parts.join(', ') + '.';
+    } catch (_e) {
+      return `Daily brief for ${dateLabel}.`;
     }
   },
 

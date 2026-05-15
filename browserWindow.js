@@ -689,7 +689,13 @@ function createMainWindow(app) {
             "style-src-elem 'self' 'unsafe-inline' https://*.onereach.ai https://fonts.googleapis.com; " +
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.onereach.ai https://unpkg.com https://cdn.jsdelivr.net; " +
             "connect-src 'self' https://*.onereach.ai https://*.api.onereach.ai https://*.openai.com https://*.chatgpt.com ws://localhost:3322 wss://*.onereach.ai wss://*.openai.com http://127.0.0.1:47291 http://localhost:47291 https://*.livekit.cloud wss://*.livekit.cloud; " +
-            "img-src 'self' data: spaces: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
+            // img-src includes `https:` so the tab strip can render
+            // favicons from arbitrary user-added web tools (Railway-hosted
+            // playgrounds, custom IDWs, etc.) without filling the error
+            // log with CSP violations on every boot. Favicons are tiny
+            // images and the chrome doesn't render arbitrary user-supplied
+            // <img> tags, so the security trade-off is minimal.
+            "img-src 'self' data: spaces: https: https://*.onereach.ai https://*.googleapis.com https://*.gstatic.com https://www.google.com; " +
             "font-src 'self' data: https://*.onereach.ai https://fonts.gstatic.com; " +
             "media-src 'self' blob: https://*.onereach.ai https://*.chatgpt.com https://*.openai.com; " +
             "worker-src 'self' blob:; " +

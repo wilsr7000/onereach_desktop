@@ -266,9 +266,22 @@ This agent provides information about the app's capabilities. It does not perfor
     const speech = this._buildSpeechSummary(grouped);
     const html = this._buildHTMLPanel(grouped);
 
+    // Phase 7 dual-channel migration: help is a panel-driven response.
+    // Spoken summary is short ("I have X capabilities, panel on screen");
+    // visualText is the same short line for the chat history; the help
+    // panel itself carries the full list and lives in a modal.
+    const total = Object.values(grouped).reduce((s, arr) => s + arr.length, 0);
+    const shortSummary = `I have ${total} capabilities. Help panel on screen.`;
     return {
       success: true,
-      message: speech,
+      message: speech, // legacy fallback
+      spokenSummary: shortSummary,
+      visualText: shortSummary,
+      displayMode: 'modal',
+      // Help panel is dense and benefits from its own window. Default
+      // sizing so the dual-channel heuristic also picks 'modal'.
+      panelWidth: 480,
+      panelHeight: 540,
       html,
     };
   },

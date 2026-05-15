@@ -123,12 +123,22 @@ describe('voice-listener.buildSessionUpdate() -- Phase 3 (audio output)', () => 
   });
 
   it('tools[0] is the handle_user_request function tool', () => {
-    expect(payload.session.tools).toHaveLength(1);
+    // Phase 5 added cancel_in_flight + stop_speaking, so tools.length is
+    // now 3 (handle_user_request + two intent classifiers). The first
+    // tool must remain handle_user_request -- the routing tool that
+    // every utterance hits unless cancel/stop fires first.
+    expect(payload.session.tools.length).toBeGreaterThanOrEqual(1);
     expect(payload.session.tools[0]).toMatchObject({
       type: 'function',
       name: 'handle_user_request',
     });
     expect(payload.session.tools[0].parameters.required).toEqual(['transcript']);
+
+    // Phase 5: cancel + stop tools also present (their detailed shape
+    // is pinned in voice-listener-cancel-stop-tools.test.js).
+    const names = payload.session.tools.map((t) => t.name);
+    expect(names).toContain('cancel_in_flight');
+    expect(names).toContain('stop_speaking');
   });
 
   it('tool_choice is "auto" (Phase 3 -- so the model can speak after function output)', () => {
