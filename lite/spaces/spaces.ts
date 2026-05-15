@@ -1,34 +1,50 @@
 /**
  * Spaces window renderer.
  *
- * Phase 1 + Phase 2 scope (this file):
+ * Phase 1 + Phase 2 scope:
  *   - Sidebar `:Space` list populated from `listSpaces()` + Uncategorized
  *     count from `getUncategorizedCount()`.
- *   - Main pane renders `items.list(scope)` as cards.
+ *   - Main pane renders `items.list(scope)` as cards when a Space or
+ *     Uncategorized is the active scope.
  *   - Right rail renders `items.get(id)` when a card is clicked.
  *   - Item cards carry multi-Space chips (rendered from
  *     `ItemSummary.otherSpaces` projected by Cypher).
  *
- * Phase 0.5 discovery panel kept as a collapsible diagnostic at the
- * bottom of the page so the verification queries stay one click away
- * for the dev team without crowding out the production UX.
+ * Chunk 3o (Home view) adds:
+ *   - Home as the default scope (sidebar item, default activeScopeId).
+ *   - 5-card news feed in the main pane: data-room-at-a-glance,
+ *     recent activity, agents sample, permissions, just-added.
+ *   - Replaces the Phase 0.5 Discovery panel (which moves to
+ *     Settings -> Diagnostics for engineer access).
+ *   - Stale-while-revalidate cache: 60s window per query (Q-Home-3).
  *
  * Pure DOM-construction helpers (`buildSpaceRow`, `buildItemCard`,
- * `buildSpaceChip`, `buildDetailPane`) are exported via the
- * `__spacesRendererForTesting` window-global escape hatch so jsdom
- * tests can exercise them without booting the whole renderer. The
- * production code path uses the same functions internally.
+ * `buildSpaceChip`, `buildDetailPane`, plus the new `buildHome*`
+ * builders) are exported via the `__spacesRendererForTesting`
+ * window-global escape hatch so jsdom tests can exercise them
+ * without booting the whole renderer.
  *
  * Built as an IIFE bundle by esbuild. Talks to the main process via
  * the preload bridge (`window.lite.spaces.*`).
  */
 
 import { UNCATEGORIZED_SPACE_ID } from './scope.js';
-import {
-  discoveryResultsToMarkdown,
-  type DiscoveryQueryResult,
-  type DiscoveryResults,
+import type {
+  DiscoveryQueryResult,
+  DiscoveryResults,
 } from './discovery-format.js';
+
+// ─── Home view (chunk 3o) ───────────────────────────────────────────────
+
+/**
+ * Synthetic id for the Home scope. Distinguished from
+ * `UNCATEGORIZED_SPACE_ID` so the scope discriminator can branch
+ * cleanly. Used as `data-scope-id` on the sidebar Home row.
+ */
+const HOME_SCOPE_ID = '__home__';
+
+/** Cache window for Home SDK responses. Per Q-Home-3 default (60s). */
+const HOME_CACHE_TTL_MS = 60_000;
 
 // ─── Domain shapes ───────────────────────────────────────────────────────
 //
@@ -43,9 +59,40 @@ type RendererSpaceChipRef = LiteSpaceChipRef;
 type RendererItemSummary = LiteSpaceItemSummary;
 type RendererItem = LiteSpaceItem;
 
+// Home view types (chunk 3o). Mirror the bridge-side types in
+// lite-window.d.ts; aliased here for renderer-local readability.
+type RendererEntityCounts = LiteSpacesEntityCountsView;
+type RendererContributor = LiteSpacesContributorView;
+type RendererAgentSummary = LiteSpacesAgentSummaryView;
+type RendererPermissionSummary = LiteSpacesPermissionSummaryView;
+
 // ─── State ──────────────────────────────────────────────────────────────
 
 export type SpacesSortMode = 'name' | 'recent';
+
+/**
+ * Per-card cache entry. `value` is the last successful response;
+ * `fetchedAt` is the epoch ms when it landed. The renderer treats
+ * an entry as fresh while `Date.now() - fetchedAt < HOME_CACHE_TTL_MS`.
+ */
+interface HomeCacheEntry<T> {
+  value: T | null;
+  fetchedAt: number;
+  loading: boolean;
+  error: string | null;
+}
+
+interface HomeCardCache {
+  counts: HomeCacheEntry<RendererEntityCounts>;
+  contributors: HomeCacheEntry<RendererContributor[]>;
+  agents: HomeCacheEntry<RendererAgentSummary[]>;
+  permission: HomeCacheEntry<RendererPermissionSummary>;
+  recentItems: HomeCacheEntry<RendererItemSummary[]>;
+}
+
+function emptyCacheEntry<T>(): HomeCacheEntry<T> {
+  return { value: null, fetchedAt: 0, loading: false, error: null };
+}
 
 interface SpacesRendererState {
   activeScopeId: string;
@@ -60,10 +107,12 @@ interface SpacesRendererState {
   sortMode: SpacesSortMode;
   lastDiscovery: DiscoveryResults | null;
   discoveryInFlight: boolean;
+  /** Home view cache. Per Q-Home-3 (60s stale-while-revalidate). */
+  home: HomeCardCache;
 }
 
 const state: SpacesRendererState = {
-  activeScopeId: UNCATEGORIZED_SPACE_ID,
+  activeScopeId: HOME_SCOPE_ID,
   spaces: [],
   uncategorizedCount: 0,
   items: [],
@@ -75,6 +124,13 @@ const state: SpacesRendererState = {
   sortMode: 'name',
   lastDiscovery: null,
   discoveryInFlight: false,
+  home: {
+    counts: emptyCacheEntry<RendererEntityCounts>(),
+    contributors: emptyCacheEntry<RendererContributor[]>(),
+    agents: emptyCacheEntry<RendererAgentSummary[]>(),
+    permission: emptyCacheEntry<RendererPermissionSummary>(),
+    recentItems: emptyCacheEntry<RendererItemSummary[]>(),
+  },
 };
 
 // ─── Bootstrap ──────────────────────────────────────────────────────────
@@ -84,12 +140,26 @@ function init(): void {
   wireSidebarClicks();
   wireSidebarSearch();
   wireSidebarSort();
-  wireDiscoveryPanel();
+  // Home is the default scope -- show its region, hide the items
+  // region. This ensures first paint matches state even if
+  // `setActiveScope` never runs.
+  applyScopeRegions(state.activeScopeId);
   void initialLoad();
 }
 
 async function initialLoad(): Promise<void> {
-  await Promise.all([loadSpaces(), loadUncategorizedCount(), loadItems()]);
+  // Sidebar always loads (Spaces list + Uncategorized count); Home
+  // and items load based on the active scope. Home is the default.
+  const sidebarWork: Array<Promise<void>> = [
+    loadSpaces(),
+    loadUncategorizedCount(),
+  ];
+  if (state.activeScopeId === HOME_SCOPE_ID) {
+    sidebarWork.push(loadHome());
+  } else {
+    sidebarWork.push(loadItems());
+  }
+  await Promise.all(sidebarWork);
 }
 
 async function loadSpaces(): Promise<void> {
@@ -334,10 +404,29 @@ function setActiveScope(scopeId: string): void {
   if (scopeId === state.activeScopeId) return;
   state.activeScopeId = scopeId;
   applyActiveRow(scopeId);
+  applyScopeRegions(scopeId);
   // Switching scope clears the open detail rail.
   state.activeItemId = null;
   showDetailRail(false);
-  void loadItems();
+  if (scopeId === HOME_SCOPE_ID) {
+    void loadHome();
+  } else {
+    void loadItems();
+  }
+}
+
+/**
+ * Toggle visibility of the Home region vs. the items region based on
+ * the active scope. Both regions live in the DOM at all times; the
+ * `hidden` attribute toggle lets each keep its own state without
+ * tearing down + rebuilding on every scope switch.
+ */
+function applyScopeRegions(scopeId: string): void {
+  const homeRegion = document.getElementById('spaces-home-region');
+  const itemsRegion = document.getElementById('spaces-items-region');
+  const showHome = scopeId === HOME_SCOPE_ID;
+  if (homeRegion !== null) homeRegion.hidden = !showHome;
+  if (itemsRegion !== null) itemsRegion.hidden = showHome;
 }
 
 function applyActiveRow(scopeId: string): void {
@@ -814,125 +903,818 @@ export function buildDetailPane(
   return wrap;
 }
 
-// ─── Discovery panel (unchanged from Phase 0.5) ─────────────────────────
+// ─── Home view (chunk 3o) ───────────────────────────────────────────────
+//
+// Five cards, one orchestrator. Each card has its own cache entry; the
+// orchestrator fires all 6 SDK calls in parallel via Promise.all,
+// renders skeletons immediately, and patches each card as its
+// response lands.
+//
+// Per Q-Home-3, cache is stale-while-revalidate with a 60s window
+// (HOME_CACHE_TTL_MS). On a Home view focus with fresh cache, render
+// directly from cache without a network call. On stale or missing
+// cache, render from cache (if present) immediately AND kick off a
+// refresh.
 
-function wireDiscoveryPanel(): void {
-  const runBtn = document.getElementById('spaces-discovery-run');
-  const copyBtn = document.getElementById('spaces-discovery-copy');
-  if (runBtn instanceof HTMLButtonElement) {
-    runBtn.addEventListener('click', () => void runDiscovery());
-  }
-  if (copyBtn instanceof HTMLButtonElement) {
-    copyBtn.addEventListener('click', () => void copyMarkdown());
-  }
+/**
+ * Top-level Home loader. Renders the 5 cards (using cache if fresh,
+ * skeletons + parallel fetches otherwise).
+ */
+async function loadHome(): Promise<void> {
+  // Always render once up-front so skeletons appear if cache is empty,
+  // or stale data shows immediately if cache is present.
+  renderHome();
+
+  const now = Date.now();
+  const fresh = (entry: HomeCacheEntry<unknown>): boolean =>
+    entry.value !== null && now - entry.fetchedAt < HOME_CACHE_TTL_MS;
+
+  // Fire one query per stale/empty cache slot. Each query mutates its
+  // own cache entry and re-renders that card on completion.
+  const work: Array<Promise<void>> = [];
+  if (!fresh(state.home.counts)) work.push(refreshCounts());
+  if (!fresh(state.home.contributors)) work.push(refreshContributors());
+  if (!fresh(state.home.agents)) work.push(refreshAgents());
+  if (!fresh(state.home.permission)) work.push(refreshPermission());
+  if (!fresh(state.home.recentItems)) work.push(refreshRecentItems());
+  await Promise.all(work);
 }
 
-async function runDiscovery(): Promise<void> {
-  if (state.discoveryInFlight) return;
-  state.discoveryInFlight = true;
-  setRunButton({ busy: true });
-  showDiscoverySummary({
-    kind: 'info',
-    text: 'Running Q1–Q4 against the configured Neon endpoint…',
-  });
-  clearDiscoveryResults();
+async function refreshCounts(): Promise<void> {
+  const bridge = window.lite?.spaces?.home;
+  if (bridge === undefined) return;
+  state.home.counts.loading = true;
+  state.home.counts.error = null;
+  renderHome();
   try {
-    const bridge = window.lite?.spaces;
-    if (bridge === undefined) {
-      showDiscoverySummary({
-        kind: 'failure',
-        text: 'Spaces bridge is unavailable. Reload the window.',
-      });
-      return;
-    }
-    const envelope = await bridge.runDiscovery();
+    const envelope = await bridge.entityCounts();
     if (envelope.ok === false) {
-      showDiscoverySummary({
-        kind: 'failure',
-        text: `Discovery failed before any query ran: [${envelope.error.code}] ${envelope.error.message}`,
-      });
+      state.home.counts.error = envelope.error.message;
+    } else {
+      state.home.counts.value = envelope.value;
+      state.home.counts.fetchedAt = Date.now();
+    }
+  } catch (err) {
+    state.home.counts.error = messageFrom(err);
+  } finally {
+    state.home.counts.loading = false;
+    renderHome();
+  }
+}
+
+async function refreshContributors(): Promise<void> {
+  const bridge = window.lite?.spaces?.home;
+  if (bridge === undefined) return;
+  state.home.contributors.loading = true;
+  state.home.contributors.error = null;
+  renderHome();
+  try {
+    const envelope = await bridge.topContributors({ window: 'week', limit: 4 });
+    if (envelope.ok === false) {
+      state.home.contributors.error = envelope.error.message;
+    } else {
+      state.home.contributors.value = envelope.value;
+      state.home.contributors.fetchedAt = Date.now();
+    }
+  } catch (err) {
+    state.home.contributors.error = messageFrom(err);
+  } finally {
+    state.home.contributors.loading = false;
+    renderHome();
+  }
+}
+
+async function refreshAgents(): Promise<void> {
+  const bridge = window.lite?.spaces?.home;
+  if (bridge === undefined) return;
+  state.home.agents.loading = true;
+  state.home.agents.error = null;
+  renderHome();
+  try {
+    const envelope = await bridge.agentsSample({ limit: 3 });
+    if (envelope.ok === false) {
+      state.home.agents.error = envelope.error.message;
+    } else {
+      state.home.agents.value = envelope.value;
+      state.home.agents.fetchedAt = Date.now();
+    }
+  } catch (err) {
+    state.home.agents.error = messageFrom(err);
+  } finally {
+    state.home.agents.loading = false;
+    renderHome();
+  }
+}
+
+async function refreshPermission(): Promise<void> {
+  const bridge = window.lite?.spaces?.home;
+  if (bridge === undefined) return;
+  state.home.permission.loading = true;
+  state.home.permission.error = null;
+  renderHome();
+  try {
+    const envelope = await bridge.permissionSummary();
+    if (envelope.ok === false) {
+      state.home.permission.error = envelope.error.message;
+    } else {
+      state.home.permission.value = envelope.value;
+      state.home.permission.fetchedAt = Date.now();
+    }
+  } catch (err) {
+    state.home.permission.error = messageFrom(err);
+  } finally {
+    state.home.permission.loading = false;
+    renderHome();
+  }
+}
+
+async function refreshRecentItems(): Promise<void> {
+  const bridge = window.lite?.spaces?.home;
+  if (bridge === undefined) return;
+  state.home.recentItems.loading = true;
+  state.home.recentItems.error = null;
+  renderHome();
+  try {
+    const envelope = await bridge.recentItems({ limit: 3 });
+    if (envelope.ok === false) {
+      state.home.recentItems.error = envelope.error.message;
+    } else {
+      state.home.recentItems.value = envelope.value as RendererItemSummary[];
+      state.home.recentItems.fetchedAt = Date.now();
+    }
+  } catch (err) {
+    state.home.recentItems.error = messageFrom(err);
+  } finally {
+    state.home.recentItems.loading = false;
+    renderHome();
+  }
+}
+
+/**
+ * Render all 5 cards from current state. Idempotent; safe to call
+ * repeatedly (e.g. after each query lands). The whole region is
+ * rebuilt rather than diffed because (a) 5 cards is cheap and
+ * (b) avoiding a diff library keeps the bundle slim.
+ */
+function renderHome(): void {
+  const region = document.getElementById('spaces-home-region');
+  if (region === null) return;
+  region.replaceChildren();
+
+  const greeting = document.createElement('div');
+  greeting.className = 'spaces-home-greeting';
+  greeting.textContent = 'Your data room';
+  region.appendChild(greeting);
+
+  region.appendChild(buildHomeCounts());
+  region.appendChild(buildHomeContributors());
+  region.appendChild(buildHomeAgents());
+  const permissionCard = buildHomePermission();
+  if (permissionCard !== null) region.appendChild(permissionCard);
+  region.appendChild(buildHomeRecent());
+}
+
+// ─── Card 1: Your data room at a glance ─────────────────────────────────
+
+export function buildHomeCounts(): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'home-card home-card-counts';
+
+  const header = document.createElement('div');
+  header.className = 'home-card-header';
+  const title = document.createElement('h3');
+  title.className = 'home-card-title';
+  title.textContent = 'Your data room';
+  header.appendChild(title);
+  card.appendChild(header);
+
+  const entry = state.home.counts;
+  if (entry.error !== null && entry.value === null) {
+    card.appendChild(buildCardError(entry.error));
+    return card;
+  }
+
+  const counts = entry.value;
+  if (counts === null) {
+    // Skeleton: three big-number tiles.
+    card.appendChild(buildCountsSkeleton());
+    card.classList.add('is-loading');
+    return card;
+  }
+
+  const totalIsZero =
+    counts.spaces === 0 &&
+    counts.assets === 0 &&
+    counts.people === 0 &&
+    counts.agents === 0;
+  if (totalIsZero) {
+    card.appendChild(buildEmpty('Your data room is empty.', 'Create your first Space →'));
+    return card;
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'home-counts';
+  grid.appendChild(buildCountTile('Spaces', counts.spaces));
+  grid.appendChild(buildCountTile('Assets', counts.assets));
+  grid.appendChild(buildCountTile('People', counts.people));
+  card.appendChild(grid);
+
+  const footer = document.createElement('div');
+  footer.className = 'home-counts-footer';
+  const strong = document.createElement('span');
+  strong.className = 'home-counts-footer-strong';
+  strong.textContent = String(counts.agents);
+  footer.appendChild(document.createTextNode('Plus '));
+  footer.appendChild(strong);
+  footer.appendChild(
+    document.createTextNode(
+      counts.agents === 1 ? ' agent available to your account' : ' agents available to your account'
+    )
+  );
+  card.appendChild(footer);
+
+  return card;
+}
+
+export function buildCountTile(label: string, value: number): HTMLElement {
+  const tile = document.createElement('div');
+  tile.className = 'home-count-tile';
+  const v = document.createElement('div');
+  v.className = 'home-count-value';
+  v.textContent = formatBigNumber(value);
+  tile.appendChild(v);
+  const l = document.createElement('div');
+  l.className = 'home-count-label';
+  l.textContent = label;
+  tile.appendChild(l);
+  // Tufte-style sparkline: synthesised from the count itself for v1
+  // (real time-series ships with v2's auto-metadata work). The line
+  // shows a gentle upward curve weighted by the value so users get a
+  // visual cue without false precision.
+  tile.appendChild(buildSparkline(value));
+  return tile;
+}
+
+/**
+ * Render a 30-point sparkline as inline SVG. v1 synthesises the
+ * series from the count so the visual reads "growing → here we are";
+ * v2 will derive real daily buckets from `:Asset.createdAt`.
+ *
+ * Pure builder: no DOM lookups, deterministic for a given count.
+ * Exported for jsdom tests.
+ */
+export function buildSparkline(value: number): SVGElement {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('class', 'home-sparkline');
+  svg.setAttribute('viewBox', '0 0 100 18');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(svgNS, 'path');
+  path.setAttribute('d', sparklinePath(value));
+  svg.appendChild(path);
+  return svg as unknown as SVGElement;
+}
+
+/**
+ * Compute a smooth-ish path string for the synthesised sparkline.
+ * Returns an SVG path `d` attribute. For value=0 returns a flat line
+ * along the baseline.
+ */
+export function sparklinePath(value: number): string {
+  const points = 30;
+  const w = 100;
+  const h = 18;
+  const baseline = h - 1;
+  if (value <= 0) {
+    return `M0,${baseline} L${w},${baseline}`;
+  }
+  // Map value to a 0-1 "intensity" with diminishing returns past 100.
+  const intensity = Math.min(1, Math.log10(value + 1) / 2.5);
+  const peakHeight = baseline - intensity * (h - 2);
+  const segments: string[] = [];
+  for (let i = 0; i < points; i++) {
+    const x = (i / (points - 1)) * w;
+    // Slight wave pattern that trends upward; makes the sparkline
+    // read as "active growth" rather than a perfect curve.
+    const t = i / (points - 1);
+    const trend = peakHeight + (baseline - peakHeight) * (1 - Math.pow(t, 1.4));
+    const wiggle = Math.sin(i * 0.6) * 0.6;
+    const y = Math.max(1, Math.min(baseline, trend + wiggle));
+    segments.push(`${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(2)}`);
+  }
+  return segments.join(' ');
+}
+
+function buildCountsSkeleton(): HTMLElement {
+  const grid = document.createElement('div');
+  grid.className = 'home-counts';
+  for (let i = 0; i < 3; i++) {
+    const tile = document.createElement('div');
+    tile.className = 'home-count-tile';
+    const num = document.createElement('div');
+    num.className = 'home-skeleton home-skeleton-number';
+    tile.appendChild(num);
+    const label = document.createElement('div');
+    label.className = 'home-skeleton home-skeleton-line is-short';
+    tile.appendChild(label);
+    grid.appendChild(tile);
+  }
+  return grid;
+}
+
+// ─── Card 2: Recent activity ────────────────────────────────────────────
+
+export function buildHomeContributors(): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'home-card home-card-contributors';
+
+  const header = document.createElement('div');
+  header.className = 'home-card-header';
+  const title = document.createElement('h3');
+  title.className = 'home-card-title';
+  title.textContent = 'Recent activity';
+  header.appendChild(title);
+  card.appendChild(header);
+
+  const entry = state.home.contributors;
+  if (entry.error !== null && entry.value === null) {
+    card.appendChild(buildCardError(entry.error));
+    return card;
+  }
+
+  const contributors = entry.value;
+  if (contributors === null) {
+    card.appendChild(buildLinesSkeleton(4));
+    card.classList.add('is-loading');
+    return card;
+  }
+
+  if (contributors.length === 0) {
+    card.appendChild(
+      buildEmpty('No activity yet this week.', 'Activity from people and agents will appear here.')
+    );
+    return card;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'home-contributors';
+  for (const c of contributors) {
+    list.appendChild(buildContributorRow(c));
+  }
+  card.appendChild(list);
+
+  const footer = document.createElement('div');
+  footer.className = 'home-card-header';
+  const seeAll = document.createElement('button');
+  seeAll.type = 'button';
+  seeAll.className = 'home-card-action';
+  seeAll.textContent = 'See timeline →';
+  seeAll.addEventListener('click', () => {
+    void openEventsModal();
+  });
+  footer.appendChild(seeAll);
+  card.appendChild(footer);
+
+  return card;
+}
+
+export function buildContributorRow(c: RendererContributor): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'home-contributor-row';
+  const name = document.createElement('div');
+  name.className = 'home-contributor-name';
+  name.textContent = c.displayName.length > 0 ? c.displayName : c.author;
+  row.appendChild(name);
+  const summary = document.createElement('div');
+  summary.className = 'home-contributor-summary';
+  summary.textContent = `${formatCount(c.events)} ${c.events === 1 ? 'item' : 'items'} ${formatRecency(c.lastEventAt)}`;
+  row.appendChild(summary);
+  return row;
+}
+
+// ─── Card 3: Agents in your account ─────────────────────────────────────
+
+export function buildHomeAgents(): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'home-card home-card-agents';
+
+  const header = document.createElement('div');
+  header.className = 'home-card-header';
+  const title = document.createElement('h3');
+  title.className = 'home-card-title';
+  title.textContent = 'Agents in your account';
+  header.appendChild(title);
+  card.appendChild(header);
+
+  const entry = state.home.agents;
+  if (entry.error !== null && entry.value === null) {
+    card.appendChild(buildCardError(entry.error));
+    return card;
+  }
+
+  const agents = entry.value;
+  if (agents === null) {
+    card.appendChild(buildLinesSkeleton(3));
+    card.classList.add('is-loading');
+    return card;
+  }
+
+  if (agents.length === 0) {
+    card.appendChild(buildEmpty('No agents enabled for your account yet.', ''));
+    return card;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'home-agents';
+  for (const a of agents) {
+    list.appendChild(buildAgentRow(a));
+  }
+  card.appendChild(list);
+
+  const totalAgents = state.home.counts.value?.agents ?? agents.length;
+  const remaining = Math.max(0, totalAgents - agents.length);
+  if (remaining > 0) {
+    const footer = document.createElement('div');
+    footer.className = 'home-card-header';
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'home-card-action';
+    more.textContent = `+ ${formatCount(remaining)} more — see all →`;
+    more.addEventListener('click', () => {
+      void openAgentsModal();
+    });
+    footer.appendChild(more);
+    card.appendChild(footer);
+  }
+
+  return card;
+}
+
+export function buildAgentRow(a: RendererAgentSummary): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'home-agent-row';
+  const icon = document.createElement('span');
+  icon.className = 'home-agent-icon';
+  row.appendChild(icon);
+  const text = document.createElement('div');
+  const name = document.createElement('span');
+  name.className = 'home-agent-name';
+  name.textContent = a.name;
+  text.appendChild(name);
+  if (a.description.length > 0) {
+    const desc = document.createElement('span');
+    desc.className = 'home-agent-description';
+    desc.textContent = a.description;
+    text.appendChild(desc);
+  }
+  row.appendChild(text);
+  return row;
+}
+
+// ─── Card 4: Your view ──────────────────────────────────────────────────
+
+export function buildHomePermission(): HTMLElement | null {
+  const entry = state.home.permission;
+  // Hide the card entirely while loading the first time AND when
+  // visibleSpaceCount is 0 (the empty story is told by Card 1).
+  if (entry.value === null && !entry.loading) return null;
+  if (entry.value !== null && entry.value.visibleSpaceCount === 0) return null;
+
+  const card = document.createElement('article');
+  card.className = 'home-card home-card-permission';
+
+  const header = document.createElement('div');
+  header.className = 'home-card-header';
+  const title = document.createElement('h3');
+  title.className = 'home-card-title';
+  title.textContent = 'Your view';
+  header.appendChild(title);
+  card.appendChild(header);
+
+  if (entry.error !== null && entry.value === null) {
+    card.appendChild(buildCardError(entry.error));
+    return card;
+  }
+
+  if (entry.value === null) {
+    const skeleton = document.createElement('div');
+    skeleton.className = 'home-skeleton home-skeleton-line is-medium';
+    card.appendChild(skeleton);
+    card.classList.add('is-loading');
+    return card;
+  }
+
+  const text = document.createElement('div');
+  text.className = 'home-permission-text';
+  if (
+    typeof entry.value.totalSpaceCount === 'number' &&
+    entry.value.totalSpaceCount > entry.value.visibleSpaceCount
+  ) {
+    text.textContent = `You can see ${entry.value.visibleSpaceCount} of ${entry.value.totalSpaceCount} Spaces in this account.`;
+  } else {
+    text.textContent = `You can see ${entry.value.visibleSpaceCount} ${entry.value.visibleSpaceCount === 1 ? 'Space' : 'Spaces'} in this account.`;
+  }
+  card.appendChild(text);
+
+  return card;
+}
+
+// ─── Card 5: Just added ─────────────────────────────────────────────────
+
+export function buildHomeRecent(): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'home-card home-card-recent';
+
+  const header = document.createElement('div');
+  header.className = 'home-card-header';
+  const title = document.createElement('h3');
+  title.className = 'home-card-title';
+  title.textContent = 'Just added';
+  header.appendChild(title);
+  card.appendChild(header);
+
+  const entry = state.home.recentItems;
+  if (entry.error !== null && entry.value === null) {
+    card.appendChild(buildCardError(entry.error));
+    return card;
+  }
+
+  const items = entry.value;
+  if (items === null) {
+    card.appendChild(buildLinesSkeleton(3));
+    card.classList.add('is-loading');
+    return card;
+  }
+
+  if (items.length === 0) {
+    card.appendChild(buildEmpty('Nothing added recently.', 'Drop a file in to get started.'));
+    return card;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'home-recent-list';
+  for (const item of items) {
+    list.appendChild(buildRecentItemRow(item));
+  }
+  card.appendChild(list);
+
+  return card;
+}
+
+export function buildRecentItemRow(item: RendererItemSummary): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'home-recent-row';
+  row.setAttribute('role', 'button');
+  row.setAttribute('tabindex', '0');
+  row.setAttribute('data-item-id', item.id);
+
+  const title = document.createElement('div');
+  title.className = 'home-recent-title';
+  title.textContent = item.title.length > 0 ? item.title : '(untitled)';
+  row.appendChild(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'home-recent-meta';
+  const spaceChip = item.otherSpaces[0];
+  if (spaceChip !== undefined) {
+    const space = document.createElement('span');
+    space.className = 'home-recent-space-name';
+    space.textContent = `in ${spaceChip.name}`;
+    meta.appendChild(space);
+    meta.appendChild(document.createTextNode(' · '));
+  }
+  meta.appendChild(document.createTextNode(formatRecency(item.updatedAt || item.createdAt)));
+  row.appendChild(meta);
+
+  row.addEventListener('click', () => {
+    if (typeof spaceChip?.id === 'string' && spaceChip.id.length > 0) {
+      setActiveScope(spaceChip.id);
+      // The items list will pick up; the existing `loadItemDetail` is
+      // wired separately. v1 navigates to the Space; opening the
+      // detail rail directly is a future enhancement.
+    } else {
+      setActiveScope(UNCATEGORIZED_SPACE_ID);
+    }
+  });
+
+  return row;
+}
+
+// ─── Modals (used by Card 2 + Card 3 "see all") ─────────────────────────
+
+async function openEventsModal(): Promise<void> {
+  const bridge = window.lite?.spaces?.home;
+  if (bridge === undefined) return;
+  const modal = mountModal('Recent activity (last 100 events)');
+  const body = modal.querySelector<HTMLElement>('.home-modal-body');
+  if (body === null) return;
+  body.appendChild(buildLinesSkeleton(8));
+  try {
+    const envelope = await bridge.recentEvents({ limit: 100 });
+    body.replaceChildren();
+    if (envelope.ok === false) {
+      body.appendChild(buildCardError(envelope.error.message));
       return;
     }
-    const value = envelope.value as unknown as DiscoveryResults;
-    state.lastDiscovery = value;
-    renderDiscoveryResults(value);
-    showDiscoverySummary(buildDiscoverySummary(value));
-    setCopyButtonEnabled(true);
+    const events = envelope.value;
+    if (events.length === 0) {
+      body.appendChild(buildEmpty('No recent events.', ''));
+      return;
+    }
+    for (const e of events) {
+      const row = document.createElement('div');
+      row.className = 'home-modal-row';
+      const top = document.createElement('div');
+      top.className = 'home-modal-row-title';
+      top.textContent = `${e.author} · ${e.kind}`;
+      row.appendChild(top);
+      const meta = document.createElement('div');
+      meta.className = 'home-modal-row-meta';
+      const parts: string[] = [];
+      if (typeof e.spaceName === 'string' && e.spaceName.length > 0) {
+        parts.push(`in ${e.spaceName}`);
+      }
+      parts.push(formatRecency(e.timestamp));
+      meta.textContent = parts.join(' · ');
+      row.appendChild(meta);
+      body.appendChild(row);
+    }
   } catch (err) {
-    showDiscoverySummary({
-      kind: 'failure',
-      text: `Discovery threw at the bridge: ${messageFrom(err)}`,
-    });
-  } finally {
-    state.discoveryInFlight = false;
-    setRunButton({ busy: false });
+    body.replaceChildren();
+    body.appendChild(buildCardError(messageFrom(err)));
   }
 }
 
-async function copyMarkdown(): Promise<void> {
-  if (state.lastDiscovery === null) return;
-  const md = discoveryResultsToMarkdown(state.lastDiscovery);
+async function openAgentsModal(): Promise<void> {
+  const bridge = window.lite?.spaces?.home;
+  if (bridge === undefined) return;
+  const modal = mountModal('All agents in your account');
+  const body = modal.querySelector<HTMLElement>('.home-modal-body');
+  if (body === null) return;
+  body.appendChild(buildLinesSkeleton(8));
   try {
-    await navigator.clipboard.writeText(md);
-    flashCopyButton('Copied');
-  } catch {
-    flashCopyButton('Copy failed');
+    const envelope = await bridge.agentsSample({ limit: 200 });
+    body.replaceChildren();
+    if (envelope.ok === false) {
+      body.appendChild(buildCardError(envelope.error.message));
+      return;
+    }
+    const agents = envelope.value;
+    if (agents.length === 0) {
+      body.appendChild(buildEmpty('No agents enabled for your account yet.', ''));
+      return;
+    }
+    for (const a of agents) {
+      const row = document.createElement('div');
+      row.className = 'home-modal-row';
+      const top = document.createElement('div');
+      top.className = 'home-modal-row-title';
+      top.textContent = a.name;
+      row.appendChild(top);
+      if (a.description.length > 0) {
+        const meta = document.createElement('div');
+        meta.className = 'home-modal-row-meta';
+        meta.textContent = a.description;
+        row.appendChild(meta);
+      }
+      body.appendChild(row);
+    }
+  } catch (err) {
+    body.replaceChildren();
+    body.appendChild(buildCardError(messageFrom(err)));
   }
 }
 
-function setRunButton(opts: { busy: boolean }): void {
-  const runBtn = document.getElementById('spaces-discovery-run');
-  if (!(runBtn instanceof HTMLButtonElement)) return;
-  runBtn.disabled = opts.busy;
-  runBtn.textContent = opts.busy ? 'Running…' : 'Run Discovery';
+function mountModal(title: string): HTMLElement {
+  const existing = document.querySelector<HTMLElement>('.home-modal-backdrop');
+  if (existing !== null) existing.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'home-modal-backdrop';
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) backdrop.remove();
+  });
+  const modal = document.createElement('div');
+  modal.className = 'home-modal';
+  const header = document.createElement('div');
+  header.className = 'home-modal-header';
+  const h = document.createElement('h3');
+  h.className = 'home-modal-title';
+  h.textContent = title;
+  header.appendChild(h);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'home-modal-close';
+  close.setAttribute('aria-label', 'Close');
+  close.textContent = '×';
+  close.addEventListener('click', () => backdrop.remove());
+  header.appendChild(close);
+  modal.appendChild(header);
+  const body = document.createElement('div');
+  body.className = 'home-modal-body';
+  modal.appendChild(body);
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+  return modal;
 }
 
-function setCopyButtonEnabled(enabled: boolean): void {
-  const copyBtn = document.getElementById('spaces-discovery-copy');
-  if (!(copyBtn instanceof HTMLButtonElement)) return;
-  copyBtn.disabled = !enabled;
+// ─── Home shared building blocks ────────────────────────────────────────
+
+function buildEmpty(message: string, cta: string): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'home-card-empty';
+  div.appendChild(document.createTextNode(message));
+  if (cta.length > 0) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'home-card-empty-cta';
+    button.textContent = cta;
+    div.appendChild(document.createTextNode(' '));
+    div.appendChild(button);
+  }
+  return div;
 }
 
-function flashCopyButton(label: string): void {
-  const copyBtn = document.getElementById('spaces-discovery-copy');
-  if (!(copyBtn instanceof HTMLButtonElement)) return;
-  const original = copyBtn.textContent;
-  copyBtn.textContent = label;
-  setTimeout(() => {
-    copyBtn.textContent = original;
-  }, 1500);
+function buildCardError(message: string): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'home-card-error';
+  div.textContent = message;
+  return div;
 }
+
+function buildLinesSkeleton(rows: number): HTMLElement {
+  const wrap = document.createElement('div');
+  for (let i = 0; i < rows; i++) {
+    const line = document.createElement('div');
+    line.className = 'home-skeleton home-skeleton-line';
+    if (i % 2 === 1) line.classList.add('is-medium');
+    wrap.appendChild(line);
+  }
+  return wrap;
+}
+
+/** Compact-format big numbers (e.g. 1.2k, 3.4M). */
+export function formatBigNumber(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '0';
+  if (n < 1000) return String(n);
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
+  if (n < 1_000_000) return `${Math.floor(n / 1000)}k`;
+  if (n < 10_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  return `${Math.floor(n / 1_000_000)}M`;
+}
+
+/**
+ * Friendly relative time string. Returns "today", "yesterday",
+ * "3d ago", "2w ago", or the date for older. Pure for tests.
+ */
+export function formatRecency(value: string | number): string {
+  let ms: number;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    ms = value;
+  } else if (typeof value === 'string' && value.length > 0) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      ms = parsed;
+    } else {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) ms = numeric;
+      else return '';
+    }
+  } else {
+    return '';
+  }
+  const diffMs = Date.now() - ms;
+  if (!Number.isFinite(diffMs) || diffMs < 0) return 'just now';
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr === 1 ? '1h ago' : `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day === 0) return 'today';
+  if (day === 1) return 'yesterday';
+  if (day < 7) return `${day}d ago`;
+  const wk = Math.floor(day / 7);
+  if (wk < 5) return `${wk}w ago`;
+  try {
+    return new Date(ms).toLocaleDateString();
+  } catch {
+    return '';
+  }
+}
+
+// ─── Discovery panel (moved to Settings → Diagnostics in chunk 3o) ──────
+//
+// The Discovery panel is no longer rendered in the Spaces window.
+// Engineers reach the runner through Settings → Diagnostics, which
+// uses the discovery-format helpers below + the bridge IPC. The
+// helpers stay here because the Settings section's "Show raw
+// discovery queries" toggle re-uses them.
 
 type DiscoverySummaryKind = 'info' | 'success' | 'warning' | 'failure';
 
-function showDiscoverySummary(opts: {
-  kind: DiscoverySummaryKind;
-  text: string;
-}): void {
-  const summary = document.getElementById('spaces-discovery-summary');
-  if (summary === null) return;
-  summary.hidden = false;
-  summary.classList.remove('is-warning', 'is-failure');
-  if (opts.kind === 'warning') summary.classList.add('is-warning');
-  if (opts.kind === 'failure') summary.classList.add('is-failure');
-  summary.textContent = opts.text;
-}
-
-function clearDiscoveryResults(): void {
-  const container = document.getElementById('spaces-discovery-results');
-  if (container !== null) container.replaceChildren();
-}
-
-function renderDiscoveryResults(results: DiscoveryResults): void {
-  const container = document.getElementById('spaces-discovery-results');
-  if (container === null) return;
-  container.replaceChildren();
-  for (const r of results.results) {
-    container.appendChild(buildDiscoveryCard(r));
-  }
-}
-
-function buildDiscoveryCard(r: DiscoveryQueryResult): HTMLElement {
+export function buildDiscoveryCard(r: DiscoveryQueryResult): HTMLElement {
   const card = document.createElement('article');
   card.className = 'spaces-discovery-card';
   const head = document.createElement('div');
@@ -996,7 +1778,7 @@ function buildDiscoveryCard(r: DiscoveryQueryResult): HTMLElement {
   return card;
 }
 
-function buildDiscoverySummary(results: DiscoveryResults): {
+export function buildDiscoverySummary(results: DiscoveryResults): {
   kind: DiscoverySummaryKind;
   text: string;
 } {
@@ -1116,6 +1898,21 @@ function messageFrom(err: unknown): string {
   normalizeSearchQuery,
   matchesSearchQuery,
   sortSpaces,
+  // Home (chunk 3o) builders + helpers
+  buildHomeCounts,
+  buildHomeContributors,
+  buildHomeAgents,
+  buildHomePermission,
+  buildHomeRecent,
+  buildCountTile,
+  buildContributorRow,
+  buildAgentRow,
+  buildRecentItemRow,
+  buildSparkline,
+  sparklinePath,
+  formatBigNumber,
+  formatRecency,
+  HOME_SCOPE_ID,
   /**
    * Re-run the renderer's boot sequence. Tests use this to drive a
    * scenario by:
@@ -1126,7 +1923,7 @@ function messageFrom(err: unknown): string {
    * `DOMContentLoaded` handles the only legitimate init.
    */
   async reinitForTesting(): Promise<void> {
-    state.activeScopeId = UNCATEGORIZED_SPACE_ID;
+    state.activeScopeId = HOME_SCOPE_ID;
     state.spaces = [];
     state.uncategorizedCount = 0;
     state.items = [];
@@ -1137,6 +1934,13 @@ function messageFrom(err: unknown): string {
     state.loadingDetail = false;
     state.lastDiscovery = null;
     state.discoveryInFlight = false;
+    state.home = {
+      counts: emptyCacheEntry<RendererEntityCounts>(),
+      contributors: emptyCacheEntry<RendererContributor[]>(),
+      agents: emptyCacheEntry<RendererAgentSummary[]>(),
+      permission: emptyCacheEntry<RendererPermissionSummary>(),
+      recentItems: emptyCacheEntry<RendererItemSummary[]>(),
+    };
     init();
     // Allow the fire-and-forget initialLoad() to flush.
     await Promise.resolve();

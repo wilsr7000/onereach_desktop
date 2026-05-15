@@ -14,16 +14,30 @@
     <header class="spaces-header">
       <h1>Spaces</h1>
       <div class="spaces-header-spacer"></div>
-      <span class="spaces-phase-badge" title="Module phase indicator">Phase 2 · items + detail</span>
+      <span class="spaces-phase-badge" title="Module phase indicator">v1 · Workspace Beta</span>
     </header>
 
     <div class="spaces-layout">
       <!--
-        Left rail: dynamic Spaces navigator (populated in Phase 1).
-        The 'Uncategorized' row is the intake + exception zone (always
-        first, always present).
+        Left rail: Home + dynamic Spaces navigator. Home is the default
+        scope (chunk 3o). Uncategorized is the intake + exception zone
+        (always present below Home, above the user's Spaces).
       -->
       <nav id="spaces-sidebar" class="spaces-sidebar" aria-label="Spaces">
+        <div class="spaces-sidebar-section">
+          <ul class="spaces-list" id="spaces-list-home">
+            <li
+              class="spaces-row spaces-row-home is-active"
+              data-scope-id="__home__"
+              role="button"
+              tabindex="0"
+            >
+              <span class="spaces-row-dot spaces-row-dot-home" aria-hidden="true"></span>
+              <span class="spaces-row-name">Home</span>
+            </li>
+          </ul>
+        </div>
+
         <div class="spaces-sidebar-search">
           <input
             type="search"
@@ -83,65 +97,33 @@
       </nav>
 
       <!--
-        Main pane: item canvas (cards / list). Empty in Phase 0; the
-        Phase 0 view explicitly tells the user the module is wired but
-        not yet fetching data, with the active scope label echoed back
-        so the wiring is observable.
-
-        Phase 0.5 inserts a Discovery panel under the empty-state card
-        with a button that runs the 4 auto-runnable verification
-        queries (Q1-Q4) and renders results inline. The panel hides
-        itself once Phase 1 lands real data lists.
+        Main pane: Home news-feed view (chunk 3o, default) OR item
+        canvas (chunk 3a-3i, when a Space or Uncategorized is the
+        active scope).
       -->
       <main class="spaces-main" id="spaces-main">
         <!--
-          Items region populated at runtime by spaces.ts. The Phase-0
-          hero card is gone; the renderer paints loading / empty /
-          error states inline as it fetches.
+          Home view region (chunk 3o). Visible when activeScopeId ===
+          '__home__'. spaces.ts hides this region when a Space or
+          Uncategorized is selected, and shows the items region instead.
+          See lite/spaces/HOME-V1.md for the per-card spec.
         -->
-        <section id="spaces-items-region" class="spaces-items-region"></section>
+        <section
+          id="spaces-home-region"
+          class="spaces-home-region"
+          aria-label="Home"
+        ></section>
 
-        <section class="spaces-discovery" id="spaces-discovery">
-          <header class="spaces-discovery-header">
-            <div>
-              <h3 class="spaces-discovery-title">Phase 0.5 — Discovery</h3>
-              <p class="spaces-discovery-subtitle">
-                Runs Q1–Q4 verification queries against the configured Neon
-                endpoint. Q5 and Q6 are operational questions for the Edison
-                team and are tracked in
-                <code>lite/spaces/DISCOVERY.md</code>.
-              </p>
-            </div>
-            <div class="spaces-discovery-actions">
-              <button
-                type="button"
-                class="spaces-btn spaces-btn-primary"
-                id="spaces-discovery-run"
-              >
-                Run Discovery
-              </button>
-              <button
-                type="button"
-                class="spaces-btn spaces-btn-secondary"
-                id="spaces-discovery-copy"
-                disabled
-              >
-                Copy as Markdown
-              </button>
-            </div>
-          </header>
-
-          <div
-            class="spaces-discovery-summary"
-            id="spaces-discovery-summary"
-            hidden
-          ></div>
-
-          <div
-            class="spaces-discovery-results"
-            id="spaces-discovery-results"
-          ></div>
-        </section>
+        <!--
+          Items region populated at runtime by spaces.ts when a Space
+          or Uncategorized is the active scope. Hidden when Home is
+          active.
+        -->
+        <section
+          id="spaces-items-region"
+          class="spaces-items-region"
+          hidden
+        ></section>
       </main>
 
       <!--

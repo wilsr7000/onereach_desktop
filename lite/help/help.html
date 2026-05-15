@@ -25,6 +25,7 @@
           <a href="#settings" class="toc-link">Settings</a>
           <a href="#ai-roster" class="toc-link">Your AI Roster</a>
           <a href="#tools" class="toc-link">Tools</a>
+          <a href="#spaces" class="toc-link">Spaces</a>
           <a href="#ai-run-times" class="toc-link">AI Run Times</a>
           <a href="#university" class="toc-link">University</a>
           <a href="#bug-reports" class="toc-link">Bug Reports</a>
@@ -43,9 +44,9 @@
           <p class="lede">
             A slim desktop kernel that signs you in to Onereach.ai once and gives you a
             single home for the AIs you actually use. Lite is intentionally small:
-            sign-in, your AI roster, a tools menu, articles, tutorials, and bug
-            reporting &mdash; with everything else loaded on demand or deferred to the
-            full app.
+            sign-in, your AI roster, a tools menu, Spaces (your shared knowledge graph),
+            articles, tutorials, and bug reporting &mdash; with everything else loaded on
+            demand or deferred to the full app.
           </p>
           <p>
             This guide walks through every feature in the order you&rsquo;ll meet them.
@@ -250,6 +251,207 @@
           <p>
             Tools open in your default browser, not inside Lite. They&rsquo;re for
             quick access to dashboards, docs, or external apps you reference often.
+          </p>
+        </section>
+
+        <section id="spaces">
+          <h2>Spaces</h2>
+          <p class="lede">
+            Spaces is your shared, organized place for the work product your team
+            and your AIs are producing. If an IDW is &ldquo;the AI you talk to,&rdquo;
+            a Space is &ldquo;where the answer ends up.&rdquo; Open it from
+            <em>Tools &rarr; Spaces&hellip;</em>.
+          </p>
+
+          <h3>The mental model in 30 seconds</h3>
+          <p>
+            Spaces holds three things, with everything else built on top:
+          </p>
+          <ul class="def-list">
+            <li><strong>Spaces</strong> &mdash; named contexts you organize work
+              around. Examples: <em>Acme Renewal</em>, <em>Q3 Board Prep</em>,
+              <em>Engineering On-Call</em>, <em>2026 GTM Planning</em>. Each Space
+              has a name, an optional color, and a list of items inside it.</li>
+            <li><strong>Items</strong> &mdash; the actual content. Documents,
+              images, links, text snippets, audio, video. An item can live in
+              <em>more than one</em> Space at a time (the brief that&rsquo;s both
+              in <em>Acme Renewal</em> and <em>Customer References</em> is one
+              item, not two).</li>
+            <li><strong>Uncategorized</strong> &mdash; the intake zone. Anything
+              that arrives without being filed lands here. Always pinned to the
+              top of the sidebar with a count, so you can see at a glance what
+              hasn&rsquo;t been triaged yet.</li>
+          </ul>
+          <p class="callout">
+            Spaces is shared with your account&rsquo;s graph &mdash; if a teammate
+            files something into <em>Acme Renewal</em> from another tool, you
+            see it in Lite. It&rsquo;s the same substrate, not a Lite-only copy.
+          </p>
+
+          <h3>What Lite shows you</h3>
+          <p>The Spaces window has three panes:</p>
+          <ul class="def-list">
+            <li><strong>Left rail.</strong> Search box, sort dropdown
+              (<em>Name A&rarr;Z</em> or <em>Recently updated</em>), the
+              <em>Uncategorized</em> row with its current intake count, and every
+              Space your account can read.</li>
+            <li><strong>Main pane.</strong> Cards for the items in whichever
+              scope you have selected. Each card shows title, kind, a short
+              excerpt, chips for any <em>other</em> Spaces the item also
+              participates in, and (when known) a provenance line saying who or
+              what produced it.</li>
+            <li><strong>Right rail.</strong> Detail panel that opens when you
+              click a card. Full content, image previews for image kinds,
+              download links for binary kinds, and the item&rsquo;s metadata.
+              Click the same card again to collapse the panel.</li>
+          </ul>
+
+          <h3>Use cases</h3>
+
+          <h4>1. &ldquo;What did my agents drop on me overnight?&rdquo;</h4>
+          <p>
+            Open Spaces. Look at the <em>Uncategorized</em> row in the sidebar
+            &mdash; the count is everything that arrived without being filed.
+            Click it. The main pane shows every item, sorted with newest first.
+            Click each one to read it; if it&rsquo;s worth keeping in the
+            canonical record, file it (Phase 3 &mdash; see below). If it isn&rsquo;t,
+            ignore it and move on. Treat <em>Uncategorized</em> like an inbox you
+            keep at zero on Friday afternoons.
+          </p>
+
+          <h4>2. &ldquo;Pull up everything for the Acme renewal.&rdquo;</h4>
+          <p>
+            Type <em>acme</em> in the sidebar search. The list filters to the
+            matching Space. Click it. The main pane shows every item in the Acme
+            Renewal Space &mdash; meeting notes, attached PDFs, agent-generated
+            summaries, the contract draft. Sort the sidebar by <em>Recently
+            updated</em> when you want to see which Spaces had movement today.
+          </p>
+
+          <h4>3. &ldquo;Wait, this brief shows up in three Spaces?&rdquo;</h4>
+          <p>
+            Multi-Space chips on each card tell you when an item participates in
+            more than the Space you&rsquo;re currently viewing. A document in
+            <em>Acme Renewal</em> that also carries a <em>Customer References</em>
+            chip and a <em>Legal Review</em> chip is shared work product &mdash;
+            edits affect every consumer. The chips also surface accidental
+            duplication; if the same brief shows up under two near-identical
+            Spaces, that&rsquo;s a signal to consolidate.
+          </p>
+
+          <h4>4. &ldquo;Who wrote this &mdash; an agent or a person?&rdquo;</h4>
+          <p>
+            When the underlying item carries authorship, cards show a small
+            provenance line: &ldquo;Produced by <em>Quarterly Audit Agent</em>&rdquo;
+            or &ldquo;Authored by <em>Robb Wilson</em>.&rdquo; This matters for
+            triage (auto-generated drafts versus human-edited final work) and for
+            audit (knowing which agent last touched a record before it became
+            canonical). Items without a known producer simply omit the line; the
+            card still renders.
+          </p>
+
+          <h4>5. &ldquo;That thing from last Tuesday &mdash; where is it?&rdquo;</h4>
+          <p>
+            Sort the sidebar by <em>Recently updated</em>. The Spaces with the
+            most recent activity float to the top. Click through; the main pane
+            shows items in update-time order so the recent stuff is right there.
+            If you remember the title or a phrase from the body, search the
+            sidebar (filters Spaces by name) or scroll the cards (excerpts let
+            you scan without opening every one).
+          </p>
+
+          <h4>6. &ldquo;I want to see what shape my work is in.&rdquo;</h4>
+          <p>
+            The Spaces sidebar is a map of how your operation is actually
+            organized: the Spaces you and your agents have created, the count of
+            stuff inside each, the intake pressure in <em>Uncategorized</em>.
+            A long Uncategorized list means the upstream agents are running
+            faster than you&rsquo;re reviewing them. A handful of high-volume
+            Spaces and many empty ones means the early Spaces are doing all the
+            work; consider rebalancing.
+          </p>
+
+          <h3>Spaces vs IDWs vs Tools</h3>
+          <p>Three surfaces, three jobs:</p>
+          <ul class="def-list">
+            <li><strong>IDWs</strong> are <em>where you talk</em> &mdash; the AIs
+              you query. ChatGPT, Claude, Gemini, your custom OneReach agents.
+              See <a href="#ai-roster">Your AI Roster</a>.</li>
+            <li><strong>Spaces</strong> is <em>where it lands</em> &mdash; the
+              organized record of what those AIs (and you) produced. Same
+              substrate other parts of GSX read and write into.</li>
+            <li><strong>Tools</strong> is <em>where you go</em> &mdash; quick
+              shortcuts to dashboards and external apps. Bookmarks, basically.
+              See <a href="#tools">Tools</a>.</li>
+          </ul>
+
+          <h3>What you can&rsquo;t do yet</h3>
+          <p>
+            The current build is read-only. You can browse, search, sort, and
+            inspect; you can&rsquo;t (yet) create a new Space, rename one, file
+            an item into a Space, or remove an item from a Space from inside
+            Lite. Those mutations land in the next phase. Until then, files into
+            and out of Spaces happen on the producing side &mdash; the agents,
+            the integrations, or the GSX tools that wrote the item are also where
+            you organize it. Lite is the read-and-review surface.
+          </p>
+          <p>
+            If a Space appears empty, that may mean: (1) it genuinely has no
+            items, (2) you don&rsquo;t have read access to its contents
+            (permissions live in the graph), or (3) the item filter is hiding
+            non-<code>:Item</code> entities (Lite shows documents, images, URLs,
+            text, audio, and video; agents and workflows that participate in the
+            same Space are not surfaced yet).
+          </p>
+
+          <h3>What&rsquo;s coming</h3>
+          <ul class="def-list">
+            <li><strong>Write paths.</strong> Create / rename / delete a Space.
+              Manually file an item into a Space, remove it from one, move it
+              between two.</li>
+            <li><strong>Approval queue.</strong> When an agent produces work
+              destined for a canonical Space, route it through an approval
+              decision first. <em>Uncategorized</em> becomes the inbox you
+              actively work, not just a passive intake counter.</li>
+            <li><strong>Librarian agents.</strong> Suggestion, dedup, and
+              archival agents that watch the graph and propose tidies. You
+              accept, reject, or ignore each suggestion.</li>
+            <li><strong>Ask the Librarians.</strong> Search the contents of
+              every Space you can read with a single query. RAG-backed; cites
+              the items it pulled from.</li>
+          </ul>
+
+          <h3>The Discovery panel</h3>
+          <p>
+            At the bottom of the Spaces window is a collapsible
+            <em>Discovery</em> panel &mdash; a diagnostic that runs a handful of
+            verification queries against the configured graph endpoint. It&rsquo;s
+            for setup and troubleshooting (confirming the connection works,
+            confirming the schema looks right) and is safe to ignore in normal
+            use. If something looks wrong with Spaces &mdash; missing items,
+            empty Spaces you expected to have content &mdash; click <em>Run
+            Discovery</em> and the results tell you whether the issue is the
+            connection, the schema, or your read permissions.
+          </p>
+
+          <h3>Errors you might see</h3>
+          <ul class="def-list">
+            <li><strong>&ldquo;Sign in required.&rdquo;</strong> You&rsquo;re
+              signed out. Spaces always requires an active OneReach session.
+              See <a href="#signing-in">Signing In &amp; Out</a>.</li>
+            <li><strong>&ldquo;You don&rsquo;t have access to that
+              Space.&rdquo;</strong> Permissions are graph-level. Ask whoever
+              owns the Space to add you, or check that you&rsquo;re signed in
+              to the right account if your login covers multiple.</li>
+            <li><strong>&ldquo;The Spaces service is unreachable.&rdquo;</strong>
+              Network or backend issue. The same configuration powers a few other
+              Lite features &mdash; if those are also degraded, it&rsquo;s
+              connectivity, not Spaces.</li>
+          </ul>
+          <p>
+            All Spaces errors carry a stable code (<code>SPACES_*</code>). The
+            log server (<a href="#diagnostics">Diagnostics</a>) shows the full
+            trail under <code>category=spaces</code> if you want to dig in.
           </p>
         </section>
 

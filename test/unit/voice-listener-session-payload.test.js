@@ -9,7 +9,11 @@
  * Asserted invariants (Phase 3 -- audio output hard cut active):
  *   - session.type === 'realtime'
  *   - session.model === 'gpt-realtime-2'
- *   - session.output_modalities is ['audio', 'text'] (flipped in Phase 3).
+ *   - session.output_modalities is ['audio'] (Phase 3 -- audio-only). The GA
+ *     Realtime API rejects the combined ['audio', 'text'] value with
+ *     `Invalid modalities: ['audio', 'text']. Supported combinations are:
+ *     ['text'] and ['audio']`. Audio-only still gets transcript via
+ *     response.output_audio_transcript.delta events.
  *   - audio.output is present with PCM format and a fixed `marin` voice
  *     (per-agent voices are blocked by the GA mid-session voice-change
  *     restriction; this is a documented follow-up).
@@ -72,9 +76,11 @@ describe('voice-listener.buildSessionUpdate() -- Phase 3 (audio output)', () => 
     expect(payload.session.reasoning.effort).toBe('low');
   });
 
-  it('output_modalities includes audio (Phase 3 hard cut)', () => {
-    expect(payload.session.output_modalities).toContain('audio');
-    expect(payload.session.output_modalities).toContain('text');
+  it('output_modalities is ["audio"] only (GA API rejects audio+text combo)', () => {
+    // The GA Realtime API only accepts ['audio'] OR ['text'], NOT both.
+    // ['audio', 'text'] is rejected with invalid_request_error and the
+    // session never opens -- verified live against gpt-realtime-2 (May 2026).
+    expect(payload.session.output_modalities).toEqual(['audio']);
   });
 
   it('audio.output is configured with PCM 24kHz and a fixed voice', () => {

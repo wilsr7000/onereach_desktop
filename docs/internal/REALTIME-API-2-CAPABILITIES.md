@@ -18,7 +18,7 @@ with bearer-only auth (`Authorization: Bearer <key>`). Immediately after
   "session": {
     "type": "realtime",
     "model": "gpt-realtime-2",
-    "output_modalities": ["audio", "text"],
+    "output_modalities": ["audio"],
     "reasoning": { "effort": "low" },
     "instructions": "Every time the user speaks, call handle_user_request with their verbatim transcript. After the function returns, speak the function output verbatim and stop. Do not invent answers; a brief preamble like \"one moment\" before calling the tool is fine.",
     "audio": {
@@ -53,6 +53,11 @@ with bearer-only auth (`Authorization: Bearer <key>`). Immediately after
 
 Per the GA fact-check spike:
 
+- `output_modalities` MUST be `["audio"]` OR `["text"]`, never both. The
+  combined `["audio", "text"]` value is rejected with `invalid_request_error
+  / Invalid modalities` and the session never opens. Audio-only mode still
+  emits the spoken transcript via `response.output_audio_transcript.delta`
+  events, so nothing user-visible is lost.
 - `reasoning.effort: "low"` is the recommended default for production voice
   agents. The router does no heavy reasoning; it forwards transcripts.
 - `cache_control` does NOT exist as a session.update field. The realtime

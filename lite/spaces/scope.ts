@@ -14,7 +14,7 @@
 /**
  * Synthetic id reserved for the Uncategorized "intake + exception" zone.
  * Not a real `:Space` node id; resolves to the
- * `MATCH (i:Item) WHERE NOT (i)-[:MEMBER_OF]->(:Space)` query.
+ * `MATCH (a:Asset) WHERE NOT (a)-[:BELONGS_TO]->(:Space)` query.
  */
 export const UNCATEGORIZED_SPACE_ID = '__uncategorized__';
 

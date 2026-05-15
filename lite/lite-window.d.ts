@@ -621,6 +621,68 @@ interface LiteSpacesItemsBridge {
   resolveFileUrl(key: string): Promise<LiteSpacesIpcResult<string | null>>;
 }
 
+// ─── Home view (chunk 3k + 3o) ───────────────────────────────────────────
+//
+// Bridge-safe view types mirroring the Home types in
+// `lite/spaces/types.ts`. Documented in `lite/spaces/HOME-V1.md`.
+
+interface LiteSpacesEntityCountsView {
+  spaces: number;
+  assets: number;
+  people: number;
+  agents: number;
+}
+
+interface LiteSpacesContributorView {
+  author: string;
+  displayName: string;
+  events: number;
+  lastEventAt: string;
+}
+
+interface LiteSpacesEventView {
+  id: string;
+  author: string;
+  kind: string;
+  timestamp: string;
+  spaceId?: string;
+  spaceName?: string;
+}
+
+interface LiteSpacesAgentSummaryView {
+  id: string;
+  name: string;
+  description: string;
+}
+
+interface LiteSpacesPermissionSummaryView {
+  visibleSpaceCount: number;
+  totalSpaceCount?: number;
+}
+
+type LiteSpacesContributorWindow = 'day' | 'week' | 'month';
+
+interface LiteSpacesHomeBridge {
+  entityCounts(): Promise<LiteSpacesIpcResult<LiteSpacesEntityCountsView>>;
+  recentItems(opts?: {
+    limit?: number;
+  }): Promise<LiteSpacesIpcResult<LiteSpaceItemSummary[]>>;
+  topContributors(opts?: {
+    window?: LiteSpacesContributorWindow;
+    limit?: number;
+  }): Promise<LiteSpacesIpcResult<LiteSpacesContributorView[]>>;
+  recentEvents(opts?: {
+    limit?: number;
+    since?: number;
+  }): Promise<LiteSpacesIpcResult<LiteSpacesEventView[]>>;
+  agentsSample(opts?: {
+    limit?: number;
+  }): Promise<LiteSpacesIpcResult<LiteSpacesAgentSummaryView[]>>;
+  permissionSummary(): Promise<
+    LiteSpacesIpcResult<LiteSpacesPermissionSummaryView>
+  >;
+}
+
 interface LiteSpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
@@ -629,6 +691,8 @@ interface LiteSpacesBridge {
   items: LiteSpacesItemsBridge;
   /** Phase 0.5 -- run Q1-Q4 verification queries. */
   runDiscovery(): Promise<LiteSpacesIpcResult<LiteSpacesDiscoveryResultsView>>;
+  /** Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md. */
+  home: LiteSpacesHomeBridge;
 }
 
 // ---------------------------------------------------------------------------

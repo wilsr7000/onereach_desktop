@@ -160,5 +160,92 @@ describe('install-update.sh helper', () => {
       expect(status.version).toBe('99.9.9-test');
       expect(status.errorMessage).toMatch(/no update bundle/i);
     });
+
+    it('writes "success" (not the trap fallback) on the happy path -- regression test for v5.0.8 EXPECTED_EXIT bug', () => {
+      // The bug: v5.0.5-v5.0.8 used a flag named EXPECTED_EXIT (default 0)
+      // and a trap that fired `if EXPECTED_EXIT == 0 then write_status
+      // failed/unknown`. The success path also set EXPECTED_EXIT=0 (intended
+      // as "exit code 0") before exit -- so the trap ALWAYS fired and
+      // overwrote the legitimate "success" status. Result: every successful
+      // install reported `outcome: failed, step: unknown, errorMessage:
+      // "helper exited unexpectedly"` and the boot dialog scared users.
+      //
+      // v5.0.9 renamed the flag to REACHED_EXPECTED_EXIT, defaulted to 0,
+      // success path sets it to 1, and the trap checks `if == 0 then write
+      // failed`. This test pins that semantic so a future rename or
+      // refactor doesn't reintroduce the bug.
+      //
+      // We can't easily run the script all the way through to "success"
+      // here (would need a real signed bundle to ditto) but we CAN assert
+      // the static structure: the success path's last operation before
+      // `exit 0` must set REACHED_EXPECTED_EXIT=1 (not =0).
+      const script = readFileSync(HELPER_PATH, 'utf-8');
+      const lines = script.split('\n');
+
+      // Find the line `exit 0` that is preceded by `REACHED_EXPECTED_EXIT=1`
+      // within the previous 3 lines. Must exist (the success path).
+      let foundCleanExit = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === 'exit 0') {
+          for (let j = Math.max(0, i - 3); j < i; j++) {
+            if (lines[j].trim() === 'REACHED_EXPECTED_EXIT=1') {
+              foundCleanExit = true;
+              break;
+            }
+          }
+          if (foundCleanExit) break;
+        }
+      }
+      expect(foundCleanExit).toBe(true);
+
+      // And the trap MUST check `REACHED_EXPECTED_EXIT = "0"` (not "1").
+      // The whole point of the variable is "we reached an explicit exit",
+      // so the trap fires only when we DIDN'T (i.e. value is still 0).
+      expect(script).toMatch(/if \[ "\$REACHED_EXPECTED_EXIT" = "0" \]/);
+
+      // Negative assertion: no leftover EXPECTED_EXIT references in CODE
+      // (comments may legitimately reference the old name to document the
+      // bug history). If someone partially reverts the rename, this fails.
+      const codeLines = lines.filter((line) => !line.trim().startsWith('#'));
+      const oldCodeRefs = codeLines.filter((line) => /\bEXPECTED_EXIT\b/.test(line) && !/REACHED_EXPECTED_EXIT/.test(line));
+      expect(oldCodeRefs).toEqual([]);
+    });
+  });
+
+  describe('main.js boot-time verifier (defends against v5.0.8 false positive)', () => {
+    it('treats "failed for current version" as silent success', () => {
+      // After v5.0.8's helper bug shipped a false-positive failure status,
+      // the boot-time verifier in main.js was patched (v5.0.10) to detect
+      // the contradiction: if the status says "failed for version X" but
+      // the running app IS version X, the install actually succeeded -- we
+      // ARE the new version. Treat as silent success, no dialog.
+      //
+      // Without this guard, every user upgrading FROM a buggy helper version
+      // sees a scary "Update did not install" dialog explaining nothing.
+      // This test pins the contradiction-check so it doesn't get refactored
+      // away in the future.
+      const mainJs = readFileSync(join(REPO_ROOT, 'main.js'), 'utf-8');
+
+      // Look for the contradiction check inside _checkPreviousInstallResult.
+      // Specifically: a branch that compares result.outcome === 'failed'
+      // AND result.version === currentVersion before the dialog.
+      const fnStart = mainJs.indexOf('function _checkPreviousInstallResult');
+      expect(fnStart).toBeGreaterThan(-1);
+      // Take ~3000 chars after the function start (the function body).
+      const fnBody = mainJs.slice(fnStart, fnStart + 5000);
+
+      // The check should reference both `outcome === 'failed'` and
+      // `version === currentVersion` (with quotes/operators flexible).
+      expect(fnBody).toMatch(/outcome\s*===?\s*['"]failed['"]/);
+      expect(fnBody).toMatch(/result\.version\s*===?\s*currentVersion/);
+
+      // And it should return BEFORE showing the dialog (otherwise the
+      // contradiction check is purely cosmetic).
+      const failedCheckIdx = fnBody.search(/result\.outcome\s*===?\s*['"]failed['"]/);
+      const dialogIdx = fnBody.search(/showMessageBoxSync/);
+      expect(failedCheckIdx).toBeGreaterThan(-1);
+      expect(dialogIdx).toBeGreaterThan(-1);
+      expect(failedCheckIdx).toBeLessThan(dialogIdx);
+    });
   });
 });

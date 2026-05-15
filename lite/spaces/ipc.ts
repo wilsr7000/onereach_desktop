@@ -20,6 +20,12 @@ import type {
   ItemSummary,
   ListOpts,
   Space,
+  EntityCounts,
+  Contributor,
+  Event,
+  AgentSummary,
+  PermissionSummary,
+  ContributorWindow,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import type { DiscoveryResults } from './discovery-format.js';
@@ -33,6 +39,13 @@ export const SPACES_IPC = {
   ITEMS_RESOLVE_FILE_URL: 'lite:spaces:items:resolveFileUrl',
   /** Phase 0.5: run the Q1-Q4 verification queries. */
   DISCOVERY_RUN: 'lite:spaces:discovery:run',
+  /** Home view (chunk 3k + 3o). See `lite/spaces/HOME-V1.md`. */
+  HOME_ENTITY_COUNTS: 'lite:spaces:home:entityCounts',
+  HOME_RECENT_ITEMS: 'lite:spaces:home:recentItems',
+  HOME_TOP_CONTRIBUTORS: 'lite:spaces:home:topContributors',
+  HOME_RECENT_EVENTS: 'lite:spaces:home:recentEvents',
+  HOME_AGENTS_SAMPLE: 'lite:spaces:home:agentsSample',
+  HOME_PERMISSION_SUMMARY: 'lite:spaces:home:permissionSummary',
 } as const;
 
 /**
@@ -171,6 +184,113 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
+  // ─── Home view (chunk 3k + 3o) ─────────────────────────────────────────
+  //
+  // Six read-only handlers powering the Home news-feed cards. All
+  // delegate to the SpacesApi singleton; errors normalize through the
+  // existing `serializeError` helper. Detail in
+  // `lite/spaces/HOME-V1.md`.
+
+  ipcMain.handle(
+    SPACES_IPC.HOME_ENTITY_COUNTS,
+    async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<EntityCounts>> => {
+      try {
+        const value = await getSpacesApi().getEntityCounts();
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.HOME_RECENT_ITEMS,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { limit?: unknown }
+    ): Promise<SpacesIpcResult<ItemSummary[]>> => {
+      try {
+        const limit = isPositiveInteger(payload?.limit) ? (payload?.limit as number) : undefined;
+        const opts = limit !== undefined ? { limit } : undefined;
+        const value = await getSpacesApi().listRecentItems(opts);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.HOME_TOP_CONTRIBUTORS,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { window?: unknown; limit?: unknown }
+    ): Promise<SpacesIpcResult<Contributor[]>> => {
+      try {
+        const opts: { window?: ContributorWindow; limit?: number } = {};
+        if (isContributorWindow(payload?.window)) opts.window = payload?.window as ContributorWindow;
+        if (isPositiveInteger(payload?.limit)) opts.limit = payload?.limit as number;
+        const value = await getSpacesApi().topContributors(opts);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.HOME_RECENT_EVENTS,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { limit?: unknown; since?: unknown }
+    ): Promise<SpacesIpcResult<Event[]>> => {
+      try {
+        const opts: { limit?: number; since?: number } = {};
+        if (isPositiveInteger(payload?.limit)) opts.limit = payload?.limit as number;
+        if (
+          typeof payload?.since === 'number' &&
+          Number.isFinite(payload?.since) &&
+          payload?.since >= 0
+        ) {
+          opts.since = Math.floor(payload.since as number);
+        }
+        const value = await getSpacesApi().listRecentEvents(opts);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.HOME_AGENTS_SAMPLE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { limit?: unknown }
+    ): Promise<SpacesIpcResult<AgentSummary[]>> => {
+      try {
+        const limit = isPositiveInteger(payload?.limit) ? (payload?.limit as number) : undefined;
+        const opts = limit !== undefined ? { limit } : undefined;
+        const value = await getSpacesApi().listAgentsSample(opts);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.HOME_PERMISSION_SUMMARY,
+    async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<PermissionSummary>> => {
+      try {
+        const value = await getSpacesApi().getPermissionSummary();
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
   registered = true;
 }
 
@@ -198,6 +318,14 @@ function isListOpts(v: unknown): v is ListOpts {
   if ('limit' in o && typeof o['limit'] !== 'number') return false;
   if ('offset' in o && typeof o['offset'] !== 'number') return false;
   return true;
+}
+
+function isPositiveInteger(v: unknown): boolean {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0;
+}
+
+function isContributorWindow(v: unknown): v is ContributorWindow {
+  return v === 'day' || v === 'week' || v === 'month';
 }
 
 function serializeError(err: unknown): {

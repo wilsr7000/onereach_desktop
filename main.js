@@ -17679,7 +17679,31 @@ function _checkPreviousInstallResult() {
     return;
   }
 
-  // Failure path. Surface the result to the user with a dialog.
+  // Defensive contradiction check (added v5.0.10 after v5.0.8 helper bug
+  // shipped a false-positive). If the status says "failed for version X"
+  // but we're CURRENTLY running version X, the install actually succeeded
+  // -- we ARE the new version. The "failed" record came from a buggy
+  // helper that wrote the wrong status (v5.0.5-v5.0.8's helper had an
+  // EXPECTED_EXIT logic bug that made the on-exit trap overwrite the
+  // legitimate "success" status with "failed/unknown" on every successful
+  // run). Treat as silent success: log a hint, delete the file, no dialog.
+  // Without this guard, every user upgrading FROM a buggy helper version
+  // sees a scary "Update did not install" dialog explaining nothing,
+  // even though the install worked perfectly.
+  if (result.outcome === 'failed' && result.version === currentVersion) {
+    log.warn(
+      `[AutoUpdate] status file says v${result.version} install FAILED but we're already on v${currentVersion} -- ` +
+        `treating as false-positive (likely v5.0.5-v5.0.8 helper EXPECTED_EXIT bug). Deleting status file silently.`
+    );
+    try {
+      fs.unlinkSync(statusFile);
+    } catch (_) {
+      /* ignore */
+    }
+    return;
+  }
+
+  // Real failure path. Surface the result to the user with a dialog.
   log.error(
     `[AutoUpdate] previous install of v${result.version} FAILED at step "${result.step}": ${result.errorMessage}`
   );

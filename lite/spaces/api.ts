@@ -30,6 +30,15 @@ import type {
   Item,
   ItemSummary,
   ListOpts,
+  EntityCounts,
+  Contributor,
+  Event,
+  AgentSummary,
+  PermissionSummary,
+  TopContributorsOpts,
+  RecentEventsOpts,
+  RecentItemsOpts,
+  AgentsSampleOpts,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -43,6 +52,16 @@ export type {
   ItemProvenance,
   SpaceChipRef,
   ListOpts,
+  EntityCounts,
+  Contributor,
+  Event,
+  AgentSummary,
+  PermissionSummary,
+  ContributorWindow,
+  TopContributorsOpts,
+  RecentEventsOpts,
+  RecentItemsOpts,
+  AgentsSampleOpts,
 } from './types.js';
 export { SPACES_MODULE_VERSION } from './types.js';
 
@@ -155,6 +174,60 @@ export interface SpacesApi {
 
   /** Items sub-surface. */
   readonly items: SpacesItemsApi;
+
+  // ─── Home view (chunk 3k + 3o) ────────────────────────────────────────
+  //
+  // Read-only methods powering the Home news-feed cards. Detail in
+  // `lite/spaces/HOME-V1.md`. All return canonical shapes from
+  // `./types.ts`; SDK normalises wire-format variations.
+
+  /**
+   * Flat entity counts for the "Your data room at a glance" card.
+   * Counts default to 0 (never undefined) so the renderer can tell
+   * "loaded with no data" apart from "still loading".
+   *
+   * Tries APOC's `apoc.meta.stats()` first and falls back to an
+   * explicit per-label `UNION ALL` if APOC isn't installed. The
+   * fallback is transparent.
+   */
+  getEntityCounts(): Promise<EntityCounts>;
+
+  /**
+   * Most-recent assets across the entire account, ordered by
+   * `updatedAt` (or `createdAt`) descending. Powers Card 5
+   * ("Just added"). Returns the same `ItemSummary` shape as
+   * `items.list()` so renderers reuse the existing card builder.
+   */
+  listRecentItems(opts?: RecentItemsOpts): Promise<ItemSummary[]>;
+
+  /**
+   * Top contributors over a rolling time window. Powers Card 2
+   * ("Recent activity"). Window defaults to 'week'; limit defaults
+   * to 4 (matches the card's row count).
+   */
+  topContributors(opts?: TopContributorsOpts): Promise<Contributor[]>;
+
+  /**
+   * Recent commit events across the account, optionally filtered to
+   * those after a `since` epoch ms cutoff. Powers Card 2's "See
+   * timeline" drill-down (modal in v1).
+   */
+  listRecentEvents(opts?: RecentEventsOpts): Promise<Event[]>;
+
+  /**
+   * Sample of `:Agent` nodes visible to the current account. Powers
+   * Card 3 ("Agents in your account"). Limit defaults to 3 (matches
+   * the card's row count); cap is 200 (matches modal pagination size).
+   */
+  listAgentsSample(opts?: AgentsSampleOpts): Promise<AgentSummary[]>;
+
+  /**
+   * "Your view" payload for Card 4: how many Spaces the current
+   * account can see. `totalSpaceCount` is omitted in v1 because the
+   * canonical schema doesn't expose a way to count Spaces the user
+   * CAN'T see; renderer falls back to "you see X Spaces" copy.
+   */
+  getPermissionSummary(): Promise<PermissionSummary>;
 }
 
 // ─── Default uninitialized implementation ──────────────────────────────
@@ -196,6 +269,30 @@ class UninitializedSpacesApi implements SpacesApi {
 
   async getUncategorizedCount(): Promise<number> {
     throw notInitialized('getUncategorizedCount');
+  }
+
+  async getEntityCounts(): Promise<EntityCounts> {
+    throw notInitialized('getEntityCounts');
+  }
+
+  async listRecentItems(_opts?: RecentItemsOpts): Promise<ItemSummary[]> {
+    throw notInitialized('listRecentItems');
+  }
+
+  async topContributors(_opts?: TopContributorsOpts): Promise<Contributor[]> {
+    throw notInitialized('topContributors');
+  }
+
+  async listRecentEvents(_opts?: RecentEventsOpts): Promise<Event[]> {
+    throw notInitialized('listRecentEvents');
+  }
+
+  async listAgentsSample(_opts?: AgentsSampleOpts): Promise<AgentSummary[]> {
+    throw notInitialized('listAgentsSample');
+  }
+
+  async getPermissionSummary(): Promise<PermissionSummary> {
+    throw notInitialized('getPermissionSummary');
   }
 }
 

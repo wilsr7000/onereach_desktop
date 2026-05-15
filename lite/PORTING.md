@@ -184,6 +184,187 @@ Exit declared by: __________ on __________
 
 Currently porting from full into lite (one at a time):
 
+### chunk: spaces-3a
+
+- **status**: untested
+- **plan reference**: [`.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md`](../.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md) (ADR-048)
+- **borrowed from full**: none -- net-new write surface on `lite/spaces/`. Cypher patterns (`CREATE`, `MATCH ... SET`, soft-delete via `s.deletedAt`) are standard Neo4j; no full-app pattern to borrow.
+- **public surface (planned)**: extends [`lite/spaces/api.ts`](../lite/spaces/api.ts) `SpacesApi`:
+  - `create({ name, description?, color?, iconKey? }): Promise<Space>`
+  - `rename(id, name): Promise<Space>`
+  - `delete(id, opts?: { soft?: boolean }): Promise<void>` (default soft)
+  - `undelete(id): Promise<Space>`
+- **contracts**: extend [`lite/spaces/types.ts`](../lite/spaces/types.ts) -- add `CreateSpaceInput`, `RenameSpaceInput`. New error codes in [`lite/spaces/errors.ts`](../lite/spaces/errors.ts): `SPACES_DUPLICATE_NAME`, `SPACES_DELETE_NON_EMPTY`.
+- **api conformance**: [`lite/test/unit/spaces-api.test.ts`](../lite/test/unit/spaces-api.test.ts) `expectedMethods` extends to include `create`, `rename`, `delete`, `undelete`.
+- **error conformance**: same test file extends `runErrorConformanceContract` to cover the new codes.
+- **unit tests (planned)**: extend [`lite/test/unit/spaces-sdk-client.test.ts`](../lite/test/unit/spaces-sdk-client.test.ts) with Cypher source regression guards for the new mutations. New `lite/test/unit/spaces-detail-attribution.test.ts` for the renderer's "Created by [principal] at [timestamp]" line.
+- **integration tests (planned)**: [`lite/test/integration/spaces/trust-principles.test.ts`](../lite/test/integration/spaces/trust-principles.test.ts) -- registers `create / delete-soft` and `delete-soft / undelete` as inverse pairs; create -> delete -> undelete -> read = original. **This harness lands as part of 3a so subsequent chunks register against it.**
+- **failure modes covered (planned)**: `SPACES_DUPLICATE_NAME` (rename collision), `SPACES_DELETE_NON_EMPTY` (delete with items still inside), `SPACES_NOT_AUTHENTICATED` (signed-out caller), `SPACES_FORBIDDEN` (caller lacks permission per D5), reversibility round-trip.
+- **observability (planned)**: log spans `spaces.create.start/.finish/.fail`, `spaces.rename.*`, `spaces.delete.*`, `spaces.undelete.*` per ADR-032. Every event carries `principal` + `accountId` per Trust Principle: Attributable.
+- **trust principles operationalized**:
+  - Suggest don't decide: explicit user actions; n/a auto-action surface in 3a
+  - Explainable: detail panel shows "Created by ... Last renamed ..." (test: `spaces-detail-attribution.test.ts`)
+  - Reversible: soft-delete + undelete round-trips (test: `trust-principles.test.ts`)
+  - Attributable: events carry principal + accountId (test: `spaces-event-attribution.test.ts`)
+- **deliberately not ported from full**: hard-delete UX (admin-override only, deferred), bulk delete, transfer ownership.
+- **dependencies**: none external. Pre-A item-source ADR (ADR-049) does NOT block 3a.
+- **regression-replay fixture**: none yet.
+
+### chunk: spaces-3b
+
+- **status**: untested
+- **plan reference**: [`.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md`](../.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md) (ADR-048 + ADR-049)
+- **borrowed from full**: pattern only -- module shape borrowed from `lite/idw/`. Authoring UX inspired by simple form patterns; no full-app code imported.
+- **public surface (planned)**: new module `lite/items/api.ts`:
+  - `items.create({ kind, title, content?, sourceUrl? }): Promise<Item>`
+  - `items.delete(id, opts?: { soft?: boolean }): Promise<void>`
+  - `items.undelete(id): Promise<Item>`
+  - `items.get(id): Promise<Item | null>`
+  - `items.list(opts?): Promise<ItemSummary[]>` (general-purpose; not Spaces-scoped)
+- **contracts**: new `lite/items/types.ts` -- `Item` type (consistent with `lite/spaces/types.ts:Item`). New error codes in `lite/items/errors.ts`: `ITEMS_INVALID_KIND`, `ITEMS_TITLE_REQUIRED`, `ITEMS_TOO_LARGE`, `ITEMS_NOT_FOUND`, `ITEMS_FORBIDDEN`, `ITEMS_NOT_AUTHENTICATED`, `ITEMS_NOT_INITIALIZED`.
+- **api conformance**: new `lite/test/unit/items-api.test.ts` runs `runApiConformanceContract` per Rule 12 / ADR-024.
+- **error conformance**: same test file runs `runErrorConformanceContract` against `ItemsError` (modulePrefix `ITEMS_`).
+- **events conformance** (ADR-032): extend `lite/test/unit/event-name-conformance.test.ts` MODULES with `items` + sourceFiles `[items/store.ts, items/main.ts]`.
+- **unit tests (planned)**:
+  - `lite/test/unit/items-api.test.ts` -- conformance contract + module-specific
+  - `lite/test/unit/items-no-auto-create.test.ts` -- asserts no IPC fires `items.create` without renderer trigger
+  - `lite/test/unit/items-authored-by.test.ts` -- renderer-supplied principal cannot override auth principal on create
+  - `lite/test/unit/items-detail-attribution.test.ts` -- renders `:AUTHORED_BY` provenance line
+- **integration tests (planned)**: extends `lite/test/integration/spaces/trust-principles.test.ts` with `items.create / items.delete-soft` and `items.delete-soft / items.undelete` inverse pairs.
+- **failure modes covered (planned)**: invalid kind, missing title, content too large, principal-spoof attempt, KV write rejection.
+- **observability (planned)**: log spans `items.create.start/.finish/.fail`, `items.delete.*`, `items.undelete.*`, `items.get.*`, `items.list.*` per ADR-032. `:AUTHORED_BY` edge populated in main-process from auth principal at create-time.
+- **trust principles operationalized**:
+  - Suggest don't decide: no auto-save of clipboard; no background capture (test: `items-no-auto-create.test.ts`)
+  - Explainable: detail panel shows authoring principal + timestamp (test: `items-detail-attribution.test.ts`)
+  - Reversible: soft-delete + undelete (test: `trust-principles.test.ts`)
+  - Attributable: principal stamped main-side, not renderer-side (test: `items-authored-by.test.ts`)
+- **deliberately not ported from full**: nothing -- net-new module. (Save-from-clipboard, save-from-IDW, save-from-AI-Run-Times features call `getItemsApi().create()` later; not part of 3b.)
+- **dependencies**: Pre-A item-source ADR (ADR-049) MUST land before code begins. Plan recommends B1 (this chunk implements B1).
+- **regression-replay fixture**: none yet.
+
+### chunk: spaces-3c
+
+- **status**: untested
+- **plan reference**: [`.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md`](../.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md) (ADR-048)
+- **borrowed from full**: none -- standard Neo4j `MERGE` / `DELETE` edge patterns.
+- **public surface (planned)**: extends [`lite/spaces/api.ts`](../lite/spaces/api.ts) `SpacesItemsApi`:
+  - `fileInto(itemId, spaceId): Promise<void>` -- adds `[:MEMBER_OF]` edge with `addedBy` + `addedAt` properties
+  - `removeFrom(itemId, spaceId): Promise<void>` -- deletes the same edge; item itself stays in graph
+- **contracts**: no new types; reuses existing `Item` + `Space` shapes.
+- **api conformance**: extend `expectedMethods` on `SpacesItemsApi` in [`lite/test/unit/spaces-api.test.ts`](../lite/test/unit/spaces-api.test.ts).
+- **unit tests (planned)**: extend [`lite/test/unit/spaces-sdk-client.test.ts`](../lite/test/unit/spaces-sdk-client.test.ts) with Cypher source regression guards for the `MERGE` and `DELETE` edge queries. New `lite/test/unit/items-membership-history.test.ts` for the activity-log "joined / left Space" rendering. New `lite/test/unit/member-of-edge-attribution.test.ts` asserting `addedBy` + `addedAt` populated correctly.
+- **integration tests (planned)**: `trust-principles.test.ts` registers `fileInto / removeFrom` as inverse pair: file -> remove -> file produces same membership state.
+- **failure modes covered (planned)**: item not found, Space not found, caller lacks edit permission per D5/D6, multi-Space chip update on file/remove, removeFrom against item not in Space (no-op vs error).
+- **observability (planned)**: log spans `spaces.items.fileInto.*`, `spaces.items.removeFrom.*` per ADR-032. Each `MEMBER_OF` edge carries `addedBy` (principal id) + `addedAt` (ISO timestamp).
+- **trust principles operationalized**:
+  - Suggest don't decide: explicit user actions; n/a
+  - Explainable: activity log shows when item joined / left each Space, by whom (test: `items-membership-history.test.ts`)
+  - Reversible: file -> remove -> file roundtrip (test: `trust-principles.test.ts`)
+  - Attributable: edge properties stamped main-side (test: `member-of-edge-attribution.test.ts`)
+- **deliberately not ported from full**: bulk file-into (defer; not on roadmap), drag-and-drop UX (defer).
+- **dependencies**: 3a (Space mutations needed for fixture setup), 3b (items needed to file). Pre-A ADR-049 indirectly through 3b.
+- **regression-replay fixture**: none yet.
+
+### chunk: spaces-3d
+
+- **status**: blocked-on-discovery
+- **plan reference**: [`.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md`](../.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md) (ADR-048)
+- **borrowed from full**: TBD -- depends on D1-D7 outcomes. If wire format ends up matching anything full's `omnigraph-client.js` already does, study that pattern.
+- **blocked on**:
+  - [`lite/spaces/DISCOVERY-PHASE-3.md`](../lite/spaces/DISCOVERY-PHASE-3.md) -- D1-D4 must return before code start; D5-D7 before ship
+  - [`lite/spaces/PRIVACY-REVIEW-PICKER.md`](../lite/spaces/PRIVACY-REVIEW-PICKER.md) -- sign-off required before code start
+- **public surface (planned, shape depends on D1-D4)**: extends [`lite/spaces/api.ts`](../lite/spaces/api.ts):
+  - `share(spaceId, principal, level): Promise<Grant>`
+  - `unshare(spaceId, principal): Promise<void>`
+  - `listGrants(spaceId): Promise<Grant[]>`
+  - `listAccountMembers(): Promise<Person[]>`
+  - new types: `Grant`, `Permission` enum (per D2), `Person`
+- **contracts**: new `lite/spaces/grants.ts` for Grant / Permission types. New error codes: `SPACES_GRANT_FORBIDDEN`, `SPACES_GRANT_DUPLICATE`, `SPACES_GRANT_NOT_FOUND`, `SPACES_PRINCIPAL_NOT_FOUND`.
+- **api conformance**: extend [`lite/test/unit/spaces-api.test.ts`](../lite/test/unit/spaces-api.test.ts) with new methods.
+- **unit tests (planned)**:
+  - extend [`lite/test/unit/spaces-sdk-client.test.ts`](../lite/test/unit/spaces-sdk-client.test.ts) with Cypher / SDK source guards (shape per D3/D4)
+  - `lite/test/unit/share-no-defaults.test.ts` -- explicit-only, no auto-share, no broadcast defaults
+  - `lite/test/unit/grant-explainability.test.ts` -- grant list shows granter + timestamp + level
+  - `lite/test/unit/share-event-attribution.test.ts` -- every grant event carries granting principal
+  - `lite/test/unit/people-no-pii-leak.test.ts` -- picker response is filtered per privacy review
+- **integration tests (planned)**: `trust-principles.test.ts` registers `share / unshare` as inverse pair. `lite/test/integration/spaces/share-recipient-visibility.test.ts` verifies a second test account sees the shared Space in their sidebar after grant.
+- **failure modes covered (planned)**: caller lacks grant rights per D5, principal not found, duplicate grant, revoke nonexistent grant, network error during grant, picker filters out PII per D7/privacy review.
+- **observability (planned)**: log spans `spaces.share.*`, `spaces.unshare.*`, `spaces.listGrants.*`, `spaces.listAccountMembers.*`. `spaces.share.granted` event reserved for Phase 4 notification consumer.
+- **trust principles operationalized**:
+  - Suggest don't decide: no auto-share, no "share-with-everyone" default (test: `share-no-defaults.test.ts`)
+  - Explainable: grant list shows granter + when + level + optional rationale (test: `grant-explainability.test.ts`)
+  - Reversible: share -> unshare -> share roundtrip (test: `trust-principles.test.ts`)
+  - Attributable: granter principal in every grant event (test: `share-event-attribution.test.ts`)
+- **deliberately not ported from full**: cross-account / cross-tenant sharing (Phase 5+), share-link / link-with-permission (defer; not on roadmap), expiring grants (defer).
+- **dependencies**: 3a (Space mutations for fixture). Pre-B Edison D-series + privacy review (hard blockers per "blocked on" above).
+- **regression-replay fixture**: none yet.
+
+### chunk: spaces-3e0
+
+- **status**: untested (non-code prototype)
+- **plan reference**: [`.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md`](../.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md) (ADR-048)
+- **borrowed from full**: none -- non-code phase.
+- **deliverable**: HTML/CSS prototype of the tour (step strip, copy variants, click-through using fake state) + 2-3 user tests with users who have NOT seen the Spaces module + observed median + p95 time-to-completion + revised copy/step boundaries if needed.
+- **gate to 3e**: median ≤ 90s AND p95 ≤ 180s, OR targets revised in writing with rationale.
+- **artifacts (planned)**: `lite/spaces/onboarding/prototype/` (HTML + CSS, gitignored after gate clears) + a one-page summary in [`.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md`](../.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md) under "Phase 3e0 results."
+- **dependencies**: nothing -- can start as soon as the plan is confirmed and the team has 2-3 user-test slots.
+- **regression-replay fixture**: n/a.
+
+### chunk: spaces-3e
+
+- **status**: blocked-on-prototype
+- **plan reference**: [`.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md`](../.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md) (ADR-048)
+- **borrowed from full**: pattern only -- step-strip / progress UX inspired by Notion / Linear onboarding patterns; no full-app code.
+- **public surface (planned)**: new sub-module `lite/spaces/onboarding/`:
+  - `getSpacesOnboardingApi()` -- `start(entryPoint)`, `currentStep()`, `next()`, `back()`, `skip()`, `abandon()`, `complete()`, `dismiss()`, `replay()`
+  - `onChange(handler)` for renderer subscription
+- **persistence**: KV `lite-spaces-onboarding/default` blob: `{ schemaVersion: 1, dismissedAt?, completedAt?, lastStepReached?, principalAtStart? }` per ADR-044's per-account scoping.
+- **renderer surface**: step strip across the top of the Spaces window. Three entry points: empty-state CTA, permanent "How does this work?" header button, Settings -> Diagnostics replay.
+- **contracts**: new `lite/spaces/onboarding/types.ts` for `OnboardingState`, `OnboardingStep`, `OnboardingEntryPoint`.
+- **api conformance**: new `lite/test/unit/spaces-onboarding-api.test.ts` runs `runApiConformanceContract`.
+- **unit tests (planned)**:
+  - `spaces-onboarding-state.test.ts` -- step transitions, skip / back / abandon semantics, persistence
+  - `tour-events.test.ts` -- every transition emits the expected event with correct payload
+  - `spaces-onboarding-entry.test.ts` -- empty-state CTA visible only when zero spaces; header button always visible; Settings replay reachable
+- **integration tests (planned)**: `lite/test/integration/spaces/onboarding-flow.test.ts` -- full happy path through 5 steps against fixture graph + 3a/3b/3c/3d mocks.
+- **failure modes covered (planned)**: step 1 create fails (banner + retry), step 2 item-create or fileInto fails, step 4 share fails (see 3f cleanup), abandoned tour resumable from `lastStepReached`.
+- **observability (planned)**: tour-specific events `spaces.tour.start`, `spaces.tour.step.enter`, `spaces.tour.step.exit`, `spaces.tour.complete`, `spaces.tour.abandon` -- mandatory for funnel analysis. ADR-032 spans on every IPC.
+- **trust principles operationalized** (tour wraps 3a/3b/3c/3d so principles inherit):
+  - Suggest don't decide: tour never auto-files anything
+  - Explainable: every action is one the user just chose
+  - Reversible: cleanup path in 3f restores
+  - Attributable: tour-mode mutations carry `viaTour: true` flag for analytics
+- **deliberately not ported from full**: nothing -- net-new flow.
+- **dependencies**: 3a, 3b, 3c, 3d, 3e0. Hard-blocked on 3e0 prototype clearing 90s / 180s targets (or revising them).
+- **regression-replay fixture**: none yet.
+
+### chunk: spaces-3f
+
+- **status**: blocked-on-3e
+- **plan reference**: [`.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md`](../.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md) (ADR-048)
+- **borrowed from full**: none.
+- **deliverable**: recap card after step 5 of the tour (what was created + what's shared + with whom) + "Keep going" / "Delete and start fresh" branch + cleanup-path failure matrix UI.
+- **public surface (planned)**: `getSpacesOnboardingApi().cleanup()` -- multi-mutation orchestrator (revoke shares -> remove memberships -> soft-delete items -> soft-delete Space). Returns structured `CleanupResult` with per-step `success | error` so the renderer can show the failure matrix.
+- **failure matrix UI** (per plan):
+  - Step 1 (revoke shares) fails -> "Shares still active. [Retry] / [Open Settings]"; do NOT proceed
+  - Step 2 (remove memberships) fails -> "Items still in the Space. [Retry] / [Keep them]"; do NOT proceed
+  - Step 3 (delete items) fails -> log warning, continue (item delete is recoverable)
+  - Step 4 (delete Space) fails -> "Items gone but Space stayed. [Retry] / [Keep this Space]"
+- **unit tests (planned)**:
+  - `spaces-onboarding-recap.test.ts` -- recap card renders correct summary
+  - `spaces-onboarding-cleanup.test.ts` -- happy path + each failure path leaves user in explainable state
+- **integration tests (planned)**: cleanup against fixture graph, with each step's failure injected once.
+- **failure modes covered (planned)**: every cleanup step's failure mode + retry path + "leave it" path. **No silent partial-failure**.
+- **observability (planned)**: `spaces.tour.cleanup.start`, `spaces.tour.cleanup.step.<n>`, `spaces.tour.cleanup.finish`, `spaces.tour.cleanup.fail` per ADR-032. `tour.complete` event carries `cleanedUp: boolean`.
+- **trust principles operationalized**:
+  - Suggest don't decide: cleanup is explicit user choice ("Delete and start fresh" vs "Keep going")
+  - Explainable: failure matrix tells user exactly what state they're in
+  - Reversible: each cleanup step is itself a registered mutation pair (3a delete/undelete, 3c file/remove, 3d share/unshare)
+  - Attributable: cleanup mutations carry `viaTour: true` AND `cleanup: true` flags
+- **deliberately not ported from full**: nothing -- net-new.
+- **dependencies**: 3e (the tour itself).
+- **regression-replay fixture**: none yet -- the failure-injection tests cover the matrix.
+
 ### chunk: idw-multikind
 
 - **status**: hardening

@@ -1,6 +1,8 @@
 # Spaces Module
 
-**Status**: Phase 1 + Phase 2 shipped. The Spaces window opens, lists every `:Space` the active account can see, surfaces the Uncategorized intake count, fetches `:Item` cards for the selected scope (Uncategorized or a chosen Space), renders multi-Space chips and optional provenance on each card, and pops a detail panel with full content when a card is clicked. Cypher-backed throughout; no stubs remain. Phase 0.5 Discovery panel kept as a collapsible diagnostic at the bottom of the page.
+**Status**: Phase 1 + Phase 2 shipped. The Spaces window opens, lists every `:Space` the active account can see, surfaces the Uncategorized intake count, fetches `:Asset` cards (surfaced as "Items" in the renderer naming) for the selected scope (Uncategorized or a chosen Space), renders multi-Space chips and optional provenance on each card, and pops a detail panel with full content when a card is clicked. Cypher-backed throughout; no stubs remain. Phase 0.5 Discovery panel kept as a collapsible diagnostic at the bottom of the page.
+
+**Schema**: queries follow the canonical OneReach graph schema documented in the `(:Schema)` nodes themselves: node label `:Asset`, edge `[:BELONGS_TO]` from Asset to Space, creator edge `[:CREATED]` from Person to Asset. Every projected field uses `coalesce(canonical, legacy, default)` so existing data written by the legacy `omnigraph-client.js` push path (which writes `title` / `assetType` / `fileUrl` / snake_case timestamps) still renders alongside data using the canonical names. The TypeScript surface (`Item`, `ItemSummary`) keeps the friendlier "Item" naming for renderers; only the Cypher uses the storage label.
 
 > Spaces is a **platform primitive**, not a Lite-only feature. The Lite UI in this module is the first consumer of the SDK; future consumers include GSX agents, Cowork integrations, and the Approval + Audit event stream. The methods on `SpacesApi` ARE the platform contract -- treat them with that level of stability discipline. See the spaces plan ("Spaces as Platform Primitive" section).
 
@@ -12,7 +14,7 @@ import { getSpacesApi } from '../spaces/api.js';
 const api = getSpacesApi();
 api.open();                                          // launch / focus the window
 await api.listSpaces();                              // every :Space the account can read
-await api.getUncategorizedCount();                   // :Items with no :MEMBER_OF edge
+await api.getUncategorizedCount();                   // :Asset nodes with no :BELONGS_TO edge
 await api.items.list({ kind: 'uncategorized' });     // Items without a :Space
 await api.items.list({ kind: 'space', spaceId: '…' }); // Items in one :Space (+ chips)
 await api.items.get(itemId);                          // full Item incl. content + metadata
@@ -26,7 +28,7 @@ All five queries live as module constants on `lite/spaces/sdk-client.ts` so they
 
 ### Provenance projection
 
-Each item-list query and `getItem` optionally project a `producedBy` row via `(:Item)-[:PRODUCED_BY|AUTHORED_BY]->(producer)`. When the edge is absent, the projection collapses to `null` and the renderer omits the provenance line. This wires for the Phase 0.5 Q2 outcome: if the schema doesn't carry authorship yet, the column is invisible until it does.
+Each item-list query and `getItem` optionally project a `producedBy` row via the canonical creator edge `(:Person)-[:CREATED]->(:Asset)` (per the `_RelationshipTypes` Schema node). When the edge is absent, the projection collapses to `null` and the renderer omits the provenance line. Future producer types (`:Agent`, `:Workflow`, etc.) will widen the OPTIONAL MATCH as those modules port over.
 
 ## Internal layout
 

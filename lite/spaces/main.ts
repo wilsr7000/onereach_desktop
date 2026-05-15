@@ -37,6 +37,15 @@ import type {
   ItemSummary,
   ListOpts,
   Space,
+  EntityCounts,
+  Contributor,
+  Event,
+  AgentSummary,
+  PermissionSummary,
+  TopContributorsOpts,
+  RecentEventsOpts,
+  RecentItemsOpts,
+  AgentsSampleOpts,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -224,5 +233,25 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       return client.getUncategorizedCount();
     },
     items,
+
+    // ─── Home view (chunk 3k + 3o) ──────────────────────────────────────
+    getEntityCounts(): Promise<EntityCounts> {
+      return client.getEntityCounts();
+    },
+    listRecentItems(opts?: RecentItemsOpts): Promise<ItemSummary[]> {
+      return client.listRecentItems(opts);
+    },
+    topContributors(opts?: TopContributorsOpts): Promise<Contributor[]> {
+      return client.topContributors(opts);
+    },
+    listRecentEvents(opts?: RecentEventsOpts): Promise<Event[]> {
+      return client.listRecentEvents(opts);
+    },
+    listAgentsSample(opts?: AgentsSampleOpts): Promise<AgentSummary[]> {
+      return client.listAgentsSample(opts);
+    },
+    getPermissionSummary(): Promise<PermissionSummary> {
+      return client.getPermissionSummary();
+    },
   };
 }

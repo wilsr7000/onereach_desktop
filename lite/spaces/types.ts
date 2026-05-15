@@ -9,10 +9,17 @@
  * Public types live here so both `api.ts` and the internal sdk-client
  * reference one source of truth.
  *
- * Scope note: Phase 2 renders only `:Item` entities (binary files, text,
- * URLs, web clips). Other entity types (`:Agent`, `:Workflow`, `:Person`,
- * `:Tool`) exist in the data model but are surfaced in later phases as
- * their respective Lite modules port over.
+ * Scope note: Phase 2 renders only `:Asset` entities (binary files,
+ * text, URLs, web clips). Other entity types (`:Agent`, `:Person`,
+ * `:Tool`, `:Playbook`, etc.) exist in the data model but are
+ * surfaced in later phases as their respective Lite modules port over.
+ *
+ * Naming asymmetry: Lite's TypeScript surface uses `Item` /
+ * `ItemSummary` / `ItemKind` for ergonomic reasons (it's the noun
+ * the renderers want to read). The on-graph entity is `:Asset` per
+ * the canonical schema (see `(:Schema {entity: 'Asset'})` and
+ * `lite/spaces/sdk-client.ts CYPHER`). The translation happens in
+ * the SDK client; renderers never see the storage label.
  */
 
 /** Module version constant -- consumers can pin or feature-detect. */
@@ -39,7 +46,7 @@ export interface Space {
   color?: string;
   /** Optional lucide icon key (e.g. 'circle', 'shield', 'folder'). Default 'circle'. */
   iconKey?: string;
-  /** Cached count of `:Item` nodes with `[:MEMBER_OF]` to this Space. */
+  /** Cached count of `:Asset` nodes with `[:BELONGS_TO]` to this Space. */
   itemCount?: number;
   /** ISO timestamp of node creation. */
   createdAt?: string;
@@ -49,7 +56,12 @@ export interface Space {
 
 // ─── Items ───────────────────────────────────────────────────────────────
 
-/** Discriminated kind values. Mirrors the `i.kind` property on `:Item` nodes. */
+/**
+ * Discriminated kind values. Mirrors the canonical `a.type` property
+ * on `:Asset` nodes (with legacy fallback to `a.assetType` per the
+ * SDK Cypher). Unknown values are normalized to `'other'` by
+ * `toItemKind()` in `sdk-client.ts`.
+ */
 export type ItemKind =
   | 'document'
   | 'image'
@@ -72,11 +84,11 @@ export interface SpaceChipRef {
 }
 
 /**
- * Optional provenance row when the schema exposes `(:Item)-[:PRODUCED_BY|
- * AUTHORED_BY]->(...)` edges. `null` when absent.
+ * Optional provenance row when the schema exposes
+ * `(:Person)-[:CREATED]->(:Asset)` edges (the canonical creator edge
+ * per `_RelationshipTypes` Schema node). `null` when absent.
  *
- * Whether this is populated is gated on Phase 0.5 Q2; the renderer
- * treats `null` as "do not render the line."
+ * The renderer treats `null` as "do not render the line."
  */
 export interface ItemProvenance {
   /** Principal type label (e.g. 'Agent', 'Person'). */
@@ -134,4 +146,141 @@ export interface ListOpts {
   limit?: number;
   /** For paging; 0-based. */
   offset?: number;
+}
+
+// ─── Home view (chunk 3k + 3o) ──────────────────────────────────────────
+//
+// Types backing the Home news-feed cards. Documented in
+// `lite/spaces/HOME-V1.md`. The 3k data layer ships these; 3o renders.
+
+/**
+ * Flat entity counts powering the "Your data room at a glance" card.
+ *
+ * Sources from `apoc.meta.stats()` when available, falls back to an
+ * explicit UNION ALL when APOC isn't installed. Either path normalizes
+ * to this shape; renderer never sees the wire-format difference.
+ *
+ * Counts of `0` are represented as the literal `0` (never undefined),
+ * so the renderer can distinguish "loaded with no data" from "still
+ * loading".
+ */
+export interface EntityCounts {
+  spaces: number;
+  assets: number;
+  people: number;
+  agents: number;
+}
+
+/**
+ * One row in the "Recent activity" card. A contributor is anything
+ * (Person OR Agent) that has authored `:Commit` events in the requested
+ * time window.
+ *
+ * `displayName` is the best human-readable label the SDK could derive:
+ * the underlying `:Commit.author` is a free-form string written by the
+ * producer (e.g. `device_mac.lan_<id>`, `robb+admin/onereach@onereach.com`,
+ * `Audit Agent`). The SDK doesn't try to resolve these to `:Person` /
+ * `:Agent` nodes in v1; that's a 3n / 3m concern.
+ */
+export interface Contributor {
+  /** The raw `:Commit.author` value (used as a stable id for the row). */
+  author: string;
+  /**
+   * Best-effort human display label. v1 returns `author` verbatim;
+   * v2 may resolve `:Person` / `:Agent` matches and pretty-print.
+   */
+  displayName: string;
+  /** Number of commit events authored by this contributor in the window. */
+  events: number;
+  /** ISO timestamp of this contributor's most-recent event in the window. */
+  lastEventAt: string;
+}
+
+/**
+ * One event from the `:Commit` projection. Ordered by `timestamp` desc
+ * by the underlying Cypher.
+ *
+ * The `kind` field carries the verbatim `:Commit.message` string
+ * (e.g. `'item:added'`, `'item:updated'`). v1 surfaces it as-is; when
+ * 3l (real bidirectional sync) lands in v2 the `kind` enum widens to
+ * include sync-event variants without a data-shape change.
+ */
+export interface Event {
+  /** The `:Commit.hash` (stable id; sortable but not chronological). */
+  id: string;
+  /** Raw `:Commit.author`. See `Contributor.author` for the same caveat. */
+  author: string;
+  /** Verbatim `:Commit.message`. Producer-defined; widens over time. */
+  kind: string;
+  /** ISO timestamp of the commit. */
+  timestamp: string;
+  /** The `:Space.id` this commit was written against, when present. */
+  spaceId?: string;
+  /** Best-effort Space display name; falls back to `spaceId`. */
+  spaceName?: string;
+}
+
+/**
+ * One row in the "Agents in your account" card. Powers Card 3 of Home;
+ * v1 surfaces a sample (the first N alphabetically) plus a "+ X more"
+ * link to a modal listing all agents.
+ */
+export interface AgentSummary {
+  id: string;
+  name: string;
+  /** Empty string when the agent has no description property. */
+  description: string;
+}
+
+/**
+ * "Your view" card payload. Tells the user how many Spaces they can
+ * see in this account. v1 only knows `visibleSpaceCount`; the
+ * `totalSpaceCount` comparison is reserved for when Edison D6
+ * (composition with item ACLs) returns a way to count Spaces the
+ * user CAN'T see.
+ */
+export interface PermissionSummary {
+  /** Spaces visible to the current account. Always set. */
+  visibleSpaceCount: number;
+  /**
+   * Total Spaces in the account, including ones the user can't see.
+   * Optional in v1 — depends on Edison D6 answers; omitted when
+   * unknown so the renderer falls back to "you see X Spaces" copy
+   * instead of "X of Y".
+   */
+  totalSpaceCount?: number;
+}
+
+/**
+ * Window selectors for `topContributors()`. The SDK translates these
+ * to a `sinceMs` epoch parameter on the Cypher.
+ */
+export type ContributorWindow = 'day' | 'week' | 'month';
+
+/** Options shape for `topContributors()`. */
+export interface TopContributorsOpts {
+  /** Default 'week'. */
+  window?: ContributorWindow;
+  /** Default 4 (matches Home Card 2 row count). Capped at 50. */
+  limit?: number;
+}
+
+/** Options shape for `listRecentEvents()`. */
+export interface RecentEventsOpts {
+  /** Default 50; cap is server-side at 200. */
+  limit?: number;
+  /** Optional epoch ms cutoff; events with `timestamp >= since` only. */
+  since?: number;
+}
+
+/** Options shape for `listRecentItems()`. */
+export interface RecentItemsOpts {
+  /** Default 3 (matches Home Card 5 row count). Capped at 50. */
+  limit?: number;
+}
+
+/** Options shape for `listAgentsSample()`. */
+export interface AgentsSampleOpts {
+  /** Default 3 (matches Home Card 3 row count). Capped at 200. */
+  limit?: number;
 }

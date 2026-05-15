@@ -88,6 +88,55 @@ export const mountDiagnostics: SectionDescriptor['mount'] = (container) => {
         void copyJson(copyBtn, JSON.stringify(snap, null, 2));
       });
     }
+    const discoveryBtn = target.querySelector<HTMLButtonElement>(
+      '#diag-spaces-discovery-run'
+    );
+    const discoveryOutput = target.querySelector<HTMLPreElement>(
+      '#diag-spaces-discovery-output'
+    );
+    if (discoveryBtn !== null && discoveryOutput !== null) {
+      discoveryBtn.addEventListener('click', () => {
+        void runSpacesDiscovery(discoveryBtn, discoveryOutput);
+      });
+    }
+  }
+
+  /**
+   * Engineer "Run discovery" handler. Calls the Spaces bridge,
+   * renders the result envelope as pretty JSON in a pre block.
+   * Disables the button while in flight so double-clicks don't
+   * stack queries.
+   */
+  async function runSpacesDiscovery(
+    btn: HTMLButtonElement,
+    output: HTMLPreElement
+  ): Promise<void> {
+    const spaces = window.lite?.spaces;
+    if (spaces === undefined) {
+      output.hidden = false;
+      output.textContent =
+        'Spaces bridge is unavailable. Open the Spaces window once so the bridge is bound.';
+      return;
+    }
+    btn.disabled = true;
+    const originalLabel = btn.textContent;
+    btn.textContent = 'Running…';
+    output.hidden = false;
+    output.textContent = 'Running discovery (Q1-Q4) against the configured Neon endpoint…';
+    try {
+      const envelope = await spaces.runDiscovery();
+      if (disposed) return;
+      output.textContent = JSON.stringify(envelope, null, 2);
+    } catch (err) {
+      if (disposed) return;
+      output.textContent =
+        err instanceof Error ? `Error: ${err.message}` : `Error: ${String(err)}`;
+    } finally {
+      if (!disposed) {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    }
   }
 
   async function copyJson(btn: HTMLButtonElement, json: string): Promise<void> {
@@ -151,7 +200,44 @@ function snapshotHTML(snap: LiteAppHealthSnapshotView): string {
     neonSectionHTML(snap.neon),
     updaterSectionHTML(snap.updater),
     diagnosticsSectionHTML(snap.diagnostics),
+    spacesDiscoverySectionHTML(),
   ].join('');
+}
+
+/**
+ * Engineer-only "Show raw discovery queries" section. The Discovery
+ * panel was removed from the Spaces window in chunk 3o (Home view);
+ * this section keeps the runner accessible for debugging the
+ * verification queries Q1-Q4 (see lite/spaces/HOME-V1.md and
+ * lite/spaces/discovery.ts).
+ *
+ * Renders a button + an empty results container. The click handler
+ * is attached in `attachActionHandlers()`. Output is plain JSON
+ * (the rich card-based renderer ships in the spaces bundle, not the
+ * settings bundle, and isn't worth duplicating for the engineer
+ * surface).
+ */
+function spacesDiscoverySectionHTML(): string {
+  return `
+    <section class="diag-section">
+      <h3 class="diag-section-title">Spaces Discovery (engineer)</h3>
+      <p class="diag-intro">
+        Re-runs the four verification Cypher queries that gated the original
+        Phase 0.5 Spaces design (entity inventory, provenance edges,
+        agent presence, ACL filtering). Surfaced here for engineers to
+        debug the schema; the Spaces window itself uses the Home view
+        instead. See <code>lite/spaces/HOME-V1.md</code>.
+      </p>
+      <div class="diag-toolbar">
+        <div class="diag-toolbar-actions">
+          <button type="button" id="diag-spaces-discovery-run" class="btn-secondary">
+            Run discovery
+          </button>
+        </div>
+      </div>
+      <pre id="diag-spaces-discovery-output" class="diag-discovery-output" hidden></pre>
+    </section>
+  `;
 }
 
 function toolbarHTML(snap: LiteAppHealthSnapshotView): string {

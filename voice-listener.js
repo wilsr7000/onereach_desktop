@@ -239,11 +239,15 @@ class VoiceListener {
    * effects -- WebSocket, repair-memory load, retry timers, etc.).
    *
    * Phase 3 (audio output hard cut) notes:
-   *   - `output_modalities: ['audio', 'text']` lets the model voice agent
+   *   - `output_modalities: ['audio']` lets the model voice agent
    *     responses natively. voice-speaker.js's tts-1 pipeline is kept
    *     alive for non-orb proactive callers (critical-meeting alarms etc.)
    *     so we don't have a coordination bug between two audio paths in
-   *     the orb itself.
+   *     the orb itself. The GA Realtime API rejects the combined
+   *     `['audio', 'text']` value -- it only accepts `['audio']` OR
+   *     `['text']`. When `['audio']` is selected the model still emits
+   *     `response.output_audio_transcript.delta` events (the spoken
+   *     transcript), so nothing user-visible is lost.
    *   - `audio.output.voice` is locked to `marin` for the whole session.
    *     The GA API forbids voice changes after the first audio response,
    *     so per-agent voices (the preview behavior) require custom voice
@@ -262,7 +266,7 @@ class VoiceListener {
       session: {
         type: 'realtime',
         model: 'gpt-realtime-2',
-        output_modalities: ['audio', 'text'],
+        output_modalities: ['audio'],
         reasoning: { effort: 'low' },
         instructions:
           'Every time the user speaks, call handle_user_request with their verbatim transcript. ' +

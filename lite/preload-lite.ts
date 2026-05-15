@@ -68,6 +68,13 @@ const SPACES_ITEMS_LIST = 'lite:spaces:items:list';
 const SPACES_ITEMS_GET = 'lite:spaces:items:get';
 const SPACES_ITEMS_RESOLVE_FILE_URL = 'lite:spaces:items:resolveFileUrl';
 const SPACES_DISCOVERY_RUN = 'lite:spaces:discovery:run';
+// Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md.
+const SPACES_HOME_ENTITY_COUNTS = 'lite:spaces:home:entityCounts';
+const SPACES_HOME_RECENT_ITEMS = 'lite:spaces:home:recentItems';
+const SPACES_HOME_TOP_CONTRIBUTORS = 'lite:spaces:home:topContributors';
+const SPACES_HOME_RECENT_EVENTS = 'lite:spaces:home:recentEvents';
+const SPACES_HOME_AGENTS_SAMPLE = 'lite:spaces:home:agentsSample';
+const SPACES_HOME_PERMISSION_SUMMARY = 'lite:spaces:home:permissionSummary';
 
 const NEON_QUERY = 'lite:neon:query';
 const NEON_STATUS = 'lite:neon:status';
@@ -478,6 +485,67 @@ interface SpacesDiscoveryResultsView {
   results: SpacesDiscoveryQueryResultView[];
 }
 
+// ─── Home view (chunk 3k + 3o) ───────────────────────────────────────────
+//
+// Local bridge-level views mirroring the Home types in
+// `lite/spaces/types.ts`. Renderer-facing aliases live in
+// `lite/lite-window.d.ts`. Detail in `lite/spaces/HOME-V1.md`.
+
+interface SpacesEntityCountsView {
+  spaces: number;
+  assets: number;
+  people: number;
+  agents: number;
+}
+
+interface SpacesContributorView {
+  author: string;
+  displayName: string;
+  events: number;
+  lastEventAt: string;
+}
+
+interface SpacesEventView {
+  id: string;
+  author: string;
+  kind: string;
+  timestamp: string;
+  spaceId?: string;
+  spaceName?: string;
+}
+
+interface SpacesAgentSummaryView {
+  id: string;
+  name: string;
+  description: string;
+}
+
+interface SpacesPermissionSummaryView {
+  visibleSpaceCount: number;
+  totalSpaceCount?: number;
+}
+
+type SpacesContributorWindow = 'day' | 'week' | 'month';
+
+interface SpacesHomeBridge {
+  entityCounts(): Promise<SpacesIpcResultView<SpacesEntityCountsView>>;
+  recentItems(opts?: {
+    limit?: number;
+  }): Promise<SpacesIpcResultView<unknown[]>>;
+  topContributors(opts?: {
+    window?: SpacesContributorWindow;
+    limit?: number;
+  }): Promise<SpacesIpcResultView<SpacesContributorView[]>>;
+  recentEvents(opts?: {
+    limit?: number;
+    since?: number;
+  }): Promise<SpacesIpcResultView<SpacesEventView[]>>;
+  agentsSample(opts?: {
+    limit?: number;
+  }): Promise<SpacesIpcResultView<SpacesAgentSummaryView[]>>;
+  permissionSummary(): Promise<SpacesIpcResultView<SpacesPermissionSummaryView>>;
+}
+
 interface SpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
@@ -490,6 +558,8 @@ interface SpacesBridge {
    * the envelope's `results[i].error`.
    */
   runDiscovery(): Promise<SpacesIpcResultView<SpacesDiscoveryResultsView>>;
+  /** Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md. */
+  home: SpacesHomeBridge;
 }
 
 interface HealthBridge {
@@ -1092,6 +1162,37 @@ const spaces: SpacesBridge = {
     ipcRenderer.invoke(SPACES_DISCOVERY_RUN) as Promise<
       SpacesIpcResultView<SpacesDiscoveryResultsView>
     >,
+  // Home view (chunk 3k + 3o)
+  home: {
+    entityCounts: () =>
+      ipcRenderer.invoke(SPACES_HOME_ENTITY_COUNTS) as Promise<
+        SpacesIpcResultView<SpacesEntityCountsView>
+      >,
+    recentItems: (opts) =>
+      ipcRenderer.invoke(
+        SPACES_HOME_RECENT_ITEMS,
+        opts !== undefined ? opts : {}
+      ) as Promise<SpacesIpcResultView<unknown[]>>,
+    topContributors: (opts) =>
+      ipcRenderer.invoke(
+        SPACES_HOME_TOP_CONTRIBUTORS,
+        opts !== undefined ? opts : {}
+      ) as Promise<SpacesIpcResultView<SpacesContributorView[]>>,
+    recentEvents: (opts) =>
+      ipcRenderer.invoke(
+        SPACES_HOME_RECENT_EVENTS,
+        opts !== undefined ? opts : {}
+      ) as Promise<SpacesIpcResultView<SpacesEventView[]>>,
+    agentsSample: (opts) =>
+      ipcRenderer.invoke(
+        SPACES_HOME_AGENTS_SAMPLE,
+        opts !== undefined ? opts : {}
+      ) as Promise<SpacesIpcResultView<SpacesAgentSummaryView[]>>,
+    permissionSummary: () =>
+      ipcRenderer.invoke(SPACES_HOME_PERMISSION_SUMMARY) as Promise<
+        SpacesIpcResultView<SpacesPermissionSummaryView>
+      >,
+  },
 };
 
 const health: HealthBridge = {

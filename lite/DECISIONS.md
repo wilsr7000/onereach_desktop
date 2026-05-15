@@ -1378,4 +1378,70 @@ New ADRs append below as they're made. Use the next sequential ID (ADR-037, ADR-
 
 ---
 
+## ADR-048: Lite Spaces Phase 3 -- writes + sharing + onboarding tour shipped as one bundled plan, seven independent chunks
+
+- **Status**: accepted (plan-doc), pending implementation
+- **Date**: 2026-05-13
+- **Context**: Phase 1+2 of `lite/spaces/` ships read-only browse. The next slice has to deliver the demo loop end-to-end -- create a Space, file something into it, share it with a teammate -- because that's what teaches Spaces to a new user. The product question was: do we ship writes (Phase 3) and sharing as separate roadmap chunks, with onboarding stitched on later? Or bundle them into a single plan? Splitting fits the standard one-chunk-one-PR hardening discipline. Bundling preserves the demo-loop coherence -- writes alone don't teach the model, sharing alone has nothing to share, the tour alone has nothing to do. The first version of the plan bundled too aggressively (one phase, many sub-phases); the user critique was that "one phase" implicitly violated the per-chunk hardening contract and glossed over the real Edison dependencies for sharing.
+- **Decision**:
+  1. **Hybrid framing.** The plan is one strategic document for narrative coherence: cross-cutting concerns (Trust Principles, Measurement, Reversibility) live at the plan level, not duplicated per chunk. The hardening contract is per sub-phase: each of `spaces-3a` (Create / Rename / Delete), `spaces-3b` (Item creation seam), `spaces-3c` (Add to / Remove from Space), `spaces-3d` (Sharing UX), `spaces-3e0` (Tour prototype gate), `spaces-3e` (Tour code), `spaces-3f` (Recap + cleanup) ships as its own PR with its own [`lite/PORTING.md`](PORTING.md) entry.
+  2. **Pre-plan dependencies on the critical path.** Two things block code start (not plan confirmation): (a) **Pre-A**: the item-source ADR (B1/B2/B3 -- which seam does the user use to author items?) ships in [`lite/DECISIONS.md`](DECISIONS.md) before any 3b code; recommended B1 (a new `lite/items/` module with `:AUTHORED_BY` provenance distinguishing user-authored from agent-produced). (b) **Pre-B**: the Edison D-series questions (D1-D7) about graph-level ACL semantics ship at [`lite/spaces/DISCOVERY-PHASE-3.md`](spaces/DISCOVERY-PHASE-3.md) and are sent to whoever owns Edison authorization in parallel with plan creation. Code in 3d cannot begin until D1-D4 return. The privacy review for the member-picker query ([`lite/spaces/PRIVACY-REVIEW-PICKER.md`](spaces/PRIVACY-REVIEW-PICKER.md)) ships before 3d code begins.
+  3. **Trust Principles operationalized**, not asserted. The four principles from the existing Spaces plan (Suggest don't decide, Explainable, Reversible, Attributable) get a 4-row table per sub-phase showing how that sub-phase upholds each principle and naming the test that proves it. A new `lite/test/integration/spaces/trust-principles.test.ts` harness registers every Phase 3 mutation method alongside its inverse and fails the build if a mutation lands without one. This is the difference between "Reversible" as a slogan and "Reversible" as a CI gate.
+  4. **Tour prototype gate (3e0) before tour code (3e).** The 90-second / 3-minute median + p95 claims are aspirational without evidence; 3e0 is a non-code prototype with 2-3 user tests that gates 3e. Skipping the gate ships a tour that COULD be 4 minutes p50 because step 4 was confusing and we didn't catch it. The cost of the prototype is one afternoon; the cost of skipping is permanent.
+  5. **Tour entry from three places, not just empty state.** Empty-state CTA covers brand-new accounts. A permanent "How does this work?" button in the Spaces window header covers users who join an account with 50 existing Spaces (who arguably need orientation most). Settings -> Diagnostics "Replay" covers QA. The "users who already have Spaces" gap was the biggest hole in the v1 framing.
+  6. **Cleanup-path failure matrix.** "Delete and start fresh" in 3f is multi-mutation (revoke shares, remove memberships, soft-delete items, soft-delete Space). The plan documents what UI shows when each step fails so the user is never left with worse state than starting over. Without this matrix, "delete and start fresh" can be the cardinal sin of an onboarding flow.
+  7. **Measurement is first-class.** Tour ships with named events (`spaces.tour.start / .step.enter / .step.exit / .complete / .abandon`) for funnel analysis, not just span logging. Without these, we don't know which step kills people post-launch.
+- **Consequences**:
+  - Phase 3 is a multi-chunk multi-PR effort, sequenced via the dependency graph in the plan doc. No single PR ships "Phase 3."
+  - Edison delivery cadence is on the critical path for 3d. Sending D1-D7 in parallel with plan-doc creation buys time.
+  - The trust-principles harness lands as part of 3a (the first mutation chunk) so all subsequent chunks register against it; failure to register an inverse is build-red.
+  - The tour prototype is gated by user-testing outcomes, not engineering velocity.
+  - The plan doc itself is comparatively long, but cross-cutting concerns (Trust Principles, Measurement, Reversibility) are visible in one place rather than scattered.
+- **Files**:
+  - New: `.cursor/plans/lite_spaces_phase_3_writes_share_onboard_7e4c2a91.plan.md` (this trajectory's strategic doc)
+  - New: `lite/spaces/DISCOVERY-PHASE-3.md` (Pre-B Edison D-series questions)
+  - New: `lite/spaces/PRIVACY-REVIEW-PICKER.md` (member-picker privacy review)
+  - New: `lite/test/integration/spaces/trust-principles.test.ts` (mutation/inverse harness, lands with 3a)
+  - Modified: `lite/spaces/ROADMAP.md` (Phase 3 entry expands to writes + sharing + tour)
+  - Modified: `lite/PORTING.md` (seven new chunks under Active Ports)
+  - Modified: `lite/LITE-PUNCH-LIST.md` (intro-card / empty-state items collapse into "Phase 3 onboarding tour")
+- **Patterns rejected**:
+  - **One mega-PR for "Phase 3"** -- violates per-chunk hardening discipline; merge conflicts; impossible to review.
+  - **Three separate plans (writes / sharing / tour)** -- splits cross-cutting concerns across docs; loses demo-loop narrative; Trust Principles get re-asserted three times instead of operationalized once.
+  - **Skip the prototype gate, design the tour from intuition** -- v1 plan critique caught this: "median <= 90s" was made up, the prototype is the only way to know if the tour copy and step boundaries hold up.
+  - **Tour from empty state only** -- excludes the user who joins an account with existing Spaces, who arguably most needs the tour.
+  - **Approval queue + Librarian agents in this plan** -- they belong in Phase 4. Including them here drowns the 90-second demo loop in governance UX.
+- **Supersedes**: nothing (extends the read-only foundation in [`.cursor/plans/spaces-manager-phases_5ab75078.plan.md`](../.cursor/plans/spaces-manager-phases_5ab75078.plan.md)).
+
+---
+
+## ADR-049: Item creation seam for Lite -- new `lite/items/` module with `:AUTHORED_BY` provenance
+
+- **Status**: proposed (Pre-A blocker for ADR-048 Phase 3b)
+- **Date**: 2026-05-13
+- **Context**: Phase 3 of `lite/spaces/` requires the user to author and persist a `:Item` from the Lite UI -- step 2 of the onboarding tour ("Drop something into your Space") needs a real item to file. Today the entire mental model of `:Item` in OmniGraph is "something an agent or integration produced"; there's no Lite-side authoring path. The decision is which seam the user uses to author an item, and how the data model distinguishes user-authored items from agent-produced ones. The cost of getting this wrong is data-model fragmentation: if we add an authoring path for the tutorial only and remove it later, we leave a small population of `:Item` nodes with anomalous provenance; if we re-use existing seams (clipboard, IDW conversation, AI Run Times article) without unifying them, the user-authoring concept lives in three places at once.
+- **Decision**: Adopt option **B1**: introduce a new `lite/items/` module with a narrow public API (`items.create`, `items.delete`, `items.undelete`, `items.get`, `items.list`) that creates `:Item` nodes with an `[:AUTHORED_BY]->(:Person)` edge to the current OneReach principal. The Cypher write attaches the principal at create-time in main process, not from renderer-supplied data, so the renderer cannot fabricate authorship. The module is generally available (not tour-scoped) so it can later host saved-from-clipboard, saved-from-IDW, and saved-from-AI-Run-Times consumers as those seams need it.
+- **Rejected alternatives**:
+  - **B2 -- re-use existing seams**: integration surface forks across three modules (clipboard, IDW, AI Run Times); none of them today produces `:Item` nodes with `:AUTHORED_BY`; bringing them all up to that contract is more work than introducing one canonical module. Also: the tour would need to teach the user three different "save into a Space" paths simultaneously, which fragments the demo.
+  - **B3 -- tour assumes pre-existing items**: weakens the tour to "browse what someone else put there"; user never sees the create-and-file loop; doesn't demo what Spaces actually does in steady state. Acceptable as a graceful-degrade path if B1 is delayed, but not as the default.
+- **Distinguishing user-authored from agent-produced**: the Phase 0.5 Q2 query revealed `:PRODUCED_BY` and `:AUTHORED_BY` are both already in the schema. Agents already use `:PRODUCED_BY`; humans use `:AUTHORED_BY`. The query in Phase 2 already projects whichever is present into the `producedBy` field on `ItemSummary`. No new schema work; just consistent use.
+- **Consequences**:
+  - New module `lite/items/` follows the standard module shape per [`PORTING.md`](PORTING.md): `api.ts`, `main.ts`, `store.ts`, `errors.ts`, `events.ts`, `contracts/`, `README.md`.
+  - New error codes: `ITEMS_INVALID_KIND`, `ITEMS_TITLE_REQUIRED`, `ITEMS_TOO_LARGE`, `ITEMS_NOT_FOUND`, `ITEMS_FORBIDDEN`, `ITEMS_NOT_AUTHENTICATED`, `ITEMS_NOT_INITIALIZED`.
+  - `ItemsApi` registered in the trust-principles harness with `create / delete-soft` and `delete-soft / undelete` as inverse pairs.
+  - Renderer surface lives initially in the Spaces detail-panel composer; a generally-available "+" composer in the chrome (ahead of step 2 of the tour) is a follow-up chunk, not blocking Phase 3.
+  - Forward-compat: future "save from clipboard / IDW / AI Run Times" features call `getItemsApi().create({ ... })` -- no new module per consumer.
+- **Files**:
+  - New: `lite/items/` module (Phase 3b chunk)
+  - Renderer integration: `lite/spaces/spaces.ts` adds the "+" detail-panel composer
+- **Test discipline**:
+  - `items-api.test.ts` -- conformance contract per Rule 12 / ADR-024
+  - `items-no-auto-create.test.ts` -- asserts no IPC fires `items.create` without a renderer trigger
+  - `items-authored-by.test.ts` -- renderer-supplied principal cannot override the auth principal on create
+  - `items-detail-attribution.test.ts` -- detail panel renders `:AUTHORED_BY` provenance line correctly
+  - `trust-principles.test.ts` -- create -> delete -> undelete restores state
+- **Open question**: ID strategy (server-issued vs client UUID). Tracked in Edison D-series question D8.
+
+---
+
 The chunk-failure-recovery release valve (Phase 2 entry) logs structured incident entries here -- one ADR per declared incident, with the two CODEOWNERS' sign-offs and the time-box.

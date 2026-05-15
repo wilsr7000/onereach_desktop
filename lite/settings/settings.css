@@ -1623,3 +1623,18 @@ body {
 .banner.error {
   border-left: 3px solid currentColor;
 }
+
+/* Engineer-only Spaces Discovery output (chunk 3o move). */
+.diag-discovery-output {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #c7c7cd;
+  background: #0B0D11;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-top: 12px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+}

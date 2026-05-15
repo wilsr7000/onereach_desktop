@@ -68,23 +68,25 @@ function makeClient(stub: StubQuery): SdkSpacesClient {
 // ─── Cypher source regression guards ─────────────────────────────────────
 
 describe('CYPHER source strings', () => {
-  it('listSpaces query matches :Space + itemCount projection', () => {
+  it('listSpaces query matches :Space + itemCount via :Asset/:BELONGS_TO', () => {
     expect(CYPHER.LIST_SPACES).toMatch(/MATCH \(s:Space\)/);
+    expect(CYPHER.LIST_SPACES).toMatch(/\(a:Asset\)-\[:BELONGS_TO\]->\(s\)/);
     expect(CYPHER.LIST_SPACES).toMatch(/RETURN/);
     expect(CYPHER.LIST_SPACES).toMatch(/ORDER BY toLower/);
-    expect(CYPHER.LIST_SPACES).toMatch(/count\(i\) AS itemCount/);
+    expect(CYPHER.LIST_SPACES).toMatch(/count\(a\) AS itemCount/);
   });
 
-  it('uncategorized count uses NOT (i)-[:MEMBER_OF]->(:Space)', () => {
+  it('uncategorized count uses NOT (a)-[:BELONGS_TO]->(:Space)', () => {
     expect(CYPHER.UNCATEGORIZED_COUNT).toMatch(
-      /WHERE NOT \(i\)-\[:MEMBER_OF\]->\(:Space\)/
+      /WHERE NOT \(a\)-\[:BELONGS_TO\]->\(:Space\)/
     );
-    expect(CYPHER.UNCATEGORIZED_COUNT).toMatch(/count\(i\) AS count/);
+    expect(CYPHER.UNCATEGORIZED_COUNT).toMatch(/count\(a\) AS count/);
   });
 
-  it('list-items-uncategorized matches Items with no :Space membership', () => {
+  it('list-items-uncategorized matches :Asset with no :Space membership', () => {
+    expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/MATCH \(a:Asset\)/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(
-      /WHERE NOT \(i\)-\[:MEMBER_OF\]->\(:Space\)/
+      /WHERE NOT \(a\)-\[:BELONGS_TO\]->\(:Space\)/
     );
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/\[\] AS otherSpaces/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/SKIP toInteger\(\$offset\)/);
@@ -92,16 +94,38 @@ describe('CYPHER source strings', () => {
   });
 
   it('list-items-in-space takes a spaceId param and filters otherSpaces', () => {
-    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/\(s:Space \{id: \$spaceId\}\)/);
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/\(a:Asset\)-\[:BELONGS_TO\]->\(s:Space \{id: \$spaceId\}\)/);
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/other\.id <> s\.id/);
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/\[x IN otherSpacesRaw WHERE x\.id IS NOT NULL\] AS otherSpaces/);
   });
 
-  it('getItem uses id parameter and LIMIT 1', () => {
-    expect(CYPHER.GET_ITEM).toMatch(/\(i:Item \{id: \$id\}\)/);
+  it('getItem uses :Asset id parameter and LIMIT 1', () => {
+    expect(CYPHER.GET_ITEM).toMatch(/\(a:Asset \{id: \$id\}\)/);
     expect(CYPHER.GET_ITEM).toMatch(/LIMIT 1$/m);
-    expect(CYPHER.GET_ITEM).toMatch(/i\.content AS content/);
-    expect(CYPHER.GET_ITEM).toMatch(/i\.metadata AS metadata/);
+    expect(CYPHER.GET_ITEM).toMatch(/coalesce\(a\.content, ''\) AS content/);
+    expect(CYPHER.GET_ITEM).toMatch(/null AS metadata/);
+  });
+
+  it('every projection uses canonical-with-legacy coalesce for renames', () => {
+    // a.name is canonical (per :Schema), a.title is legacy (per
+    // omnigraph-client.js). Both LIST_ITEMS_* projections must
+    // coalesce so existing data still renders.
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/coalesce\(a\.name, a\.title, a\.id\) AS title/);
+    expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/coalesce\(a\.name, a\.title, a\.id\) AS title/);
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/coalesce\(a\.type, a\.assetType, 'other'\) AS kind/);
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/coalesce\(a\.url, a\.fileUrl\) AS fileKey/);
+  });
+
+  it('uses canonical (:Person)-[:CREATED]->(:Asset) for producer projection', () => {
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(
+      /OPTIONAL MATCH \(creator:Person\)-\[:CREATED\]->\(a\)/
+    );
+    expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(
+      /OPTIONAL MATCH \(creator:Person\)-\[:CREATED\]->\(a\)/
+    );
+    expect(CYPHER.GET_ITEM).toMatch(
+      /OPTIONAL MATCH \(creator:Person\)-\[:CREATED\]->\(a\)/
+    );
   });
 });
 
@@ -180,28 +204,28 @@ describe('SdkSpacesClient.listSpaces', () => {
 describe('SdkSpacesClient.getUncategorizedCount', () => {
   it('returns the count value as a number', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (i)-[:MEMBER_OF]->(:Space)', [{ count: 17 }]);
+    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: 17 }]);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(17);
   });
 
   it('returns 0 when no rows come back', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (i)-[:MEMBER_OF]->(:Space)', []);
+    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)', []);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(0);
   });
 
   it('clamps negative or fractional counts to a non-negative integer', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (i)-[:MEMBER_OF]->(:Space)', [{ count: -5 }]);
+    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: -5 }]);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(0);
   });
 
   it('returns 0 when count field is missing or non-numeric', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (i)-[:MEMBER_OF]->(:Space)', [{ count: 'nope' }]);
+    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: 'nope' }]);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(0);
   });
@@ -212,17 +236,17 @@ describe('SdkSpacesClient.getUncategorizedCount', () => {
 describe('SdkSpacesClient.listItems (uncategorized)', () => {
   it('emits LIST_ITEMS_UNCATEGORIZED with default offset/limit', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (i)-[:MEMBER_OF]->(:Space)\n    OPTIONAL MATCH', []);
+    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' });
     const call = stub.calls[stub.calls.length - 1];
     expect(call?.parameters).toEqual({ offset: 0, limit: 100 });
-    expect(call?.cypher).toContain('OPTIONAL MATCH (i)-[:PRODUCED_BY|AUTHORED_BY]->(producer)');
+    expect(call?.cypher).toContain('OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)');
   });
 
   it('always returns otherSpaces=[] for uncategorized scope', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (i)-[:MEMBER_OF]->(:Space)\n    OPTIONAL MATCH', [
+    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
       {
         id: 'i-1',
         title: 'Inbox file',
@@ -240,7 +264,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('normalizes unknown kinds to "other"', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (i)-[:MEMBER_OF]->(:Space)\n    OPTIONAL MATCH', [
+    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
       {
         id: 'i-2',
         title: 'Weird',
@@ -258,7 +282,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('parses producedBy when the producer projection is populated', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (i)-[:MEMBER_OF]->(:Space)\n    OPTIONAL MATCH', [
+    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
       {
         id: 'i-3',
         title: 'Agent output',
@@ -280,7 +304,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('respects limit/offset opts (clamped to MAX_LIMIT=500)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (i)-[:MEMBER_OF]->(:Space)\n    OPTIONAL MATCH', []);
+    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' }, { limit: 999_999, offset: 50 });
     const call = stub.calls[stub.calls.length - 1];
@@ -301,7 +325,7 @@ describe('SdkSpacesClient.listItems (space)', () => {
 
   it('emits LIST_ITEMS_IN_SPACE with the spaceId parameter', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (i:Item)-[:MEMBER_OF]->(s:Space', []);
+    stub.setResponse('MATCH (a:Asset)-[:BELONGS_TO]->(s:Space', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'space', spaceId: 'sp-77' }, { limit: 20 });
     const call = stub.calls[stub.calls.length - 1];
@@ -310,7 +334,7 @@ describe('SdkSpacesClient.listItems (space)', () => {
 
   it('keeps non-null otherSpaces chips and drops empty entries', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (i:Item)-[:MEMBER_OF]->(s:Space', [
+    stub.setResponse('MATCH (a:Asset)-[:BELONGS_TO]->(s:Space', [
       {
         id: 'i-9',
         title: 'Cross-space item',
@@ -340,14 +364,14 @@ describe('SdkSpacesClient.listItems (space)', () => {
 describe('SdkSpacesClient.getItem', () => {
   it('returns null when no rows come back', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (i:Item {id: $id})', []);
+    stub.setResponse('MATCH (a:Asset {id: $id})', []);
     const client = makeClient(stub);
     expect(await client.getItem('missing')).toBeNull();
   });
 
   it('maps the full Item including content + metadata', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (i:Item {id: $id})', [
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
       {
         id: 'i-100',
         title: 'Spec doc',
@@ -384,7 +408,7 @@ describe('SdkSpacesClient.getItem', () => {
 
   it('drops malformed metadata silently (returns the rest of the Item)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (i:Item {id: $id})', [
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
       {
         id: 'i-101',
         title: 'No meta',

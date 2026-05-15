@@ -150,6 +150,16 @@ function buildStubConsumer(): {
         return maybeFail(fileUrlMap.get(key) ?? null);
       },
     },
+    // Home view (chunk 3k + 3o). Stub returns are not exercised by
+    // the platform-contract tests below; they're here so the stub
+    // shape satisfies the SpacesApi interface.
+    getEntityCounts: async () =>
+      maybeFail({ spaces: 0, assets: 0, people: 0, agents: 0 }),
+    listRecentItems: async () => maybeFail([] as ItemSummary[]),
+    topContributors: async () => maybeFail([]),
+    listRecentEvents: async () => maybeFail([]),
+    listAgentsSample: async () => maybeFail([]),
+    getPermissionSummary: async () => maybeFail({ visibleSpaceCount: 0 }),
   };
 
   return {
