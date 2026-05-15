@@ -65,6 +65,50 @@ type RendererEntityCounts = LiteSpacesEntityCountsView;
 type RendererContributor = LiteSpacesContributorView;
 type RendererAgentSummary = LiteSpacesAgentSummaryView;
 type RendererPermissionSummary = LiteSpacesPermissionSummaryView;
+type RendererEvent = LiteSpacesEventView;
+
+/**
+ * Home filter modes. Apply to the unified timeline:
+ *   - 'all'    -- show every row (default)
+ *   - 'people' -- producer is a Person, or author doesn't look agent-y
+ *   - 'agents' -- producer is an Agent, or author contains 'agent'/'bot'
+ *   - '24h'    -- timestamp within the last 24 hours
+ *   - '7d'     -- timestamp within the last 7 days
+ *
+ * Filters compose with the timeline merge: we filter the merged
+ * chronological list, not the underlying query results.
+ */
+export type HomeFilter = 'all' | 'people' | 'agents' | '24h' | '7d';
+
+/**
+ * One unified row in the Home timeline. Both events (commits) and
+ * items (newly added assets) project into this shape so the renderer
+ * has one row builder and one filter rule. Source-tagged so the
+ * filter can branch (e.g. "Mine" vs "Agents") and the row chrome can
+ * vary (items get an excerpt; events don't).
+ */
+export interface TimelineRow {
+  kind: 'item' | 'event';
+  id: string;
+  /** Producer display string (raw `:Commit.author` or `:Person.name`). */
+  author: string;
+  /** Verb phrase: "added", "updated", "produced", or a freeform commit kind. */
+  verb: string;
+  /** Object phrase: item title for items; "Audit_2026Q1.docx" or fallback for events. */
+  object: string;
+  /** Space chip (when known). */
+  space?: RendererSpaceChipRef;
+  /** ISO timestamp used for sort + filter. */
+  timestamp: string;
+  /** Excerpt: items only (events don't have one). */
+  excerpt?: string;
+  /** Whether the producer was an Agent (drives icon + 'Agents' filter). */
+  fromAgent: boolean;
+  /** Pass-through item id when `kind === 'item'`, for click-to-open. */
+  itemId?: string;
+  /** Pass-through space id for click-to-open. */
+  spaceId?: string;
+}
 
 // ─── State ──────────────────────────────────────────────────────────────
 
@@ -88,6 +132,12 @@ interface HomeCardCache {
   agents: HomeCacheEntry<RendererAgentSummary[]>;
   permission: HomeCacheEntry<RendererPermissionSummary>;
   recentItems: HomeCacheEntry<RendererItemSummary[]>;
+  /**
+   * `:Commit` events powering the unified timeline. Fetched at
+   * `limit: 50` so the merged-with-items feed has enough material
+   * for filter chips to feel responsive.
+   */
+  events: HomeCacheEntry<RendererEvent[]>;
 }
 
 function emptyCacheEntry<T>(): HomeCacheEntry<T> {
@@ -109,6 +159,19 @@ interface SpacesRendererState {
   discoveryInFlight: boolean;
   /** Home view cache. Per Q-Home-3 (60s stale-while-revalidate). */
   home: HomeCardCache;
+  /** Active filter for the unified timeline. */
+  homeFilter: HomeFilter;
+  /**
+   * Render-time markers from `localStorage` (preferences live device-
+   * locally so they don't round-trip the network). `welcomeDismissed`
+   * gates the first-run welcome card; `lastVisitMs` powers the
+   * "since you last visited" hairline; `currentVisitMs` is set once
+   * per Spaces-window open so the hairline keeps reading "since X"
+   * even as the user clicks around within this session.
+   */
+  welcomeDismissed: boolean;
+  lastVisitMs: number | null;
+  currentVisitMs: number;
 }
 
 const state: SpacesRendererState = {
@@ -130,8 +193,60 @@ const state: SpacesRendererState = {
     agents: emptyCacheEntry<RendererAgentSummary[]>(),
     permission: emptyCacheEntry<RendererPermissionSummary>(),
     recentItems: emptyCacheEntry<RendererItemSummary[]>(),
+    events: emptyCacheEntry<RendererEvent[]>(),
   },
+  homeFilter: 'all',
+  welcomeDismissed: readWelcomeDismissed(),
+  lastVisitMs: readLastVisitMs(),
+  currentVisitMs: Date.now(),
 };
+
+// ─── Home preferences (localStorage) ────────────────────────────────────
+//
+// Renderer-side preferences live in localStorage so they don't pay the
+// KV round-trip. These keys are scoped to this device intentionally
+// -- "have you seen the welcome" and "when did you last visit" are
+// per-device signals, not per-account ones.
+
+const STORAGE_WELCOME_KEY = 'lite-spaces-home.welcome-seen';
+const STORAGE_LAST_VISIT_KEY = 'lite-spaces-home.last-visit';
+
+function readWelcomeDismissed(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_WELCOME_KEY) === '1';
+  } catch {
+    // localStorage may be disabled in some sandboxes; default to
+    // "not dismissed" so the welcome card still renders.
+    return false;
+  }
+}
+
+function readLastVisitMs(): number | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_LAST_VISIT_KEY);
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function markWelcomeSeen(): void {
+  try {
+    localStorage.setItem(STORAGE_WELCOME_KEY, '1');
+  } catch {
+    // best-effort
+  }
+}
+
+function markVisitNow(): void {
+  try {
+    localStorage.setItem(STORAGE_LAST_VISIT_KEY, String(Date.now()));
+  } catch {
+    // best-effort
+  }
+}
 
 // ─── Bootstrap ──────────────────────────────────────────────────────────
 
@@ -921,23 +1036,34 @@ export function buildDetailPane(
  * skeletons + parallel fetches otherwise).
  */
 async function loadHome(): Promise<void> {
-  // Always render once up-front so skeletons appear if cache is empty,
-  // or stale data shows immediately if cache is present.
+  // Stamp this visit so subsequent re-loads (e.g. after sidebar nav
+  // back to Home) still read "since your previous arrival" rather
+  // than "0 new" because we wrote the timestamp right before the
+  // next read. The current-visit-ms in state captures the moment
+  // this session started; the localStorage write happens at the end
+  // so the NEXT session sees this session's timestamp.
   renderHome();
 
   const now = Date.now();
   const fresh = (entry: HomeCacheEntry<unknown>): boolean =>
     entry.value !== null && now - entry.fetchedAt < HOME_CACHE_TTL_MS;
 
-  // Fire one query per stale/empty cache slot. Each query mutates its
-  // own cache entry and re-renders that card on completion.
+  // The timeline is the centerpiece, so its two sources fire first.
+  // Counts / agents / contributors / permission feed the secondary
+  // context column; they're best-effort and fail soft.
   const work: Array<Promise<void>> = [];
-  if (!fresh(state.home.counts)) work.push(refreshCounts());
-  if (!fresh(state.home.contributors)) work.push(refreshContributors());
-  if (!fresh(state.home.agents)) work.push(refreshAgents());
-  if (!fresh(state.home.permission)) work.push(refreshPermission());
+  if (!fresh(state.home.events)) work.push(refreshEvents());
   if (!fresh(state.home.recentItems)) work.push(refreshRecentItems());
+  if (!fresh(state.home.contributors)) work.push(refreshContributors());
+  if (!fresh(state.home.permission)) work.push(refreshPermission());
+  if (!fresh(state.home.counts)) work.push(refreshCounts());
+  if (!fresh(state.home.agents)) work.push(refreshAgents());
   await Promise.all(work);
+
+  // Persist "you were last here" AFTER the timeline lands so the
+  // "since" computation in this session keeps using the previous
+  // visit's timestamp.
+  markVisitNow();
 }
 
 async function refreshCounts(): Promise<void> {
@@ -1035,7 +1161,10 @@ async function refreshRecentItems(): Promise<void> {
   state.home.recentItems.error = null;
   renderHome();
   try {
-    const envelope = await bridge.recentItems({ limit: 3 });
+    // Timeline-first: pull 25 instead of 3 so the merged feed has
+    // enough material for filter chips ("24h" / "7d" / "agents")
+    // to feel responsive without re-fetching.
+    const envelope = await bridge.recentItems({ limit: 25 });
     if (envelope.ok === false) {
       state.home.recentItems.error = envelope.error.message;
     } else {
@@ -1050,501 +1179,754 @@ async function refreshRecentItems(): Promise<void> {
   }
 }
 
+async function refreshEvents(): Promise<void> {
+  const bridge = window.lite?.spaces?.home;
+  if (bridge === undefined) return;
+  state.home.events.loading = true;
+  state.home.events.error = null;
+  renderHome();
+  try {
+    const envelope = await bridge.recentEvents({ limit: 50 });
+    if (envelope.ok === false) {
+      state.home.events.error = envelope.error.message;
+    } else {
+      state.home.events.value = envelope.value;
+      state.home.events.fetchedAt = Date.now();
+    }
+  } catch (err) {
+    state.home.events.error = messageFrom(err);
+  } finally {
+    state.home.events.loading = false;
+    renderHome();
+  }
+}
+
 /**
- * Render all 5 cards from current state. Idempotent; safe to call
- * repeatedly (e.g. after each query lands). The whole region is
- * rebuilt rather than diffed because (a) 5 cards is cheap and
- * (b) avoiding a diff library keeps the bundle slim.
+ * Render the Home view: timeline-first.
+ *
+ * The mental model is "channel-but-better." A Slack channel works
+ * because the message timeline IS the home; users don't navigate
+ * through summary cards to reach what they came for. Spaces does the
+ * same: the unified timeline (events + recently-added items) is the
+ * centerpiece, with a small context column for the durable signals
+ * (active contributors, ACL transparency) that Slack lacks.
+ *
+ *   ┌────────────────────────────────────────────────┐
+ *   │ Welcome card (one-shot, dismissible)           │
+ *   ├────────────────────────────────────────────────┤
+ *   │ Since you last visited: N new ·············    │
+ *   ├──────────────────────────────────┬─────────────┤
+ *   │ [All] [People] [Agents] [24h] [7d] │           │
+ *   │                                    │ Active    │
+ *   │ TIMELINE                           │ this week │
+ *   │ ...                                │           │
+ *   │                                    │ About     │
+ *   │                                    │ this view │
+ *   └────────────────────────────────────┴───────────┘
+ *
+ * Idempotent. Safe to call after each query lands.
  */
 function renderHome(): void {
   const region = document.getElementById('spaces-home-region');
   if (region === null) return;
   region.replaceChildren();
 
-  const greeting = document.createElement('div');
-  greeting.className = 'spaces-home-greeting';
-  greeting.textContent = 'Your data room';
-  region.appendChild(greeting);
+  // First-run welcome (one-shot, persisted to localStorage). Renders
+  // ABOVE the hairline so the page reads top-down: "what is this →
+  // what's new → what's happening."
+  if (!state.welcomeDismissed) {
+    region.appendChild(buildWelcomeCard());
+  }
 
-  region.appendChild(buildHomeCounts());
-  region.appendChild(buildHomeContributors());
-  region.appendChild(buildHomeAgents());
-  const permissionCard = buildHomePermission();
-  if (permissionCard !== null) region.appendChild(permissionCard);
-  region.appendChild(buildHomeRecent());
+  // "Since you last visited" hairline. Hidden on first-ever visit
+  // (lastVisitMs === null) -- nothing to compare against.
+  const hairline = buildSinceLastVisit();
+  if (hairline !== null) region.appendChild(hairline);
+
+  // Two-column body: timeline (primary, left) + context (secondary,
+  // right). Stacks vertically below 880px viewport via CSS.
+  const body = document.createElement('div');
+  body.className = 'home-body';
+
+  const primary = document.createElement('div');
+  primary.className = 'home-primary';
+  primary.appendChild(buildFilterChips());
+  primary.appendChild(buildHomeTimeline());
+  body.appendChild(primary);
+
+  body.appendChild(buildHomeContext());
+
+  region.appendChild(body);
 }
 
-// ─── Card 1: Your data room at a glance ─────────────────────────────────
+// ─── Welcome card (one-shot) ────────────────────────────────────────────
 
-export function buildHomeCounts(): HTMLElement {
+/**
+ * First-run welcome card. Explains what a Space is in the user's own
+ * frame ("project place, channel-but-better"). Dismissed permanently
+ * via localStorage so returning users don't see it every visit.
+ *
+ * Pure builder; exported for jsdom tests.
+ */
+export function buildWelcomeCard(): HTMLElement {
   const card = document.createElement('article');
-  card.className = 'home-card home-card-counts';
+  card.className = 'home-welcome';
+  card.setAttribute('role', 'region');
+  card.setAttribute('aria-label', 'Welcome to Spaces');
 
-  const header = document.createElement('div');
-  header.className = 'home-card-header';
-  const title = document.createElement('h3');
-  title.className = 'home-card-title';
-  title.textContent = 'Your data room';
-  header.appendChild(title);
-  card.appendChild(header);
+  const title = document.createElement('h2');
+  title.className = 'home-welcome-title';
+  title.textContent = 'Welcome to Spaces';
+  card.appendChild(title);
 
-  const entry = state.home.counts;
-  if (entry.error !== null && entry.value === null) {
-    card.appendChild(buildCardError(entry.error));
-    return card;
+  const body = document.createElement('p');
+  body.className = 'home-welcome-body';
+  body.textContent =
+    'Spaces are the project places where you and your AI agents work together. Think of each Space as a channel — but assets you put in stay findable forever, not buried by time. The timeline below shows what is happening across every Space you can see.';
+  card.appendChild(body);
+
+  const actions = document.createElement('div');
+  actions.className = 'home-welcome-actions';
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'home-welcome-dismiss';
+  dismiss.textContent = 'Got it';
+  dismiss.addEventListener('click', () => {
+    markWelcomeSeen();
+    state.welcomeDismissed = true;
+    renderHome();
+  });
+  actions.appendChild(dismiss);
+  card.appendChild(actions);
+
+  return card;
+}
+
+// ─── Since-you-last-visited hairline ────────────────────────────────────
+
+/**
+ * Compute a friendly "since" string for the hairline header. Pure;
+ * exported for tests.
+ *
+ *   - `null` (first-ever visit): null
+ *   - within 5 min of last visit: null (don't nag on rapid re-opens)
+ *   - within 24h: "Welcome back — last here 3h ago"
+ *   - within 7d:  "Welcome back — last here yesterday"
+ *   - older:      "Welcome back — last here 2w ago"
+ */
+export function formatSinceLastVisit(
+  lastVisitMs: number | null,
+  nowMs: number
+): string | null {
+  if (lastVisitMs === null) return null;
+  const diff = nowMs - lastVisitMs;
+  // Suppress on rapid re-opens (e.g. tab switching).
+  if (diff < 5 * 60_000) return null;
+  return `Welcome back — last here ${formatRecency(lastVisitMs)}.`;
+}
+
+/**
+ * Count rows in the unified timeline that arrived after `sinceMs`.
+ * Used to suffix the hairline with "X new since…" when fresh data
+ * is available. Returns 0 when nothing landed.
+ */
+export function countTimelineSince(
+  rows: ReadonlyArray<TimelineRow>,
+  sinceMs: number
+): number {
+  let n = 0;
+  for (const row of rows) {
+    const t = Date.parse(row.timestamp);
+    if (Number.isFinite(t) && t > sinceMs) n++;
+  }
+  return n;
+}
+
+function buildSinceLastVisit(): HTMLElement | null {
+  const friendly = formatSinceLastVisit(state.lastVisitMs, state.currentVisitMs);
+  if (friendly === null) return null;
+
+  const row = document.createElement('div');
+  row.className = 'home-hairline';
+
+  const left = document.createElement('span');
+  left.className = 'home-hairline-text';
+  left.textContent = friendly;
+  row.appendChild(left);
+
+  // Right-side new-count badge. Computed only if events + items have
+  // landed; null/loading caches are silent.
+  if (
+    state.lastVisitMs !== null &&
+    (state.home.events.value !== null || state.home.recentItems.value !== null)
+  ) {
+    const merged = mergeTimeline(
+      state.home.events.value ?? [],
+      state.home.recentItems.value ?? []
+    );
+    const newCount = countTimelineSince(merged, state.lastVisitMs);
+    if (newCount > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'home-hairline-badge';
+      badge.textContent =
+        newCount === 1 ? '1 new since then' : `${formatBigNumber(newCount)} new since then`;
+      row.appendChild(badge);
+    }
   }
 
-  const counts = entry.value;
-  if (counts === null) {
-    // Skeleton: three big-number tiles.
-    card.appendChild(buildCountsSkeleton());
-    card.classList.add('is-loading');
-    return card;
+  return row;
+}
+
+// ─── Filter chips ───────────────────────────────────────────────────────
+
+const FILTER_LABELS: ReadonlyArray<{ id: HomeFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'people', label: 'People' },
+  { id: 'agents', label: 'Agents' },
+  { id: '24h', label: 'Last 24h' },
+  { id: '7d', label: 'Last 7 days' },
+];
+
+/**
+ * Render the filter-chip row. Each chip toggles `state.homeFilter`
+ * and re-renders the timeline. Exported for jsdom tests.
+ */
+export function buildFilterChips(active?: HomeFilter): HTMLElement {
+  const a = active ?? state.homeFilter;
+  const row = document.createElement('div');
+  row.className = 'home-filter-chips';
+  row.setAttribute('role', 'tablist');
+  row.setAttribute('aria-label', 'Filter timeline');
+
+  for (const { id, label } of FILTER_LABELS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'home-filter-chip' + (id === a ? ' is-active' : '');
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', id === a ? 'true' : 'false');
+    btn.setAttribute('data-filter', id);
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      if (state.homeFilter === id) return;
+      state.homeFilter = id;
+      renderHome();
+    });
+    row.appendChild(btn);
+  }
+  return row;
+}
+
+// ─── Unified timeline (events + items merged chronologically) ───────────
+
+/**
+ * Heuristic: does this author string look agent-y? Used by both the
+ * `agents` filter and the row icon. Lower-cased substring search
+ * against common agent / bot tokens; not authoritative (real agent
+ * identity lands in 3n/3m), just good-enough until then.
+ *
+ * Pure; exported for tests.
+ */
+export function looksLikeAgentAuthor(author: string): boolean {
+  if (typeof author !== 'string' || author.length === 0) return false;
+  const a = author.toLowerCase();
+  return (
+    a.includes('agent') ||
+    a.includes('bot') ||
+    a.endsWith('.ai') ||
+    a.includes('autoscript') ||
+    a.includes('worker')
+  );
+}
+
+/**
+ * Merge events + items into a unified chronological timeline.
+ * Items dedupe against events when an event was emitted for the same
+ * item-creation (matched on item.id appearing in event.kind / id).
+ * Pure; exported for tests.
+ */
+export function mergeTimeline(
+  events: ReadonlyArray<RendererEvent>,
+  items: ReadonlyArray<RendererItemSummary>
+): TimelineRow[] {
+  const rows: TimelineRow[] = [];
+
+  for (const item of items) {
+    const space = item.otherSpaces[0];
+    const row: TimelineRow = {
+      kind: 'item',
+      id: `item:${item.id}`,
+      author: item.producedBy?.name ?? '',
+      verb: 'added',
+      object: item.title.length > 0 ? item.title : '(untitled)',
+      timestamp: item.updatedAt || item.createdAt,
+      fromAgent: item.producedBy?.kind === 'Agent',
+      itemId: item.id,
+    };
+    if (space !== undefined) {
+      row.space = space;
+      row.spaceId = space.id;
+    }
+    if (typeof item.excerpt === 'string' && item.excerpt.length > 0) {
+      row.excerpt = item.excerpt;
+    }
+    rows.push(row);
   }
 
-  const totalIsZero =
-    counts.spaces === 0 &&
-    counts.assets === 0 &&
-    counts.people === 0 &&
-    counts.agents === 0;
-  if (totalIsZero) {
-    card.appendChild(buildEmpty('Your data room is empty.', 'Create your first Space →'));
-    return card;
+  for (const e of events) {
+    // Soft de-dup: if an item with the same trailing id segment is
+    // already in the rows from `items`, skip the event (the item row
+    // is richer).
+    const isItemEvent = rows.some((r) => r.kind === 'item' && e.id.endsWith(r.itemId ?? '___'));
+    if (isItemEvent) continue;
+
+    const space: RendererSpaceChipRef | undefined =
+      typeof e.spaceId === 'string' && e.spaceId.length > 0
+        ? {
+            id: e.spaceId,
+            name: typeof e.spaceName === 'string' && e.spaceName.length > 0 ? e.spaceName : e.spaceId,
+          }
+        : undefined;
+
+    const row: TimelineRow = {
+      kind: 'event',
+      id: `event:${e.id}`,
+      author: e.author,
+      verb: deriveVerb(e.kind),
+      object: deriveObject(e.kind),
+      timestamp: e.timestamp,
+      fromAgent: looksLikeAgentAuthor(e.author),
+    };
+    if (space !== undefined) {
+      row.space = space;
+      row.spaceId = space.id;
+    }
+    rows.push(row);
   }
 
-  const grid = document.createElement('div');
-  grid.className = 'home-counts';
-  grid.appendChild(buildCountTile('Spaces', counts.spaces));
-  grid.appendChild(buildCountTile('Assets', counts.assets));
-  grid.appendChild(buildCountTile('People', counts.people));
-  card.appendChild(grid);
+  rows.sort((a, b) => {
+    const ta = Date.parse(a.timestamp);
+    const tb = Date.parse(b.timestamp);
+    const na = Number.isFinite(ta) ? ta : 0;
+    const nb = Number.isFinite(tb) ? tb : 0;
+    return nb - na;
+  });
+  return rows;
+}
 
-  const footer = document.createElement('div');
-  footer.className = 'home-counts-footer';
-  const strong = document.createElement('span');
-  strong.className = 'home-counts-footer-strong';
-  strong.textContent = String(counts.agents);
-  footer.appendChild(document.createTextNode('Plus '));
-  footer.appendChild(strong);
-  footer.appendChild(
+/**
+ * Translate a commit `kind` string ("item:added", "item:updated",
+ * "auth.refresh", etc.) into a friendly verb phrase. Returns the
+ * raw kind when no friendly form is known so we never lose signal.
+ */
+function deriveVerb(kind: string): string {
+  if (typeof kind !== 'string' || kind.length === 0) return 'recorded';
+  const lower = kind.toLowerCase();
+  if (lower.includes('add')) return 'added';
+  if (lower.includes('create')) return 'created';
+  if (lower.includes('update')) return 'updated';
+  if (lower.includes('delete') || lower.includes('remove')) return 'removed';
+  if (lower.includes('produce')) return 'produced';
+  if (lower.includes('share')) return 'shared';
+  return kind;
+}
+
+function deriveObject(kind: string): string {
+  if (typeof kind !== 'string' || kind.length === 0) return 'an event';
+  // "item:added" -> "an item"; "space:created" -> "a Space"
+  const before = kind.split(':')[0]?.toLowerCase() ?? '';
+  if (before === 'item' || before === 'asset') return 'an item';
+  if (before === 'space') return 'a Space';
+  if (before === 'agent') return 'an agent';
+  if (before === 'comment' || before === 'message') return 'a comment';
+  return 'an event';
+}
+
+/**
+ * Apply the active filter to a merged timeline. Pure; exported for
+ * tests.
+ */
+export function filterTimeline(
+  rows: ReadonlyArray<TimelineRow>,
+  filter: HomeFilter,
+  nowMs: number
+): TimelineRow[] {
+  if (filter === 'all') return [...rows];
+  if (filter === 'people') return rows.filter((r) => !r.fromAgent);
+  if (filter === 'agents') return rows.filter((r) => r.fromAgent);
+  const horizonMs = filter === '24h' ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+  const cutoff = nowMs - horizonMs;
+  return rows.filter((r) => {
+    const t = Date.parse(r.timestamp);
+    return Number.isFinite(t) && t >= cutoff;
+  });
+}
+
+/**
+ * Build the full timeline region: header, list (or skeleton/empty/
+ * error), end-of-feed cue. Wires click on each row to navigate to the
+ * relevant Space (and item, for item-kind rows).
+ */
+function buildHomeTimeline(): HTMLElement {
+  const region = document.createElement('section');
+  region.className = 'home-timeline';
+  region.setAttribute('aria-label', 'Activity timeline');
+
+  const eventsEntry = state.home.events;
+  const itemsEntry = state.home.recentItems;
+
+  // Error: both queries failed, no cached data.
+  if (
+    eventsEntry.error !== null &&
+    itemsEntry.error !== null &&
+    eventsEntry.value === null &&
+    itemsEntry.value === null
+  ) {
+    region.appendChild(buildCardError(eventsEntry.error));
+    return region;
+  }
+
+  // Initial load: neither query has resolved yet.
+  if (eventsEntry.value === null && itemsEntry.value === null) {
+    region.appendChild(buildTimelineSkeleton(8));
+    region.classList.add('is-loading');
+    return region;
+  }
+
+  const merged = mergeTimeline(
+    eventsEntry.value ?? [],
+    itemsEntry.value ?? []
+  );
+  const filtered = filterTimeline(merged, state.homeFilter, Date.now());
+
+  if (filtered.length === 0) {
+    region.appendChild(buildTimelineEmpty(state.homeFilter, merged.length > 0));
+    return region;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'home-timeline-list';
+  for (const row of filtered) {
+    list.appendChild(buildTimelineRow(row));
+  }
+  region.appendChild(list);
+
+  // End-of-feed cue (only when not actively filtering away rows).
+  if (filtered.length >= 5 && filtered.length === merged.length) {
+    const tail = document.createElement('div');
+    tail.className = 'home-timeline-tail';
+    tail.textContent = 'You are all caught up.';
+    region.appendChild(tail);
+  }
+
+  return region;
+}
+
+function buildTimelineEmpty(filter: HomeFilter, hasUnfilteredRows: boolean): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'home-timeline-empty';
+  if (hasUnfilteredRows) {
+    wrap.textContent =
+      filter === '24h'
+        ? 'Nothing in the last 24 hours. Try "Last 7 days" or "All".'
+        : filter === '7d'
+          ? 'Nothing in the last 7 days. Try "All".'
+          : filter === 'people'
+            ? 'No people-driven activity here. Switch to "Agents" or "All".'
+            : 'No agent-driven activity here. Switch to "People" or "All".';
+    return wrap;
+  }
+  wrap.appendChild(
     document.createTextNode(
-      counts.agents === 1 ? ' agent available to your account' : ' agents available to your account'
+      'Nothing has happened in your Spaces yet. When you or an agent adds an item, it shows up here.'
     )
   );
-  card.appendChild(footer);
-
-  return card;
+  return wrap;
 }
 
-export function buildCountTile(label: string, value: number): HTMLElement {
-  const tile = document.createElement('div');
-  tile.className = 'home-count-tile';
-  const v = document.createElement('div');
-  v.className = 'home-count-value';
-  v.textContent = formatBigNumber(value);
-  tile.appendChild(v);
-  const l = document.createElement('div');
-  l.className = 'home-count-label';
-  l.textContent = label;
-  tile.appendChild(l);
-  // Tufte-style sparkline: synthesised from the count itself for v1
-  // (real time-series ships with v2's auto-metadata work). The line
-  // shows a gentle upward curve weighted by the value so users get a
-  // visual cue without false precision.
-  tile.appendChild(buildSparkline(value));
-  return tile;
+function buildTimelineSkeleton(rows: number): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'home-timeline-list';
+  for (let i = 0; i < rows; i++) {
+    const row = document.createElement('div');
+    row.className = 'home-timeline-row is-skeleton';
+    const meta = document.createElement('div');
+    meta.className = 'home-skeleton home-skeleton-line is-short';
+    row.appendChild(meta);
+    const title = document.createElement('div');
+    title.className = 'home-skeleton home-skeleton-line';
+    row.appendChild(title);
+    wrap.appendChild(row);
+  }
+  return wrap;
 }
 
 /**
- * Render a 30-point sparkline as inline SVG. v1 synthesises the
- * series from the count so the visual reads "growing → here we are";
- * v2 will derive real daily buckets from `:Asset.createdAt`.
+ * Build a single timeline row.
  *
- * Pure builder: no DOM lookups, deterministic for a given count.
- * Exported for jsdom tests.
+ * Visual: `[icon] [author] [verb] [object]` followed by a meta line
+ * (`in [Space] · [recency]`) and an optional excerpt for item rows.
+ *
+ * Click navigates to the Space (and opens the item in the detail
+ * rail when `itemId` is present). Pure DOM construction; the click
+ * handler reaches out via `setActiveScope` + `loadItemDetail` which
+ * are module-private but in the same renderer bundle.
  */
-export function buildSparkline(value: number): SVGElement {
-  const svgNS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('class', 'home-sparkline');
-  svg.setAttribute('viewBox', '0 0 100 18');
-  svg.setAttribute('preserveAspectRatio', 'none');
-  svg.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS(svgNS, 'path');
-  path.setAttribute('d', sparklinePath(value));
-  svg.appendChild(path);
-  return svg as unknown as SVGElement;
-}
+export function buildTimelineRow(row: TimelineRow): HTMLElement {
+  const el = document.createElement('article');
+  el.className = `home-timeline-row home-timeline-row-${row.kind}`;
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('data-row-id', row.id);
+  if (row.fromAgent) el.classList.add('is-agent');
 
-/**
- * Compute a smooth-ish path string for the synthesised sparkline.
- * Returns an SVG path `d` attribute. For value=0 returns a flat line
- * along the baseline.
- */
-export function sparklinePath(value: number): string {
-  const points = 30;
-  const w = 100;
-  const h = 18;
-  const baseline = h - 1;
-  if (value <= 0) {
-    return `M0,${baseline} L${w},${baseline}`;
-  }
-  // Map value to a 0-1 "intensity" with diminishing returns past 100.
-  const intensity = Math.min(1, Math.log10(value + 1) / 2.5);
-  const peakHeight = baseline - intensity * (h - 2);
-  const segments: string[] = [];
-  for (let i = 0; i < points; i++) {
-    const x = (i / (points - 1)) * w;
-    // Slight wave pattern that trends upward; makes the sparkline
-    // read as "active growth" rather than a perfect curve.
-    const t = i / (points - 1);
-    const trend = peakHeight + (baseline - peakHeight) * (1 - Math.pow(t, 1.4));
-    const wiggle = Math.sin(i * 0.6) * 0.6;
-    const y = Math.max(1, Math.min(baseline, trend + wiggle));
-    segments.push(`${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(2)}`);
-  }
-  return segments.join(' ');
-}
+  // Icon: dot whose color signals the producer kind. Agent rows
+  // get a square-ish accent, person rows get a circle. (Subtle;
+  // accessibility cue is still the text.)
+  const dot = document.createElement('span');
+  dot.className = 'home-timeline-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  el.appendChild(dot);
 
-function buildCountsSkeleton(): HTMLElement {
-  const grid = document.createElement('div');
-  grid.className = 'home-counts';
-  for (let i = 0; i < 3; i++) {
-    const tile = document.createElement('div');
-    tile.className = 'home-count-tile';
-    const num = document.createElement('div');
-    num.className = 'home-skeleton home-skeleton-number';
-    tile.appendChild(num);
-    const label = document.createElement('div');
-    label.className = 'home-skeleton home-skeleton-line is-short';
-    tile.appendChild(label);
-    grid.appendChild(tile);
-  }
-  return grid;
-}
+  const body = document.createElement('div');
+  body.className = 'home-timeline-body';
 
-// ─── Card 2: Recent activity ────────────────────────────────────────────
+  const headline = document.createElement('div');
+  headline.className = 'home-timeline-headline';
 
-export function buildHomeContributors(): HTMLElement {
-  const card = document.createElement('article');
-  card.className = 'home-card home-card-contributors';
+  const authorEl = document.createElement('span');
+  authorEl.className = 'home-timeline-author';
+  authorEl.textContent = row.author.length > 0 ? row.author : 'Someone';
+  headline.appendChild(authorEl);
 
-  const header = document.createElement('div');
-  header.className = 'home-card-header';
-  const title = document.createElement('h3');
-  title.className = 'home-card-title';
-  title.textContent = 'Recent activity';
-  header.appendChild(title);
-  card.appendChild(header);
+  const verbEl = document.createElement('span');
+  verbEl.className = 'home-timeline-verb';
+  verbEl.textContent = ` ${row.verb} `;
+  headline.appendChild(verbEl);
 
-  const entry = state.home.contributors;
-  if (entry.error !== null && entry.value === null) {
-    card.appendChild(buildCardError(entry.error));
-    return card;
-  }
+  const objectEl = document.createElement('span');
+  objectEl.className = 'home-timeline-object';
+  objectEl.textContent = row.object;
+  headline.appendChild(objectEl);
 
-  const contributors = entry.value;
-  if (contributors === null) {
-    card.appendChild(buildLinesSkeleton(4));
-    card.classList.add('is-loading');
-    return card;
-  }
+  body.appendChild(headline);
 
-  if (contributors.length === 0) {
-    card.appendChild(
-      buildEmpty('No activity yet this week.', 'Activity from people and agents will appear here.')
-    );
-    return card;
-  }
-
-  const list = document.createElement('div');
-  list.className = 'home-contributors';
-  for (const c of contributors) {
-    list.appendChild(buildContributorRow(c));
-  }
-  card.appendChild(list);
-
-  const footer = document.createElement('div');
-  footer.className = 'home-card-header';
-  const seeAll = document.createElement('button');
-  seeAll.type = 'button';
-  seeAll.className = 'home-card-action';
-  seeAll.textContent = 'See timeline →';
-  seeAll.addEventListener('click', () => {
-    void openEventsModal();
-  });
-  footer.appendChild(seeAll);
-  card.appendChild(footer);
-
-  return card;
-}
-
-export function buildContributorRow(c: RendererContributor): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'home-contributor-row';
-  const name = document.createElement('div');
-  name.className = 'home-contributor-name';
-  name.textContent = c.displayName.length > 0 ? c.displayName : c.author;
-  row.appendChild(name);
-  const summary = document.createElement('div');
-  summary.className = 'home-contributor-summary';
-  summary.textContent = `${formatCount(c.events)} ${c.events === 1 ? 'item' : 'items'} ${formatRecency(c.lastEventAt)}`;
-  row.appendChild(summary);
-  return row;
-}
-
-// ─── Card 3: Agents in your account ─────────────────────────────────────
-
-export function buildHomeAgents(): HTMLElement {
-  const card = document.createElement('article');
-  card.className = 'home-card home-card-agents';
-
-  const header = document.createElement('div');
-  header.className = 'home-card-header';
-  const title = document.createElement('h3');
-  title.className = 'home-card-title';
-  title.textContent = 'Agents in your account';
-  header.appendChild(title);
-  card.appendChild(header);
-
-  const entry = state.home.agents;
-  if (entry.error !== null && entry.value === null) {
-    card.appendChild(buildCardError(entry.error));
-    return card;
-  }
-
-  const agents = entry.value;
-  if (agents === null) {
-    card.appendChild(buildLinesSkeleton(3));
-    card.classList.add('is-loading');
-    return card;
-  }
-
-  if (agents.length === 0) {
-    card.appendChild(buildEmpty('No agents enabled for your account yet.', ''));
-    return card;
-  }
-
-  const list = document.createElement('div');
-  list.className = 'home-agents';
-  for (const a of agents) {
-    list.appendChild(buildAgentRow(a));
-  }
-  card.appendChild(list);
-
-  const totalAgents = state.home.counts.value?.agents ?? agents.length;
-  const remaining = Math.max(0, totalAgents - agents.length);
-  if (remaining > 0) {
-    const footer = document.createElement('div');
-    footer.className = 'home-card-header';
-    const more = document.createElement('button');
-    more.type = 'button';
-    more.className = 'home-card-action';
-    more.textContent = `+ ${formatCount(remaining)} more — see all →`;
-    more.addEventListener('click', () => {
-      void openAgentsModal();
-    });
-    footer.appendChild(more);
-    card.appendChild(footer);
-  }
-
-  return card;
-}
-
-export function buildAgentRow(a: RendererAgentSummary): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'home-agent-row';
-  const icon = document.createElement('span');
-  icon.className = 'home-agent-icon';
-  row.appendChild(icon);
-  const text = document.createElement('div');
-  const name = document.createElement('span');
-  name.className = 'home-agent-name';
-  name.textContent = a.name;
-  text.appendChild(name);
-  if (a.description.length > 0) {
-    const desc = document.createElement('span');
-    desc.className = 'home-agent-description';
-    desc.textContent = a.description;
-    text.appendChild(desc);
-  }
-  row.appendChild(text);
-  return row;
-}
-
-// ─── Card 4: Your view ──────────────────────────────────────────────────
-
-export function buildHomePermission(): HTMLElement | null {
-  const entry = state.home.permission;
-  // Hide the card entirely while loading the first time AND when
-  // visibleSpaceCount is 0 (the empty story is told by Card 1).
-  if (entry.value === null && !entry.loading) return null;
-  if (entry.value !== null && entry.value.visibleSpaceCount === 0) return null;
-
-  const card = document.createElement('article');
-  card.className = 'home-card home-card-permission';
-
-  const header = document.createElement('div');
-  header.className = 'home-card-header';
-  const title = document.createElement('h3');
-  title.className = 'home-card-title';
-  title.textContent = 'Your view';
-  header.appendChild(title);
-  card.appendChild(header);
-
-  if (entry.error !== null && entry.value === null) {
-    card.appendChild(buildCardError(entry.error));
-    return card;
-  }
-
-  if (entry.value === null) {
-    const skeleton = document.createElement('div');
-    skeleton.className = 'home-skeleton home-skeleton-line is-medium';
-    card.appendChild(skeleton);
-    card.classList.add('is-loading');
-    return card;
-  }
-
-  const text = document.createElement('div');
-  text.className = 'home-permission-text';
-  if (
-    typeof entry.value.totalSpaceCount === 'number' &&
-    entry.value.totalSpaceCount > entry.value.visibleSpaceCount
-  ) {
-    text.textContent = `You can see ${entry.value.visibleSpaceCount} of ${entry.value.totalSpaceCount} Spaces in this account.`;
-  } else {
-    text.textContent = `You can see ${entry.value.visibleSpaceCount} ${entry.value.visibleSpaceCount === 1 ? 'Space' : 'Spaces'} in this account.`;
-  }
-  card.appendChild(text);
-
-  return card;
-}
-
-// ─── Card 5: Just added ─────────────────────────────────────────────────
-
-export function buildHomeRecent(): HTMLElement {
-  const card = document.createElement('article');
-  card.className = 'home-card home-card-recent';
-
-  const header = document.createElement('div');
-  header.className = 'home-card-header';
-  const title = document.createElement('h3');
-  title.className = 'home-card-title';
-  title.textContent = 'Just added';
-  header.appendChild(title);
-  card.appendChild(header);
-
-  const entry = state.home.recentItems;
-  if (entry.error !== null && entry.value === null) {
-    card.appendChild(buildCardError(entry.error));
-    return card;
-  }
-
-  const items = entry.value;
-  if (items === null) {
-    card.appendChild(buildLinesSkeleton(3));
-    card.classList.add('is-loading');
-    return card;
-  }
-
-  if (items.length === 0) {
-    card.appendChild(buildEmpty('Nothing added recently.', 'Drop a file in to get started.'));
-    return card;
-  }
-
-  const list = document.createElement('div');
-  list.className = 'home-recent-list';
-  for (const item of items) {
-    list.appendChild(buildRecentItemRow(item));
-  }
-  card.appendChild(list);
-
-  return card;
-}
-
-export function buildRecentItemRow(item: RendererItemSummary): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'home-recent-row';
-  row.setAttribute('role', 'button');
-  row.setAttribute('tabindex', '0');
-  row.setAttribute('data-item-id', item.id);
-
-  const title = document.createElement('div');
-  title.className = 'home-recent-title';
-  title.textContent = item.title.length > 0 ? item.title : '(untitled)';
-  row.appendChild(title);
-
+  // Meta line: Space chip + recency.
   const meta = document.createElement('div');
-  meta.className = 'home-recent-meta';
-  const spaceChip = item.otherSpaces[0];
-  if (spaceChip !== undefined) {
-    const space = document.createElement('span');
-    space.className = 'home-recent-space-name';
-    space.textContent = `in ${spaceChip.name}`;
-    meta.appendChild(space);
+  meta.className = 'home-timeline-meta';
+  if (row.space !== undefined) {
+    const inEl = document.createElement('span');
+    inEl.className = 'home-timeline-meta-prefix';
+    inEl.textContent = 'in ';
+    meta.appendChild(inEl);
+    meta.appendChild(buildSpaceChip(row.space));
     meta.appendChild(document.createTextNode(' · '));
   }
-  meta.appendChild(document.createTextNode(formatRecency(item.updatedAt || item.createdAt)));
-  row.appendChild(meta);
+  const ts = document.createElement('span');
+  ts.className = 'home-timeline-recency';
+  ts.textContent = formatRecency(row.timestamp);
+  meta.appendChild(ts);
+  body.appendChild(meta);
 
-  row.addEventListener('click', () => {
-    if (typeof spaceChip?.id === 'string' && spaceChip.id.length > 0) {
-      setActiveScope(spaceChip.id);
-      // The items list will pick up; the existing `loadItemDetail` is
-      // wired separately. v1 navigates to the Space; opening the
-      // detail rail directly is a future enhancement.
-    } else {
+  if (typeof row.excerpt === 'string' && row.excerpt.length > 0) {
+    const ex = document.createElement('p');
+    ex.className = 'home-timeline-excerpt';
+    ex.textContent = row.excerpt;
+    body.appendChild(ex);
+  }
+
+  el.appendChild(body);
+
+  el.addEventListener('click', () => {
+    if (typeof row.spaceId === 'string' && row.spaceId.length > 0) {
+      setActiveScope(row.spaceId);
+      if (typeof row.itemId === 'string' && row.itemId.length > 0) {
+        void loadItemDetail(row.itemId);
+      }
+    } else if (row.kind === 'item') {
+      // Item not in any Space → take the user to Uncategorized so
+      // they can see it in context.
       setActiveScope(UNCATEGORIZED_SPACE_ID);
     }
   });
 
-  return row;
+  return el;
 }
 
-// ─── Modals (used by Card 2 + Card 3 "see all") ─────────────────────────
+// ─── Context column (secondary right rail of Home) ──────────────────────
 
-async function openEventsModal(): Promise<void> {
-  const bridge = window.lite?.spaces?.home;
-  if (bridge === undefined) return;
-  const modal = mountModal('Recent activity (last 100 events)');
-  const body = modal.querySelector<HTMLElement>('.home-modal-body');
-  if (body === null) return;
-  body.appendChild(buildLinesSkeleton(8));
-  try {
-    const envelope = await bridge.recentEvents({ limit: 100 });
-    body.replaceChildren();
-    if (envelope.ok === false) {
-      body.appendChild(buildCardError(envelope.error.message));
-      return;
-    }
-    const events = envelope.value;
-    if (events.length === 0) {
-      body.appendChild(buildEmpty('No recent events.', ''));
-      return;
-    }
-    for (const e of events) {
-      const row = document.createElement('div');
-      row.className = 'home-modal-row';
-      const top = document.createElement('div');
-      top.className = 'home-modal-row-title';
-      top.textContent = `${e.author} · ${e.kind}`;
-      row.appendChild(top);
-      const meta = document.createElement('div');
-      meta.className = 'home-modal-row-meta';
-      const parts: string[] = [];
-      if (typeof e.spaceName === 'string' && e.spaceName.length > 0) {
-        parts.push(`in ${e.spaceName}`);
-      }
-      parts.push(formatRecency(e.timestamp));
-      meta.textContent = parts.join(' · ');
-      row.appendChild(meta);
-      body.appendChild(row);
-    }
-  } catch (err) {
-    body.replaceChildren();
-    body.appendChild(buildCardError(messageFrom(err)));
+/**
+ * The small right-rail context column. Holds the durable signals
+ * that don't belong in the timeline: who's been active this week,
+ * how the user's view is scoped, and a peek at available agents.
+ * Each block is independent — none blocks the timeline.
+ */
+function buildHomeContext(): HTMLElement {
+  const aside = document.createElement('aside');
+  aside.className = 'home-context';
+  aside.setAttribute('aria-label', 'Spaces context');
+
+  aside.appendChild(buildContextActiveContributors());
+  aside.appendChild(buildContextAboutThisView());
+  aside.appendChild(buildContextAgentsPeek());
+
+  return aside;
+}
+
+function buildContextActiveContributors(): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'home-context-section';
+
+  const title = document.createElement('h4');
+  title.className = 'home-context-title';
+  title.textContent = 'Active this week';
+  section.appendChild(title);
+
+  const entry = state.home.contributors;
+  if (entry.error !== null && entry.value === null) {
+    section.appendChild(buildCardError(entry.error));
+    return section;
   }
+  const contributors = entry.value;
+  if (contributors === null) {
+    section.appendChild(buildLinesSkeleton(3));
+    return section;
+  }
+  if (contributors.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'home-context-empty';
+    empty.textContent = 'No activity yet this week.';
+    section.appendChild(empty);
+    return section;
+  }
+  const list = document.createElement('ul');
+  list.className = 'home-context-list';
+  for (const c of contributors) {
+    const li = document.createElement('li');
+    li.className = 'home-context-row';
+    const name = document.createElement('span');
+    name.className = 'home-context-row-name';
+    name.textContent = c.displayName.length > 0 ? c.displayName : c.author;
+    li.appendChild(name);
+    const count = document.createElement('span');
+    count.className = 'home-context-row-count';
+    count.textContent = String(c.events);
+    li.appendChild(count);
+    list.appendChild(li);
+  }
+  section.appendChild(list);
+  return section;
 }
+
+function buildContextAboutThisView(): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'home-context-section';
+
+  const title = document.createElement('h4');
+  title.className = 'home-context-title';
+  title.textContent = 'About this view';
+  section.appendChild(title);
+
+  const permEntry = state.home.permission;
+  const countsEntry = state.home.counts;
+
+  if (permEntry.value === null && permEntry.error === null) {
+    section.appendChild(buildLinesSkeleton(2));
+    return section;
+  }
+  if (permEntry.value === null) {
+    section.appendChild(buildCardError(permEntry.error ?? 'Permission unavailable'));
+    return section;
+  }
+
+  const visible = permEntry.value.visibleSpaceCount;
+  const total = permEntry.value.totalSpaceCount;
+  const acl = document.createElement('p');
+  acl.className = 'home-context-text';
+  if (typeof total === 'number' && total > visible) {
+    acl.textContent = `You can see ${visible} of ${total} Spaces in this account.`;
+  } else {
+    acl.textContent =
+      visible === 1
+        ? 'You can see 1 Space in this account.'
+        : `You can see all ${visible} Spaces in this account.`;
+  }
+  section.appendChild(acl);
+
+  if (countsEntry.value !== null) {
+    const summary = document.createElement('p');
+    summary.className = 'home-context-text home-context-text-dim';
+    summary.textContent = `${formatBigNumber(countsEntry.value.assets)} ${
+      countsEntry.value.assets === 1 ? 'item' : 'items'
+    } across ${formatBigNumber(countsEntry.value.people)} ${
+      countsEntry.value.people === 1 ? 'person' : 'people'
+    } and ${formatBigNumber(countsEntry.value.agents)} ${
+      countsEntry.value.agents === 1 ? 'agent' : 'agents'
+    }.`;
+    section.appendChild(summary);
+  }
+
+  return section;
+}
+
+function buildContextAgentsPeek(): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'home-context-section';
+
+  const title = document.createElement('h4');
+  title.className = 'home-context-title';
+  title.textContent = 'Agents in your account';
+  section.appendChild(title);
+
+  const entry = state.home.agents;
+  if (entry.error !== null && entry.value === null) {
+    section.appendChild(buildCardError(entry.error));
+    return section;
+  }
+  const agents = entry.value;
+  if (agents === null) {
+    section.appendChild(buildLinesSkeleton(3));
+    return section;
+  }
+  if (agents.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'home-context-empty';
+    empty.textContent = 'No agents enabled yet.';
+    section.appendChild(empty);
+    return section;
+  }
+  const list = document.createElement('ul');
+  list.className = 'home-context-list';
+  for (const a of agents) {
+    const li = document.createElement('li');
+    li.className = 'home-context-row';
+    const name = document.createElement('span');
+    name.className = 'home-context-row-name';
+    name.textContent = a.name;
+    li.appendChild(name);
+    list.appendChild(li);
+  }
+  section.appendChild(list);
+  const totalAgents = state.home.counts.value?.agents ?? agents.length;
+  const remaining = Math.max(0, totalAgents - agents.length);
+  if (remaining > 0) {
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'home-context-action';
+    action.textContent = `+ ${remaining} more — see all`;
+    action.addEventListener('click', () => {
+      void openAgentsModal();
+    });
+    section.appendChild(action);
+  }
+  return section;
+}
+
+// ─── Modals (agents "see all") ──────────────────────────────────────────
+//
+// The timeline-first redesign promoted the unified event/item feed
+// to the primary Home surface, so the old "See full timeline →"
+// events modal is gone (its content IS the page now). The agents
+// "see all" modal stays for the right-rail context column.
 
 async function openAgentsModal(): Promise<void> {
   const bridge = window.lite?.spaces?.home;
@@ -1898,18 +2280,15 @@ function messageFrom(err: unknown): string {
   normalizeSearchQuery,
   matchesSearchQuery,
   sortSpaces,
-  // Home (chunk 3o) builders + helpers
-  buildHomeCounts,
-  buildHomeContributors,
-  buildHomeAgents,
-  buildHomePermission,
-  buildHomeRecent,
-  buildCountTile,
-  buildContributorRow,
-  buildAgentRow,
-  buildRecentItemRow,
-  buildSparkline,
-  sparklinePath,
+  // Home (chunk 3o) — timeline-first builders + pure helpers.
+  buildWelcomeCard,
+  buildFilterChips,
+  buildTimelineRow,
+  mergeTimeline,
+  filterTimeline,
+  formatSinceLastVisit,
+  countTimelineSince,
+  looksLikeAgentAuthor,
   formatBigNumber,
   formatRecency,
   HOME_SCOPE_ID,
@@ -1940,7 +2319,12 @@ function messageFrom(err: unknown): string {
       agents: emptyCacheEntry<RendererAgentSummary[]>(),
       permission: emptyCacheEntry<RendererPermissionSummary>(),
       recentItems: emptyCacheEntry<RendererItemSummary[]>(),
+      events: emptyCacheEntry<RendererEvent[]>(),
     };
+    state.homeFilter = 'all';
+    state.welcomeDismissed = readWelcomeDismissed();
+    state.lastVisitMs = readLastVisitMs();
+    state.currentVisitMs = Date.now();
     init();
     // Allow the fire-and-forget initialLoad() to flush.
     await Promise.resolve();
