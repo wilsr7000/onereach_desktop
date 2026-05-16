@@ -36,8 +36,8 @@ body {
  * ============================================================ */
 
 .tab-bar {
-  flex: 0 0 36px;
-  height: 36px;
+  flex: 0 0 48px;
+  height: 48px;
   display: flex;
   align-items: stretch;
   background: var(--or-bg-shell);
@@ -49,21 +49,22 @@ body {
 }
 
 /*
- * Spaces "OR logo" button — ported from the full app's
- * `#black-hole-button` (tabbed-browser.html). Dark-blue radial-gradient
- * circle with the OneReach logo masked on top in semi-transparent
- * white. Scaled from the full app's 40x40 down to 28x28 so it lives
- * comfortably inside the 36px tab bar. Click handler in chrome.ts
- * routes to window.lite.spaces.open().
+ * Spaces "OR logo" button — ported VERBATIM from the full app's
+ * `#black-hole-button` (tabbed-browser.html). 40x40 dark-blue
+ * radial-gradient circle with the OneReach logo (16x16) masked on
+ * top in semi-transparent white. Tab bar grew from 36px → 48px to
+ * give this button proper breathing room (matches the full app's
+ * tab-bar height too). Click handler in chrome.ts routes to
+ * window.lite.spaces.open().
  */
 .spaces-or-button {
   -webkit-app-region: no-drag;
   position: relative;
   overflow: hidden;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   align-self: center;
-  margin: 0 8px 0 0;
+  margin: 0 8px;
   padding: 0;
   border-radius: 50%;
   border: 1px solid rgba(79, 140, 255, 0.32);
@@ -90,8 +91,8 @@ body {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   background-color: rgba(255, 255, 255, 0.9);
   -webkit-mask-image: url('./or-logo.png');
   -webkit-mask-size: contain;
