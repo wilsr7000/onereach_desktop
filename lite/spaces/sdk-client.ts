@@ -46,7 +46,10 @@ import type {
   RecentEventsOpts,
   RecentItemsOpts,
   AgentsSampleOpts,
+  CreateSpaceInput,
+  DeleteSpaceOpts,
 } from './types.js';
+import { MAX_SPACE_NAME_LENGTH, MAX_SPACE_DESC_LENGTH } from './types.js';
 import type { SpaceScope } from './scope.js';
 
 /**
@@ -95,6 +98,7 @@ const MAX_LIMIT = 500;
 export const CYPHER = {
   LIST_SPACES: `
     MATCH (s:Space)
+      WHERE s.deletedAt IS NULL
     OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)
     WITH s, count(a) AS itemCount
     RETURN s.id AS id,
@@ -138,8 +142,10 @@ export const CYPHER = {
   `,
   LIST_ITEMS_IN_SPACE: `
     MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(other:Space)
       WHERE other.id <> s.id
+        AND other.deletedAt IS NULL
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     WITH a,
          collect(DISTINCT { id: other.id,
@@ -170,12 +176,16 @@ export const CYPHER = {
     MATCH (a:Asset {id: $id})
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
+    OPTIONAL MATCH (editor:Person)-[:LAST_EDITED]->(a)
+    OPTIONAL MATCH (a)-[:TAGGED_AS]->(t:Tag)
     WITH a,
          collect(DISTINCT { id: s.id,
                             name: coalesce(s.name, s.id),
                             color: s.color,
                             iconKey: coalesce(s.iconKey, s.icon) }) AS spacesRaw,
-         head(collect(creator)) AS producer
+         head(collect(creator)) AS producer,
+         head(collect(editor)) AS lastEditor,
+         collect(DISTINCT coalesce(t.name, t.id)) AS edgeTags
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
            coalesce(a.type, a.assetType, 'other') AS kind,
@@ -185,6 +195,9 @@ export const CYPHER = {
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
            coalesce(a.excerpt, a.description, a.notes) AS excerpt,
            coalesce(a.content, '') AS content,
+           coalesce(a.size, a.fileSize, a.byteCount) AS size,
+           coalesce(a.mimeType, a.contentType) AS mimeType,
+           coalesce(a.tags, edgeTags, []) AS tags,
            null AS metadata,
            [x IN spacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
@@ -192,7 +205,13 @@ export const CYPHER = {
                 ELSE { kind: head(labels(producer)),
                        name: coalesce(producer.name, producer.title, ''),
                        id: producer.id }
-           END AS producedBy
+           END AS producedBy,
+           CASE WHEN lastEditor IS NULL
+                THEN null
+                ELSE { kind: head(labels(lastEditor)),
+                       name: coalesce(lastEditor.name, lastEditor.title, ''),
+                       id: lastEditor.id }
+           END AS lastEditedBy
     LIMIT 1
   `,
 
@@ -214,7 +233,7 @@ export const CYPHER = {
     RETURN labels
   `,
   HOME_ENTITY_COUNTS_FALLBACK: `
-    MATCH (s:Space) RETURN 'Space' AS kind, count(s) AS n
+    MATCH (s:Space) WHERE s.deletedAt IS NULL RETURN 'Space' AS kind, count(s) AS n
     UNION ALL
     MATCH (a:Asset) RETURN 'Asset' AS kind, count(a) AS n
     UNION ALL
@@ -231,6 +250,7 @@ export const CYPHER = {
   HOME_RECENT_ITEMS: `
     MATCH (a:Asset)
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
+      WHERE s.deletedAt IS NULL
     WITH a, head(collect(s)) AS firstSpace
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
@@ -316,8 +336,158 @@ export const CYPHER = {
    */
   HOME_PERMISSION_SUMMARY: `
     MATCH (s:Space)
+      WHERE s.deletedAt IS NULL
     WITH count(s) AS visible
     RETURN visible AS visibleSpaceCount
+  `,
+
+  // ─── Mutations (Phase 3a) ────────────────────────────────────────────
+  //
+  // Server-side uniqueness on `:Space.name` is enforced via the
+  // pre-CREATE existence check so we surface `SPACES_DUPLICATE_NAME`
+  // rather than relying on a (currently absent) `CREATE CONSTRAINT`.
+  // Soft-delete sets `s.deletedAt`. Every read path that touches
+  // `:Space` filters with `WHERE s.deletedAt IS NULL` so the soft-
+  // deleted Space disappears from listings, item-in-Space queries,
+  // entity counts, and the multi-Space chip projection. To surface
+  // deleted Spaces (e.g. for an "Undo" toast or a future "Trash"
+  // view) callers will need a parallel `LIST_SPACES_INCLUDING_DELETED`
+  // query that omits the WHERE -- not added in v1 since the toast's
+  // Undo flow only needs the id, not a re-list.
+
+  /**
+   * CREATE_SPACE -- atomic create. Fails if a non-deleted Space with
+   * the same name already exists in the account. The Cypher `WHERE NOT
+   * EXISTS` predicate is server-evaluated so the check + create are
+   * one round-trip; no race window between the two.
+   *
+   * Returns the new Space row projected the same way LIST_SPACES does.
+   * Empty result set means the name collided -- callers map to
+   * `SPACES_DUPLICATE_NAME`.
+   */
+  CREATE_SPACE: `
+    OPTIONAL MATCH (existing:Space)
+      WHERE toLower(coalesce(existing.name, '')) = toLower($name)
+        AND existing.deletedAt IS NULL
+    WITH existing
+    WHERE existing IS NULL
+    CREATE (s:Space {
+      id: $id,
+      name: $name,
+      description: $description,
+      color: $color,
+      iconKey: $iconKey,
+      createdAt: $now,
+      updatedAt: $now
+    })
+    RETURN s.id AS id,
+           coalesce(s.name, s.id) AS name,
+           coalesce(s.description, '') AS description,
+           coalesce(s.color, '') AS color,
+           coalesce(s.iconKey, '') AS iconKey,
+           0 AS itemCount,
+           toString(s.createdAt) AS createdAt,
+           toString(s.updatedAt) AS updatedAt
+  `,
+
+  /**
+   * RENAME_SPACE -- updates `s.name` and `s.updatedAt`. Two predicates
+   * combine to avoid race conditions:
+   *   - The target Space must exist and be non-deleted.
+   *   - No OTHER non-deleted Space already has the new name.
+   * Empty result set means either the target is missing (caller maps
+   * to `SPACES_NOT_FOUND`) or the name collides (mapped to
+   * `SPACES_DUPLICATE_NAME`). The two are distinguished by a follow-up
+   * existence probe via SPACE_EXISTS_BY_ID.
+   */
+  RENAME_SPACE: `
+    MATCH (s:Space {id: $id})
+      WHERE s.deletedAt IS NULL
+    OPTIONAL MATCH (other:Space)
+      WHERE other.id <> $id
+        AND toLower(coalesce(other.name, '')) = toLower($name)
+        AND other.deletedAt IS NULL
+    WITH s, other
+    WHERE other IS NULL
+    SET s.name = $name,
+        s.updatedAt = $now
+    RETURN s.id AS id,
+           coalesce(s.name, s.id) AS name,
+           coalesce(s.description, '') AS description,
+           coalesce(s.color, '') AS color,
+           coalesce(s.iconKey, '') AS iconKey,
+           toString(s.createdAt) AS createdAt,
+           toString(s.updatedAt) AS updatedAt
+  `,
+
+  /**
+   * SPACE_EXISTS_BY_ID -- 1-row existence probe used after RENAME or
+   * DELETE returns 0 rows, to distinguish NOT_FOUND from
+   * DUPLICATE_NAME / DELETE_NON_EMPTY in the SDK layer. Cheap and
+   * deterministic.
+   */
+  SPACE_EXISTS_BY_ID: `
+    MATCH (s:Space {id: $id})
+    RETURN count(s) AS count
+  `,
+
+  /**
+   * SPACE_ITEM_COUNT -- pre-flight for hard delete. Counts items
+   * connected via `:BELONGS_TO`. Returns 0 for empty Spaces and for
+   * non-existent ids (caller handles non-existence separately).
+   */
+  SPACE_ITEM_COUNT: `
+    MATCH (s:Space {id: $id})
+    OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)
+    RETURN count(a) AS count
+  `,
+
+  /**
+   * SOFT_DELETE_SPACE -- sets `deletedAt` so the Space stops appearing
+   * in listSpaces() but its items keep their `[:BELONGS_TO]` edges.
+   * Reversible via UNDELETE_SPACE.
+   */
+  SOFT_DELETE_SPACE: `
+    MATCH (s:Space {id: $id})
+      WHERE s.deletedAt IS NULL
+    SET s.deletedAt = $now,
+        s.updatedAt = $now
+    RETURN s.id AS id
+  `,
+
+  /**
+   * HARD_DELETE_SPACE -- removes the node entirely. Caller MUST have
+   * verified item count == 0 first; otherwise data orphans (items
+   * pointing at a now-missing Space). The Cypher itself uses DELETE
+   * (no DETACH) so a stale [:BELONGS_TO] edge will surface as a Neo4j
+   * constraint error -- belt-and-suspenders.
+   */
+  HARD_DELETE_SPACE: `
+    MATCH (s:Space {id: $id})
+    DELETE s
+  `,
+
+  /**
+   * UNDELETE_SPACE -- clears `deletedAt` so the Space reappears in
+   * listSpaces(). Returns the restored row in the LIST_SPACES shape.
+   * Empty result set means the Space wasn't soft-deleted (or doesn't
+   * exist) -- caller maps to `SPACES_NOT_FOUND`.
+   */
+  UNDELETE_SPACE: `
+    MATCH (s:Space {id: $id})
+      WHERE s.deletedAt IS NOT NULL
+    OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)
+    WITH s, count(a) AS itemCount
+    SET s.deletedAt = null,
+        s.updatedAt = $now
+    RETURN s.id AS id,
+           coalesce(s.name, s.id) AS name,
+           coalesce(s.description, '') AS description,
+           coalesce(s.color, '') AS color,
+           coalesce(s.iconKey, '') AS iconKey,
+           itemCount AS itemCount,
+           toString(s.createdAt) AS createdAt,
+           toString(s.updatedAt) AS updatedAt
   `,
 } as const;
 
@@ -479,6 +649,169 @@ export class SdkSpacesClient {
     return toPermissionSummary(rows[0]);
   }
 
+  // ─── Mutations (Phase 3a) ──────────────────────────────────────────────
+
+  /**
+   * Create a new Space. Validates input client-side, generates an id,
+   * stamps `createdAt`/`updatedAt`, executes the atomic create. A name
+   * collision returns 0 rows; we surface that as
+   * `SPACES_DUPLICATE_NAME`.
+   */
+  async createSpace(input: CreateSpaceInput): Promise<Space> {
+    const name = validateSpaceName(input.name);
+    const description = validateOptionalDescription(input.description);
+    const color = typeof input.color === 'string' ? input.color : '';
+    const iconKey = typeof input.iconKey === 'string' ? input.iconKey : '';
+    const id = generateSpaceId();
+    const now = nowIso();
+    const rows = await this.run(CYPHER.CREATE_SPACE, {
+      id,
+      name,
+      description,
+      color,
+      iconKey,
+      now,
+    });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_DUPLICATE_NAME',
+        message: `A space named "${name}" already exists`,
+        remediation: 'Pick a different name. Names are unique within an account.',
+        context: { name },
+      });
+    }
+    return toSpace(rows[0] as Record<string, unknown>);
+  }
+
+  /**
+   * Rename an existing Space. 0 rows from RENAME_SPACE means either the
+   * Space doesn't exist (or is soft-deleted) or the new name collides;
+   * a follow-up SPACE_EXISTS_BY_ID probe disambiguates so callers see
+   * the right error code.
+   */
+  async renameSpace(id: string, name: string): Promise<Space> {
+    const validId = validateSpaceId(id);
+    const validName = validateSpaceName(name);
+    const now = nowIso();
+    const rows = await this.run(CYPHER.RENAME_SPACE, {
+      id: validId,
+      name: validName,
+      now,
+    });
+    if (rows.length === 0) {
+      const exists = await this.spaceExists(validId);
+      if (!exists) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Space ${validId} not found (it may have been deleted)`,
+          remediation: 'Refresh the list and try again.',
+          context: { id: validId },
+        });
+      }
+      throw new SpacesError({
+        code: 'SPACES_DUPLICATE_NAME',
+        message: `A space named "${validName}" already exists`,
+        remediation: 'Pick a different name. Names are unique within an account.',
+        context: { id: validId, name: validName },
+      });
+    }
+    return toSpace(rows[0] as Record<string, unknown>);
+  }
+
+  /**
+   * Delete a Space. Defaults to soft (sets `deletedAt`); pass
+   * `{ soft: false }` to hard-remove. Hard delete refuses if the
+   * Space still has items so data can't orphan accidentally.
+   */
+  async deleteSpace(id: string, opts: DeleteSpaceOpts = {}): Promise<void> {
+    const validId = validateSpaceId(id);
+    const soft = opts.soft !== false; // default true
+
+    if (soft) {
+      const now = nowIso();
+      const rows = await this.run(CYPHER.SOFT_DELETE_SPACE, { id: validId, now });
+      if (rows.length === 0) {
+        const exists = await this.spaceExists(validId);
+        if (!exists) {
+          throw new SpacesError({
+            code: 'SPACES_NOT_FOUND',
+            message: `Space ${validId} not found`,
+            remediation: 'Refresh the list and try again.',
+            context: { id: validId },
+          });
+        }
+        // Space exists but the WHERE filtered it out -- already soft-deleted.
+        // Idempotent: treat as success.
+      }
+      return;
+    }
+
+    // Hard delete: pre-flight the item count.
+    const countRows = await this.run(CYPHER.SPACE_ITEM_COUNT, { id: validId });
+    const itemCount = toCount(countRows[0]);
+    if (countRows.length === 0) {
+      // The MATCH didn't bind -- Space doesn't exist.
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Space ${validId} not found`,
+        remediation: 'Refresh the list and try again.',
+        context: { id: validId },
+      });
+    }
+    if (itemCount > 0) {
+      throw new SpacesError({
+        code: 'SPACES_DELETE_NON_EMPTY',
+        message: `Cannot hard-delete a Space that still contains ${itemCount} item(s)`,
+        remediation:
+          'Move the items out first (or use soft delete -- the default -- which keeps items reachable via Uncategorized).',
+        context: { id: validId, itemCount },
+      });
+    }
+    await this.run(CYPHER.HARD_DELETE_SPACE, { id: validId });
+  }
+
+  /**
+   * Restore a soft-deleted Space. 0 rows means either the Space
+   * doesn't exist or wasn't soft-deleted -- a follow-up probe
+   * disambiguates so the caller sees the right error code.
+   */
+  async undeleteSpace(id: string): Promise<Space> {
+    const validId = validateSpaceId(id);
+    const now = nowIso();
+    const rows = await this.run(CYPHER.UNDELETE_SPACE, { id: validId, now });
+    if (rows.length === 0) {
+      const exists = await this.spaceExists(validId);
+      if (!exists) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Space ${validId} not found`,
+          remediation: 'Verify the id; the Space may have been hard-deleted.',
+          context: { id: validId },
+        });
+      }
+      // Exists but wasn't soft-deleted -- nothing to restore. Idempotent:
+      // re-fetch and return the current row.
+      const refreshed = await this.run(CYPHER.LIST_SPACES);
+      const match = refreshed
+        .map(toSpace)
+        .find((s) => s.id === validId);
+      if (match !== undefined) return match;
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Space ${validId} not found after undelete`,
+        remediation: 'Refresh the list and try again.',
+        context: { id: validId },
+      });
+    }
+    return toSpace(rows[0] as Record<string, unknown>);
+  }
+
+  /** @internal -- helper for disambiguating empty mutation results. */
+  private async spaceExists(id: string): Promise<boolean> {
+    const rows = await this.run(CYPHER.SPACE_EXISTS_BY_ID, { id });
+    return toCount(rows[0]) > 0;
+  }
+
   /**
    * Wraps the injected query function and translates underlying
    * errors into `SpacesError` so callers always see one stable
@@ -495,6 +828,99 @@ export class SdkSpacesClient {
       throw normalizeError(err);
     }
   }
+}
+
+// ─── Mutation helpers (Phase 3a) ─────────────────────────────────────────
+
+/**
+ * Validate + normalize a Space name. Throws `SPACES_INVALID_INPUT` on
+ * empty / too-long values. Trims whitespace.
+ */
+function validateSpaceName(raw: unknown): string {
+  if (typeof raw !== 'string') {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: 'Space name must be a string',
+      remediation: 'Pass a non-empty string for the name field.',
+      context: { received: typeof raw },
+    });
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: 'Space name cannot be empty',
+      remediation: 'Enter a name -- it can be edited later.',
+    });
+  }
+  if (trimmed.length > MAX_SPACE_NAME_LENGTH) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: `Space name is too long (${trimmed.length} chars; max ${MAX_SPACE_NAME_LENGTH})`,
+      remediation: `Shorten the name to ${MAX_SPACE_NAME_LENGTH} characters or fewer.`,
+      context: { length: trimmed.length, max: MAX_SPACE_NAME_LENGTH },
+    });
+  }
+  return trimmed;
+}
+
+/** Validate optional description; returns empty string when absent. */
+function validateOptionalDescription(raw: unknown): string {
+  if (raw === undefined || raw === null) return '';
+  if (typeof raw !== 'string') {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: 'Space description must be a string',
+      remediation: 'Pass a string (or omit the field).',
+      context: { received: typeof raw },
+    });
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length > MAX_SPACE_DESC_LENGTH) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: `Description is too long (${trimmed.length} chars; max ${MAX_SPACE_DESC_LENGTH})`,
+      remediation: `Shorten the description to ${MAX_SPACE_DESC_LENGTH} characters or fewer.`,
+      context: { length: trimmed.length, max: MAX_SPACE_DESC_LENGTH },
+    });
+  }
+  return trimmed;
+}
+
+/** Validate a Space id (used by rename / delete / undelete). */
+function validateSpaceId(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: 'Space id must be a non-empty string',
+      remediation: 'Pass an id taken from a prior listSpaces() result.',
+      context: { received: typeof raw },
+    });
+  }
+  return raw;
+}
+
+/**
+ * Generate a stable, URL-safe Space id. Uses crypto.randomUUID() when
+ * available (modern Node, Electron) and falls back to a timestamped
+ * pseudo-random string for environments that don't have it.
+ */
+function generateSpaceId(): string {
+  try {
+    const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+    if (c !== undefined && typeof c.randomUUID === 'function') {
+      return `space-${c.randomUUID()}`;
+    }
+  } catch {
+    /* fall through */
+  }
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `space-${Date.now().toString(36)}-${rand}`;
+}
+
+/** Single source of truth for the timestamp written to created/updated/deletedAt. */
+function nowIso(): string {
+  return new Date().toISOString();
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -605,7 +1031,33 @@ function toItem(row: Record<string, unknown>): Item {
   if (metaRaw !== null && typeof metaRaw === 'object' && !Array.isArray(metaRaw)) {
     item.metadata = metaRaw as Record<string, unknown>;
   }
+  // Phase A2 detail-pane projections. Each falls through to undefined
+  // when the underlying field is missing so the renderer can branch
+  // on presence rather than special-case sentinel values.
+  const size = optNumber(row, 'size');
+  if (size !== undefined && size >= 0) item.size = Math.floor(size);
+  const mime = optString(row, 'mimeType');
+  if (mime !== undefined) item.mimeType = mime;
+  item.tags = toTagList(row['tags']);
+  item.lastEditedBy = toProducedBy(row['lastEditedBy']);
   return item;
+}
+
+/**
+ * Normalize the `tags` projection into a string[] regardless of whether
+ * the graph stored them as an array property or projected from
+ * `[:TAGGED_AS]->(:Tag)` edges. Drops empty/non-string entries.
+ */
+function toTagList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const raw of v) {
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) continue;
+    out.push(trimmed);
+  }
+  return out;
 }
 
 const ITEM_KINDS: ReadonlySet<ItemKind> = new Set([

@@ -107,7 +107,28 @@ body {
 }
 
 .spaces-layout.has-detail {
-  grid-template-columns: 240px 1fr 320px;
+  /* Detail rail bumped from 320px → 480px so the rich asset view
+   * (meta strip, Markdown content, tags, type-specific blocks) has
+   * room without crowding the timeline. Below 1100px viewport the
+   * detail pane goes overlay-style via the media query below. */
+  grid-template-columns: 240px 1fr 480px;
+}
+
+@media (max-width: 1100px) {
+  /* On narrower windows the rail covers the items region so we
+   * don't squeeze either to unusable widths. Click "×" to dismiss. */
+  .spaces-layout.has-detail {
+    grid-template-columns: 240px 1fr;
+  }
+  .spaces-layout.has-detail .spaces-detail {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 480px;
+    z-index: 10;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.45);
+  }
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────── */
@@ -743,16 +764,53 @@ body {
   padding-top: 8px;
 }
 
+.spaces-detail-content-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spaces-detail-content-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.spaces-detail-toggle-btn {
+  font: inherit;
+  font-size: 11px;
+  color: #9a9aa3;
+  background: transparent;
+  border: none;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.spaces-detail-toggle-btn:hover {
+  color: #d2d2d6;
+}
+
+.spaces-detail-toggle-btn.is-active {
+  background: rgba(79, 140, 255, 0.18);
+  color: #f4f4f6;
+}
+
 .spaces-detail-content {
   background: #0B0D11;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
-  padding: 12px;
-  max-height: 360px;
+  padding: 14px 16px;
+  max-height: 480px;
   overflow: auto;
 }
 
-.spaces-detail-content pre {
+.spaces-detail-source-pre {
   font-family:
     'SF Mono',
     Menlo,
@@ -763,6 +821,104 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
+}
+
+/* Markdown-rendered body. Use the project's existing dark palette so
+ * it doesn't read as a separate visual world from the rest of the
+ * detail pane. */
+.spaces-markdown {
+  color: #e2e2e6;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.spaces-markdown h1,
+.spaces-markdown h2,
+.spaces-markdown h3 {
+  color: #f4f4f6;
+  margin: 18px 0 6px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+
+.spaces-markdown h1 { font-size: 18px; }
+.spaces-markdown h2 { font-size: 16px; }
+.spaces-markdown h3 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.4px; color: #c7c7cd; }
+
+.spaces-markdown h1:first-child,
+.spaces-markdown h2:first-child,
+.spaces-markdown h3:first-child { margin-top: 0; }
+
+.spaces-markdown p { margin: 0 0 12px; }
+.spaces-markdown p:last-child { margin-bottom: 0; }
+
+.spaces-markdown strong { color: #f4f4f6; }
+.spaces-markdown em { color: #c7c7cd; }
+
+.spaces-markdown a {
+  color: #8aa9ff;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(138, 169, 255, 0.3);
+}
+.spaces-markdown a:hover { border-bottom-color: rgba(138, 169, 255, 0.7); }
+
+.spaces-markdown ul,
+.spaces-markdown ol {
+  margin: 0 0 12px 22px;
+  padding: 0;
+}
+.spaces-markdown li { margin-bottom: 4px; }
+
+.spaces-markdown code {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #c7c7cd;
+}
+
+.spaces-markdown-code {
+  background: #0e1116;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  overflow-x: auto;
+}
+
+.spaces-markdown-code code {
+  background: transparent;
+  padding: 0;
+  font-size: 11.5px;
+  color: #d2d2d6;
+  display: block;
+  white-space: pre;
+}
+
+/* Mime hint next to the kind badge. */
+.spaces-detail-mime {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  color: #6f6f78;
+  letter-spacing: 0.2px;
+}
+
+/* Tag chip row in the detail pane. */
+.spaces-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.spaces-detail-tag {
+  font-size: 11px;
+  color: #c7c7cd;
+  background: rgba(123, 219, 255, 0.08);
+  border: 1px solid rgba(123, 219, 255, 0.18);
+  padding: 2px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.1px;
 }
 
 .spaces-detail-source {
@@ -1623,4 +1779,388 @@ body {
 .home-modal-row-meta {
   font-size: 11.5px;
   color: #9a9aa3;
+}
+
+/* ─── Mutations UI (Phase 3a) ─────────────────────────────────────────────
+ *
+ * Surfaces:
+ *   - "+ New Space" button in the header
+ *   - Per-row "⋯" affordance and floating row menu
+ *   - Inline-rename input replacing the row name on Rename
+ *   - Modal dialog for Create (single-input flow with inline validation)
+ *   - Self-dismissing toast with Undo for soft-delete reversal
+ */
+
+/* "+ New Space" button in the header. */
+.spaces-new-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(180deg, var(--or-accent-hover), var(--or-accent));
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(79, 140, 255, 0.18);
+  transition:
+    background var(--or-transition-fast, 120ms ease),
+    transform var(--or-transition-fast, 120ms ease),
+    box-shadow var(--or-transition-fast, 120ms ease);
+  margin-right: 12px;
+}
+
+.spaces-new-button:hover {
+  background: linear-gradient(180deg, #83b0ff, var(--or-accent-hover));
+  box-shadow: 0 6px 20px rgba(79, 140, 255, 0.28);
+  transform: translateY(-1px);
+}
+
+.spaces-new-button:active {
+  transform: translateY(0);
+}
+
+.spaces-new-button-glyph {
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 600;
+  position: relative;
+  top: -1px;
+}
+
+/* Hover-revealed "⋯" button on sidebar rows. */
+.spaces-row {
+  position: relative;
+}
+
+.spaces-row-menu-trigger {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--or-transition-fast, 120ms ease),
+    background var(--or-transition-fast, 120ms ease),
+    color var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-row:hover .spaces-row-menu-trigger,
+.spaces-row:focus-within .spaces-row-menu-trigger,
+.spaces-row-menu-trigger.is-open {
+  opacity: 1;
+}
+
+.spaces-row-menu-trigger:hover,
+.spaces-row-menu-trigger.is-open {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--or-text-primary, #f4f6fb);
+}
+
+/* Hide the count when the trigger is visible so they don't collide. */
+.spaces-row:hover .spaces-row-count,
+.spaces-row:focus-within .spaces-row-count,
+.spaces-row-menu-trigger.is-open ~ .spaces-row-count {
+  visibility: hidden;
+}
+
+/* The row context menu (popover). */
+.spaces-row-menu {
+  position: fixed;
+  z-index: 1500;
+  min-width: 140px;
+  background: var(--or-bg-elevated, #1b1b20);
+  border: 1px solid var(--or-border-strong, rgba(255, 255, 255, 0.12));
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 4px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spaces-row-menu[hidden] {
+  display: none;
+}
+
+.spaces-row-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--or-text-primary, #f4f6fb);
+  border: none;
+  border-radius: 4px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-row-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.spaces-row-menu-item-danger {
+  color: var(--or-danger, #ff6b7a);
+}
+
+.spaces-row-menu-item-danger:hover {
+  background: rgba(255, 107, 122, 0.12);
+  color: var(--or-danger, #ff6b7a);
+}
+
+/* Inline rename: an <input> replaces the row name in place. */
+.spaces-row-rename-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--or-bg-shell, #121216);
+  color: var(--or-text-primary, #f4f6fb);
+  border: 1px solid var(--or-border-signal, rgba(79, 140, 255, 0.46));
+  border-radius: 4px;
+  padding: 3px 7px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.spaces-row-rename-input:focus {
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.18);
+}
+
+/* Modal backdrop + dialog. */
+.spaces-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: spaces-modal-fade-in 140ms ease-out;
+}
+
+.spaces-modal-backdrop[hidden] {
+  display: none;
+}
+
+@keyframes spaces-modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.spaces-modal {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(79, 140, 255, 0.1), transparent 38%),
+    var(--or-bg-surface, #161618);
+  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: var(--or-radius-md, 10px);
+  padding: 24px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.56);
+  animation: spaces-modal-rise 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes spaces-modal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.spaces-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--or-text-primary, #f4f6fb);
+}
+
+.spaces-modal-help {
+  font-size: 12.5px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.spaces-modal-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.spaces-modal-label {
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  margin-bottom: 6px;
+}
+
+.spaces-modal-input {
+  background: var(--or-bg-shell, #121216);
+  color: var(--or-text-primary, #f4f6fb);
+  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13.5px;
+  outline: none;
+  transition:
+    border-color var(--or-transition-fast, 120ms ease),
+    box-shadow var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-modal-input:focus {
+  border-color: var(--or-border-signal, rgba(79, 140, 255, 0.46));
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.18);
+}
+
+.spaces-modal-error {
+  margin-top: 8px;
+  padding: 8px 11px;
+  background: rgba(255, 107, 122, 0.08);
+  border: 1px solid rgba(255, 107, 122, 0.24);
+  border-left: 3px solid var(--or-danger, #ff6b7a);
+  border-radius: 4px;
+  color: var(--or-danger, #ff6b7a);
+  font-size: 12px;
+}
+
+.spaces-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.spaces-modal-button {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--or-text-primary, #f4f6fb);
+  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background var(--or-transition-fast, 120ms ease),
+    border-color var(--or-transition-fast, 120ms ease),
+    transform var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-modal-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--or-border-strong, rgba(255, 255, 255, 0.12));
+}
+
+.spaces-modal-button-primary {
+  background: linear-gradient(180deg, var(--or-accent-hover), var(--or-accent));
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.spaces-modal-button-primary:hover {
+  background: linear-gradient(180deg, #83b0ff, var(--or-accent-hover));
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.spaces-modal-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Toast (post-delete undo). */
+.spaces-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 2500;
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--or-bg-elevated, #1b1b20);
+  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: var(--or-radius-md, 10px);
+  padding: 11px 16px 11px 18px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
+  font-size: 13px;
+  color: var(--or-text-primary, #f4f6fb);
+  animation: spaces-toast-rise 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.spaces-toast[hidden] {
+  display: none;
+}
+
+@keyframes spaces-toast-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.spaces-toast.is-leaving {
+  animation: spaces-toast-fall 180ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes spaces-toast-fall {
+  to {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+.spaces-toast-message {
+  color: var(--or-text-secondary, rgba(244, 246, 251, 0.72));
+}
+
+.spaces-toast-action {
+  background: transparent;
+  color: var(--or-accent-strong, #7bdbff);
+  border: none;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-toast-action:hover {
+  background: rgba(123, 219, 255, 0.1);
+}
+
+.spaces-toast-action[hidden] {
+  display: none;
 }

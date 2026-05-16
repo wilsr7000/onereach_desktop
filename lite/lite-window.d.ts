@@ -603,6 +603,14 @@ interface LiteSpaceItemSummary {
 interface LiteSpaceItem extends LiteSpaceItemSummary {
   content?: string;
   metadata?: Record<string, unknown>;
+  /** Byte size for binary kinds. Floored non-negative integer. */
+  size?: number;
+  /** MIME type ('image/png' etc.) — refines preview for `other`-kind binaries. */
+  mimeType?: string;
+  /** Plain-text tag list (canonical or [:TAGGED_AS] projection). */
+  tags?: string[];
+  /** Last edit attribution; null when the schema has no [:LAST_EDITED] edge yet. */
+  lastEditedBy?: LiteSpaceItemProvenance | null;
 }
 
 interface LiteSpacesItemsBridge {
@@ -688,6 +696,20 @@ interface LiteSpacesHomeBridge {
   >;
 }
 
+// ─── Mutation inputs (Phase 3a) ─────────────────────────────────────────
+
+interface LiteSpacesCreateSpaceInput {
+  name: string;
+  description?: string;
+  color?: string;
+  iconKey?: string;
+}
+
+interface LiteSpacesDeleteSpaceOpts {
+  /** Default true (soft delete). Set to false to hard-remove. */
+  soft?: boolean;
+}
+
 interface LiteSpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
@@ -698,6 +720,19 @@ interface LiteSpacesBridge {
   runDiscovery(): Promise<LiteSpacesIpcResult<LiteSpacesDiscoveryResultsView>>;
   /** Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md. */
   home: LiteSpacesHomeBridge;
+  /**
+   * Mutations (Phase 3a). All four can fail with
+   * `SPACES_INVALID_INPUT`, `SPACES_DUPLICATE_NAME`,
+   * `SPACES_NOT_FOUND`, `SPACES_DELETE_NON_EMPTY`,
+   * `SPACES_NOT_AUTHENTICATED`, `SPACES_CYPHER`, or `SPACES_NETWORK`.
+   */
+  createSpace(input: LiteSpacesCreateSpaceInput): Promise<LiteSpacesIpcResult<LiteSpace>>;
+  renameSpace(id: string, name: string): Promise<LiteSpacesIpcResult<LiteSpace>>;
+  deleteSpace(
+    id: string,
+    opts?: LiteSpacesDeleteSpaceOpts
+  ): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  undeleteSpace(id: string): Promise<LiteSpacesIpcResult<LiteSpace>>;
 }
 
 // ---------------------------------------------------------------------------

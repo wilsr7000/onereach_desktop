@@ -136,6 +136,32 @@ export interface Item extends ItemSummary {
   content?: string;
   /** Free-form metadata bag. */
   metadata?: Record<string, unknown>;
+  /**
+   * Size in bytes for binary assets (`fileKey` present). Read from
+   * canonical `a.size`, legacy `a.fileSize`, or `a.byteCount`. Undefined
+   * when the graph node has none of those.
+   */
+  size?: number;
+  /**
+   * MIME type ('image/png', 'application/pdf', etc.). From canonical
+   * `a.mimeType`, legacy `a.contentType`. Used to refine the detail-pane
+   * preview (e.g. show a video player for `video/*` even when
+   * `a.type` collapsed to 'other').
+   */
+  mimeType?: string;
+  /**
+   * Plain-text tag list. Read from `a.tags` (canonical, array property)
+   * or `[:TAGGED_AS]->(:Tag)` edge collection (canonical edge model).
+   * Empty array when neither path is populated. Phase 3b will mutate
+   * via `items.addTag` / `removeTag`.
+   */
+  tags?: string[];
+  /**
+   * Last-edited attribution. Distinct from `producedBy` (the original
+   * author) — populated when a `[:LAST_EDITED]->(:Person)` edge exists.
+   * Falls back to `null` when the schema has no such edge yet.
+   */
+  lastEditedBy?: ItemProvenance | null;
 }
 
 // ─── Query options ───────────────────────────────────────────────────────
@@ -147,6 +173,50 @@ export interface ListOpts {
   /** For paging; 0-based. */
   offset?: number;
 }
+
+// ─── Mutation inputs (Phase 3a) ─────────────────────────────────────────
+//
+// Inputs for `spaces.create` / `.rename` / `.delete` / `.undelete`. All
+// fields are validated client-side (length, trim) so error feedback is
+// snappy and the Cypher only ever sees normalized values.
+
+/** Input to `spaces.create({...})`. */
+export interface CreateSpaceInput {
+  /**
+   * Display name. Trimmed; rejected if empty or longer than
+   * `MAX_SPACE_NAME_LENGTH`. Uniqueness is enforced server-side; a
+   * collision surfaces as `SPACES_DUPLICATE_NAME`.
+   */
+  name: string;
+  /** Optional human description. Trimmed; capped at `MAX_SPACE_DESC_LENGTH`. */
+  description?: string;
+  /** Optional hex color for the sidebar dot (e.g. `'#4f8cff'`). */
+  color?: string;
+  /** Optional lucide icon key. */
+  iconKey?: string;
+}
+
+/** Input to `spaces.rename(id, name)`. (Wrapped for symmetry; same constraints as `create.name`.) */
+export interface RenameSpaceInput {
+  name: string;
+}
+
+/** Options for `spaces.delete(id, opts?)`. */
+export interface DeleteSpaceOpts {
+  /**
+   * When `true` (default), sets `s.deletedAt` instead of removing the
+   * node. The Space stops appearing in `listSpaces()` but can be
+   * restored via `undelete()`. When `false`, hard-removes the node;
+   * refuses (throws `SPACES_DELETE_NON_EMPTY`) if any items still
+   * have a `[:BELONGS_TO]` edge into the Space.
+   */
+  soft?: boolean;
+}
+
+/** Max display-name length enforced client-side and in the Cypher pattern. */
+export const MAX_SPACE_NAME_LENGTH = 80 as const;
+/** Max description length enforced client-side. */
+export const MAX_SPACE_DESC_LENGTH = 400 as const;
 
 // ─── Home view (chunk 3k + 3o) ──────────────────────────────────────────
 //

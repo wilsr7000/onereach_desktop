@@ -314,13 +314,21 @@ describe('buildDetailPane', () => {
     expect(pane.querySelectorAll('.spaces-detail-chips .spaces-chip')).toHaveLength(2);
   });
 
-  it('renders content in a <pre> when present', () => {
+  it('renders content via the Markdown block when present', () => {
+    // Phase A3 swapped raw <pre> for a Markdown-rendered body with
+    // a "rendered / source" toggle. Plain text without Markdown
+    // syntax projects into a single <p> inside `.spaces-markdown`.
     const pane = handle().buildDetailPane(
       baseDetailItem({ content: 'full text body' }),
       () => undefined
     );
-    expect(pane.querySelector('.spaces-detail-content pre')?.textContent).toBe(
+    expect(pane.querySelector('.spaces-detail-content-block')).not.toBeNull();
+    expect(pane.querySelector('.spaces-markdown p')?.textContent).toBe(
       'full text body'
+    );
+    // Toggle row is wired with both buttons; default mode is Rendered.
+    expect(pane.querySelector('.spaces-detail-toggle-btn.is-active')?.getAttribute('data-mode')).toBe(
+      'rendered'
     );
   });
 

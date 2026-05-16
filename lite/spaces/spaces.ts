@@ -269,6 +269,7 @@ function init(): void {
   wireSidebarClicks();
   wireSidebarSearch();
   wireSidebarSort();
+  wireMutationsUI();
   // Home is the default scope -- show its region, hide the items
   // region. This ensures first paint matches state even if
   // `setActiveScope` never runs.
@@ -745,6 +746,19 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
     typeof space.itemCount === 'number' ? formatCount(space.itemCount) : '';
   li.appendChild(count);
 
+  // Hover-revealed "⋯" trigger for the rename/delete menu (Phase 3a).
+  // Click handler stops propagation so the row's own activation
+  // doesn't fire; the click is wired globally by `wireMutationsUI()`
+  // via the `data-row-menu-trigger` attribute selector so per-row
+  // listeners don't leak across renders.
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'spaces-row-menu-trigger';
+  trigger.setAttribute('aria-label', `Open menu for ${space.name || 'this space'}`);
+  trigger.setAttribute('data-row-menu-trigger', space.id);
+  trigger.textContent = '⋯';
+  li.appendChild(trigger);
+
   return li;
 }
 
@@ -1098,13 +1112,36 @@ function showDetailRail(show: boolean): void {
   if (layout !== null) layout.classList.toggle('has-detail', show);
 }
 
+/**
+ * Detail pane preview mode for text-kind items.
+ * - `'rendered'` — show the content as Markdown-rendered HTML.
+ * - `'source'` — show the raw text in a `<pre>`.
+ */
+export type DetailPreviewMode = 'rendered' | 'source';
+
+/**
+ * Build the per-item detail pane. Replaces the cramped right-rail
+ * preview with a proper asset view: kind badge + filename, meta strip
+ * (size · date · author · last-edited-by), tag chips, Markdown-aware
+ * content body with preview/source toggle, and type-specific
+ * subsections.
+ *
+ * Pure-ish: any DOM the caller passes is owned by the caller; we
+ * just construct a wrapper they append. The preview-mode toggle
+ * holds state INSIDE the returned subtree (no external state needed)
+ * so re-rendering the pane on data refresh resets the toggle
+ * sensibly (rendered is the default; users who flipped to source
+ * see it return to rendered, which is fine for a refresh-driven UI).
+ */
 export function buildDetailPane(
   item: RendererItem,
-  onClose: () => void
+  onClose: () => void,
+  initialMode: DetailPreviewMode = 'rendered'
 ): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'spaces-detail-pane';
 
+  // ── Header: kind badge + close button ────────────────────────────────
   const header = document.createElement('div');
   header.className = 'spaces-detail-head';
 
@@ -1112,6 +1149,16 @@ export function buildDetailPane(
   kind.className = `spaces-card-kind spaces-card-kind-${item.kind}`;
   kind.textContent = kindLabel(item.kind);
   header.appendChild(kind);
+
+  // MIME-type hint when present (e.g. "image/png"). Sits next to the
+  // kind badge in a muted style — useful when the canonical `a.type`
+  // collapsed to 'other' but the MIME tells the real story.
+  if (typeof item.mimeType === 'string' && item.mimeType.length > 0) {
+    const mime = document.createElement('span');
+    mime.className = 'spaces-detail-mime';
+    mime.textContent = item.mimeType;
+    header.appendChild(mime);
+  }
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
@@ -1123,16 +1170,16 @@ export function buildDetailPane(
 
   wrap.appendChild(header);
 
+  // ── Title ────────────────────────────────────────────────────────────
   const title = document.createElement('h2');
   title.className = 'spaces-detail-title';
   title.textContent = item.title.length > 0 ? item.title : '(untitled)';
   wrap.appendChild(title);
 
-  const meta = document.createElement('div');
-  meta.className = 'spaces-detail-meta';
-  meta.textContent = `Updated ${formatRelativeTime(item.updatedAt)}`;
-  wrap.appendChild(meta);
+  // ── Meta strip: time + size + producer + last-edited-by ──────────────
+  wrap.appendChild(buildDetailMeta(item));
 
+  // ── Space chips ──────────────────────────────────────────────────────
   if (item.otherSpaces.length > 0) {
     const chips = document.createElement('div');
     chips.className = 'spaces-detail-chips';
@@ -1142,22 +1189,130 @@ export function buildDetailPane(
     wrap.appendChild(chips);
   }
 
-  if (item.producedBy !== null) {
-    const prov = document.createElement('div');
-    prov.className = 'spaces-detail-provenance';
-    prov.textContent = `Produced by ${item.producedBy.name} (${item.producedBy.kind})`;
-    wrap.appendChild(prov);
+  // ── Tag chips ────────────────────────────────────────────────────────
+  if (Array.isArray(item.tags) && item.tags.length > 0) {
+    wrap.appendChild(buildDetailTags(item.tags));
   }
 
+  // ── Content body (Markdown-aware, with preview/source toggle) ────────
   if (typeof item.content === 'string' && item.content.length > 0) {
-    const content = document.createElement('div');
-    content.className = 'spaces-detail-content';
-    const pre = document.createElement('pre');
-    pre.textContent = item.content;
-    content.appendChild(pre);
-    wrap.appendChild(content);
+    wrap.appendChild(buildDetailContent(item.content, initialMode));
   }
 
+  // ── Type-specific subsection (source link, audio/video player) ───────
+  const subsection = buildDetailTypeBlock(item);
+  if (subsection !== null) wrap.appendChild(subsection);
+
+  return wrap;
+}
+
+/** Meta strip: relative time · size · producer · last-edited-by. */
+export function buildDetailMeta(item: RendererItem): HTMLElement {
+  const meta = document.createElement('div');
+  meta.className = 'spaces-detail-meta';
+
+  const parts: string[] = [];
+  parts.push(`Updated ${formatRelativeTime(item.updatedAt)}`);
+  if (typeof item.size === 'number' && item.size > 0) {
+    parts.push(formatBytes(item.size));
+  }
+  meta.appendChild(document.createTextNode(parts.join(' · ')));
+
+  // Provenance + last-edited-by on a second line so the primary
+  // updated/size info reads clean.
+  if (item.producedBy !== null || (item.lastEditedBy ?? null) !== null) {
+    const provLine = document.createElement('div');
+    provLine.className = 'spaces-detail-provenance';
+    const segments: string[] = [];
+    if (item.producedBy !== null) {
+      segments.push(`Produced by ${item.producedBy.name} (${item.producedBy.kind})`);
+    }
+    const edited = item.lastEditedBy ?? null;
+    if (edited !== null && edited.id !== item.producedBy?.id) {
+      segments.push(`Last edited by ${edited.name}`);
+    }
+    provLine.textContent = segments.join(' · ');
+    meta.appendChild(provLine);
+  }
+  return meta;
+}
+
+/** Tag chip row. Read-only in Phase A; Phase B adds add/remove. */
+export function buildDetailTags(tags: ReadonlyArray<string>): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'spaces-detail-tags';
+  for (const tag of tags) {
+    if (typeof tag !== 'string' || tag.trim().length === 0) continue;
+    const chip = document.createElement('span');
+    chip.className = 'spaces-detail-tag';
+    chip.textContent = tag.trim();
+    row.appendChild(chip);
+  }
+  return row;
+}
+
+/**
+ * Content body for text/document kinds. Renders Markdown by default
+ * (the `'rendered'` mode) with a toggle to flip to raw `'source'`.
+ * For non-text kinds the caller typically skips this; we still
+ * render gracefully if `content` is present.
+ */
+export function buildDetailContent(
+  source: string,
+  initialMode: DetailPreviewMode
+): HTMLElement {
+  const block = document.createElement('div');
+  block.className = 'spaces-detail-content-block';
+  block.setAttribute('data-mode', initialMode);
+
+  // Toggle row.
+  const toggleRow = document.createElement('div');
+  toggleRow.className = 'spaces-detail-content-toggle';
+  const renderedBtn = document.createElement('button');
+  renderedBtn.type = 'button';
+  renderedBtn.className =
+    'spaces-detail-toggle-btn' + (initialMode === 'rendered' ? ' is-active' : '');
+  renderedBtn.textContent = 'Rendered';
+  renderedBtn.setAttribute('data-mode', 'rendered');
+  const sourceBtn = document.createElement('button');
+  sourceBtn.type = 'button';
+  sourceBtn.className =
+    'spaces-detail-toggle-btn' + (initialMode === 'source' ? ' is-active' : '');
+  sourceBtn.textContent = 'Source';
+  sourceBtn.setAttribute('data-mode', 'source');
+  toggleRow.appendChild(renderedBtn);
+  toggleRow.appendChild(sourceBtn);
+  block.appendChild(toggleRow);
+
+  const body = document.createElement('div');
+  body.className = 'spaces-detail-content';
+  body.appendChild(initialMode === 'rendered' ? renderMarkdown(source) : renderSource(source));
+  block.appendChild(body);
+
+  const setMode = (next: DetailPreviewMode): void => {
+    block.setAttribute('data-mode', next);
+    renderedBtn.classList.toggle('is-active', next === 'rendered');
+    sourceBtn.classList.toggle('is-active', next === 'source');
+    body.replaceChildren(next === 'rendered' ? renderMarkdown(source) : renderSource(source));
+  };
+  renderedBtn.addEventListener('click', () => setMode('rendered'));
+  sourceBtn.addEventListener('click', () => setMode('source'));
+  return block;
+}
+
+function renderSource(source: string): HTMLElement {
+  const pre = document.createElement('pre');
+  pre.className = 'spaces-detail-source-pre';
+  pre.textContent = source;
+  return pre;
+}
+
+/**
+ * Type-specific subsection for items beyond the generic content body.
+ * Returns `null` when nothing extra is needed (image preview is
+ * handled by the post-fetch `injectBinaryPreview` path).
+ */
+function buildDetailTypeBlock(item: RendererItem): HTMLElement | null {
   if (typeof item.sourceUrl === 'string' && item.sourceUrl.length > 0) {
     const sourceWrap = document.createElement('div');
     sourceWrap.className = 'spaces-detail-source';
@@ -1171,10 +1326,168 @@ export function buildDetailPane(
     link.textContent = item.sourceUrl;
     sourceWrap.appendChild(label);
     sourceWrap.appendChild(link);
-    wrap.appendChild(sourceWrap);
+    return sourceWrap;
   }
+  return null;
+}
 
+// ─── Minimal Markdown renderer (pure, exported for tests) ───────────────
+//
+// Handles the common Markdown subset:
+//   - ATX headers (#, ##, ###)
+//   - **bold**, *italic*, `code` inline
+//   - ``` fenced code blocks
+//   - [text](url) links (rel=noopener)
+//   - * / - / 1. lists (one level deep)
+//   - blank-line paragraph breaks
+//
+// HTML in the source is escaped first to prevent XSS via injection.
+// Returning an HTMLElement (not innerHTML) means renderer consumers
+// don't see a `dangerouslySetInnerHTML`-shaped API.
+
+const MARKDOWN_ESCAPE: Readonly<Record<string, string>> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (ch) => MARKDOWN_ESCAPE[ch] ?? ch);
+}
+
+/**
+ * Apply inline Markdown to an already HTML-escaped string.
+ *
+ * Code spans are extracted into placeholders BEFORE bold / italic /
+ * link replacements so we never interpret formatting inside `` `…` ``.
+ * Placeholders are unique sentinel strings (` CS<n> `) that
+ * can't collide with user content (NUL is forbidden in source) — they
+ * survive the other passes intact and we restore them at the end.
+ */
+export function renderInlineMarkdown(escapedSource: string): string {
+  const codeSpans: string[] = [];
+  // 1. Extract code spans into placeholders.
+  let out = escapedSource.replace(/`([^`]+)`/g, (_m, code) => {
+    const idx = codeSpans.length;
+    codeSpans.push(`<code>${code}</code>`);
+    return ` CS${idx} `;
+  });
+  // 2. Bold then italic so **x** parses before *x*.
+  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/(^|[^*])\*([^*\s][^*]*[^*\s]|[^*\s])\*/g, '$1<em>$2</em>');
+  // 3. Links: [text](url). URL must be http(s) for safety; mailto OK.
+  out = out.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g,
+    (_m, text, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`
+  );
+  // 4. Restore code-span placeholders.
+  out = out.replace(/ CS(\d+) /g, (_m, n) => codeSpans[Number(n)] ?? '');
+  return out;
+}
+
+/**
+ * Render a Markdown source string into a DOM element. Pure; the
+ * returned element is unparented and safe to append anywhere.
+ *
+ * Exported for jsdom tests. The implementation is deliberately
+ * minimal: it covers what users typically write in inline notes
+ * without pulling in a 30KB library.
+ */
+export function renderMarkdown(source: string): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-markdown';
+  if (typeof source !== 'string' || source.length === 0) return wrap;
+
+  const lines = source.split(/\r?\n/);
+  let i = 0;
+  let buf: string[] = []; // accumulating paragraph lines
+
+  const flushParagraph = (): void => {
+    if (buf.length === 0) return;
+    const text = buf.join(' ').trim();
+    buf = [];
+    if (text.length === 0) return;
+    const p = document.createElement('p');
+    p.innerHTML = renderInlineMarkdown(escapeHtml(text));
+    wrap.appendChild(p);
+  };
+
+  while (i < lines.length) {
+    const line = lines[i] ?? '';
+    // Fenced code block: ``` start … ``` end.
+    if (line.trim().startsWith('```')) {
+      flushParagraph();
+      const fenceLang = line.trim().slice(3);
+      i++;
+      const codeLines: string[] = [];
+      while (i < lines.length && !((lines[i] ?? '').trim().startsWith('```'))) {
+        codeLines.push(lines[i] ?? '');
+        i++;
+      }
+      if (i < lines.length) i++; // consume closing fence
+      const pre = document.createElement('pre');
+      pre.className = 'spaces-markdown-code';
+      if (fenceLang.length > 0) pre.setAttribute('data-lang', fenceLang);
+      const code = document.createElement('code');
+      code.textContent = codeLines.join('\n');
+      pre.appendChild(code);
+      wrap.appendChild(pre);
+      continue;
+    }
+    // ATX headers.
+    const headerMatch = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (headerMatch !== null) {
+      flushParagraph();
+      const level = (headerMatch[1] ?? '#').length;
+      const text = (headerMatch[2] ?? '').trim();
+      const h = document.createElement(`h${level}` as 'h1' | 'h2' | 'h3');
+      h.innerHTML = renderInlineMarkdown(escapeHtml(text));
+      wrap.appendChild(h);
+      i++;
+      continue;
+    }
+    // List (one level): collect contiguous list lines.
+    if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
+      flushParagraph();
+      const isOrdered = /^\s*\d+\./.test(line);
+      const list = document.createElement(isOrdered ? 'ol' : 'ul');
+      while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i] ?? '')) {
+        const li = document.createElement('li');
+        const stripped = (lines[i] ?? '').replace(/^\s*([-*]|\d+\.)\s+/, '');
+        li.innerHTML = renderInlineMarkdown(escapeHtml(stripped));
+        list.appendChild(li);
+        i++;
+      }
+      wrap.appendChild(list);
+      continue;
+    }
+    // Blank line ends a paragraph.
+    if (line.trim().length === 0) {
+      flushParagraph();
+      i++;
+      continue;
+    }
+    buf.push(line);
+    i++;
+  }
+  flushParagraph();
   return wrap;
+}
+
+/**
+ * Compact byte formatter (1.2 KB, 3.4 MB). Pure; exported for tests.
+ *   - 0–999  B
+ *   - 1.0–999.9 KB (one decimal)
+ *   - 1.0+ MB (one decimal)
+ */
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '';
+  if (n < 1000) return `${Math.floor(n)} B`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)} KB`;
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)} MB`;
+  return `${(n / 1_000_000_000).toFixed(1)} GB`;
 }
 
 // ─── Home view (chunk 3o) ───────────────────────────────────────────────
@@ -2484,6 +2797,12 @@ function messageFrom(err: unknown): string {
   buildItemCard,
   buildSpaceChip,
   buildDetailPane,
+  buildDetailMeta,
+  buildDetailTags,
+  buildDetailContent,
+  renderMarkdown,
+  renderInlineMarkdown,
+  formatBytes,
   buildBinaryPreview,
   buildItemsToolbar,
   formatCount,
@@ -2544,6 +2863,442 @@ function messageFrom(err: unknown): string {
     await Promise.resolve();
   },
 };
+
+// ─── Mutations UI (Phase 3a) ────────────────────────────────────────────
+//
+// Wires the three mutation surfaces:
+//   1. "+ New Space" header button → modal → createSpace
+//   2. Per-row ⋯ menu → Rename (inline input) / Delete (soft + undo toast)
+//   3. Toast at bottom with Undo for soft-delete reversal (undeleteSpace)
+//
+// All bridge calls are best-effort with inline error display. The
+// global state.spaces is refreshed via loadSpaces() after every
+// successful mutation so the sidebar reflects ground truth -- we don't
+// optimistic-update local state because the server-assigned id /
+// timestamps come back in the response we'd have to merge anyway.
+
+interface RowMenuState {
+  spaceId: string | null;
+  triggerEl: HTMLButtonElement | null;
+}
+
+const rowMenuState: RowMenuState = {
+  spaceId: null,
+  triggerEl: null,
+};
+
+interface ToastState {
+  hideTimer: ReturnType<typeof setTimeout> | null;
+  /** Undo handler for the currently-shown toast, if any. */
+  onUndo: (() => void) | null;
+}
+
+const toastState: ToastState = {
+  hideTimer: null,
+  onUndo: null,
+};
+
+/** Wire the mutation surfaces. Called once from `init()`. */
+function wireMutationsUI(): void {
+  wireNewSpaceButton();
+  wireNewSpaceDialog();
+  wireRowMenuTriggers();
+  wireRowMenu();
+  wireToast();
+}
+
+// ─── "+ New Space" button + modal dialog ────────────────────────────────
+
+function wireNewSpaceButton(): void {
+  const button = document.getElementById('spaces-new-button');
+  if (button === null) return;
+  button.addEventListener('click', () => {
+    openNewSpaceDialog();
+  });
+}
+
+function openNewSpaceDialog(): void {
+  const backdrop = document.getElementById('spaces-new-dialog-backdrop');
+  const input = document.getElementById('spaces-new-name-input');
+  const error = document.getElementById('spaces-new-error');
+  if (backdrop === null || !(input instanceof HTMLInputElement) || error === null) return;
+  backdrop.hidden = false;
+  backdrop.setAttribute('aria-hidden', 'false');
+  input.value = '';
+  error.hidden = true;
+  error.textContent = '';
+  // Defer focus so the browser doesn't fight the modal animation.
+  requestAnimationFrame(() => input.focus());
+}
+
+function closeNewSpaceDialog(): void {
+  const backdrop = document.getElementById('spaces-new-dialog-backdrop');
+  if (backdrop === null) return;
+  backdrop.hidden = true;
+  backdrop.setAttribute('aria-hidden', 'true');
+}
+
+function wireNewSpaceDialog(): void {
+  const form = document.getElementById('spaces-new-form');
+  const cancel = document.getElementById('spaces-new-cancel');
+  const backdrop = document.getElementById('spaces-new-dialog-backdrop');
+  if (form instanceof HTMLFormElement) {
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      void submitNewSpace();
+    });
+  }
+  if (cancel !== null) {
+    cancel.addEventListener('click', () => closeNewSpaceDialog());
+  }
+  if (backdrop !== null) {
+    // Click on the dim area (NOT the modal itself) closes the dialog.
+    backdrop.addEventListener('click', (ev) => {
+      if (ev.target === backdrop) closeNewSpaceDialog();
+    });
+  }
+  // Esc closes when the dialog is open.
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') {
+      if (backdrop !== null && backdrop.hidden === false) closeNewSpaceDialog();
+      if (rowMenuState.spaceId !== null) closeRowMenu();
+    }
+  });
+}
+
+async function submitNewSpace(): Promise<void> {
+  const input = document.getElementById('spaces-new-name-input');
+  const error = document.getElementById('spaces-new-error');
+  const submit = document.getElementById('spaces-new-submit');
+  if (!(input instanceof HTMLInputElement) || error === null) return;
+  const name = input.value.trim();
+  if (name.length === 0) {
+    showDialogError(error, 'Please enter a name.');
+    return;
+  }
+  if (submit instanceof HTMLButtonElement) submit.disabled = true;
+  error.hidden = true;
+  error.textContent = '';
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showDialogError(error, 'Bridge unavailable. Reload the window.');
+    if (submit instanceof HTMLButtonElement) submit.disabled = false;
+    return;
+  }
+  try {
+    const envelope = await bridge.createSpace({ name });
+    if (envelope.ok === false) {
+      showDialogError(error, envelope.error.message);
+      if (submit instanceof HTMLButtonElement) submit.disabled = false;
+      return;
+    }
+    closeNewSpaceDialog();
+    await loadSpaces();
+    showToast(`Created "${name}"`);
+  } catch (err) {
+    showDialogError(error, messageFrom(err));
+  } finally {
+    if (submit instanceof HTMLButtonElement) submit.disabled = false;
+  }
+}
+
+function showDialogError(el: HTMLElement, message: string): void {
+  el.textContent = message;
+  el.hidden = false;
+}
+
+// ─── Per-row ⋯ menu ─────────────────────────────────────────────────────
+
+function wireRowMenuTriggers(): void {
+  const sidebar = document.getElementById('spaces-sidebar');
+  if (sidebar === null) return;
+  // Delegated click handler: catches every ⋯ press across re-renders
+  // without per-row listener bookkeeping. `stopPropagation` keeps the
+  // existing `wireSidebarClicks` row-activation logic from firing.
+  sidebar.addEventListener('click', (ev: MouseEvent) => {
+    const target = ev.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (!target.matches('[data-row-menu-trigger]')) return;
+    ev.stopPropagation();
+    const spaceId = target.getAttribute('data-row-menu-trigger');
+    if (typeof spaceId !== 'string' || spaceId.length === 0) return;
+    openRowMenu(spaceId, target as HTMLButtonElement);
+  });
+}
+
+function openRowMenu(spaceId: string, triggerEl: HTMLButtonElement): void {
+  const menu = document.getElementById('spaces-row-menu');
+  if (menu === null) return;
+  // If the menu is already open for this same trigger, treat the
+  // click as a toggle and close it.
+  if (rowMenuState.spaceId === spaceId && menu.hidden === false) {
+    closeRowMenu();
+    return;
+  }
+  closeRowMenu();
+  rowMenuState.spaceId = spaceId;
+  rowMenuState.triggerEl = triggerEl;
+  triggerEl.classList.add('is-open');
+  triggerEl.setAttribute('aria-expanded', 'true');
+  // Position relative to the trigger.
+  const rect = triggerEl.getBoundingClientRect();
+  menu.style.top = `${Math.round(rect.bottom + 4)}px`;
+  menu.style.left = `${Math.round(rect.left - 100)}px`; // shift left so menu opens to the left of ⋯
+  menu.hidden = false;
+  menu.setAttribute('aria-hidden', 'false');
+}
+
+function closeRowMenu(): void {
+  const menu = document.getElementById('spaces-row-menu');
+  if (rowMenuState.triggerEl !== null) {
+    rowMenuState.triggerEl.classList.remove('is-open');
+    rowMenuState.triggerEl.setAttribute('aria-expanded', 'false');
+  }
+  rowMenuState.spaceId = null;
+  rowMenuState.triggerEl = null;
+  if (menu !== null) {
+    menu.hidden = true;
+    menu.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function wireRowMenu(): void {
+  const menu = document.getElementById('spaces-row-menu');
+  if (menu === null) return;
+  menu.addEventListener('click', (ev: MouseEvent) => {
+    const target = ev.target;
+    if (!(target instanceof HTMLElement)) return;
+    const action = target.getAttribute('data-action');
+    const spaceId = rowMenuState.spaceId;
+    if (typeof spaceId !== 'string' || spaceId.length === 0) return;
+    closeRowMenu();
+    if (action === 'rename') {
+      startInlineRename(spaceId);
+    } else if (action === 'delete') {
+      void performSoftDelete(spaceId);
+    }
+  });
+  // Outside-click closes the menu.
+  document.addEventListener('click', (ev: MouseEvent) => {
+    if (rowMenuState.spaceId === null) return;
+    const target = ev.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('#spaces-row-menu') !== null) return;
+    if (target.matches('[data-row-menu-trigger]')) return;
+    closeRowMenu();
+  });
+}
+
+// ─── Inline rename ──────────────────────────────────────────────────────
+
+function startInlineRename(spaceId: string): void {
+  const row = document.querySelector<HTMLElement>(
+    `.spaces-row-space[data-scope-id="${cssEscape(spaceId)}"]`
+  );
+  if (row === null) return;
+  const nameEl = row.querySelector<HTMLElement>('.spaces-row-name');
+  if (nameEl === null) return;
+  const currentName = nameEl.textContent ?? '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'spaces-row-rename-input';
+  input.value = currentName === '(unnamed)' ? '' : currentName;
+  input.maxLength = 80;
+  // Clicking inside the input must not bubble up to the sidebar's
+  // row-activation handler.
+  input.addEventListener('click', (ev) => ev.stopPropagation());
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      void commitRename(spaceId, input.value, currentName, input);
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      cancelRename(input, nameEl, currentName);
+    }
+  });
+  input.addEventListener('blur', () => {
+    // Commit on blur if the value changed; otherwise cancel.
+    if (input.value.trim() !== currentName.trim() && input.value.trim().length > 0) {
+      void commitRename(spaceId, input.value, currentName, input);
+    } else {
+      cancelRename(input, nameEl, currentName);
+    }
+  });
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+async function commitRename(
+  spaceId: string,
+  newName: string,
+  oldName: string,
+  inputEl: HTMLInputElement
+): Promise<void> {
+  const trimmed = newName.trim();
+  if (trimmed.length === 0 || trimmed === oldName.trim()) {
+    cancelRename(inputEl, null, oldName);
+    return;
+  }
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showToast('Bridge unavailable.');
+    cancelRename(inputEl, null, oldName);
+    return;
+  }
+  inputEl.disabled = true;
+  try {
+    const envelope = await bridge.renameSpace(spaceId, trimmed);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      cancelRename(inputEl, null, oldName);
+      return;
+    }
+    await loadSpaces();
+    showToast(`Renamed to "${trimmed}"`);
+  } catch (err) {
+    showToast(messageFrom(err));
+    cancelRename(inputEl, null, oldName);
+  }
+}
+
+function cancelRename(
+  inputEl: HTMLInputElement,
+  nameEl: HTMLElement | null,
+  oldName: string
+): void {
+  // Restore the original <span> in place of the <input>.
+  if (!inputEl.isConnected) return;
+  const restored =
+    nameEl ??
+    (() => {
+      const span = document.createElement('span');
+      span.className = 'spaces-row-name';
+      span.textContent = oldName.length > 0 ? oldName : '(unnamed)';
+      return span;
+    })();
+  inputEl.replaceWith(restored);
+}
+
+/**
+ * CSS.escape isn't always typed; provide a tiny fallback for the
+ * single use site above.
+ */
+function cssEscape(s: string): string {
+  if (typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === 'function') {
+    return (globalThis as unknown as { CSS: { escape: (s: string) => string } }).CSS.escape(s);
+  }
+  return s.replace(/["\\]/g, '\\$&');
+}
+
+// ─── Delete + undo toast ────────────────────────────────────────────────
+
+async function performSoftDelete(spaceId: string): Promise<void> {
+  const space = state.spaces.find((s) => s.id === spaceId);
+  const displayName = space?.name && space.name.length > 0 ? space.name : 'space';
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showToast('Bridge unavailable.');
+    return;
+  }
+  try {
+    const envelope = await bridge.deleteSpace(spaceId, { soft: true });
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    // If we just deleted the active space, jump back to Home so the
+    // main pane isn't pointed at a non-existent scope.
+    if (state.activeScopeId === spaceId) {
+      setActiveScope(HOME_SCOPE_ID);
+    }
+    await loadSpaces();
+    showToast(`Deleted "${displayName}"`, {
+      undoLabel: 'Undo',
+      onUndo: () => void performUndoDelete(spaceId, displayName),
+    });
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
+async function performUndoDelete(spaceId: string, displayName: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.undeleteSpace(spaceId);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    await loadSpaces();
+    showToast(`Restored "${displayName}"`);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
+// ─── Toast (Phase 3a) ───────────────────────────────────────────────────
+
+interface ShowToastOpts {
+  undoLabel?: string;
+  onUndo?: () => void;
+  /** Milliseconds before auto-hide. Default 6000. */
+  durationMs?: number;
+}
+
+function showToast(message: string, opts: ShowToastOpts = {}): void {
+  const toast = document.getElementById('spaces-toast');
+  const messageEl = document.getElementById('spaces-toast-message');
+  const action = document.getElementById('spaces-toast-action');
+  if (toast === null || messageEl === null || !(action instanceof HTMLButtonElement)) return;
+  // Clear any prior auto-hide timer.
+  if (toastState.hideTimer !== null) {
+    clearTimeout(toastState.hideTimer);
+    toastState.hideTimer = null;
+  }
+  toastState.onUndo = opts.onUndo ?? null;
+  messageEl.textContent = message;
+  if (typeof opts.undoLabel === 'string' && opts.onUndo !== undefined) {
+    action.textContent = opts.undoLabel;
+    action.hidden = false;
+  } else {
+    action.hidden = true;
+    action.textContent = '';
+  }
+  toast.classList.remove('is-leaving');
+  toast.hidden = false;
+  const duration = typeof opts.durationMs === 'number' && opts.durationMs > 0
+    ? opts.durationMs
+    : 6000;
+  toastState.hideTimer = setTimeout(() => hideToast(), duration);
+}
+
+function hideToast(): void {
+  const toast = document.getElementById('spaces-toast');
+  if (toast === null) return;
+  toast.classList.add('is-leaving');
+  // Let the leaving animation play, then hard-hide.
+  window.setTimeout(() => {
+    toast.hidden = true;
+    toast.classList.remove('is-leaving');
+  }, 200);
+  if (toastState.hideTimer !== null) {
+    clearTimeout(toastState.hideTimer);
+    toastState.hideTimer = null;
+  }
+  toastState.onUndo = null;
+}
+
+function wireToast(): void {
+  const action = document.getElementById('spaces-toast-action');
+  if (!(action instanceof HTMLButtonElement)) return;
+  action.addEventListener('click', () => {
+    const handler = toastState.onUndo;
+    hideToast();
+    if (handler !== null) handler();
+  });
+}
 
 // ─── Boot ───────────────────────────────────────────────────────────────
 

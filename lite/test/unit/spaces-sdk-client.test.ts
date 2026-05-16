@@ -71,6 +71,11 @@ describe('CYPHER source strings', () => {
   it('listSpaces query matches :Space + itemCount via :Asset/:BELONGS_TO', () => {
     expect(CYPHER.LIST_SPACES).toMatch(/MATCH \(s:Space\)/);
     expect(CYPHER.LIST_SPACES).toMatch(/\(a:Asset\)-\[:BELONGS_TO\]->\(s\)/);
+    // Soft-deleted Spaces (deletedAt set) MUST be filtered out.
+    // Without this WHERE, a deleted Space stays visible in the
+    // sidebar after `deleteSpace()` even though the mutation
+    // succeeded -- the user-reported bug from 2026-05-15.
+    expect(CYPHER.LIST_SPACES).toMatch(/WHERE s\.deletedAt IS NULL/);
     expect(CYPHER.LIST_SPACES).toMatch(/RETURN/);
     expect(CYPHER.LIST_SPACES).toMatch(/ORDER BY toLower/);
     expect(CYPHER.LIST_SPACES).toMatch(/count\(a\) AS itemCount/);
@@ -97,6 +102,11 @@ describe('CYPHER source strings', () => {
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/\(a:Asset\)-\[:BELONGS_TO\]->\(s:Space \{id: \$spaceId\}\)/);
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/other\.id <> s\.id/);
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/\[x IN otherSpacesRaw WHERE x\.id IS NOT NULL\] AS otherSpaces/);
+    // Soft-deleted Spaces (target Space OR a multi-Space chip
+    // target) MUST be filtered so the user never sees an item
+    // attributed to a Space they just deleted.
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/WHERE s\.deletedAt IS NULL/);
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/other\.deletedAt IS NULL/);
   });
 
   it('getItem uses :Asset id parameter and LIMIT 1', () => {
@@ -126,6 +136,21 @@ describe('CYPHER source strings', () => {
     expect(CYPHER.GET_ITEM).toMatch(
       /OPTIONAL MATCH \(creator:Person\)-\[:CREATED\]->\(a\)/
     );
+  });
+
+  it('GET_ITEM projects size + mimeType + tags + lastEditedBy (Phase A2)', () => {
+    expect(CYPHER.GET_ITEM).toMatch(/coalesce\(a\.size, a\.fileSize, a\.byteCount\) AS size/);
+    expect(CYPHER.GET_ITEM).toMatch(/coalesce\(a\.mimeType, a\.contentType\) AS mimeType/);
+    expect(CYPHER.GET_ITEM).toMatch(/coalesce\(a\.tags, edgeTags, \[\]\) AS tags/);
+    expect(CYPHER.GET_ITEM).toMatch(
+      /OPTIONAL MATCH \(editor:Person\)-\[:LAST_EDITED\]->\(a\)/
+    );
+    expect(CYPHER.GET_ITEM).toMatch(/AS lastEditedBy/);
+  });
+
+  it('GET_ITEM uses [:TAGGED_AS]->(:Tag) edges as the canonical tag fallback', () => {
+    expect(CYPHER.GET_ITEM).toMatch(/OPTIONAL MATCH \(a\)-\[:TAGGED_AS\]->\(t:Tag\)/);
+    expect(CYPHER.GET_ITEM).toMatch(/coalesce\(t\.name, t\.id\)\) AS edgeTags/);
   });
 });
 
@@ -425,6 +450,144 @@ describe('SdkSpacesClient.getItem', () => {
     expect(item).not.toBeNull();
     expect(item?.metadata).toBeUndefined();
   });
+
+  it('maps size + mimeType when present (Phase A2)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
+      {
+        id: 'i-200',
+        title: 'A PDF',
+        kind: 'document',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        otherSpaces: [],
+        producedBy: null,
+        size: 8421376,
+        mimeType: 'application/pdf',
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-200');
+    expect(item?.size).toBe(8421376);
+    expect(item?.mimeType).toBe('application/pdf');
+  });
+
+  it('drops size when non-positive or non-finite', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
+      {
+        id: 'i-201',
+        title: 'A',
+        kind: 'other',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        size: -1,
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-201');
+    expect(item?.size).toBeUndefined();
+  });
+
+  it('floors fractional size values to an integer', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
+      {
+        id: 'i-202',
+        title: 'A',
+        kind: 'other',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        size: 1234.7,
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-202');
+    expect(item?.size).toBe(1234);
+  });
+
+  it('normalizes tags into a clean string[] (drops empty / non-string entries)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
+      {
+        id: 'i-203',
+        title: 'Tagged',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: ['  policy ', '', 'q3', null, 42, '   ', 'finance'],
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-203');
+    expect(item?.tags).toEqual(['policy', 'q3', 'finance']);
+  });
+
+  it('defaults tags to [] when missing or non-array', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
+      {
+        id: 'i-204',
+        title: 'No tags',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-204');
+    expect(item?.tags).toEqual([]);
+  });
+
+  it('maps lastEditedBy when projection is non-null', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
+      {
+        id: 'i-205',
+        title: 'Edited',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: { kind: 'Person', name: 'Robb', id: 'p-1' },
+        lastEditedBy: { kind: 'Person', name: 'Alice', id: 'p-2' },
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-205');
+    expect(item?.lastEditedBy).toEqual({
+      kind: 'Person',
+      name: 'Alice',
+      id: 'p-2',
+    });
+  });
+
+  it('returns null lastEditedBy when projection is null (schema lacks the edge)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
+      {
+        id: 'i-206',
+        title: 'No editor',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        lastEditedBy: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-206');
+    expect(item?.lastEditedBy).toBeNull();
+  });
 });
 
 // ─── Error normalization ────────────────────────────────────────────────
@@ -506,12 +669,19 @@ describe('CYPHER source strings — Home view', () => {
     expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(p:Person\)/);
     expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(g:Agent\)/);
     expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/UNION ALL/);
+    // Soft-deleted Spaces don't count toward the data-room overview.
+    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(
+      /MATCH \(s:Space\) WHERE s\.deletedAt IS NULL/
+    );
   });
 
   it('HOME_RECENT_ITEMS uses :Asset label and ItemSummary projection', () => {
     expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/MATCH \(a:Asset\)/);
     expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/coalesce\(a\.name, a\.title, a\.id\) AS title/);
     expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/LIMIT toInteger\(\$limit\)/);
+    // The Space chip projection must skip deleted Spaces so a
+    // recent-item card never claims a Space the user just deleted.
+    expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/WHERE s\.deletedAt IS NULL/);
   });
 
   it('HOME_TOP_CONTRIBUTORS aggregates :Commit by author with $sinceMs cutoff', () => {
@@ -558,6 +728,8 @@ describe('CYPHER source strings — Home view', () => {
   it('HOME_PERMISSION_SUMMARY counts visible :Space nodes', () => {
     expect(CYPHER.HOME_PERMISSION_SUMMARY).toMatch(/MATCH \(s:Space\)/);
     expect(CYPHER.HOME_PERMISSION_SUMMARY).toMatch(/count\(s\) AS visible/);
+    // Soft-deleted Spaces don't count toward "you can see N Spaces".
+    expect(CYPHER.HOME_PERMISSION_SUMMARY).toMatch(/WHERE s\.deletedAt IS NULL/);
   });
 });
 
@@ -889,5 +1061,309 @@ describe('SdkSpacesClient.getPermissionSummary', () => {
     stub.setResponse('MATCH (s:Space)', []);
     const client = makeClient(stub);
     expect(await client.getPermissionSummary()).toEqual({ visibleSpaceCount: 0 });
+  });
+});
+
+// ─── Mutation queries (Phase 3a) ─────────────────────────────────────────
+//
+// Cypher-source guards + behavior tests for create / rename / delete /
+// undelete. The behavior tests use the same `buildStubQuery` harness as
+// the read queries; they assert row mapping, parameter shape,
+// disambiguation between NOT_FOUND and DUPLICATE_NAME / DELETE_NON_EMPTY,
+// and the soft-vs-hard delete path split.
+
+describe('CYPHER source strings — mutations (Phase 3a)', () => {
+  it('CREATE_SPACE checks uniqueness via case-insensitive name predicate', () => {
+    expect(CYPHER.CREATE_SPACE).toMatch(
+      /OPTIONAL MATCH \(existing:Space\)\s+WHERE toLower\(coalesce\(existing\.name, ''\)\) = toLower\(\$name\)/
+    );
+    expect(CYPHER.CREATE_SPACE).toMatch(/WHERE existing IS NULL/);
+    expect(CYPHER.CREATE_SPACE).toMatch(/CREATE \(s:Space \{/);
+    expect(CYPHER.CREATE_SPACE).toMatch(/id: \$id/);
+    expect(CYPHER.CREATE_SPACE).toMatch(/createdAt: \$now/);
+    expect(CYPHER.CREATE_SPACE).toMatch(/updatedAt: \$now/);
+    expect(CYPHER.CREATE_SPACE).toMatch(/RETURN s\.id AS id/);
+  });
+
+  it('RENAME_SPACE matches target by id, checks new-name collision separately', () => {
+    expect(CYPHER.RENAME_SPACE).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
+    expect(CYPHER.RENAME_SPACE).toMatch(/s\.deletedAt IS NULL/);
+    expect(CYPHER.RENAME_SPACE).toMatch(/OPTIONAL MATCH \(other:Space\)/);
+    expect(CYPHER.RENAME_SPACE).toMatch(/other\.id <> \$id/);
+    expect(CYPHER.RENAME_SPACE).toMatch(/WHERE other IS NULL/);
+    expect(CYPHER.RENAME_SPACE).toMatch(/SET s\.name = \$name,\s+s\.updatedAt = \$now/);
+  });
+
+  it('SPACE_EXISTS_BY_ID returns a count for disambiguation', () => {
+    expect(CYPHER.SPACE_EXISTS_BY_ID).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
+    expect(CYPHER.SPACE_EXISTS_BY_ID).toMatch(/RETURN count\(s\) AS count/);
+  });
+
+  it('SPACE_ITEM_COUNT measures BELONGS_TO assets for hard-delete pre-flight', () => {
+    expect(CYPHER.SPACE_ITEM_COUNT).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
+    expect(CYPHER.SPACE_ITEM_COUNT).toMatch(
+      /OPTIONAL MATCH \(a:Asset\)-\[:BELONGS_TO\]->\(s\)/
+    );
+    expect(CYPHER.SPACE_ITEM_COUNT).toMatch(/RETURN count\(a\) AS count/);
+  });
+
+  it('SOFT_DELETE_SPACE sets deletedAt + updatedAt, skips already-deleted', () => {
+    expect(CYPHER.SOFT_DELETE_SPACE).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
+    expect(CYPHER.SOFT_DELETE_SPACE).toMatch(/WHERE s\.deletedAt IS NULL/);
+    expect(CYPHER.SOFT_DELETE_SPACE).toMatch(/SET s\.deletedAt = \$now/);
+    expect(CYPHER.SOFT_DELETE_SPACE).toMatch(/s\.updatedAt = \$now/);
+  });
+
+  it('HARD_DELETE_SPACE uses plain DELETE (no DETACH) for orphan-safety', () => {
+    expect(CYPHER.HARD_DELETE_SPACE).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
+    expect(CYPHER.HARD_DELETE_SPACE).toMatch(/DELETE s/);
+    // DETACH DELETE would silently nuke :BELONGS_TO edges -- we
+    // deliberately use plain DELETE so a constraint error surfaces
+    // any orphaned edge instead of swallowing the data loss.
+    expect(CYPHER.HARD_DELETE_SPACE).not.toMatch(/DETACH DELETE/);
+  });
+
+  it('UNDELETE_SPACE clears deletedAt and projects itemCount alongside the row', () => {
+    expect(CYPHER.UNDELETE_SPACE).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
+    expect(CYPHER.UNDELETE_SPACE).toMatch(/WHERE s\.deletedAt IS NOT NULL/);
+    expect(CYPHER.UNDELETE_SPACE).toMatch(/SET s\.deletedAt = null/);
+    expect(CYPHER.UNDELETE_SPACE).toMatch(/RETURN s\.id AS id/);
+    expect(CYPHER.UNDELETE_SPACE).toMatch(/itemCount AS itemCount/);
+  });
+});
+
+describe('SdkSpacesClient.createSpace', () => {
+  it('returns the persisted Space on success', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (s:Space', [
+      {
+        id: 'space-uuid-123',
+        name: 'New Space',
+        description: '',
+        color: '',
+        iconKey: '',
+        itemCount: 0,
+        createdAt: '2026-01-15T10:00:00Z',
+        updatedAt: '2026-01-15T10:00:00Z',
+      },
+    ]);
+    const client = makeClient(stub);
+    const result = await client.createSpace({ name: 'New Space' });
+    expect(result).toEqual({
+      id: 'space-uuid-123',
+      name: 'New Space',
+      itemCount: 0,
+      createdAt: '2026-01-15T10:00:00Z',
+      updatedAt: '2026-01-15T10:00:00Z',
+    });
+  });
+
+  it('passes the name, generated id, and an ISO timestamp to the query', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (s:Space', [
+      {
+        id: 'auto-id',
+        name: 'Audit',
+        description: '',
+        color: '',
+        iconKey: '',
+        itemCount: 0,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.createSpace({ name: 'Audit' });
+    const createCall = stub.calls.find((c) => c.cypher.includes('CREATE (s:Space'));
+    expect(createCall?.parameters).toMatchObject({ name: 'Audit' });
+    expect(typeof createCall?.parameters?.['id']).toBe('string');
+    expect((createCall?.parameters?.['id'] as string).length).toBeGreaterThan(0);
+    const now = createCall?.parameters?.['now'];
+    expect(typeof now).toBe('string');
+    // Must look like an ISO 8601 timestamp.
+    expect(now as string).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('throws SPACES_DUPLICATE_NAME when the create returns no rows', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (s:Space', []);
+    const client = makeClient(stub);
+    await expect(client.createSpace({ name: 'Audit' })).rejects.toMatchObject({
+      code: 'SPACES_DUPLICATE_NAME',
+    });
+  });
+
+  it('rejects empty name with SPACES_INVALID_INPUT (client-side)', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.createSpace({ name: '   ' })).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+    // Should not even hit the wire.
+    expect(stub.calls.length).toBe(0);
+  });
+
+  it('rejects too-long names with SPACES_INVALID_INPUT', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    const longName = 'a'.repeat(200);
+    await expect(client.createSpace({ name: longName })).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+    expect(stub.calls.length).toBe(0);
+  });
+
+  it('trims whitespace on the name before sending', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (s:Space', [
+      { id: 'x', name: 'Audit', description: '', color: '', iconKey: '', itemCount: 0, createdAt: '', updatedAt: '' },
+    ]);
+    const client = makeClient(stub);
+    await client.createSpace({ name: '  Audit  ' });
+    const createCall = stub.calls.find((c) => c.cypher.includes('CREATE (s:Space'));
+    expect(createCall?.parameters?.['name']).toBe('Audit');
+  });
+});
+
+describe('SdkSpacesClient.renameSpace', () => {
+  it('returns the updated Space on success', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET s.name', [
+      {
+        id: 'sp-1',
+        name: 'Updated',
+        description: '',
+        color: '',
+        iconKey: '',
+        createdAt: '',
+        updatedAt: '2026-02-01T00:00:00Z',
+      },
+    ]);
+    const client = makeClient(stub);
+    const result = await client.renameSpace('sp-1', 'Updated');
+    expect(result).toMatchObject({ id: 'sp-1', name: 'Updated' });
+  });
+
+  it('throws SPACES_NOT_FOUND when the rename returns 0 rows and the id is gone', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET s.name', []);
+    // Existence probe returns count=0 -> the space is missing.
+    stub.setResponse('RETURN count(s) AS count', [{ count: 0 }]);
+    const client = makeClient(stub);
+    await expect(client.renameSpace('sp-x', 'New')).rejects.toMatchObject({
+      code: 'SPACES_NOT_FOUND',
+    });
+  });
+
+  it('throws SPACES_DUPLICATE_NAME when the rename returns 0 rows but the id exists', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET s.name', []);
+    stub.setResponse('RETURN count(s) AS count', [{ count: 1 }]);
+    const client = makeClient(stub);
+    await expect(client.renameSpace('sp-1', 'Collision')).rejects.toMatchObject({
+      code: 'SPACES_DUPLICATE_NAME',
+    });
+  });
+
+  it('rejects empty id with SPACES_INVALID_INPUT (client-side)', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.renameSpace('', 'name')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+    expect(stub.calls.length).toBe(0);
+  });
+});
+
+describe('SdkSpacesClient.deleteSpace', () => {
+  it('soft delete (default) sets deletedAt without checking item count', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET s.deletedAt = $now', [{ id: 'sp-1' }]);
+    const client = makeClient(stub);
+    await client.deleteSpace('sp-1');
+    // Must NOT have run the SPACE_ITEM_COUNT pre-flight for soft delete.
+    expect(stub.calls.find((c) => c.cypher.includes('count(a) AS count'))).toBeUndefined();
+  });
+
+  it('soft delete is idempotent when the space is already soft-deleted', async () => {
+    const stub = buildStubQuery();
+    // SOFT_DELETE_SPACE returns 0 rows (already deleted).
+    stub.setResponse('SET s.deletedAt = $now', []);
+    // But the existence probe says the space exists.
+    stub.setResponse('RETURN count(s) AS count', [{ count: 1 }]);
+    const client = makeClient(stub);
+    // Should resolve without throwing.
+    await expect(client.deleteSpace('sp-1')).resolves.toBeUndefined();
+  });
+
+  it('soft delete throws SPACES_NOT_FOUND when the space never existed', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET s.deletedAt = $now', []);
+    stub.setResponse('RETURN count(s) AS count', [{ count: 0 }]);
+    const client = makeClient(stub);
+    await expect(client.deleteSpace('missing')).rejects.toMatchObject({
+      code: 'SPACES_NOT_FOUND',
+    });
+  });
+
+  it('hard delete refuses with SPACES_DELETE_NON_EMPTY when items remain', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)', [{ count: 7 }]);
+    const client = makeClient(stub);
+    await expect(client.deleteSpace('sp-1', { soft: false })).rejects.toMatchObject({
+      code: 'SPACES_DELETE_NON_EMPTY',
+    });
+    // Must NOT have run HARD_DELETE_SPACE.
+    expect(stub.calls.find((c) => c.cypher.includes('DELETE s'))).toBeUndefined();
+  });
+
+  it('hard delete proceeds when item count is 0', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)', [{ count: 0 }]);
+    stub.setResponse('DELETE s', []);
+    const client = makeClient(stub);
+    await client.deleteSpace('sp-1', { soft: false });
+    expect(stub.calls.find((c) => c.cypher.includes('DELETE s'))).toBeDefined();
+  });
+
+  it('hard delete throws SPACES_NOT_FOUND when the space does not exist', async () => {
+    const stub = buildStubQuery();
+    // SPACE_ITEM_COUNT returns no rows because MATCH didn't bind.
+    stub.setResponse('OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)', []);
+    const client = makeClient(stub);
+    await expect(client.deleteSpace('missing', { soft: false })).rejects.toMatchObject({
+      code: 'SPACES_NOT_FOUND',
+    });
+  });
+});
+
+describe('SdkSpacesClient.undeleteSpace', () => {
+  it('returns the restored Space on success', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET s.deletedAt = null', [
+      {
+        id: 'sp-1',
+        name: 'Restored',
+        description: '',
+        color: '',
+        iconKey: '',
+        itemCount: 4,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ]);
+    const client = makeClient(stub);
+    const result = await client.undeleteSpace('sp-1');
+    expect(result).toMatchObject({ id: 'sp-1', name: 'Restored', itemCount: 4 });
+  });
+
+  it('throws SPACES_NOT_FOUND when the space is hard-deleted', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET s.deletedAt = null', []);
+    stub.setResponse('RETURN count(s) AS count', [{ count: 0 }]);
+    const client = makeClient(stub);
+    await expect(client.undeleteSpace('gone')).rejects.toMatchObject({
+      code: 'SPACES_NOT_FOUND',
+    });
   });
 });
