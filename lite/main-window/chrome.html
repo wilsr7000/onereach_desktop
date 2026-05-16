@@ -13,6 +13,21 @@
   <body>
     <!-- Tab bar at the top -- 36px high, defined in chrome.css. -->
     <div id="tab-bar" class="tab-bar" role="tablist" aria-label="Open agent tabs">
+      <!--
+        Open Spaces button -- ported verbatim from the full app's
+        `#black-hole-button` (tabbed-browser.html). Dark-blue gradient
+        circle with the OR logo masked on top. Click opens the Spaces
+        window via the same single-instance factory the Tools menu uses.
+        Sits in the upper-left so it reads as a workspace-level entry
+        point, peer to Home, not buried in a body button row.
+      -->
+      <button
+        id="spaces-or-button"
+        class="spaces-or-button"
+        type="button"
+        title="Open Spaces"
+        aria-label="Open Spaces"
+      ></button>
       <button
         id="home-pill"
         class="tab-pill home-pill active"
@@ -54,7 +69,6 @@
         <div class="home-cta-row">
           <button id="open-store-btn" class="btn-primary" type="button">Open OAGI Store</button>
           <button id="manage-agents-btn" class="btn-secondary" type="button">Manage Agents</button>
-          <button id="open-spaces-btn" class="btn-secondary" type="button">Open Spaces</button>
         </div>
 
         <!-- Onboarding card: only visible AFTER the user signs in

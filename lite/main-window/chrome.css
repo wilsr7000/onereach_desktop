@@ -48,6 +48,92 @@ body {
   overflow: hidden;
 }
 
+/*
+ * Spaces "OR logo" button — ported from the full app's
+ * `#black-hole-button` (tabbed-browser.html). Dark-blue radial-gradient
+ * circle with the OneReach logo masked on top in semi-transparent
+ * white. Scaled from the full app's 40x40 down to 28x28 so it lives
+ * comfortably inside the 36px tab bar. Click handler in chrome.ts
+ * routes to window.lite.spaces.open().
+ */
+.spaces-or-button {
+  -webkit-app-region: no-drag;
+  position: relative;
+  overflow: hidden;
+  width: 28px;
+  height: 28px;
+  align-self: center;
+  margin: 0 8px 0 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(79, 140, 255, 0.32);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(123, 219, 255, 0.18), transparent 60%),
+    linear-gradient(135deg, #123a72 0%, #111426 100%);
+  box-shadow:
+    0 0 0 1px rgba(79, 140, 255, 0.18),
+    0 4px 12px rgba(79, 140, 255, 0.22);
+  cursor: pointer;
+  transition:
+    background 200ms ease,
+    border-color 200ms ease,
+    transform 200ms ease,
+    box-shadow 200ms ease;
+}
+
+/* Overlaid OR logo. Same data the full app uses, masked in luminance
+ * mode so the logo paints in the foreground color (semi-transparent
+ * white). Asset is copied to dist-lite/build/or-logo.png by esbuild
+ * so the renderer can reference it as a sibling URL. */
+.spaces-or-button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  background-color: rgba(255, 255, 255, 0.9);
+  -webkit-mask-image: url('./or-logo.png');
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-mode: luminance;
+  mask-image: url('./or-logo.png');
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-mode: luminance;
+  transform: translate(-50%, -50%);
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+  pointer-events: none;
+}
+
+.spaces-or-button:hover {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(123, 219, 255, 0.3), transparent 62%),
+    linear-gradient(135deg, #1a4c92 0%, #151a34 100%);
+  border-color: rgba(123, 219, 255, 0.68);
+  transform: translateY(-1px) scale(1.04);
+  box-shadow:
+    0 0 0 1px rgba(79, 140, 255, 0.32),
+    0 6px 16px rgba(79, 140, 255, 0.4);
+}
+
+.spaces-or-button:hover::after {
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
+.spaces-or-button:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.spaces-or-button:focus-visible {
+  outline: 2px solid rgba(123, 219, 255, 0.7);
+  outline-offset: 2px;
+}
+
 .tab-list {
   display: flex;
   align-items: stretch;

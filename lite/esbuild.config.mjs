@@ -51,6 +51,17 @@ const ASSETS_TO_COPY = [
   { from: 'lite/help/help.css', to: 'help.css' },
   { from: 'lite/spaces/spaces.html', to: 'spaces.html' },
   { from: 'lite/spaces/spaces.css', to: 'spaces.css' },
+  // Tray icons (Phase 0a). Copied next to the main bundle so
+  // `lite/tray/main.ts` can resolve them via `path.join(__dirname,
+  // ...)` without poking at <appPath>/assets/. Template variant
+  // enables macOS menu-bar auto-adapt; regular icon is the fallback.
+  { from: 'assets/tray-iconTemplate.png', to: 'tray-iconTemplate.png' },
+  { from: 'assets/tray-icon.png', to: 'tray-icon.png' },
+  // OneReach logo used by `.spaces-or-button` in the main-window tab
+  // bar. Same asset the full app's `#black-hole-button` uses; copied
+  // sibling-of the HTML/CSS so `chrome.css` can reference it as
+  // `./or-logo.png` without a build-time data-URL.
+  { from: 'assets/or-logo.png', to: 'or-logo.png' },
 ];
 
 async function copyAssets() {

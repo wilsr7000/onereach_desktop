@@ -326,14 +326,14 @@ async function bootstrap(): Promise<void> {
       void settings.open('idws').catch(() => undefined);
     });
   }
-  // "Open Spaces" — peer to the OAGI / Manage Agents CTAs. Routes
-  // through the spaces bridge (window.lite.spaces.open) so the same
-  // single-instance BrowserWindow pattern handles focus on repeat
-  // clicks. Silently no-ops if the bridge isn't wired (signed-out
-  // boot before initSpaces runs).
-  const openSpacesBtn = document.getElementById('open-spaces-btn');
-  if (openSpacesBtn !== null) {
-    openSpacesBtn.addEventListener('click', () => {
+  // Spaces OR-logo button (upper-left of the tab bar) — ported from
+  // the full app's `#black-hole-button` (Quick Capture / Spaces). Same
+  // single-instance bridge as the Tools → Spaces… menu entry; repeat
+  // clicks focus the existing window. Soft no-op if the bridge isn't
+  // wired yet (signed-out boot before initSpaces runs).
+  const spacesOrBtn = document.getElementById('spaces-or-button');
+  if (spacesOrBtn !== null) {
+    spacesOrBtn.addEventListener('click', () => {
       const spaces = window.lite?.spaces;
       if (spaces === undefined) return;
       void spaces.open().catch(() => undefined);
