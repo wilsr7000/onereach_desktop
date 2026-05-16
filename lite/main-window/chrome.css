@@ -80,6 +80,33 @@ body {
     border-color 200ms ease,
     transform 200ms ease,
     box-shadow 200ms ease;
+  /* Subtle "alive" breathing: the outer ring + drop shadow pulse on
+   * a slow 4s cycle. Reads as ambient signal of presence, not as
+   * grabbing the eye. Pauses on hover so the hover lift can take
+   * over cleanly. Disabled for users with prefers-reduced-motion. */
+  animation: spaces-or-breathe 4s ease-in-out infinite;
+}
+
+@keyframes spaces-or-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(79, 140, 255, 0.18),
+      0 4px 12px rgba(79, 140, 255, 0.22);
+    border-color: rgba(79, 140, 255, 0.32);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(123, 219, 255, 0.32),
+      0 6px 18px rgba(79, 140, 255, 0.4);
+    border-color: rgba(123, 219, 255, 0.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spaces-or-button {
+    animation: none;
+  }
 }
 
 /* Overlaid OR logo. Same data the full app uses, masked in luminance
@@ -112,6 +139,10 @@ body {
 }
 
 .spaces-or-button:hover {
+  /* Pause the idle breathing so hover can own the visual treatment.
+   * Without this, the keyframe periodically clobbers the hover
+   * shadow + border-color values. */
+  animation-play-state: paused;
   background:
     radial-gradient(circle at 50% 50%, rgba(123, 219, 255, 0.3), transparent 62%),
     linear-gradient(135deg, #1a4c92 0%, #151a34 100%);
