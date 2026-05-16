@@ -326,6 +326,19 @@ async function bootstrap(): Promise<void> {
       void settings.open('idws').catch(() => undefined);
     });
   }
+  // "Open Spaces" — peer to the OAGI / Manage Agents CTAs. Routes
+  // through the spaces bridge (window.lite.spaces.open) so the same
+  // single-instance BrowserWindow pattern handles focus on repeat
+  // clicks. Silently no-ops if the bridge isn't wired (signed-out
+  // boot before initSpaces runs).
+  const openSpacesBtn = document.getElementById('open-spaces-btn');
+  if (openSpacesBtn !== null) {
+    openSpacesBtn.addEventListener('click', () => {
+      const spaces = window.lite?.spaces;
+      if (spaces === undefined) return;
+      void spaces.open().catch(() => undefined);
+    });
+  }
 
   // 3. Wire the Home pill click.
   wireHomePill();
