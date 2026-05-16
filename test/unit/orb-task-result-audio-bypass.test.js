@@ -75,6 +75,17 @@ describe('voice-speaker -- speak() reads metadata.taskResult and stamps it on br
     expect(SPEAKER_SOURCE).toMatch(/const\s+taskResult\s*=\s*!!metadata\?\.taskResult/);
   });
 
+  it('speak() forwards options.taskResult through the speech-queue metadata (regression: v5.0.13 hotfix forgot this line)', () => {
+    // The speak() function builds an explicit allowlist of metadata
+    // fields to pass to the speech queue. Without taskResult on the
+    // allowlist, the bridge's `taskResult: true` is dropped at the
+    // queue boundary and the audio gets phantom-blocked by the orb.
+    // This pins the field on the allowlist.
+    const speakFn = SPEAKER_SOURCE.match(/async speak\(text, options = \{\}\) \{[\s\S]{0,1500}^\s\s\}/m);
+    expect(speakFn, 'async speak() function must exist').toBeTruthy();
+    expect(speakFn[0]).toMatch(/taskResult:\s*!!options\.taskResult/);
+  });
+
   it('audio_wav broadcast includes taskResult', () => {
     // Find the broadcast({ type: 'audio_wav', ... }) literal.
     const wavBroadcast = SPEAKER_SOURCE.match(/this\.broadcast\(\{\s*type:\s*['"]audio_wav['"][\s\S]{0,400}\}\)/);

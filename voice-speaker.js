@@ -48,6 +48,14 @@ class VoiceSpeaker {
         // leaves these undefined and behaves exactly as before.
         agentId: options.agentId,
         proactive: !!options.proactive,
+        // taskResult: TTS for a just-completed user-initiated task
+        // (daily brief, etc.). The orb's idle-audio guard also lets
+        // these through. Without this propagation, the bridge's
+        // taskResult: true flag was lost at the queue boundary and the
+        // orb dropped the audio (v5.0.13 hotfix forgot to add this
+        // line to speak() -- the metadata builder was an explicit
+        // allowlist and taskResult wasn't on it).
+        taskResult: !!options.taskResult,
         skipAffectMatching: options.skipAffectMatching,
       },
     });
