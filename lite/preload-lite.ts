@@ -71,6 +71,12 @@ const SPACES_ITEMS_UPDATE = 'lite:spaces:items:update';
 const SPACES_ITEMS_ADD_TAG = 'lite:spaces:items:addTag';
 const SPACES_ITEMS_REMOVE_TAG = 'lite:spaces:items:removeTag';
 const SPACES_ITEMS_RECENT_COMMITS = 'lite:spaces:items:recentCommits';
+const SPACES_SET_SPACE_KIND = 'lite:spaces:setKind';
+const SPACES_PLAYBOOKS_CURRENT = 'lite:spaces:playbooks:current';
+const SPACES_PLAYBOOKS_SET = 'lite:spaces:playbooks:set';
+const SPACES_TICKETS_LIST = 'lite:spaces:tickets:list';
+const SPACES_TICKETS_CREATE = 'lite:spaces:tickets:create';
+const SPACES_TICKETS_UPDATE = 'lite:spaces:tickets:update';
 const SPACES_DISCOVERY_RUN = 'lite:spaces:discovery:run';
 // Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md.
 const SPACES_HOME_ENTITY_COUNTS = 'lite:spaces:home:entityCounts';
@@ -585,6 +591,42 @@ interface SpacesDeleteSpaceOptsView {
   soft?: boolean;
 }
 
+interface SpacesTicketsBridge {
+  list(
+    spaceId: string,
+    opts?: { status?: string; limit?: number; offset?: number }
+  ): Promise<SpacesIpcResultView<unknown[]>>;
+  create(
+    spaceId: string,
+    input: {
+      title: string;
+      description?: string;
+      status?: string;
+      priority?: string;
+      playbookId?: string;
+      assigneeId?: string;
+    }
+  ): Promise<SpacesIpcResultView<unknown>>;
+  update(
+    id: string,
+    patch: {
+      title?: string;
+      description?: string;
+      status?: string;
+      priority?: string;
+      assigneeId?: string | null;
+    }
+  ): Promise<SpacesIpcResultView<unknown>>;
+}
+
+interface SpacesPlaybooksBridge {
+  current(spaceId: string): Promise<SpacesIpcResultView<unknown | null>>;
+  set(
+    spaceId: string,
+    playbookId: string
+  ): Promise<SpacesIpcResultView<{ playbook: unknown; ticketCount: number }>>;
+}
+
 interface SpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
@@ -607,6 +649,13 @@ interface SpacesBridge {
     opts?: SpacesDeleteSpaceOptsView
   ): Promise<SpacesIpcResultView<{ ok: true }>>;
   undeleteSpace(id: string): Promise<SpacesIpcResultView<unknown>>;
+  /** Phase 4 — shared spaces (playbooks + tickets). */
+  setSpaceKind(
+    id: string,
+    kind: 'user' | 'shared'
+  ): Promise<SpacesIpcResultView<'user' | 'shared'>>;
+  playbooks: SpacesPlaybooksBridge;
+  tickets: SpacesTicketsBridge;
 }
 
 interface HealthBridge {
@@ -1276,6 +1325,37 @@ const spaces: SpacesBridge = {
     ipcRenderer.invoke(SPACES_UNDELETE_SPACE, { id }) as Promise<
       SpacesIpcResultView<unknown>
     >,
+  setSpaceKind: (id, kind) =>
+    ipcRenderer.invoke(SPACES_SET_SPACE_KIND, { id, kind }) as Promise<
+      SpacesIpcResultView<'user' | 'shared'>
+    >,
+  playbooks: {
+    current: (spaceId) =>
+      ipcRenderer.invoke(SPACES_PLAYBOOKS_CURRENT, { spaceId }) as Promise<
+        SpacesIpcResultView<unknown | null>
+      >,
+    set: (spaceId, playbookId) =>
+      ipcRenderer.invoke(SPACES_PLAYBOOKS_SET, { spaceId, playbookId }) as Promise<
+        SpacesIpcResultView<{ playbook: unknown; ticketCount: number }>
+      >,
+  },
+  tickets: {
+    list: (spaceId, opts) =>
+      ipcRenderer.invoke(SPACES_TICKETS_LIST, {
+        spaceId,
+        ...(opts?.status !== undefined ? { status: opts.status } : {}),
+        ...(opts?.limit !== undefined ? { limit: opts.limit } : {}),
+        ...(opts?.offset !== undefined ? { offset: opts.offset } : {}),
+      }) as Promise<SpacesIpcResultView<unknown[]>>,
+    create: (spaceId, input) =>
+      ipcRenderer.invoke(SPACES_TICKETS_CREATE, { spaceId, input }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    update: (id, patch) =>
+      ipcRenderer.invoke(SPACES_TICKETS_UPDATE, { id, patch }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+  },
 };
 
 const health: HealthBridge = {

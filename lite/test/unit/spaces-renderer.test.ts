@@ -51,6 +51,7 @@ interface TestSpace {
   color?: string;
   iconKey?: string;
   itemCount?: number;
+  kind?: 'user' | 'shared';
 }
 
 interface TestChip {
@@ -144,6 +145,33 @@ describe('buildSpaceRow', () => {
     const row = handle().buildSpaceRow({ id: 'sp-1', name: 'X' }, false);
     expect(row.getAttribute('role')).toBe('button');
     expect(row.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('flags shared spaces with .is-shared + a kind badge (Phase 4)', () => {
+    const row = handle().buildSpaceRow(
+      { id: 'sp-shared', name: 'Quarterly Audit', kind: 'shared' },
+      false
+    );
+    expect(row.classList.contains('is-shared')).toBe(true);
+    const badge = row.querySelector('.spaces-row-kind-badge');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe('AI');
+    expect(badge?.getAttribute('aria-label')).toMatch(/AI-managed/i);
+  });
+
+  it('user spaces have no shared-flag class or badge', () => {
+    const row = handle().buildSpaceRow(
+      { id: 'sp-1', name: 'Engineering', kind: 'user' },
+      false
+    );
+    expect(row.classList.contains('is-shared')).toBe(false);
+    expect(row.querySelector('.spaces-row-kind-badge')).toBeNull();
+  });
+
+  it('treats spaces without a kind field as user-managed (additive)', () => {
+    const row = handle().buildSpaceRow({ id: 'sp-1', name: 'X' }, false);
+    expect(row.classList.contains('is-shared')).toBe(false);
+    expect(row.querySelector('.spaces-row-kind-badge')).toBeNull();
   });
 });
 

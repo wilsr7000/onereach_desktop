@@ -43,6 +43,11 @@ import type {
   DeleteSpaceOpts,
   ItemUpdatePatch,
   RecentCommitsOpts,
+  SpaceKind,
+  ListTicketsOpts,
+  CreateTicketInput,
+  UpdateTicketPatch,
+  SetPlaybookResult,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -71,6 +76,13 @@ export type {
   DeleteSpaceOpts,
   ItemUpdatePatch,
   RecentCommitsOpts,
+  SpaceKind,
+  TicketStatus,
+  TicketDetails,
+  ListTicketsOpts,
+  CreateTicketInput,
+  UpdateTicketPatch,
+  SetPlaybookResult,
 } from './types.js';
 export {
   SPACES_MODULE_VERSION,
@@ -79,6 +91,7 @@ export {
   MAX_ITEM_TITLE_LENGTH,
   MAX_ITEM_DESCRIPTION_LENGTH,
   MAX_ITEM_TAG_LENGTH,
+  TICKET_STATUSES,
 } from './types.js';
 
 export type { SpaceScope } from './scope.js';
@@ -211,6 +224,60 @@ export interface SpacesItemsApi {
 }
 
 /**
+ * Tickets sub-surface (Phase 4 — shared spaces). Tickets are
+ * `:Asset {type: 'ticket'}` rows that decompose a playbook into
+ * actionable work units. They live alongside other items in a Space
+ * but get their own listing for the shared-space dashboard.
+ */
+export interface SpacesTicketsApi {
+  /**
+   * List tickets in a Space, optionally filtered by status. Returns
+   * ticket-shaped Items (`Item.kind === 'ticket'` with `Item.ticket`
+   * populated). Ordered by status priority (open → in_progress →
+   * blocked → done) then most-recently-updated within each status.
+   */
+  list(spaceId: string, opts?: ListTicketsOpts): Promise<Item[]>;
+
+  /**
+   * Create a new ticket in a Space. Optionally links the ticket back
+   * to a source playbook via `[:DECOMPOSED_FROM]` and to an initial
+   * assignee via `[:ASSIGNED_TO]`.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for empty title or
+   *   unknown status. `SPACES_NOT_FOUND` if the Space is missing.
+   */
+  create(spaceId: string, input: CreateTicketInput): Promise<Item>;
+
+  /**
+   * Update a ticket. Mirrors `items.update()` but exposes ticket-
+   * specific fields (status, priority, assignee). Pass
+   * `{ assigneeId: null }` to clear the assignment.
+   */
+  update(id: string, patch: UpdateTicketPatch): Promise<Item>;
+}
+
+/**
+ * Playbooks sub-surface (Phase 4 — shared spaces). A Space designates
+ * one Asset as its "current playbook" — the plan agents are working
+ * against. The playbook is just an Item with `kind === 'playbook'`.
+ */
+export interface SpacesPlaybooksApi {
+  /**
+   * Return the current playbook for a Space, or `null` when none is
+   * set. `null` also covers the "space doesn't exist" case.
+   */
+  current(spaceId: string): Promise<Item | null>;
+
+  /**
+   * Promote an Asset to the Space's current playbook. The asset's
+   * `kind` is rewritten to `'playbook'` so listings show the
+   * playbook chrome. Any previous current playbook is demoted (the
+   * `[:CURRENT_PLAYBOOK]` edge is dropped).
+   */
+  set(spaceId: string, playbookId: string): Promise<SetPlaybookResult>;
+}
+
+/**
  * The public surface of the spaces module.
  *
  * **Error contract**: every async method throws `SpacesError` on
@@ -244,6 +311,23 @@ export interface SpacesApi {
 
   /** Items sub-surface. */
   readonly items: SpacesItemsApi;
+
+  /** Tickets sub-surface (Phase 4 — shared spaces). */
+  readonly tickets: SpacesTicketsApi;
+
+  /** Playbooks sub-surface (Phase 4 — shared spaces). */
+  readonly playbooks: SpacesPlaybooksApi;
+
+  /**
+   * Toggle a Space between 'user' (default) and 'shared' (AI-managed).
+   * Idempotent: setting the same kind again is a no-op aside from
+   * refreshing `updatedAt`. Returns the new kind so the caller can
+   * confirm the flip landed.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for an unknown kind;
+   *   `SPACES_NOT_FOUND` if the Space is missing or soft-deleted.
+   */
+  setSpaceKind(id: string, kind: SpaceKind): Promise<SpaceKind>;
 
   // ─── Home view (chunk 3k + 3o) ────────────────────────────────────────
   //
@@ -394,6 +478,31 @@ class UninitializedSpacesApi implements SpacesApi {
       throw notInitialized('items.recentCommits');
     },
   };
+
+  readonly tickets: SpacesTicketsApi = {
+    async list(_spaceId: string, _opts?: ListTicketsOpts): Promise<Item[]> {
+      throw notInitialized('tickets.list');
+    },
+    async create(_spaceId: string, _input: CreateTicketInput): Promise<Item> {
+      throw notInitialized('tickets.create');
+    },
+    async update(_id: string, _patch: UpdateTicketPatch): Promise<Item> {
+      throw notInitialized('tickets.update');
+    },
+  };
+
+  readonly playbooks: SpacesPlaybooksApi = {
+    async current(_spaceId: string): Promise<Item | null> {
+      throw notInitialized('playbooks.current');
+    },
+    async set(_spaceId: string, _playbookId: string): Promise<SetPlaybookResult> {
+      throw notInitialized('playbooks.set');
+    },
+  };
+
+  async setSpaceKind(_id: string, _kind: SpaceKind): Promise<SpaceKind> {
+    throw notInitialized('setSpaceKind');
+  }
 
   open(): void {
     void import('../logging/api.js').then((m) => {

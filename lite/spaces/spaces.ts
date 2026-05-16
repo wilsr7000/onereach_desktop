@@ -757,6 +757,10 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
   const li = document.createElement('li');
   li.className = 'spaces-row spaces-row-space';
   if (active) li.classList.add('is-active');
+  // Shared spaces get an opt-in class for CSS hooks (accent color,
+  // sparkle dot, etc.) so the renderer doesn't need to drop in extra
+  // child elements when the space is user-managed.
+  if (space.kind === 'shared') li.classList.add('is-shared');
   li.setAttribute('data-scope-id', space.id);
   li.setAttribute('role', 'button');
   li.setAttribute('tabindex', '0');
@@ -772,6 +776,18 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
   name.className = 'spaces-row-name';
   name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
   li.appendChild(name);
+
+  // Shared-space badge (Phase 4). A small "AI" pill next to the name so
+  // users instantly see which Spaces are AI-managed. Skipped for
+  // user-managed spaces so the sidebar stays clean.
+  if (space.kind === 'shared') {
+    const badge = document.createElement('span');
+    badge.className = 'spaces-row-kind-badge';
+    badge.setAttribute('aria-label', 'AI-managed shared space');
+    badge.title = 'Shared space — AI-managed';
+    badge.textContent = 'AI';
+    li.appendChild(badge);
+  }
 
   const count = document.createElement('span');
   count.className = 'spaces-row-count';
@@ -1856,12 +1872,247 @@ function buildActivityRow(ev: RendererEvent): HTMLElement {
   return row;
 }
 
+// ─── Phase 4: shared-space primitives (ticket + playbook) ───────────────
+
+type RendererTicketStatus = 'open' | 'in_progress' | 'done' | 'blocked';
+
+const TICKET_STATUSES_ORDERED: ReadonlyArray<RendererTicketStatus> = [
+  'open',
+  'in_progress',
+  'done',
+  'blocked',
+];
+
+/** User-facing label for each ticket status; matches the SDK enum. */
+const TICKET_STATUS_LABELS: Readonly<Record<RendererTicketStatus, string>> = {
+  open: 'Open',
+  in_progress: 'In progress',
+  done: 'Done',
+  blocked: 'Blocked',
+};
+
+/**
+ * A reusable status pill — single span styled by `data-status`.
+ * Used in both ticket cards and the ticket detail block.
+ */
+export function buildTicketStatusPill(status: RendererTicketStatus): HTMLElement {
+  const pill = document.createElement('span');
+  pill.className = 'spaces-ticket-status-pill';
+  pill.setAttribute('data-status', status);
+  pill.textContent = TICKET_STATUS_LABELS[status] ?? status;
+  return pill;
+}
+
+/**
+ * Ticket detail block. Surfaces status (editable when callback supplied),
+ * priority, assignee, and a link back to the source playbook. Renders
+ * only when `Item.kind === 'ticket'` AND `Item.ticket` is populated;
+ * the caller (`buildDetailTypeBlock`) gates on those conditions.
+ */
+export interface DetailTicketCallbacks {
+  /** Called when the user picks a new status from the dropdown. */
+  onStatusChange?: (next: RendererTicketStatus) => Promise<void>;
+  /** Called when the user clicks the "View playbook" link. */
+  onOpenPlaybook?: (playbookId: string) => void;
+}
+
+export function buildDetailTicketBlock(
+  item: RendererItem,
+  cb?: DetailTicketCallbacks
+): HTMLElement {
+  const t = item.ticket;
+  const status: RendererTicketStatus =
+    t !== undefined && isRendererTicketStatus(t.status) ? t.status : 'open';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-ticket';
+
+  // ── Status row ───────────────────────────────────────────────────────
+  const statusRow = document.createElement('div');
+  statusRow.className = 'spaces-detail-ticket-row spaces-detail-ticket-row-status';
+  const statusLabel = document.createElement('span');
+  statusLabel.className = 'spaces-detail-label';
+  statusLabel.textContent = 'Status';
+  statusRow.appendChild(statusLabel);
+
+  if (cb?.onStatusChange !== undefined) {
+    const onStatusChange = cb.onStatusChange;
+    const select = document.createElement('select');
+    select.className = 'spaces-detail-ticket-status-select';
+    select.setAttribute('aria-label', 'Ticket status');
+    for (const s of TICKET_STATUSES_ORDERED) {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = TICKET_STATUS_LABELS[s];
+      if (s === status) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.addEventListener('change', () => {
+      const next = select.value as RendererTicketStatus;
+      if (next === status) return;
+      select.disabled = true;
+      wrap.classList.add('is-saving');
+      onStatusChange(next)
+        .catch(() => {
+          select.value = status;
+        })
+        .finally(() => {
+          select.disabled = false;
+          wrap.classList.remove('is-saving');
+        });
+    });
+    statusRow.appendChild(select);
+  } else {
+    statusRow.appendChild(buildTicketStatusPill(status));
+  }
+  wrap.appendChild(statusRow);
+
+  // ── Priority (read-only chip; v1) ────────────────────────────────────
+  if (t?.priority !== undefined) {
+    const pri = document.createElement('div');
+    pri.className = 'spaces-detail-ticket-row';
+    const priLabel = document.createElement('span');
+    priLabel.className = 'spaces-detail-label';
+    priLabel.textContent = 'Priority';
+    pri.appendChild(priLabel);
+    const priChip = document.createElement('span');
+    priChip.className = 'spaces-detail-ticket-priority';
+    priChip.setAttribute('data-priority', t.priority);
+    priChip.textContent = t.priority;
+    pri.appendChild(priChip);
+    wrap.appendChild(pri);
+  }
+
+  // ── Assignee (read-only chip; v1) ────────────────────────────────────
+  const assigneeRow = document.createElement('div');
+  assigneeRow.className = 'spaces-detail-ticket-row';
+  const assigneeLabel = document.createElement('span');
+  assigneeLabel.className = 'spaces-detail-label';
+  assigneeLabel.textContent = 'Assignee';
+  assigneeRow.appendChild(assigneeLabel);
+  const assigneeChip = document.createElement('span');
+  assigneeChip.className = 'spaces-detail-ticket-assignee';
+  if (t?.assignee !== null && t?.assignee !== undefined) {
+    assigneeChip.classList.add('is-assigned');
+    assigneeChip.setAttribute('data-assignee-kind', t.assignee.kind);
+    assigneeChip.textContent = `${t.assignee.name} (${t.assignee.kind})`;
+  } else {
+    assigneeChip.textContent = 'Unassigned';
+  }
+  assigneeRow.appendChild(assigneeChip);
+  wrap.appendChild(assigneeRow);
+
+  // ── Source playbook link ─────────────────────────────────────────────
+  if (typeof t?.playbookId === 'string' && t.playbookId.length > 0) {
+    const pbId = t.playbookId;
+    const pbRow = document.createElement('div');
+    pbRow.className = 'spaces-detail-ticket-row';
+    const pbLabel = document.createElement('span');
+    pbLabel.className = 'spaces-detail-label';
+    pbLabel.textContent = 'From playbook';
+    pbRow.appendChild(pbLabel);
+
+    const onOpen = cb?.onOpenPlaybook;
+    if (onOpen !== undefined) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'spaces-detail-ticket-playbook-link';
+      link.textContent = 'View playbook';
+      link.setAttribute('data-playbook-id', pbId);
+      link.addEventListener('click', () => onOpen(pbId));
+      pbRow.appendChild(link);
+    } else {
+      const idEl = document.createElement('span');
+      idEl.className = 'spaces-detail-ticket-playbook-link is-readonly';
+      idEl.textContent = pbId;
+      pbRow.appendChild(idEl);
+    }
+    wrap.appendChild(pbRow);
+  }
+
+  return wrap;
+}
+
+function isRendererTicketStatus(v: unknown): v is RendererTicketStatus {
+  return (
+    v === 'open' || v === 'in_progress' || v === 'done' || v === 'blocked'
+  );
+}
+
+/**
+ * Playbook detail block. v1 surfaces a "Current playbook" banner +
+ * a placeholder "Decompose into tickets" affordance. The decomposition
+ * itself is deferred to v2 (manual ticket creation works today).
+ */
+export interface DetailPlaybookCallbacks {
+  /** Called when the user clicks "Decompose into tickets" (v2 wires AI). */
+  onDecompose?: () => Promise<void>;
+}
+
+export function buildDetailPlaybookBlock(
+  item: RendererItem,
+  cb?: DetailPlaybookCallbacks
+): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-playbook';
+
+  const banner = document.createElement('div');
+  banner.className = 'spaces-detail-playbook-banner';
+  const icon = document.createElement('span');
+  icon.className = 'spaces-detail-playbook-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = '★';
+  banner.appendChild(icon);
+  const label = document.createElement('span');
+  label.className = 'spaces-detail-playbook-label';
+  label.textContent = 'Playbook';
+  banner.appendChild(label);
+  const hint = document.createElement('span');
+  hint.className = 'spaces-detail-playbook-hint';
+  hint.textContent = 'Drives the work in this shared space';
+  banner.appendChild(hint);
+  wrap.appendChild(banner);
+
+  // Decompose CTA. Placeholder for v2 (AI auto-decomposition); v1 the
+  // button is wired but flips the wrap into a "coming soon" state.
+  const cta = document.createElement('button');
+  cta.type = 'button';
+  cta.className = 'spaces-detail-playbook-decompose';
+  cta.textContent = 'Decompose into tickets';
+  cta.setAttribute('data-item-id', item.id);
+  if (cb?.onDecompose !== undefined) {
+    const onDecompose = cb.onDecompose;
+    cta.addEventListener('click', () => {
+      cta.disabled = true;
+      wrap.classList.add('is-decomposing');
+      onDecompose()
+        .catch(() => undefined)
+        .finally(() => {
+          cta.disabled = false;
+          wrap.classList.remove('is-decomposing');
+        });
+    });
+  } else {
+    cta.disabled = true;
+    cta.title = 'AI decomposition is coming in v2 — for now, add tickets manually.';
+  }
+  wrap.appendChild(cta);
+
+  return wrap;
+}
+
 /**
  * Type-specific subsection for items beyond the generic content body.
  * Returns `null` when nothing extra is needed (image preview is
  * handled by the post-fetch `injectBinaryPreview` path).
  */
 function buildDetailTypeBlock(item: RendererItem): HTMLElement | null {
+  if (item.kind === 'ticket') {
+    return buildDetailTicketBlock(item);
+  }
+  if (item.kind === 'playbook') {
+    return buildDetailPlaybookBlock(item);
+  }
   if (typeof item.sourceUrl === 'string' && item.sourceUrl.length > 0) {
     const sourceWrap = document.createElement('div');
     sourceWrap.className = 'spaces-detail-source';
@@ -3272,6 +3523,8 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   text: 'Text',
   audio: 'Audio',
   video: 'Video',
+  playbook: 'Playbook',
+  ticket: 'Ticket',
   other: 'Other',
 };
 
@@ -3353,6 +3606,9 @@ function messageFrom(err: unknown): string {
   buildKindReclassify,
   buildAttributionChip,
   buildDetailActivity,
+  buildTicketStatusPill,
+  buildDetailTicketBlock,
+  buildDetailPlaybookBlock,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,

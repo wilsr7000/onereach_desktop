@@ -25,6 +25,8 @@ import {
   _resetSpacesApiForTesting,
   type SpacesApi,
   type SpacesItemsApi,
+  type SpacesTicketsApi,
+  type SpacesPlaybooksApi,
 } from './api.js';
 import { SpacesError } from './errors.js';
 import { createSpacesWindow, closeSpacesWindow } from './window.js';
@@ -50,6 +52,11 @@ import type {
   DeleteSpaceOpts,
   ItemUpdatePatch,
   RecentCommitsOpts,
+  SpaceKind,
+  ListTicketsOpts,
+  CreateTicketInput,
+  UpdateTicketPatch,
+  SetPlaybookResult,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -240,6 +247,27 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
   };
 
+  const tickets: SpacesTicketsApi = {
+    list(spaceId: string, opts?: ListTicketsOpts): Promise<Item[]> {
+      return client.listTickets(spaceId, opts ?? {});
+    },
+    create(spaceId: string, input: CreateTicketInput): Promise<Item> {
+      return client.createTicket(spaceId, input);
+    },
+    update(id: string, patch: UpdateTicketPatch): Promise<Item> {
+      return client.updateTicket(id, patch);
+    },
+  };
+
+  const playbooks: SpacesPlaybooksApi = {
+    current(spaceId: string): Promise<Item | null> {
+      return client.getCurrentPlaybook(spaceId);
+    },
+    set(spaceId: string, playbookId: string): Promise<SetPlaybookResult> {
+      return client.setCurrentPlaybook(spaceId, playbookId);
+    },
+  };
+
   return {
     open: handle.open,
     listSpaces(): Promise<Space[]> {
@@ -249,6 +277,11 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       return client.getUncategorizedCount();
     },
     items,
+    tickets,
+    playbooks,
+    setSpaceKind(id: string, kind: SpaceKind): Promise<SpaceKind> {
+      return client.setSpaceKind(id, kind);
+    },
 
     // ─── Home view (chunk 3k + 3o) ──────────────────────────────────────
     getEntityCounts(): Promise<EntityCounts> {

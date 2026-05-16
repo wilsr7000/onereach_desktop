@@ -50,6 +50,13 @@ import type {
   DeleteSpaceOpts,
   ItemUpdatePatch,
   RecentCommitsOpts,
+  SpaceKind,
+  TicketStatus,
+  TicketDetails,
+  ListTicketsOpts,
+  CreateTicketInput,
+  UpdateTicketPatch,
+  SetPlaybookResult,
 } from './types.js';
 import {
   MAX_SPACE_NAME_LENGTH,
@@ -114,6 +121,7 @@ export const CYPHER = {
            coalesce(s.description, '') AS description,
            coalesce(s.color, '') AS color,
            coalesce(s.iconKey, s.icon, '') AS iconKey,
+           coalesce(s.kind, 'user') AS kind,
            itemCount AS itemCount,
            coalesce(toString(s.createdAt), toString(s.created_at), '') AS createdAt,
            coalesce(toString(s.updatedAt), toString(s.updated_at), '') AS updatedAt
@@ -273,6 +281,9 @@ export const CYPHER = {
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     OPTIONAL MATCH (editor:Person)-[:LAST_EDITED]->(a)
     OPTIONAL MATCH (a)-[:TAGGED_AS]->(t:Tag)
+    OPTIONAL MATCH (a)-[:ASSIGNED_TO]->(assignee)
+      WHERE assignee:Person OR assignee:Agent
+    OPTIONAL MATCH (a)-[:DECOMPOSED_FROM]->(pb:Asset)
     WITH a,
          collect(DISTINCT { id: s.id,
                             name: coalesce(s.name, s.id),
@@ -280,7 +291,9 @@ export const CYPHER = {
                             iconKey: coalesce(s.iconKey, s.icon) }) AS spacesRaw,
          head(collect(creator)) AS producer,
          head(collect(editor)) AS lastEditor,
-         collect(DISTINCT coalesce(t.name, t.id)) AS edgeTags
+         collect(DISTINCT coalesce(t.name, t.id)) AS edgeTags,
+         head(collect(assignee)) AS assigneeNode,
+         head(collect(pb)) AS sourcePlaybook
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
            coalesce(a.type, a.assetType, 'other') AS kind,
@@ -306,7 +319,16 @@ export const CYPHER = {
                 ELSE { kind: head(labels(lastEditor)),
                        name: coalesce(lastEditor.name, lastEditor.title, ''),
                        id: lastEditor.id }
-           END AS lastEditedBy
+           END AS lastEditedBy,
+           coalesce(a.status, 'open') AS ticketStatus,
+           a.priority AS ticketPriority,
+           coalesce(sourcePlaybook.id, a.playbookId) AS ticketPlaybookId,
+           CASE WHEN assigneeNode IS NULL
+                THEN null
+                ELSE { kind: head(labels(assigneeNode)),
+                       name: coalesce(assigneeNode.name, assigneeNode.title, ''),
+                       id: assigneeNode.id }
+           END AS ticketAssignee
     LIMIT 1
   `,
 
@@ -580,9 +602,181 @@ export const CYPHER = {
            coalesce(s.description, '') AS description,
            coalesce(s.color, '') AS color,
            coalesce(s.iconKey, '') AS iconKey,
+           coalesce(s.kind, 'user') AS kind,
            itemCount AS itemCount,
            toString(s.createdAt) AS createdAt,
            toString(s.updatedAt) AS updatedAt
+  `,
+
+  // ─── Shared spaces: playbooks + tickets (Phase 4) ──────────────────────
+
+  /**
+   * Flip a Space's `kind` between 'user' (default) and 'shared'. The
+   * field defaults to 'user' on every existing row via the
+   * `coalesce(s.kind, 'user')` projection above, so this mutation is
+   * additive — no migration needed for spaces created before the
+   * shared-space concept existed.
+   */
+  SET_SPACE_KIND: `
+    MATCH (s:Space {id: $id})
+      WHERE s.deletedAt IS NULL
+    SET s.kind = $kind,
+        s.updatedAt = $now
+    RETURN s.id AS id, coalesce(s.kind, 'user') AS kind
+  `,
+
+  /**
+   * Fetch the current playbook for a shared space. Resolves via the
+   * canonical `[:CURRENT_PLAYBOOK]` edge with a legacy fallback to
+   * `s.currentPlaybookId` for spaces that haven't migrated yet.
+   *
+   * Returns 0 rows when the Space has no playbook (the renderer treats
+   * that as "shared space exists but is empty — show the seed CTA").
+   */
+  GET_CURRENT_PLAYBOOK: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+    OPTIONAL MATCH (s)-[:CURRENT_PLAYBOOK]->(canonical:Asset)
+    OPTIONAL MATCH (legacy:Asset {id: s.currentPlaybookId})
+    WITH coalesce(canonical, legacy) AS pb
+    WHERE pb IS NOT NULL
+    RETURN pb.id AS playbookId
+    LIMIT 1
+  `,
+
+  /**
+   * Promote an :Asset to the Space's current playbook. Drops any
+   * existing `[:CURRENT_PLAYBOOK]` edge first (a Space has at most one
+   * current playbook), then MERGEs the new one and stamps
+   * `a.type = 'playbook'` so listings render it with the playbook chrome.
+   *
+   * Returns the count of tickets already attached to the new playbook
+   * so the renderer can decide whether to fetch the ticket list.
+   */
+  SET_CURRENT_PLAYBOOK: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+    MATCH (pb:Asset {id: $playbookId})
+    OPTIONAL MATCH (s)-[old:CURRENT_PLAYBOOK]->(:Asset)
+    DELETE old
+    WITH s, pb
+    MERGE (s)-[:CURRENT_PLAYBOOK]->(pb)
+    SET pb.type = 'playbook',
+        pb.updatedAt = $now
+    WITH pb
+    OPTIONAL MATCH (t:Asset)-[:DECOMPOSED_FROM]->(pb)
+    RETURN pb.id AS playbookId, count(t) AS ticketCount
+  `,
+
+  /**
+   * List tickets in a Space. Tickets are `:Asset {type: 'ticket'}` with
+   * a `[:BELONGS_TO]` edge to the Space. Optional `$status` filter
+   * passes through as a parameterised WHERE — null disables filtering.
+   *
+   * Order: open tickets first (so users see actionable work), then
+   * status alphabetical, then most-recently-updated first within each
+   * status. Pagination via SKIP/LIMIT matches LIST_ITEMS_*.
+   */
+  LIST_TICKETS_IN_SPACE: `
+    MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+        AND coalesce(a.type, a.assetType) = 'ticket'
+        AND ($status IS NULL OR coalesce(a.status, 'open') = $status)
+    OPTIONAL MATCH (a)-[:ASSIGNED_TO]->(assignee)
+      WHERE assignee:Person OR assignee:Agent
+    OPTIONAL MATCH (a)-[:DECOMPOSED_FROM]->(pb:Asset)
+    WITH a,
+         head(collect(assignee)) AS assigneeNode,
+         head(collect(pb)) AS sourcePlaybook
+    RETURN a.id AS id,
+           coalesce(a.name, a.title, a.id) AS title,
+           coalesce(a.excerpt, a.description, a.notes) AS excerpt,
+           coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
+           coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
+           coalesce(a.status, 'open') AS status,
+           a.priority AS priority,
+           coalesce(sourcePlaybook.id, a.playbookId) AS playbookId,
+           CASE WHEN assigneeNode IS NULL
+                THEN null
+                ELSE { kind: head(labels(assigneeNode)),
+                       name: coalesce(assigneeNode.name, assigneeNode.title, ''),
+                       id: assigneeNode.id }
+           END AS assignee
+    ORDER BY CASE coalesce(a.status, 'open')
+                  WHEN 'open' THEN 0
+                  WHEN 'in_progress' THEN 1
+                  WHEN 'blocked' THEN 2
+                  WHEN 'done' THEN 3
+                  ELSE 4 END,
+             coalesce(toString(a.updatedAt), toString(a.updated_at), '') DESC
+    SKIP toInteger($offset)
+    LIMIT toInteger($limit)
+  `,
+
+  /**
+   * Create a new ticket asset and attach it to a Space. Optionally
+   * MERGEs a `[:DECOMPOSED_FROM]` edge to a source playbook and an
+   * `[:ASSIGNED_TO]` edge to a Person/Agent.
+   *
+   * Uniqueness: ids are generated client-side from a random suffix +
+   * timestamp; collisions are vanishingly rare and the MERGE on
+   * `[:BELONGS_TO]` is idempotent so a retried call doesn't double-link.
+   */
+  CREATE_TICKET: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+    CREATE (a:Asset {
+      id: $id,
+      type: 'ticket',
+      name: $title,
+      title: $title,
+      description: $description,
+      status: $status,
+      priority: $priority,
+      playbookId: $playbookId,
+      createdAt: $now,
+      updatedAt: $now
+    })
+    MERGE (a)-[:BELONGS_TO]->(s)
+    WITH a
+    OPTIONAL MATCH (pb:Asset {id: $playbookId})
+    FOREACH (x IN CASE WHEN pb IS NULL THEN [] ELSE [pb] END |
+      MERGE (a)-[:DECOMPOSED_FROM]->(x))
+    WITH a
+    OPTIONAL MATCH (assignee {id: $assigneeId})
+      WHERE assignee:Person OR assignee:Agent
+    FOREACH (x IN CASE WHEN assignee IS NULL THEN [] ELSE [assignee] END |
+      MERGE (a)-[:ASSIGNED_TO]->(x))
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Update a ticket. Mirrors UPDATE_ITEM but adds status/priority/
+   * assignee handling. Status is validated client-side against the
+   * TicketStatus enum so a typo never lands in the graph.
+   *
+   * Assignee re-assignment: drops any existing `[:ASSIGNED_TO]` edge
+   * first so we never accumulate stale assignments. When
+   * `$assigneeId` is null/empty, the ticket ends up unassigned.
+   */
+  UPDATE_TICKET: `
+    MATCH (a:Asset {id: $id})
+      WHERE coalesce(a.type, a.assetType) = 'ticket'
+    SET a.name = coalesce($title, a.name),
+        a.title = coalesce($title, a.title),
+        a.description = coalesce($description, a.description),
+        a.status = coalesce($status, a.status),
+        a.priority = coalesce($priority, a.priority),
+        a.updatedAt = $now
+    WITH a
+    OPTIONAL MATCH (a)-[r:ASSIGNED_TO]->()
+    DELETE r
+    WITH a
+    OPTIONAL MATCH (assignee {id: $assigneeId})
+      WHERE assignee:Person OR assignee:Agent
+    FOREACH (x IN CASE WHEN assignee IS NULL THEN [] ELSE [assignee] END |
+      MERGE (a)-[:ASSIGNED_TO]->(x))
+    RETURN a.id AS id
   `,
 } as const;
 
@@ -1023,6 +1217,267 @@ export class SdkSpacesClient {
     return toSpace(rows[0] as Record<string, unknown>);
   }
 
+  // ─── Phase 4: shared spaces (playbooks + tickets) ────────────────────
+
+  /**
+   * Flip a Space's `kind` between 'user' and 'shared'. Idempotent:
+   * setting the same kind again is a no-op at the renderer level
+   * (just refreshes `updatedAt`).
+   *
+   * @throws {SpacesError} SPACES_NOT_FOUND if the Space is missing or
+   *   soft-deleted; SPACES_INVALID_INPUT if `kind` is anything other
+   *   than 'user' / 'shared'.
+   */
+  async setSpaceKind(id: string, kind: SpaceKind): Promise<SpaceKind> {
+    const validId = validateSpaceId(id);
+    if (kind !== 'user' && kind !== 'shared') {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `kind must be 'user' or 'shared' (got ${String(kind)})`,
+        context: { kind },
+      });
+    }
+    const now = nowIso();
+    const rows = await this.run(CYPHER.SET_SPACE_KIND, { id: validId, kind, now });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Space ${validId} not found`,
+        remediation: 'It may have been deleted. Refresh and try again.',
+        context: { id: validId },
+      });
+    }
+    const next = optString(rows[0] as Record<string, unknown>, 'kind');
+    return next === 'shared' ? 'shared' : 'user';
+  }
+
+  /**
+   * Return the current playbook for a shared space, or `null` when
+   * none is set. Wraps the GET_CURRENT_PLAYBOOK probe with a follow-up
+   * `getItem(playbookId)` so the caller receives the full Item rather
+   * than just an id.
+   *
+   * Returns `null` for both "space has no playbook" AND "space doesn't
+   * exist" — distinguishing them costs a second round-trip and the
+   * caller's renderer treats them identically (the "set a playbook"
+   * CTA in both cases).
+   */
+  async getCurrentPlaybook(spaceId: string): Promise<Item | null> {
+    const validId = validateSpaceId(spaceId);
+    const rows = await this.run(CYPHER.GET_CURRENT_PLAYBOOK, { spaceId: validId });
+    if (rows.length === 0) return null;
+    const pbId = optString(rows[0] as Record<string, unknown>, 'playbookId');
+    if (pbId === undefined || pbId.length === 0) return null;
+    return this.getItem(pbId);
+  }
+
+  /**
+   * Promote an :Asset to be the Space's current playbook. The asset's
+   * type is rewritten to `'playbook'` so listings draw it with the
+   * playbook chrome regardless of what kind it was before.
+   *
+   * @throws {SpacesError} SPACES_NOT_FOUND if either the Space or the
+   *   asset is missing.
+   */
+  async setCurrentPlaybook(spaceId: string, playbookId: string): Promise<SetPlaybookResult> {
+    const validSpaceId = validateSpaceId(spaceId);
+    if (typeof playbookId !== 'string' || playbookId.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'setCurrentPlaybook requires a non-empty playbookId',
+        context: { playbookId },
+      });
+    }
+    const now = nowIso();
+    const rows = await this.run(CYPHER.SET_CURRENT_PLAYBOOK, {
+      spaceId: validSpaceId,
+      playbookId,
+      now,
+    });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: 'Space or asset not found',
+        remediation: 'Verify both ids; the Space may have been deleted.',
+        context: { spaceId: validSpaceId, playbookId },
+      });
+    }
+    const playbook = await this.getItem(playbookId);
+    if (playbook === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Playbook ${playbookId} disappeared after promotion`,
+        context: { playbookId },
+      });
+    }
+    const ticketCount = optNumber(rows[0] as Record<string, unknown>, 'ticketCount') ?? 0;
+    return { playbook, ticketCount };
+  }
+
+  /**
+   * List tickets in a Space. Returns ticket-shaped Items (i.e.
+   * `Item.kind === 'ticket'` with `Item.ticket` populated). When the
+   * Space isn't shared the result is still well-defined: just the
+   * tickets that happen to live there, if any.
+   */
+  async listTickets(spaceId: string, opts: ListTicketsOpts = {}): Promise<Item[]> {
+    const validSpaceId = validateSpaceId(spaceId);
+    const status = opts.status ?? null;
+    if (status !== null && !(TICKET_STATUS_SET as Set<string>).has(status)) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `Unknown ticket status ${String(status)}`,
+        context: { status },
+      });
+    }
+    const limit = clampSmallLimit(opts.limit, 200, 500);
+    const offset = typeof opts.offset === 'number' && opts.offset >= 0
+      ? Math.floor(opts.offset)
+      : 0;
+    const rows = await this.run(CYPHER.LIST_TICKETS_IN_SPACE, {
+      spaceId: validSpaceId,
+      status,
+      limit,
+      offset,
+    });
+    return rows.map((r) => toTicketItem(r as Record<string, unknown>));
+  }
+
+  /**
+   * Create a new ticket in a Space. Returns the freshly-projected
+   * ticket Item via a follow-up getItem so the caller never sees a
+   * half-populated row.
+   *
+   * @throws {SpacesError} SPACES_INVALID_INPUT for empty title /
+   *   oversize fields / unknown status; SPACES_NOT_FOUND if the
+   *   Space doesn't exist.
+   */
+  async createTicket(spaceId: string, input: CreateTicketInput): Promise<Item> {
+    const validSpaceId = validateSpaceId(spaceId);
+    const title = validateTitle(input.title);
+    const description = validateOptionalDescription(input.description ?? '');
+    const status = input.status ?? 'open';
+    if (!(TICKET_STATUS_SET as Set<string>).has(status)) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `Unknown ticket status ${String(status)}`,
+        context: { status },
+      });
+    }
+    const priority = input.priority ?? null;
+    const playbookId = typeof input.playbookId === 'string' && input.playbookId.length > 0
+      ? input.playbookId
+      : null;
+    const assigneeId = typeof input.assigneeId === 'string' && input.assigneeId.length > 0
+      ? input.assigneeId
+      : null;
+    const id = generateTicketId();
+    const now = nowIso();
+    const rows = await this.run(CYPHER.CREATE_TICKET, {
+      spaceId: validSpaceId,
+      id,
+      title,
+      description,
+      status,
+      priority,
+      playbookId,
+      assigneeId,
+      now,
+    });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Space ${validSpaceId} not found`,
+        remediation: 'Refresh the list and try again.',
+        context: { spaceId: validSpaceId },
+      });
+    }
+    const created = await this.getItem(id);
+    if (created === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Ticket ${id} disappeared after creation`,
+        context: { id },
+      });
+    }
+    return created;
+  }
+
+  /**
+   * Update a ticket. Mirrors `updateItem` but exposes ticket-specific
+   * fields (status, priority, assignee) via a typed patch. Returns the
+   * freshly re-fetched ticket Item.
+   */
+  async updateTicket(id: string, patch: UpdateTicketPatch): Promise<Item> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'updateTicket requires a non-empty id',
+        context: { id },
+      });
+    }
+    const params: Record<string, unknown> = {
+      id,
+      title: null,
+      description: null,
+      status: null,
+      priority: null,
+      assigneeId: null,
+    };
+    if (typeof patch.title === 'string') {
+      params['title'] = validateTitle(patch.title);
+    }
+    if (typeof patch.description === 'string') {
+      params['description'] = validateOptionalDescription(patch.description);
+    }
+    if (patch.status !== undefined) {
+      if (!(TICKET_STATUS_SET as Set<string>).has(patch.status)) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `Unknown ticket status ${String(patch.status)}`,
+          context: { status: patch.status },
+        });
+      }
+      params['status'] = patch.status;
+    }
+    if (patch.priority !== undefined) {
+      if (!(TICKET_PRIORITIES as Set<string>).has(patch.priority)) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `Unknown priority ${String(patch.priority)}`,
+          context: { priority: patch.priority },
+        });
+      }
+      params['priority'] = patch.priority;
+    }
+    if (patch.assigneeId !== undefined) {
+      // null clears the assignment; a non-empty string sets / re-MERGES it.
+      params['assigneeId'] =
+        typeof patch.assigneeId === 'string' && patch.assigneeId.length > 0
+          ? patch.assigneeId
+          : null;
+    }
+    params['now'] = nowIso();
+    const rows = await this.run(CYPHER.UPDATE_TICKET, params);
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Ticket ${id} not found`,
+        remediation: 'It may have been deleted. Refresh and try again.',
+        context: { id },
+      });
+    }
+    const updated = await this.getItem(id);
+    if (updated === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Ticket ${id} disappeared after update`,
+        context: { id },
+      });
+    }
+    return updated;
+  }
+
   /** @internal -- helper for disambiguating empty mutation results. */
   private async spaceExists(id: string): Promise<boolean> {
     const rows = await this.run(CYPHER.SPACE_EXISTS_BY_ID, { id });
@@ -1135,6 +1590,52 @@ function generateSpaceId(): string {
   return `space-${Date.now().toString(36)}-${rand}`;
 }
 
+/**
+ * Generate a ticket id. Same id strategy as Space (UUID with prefix)
+ * so renderers can identify a ticket from its id alone when debugging.
+ */
+function generateTicketId(): string {
+  try {
+    const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+    if (c !== undefined && typeof c.randomUUID === 'function') {
+      return `ticket-${c.randomUUID()}`;
+    }
+  } catch {
+    /* fall through */
+  }
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `ticket-${Date.now().toString(36)}-${rand}`;
+}
+
+/**
+ * Validate + normalize a ticket / item title. Throws
+ * `SPACES_INVALID_INPUT` for empty or oversize values.
+ */
+function validateTitle(raw: unknown): string {
+  if (typeof raw !== 'string') {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: 'title must be a string',
+      context: { raw: typeof raw },
+    });
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: 'title must be non-empty after trim',
+    });
+  }
+  if (trimmed.length > MAX_ITEM_TITLE_LENGTH) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: `title must be ${MAX_ITEM_TITLE_LENGTH} chars or fewer`,
+      context: { length: trimmed.length },
+    });
+  }
+  return trimmed;
+}
+
 /** Single source of truth for the timestamp written to created/updated/deletedAt. */
 function nowIso(): string {
   return new Date().toISOString();
@@ -1205,6 +1706,8 @@ function toSpace(row: Record<string, unknown>): Space {
   if (createdAt !== undefined) space.createdAt = createdAt;
   const updatedAt = optString(row, 'updatedAt');
   if (updatedAt !== undefined) space.updatedAt = updatedAt;
+  const kind = optString(row, 'kind');
+  if (kind === 'shared' || kind === 'user') space.kind = kind;
   return space;
 }
 
@@ -1257,6 +1760,56 @@ function toItem(row: Record<string, unknown>): Item {
   if (mime !== undefined) item.mimeType = mime;
   item.tags = toTagList(row['tags']);
   item.lastEditedBy = toProducedBy(row['lastEditedBy']);
+  // Phase 4 (shared-space) ticket projection. Only populated when the
+  // item is itself a ticket; for every other kind the GET_ITEM Cypher
+  // returns sentinel values that toTicketStatus/toTicketPriority reject,
+  // so item.ticket stays undefined.
+  if (item.kind === 'ticket') {
+    const status = toTicketStatus(row['ticketStatus']) ?? 'open';
+    const ticket: TicketDetails = {
+      status,
+      assignee: toProducedBy(row['ticketAssignee']),
+    };
+    const priority = toTicketPriority(row['ticketPriority']);
+    if (priority !== null) ticket.priority = priority;
+    const playbookId = optString(row, 'ticketPlaybookId');
+    if (playbookId !== undefined && playbookId.length > 0) {
+      ticket.playbookId = playbookId;
+    }
+    item.ticket = ticket;
+  }
+  return item;
+}
+
+/**
+ * Map one row of LIST_TICKETS_IN_SPACE into an Item-shaped object with
+ * the ticket substructure populated. Renderer code that knows how to
+ * draw an Item draws a ticket without any new mapper.
+ */
+function toTicketItem(row: Record<string, unknown>): Item {
+  const item: Item = {
+    id: requireString(row, 'id'),
+    title: optString(row, 'title') ?? '',
+    kind: 'ticket',
+    createdAt: optString(row, 'createdAt') ?? '',
+    updatedAt: optString(row, 'updatedAt') ?? '',
+    otherSpaces: [],
+    producedBy: null,
+  };
+  const excerpt = optString(row, 'excerpt');
+  if (excerpt !== undefined) item.excerpt = excerpt;
+  const status = toTicketStatus(row['status']) ?? 'open';
+  const ticket: TicketDetails = {
+    status,
+    assignee: toProducedBy(row['assignee']),
+  };
+  const priority = toTicketPriority(row['priority']);
+  if (priority !== null) ticket.priority = priority;
+  const playbookId = optString(row, 'playbookId');
+  if (playbookId !== undefined && playbookId.length > 0) {
+    ticket.playbookId = playbookId;
+  }
+  item.ticket = ticket;
   return item;
 }
 
@@ -1284,11 +1837,39 @@ const ITEM_KINDS: ReadonlySet<ItemKind> = new Set([
   'text',
   'audio',
   'video',
+  'playbook',
+  'ticket',
   'other',
 ]);
 
 function toItemKind(v: unknown): ItemKind {
   return typeof v === 'string' && (ITEM_KINDS as Set<string>).has(v) ? (v as ItemKind) : 'other';
+}
+
+const TICKET_STATUS_SET: ReadonlySet<TicketStatus> = new Set<TicketStatus>([
+  'open',
+  'in_progress',
+  'done',
+  'blocked',
+]);
+
+/** Validate + normalize a ticket status, returning null when unrecognized. */
+function toTicketStatus(v: unknown): TicketStatus | null {
+  return typeof v === 'string' && (TICKET_STATUS_SET as Set<string>).has(v)
+    ? (v as TicketStatus)
+    : null;
+}
+
+const TICKET_PRIORITIES: ReadonlySet<'low' | 'med' | 'high'> = new Set([
+  'low',
+  'med',
+  'high',
+] as const);
+
+function toTicketPriority(v: unknown): 'low' | 'med' | 'high' | null {
+  return typeof v === 'string' && (TICKET_PRIORITIES as Set<string>).has(v)
+    ? (v as 'low' | 'med' | 'high')
+    : null;
 }
 
 function toChipList(v: unknown): SpaceChipRef[] {

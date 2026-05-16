@@ -2318,6 +2318,53 @@ export const MANIFEST: Manifest = {
             "description": "Resolve a binary `fileKey` (taken off `Item.fileKey`) into a\nshort-TTL signed download URL via the Files module. Used by the\ndetail panel to render image previews and offer download links\nfor non-image binary kinds.\n\nReturns `null` on any failure (missing key, no auth, network\nerror). Consumers treat `null` as \"no preview available\" rather\nthan surface an error toast -- the detail pane already shows the\nitem; the missing preview is a soft degrade.",
             "tags": [],
             "examples": []
+          },
+          {
+            "name": "update",
+            "signature": "update(id: string, patch: ItemUpdatePatch): Promise<Item>",
+            "description": "Update mutable fields on an Item (Phase 3b). Returns the freshly\nre-fetched Item so callers can update their state with the new\n`updatedAt`, `lastEditedBy`, etc. in one shape.",
+            "tags": [
+              {
+                "tag": "throws",
+                "value": "{SpacesError} `SPACES_INVALID_INPUT` for missing id / bad\n  patch shapes (empty title, oversized description, unknown type)."
+              },
+              {
+                "tag": "throws",
+                "value": "{SpacesError} `SPACES_NOT_FOUND` if the item disappeared\n  between the update and the re-fetch."
+              }
+            ],
+            "examples": []
+          },
+          {
+            "name": "addTag",
+            "signature": "addTag(id: string, tag: string): Promise<string[]>",
+            "description": "Append a tag to an Item (Phase 3b). Idempotent — duplicate calls\nfor the same tag are a no-op at the graph level. Returns the\nupdated tag list.",
+            "tags": [
+              {
+                "tag": "throws",
+                "value": "{SpacesError} `SPACES_INVALID_INPUT` for empty tags or\n  tags longer than `MAX_ITEM_TAG_LENGTH`."
+              }
+            ],
+            "examples": []
+          },
+          {
+            "name": "removeTag",
+            "signature": "removeTag(id: string, tag: string): Promise<string[]>",
+            "description": "Remove a tag from an Item. No-op when the tag is already absent.\nReturns the updated tag list.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "recentCommits",
+            "signature": "recentCommits(id: string, opts?: RecentCommitsOpts): Promise<Event[]>",
+            "description": "Per-asset activity log (Phase 3c). Returns the most recent commits\nreferencing the given Item, in reverse-chronological order. Row\nshape matches `listRecentEvents()` so the detail-pane timeline can\nreuse the same row renderer as the home-feed timeline.\n\nDefaults: 20 rows. Cap: 100.",
+            "tags": [
+              {
+                "tag": "throws",
+                "value": "{SpacesError} `SPACES_INVALID_INPUT` when `id` is empty.\n  Unknown ids soft-fail to `[]` so a stale detail view doesn't\n  crash on a freshly-deleted asset."
+              }
+            ],
+            "examples": []
           }
         ]
       },
@@ -2823,5 +2870,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-05-16T19:44:28.014Z"
+  "generatedAt": "2026-05-16T23:32:58.527Z"
 } as const;

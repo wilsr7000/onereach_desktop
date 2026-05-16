@@ -28,6 +28,11 @@ import type {
   ContributorWindow,
   CreateSpaceInput,
   DeleteSpaceOpts,
+  SpaceKind,
+  TicketStatus,
+  CreateTicketInput,
+  UpdateTicketPatch,
+  SetPlaybookResult,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import type { DiscoveryResults } from './discovery-format.js';
@@ -59,6 +64,13 @@ export const SPACES_IPC = {
   RENAME_SPACE: 'lite:spaces:rename',
   DELETE_SPACE: 'lite:spaces:delete',
   UNDELETE_SPACE: 'lite:spaces:undelete',
+  /** Phase 4 — shared spaces (playbooks + tickets). */
+  SET_SPACE_KIND: 'lite:spaces:setKind',
+  PLAYBOOKS_CURRENT: 'lite:spaces:playbooks:current',
+  PLAYBOOKS_SET: 'lite:spaces:playbooks:set',
+  TICKETS_LIST: 'lite:spaces:tickets:list',
+  TICKETS_CREATE: 'lite:spaces:tickets:create',
+  TICKETS_UPDATE: 'lite:spaces:tickets:update',
 } as const;
 
 /**
@@ -481,7 +493,133 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
+  // ─── Phase 4: shared spaces (playbooks + tickets) ──────────────────────
+
+  ipcMain.handle(
+    SPACES_IPC.SET_SPACE_KIND,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; kind?: unknown }
+    ): Promise<SpacesIpcResult<SpaceKind>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const kind =
+          payload?.kind === 'shared' || payload?.kind === 'user'
+            ? (payload.kind as SpaceKind)
+            : ('user' as SpaceKind);
+        const value = await getSpacesApi().setSpaceKind(id, kind);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.PLAYBOOKS_CURRENT,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown }
+    ): Promise<SpacesIpcResult<Item | null>> => {
+      try {
+        const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
+        const value = await getSpacesApi().playbooks.current(spaceId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.PLAYBOOKS_SET,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown; playbookId?: unknown }
+    ): Promise<SpacesIpcResult<SetPlaybookResult>> => {
+      try {
+        const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
+        const playbookId =
+          typeof payload?.playbookId === 'string' ? payload.playbookId : '';
+        const value = await getSpacesApi().playbooks.set(spaceId, playbookId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.TICKETS_LIST,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown; status?: unknown; limit?: unknown; offset?: unknown }
+    ): Promise<SpacesIpcResult<Item[]>> => {
+      try {
+        const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
+        const opts: { status?: TicketStatus; limit?: number; offset?: number } = {};
+        if (isTicketStatus(payload?.status)) opts.status = payload?.status as TicketStatus;
+        if (isPositiveInteger(payload?.limit)) opts.limit = payload?.limit as number;
+        if (
+          typeof payload?.offset === 'number' &&
+          Number.isFinite(payload?.offset) &&
+          (payload?.offset as number) >= 0
+        ) {
+          opts.offset = payload?.offset as number;
+        }
+        const value = await getSpacesApi().tickets.list(spaceId, opts);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.TICKETS_CREATE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown; input?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
+        const input =
+          payload?.input !== null && typeof payload?.input === 'object'
+            ? (payload?.input as CreateTicketInput)
+            : ({ title: '' } as CreateTicketInput);
+        const value = await getSpacesApi().tickets.create(spaceId, input);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.TICKETS_UPDATE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; patch?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const patch =
+          payload?.patch !== null && typeof payload?.patch === 'object'
+            ? (payload?.patch as UpdateTicketPatch)
+            : ({} as UpdateTicketPatch);
+        const value = await getSpacesApi().tickets.update(id, patch);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
   registered = true;
+}
+
+function isTicketStatus(v: unknown): v is TicketStatus {
+  return v === 'open' || v === 'in_progress' || v === 'done' || v === 'blocked';
 }
 
 function coerceCreateSpaceInput(raw: unknown): CreateSpaceInput {

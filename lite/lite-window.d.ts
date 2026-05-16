@@ -561,7 +561,20 @@ type LiteSpaceItemKind =
   | 'text'
   | 'audio'
   | 'video'
+  | 'playbook'
+  | 'ticket'
   | 'other';
+
+type LiteSpaceKind = 'user' | 'shared';
+
+type LiteTicketStatus = 'open' | 'in_progress' | 'done' | 'blocked';
+
+interface LiteTicketDetails {
+  status: LiteTicketStatus;
+  priority?: 'low' | 'med' | 'high';
+  assignee: LiteSpaceItemProvenance | null;
+  playbookId?: string;
+}
 
 interface LiteSpace {
   id: string;
@@ -572,6 +585,8 @@ interface LiteSpace {
   itemCount?: number;
   createdAt?: string;
   updatedAt?: string;
+  /** 'user' (default) or 'shared' (AI-managed). */
+  kind?: LiteSpaceKind;
 }
 
 interface LiteSpaceChipRef {
@@ -611,6 +626,8 @@ interface LiteSpaceItem extends LiteSpaceItemSummary {
   tags?: string[];
   /** Last edit attribution; null when the schema has no [:LAST_EDITED] edge yet. */
   lastEditedBy?: LiteSpaceItemProvenance | null;
+  /** Ticket-specific details (only populated when kind === 'ticket'). */
+  ticket?: LiteTicketDetails;
 }
 
 interface LiteSpacesItemsBridge {
@@ -762,6 +779,62 @@ interface LiteSpacesBridge {
     opts?: LiteSpacesDeleteSpaceOpts
   ): Promise<LiteSpacesIpcResult<{ ok: true }>>;
   undeleteSpace(id: string): Promise<LiteSpacesIpcResult<LiteSpace>>;
+  /**
+   * Phase 4 — shared spaces. Toggles a Space between 'user' (default,
+   * user-managed) and 'shared' (AI-managed dashboard layout).
+   */
+  setSpaceKind(
+    id: string,
+    kind: LiteSpaceKind
+  ): Promise<LiteSpacesIpcResult<LiteSpaceKind>>;
+  /** Playbooks sub-surface. */
+  playbooks: LiteSpacesPlaybooksBridge;
+  /** Tickets sub-surface. */
+  tickets: LiteSpacesTicketsBridge;
+}
+
+interface LiteSpacesPlaybooksBridge {
+  /** Return the current playbook for a Space, or null when none is set. */
+  current(spaceId: string): Promise<LiteSpacesIpcResult<LiteSpaceItem | null>>;
+  /**
+   * Promote an Asset to current playbook. Drops any previous edge.
+   * The returned ticketCount is the number of tickets already linked.
+   */
+  set(
+    spaceId: string,
+    playbookId: string
+  ): Promise<LiteSpacesIpcResult<{ playbook: LiteSpaceItem; ticketCount: number }>>;
+}
+
+interface LiteSpacesTicketsBridge {
+  /** List tickets in a Space, ordered by status (open first). */
+  list(
+    spaceId: string,
+    opts?: { status?: LiteTicketStatus; limit?: number; offset?: number }
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem[]>>;
+  /** Create a new ticket. */
+  create(
+    spaceId: string,
+    input: {
+      title: string;
+      description?: string;
+      status?: LiteTicketStatus;
+      priority?: 'low' | 'med' | 'high';
+      playbookId?: string;
+      assigneeId?: string;
+    }
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Update an existing ticket. Pass assigneeId: null to clear it. */
+  update(
+    id: string,
+    patch: {
+      title?: string;
+      description?: string;
+      status?: LiteTicketStatus;
+      priority?: 'low' | 'med' | 'high';
+      assigneeId?: string | null;
+    }
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
 }
 
 // ---------------------------------------------------------------------------

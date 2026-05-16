@@ -23,6 +23,15 @@ interface RendererItemProvenance {
   id: string;
 }
 
+type RendererTicketStatus = 'open' | 'in_progress' | 'done' | 'blocked';
+
+interface RendererTicketDetails {
+  status: RendererTicketStatus;
+  priority?: 'low' | 'med' | 'high';
+  assignee: RendererItemProvenance | null;
+  playbookId?: string;
+}
+
 interface RendererItem {
   id: string;
   title: string;
@@ -40,6 +49,16 @@ interface RendererItem {
   mimeType?: string;
   tags?: string[];
   lastEditedBy?: RendererItemProvenance | null;
+  ticket?: RendererTicketDetails;
+}
+
+interface DetailTicketCallbacks {
+  onStatusChange?: (next: RendererTicketStatus) => Promise<void>;
+  onOpenPlaybook?: (playbookId: string) => void;
+}
+
+interface DetailPlaybookCallbacks {
+  onDecompose?: () => Promise<void>;
 }
 
 interface DetailEditCallbacks {
@@ -75,6 +94,9 @@ interface RendererTestApi {
   ): HTMLElement;
   buildAttributionChip(item: RendererItem): HTMLElement | null;
   buildDetailActivity(events: ReadonlyArray<RendererActivityEvent>): HTMLElement;
+  buildTicketStatusPill(status: RendererTicketStatus): HTMLElement;
+  buildDetailTicketBlock(item: RendererItem, cb?: DetailTicketCallbacks): HTMLElement;
+  buildDetailPlaybookBlock(item: RendererItem, cb?: DetailPlaybookCallbacks): HTMLElement;
   renderMarkdown(source: string): HTMLElement;
   renderInlineMarkdown(escaped: string): string;
   formatBytes(n: number): string;
@@ -1150,5 +1172,226 @@ describe('buildDetailPane (Phase C)', () => {
       ])
     );
     expect(slot.querySelectorAll('li.spaces-detail-activity-row')).toHaveLength(1);
+  });
+});
+
+// ─── Phase 4: shared-space primitives (ticket + playbook) ───────────────
+
+describe('buildTicketStatusPill', () => {
+  it('renders the status label with data-status attribute', () => {
+    expect(renderer.buildTicketStatusPill('open').textContent).toBe('Open');
+    expect(renderer.buildTicketStatusPill('in_progress').textContent).toBe('In progress');
+    expect(renderer.buildTicketStatusPill('done').textContent).toBe('Done');
+    expect(renderer.buildTicketStatusPill('blocked').textContent).toBe('Blocked');
+  });
+
+  it('carries the status as a data-status attribute for CSS', () => {
+    const el = renderer.buildTicketStatusPill('blocked');
+    expect(el.getAttribute('data-status')).toBe('blocked');
+    expect(el.classList.contains('spaces-ticket-status-pill')).toBe(true);
+  });
+});
+
+describe('buildDetailTicketBlock', () => {
+  function ticketItem(overrides: Partial<RendererTicketDetails> = {}): RendererItem {
+    return baseItem({
+      id: 't-1',
+      title: 'Write the SDK tests',
+      kind: 'ticket',
+      ticket: {
+        status: 'open',
+        assignee: null,
+        ...overrides,
+      },
+    });
+  }
+
+  it('renders a status pill (read-only) when no onStatusChange is provided', () => {
+    const el = renderer.buildDetailTicketBlock(ticketItem({ status: 'in_progress' }));
+    expect(el.querySelector('.spaces-ticket-status-pill')?.getAttribute('data-status')).toBe(
+      'in_progress'
+    );
+    expect(el.querySelector('select')).toBeNull();
+  });
+
+  it('renders an editable status dropdown when onStatusChange is supplied', () => {
+    const el = renderer.buildDetailTicketBlock(ticketItem({ status: 'open' }), {
+      onStatusChange: async () => undefined,
+    });
+    const select = el.querySelector<HTMLSelectElement>('.spaces-detail-ticket-status-select');
+    expect(select).not.toBeNull();
+    expect(select?.value).toBe('open');
+    const options = Array.from(select?.querySelectorAll('option') ?? []).map((o) => o.value);
+    expect(options).toEqual(['open', 'in_progress', 'done', 'blocked']);
+  });
+
+  it('calls onStatusChange when the dropdown changes', async () => {
+    const calls: RendererTicketStatus[] = [];
+    const el = renderer.buildDetailTicketBlock(ticketItem({ status: 'open' }), {
+      onStatusChange: async (next) => {
+        calls.push(next);
+      },
+    });
+    const select = el.querySelector<HTMLSelectElement>('select')!;
+    select.value = 'done';
+    select.dispatchEvent(new Event('change'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual(['done']);
+  });
+
+  it('does NOT call onStatusChange when the selection is identical', async () => {
+    const calls: RendererTicketStatus[] = [];
+    const el = renderer.buildDetailTicketBlock(ticketItem({ status: 'open' }), {
+      onStatusChange: async (next) => {
+        calls.push(next);
+      },
+    });
+    const select = el.querySelector<HTMLSelectElement>('select')!;
+    select.value = 'open';
+    select.dispatchEvent(new Event('change'));
+    await Promise.resolve();
+    expect(calls).toEqual([]);
+  });
+
+  it('rolls back the dropdown when onStatusChange rejects', async () => {
+    const el = renderer.buildDetailTicketBlock(ticketItem({ status: 'open' }), {
+      onStatusChange: async () => {
+        throw new Error('network');
+      },
+    });
+    const select = el.querySelector<HTMLSelectElement>('select')!;
+    select.value = 'done';
+    select.dispatchEvent(new Event('change'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(select.value).toBe('open');
+    expect(select.disabled).toBe(false);
+  });
+
+  it('renders priority chip when present, omits when absent', () => {
+    expect(
+      renderer
+        .buildDetailTicketBlock(ticketItem({ priority: 'high' }))
+        .querySelector('.spaces-detail-ticket-priority')
+        ?.textContent
+    ).toBe('high');
+    expect(
+      renderer
+        .buildDetailTicketBlock(ticketItem())
+        .querySelector('.spaces-detail-ticket-priority')
+    ).toBeNull();
+  });
+
+  it('renders "Unassigned" when no assignee', () => {
+    const el = renderer.buildDetailTicketBlock(ticketItem({ assignee: null }));
+    expect(el.querySelector('.spaces-detail-ticket-assignee')?.textContent).toBe('Unassigned');
+  });
+
+  it('renders the assignee with kind suffix when present', () => {
+    const el = renderer.buildDetailTicketBlock(
+      ticketItem({ assignee: { kind: 'Agent', name: 'Audit Agent', id: 'ag-1' } })
+    );
+    const assignee = el.querySelector('.spaces-detail-ticket-assignee');
+    expect(assignee?.textContent).toBe('Audit Agent (Agent)');
+    expect(assignee?.classList.contains('is-assigned')).toBe(true);
+    expect(assignee?.getAttribute('data-assignee-kind')).toBe('Agent');
+  });
+
+  it('renders a clickable "View playbook" link when callback is provided', () => {
+    const opened: string[] = [];
+    const el = renderer.buildDetailTicketBlock(ticketItem({ playbookId: 'pb-1' }), {
+      onOpenPlaybook: (id) => opened.push(id),
+    });
+    const link = el.querySelector<HTMLButtonElement>('.spaces-detail-ticket-playbook-link');
+    expect(link).not.toBeNull();
+    link?.click();
+    expect(opened).toEqual(['pb-1']);
+  });
+
+  it('renders the playbook id as read-only when no callback is provided', () => {
+    const el = renderer.buildDetailTicketBlock(ticketItem({ playbookId: 'pb-1' }));
+    const el2 = el.querySelector('.spaces-detail-ticket-playbook-link.is-readonly');
+    expect(el2?.textContent).toBe('pb-1');
+  });
+
+  it('omits the playbook row entirely when ticket has no playbookId', () => {
+    const el = renderer.buildDetailTicketBlock(ticketItem());
+    expect(el.querySelector('.spaces-detail-ticket-playbook-link')).toBeNull();
+  });
+});
+
+describe('buildDetailPlaybookBlock', () => {
+  it('renders the "Playbook" banner', () => {
+    const el = renderer.buildDetailPlaybookBlock(baseItem({ kind: 'playbook' }));
+    expect(el.querySelector('.spaces-detail-playbook-label')?.textContent).toBe('Playbook');
+    expect(el.querySelector('.spaces-detail-playbook-hint')?.textContent ?? '').toMatch(
+      /drives the work/i
+    );
+  });
+
+  it('renders a disabled "Decompose" button when no callback is provided', () => {
+    const el = renderer.buildDetailPlaybookBlock(baseItem({ kind: 'playbook' }));
+    const cta = el.querySelector<HTMLButtonElement>('.spaces-detail-playbook-decompose');
+    expect(cta?.disabled).toBe(true);
+  });
+
+  it('renders an enabled button that calls onDecompose on click', async () => {
+    let calls = 0;
+    const el = renderer.buildDetailPlaybookBlock(baseItem({ kind: 'playbook' }), {
+      onDecompose: async () => {
+        calls += 1;
+      },
+    });
+    const cta = el.querySelector<HTMLButtonElement>('.spaces-detail-playbook-decompose');
+    expect(cta?.disabled).toBe(false);
+    cta?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toBe(1);
+  });
+
+  it('disables the button + flags is-decomposing while pending', async () => {
+    let resolveDecompose: (() => void) | null = null;
+    const el = renderer.buildDetailPlaybookBlock(baseItem({ kind: 'playbook' }), {
+      onDecompose: () =>
+        new Promise<void>((r) => {
+          resolveDecompose = r;
+        }),
+    });
+    const cta = el.querySelector<HTMLButtonElement>('.spaces-detail-playbook-decompose')!;
+    cta.click();
+    await Promise.resolve();
+    expect(cta.disabled).toBe(true);
+    expect(el.classList.contains('is-decomposing')).toBe(true);
+    resolveDecompose!();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(cta.disabled).toBe(false);
+    expect(el.classList.contains('is-decomposing')).toBe(false);
+  });
+});
+
+describe('buildDetailPane — ticket integration', () => {
+  it('renders the ticket detail block as the type subsection', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({
+        kind: 'ticket',
+        ticket: { status: 'in_progress', assignee: null },
+      }),
+      () => undefined
+    );
+    expect(el.querySelector('.spaces-detail-ticket')).not.toBeNull();
+    expect(el.querySelector('.spaces-ticket-status-pill')?.getAttribute('data-status')).toBe(
+      'in_progress'
+    );
+  });
+
+  it('renders the playbook block when kind === playbook', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({ kind: 'playbook' }),
+      () => undefined
+    );
+    expect(el.querySelector('.spaces-detail-playbook')).not.toBeNull();
   });
 });

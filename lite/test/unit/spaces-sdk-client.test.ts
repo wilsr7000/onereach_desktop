@@ -1729,3 +1729,477 @@ describe('SdkSpacesClient.itemRecentCommits', () => {
     expect(events).toEqual([]);
   });
 });
+
+// ─── Phase 4: shared spaces (playbooks + tickets) ───────────────────────
+
+describe('CYPHER source strings — Phase 4 (shared spaces)', () => {
+  it('LIST_SPACES projects coalesce(s.kind, "user") AS kind', () => {
+    expect(CYPHER.LIST_SPACES).toMatch(/coalesce\(s\.kind, 'user'\) AS kind/);
+  });
+
+  it('GET_ITEM projects ticket fields with status default and assignee object', () => {
+    expect(CYPHER.GET_ITEM).toMatch(/coalesce\(a\.status, 'open'\) AS ticketStatus/);
+    expect(CYPHER.GET_ITEM).toMatch(/a\.priority AS ticketPriority/);
+    expect(CYPHER.GET_ITEM).toMatch(
+      /coalesce\(sourcePlaybook\.id, a\.playbookId\) AS ticketPlaybookId/
+    );
+    expect(CYPHER.GET_ITEM).toMatch(/AS ticketAssignee/);
+    expect(CYPHER.GET_ITEM).toMatch(
+      /OPTIONAL MATCH \(a\)-\[:ASSIGNED_TO\]->\(assignee\)/
+    );
+    expect(CYPHER.GET_ITEM).toMatch(
+      /OPTIONAL MATCH \(a\)-\[:DECOMPOSED_FROM\]->\(pb:Asset\)/
+    );
+  });
+
+  it('SET_SPACE_KIND filters out soft-deleted spaces and stamps updatedAt', () => {
+    expect(CYPHER.SET_SPACE_KIND).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
+    expect(CYPHER.SET_SPACE_KIND).toMatch(/WHERE s\.deletedAt IS NULL/);
+    expect(CYPHER.SET_SPACE_KIND).toMatch(/SET s\.kind = \$kind/);
+    expect(CYPHER.SET_SPACE_KIND).toMatch(/s\.updatedAt = \$now/);
+  });
+
+  it('GET_CURRENT_PLAYBOOK resolves canonical edge then legacy property', () => {
+    expect(CYPHER.GET_CURRENT_PLAYBOOK).toMatch(
+      /OPTIONAL MATCH \(s\)-\[:CURRENT_PLAYBOOK\]->\(canonical:Asset\)/
+    );
+    expect(CYPHER.GET_CURRENT_PLAYBOOK).toMatch(
+      /OPTIONAL MATCH \(legacy:Asset \{id: s\.currentPlaybookId\}\)/
+    );
+    expect(CYPHER.GET_CURRENT_PLAYBOOK).toMatch(/coalesce\(canonical, legacy\)/);
+  });
+
+  it('SET_CURRENT_PLAYBOOK drops the prior edge, MERGEs the new one, and stamps type', () => {
+    expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(
+      /OPTIONAL MATCH \(s\)-\[old:CURRENT_PLAYBOOK\]->\(:Asset\)/
+    );
+    expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(/DELETE old/);
+    expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(/MERGE \(s\)-\[:CURRENT_PLAYBOOK\]->\(pb\)/);
+    expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(/SET pb\.type = 'playbook'/);
+    expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(/count\(t\) AS ticketCount/);
+  });
+
+  it('LIST_TICKETS_IN_SPACE matches by belongs-to + ticket type with status filter', () => {
+    expect(CYPHER.LIST_TICKETS_IN_SPACE).toMatch(
+      /MATCH \(a:Asset\)-\[:BELONGS_TO\]->\(s:Space \{id: \$spaceId\}\)/
+    );
+    expect(CYPHER.LIST_TICKETS_IN_SPACE).toMatch(/coalesce\(a\.type, a\.assetType\) = 'ticket'/);
+    expect(CYPHER.LIST_TICKETS_IN_SPACE).toMatch(/\$status IS NULL OR/);
+    expect(CYPHER.LIST_TICKETS_IN_SPACE).toMatch(/coalesce\(a\.status, 'open'\) = \$status/);
+  });
+
+  it('LIST_TICKETS_IN_SPACE orders open tickets first', () => {
+    expect(CYPHER.LIST_TICKETS_IN_SPACE).toMatch(
+      /WHEN 'open' THEN 0[\s\S]+WHEN 'in_progress' THEN 1[\s\S]+WHEN 'blocked' THEN 2[\s\S]+WHEN 'done' THEN 3/
+    );
+  });
+
+  it('CREATE_TICKET CREATEs Asset, merges BELONGS_TO + optional DECOMPOSED_FROM + ASSIGNED_TO', () => {
+    expect(CYPHER.CREATE_TICKET).toMatch(/CREATE \(a:Asset \{/);
+    expect(CYPHER.CREATE_TICKET).toMatch(/type: 'ticket'/);
+    expect(CYPHER.CREATE_TICKET).toMatch(/MERGE \(a\)-\[:BELONGS_TO\]->\(s\)/);
+    expect(CYPHER.CREATE_TICKET).toMatch(/MERGE \(a\)-\[:DECOMPOSED_FROM\]->\(x\)/);
+    expect(CYPHER.CREATE_TICKET).toMatch(/MERGE \(a\)-\[:ASSIGNED_TO\]->\(x\)/);
+  });
+
+  it('UPDATE_TICKET only updates :Asset rows where type === ticket', () => {
+    expect(CYPHER.UPDATE_TICKET).toMatch(/coalesce\(a\.type, a\.assetType\) = 'ticket'/);
+    expect(CYPHER.UPDATE_TICKET).toMatch(/SET a\.name = coalesce\(\$title, a\.name\)/);
+    expect(CYPHER.UPDATE_TICKET).toMatch(/a\.status = coalesce\(\$status, a\.status\)/);
+    expect(CYPHER.UPDATE_TICKET).toMatch(/a\.priority = coalesce\(\$priority, a\.priority\)/);
+    // Assignee re-merge: drop the prior edge first.
+    expect(CYPHER.UPDATE_TICKET).toMatch(/OPTIONAL MATCH \(a\)-\[r:ASSIGNED_TO\]->\(\)/);
+    expect(CYPHER.UPDATE_TICKET).toMatch(/DELETE r/);
+  });
+});
+
+describe('SdkSpacesClient.setSpaceKind', () => {
+  it('rejects unknown kinds', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(
+      client.setSpaceKind('sp-1', 'bogus' as unknown as 'user')
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('throws SPACES_NOT_FOUND when the Space is missing', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET s.kind = $kind', []);
+    const client = makeClient(stub);
+    await expect(client.setSpaceKind('sp-gone', 'shared')).rejects.toMatchObject({
+      code: 'SPACES_NOT_FOUND',
+    });
+  });
+
+  it('returns the new kind on success', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET s.kind = $kind', [{ id: 'sp-1', kind: 'shared' }]);
+    const client = makeClient(stub);
+    const next = await client.setSpaceKind('sp-1', 'shared');
+    expect(next).toBe('shared');
+  });
+});
+
+describe('SdkSpacesClient.getCurrentPlaybook', () => {
+  it('returns null when no playbook is set', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('OPTIONAL MATCH (s)-[:CURRENT_PLAYBOOK]', []);
+    const client = makeClient(stub);
+    const pb = await client.getCurrentPlaybook('sp-1');
+    expect(pb).toBeNull();
+  });
+
+  it('re-fetches the playbook via getItem when one is set', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('OPTIONAL MATCH (s)-[:CURRENT_PLAYBOOK]', [{ playbookId: 'pb-1' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 'pb-1',
+        title: 'Q1 plan',
+        kind: 'playbook',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    const pb = await client.getCurrentPlaybook('sp-1');
+    expect(pb).not.toBeNull();
+    expect(pb?.id).toBe('pb-1');
+    expect(pb?.kind).toBe('playbook');
+  });
+});
+
+describe('SdkSpacesClient.setCurrentPlaybook', () => {
+  it('rejects empty playbookId', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.setCurrentPlaybook('sp-1', '')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('returns the freshly-fetched playbook plus ticketCount', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (s)-[:CURRENT_PLAYBOOK]', [
+      { playbookId: 'pb-1', ticketCount: 4 },
+    ]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 'pb-1',
+        title: 'Q1 plan',
+        kind: 'playbook',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    const result = await client.setCurrentPlaybook('sp-1', 'pb-1');
+    expect(result.ticketCount).toBe(4);
+    expect(result.playbook.id).toBe('pb-1');
+  });
+});
+
+describe('SdkSpacesClient.listTickets', () => {
+  it('defaults to limit 200, status null, offset 0', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('coalesce(a.type, a.assetType) = \'ticket\'', []);
+    const client = makeClient(stub);
+    await client.listTickets('sp-1');
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({
+      spaceId: 'sp-1',
+      status: null,
+      limit: 200,
+      offset: 0,
+    });
+  });
+
+  it('passes a valid status filter through', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('coalesce(a.type, a.assetType) = \'ticket\'', []);
+    const client = makeClient(stub);
+    await client.listTickets('sp-1', { status: 'open' });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toMatchObject({ status: 'open' });
+  });
+
+  it('rejects unknown status', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(
+      client.listTickets('sp-1', { status: 'bogus' as unknown as 'open' })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('maps rows into ticket-shaped Items', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('coalesce(a.type, a.assetType) = \'ticket\'', [
+      {
+        id: 't-1',
+        title: 'Write tests',
+        excerpt: 'Cover the SDK paths',
+        createdAt: '',
+        updatedAt: '',
+        status: 'in_progress',
+        priority: 'high',
+        playbookId: 'pb-1',
+        assignee: { kind: 'Person', name: 'Alice', id: 'p-1' },
+      },
+      {
+        id: 't-2',
+        title: 'Done one',
+        createdAt: '',
+        updatedAt: '',
+        status: 'done',
+        playbookId: null,
+        assignee: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const rows = await client.listTickets('sp-1');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.kind).toBe('ticket');
+    expect(rows[0]?.ticket).toMatchObject({
+      status: 'in_progress',
+      priority: 'high',
+      playbookId: 'pb-1',
+    });
+    expect(rows[0]?.ticket?.assignee?.name).toBe('Alice');
+    expect(rows[1]?.ticket?.status).toBe('done');
+    expect(rows[1]?.ticket?.assignee).toBeNull();
+  });
+});
+
+describe('SdkSpacesClient.createTicket', () => {
+  it('rejects empty title', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.createTicket('sp-1', { title: '   ' })).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('rejects unknown status', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(
+      client.createTicket('sp-1', {
+        title: 'x',
+        status: 'wat' as unknown as 'open',
+      })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('defaults status to open, generates an id, returns the re-fetched Item', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'ticket-stub' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 'ticket-stub',
+        title: 'Write tests',
+        kind: 'ticket',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        ticketStatus: 'open',
+        ticketAssignee: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const created = await client.createTicket('sp-1', { title: 'Write tests' });
+    expect(created.kind).toBe('ticket');
+    expect(created.ticket?.status).toBe('open');
+    // Verify the CREATE parameters carried the trimmed title and defaulted status.
+    const createCall = stub.calls.find((c) => c.cypher.includes('CREATE (a:Asset'));
+    expect(createCall?.parameters).toMatchObject({
+      spaceId: 'sp-1',
+      title: 'Write tests',
+      status: 'open',
+    });
+  });
+
+  it('throws SPACES_NOT_FOUND when the Space is missing', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', []);
+    const client = makeClient(stub);
+    await expect(
+      client.createTicket('sp-gone', { title: 'x' })
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
+  });
+});
+
+describe('SdkSpacesClient.updateTicket', () => {
+  it('rejects empty id', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.updateTicket('', {})).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('rejects unknown status / priority', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(
+      client.updateTicket('t-1', { status: 'nope' as unknown as 'open' })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+    await expect(
+      client.updateTicket('t-1', { priority: 'sky' as unknown as 'low' })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('forwards null assigneeId to clear the assignment', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse(
+      "WHERE coalesce(a.type, a.assetType) = 'ticket'",
+      [{ id: 't-1' }]
+    );
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 't-1',
+        title: 't',
+        kind: 'ticket',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        ticketStatus: 'open',
+        ticketAssignee: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.updateTicket('t-1', { assigneeId: null });
+    const call = stub.calls.find((c) => c.cypher.includes('UPDATE_TICKET') ||
+      c.cypher.includes('coalesce($status, a.status)'));
+    expect(call?.parameters).toMatchObject({ assigneeId: null });
+  });
+
+  it('throws SPACES_NOT_FOUND when the ticket is missing', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse("WHERE coalesce(a.type, a.assetType) = 'ticket'", []);
+    const client = makeClient(stub);
+    await expect(
+      client.updateTicket('t-gone', { status: 'done' })
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
+  });
+
+  it('returns the freshly re-fetched ticket Item with status updated', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse(
+      "WHERE coalesce(a.type, a.assetType) = 'ticket'",
+      [{ id: 't-1' }]
+    );
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 't-1',
+        title: 'ticket',
+        kind: 'ticket',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        ticketStatus: 'done',
+        ticketAssignee: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const updated = await client.updateTicket('t-1', { status: 'done' });
+    expect(updated.ticket?.status).toBe('done');
+  });
+});
+
+describe('toItem ticket projection', () => {
+  it('toSpace surfaces s.kind from the projection', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (s:Space)', [
+      {
+        id: 'sp-1',
+        name: 'Engineering',
+        description: '',
+        color: '',
+        iconKey: '',
+        kind: 'shared',
+        itemCount: 0,
+        createdAt: '',
+        updatedAt: '',
+      },
+      {
+        id: 'sp-2',
+        name: 'Misc',
+        description: '',
+        color: '',
+        iconKey: '',
+        kind: 'user',
+        itemCount: 0,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ]);
+    const client = makeClient(stub);
+    const spaces = await client.listSpaces();
+    expect(spaces[0]?.kind).toBe('shared');
+    expect(spaces[1]?.kind).toBe('user');
+  });
+
+  it('toItem skips ticket sub-shape for non-ticket items', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 'doc-1',
+        title: 'Whitepaper',
+        kind: 'document',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        // These ARE present in the row (the projection always returns them)
+        // but `toItem` only assembles `item.ticket` when kind === 'ticket'.
+        ticketStatus: 'open',
+        ticketAssignee: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('doc-1');
+    expect(item?.ticket).toBeUndefined();
+  });
+
+  it('toItem assembles ticket sub-shape with status default + assignee + playbookId', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 't-1',
+        title: 'Write tests',
+        kind: 'ticket',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        ticketStatus: 'in_progress',
+        ticketPriority: 'high',
+        ticketPlaybookId: 'pb-1',
+        ticketAssignee: { kind: 'Agent', name: 'Audit Agent', id: 'ag-1' },
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('t-1');
+    expect(item?.kind).toBe('ticket');
+    expect(item?.ticket).toEqual({
+      status: 'in_progress',
+      priority: 'high',
+      playbookId: 'pb-1',
+      assignee: { kind: 'Agent', name: 'Audit Agent', id: 'ag-1' },
+    });
+  });
+});

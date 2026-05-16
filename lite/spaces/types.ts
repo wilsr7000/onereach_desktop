@@ -28,6 +28,22 @@ export const SPACES_MODULE_VERSION = 1 as const;
 // ─── Spaces ──────────────────────────────────────────────────────────────
 
 /**
+ * Discriminator on how a Space's contents are curated:
+ *
+ *   - `'user'` (default): humans add/remove items manually. The current
+ *     behavior of every Lite Space pre-2026Q2.
+ *   - `'shared'`: AI-managed workspace where agents do work driven by
+ *     a user-authored **playbook** (a plan asset stored in the Space).
+ *     The playbook decomposes into **tickets** (work units), and the
+ *     Space accumulates the artifacts agents produce. The renderer
+ *     swaps to a dashboard layout when `kind === 'shared'`.
+ *
+ * Optional in `Space` so existing rows default to `'user'` without a
+ * schema migration; the SDK projects `coalesce(s.kind, 'user') AS kind`.
+ */
+export type SpaceKind = 'user' | 'shared';
+
+/**
  * A canonical Space (graph community / operational context). Every
  * `:Space` node in Neo4j maps to this shape after the listSpaces query.
  *
@@ -52,6 +68,13 @@ export interface Space {
   createdAt?: string;
   /** ISO timestamp of last update. */
   updatedAt?: string;
+  /**
+   * Curation model. Defaults to `'user'` for existing Spaces (the SDK
+   * coalesces `s.kind` so rows written before this property existed
+   * still parse). `'shared'` flips the renderer into the AI-managed
+   * dashboard layout.
+   */
+  kind?: SpaceKind;
 }
 
 // ─── Items ───────────────────────────────────────────────────────────────
@@ -61,6 +84,18 @@ export interface Space {
  * on `:Asset` nodes (with legacy fallback to `a.assetType` per the
  * SDK Cypher). Unknown values are normalized to `'other'` by
  * `toItemKind()` in `sdk-client.ts`.
+ *
+ * `'playbook'` and `'ticket'` are shared-space primitives:
+ *   - **Playbook** — a user-authored plan asset. One Space designates
+ *     a "current" playbook via the `[:CURRENT_PLAYBOOK]` edge; that's
+ *     the plan the agents are working against.
+ *   - **Ticket** — a single decomposed unit of work. Tickets carry a
+ *     `status` and an optional assignee (Person or Agent), and chain
+ *     back to the source playbook via `[:DECOMPOSED_FROM]`.
+ *
+ * Both surface through the standard Item interface — the discriminator
+ * lives on `Item.kind`, and `Item.ticket` carries the ticket-specific
+ * substructure when applicable.
  */
 export type ItemKind =
   | 'document'
@@ -69,7 +104,46 @@ export type ItemKind =
   | 'text'
   | 'audio'
   | 'video'
+  | 'playbook'
+  | 'ticket'
   | 'other';
+
+/**
+ * Ticket lifecycle. Open → in_progress → done, with `'blocked'` as an
+ * orthogonal "waiting on something" state the user / agent flags
+ * manually. v1 is a flat enum; v2 could add `'cancelled'` /
+ * `'duplicate'` without breaking the renderer (UI just gets a new pill
+ * color and the SDK projection passes the new value through).
+ */
+export type TicketStatus = 'open' | 'in_progress' | 'done' | 'blocked';
+
+/** Ordered status list for stable iteration in renderer + tests. */
+export const TICKET_STATUSES: ReadonlyArray<TicketStatus> = [
+  'open',
+  'in_progress',
+  'done',
+  'blocked',
+] as const;
+
+/**
+ * Ticket-specific substructure projected onto an Item when
+ * `Item.kind === 'ticket'`. Pulls from canonical Asset properties
+ * (`a.status`, `a.assigneeId`, `a.playbookId`, `a.priority`) with
+ * legacy fallbacks per the standard `coalesce(...)` pattern.
+ */
+export interface TicketDetails {
+  /** Lifecycle status. Defaults to `'open'` when the graph row has no value. */
+  status: TicketStatus;
+  /** Free-form priority bucket. Optional. */
+  priority?: 'low' | 'med' | 'high';
+  /** Resolved assignee (Person or Agent). Null when unassigned. */
+  assignee: ItemProvenance | null;
+  /**
+   * The playbook this ticket was decomposed from. Undefined when the
+   * ticket was created directly without a playbook context.
+   */
+  playbookId?: string;
+}
 
 /**
  * Compact reference to another Space an item participates in. Used in the
@@ -162,6 +236,13 @@ export interface Item extends ItemSummary {
    * Falls back to `null` when the schema has no such edge yet.
    */
   lastEditedBy?: ItemProvenance | null;
+  /**
+   * Ticket-specific fields. Populated when `kind === 'ticket'`; absent
+   * for every other kind. The SDK does NOT synthesize a default — if
+   * the renderer needs to draw a ticket UI it should defensively check
+   * for presence (`item.ticket !== undefined`).
+   */
+  ticket?: TicketDetails;
 }
 
 // ─── Query options ───────────────────────────────────────────────────────
@@ -402,4 +483,81 @@ export interface RecentCommitsOpts {
   limit?: number;
   /** Optional epoch ms cutoff; events with `timestamp >= since` only. */
   since?: number;
+}
+
+// ─── Shared spaces: playbooks + tickets (Phase 4) ────────────────────────
+
+/**
+ * Options shape for `tickets.list(spaceId, opts?)`. Filters at the SDK
+ * layer (no need for separate Cypher per filter). Mirrors the
+ * `ListOpts` shape used by `items.list` for paging.
+ */
+export interface ListTicketsOpts {
+  /** Status filter; when omitted, returns tickets in every status. */
+  status?: TicketStatus;
+  /** Default 200; cap is server-side. */
+  limit?: number;
+  /** 0-based offset for paging. */
+  offset?: number;
+}
+
+/**
+ * Input shape for `tickets.create(spaceId, input)`. The SDK stamps id +
+ * createdAt + updatedAt + the canonical `a.type = 'ticket'` and merges
+ * a `[:BELONGS_TO]->(:Space)` edge.
+ */
+export interface CreateTicketInput {
+  /** Ticket title. 1..MAX_ITEM_TITLE_LENGTH after trim. */
+  title: string;
+  /** Optional human description. Capped at MAX_ITEM_DESCRIPTION_LENGTH. */
+  description?: string;
+  /** Initial status. Defaults to `'open'` when omitted. */
+  status?: TicketStatus;
+  /** Priority bucket. Free-form for now. */
+  priority?: 'low' | 'med' | 'high';
+  /**
+   * Optional source playbook id. When set, the SDK merges a
+   * `[:DECOMPOSED_FROM]->(:Asset)` edge so the playbook view can
+   * surface all derived tickets.
+   */
+  playbookId?: string;
+  /** Optional initial assignee. Either a `:Person.id` or `:Agent.id`. */
+  assigneeId?: string;
+}
+
+/**
+ * Patch shape for `tickets.update(ticketId, patch)`. Every field is
+ * optional — the SDK only writes what's provided. Distinct from the
+ * generic `ItemUpdatePatch` because ticket-specific fields (status,
+ * assignee, priority) demand validation that doesn't apply to other
+ * kinds.
+ */
+export interface UpdateTicketPatch {
+  /** New display title. */
+  title?: string;
+  /** New description. */
+  description?: string;
+  /** New status. Validated against the `TicketStatus` enum. */
+  status?: TicketStatus;
+  /** New priority bucket. */
+  priority?: 'low' | 'med' | 'high';
+  /**
+   * New assignee id. Pass `null` to clear the assignment. Strings are
+   * treated as a Person/Agent id; the SDK does NOT distinguish which —
+   * it MERGEs an `[:ASSIGNED_TO]` edge against whichever node carries
+   * the id.
+   */
+  assigneeId?: string | null;
+}
+
+/**
+ * Result of `playbooks.set(spaceId, playbookId)`. Returns the freshly
+ * promoted playbook + the count of derived tickets so the renderer can
+ * decide whether to refetch the ticket list.
+ */
+export interface SetPlaybookResult {
+  /** The playbook now flagged as current. */
+  playbook: Item;
+  /** Count of tickets already linked to this playbook. */
+  ticketCount: number;
 }

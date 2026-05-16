@@ -183,6 +183,19 @@ function buildStubConsumer(): {
       maybeFail(undefined);
     },
     undeleteSpace: async (id) => maybeFail<Space>({ id, name: '' }),
+    // Phase 4 — shared spaces. Canonical empty shapes; specific
+    // behaviour is exercised by the SDK / renderer suites.
+    tickets: {
+      list: async () => maybeFail([] as Item[]),
+      create: async (_spaceId, _input) => maybeFail({} as unknown as Item),
+      update: async (_id, _patch) => maybeFail({} as unknown as Item),
+    },
+    playbooks: {
+      current: async (_spaceId) => maybeFail<Item | null>(null),
+      set: async (_spaceId, _playbookId) =>
+        maybeFail({ playbook: {} as unknown as Item, ticketCount: 0 }),
+    },
+    setSpaceKind: async (_id, kind) => maybeFail(kind),
   };
 
   return {
