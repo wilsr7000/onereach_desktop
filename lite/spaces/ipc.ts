@@ -33,6 +33,9 @@ import type {
   CreateTicketInput,
   UpdateTicketPatch,
   SetPlaybookResult,
+  Person,
+  PersonUpsertInput,
+  SpaceMember,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import type { DiscoveryResults } from './discovery-format.js';
@@ -71,6 +74,11 @@ export const SPACES_IPC = {
   TICKETS_LIST: 'lite:spaces:tickets:list',
   TICKETS_CREATE: 'lite:spaces:tickets:create',
   TICKETS_UPDATE: 'lite:spaces:tickets:update',
+  /** Phase 4 v2 — identity + sharing. */
+  IDENTITY_GET_OR_CREATE_PERSON: 'lite:spaces:identity:getOrCreatePerson',
+  MEMBERS_LIST: 'lite:spaces:members:list',
+  MEMBERS_ADD: 'lite:spaces:members:add',
+  MEMBERS_REMOVE: 'lite:spaces:members:remove',
 } as const;
 
 /**
@@ -609,6 +617,79 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
             : ({} as UpdateTicketPatch);
         const value = await getSpacesApi().tickets.update(id, patch);
         return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // ─── Identity + sharing (Phase 4 v2) ──────────────────────────────────
+
+  ipcMain.handle(
+    SPACES_IPC.IDENTITY_GET_OR_CREATE_PERSON,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { input?: unknown }
+    ): Promise<SpacesIpcResult<Person>> => {
+      try {
+        const input =
+          payload?.input !== null && typeof payload?.input === 'object'
+            ? (payload?.input as PersonUpsertInput)
+            : ({ id: '' } as PersonUpsertInput);
+        const value = await getSpacesApi().identity.getOrCreatePerson(input);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.MEMBERS_LIST,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown }
+    ): Promise<SpacesIpcResult<SpaceMember[]>> => {
+      try {
+        const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
+        const value = await getSpacesApi().members.list(spaceId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.MEMBERS_ADD,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown; memberId?: unknown }
+    ): Promise<SpacesIpcResult<SpaceMember>> => {
+      try {
+        const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
+        const memberId =
+          typeof payload?.memberId === 'string' ? payload.memberId : '';
+        const value = await getSpacesApi().members.add(spaceId, memberId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.MEMBERS_REMOVE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown; memberId?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
+        const memberId =
+          typeof payload?.memberId === 'string' ? payload.memberId : '';
+        await getSpacesApi().members.remove(spaceId, memberId);
+        return { ok: true, value: { ok: true } };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
       }

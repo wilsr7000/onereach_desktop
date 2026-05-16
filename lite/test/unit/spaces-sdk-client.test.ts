@@ -2203,3 +2203,172 @@ describe('toItem ticket projection', () => {
     });
   });
 });
+
+// ─── Phase 4 v2: identity + sharing ─────────────────────────────────────
+
+describe('CYPHER source strings — Phase 4 v2 (identity + sharing)', () => {
+  it('MERGE_PERSON upserts by id with ON CREATE / ON MATCH branches', () => {
+    expect(CYPHER.MERGE_PERSON).toMatch(/MERGE \(p:Person \{id: \$id\}\)/);
+    expect(CYPHER.MERGE_PERSON).toMatch(/ON CREATE SET p\.name = \$name/);
+    expect(CYPHER.MERGE_PERSON).toMatch(
+      /ON MATCH SET p\.name = coalesce\(p\.name, \$name\)/
+    );
+    expect(CYPHER.MERGE_PERSON).toMatch(/coalesce\(p\.email, \$email\)/);
+  });
+
+  it('LIST_SPACE_MEMBERS matches Person OR Agent via HAS_ACCESS', () => {
+    expect(CYPHER.LIST_SPACE_MEMBERS).toMatch(/MATCH \(s:Space \{id: \$spaceId\}\)/);
+    expect(CYPHER.LIST_SPACE_MEMBERS).toMatch(
+      /OPTIONAL MATCH \(member\)-\[:HAS_ACCESS\]->\(s\)/
+    );
+    expect(CYPHER.LIST_SPACE_MEMBERS).toMatch(/member:Person OR member:Agent/);
+  });
+
+  it('ADD_SPACE_MEMBER MERGEs HAS_ACCESS idempotently', () => {
+    expect(CYPHER.ADD_SPACE_MEMBER).toMatch(/MERGE \(member\)-\[:HAS_ACCESS\]->\(s\)/);
+    expect(CYPHER.ADD_SPACE_MEMBER).toMatch(/member:Person OR member:Agent/);
+  });
+
+  it('REMOVE_SPACE_MEMBER deletes the HAS_ACCESS edge', () => {
+    expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(
+      /MATCH \(member \{id: \$memberId\}\)-\[r:HAS_ACCESS\]->\(s:Space \{id: \$spaceId\}\)/
+    );
+    expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(/DELETE r/);
+  });
+});
+
+describe('SdkSpacesClient.getOrCreatePerson', () => {
+  it('rejects empty id', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.getOrCreatePerson({ id: '' })).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('trims inputs and forwards name + email + ISO now', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (p:Person {id: $id})', [
+      { id: 'alice@onereach.ai', name: 'Alice', email: 'alice@onereach.ai' },
+    ]);
+    const client = makeClient(stub);
+    const p = await client.getOrCreatePerson({
+      id: '  alice@onereach.ai  ',
+      name: '  Alice  ',
+      email: '  alice@onereach.ai  ',
+    });
+    expect(p).toEqual({
+      id: 'alice@onereach.ai',
+      name: 'Alice',
+      email: 'alice@onereach.ai',
+    });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toMatchObject({
+      id: 'alice@onereach.ai',
+      name: 'Alice',
+      email: 'alice@onereach.ai',
+    });
+  });
+
+  it('returns the user-supplied id if the MERGE returns no rows', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (p:Person {id: $id})', []);
+    const client = makeClient(stub);
+    const p = await client.getOrCreatePerson({ id: 'alice', name: 'Alice' });
+    expect(p.id).toBe('alice');
+    expect(p.name).toBe('Alice');
+  });
+});
+
+describe('SdkSpacesClient.listSpaceMembers', () => {
+  it('returns [] when no members', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('OPTIONAL MATCH (member)-[:HAS_ACCESS]', []);
+    const client = makeClient(stub);
+    const members = await client.listSpaceMembers('sp-1');
+    expect(members).toEqual([]);
+  });
+
+  it('maps rows into SpaceMember objects with default kind/name', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('OPTIONAL MATCH (member)-[:HAS_ACCESS]', [
+      { kind: 'Person', id: 'alice', name: 'Alice' },
+      { kind: 'Agent', id: 'audit', name: 'Audit Agent' },
+      { kind: 'Person', id: 'bob', name: '' },
+    ]);
+    const client = makeClient(stub);
+    const members = await client.listSpaceMembers('sp-1');
+    expect(members).toHaveLength(3);
+    expect(members[0]).toEqual({ kind: 'Person', id: 'alice', name: 'Alice' });
+    expect(members[2]).toEqual({ kind: 'Person', id: 'bob', name: '' });
+  });
+
+  it('skips rows with missing/empty id (defensive)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('OPTIONAL MATCH (member)-[:HAS_ACCESS]', [
+      { kind: 'Person', id: '', name: 'No Id' },
+      { kind: 'Person', id: 'alice', name: 'Alice' },
+    ]);
+    const client = makeClient(stub);
+    const members = await client.listSpaceMembers('sp-1');
+    expect(members).toHaveLength(1);
+    expect(members[0]?.id).toBe('alice');
+  });
+});
+
+describe('SdkSpacesClient.addSpaceMember', () => {
+  it('rejects empty memberId', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.addSpaceMember('sp-1', '')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('throws SPACES_NOT_FOUND when MERGE returns no rows', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (member)-[:HAS_ACCESS]->(s)', []);
+    const client = makeClient(stub);
+    await expect(
+      client.addSpaceMember('sp-1', 'alice')
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
+  });
+
+  it('returns the canonical (kind, id, name) tuple', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (member)-[:HAS_ACCESS]->(s)', [
+      { kind: 'Agent', id: 'audit', name: 'Audit Agent' },
+    ]);
+    const client = makeClient(stub);
+    const member = await client.addSpaceMember('sp-1', 'audit');
+    expect(member).toEqual({ kind: 'Agent', id: 'audit', name: 'Audit Agent' });
+  });
+});
+
+describe('SdkSpacesClient.removeSpaceMember', () => {
+  it('rejects empty memberId', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.removeSpaceMember('sp-1', '')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('returns silently when the edge is absent (no-op semantics)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('-[r:HAS_ACCESS]->(s:Space {id: $spaceId})', []);
+    const client = makeClient(stub);
+    await expect(client.removeSpaceMember('sp-1', 'alice')).resolves.toBeUndefined();
+  });
+
+  it('forwards spaceId + memberId as Cypher params', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('-[r:HAS_ACCESS]->(s:Space {id: $spaceId})', [
+      { id: 'alice' },
+    ]);
+    const client = makeClient(stub);
+    await client.removeSpaceMember('sp-1', 'alice');
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ spaceId: 'sp-1', memberId: 'alice' });
+  });
+});

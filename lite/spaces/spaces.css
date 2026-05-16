@@ -2607,31 +2607,11 @@ body {
   color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
 }
 
-.spaces-detail-playbook-decompose {
-  background: rgba(123, 219, 255, 0.12);
-  border: 1px solid rgba(123, 219, 255, 0.4);
-  color: var(--or-accent-strong, #7bdbff);
-  padding: 6px 12px;
-  border-radius: 6px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  align-self: flex-start;
-  transition: background var(--or-transition-fast, 120ms ease);
-}
-
-.spaces-detail-playbook-decompose:hover:not(:disabled) {
-  background: rgba(123, 219, 255, 0.2);
-}
-
-.spaces-detail-playbook-decompose:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.spaces-detail-playbook.is-decomposing .spaces-detail-playbook-decompose {
-  opacity: 0.7;
+.spaces-detail-playbook-footnote {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-style: italic;
 }
 
 /* Kind badges for the playbook + ticket item-card chrome. */
@@ -2644,4 +2624,341 @@ body {
   background: rgba(106, 169, 255, 0.2);
   color: #a5cbff;
   border: 1px solid rgba(106, 169, 255, 0.4);
+}
+
+/* ─── Phase 4 v2: shared-space dashboard ─────────────────────────────── */
+
+/* "+ Shared" button in sidebar header. */
+.spaces-sidebar-title.spaces-sidebar-title-with-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.spaces-new-shared-button {
+  background: transparent;
+  border: 1px solid rgba(123, 219, 255, 0.4);
+  color: var(--or-accent-strong, #7bdbff);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: background var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-new-shared-button:hover {
+  background: rgba(123, 219, 255, 0.12);
+}
+
+/* Member row above the dashboard. */
+.spaces-shared-members {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0;
+  margin: 0 16px;
+  border-bottom: 1px solid rgba(244, 246, 251, 0.08);
+}
+
+.spaces-shared-members-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.spaces-shared-members-empty {
+  font-size: 12px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-style: italic;
+}
+
+.spaces-shared-member-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: rgba(244, 246, 251, 0.06);
+  border: 1px solid rgba(244, 246, 251, 0.12);
+  font-size: 12px;
+  color: var(--or-text-primary, #f4f6fb);
+}
+
+.spaces-shared-member-chip[data-member-kind='Agent'] {
+  background: rgba(255, 213, 107, 0.10);
+  border-color: rgba(255, 213, 107, 0.32);
+}
+
+.spaces-shared-member-chip-name {
+  font-weight: 600;
+}
+
+.spaces-shared-member-chip-kind {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  letter-spacing: 0.4px;
+}
+
+.spaces-shared-member-chip-remove {
+  background: transparent;
+  border: none;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.spaces-shared-member-chip-remove:hover {
+  background: rgba(255, 110, 110, 0.15);
+  color: #ff9b9b;
+}
+
+.spaces-shared-members-add {
+  background: transparent;
+  border: 1px dashed rgba(244, 246, 251, 0.24);
+  color: var(--or-text-secondary, rgba(244, 246, 251, 0.72));
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-shared-members-add:hover {
+  border-color: var(--or-accent, #6aa9ff);
+  color: var(--or-accent-strong, #7bdbff);
+}
+
+/* Dashboard body. */
+.spaces-shared-dashboard {
+  padding: 0 16px 24px;
+}
+
+.spaces-shared-section {
+  margin-top: 20px;
+}
+
+.spaces-shared-section-heading {
+  margin: 0 0 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-weight: 600;
+}
+
+.spaces-shared-section-heading-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.spaces-shared-section-heading-row .spaces-shared-section-heading {
+  margin: 0;
+}
+
+.spaces-shared-add-ticket-button {
+  background: rgba(106, 169, 255, 0.15);
+  border: 1px solid rgba(106, 169, 255, 0.4);
+  color: #a5cbff;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.spaces-shared-add-ticket-button:hover {
+  background: rgba(106, 169, 255, 0.25);
+}
+
+/* Playbook card (dashboard). */
+.spaces-shared-playbook-empty {
+  padding: 12px 14px;
+  border: 1px dashed rgba(244, 246, 251, 0.18);
+  border-radius: 8px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-size: 13px;
+}
+
+.spaces-shared-playbook-card {
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(123, 219, 255, 0.10), rgba(106, 169, 255, 0.06));
+  border: 1px solid rgba(123, 219, 255, 0.28);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform var(--or-transition-fast, 120ms ease), box-shadow var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-shared-playbook-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(123, 219, 255, 0.15);
+}
+
+.spaces-shared-playbook-card-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--or-text-primary, #f4f6fb);
+}
+
+.spaces-shared-playbook-card-excerpt {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--or-text-secondary, rgba(244, 246, 251, 0.72));
+}
+
+.spaces-shared-playbook-card-footnote {
+  margin: 0;
+  font-size: 11px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-style: italic;
+}
+
+/* Tickets section + grouping. */
+.spaces-shared-tickets-loading,
+.spaces-shared-tickets-empty {
+  font-size: 13px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  padding: 12px 0;
+}
+
+.spaces-shared-tickets-group {
+  margin-bottom: 14px;
+}
+
+.spaces-shared-tickets-group-heading {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-weight: 600;
+}
+
+/* Ticket card (compact). */
+.spaces-shared-ticket-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  background: rgba(244, 246, 251, 0.03);
+  border: 1px solid rgba(244, 246, 251, 0.06);
+  cursor: pointer;
+  transition: background var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-shared-ticket-card:hover {
+  background: rgba(244, 246, 251, 0.06);
+  border-color: rgba(244, 246, 251, 0.12);
+}
+
+.spaces-shared-ticket-card[data-status='done'] {
+  opacity: 0.6;
+}
+
+.spaces-shared-ticket-card[data-status='done'] .spaces-shared-ticket-card-title {
+  text-decoration: line-through;
+}
+
+.spaces-shared-ticket-card-pill {
+  /* Reuse the existing status-pill styles via class but allow click. */
+  cursor: pointer;
+}
+
+.spaces-shared-ticket-card-title {
+  font-size: 13px;
+  color: var(--or-text-primary, #f4f6fb);
+  margin: 0;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spaces-shared-ticket-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spaces-shared-ticket-card-assignee {
+  font-size: 11px;
+  color: var(--or-text-secondary, rgba(244, 246, 251, 0.72));
+  padding: 2px 6px;
+  background: rgba(244, 246, 251, 0.06);
+  border-radius: 3px;
+}
+
+.spaces-shared-ticket-card-assignee[data-assignee-kind='Agent'] {
+  background: rgba(255, 213, 107, 0.12);
+  color: #ffd56b;
+}
+
+.spaces-shared-ticket-card-priority {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(244, 246, 251, 0.06);
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+}
+
+.spaces-shared-ticket-card-priority[data-priority='high'] {
+  background: rgba(255, 110, 110, 0.14);
+  color: #ff9b9b;
+}
+
+.spaces-shared-ticket-card-priority[data-priority='med'] {
+  background: rgba(255, 191, 0, 0.14);
+  color: #ffd56b;
+}
+
+/* "Set as playbook" affordance on the detail pane. */
+.spaces-detail-set-playbook-wrap {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(244, 246, 251, 0.08);
+}
+
+.spaces-detail-set-playbook {
+  background: linear-gradient(135deg, rgba(255, 213, 107, 0.18), rgba(244, 164, 74, 0.10));
+  border: 1px solid rgba(255, 213, 107, 0.42);
+  color: #ffd56b;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-detail-set-playbook:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(255, 213, 107, 0.26), rgba(244, 164, 74, 0.18));
+}
+
+.spaces-detail-set-playbook:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

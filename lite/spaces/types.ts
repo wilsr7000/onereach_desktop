@@ -561,3 +561,44 @@ export interface SetPlaybookResult {
   /** Count of tickets already linked to this playbook. */
   ticketCount: number;
 }
+
+/**
+ * Canonical Person row. Upserted on the boot path via
+ * `identity.getOrCreatePerson({ id, name, email })` and resurfaced
+ * everywhere a producer / editor / assignee is shown.
+ */
+export interface Person {
+  id: string;
+  name: string;
+  email?: string;
+}
+
+/**
+ * Input shape for `identity.getOrCreatePerson()`. The id is required
+ * (it's used as the MERGE key); name + email are optional but
+ * recommended (they populate `:Person.name` / `email` on first
+ * insertion so attribution lights up immediately).
+ */
+export interface PersonUpsertInput {
+  /** Stable id. Use lowercased email when available; falls back to accountId. */
+  id: string;
+  /** Display name. Optional; preserves any existing value when omitted. */
+  name?: string;
+  /** Optional email. Same preserve-existing rule applies. */
+  email?: string;
+}
+
+/**
+ * A :Person or :Agent who has access to a Space (via
+ * `[:HAS_ACCESS]->(s:Space)`). Returned by
+ * `spaces.listSpaceMembers(spaceId)` and rendered as a chip row on
+ * shared spaces.
+ */
+export interface SpaceMember {
+  /** 'Person' or 'Agent'. */
+  kind: string;
+  /** Stable id. */
+  id: string;
+  /** Display name. */
+  name: string;
+}

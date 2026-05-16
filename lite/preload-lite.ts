@@ -77,6 +77,10 @@ const SPACES_PLAYBOOKS_SET = 'lite:spaces:playbooks:set';
 const SPACES_TICKETS_LIST = 'lite:spaces:tickets:list';
 const SPACES_TICKETS_CREATE = 'lite:spaces:tickets:create';
 const SPACES_TICKETS_UPDATE = 'lite:spaces:tickets:update';
+const SPACES_IDENTITY_GET_OR_CREATE_PERSON = 'lite:spaces:identity:getOrCreatePerson';
+const SPACES_MEMBERS_LIST = 'lite:spaces:members:list';
+const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
+const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
 const SPACES_DISCOVERY_RUN = 'lite:spaces:discovery:run';
 // Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md.
 const SPACES_HOME_ENTITY_COUNTS = 'lite:spaces:home:entityCounts';
@@ -627,6 +631,25 @@ interface SpacesPlaybooksBridge {
   ): Promise<SpacesIpcResultView<{ playbook: unknown; ticketCount: number }>>;
 }
 
+interface SpacesIdentityBridge {
+  getOrCreatePerson(input: {
+    id: string;
+    name?: string;
+    email?: string;
+  }): Promise<SpacesIpcResultView<{ id: string; name: string; email?: string }>>;
+}
+
+interface SpacesMembersBridge {
+  list(spaceId: string): Promise<
+    SpacesIpcResultView<Array<{ kind: string; id: string; name: string }>>
+  >;
+  add(
+    spaceId: string,
+    memberId: string
+  ): Promise<SpacesIpcResultView<{ kind: string; id: string; name: string }>>;
+  remove(spaceId: string, memberId: string): Promise<SpacesIpcResultView<{ ok: true }>>;
+}
+
 interface SpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
@@ -656,6 +679,9 @@ interface SpacesBridge {
   ): Promise<SpacesIpcResultView<'user' | 'shared'>>;
   playbooks: SpacesPlaybooksBridge;
   tickets: SpacesTicketsBridge;
+  /** Phase 4 v2 — identity + sharing. */
+  identity: SpacesIdentityBridge;
+  members: SpacesMembersBridge;
 }
 
 interface HealthBridge {
@@ -1354,6 +1380,26 @@ const spaces: SpacesBridge = {
     update: (id, patch) =>
       ipcRenderer.invoke(SPACES_TICKETS_UPDATE, { id, patch }) as Promise<
         SpacesIpcResultView<unknown>
+      >,
+  },
+  identity: {
+    getOrCreatePerson: (input) =>
+      ipcRenderer.invoke(SPACES_IDENTITY_GET_OR_CREATE_PERSON, { input }) as Promise<
+        SpacesIpcResultView<{ id: string; name: string; email?: string }>
+      >,
+  },
+  members: {
+    list: (spaceId) =>
+      ipcRenderer.invoke(SPACES_MEMBERS_LIST, { spaceId }) as Promise<
+        SpacesIpcResultView<Array<{ kind: string; id: string; name: string }>>
+      >,
+    add: (spaceId, memberId) =>
+      ipcRenderer.invoke(SPACES_MEMBERS_ADD, { spaceId, memberId }) as Promise<
+        SpacesIpcResultView<{ kind: string; id: string; name: string }>
+      >,
+    remove: (spaceId, memberId) =>
+      ipcRenderer.invoke(SPACES_MEMBERS_REMOVE, { spaceId, memberId }) as Promise<
+        SpacesIpcResultView<{ ok: true }>
       >,
   },
 };

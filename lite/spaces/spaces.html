@@ -93,6 +93,9 @@
       <button type="button" class="spaces-row-menu-item" data-action="rename" role="menuitem">
         Rename
       </button>
+      <button type="button" class="spaces-row-menu-item" data-action="toggle-shared" role="menuitem">
+        <span data-toggle-shared-label>Make shared</span>
+      </button>
       <button
         type="button"
         class="spaces-row-menu-item spaces-row-menu-item-danger"
@@ -177,7 +180,16 @@
         </div>
 
         <div class="spaces-sidebar-section">
-          <div class="spaces-sidebar-title">Spaces</div>
+          <div class="spaces-sidebar-title spaces-sidebar-title-with-action">
+            <span>Spaces</span>
+            <button
+              type="button"
+              id="spaces-new-shared-button"
+              class="spaces-new-shared-button"
+              title="Create a new shared space (AI-managed)"
+              aria-label="Create a new shared space"
+            >+ Shared</button>
+          </div>
           <ul class="spaces-list" id="spaces-list-spaces">
             <!--
               Loading skeleton: three shimmer rows mirror the typical

@@ -791,6 +791,37 @@ interface LiteSpacesBridge {
   playbooks: LiteSpacesPlaybooksBridge;
   /** Tickets sub-surface. */
   tickets: LiteSpacesTicketsBridge;
+  /** Phase 4 v2 — identity + sharing. */
+  identity: LiteSpacesIdentityBridge;
+  members: LiteSpacesMembersBridge;
+}
+
+interface LiteSpacesIdentityBridge {
+  /** Upsert a Person by id. Idempotent. */
+  getOrCreatePerson(input: {
+    id: string;
+    name?: string;
+    email?: string;
+  }): Promise<LiteSpacesIpcResult<{ id: string; name: string; email?: string }>>;
+}
+
+interface LiteSpacesMemberView {
+  /** 'Person' or 'Agent'. */
+  kind: string;
+  id: string;
+  name: string;
+}
+
+interface LiteSpacesMembersBridge {
+  /** List every Person + Agent with HAS_ACCESS to a Space. */
+  list(spaceId: string): Promise<LiteSpacesIpcResult<LiteSpacesMemberView[]>>;
+  /** Grant a Person or Agent access. Idempotent. */
+  add(
+    spaceId: string,
+    memberId: string
+  ): Promise<LiteSpacesIpcResult<LiteSpacesMemberView>>;
+  /** Revoke access. No-op when already absent. */
+  remove(spaceId: string, memberId: string): Promise<LiteSpacesIpcResult<{ ok: true }>>;
 }
 
 interface LiteSpacesPlaybooksBridge {

@@ -195,6 +195,19 @@ function buildStubConsumer(): {
       set: async (_spaceId, _playbookId) =>
         maybeFail({ playbook: {} as unknown as Item, ticketCount: 0 }),
     },
+    // Phase 4 v2 — identity + sharing stubs.
+    identity: {
+      getOrCreatePerson: async (input) =>
+        maybeFail({ id: input.id, name: input.name ?? '' }),
+    },
+    members: {
+      list: async (_spaceId) => maybeFail([]),
+      add: async (_spaceId, memberId) =>
+        maybeFail({ kind: 'Person', id: memberId, name: '' }),
+      remove: async (_spaceId, _memberId) => {
+        maybeFail(undefined);
+      },
+    },
     setSpaceKind: async (_id, kind) => maybeFail(kind),
   };
 

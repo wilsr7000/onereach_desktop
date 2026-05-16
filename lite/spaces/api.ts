@@ -48,6 +48,9 @@ import type {
   CreateTicketInput,
   UpdateTicketPatch,
   SetPlaybookResult,
+  Person,
+  PersonUpsertInput,
+  SpaceMember,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -83,6 +86,9 @@ export type {
   CreateTicketInput,
   UpdateTicketPatch,
   SetPlaybookResult,
+  Person,
+  PersonUpsertInput,
+  SpaceMember,
 } from './types.js';
 export {
   SPACES_MODULE_VERSION,
@@ -278,6 +284,45 @@ export interface SpacesPlaybooksApi {
 }
 
 /**
+ * Identity sub-surface (Phase 4 v2). Maps the active OneReach account
+ * to a stable `:Person` row so attribution edges + assignee picks +
+ * "who am I" lookups all resolve consistently.
+ */
+export interface SpacesIdentityApi {
+  /**
+   * Upsert a Person by id. Idempotent. Used by the renderer on boot
+   * to ensure the current user has a graph row, and by the sharing
+   * dialog when inviting a new collaborator who isn't in the graph
+   * yet.
+   */
+  getOrCreatePerson(input: PersonUpsertInput): Promise<Person>;
+}
+
+/**
+ * Members sub-surface (Phase 4 v2 — sharing). Manages the
+ * `[:HAS_ACCESS]` edge set on a Space. Each member is either a
+ * `:Person` (human collaborator) or `:Agent` (AI worker). Tickets are
+ * assignable to anyone in this set.
+ */
+export interface SpacesMembersApi {
+  /** List every Person + Agent with access to a Space. */
+  list(spaceId: string): Promise<SpaceMember[]>;
+
+  /**
+   * Grant a Person or Agent access. Idempotent — adding the same
+   * member twice is a no-op. Returns the canonical (kind, id, name)
+   * tuple so the renderer can patch its cached list.
+   *
+   * @throws {SpacesError} `SPACES_NOT_FOUND` if either the Space or
+   *   the principal is missing from the graph.
+   */
+  add(spaceId: string, memberId: string): Promise<SpaceMember>;
+
+  /** Revoke access. No-op when the edge is already absent. */
+  remove(spaceId: string, memberId: string): Promise<void>;
+}
+
+/**
  * The public surface of the spaces module.
  *
  * **Error contract**: every async method throws `SpacesError` on
@@ -317,6 +362,12 @@ export interface SpacesApi {
 
   /** Playbooks sub-surface (Phase 4 — shared spaces). */
   readonly playbooks: SpacesPlaybooksApi;
+
+  /** Identity sub-surface (Phase 4 v2 — sharing). */
+  readonly identity: SpacesIdentityApi;
+
+  /** Space-membership sub-surface (Phase 4 v2 — sharing). */
+  readonly members: SpacesMembersApi;
 
   /**
    * Toggle a Space between 'user' (default) and 'shared' (AI-managed).
@@ -497,6 +548,24 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async set(_spaceId: string, _playbookId: string): Promise<SetPlaybookResult> {
       throw notInitialized('playbooks.set');
+    },
+  };
+
+  readonly identity: SpacesIdentityApi = {
+    async getOrCreatePerson(_input: PersonUpsertInput): Promise<Person> {
+      throw notInitialized('identity.getOrCreatePerson');
+    },
+  };
+
+  readonly members: SpacesMembersApi = {
+    async list(_spaceId: string): Promise<SpaceMember[]> {
+      throw notInitialized('members.list');
+    },
+    async add(_spaceId: string, _memberId: string): Promise<SpaceMember> {
+      throw notInitialized('members.add');
+    },
+    async remove(_spaceId: string, _memberId: string): Promise<void> {
+      throw notInitialized('members.remove');
     },
   };
 

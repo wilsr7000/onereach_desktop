@@ -57,9 +57,6 @@ interface DetailTicketCallbacks {
   onOpenPlaybook?: (playbookId: string) => void;
 }
 
-interface DetailPlaybookCallbacks {
-  onDecompose?: () => Promise<void>;
-}
 
 interface DetailEditCallbacks {
   onTitleSave?: (next: string) => Promise<void>;
@@ -96,7 +93,7 @@ interface RendererTestApi {
   buildDetailActivity(events: ReadonlyArray<RendererActivityEvent>): HTMLElement;
   buildTicketStatusPill(status: RendererTicketStatus): HTMLElement;
   buildDetailTicketBlock(item: RendererItem, cb?: DetailTicketCallbacks): HTMLElement;
-  buildDetailPlaybookBlock(item: RendererItem, cb?: DetailPlaybookCallbacks): HTMLElement;
+  buildDetailPlaybookBlock(item: RendererItem): HTMLElement;
   renderMarkdown(source: string): HTMLElement;
   renderInlineMarkdown(escaped: string): string;
   formatBytes(n: number): string;
@@ -1330,45 +1327,21 @@ describe('buildDetailPlaybookBlock', () => {
     );
   });
 
-  it('renders a disabled "Decompose" button when no callback is provided', () => {
+  it('points users to the upstream Playbook tool for edits', () => {
     const el = renderer.buildDetailPlaybookBlock(baseItem({ kind: 'playbook' }));
-    const cta = el.querySelector<HTMLButtonElement>('.spaces-detail-playbook-decompose');
-    expect(cta?.disabled).toBe(true);
+    expect(el.querySelector('.spaces-detail-playbook-footnote')?.textContent ?? '').toMatch(
+      /playbook tool/i
+    );
   });
 
-  it('renders an enabled button that calls onDecompose on click', async () => {
-    let calls = 0;
-    const el = renderer.buildDetailPlaybookBlock(baseItem({ kind: 'playbook' }), {
-      onDecompose: async () => {
-        calls += 1;
-      },
-    });
-    const cta = el.querySelector<HTMLButtonElement>('.spaces-detail-playbook-decompose');
-    expect(cta?.disabled).toBe(false);
-    cta?.click();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(calls).toBe(1);
+  it('carries the item id on the wrap for IPC wiring', () => {
+    const el = renderer.buildDetailPlaybookBlock(baseItem({ kind: 'playbook', id: 'pb-1' }));
+    expect(el.getAttribute('data-item-id')).toBe('pb-1');
   });
 
-  it('disables the button + flags is-decomposing while pending', async () => {
-    let resolveDecompose: (() => void) | null = null;
-    const el = renderer.buildDetailPlaybookBlock(baseItem({ kind: 'playbook' }), {
-      onDecompose: () =>
-        new Promise<void>((r) => {
-          resolveDecompose = r;
-        }),
-    });
-    const cta = el.querySelector<HTMLButtonElement>('.spaces-detail-playbook-decompose')!;
-    cta.click();
-    await Promise.resolve();
-    expect(cta.disabled).toBe(true);
-    expect(el.classList.contains('is-decomposing')).toBe(true);
-    resolveDecompose!();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(cta.disabled).toBe(false);
-    expect(el.classList.contains('is-decomposing')).toBe(false);
+  it('does NOT render a decompose CTA (decomposition lives in the Playbook tool)', () => {
+    const el = renderer.buildDetailPlaybookBlock(baseItem({ kind: 'playbook' }));
+    expect(el.querySelector('.spaces-detail-playbook-decompose')).toBeNull();
   });
 });
 

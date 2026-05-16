@@ -184,6 +184,29 @@ interface SpacesRendererState {
   welcomeDismissed: boolean;
   lastVisitMs: number | null;
   currentVisitMs: number;
+  /**
+   * Phase 4 v2 — identity. Stashed once on boot from
+   * `bridge.auth.getSession()` + `bridge.spaces.identity.getOrCreatePerson()`.
+   * Null until the prefetch resolves, which is fine — every code path
+   * that consumes it (attribution, assignee) tolerates null.
+   */
+  currentUser: { id: string; name: string; email?: string } | null;
+  /**
+   * Shared-space dashboard caches. Keyed by spaceId so a navigation
+   * away + back paints the prior view instantly while the refresh
+   * runs in the background.
+   */
+  sharedDashboards: Map<
+    string,
+    {
+      playbook: RendererItem | null;
+      tickets: RendererItem[];
+      members: ReadonlyArray<LiteSpacesMemberView>;
+      fetchedAt: number;
+    }
+  >;
+  /** Polling timer handle for the active scope (Tier 3c). */
+  pollTimer: number | null;
 }
 
 const state: SpacesRendererState = {
@@ -213,6 +236,9 @@ const state: SpacesRendererState = {
   welcomeDismissed: readWelcomeDismissed(),
   lastVisitMs: readLastVisitMs(),
   currentVisitMs: Date.now(),
+  currentUser: null,
+  sharedDashboards: new Map(),
+  pollTimer: null,
 };
 
 // ─── Home preferences (localStorage) ────────────────────────────────────
@@ -280,9 +306,13 @@ function init(): void {
 async function initialLoad(): Promise<void> {
   // Sidebar always loads (Spaces list + Uncategorized count); Home
   // and items load based on the active scope. Home is the default.
+  // Identity prefetch (Phase 4 v2) runs in parallel — its failure is
+  // soft: the renderer still works without a stashed Person id, just
+  // with anonymous attribution.
   const sidebarWork: Array<Promise<void>> = [
     loadSpaces(),
     loadUncategorizedCount(),
+    loadCurrentUser(),
   ];
   if (state.activeScopeId === HOME_SCOPE_ID) {
     sidebarWork.push(loadHome());
@@ -290,6 +320,78 @@ async function initialLoad(): Promise<void> {
     sidebarWork.push(loadItems());
   }
   await Promise.all(sidebarWork);
+}
+
+/**
+ * Resolve "who am I" from the Auth bridge, then MERGE a :Person row
+ * with that id so every subsequent `[:CREATED]` / `[:LAST_EDITED]` /
+ * `[:ASSIGNED_TO]` MERGE finds a row to link.
+ *
+ * Soft-fails: missing bridge, signed-out user, or upsert failure all
+ * leave `state.currentUser` null. The SDK's "anonymous edit" path
+ * runs in that case.
+ */
+async function loadCurrentUser(): Promise<void> {
+  const w = window as unknown as {
+    lite?: {
+      auth?: {
+        getSession(env: string): Promise<{ session: { accountId: string; email?: string } | null }>;
+      };
+      spaces?: {
+        identity?: {
+          getOrCreatePerson(input: {
+            id: string;
+            name?: string;
+            email?: string;
+          }): Promise<{ ok: true; value: { id: string; name: string; email?: string } } | { ok: false }>;
+        };
+      };
+    };
+  };
+  const auth = w.lite?.auth;
+  const identity = w.lite?.spaces?.identity;
+  if (auth === undefined || identity === undefined) return;
+  try {
+    // Lite ships only the 'edison' environment in v1; if more land we
+    // can read the active env from settings.
+    const res = await auth.getSession('edison');
+    const session = res.session;
+    if (session === null) return;
+    const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
+    const id = email.length > 0 ? email : session.accountId;
+    const name = personNameFromEmail(email) ?? session.accountId;
+    const upsertPayload: { id: string; name: string; email?: string } = {
+      id,
+      name,
+    };
+    if (email.length > 0) upsertPayload.email = email;
+    const envelope = await identity.getOrCreatePerson(upsertPayload);
+    if (envelope.ok === false) return;
+    state.currentUser = {
+      id: envelope.value.id,
+      name: envelope.value.name.length > 0 ? envelope.value.name : name,
+      ...(envelope.value.email !== undefined ? { email: envelope.value.email } : {}),
+    };
+  } catch {
+    // Soft failure: keep currentUser null and proceed.
+  }
+}
+
+/**
+ * Derive a friendly display name from an email's local part:
+ * "robb.wilson@onereach.ai" → "Robb Wilson". Returns null on bad input
+ * so the caller can fall back to the accountId.
+ */
+function personNameFromEmail(email: string): string | null {
+  if (email.length === 0) return null;
+  const atIdx = email.indexOf('@');
+  if (atIdx <= 0) return null;
+  const local = email.slice(0, atIdx);
+  return local
+    .split(/[._-]/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 async function loadSpaces(): Promise<void> {
@@ -636,6 +738,33 @@ function setActiveScope(scopeId: string): void {
   } else {
     void loadItems();
   }
+  // Phase 4 v2: (re)start the polling timer for the new scope.
+  schedulePolling(scopeId);
+}
+
+/**
+ * Polling cadence for shared spaces. Every N seconds we re-fetch the
+ * dashboard cache so the user sees ticket updates from other
+ * collaborators (and agents) without a manual refresh.
+ *
+ * 15 seconds is a deliberate trade-off: fast enough that "I just
+ * changed a ticket; the other tab sees it within a few seconds" feels
+ * snappy, slow enough that we don't hammer the graph for users
+ * staring at one space all day.
+ */
+const SHARED_SPACE_POLL_MS = 15_000;
+
+function schedulePolling(scopeId: string): void {
+  if (state.pollTimer !== null) {
+    window.clearInterval(state.pollTimer);
+    state.pollTimer = null;
+  }
+  const space = state.spaces.find((s) => s.id === scopeId);
+  if (space === undefined || space.kind !== 'shared') return;
+  state.pollTimer = window.setInterval(() => {
+    if (state.activeScopeId !== scopeId) return;
+    void loadSharedSpaceDashboard(scopeId);
+  }, SHARED_SPACE_POLL_MS);
 }
 
 /**
@@ -834,6 +963,20 @@ function renderItemList(opts: RenderItemListOpts): void {
   const wrap = ensureItemsRegion(main);
   wrap.replaceChildren();
 
+  // Phase 4 v2: shared-space dashboard layout dispatch. When the active
+  // scope is a shared space, render the playbook + tickets dashboard
+  // instead of the standard timeline. We fall back to the timeline
+  // path on error / loading so the user always sees structure.
+  const activeSpace = state.spaces.find((s) => s.id === state.activeScopeId);
+  if (
+    activeSpace !== undefined &&
+    activeSpace.kind === 'shared' &&
+    opts.error === undefined
+  ) {
+    renderSharedSpaceDashboard(wrap, activeSpace, opts.loading === true);
+    return;
+  }
+
   // Header: Space name + description + refresh affordance. Lives
   // outside the timeline so a refresh doesn't cause the header to
   // shimmer.
@@ -891,6 +1034,434 @@ function renderItemList(opts: RenderItemListOpts): void {
  * pattern (name resolution, fallback for missing description) without
  * driving the full renderer.
  */
+// ─── Shared-space dashboard (Phase 4 v2) ────────────────────────────────
+
+/**
+ * Render the shared-space dashboard: header (with member chips +
+ * "+ Member" affordance), playbook block at top, tickets grouped by
+ * status below, plus a "+ Ticket" CTA.
+ *
+ * Uses cached dashboard state when available so navigation in/out of a
+ * shared space paints instantly. The fresh fetch fires in the
+ * background and re-paints when it lands.
+ */
+function renderSharedSpaceDashboard(
+  wrap: HTMLElement,
+  space: RendererSpace,
+  busy: boolean
+): void {
+  wrap.appendChild(buildSpaceHeader({ busy }));
+
+  // Member chips row.
+  const cached = state.sharedDashboards.get(space.id);
+  wrap.appendChild(buildSharedMembersRow(space, cached?.members ?? []));
+
+  // Dashboard body — playbook block + tickets section.
+  const body = document.createElement('div');
+  body.className = 'spaces-shared-dashboard';
+  body.setAttribute('data-space-id', space.id);
+
+  // Playbook section
+  body.appendChild(buildSharedDashboardPlaybook(space, cached?.playbook ?? null));
+
+  // Tickets section
+  body.appendChild(
+    buildSharedDashboardTickets(space, cached?.tickets ?? [], busy && cached === undefined)
+  );
+
+  wrap.appendChild(body);
+
+  // Fire-and-forget refresh.
+  void loadSharedSpaceDashboard(space.id);
+}
+
+function buildSharedMembersRow(
+  space: RendererSpace,
+  members: ReadonlyArray<LiteSpacesMemberView>
+): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'spaces-shared-members';
+  const label = document.createElement('span');
+  label.className = 'spaces-shared-members-label';
+  label.textContent = 'Members';
+  row.appendChild(label);
+  if (members.length === 0) {
+    const empty = document.createElement('span');
+    empty.className = 'spaces-shared-members-empty';
+    empty.textContent = 'No members yet';
+    row.appendChild(empty);
+  } else {
+    for (const m of members) {
+      row.appendChild(buildMemberChip(space.id, m));
+    }
+  }
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'spaces-shared-members-add';
+  addBtn.textContent = '+ Member';
+  addBtn.setAttribute('data-space-id', space.id);
+  addBtn.addEventListener('click', () => {
+    void openAddMemberPrompt(space.id);
+  });
+  row.appendChild(addBtn);
+  return row;
+}
+
+function buildMemberChip(spaceId: string, member: LiteSpacesMemberView): HTMLElement {
+  const chip = document.createElement('span');
+  chip.className = 'spaces-shared-member-chip';
+  chip.setAttribute('data-member-kind', member.kind);
+  chip.setAttribute('data-member-id', member.id);
+  const name = document.createElement('span');
+  name.className = 'spaces-shared-member-chip-name';
+  name.textContent = member.name.length > 0 ? member.name : member.id;
+  chip.appendChild(name);
+  const kindEl = document.createElement('span');
+  kindEl.className = 'spaces-shared-member-chip-kind';
+  kindEl.textContent = member.kind;
+  chip.appendChild(kindEl);
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'spaces-shared-member-chip-remove';
+  remove.textContent = '×';
+  remove.setAttribute('aria-label', `Remove ${member.name}`);
+  remove.addEventListener('click', () => {
+    void removeMember(spaceId, member.id);
+  });
+  chip.appendChild(remove);
+  return chip;
+}
+
+function buildSharedDashboardPlaybook(
+  space: RendererSpace,
+  playbook: RendererItem | null
+): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'spaces-shared-section spaces-shared-section-playbook';
+
+  const heading = document.createElement('h3');
+  heading.className = 'spaces-shared-section-heading';
+  heading.textContent = 'Playbook';
+  section.appendChild(heading);
+
+  if (playbook === null) {
+    const empty = document.createElement('div');
+    empty.className = 'spaces-shared-playbook-empty';
+    const msg = document.createElement('p');
+    msg.textContent =
+      'No playbook set. Add a plan to this space and promote it to playbook.';
+    empty.appendChild(msg);
+    section.appendChild(empty);
+    return section;
+  }
+
+  // Playbook card: title (click to open detail) + excerpt + footnote.
+  const card = document.createElement('article');
+  card.className = 'spaces-shared-playbook-card';
+  card.setAttribute('data-item-id', playbook.id);
+  card.setAttribute('role', 'button');
+  card.setAttribute('tabindex', '0');
+  card.addEventListener('click', () => void loadItemDetail(playbook.id));
+  card.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      void loadItemDetail(playbook.id);
+    }
+  });
+
+  const title = document.createElement('h4');
+  title.className = 'spaces-shared-playbook-card-title';
+  title.textContent = playbook.title.length > 0 ? playbook.title : '(untitled)';
+  card.appendChild(title);
+
+  if (typeof playbook.excerpt === 'string' && playbook.excerpt.length > 0) {
+    const excerpt = document.createElement('p');
+    excerpt.className = 'spaces-shared-playbook-card-excerpt';
+    excerpt.textContent = playbook.excerpt;
+    card.appendChild(excerpt);
+  }
+
+  const footnote = document.createElement('p');
+  footnote.className = 'spaces-shared-playbook-card-footnote';
+  footnote.textContent = 'Edit in the Playbook tool; changes flow in automatically.';
+  card.appendChild(footnote);
+
+  section.appendChild(card);
+  // Suppress unused-param warning while keeping the signature stable
+  // for tests that pass `space`.
+  void space;
+  return section;
+}
+
+function buildSharedDashboardTickets(
+  space: RendererSpace,
+  tickets: ReadonlyArray<RendererItem>,
+  loading: boolean
+): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'spaces-shared-section spaces-shared-section-tickets';
+
+  const headingRow = document.createElement('div');
+  headingRow.className = 'spaces-shared-section-heading-row';
+  const heading = document.createElement('h3');
+  heading.className = 'spaces-shared-section-heading';
+  heading.textContent = 'Tickets';
+  headingRow.appendChild(heading);
+
+  const addTicket = document.createElement('button');
+  addTicket.type = 'button';
+  addTicket.className = 'spaces-shared-add-ticket-button';
+  addTicket.textContent = '+ Ticket';
+  addTicket.setAttribute('data-space-id', space.id);
+  addTicket.addEventListener('click', () => {
+    void openCreateTicketPrompt(space.id);
+  });
+  headingRow.appendChild(addTicket);
+  section.appendChild(headingRow);
+
+  if (loading && tickets.length === 0) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'spaces-shared-tickets-loading';
+    placeholder.textContent = 'Loading tickets…';
+    section.appendChild(placeholder);
+    return section;
+  }
+
+  if (tickets.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'spaces-shared-tickets-empty';
+    empty.textContent = 'No tickets yet. Click "+ Ticket" to create one.';
+    section.appendChild(empty);
+    return section;
+  }
+
+  // Group by status, render each non-empty group as a sub-section.
+  const groups: Record<RendererTicketStatus, RendererItem[]> = {
+    open: [],
+    in_progress: [],
+    blocked: [],
+    done: [],
+  };
+  for (const t of tickets) {
+    const status = t.ticket?.status ?? 'open';
+    if (isRendererTicketStatus(status)) groups[status].push(t);
+  }
+  for (const status of TICKET_STATUSES_ORDERED) {
+    const group = groups[status];
+    if (group.length === 0) continue;
+    const sub = document.createElement('div');
+    sub.className = 'spaces-shared-tickets-group';
+    sub.setAttribute('data-status', status);
+    const groupHeading = document.createElement('h4');
+    groupHeading.className = 'spaces-shared-tickets-group-heading';
+    groupHeading.textContent = `${TICKET_STATUS_LABELS[status]} (${group.length})`;
+    sub.appendChild(groupHeading);
+    for (const ticket of group) {
+      sub.appendChild(buildTicketCard(ticket));
+    }
+    section.appendChild(sub);
+  }
+  return section;
+}
+
+/**
+ * Compact ticket card for the dashboard. Click → detail pane.
+ * Status pill click → cycles status without opening the detail pane
+ * (Tier 1d).
+ */
+function buildTicketCard(ticket: RendererItem): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'spaces-shared-ticket-card';
+  card.setAttribute('data-item-id', ticket.id);
+  const status = ticket.ticket?.status ?? 'open';
+  if (isRendererTicketStatus(status)) card.setAttribute('data-status', status);
+
+  // Status pill (clickable for quick-cycle)
+  const pill = buildTicketStatusPill(status);
+  pill.classList.add('spaces-shared-ticket-card-pill');
+  pill.setAttribute('role', 'button');
+  pill.setAttribute('tabindex', '0');
+  pill.title = 'Click to cycle status';
+  pill.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    void cycleTicketStatus(ticket);
+  });
+  pill.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void cycleTicketStatus(ticket);
+    }
+  });
+  card.appendChild(pill);
+
+  // Title (clickable → detail pane)
+  const title = document.createElement('h5');
+  title.className = 'spaces-shared-ticket-card-title';
+  title.textContent = ticket.title.length > 0 ? ticket.title : '(untitled)';
+  card.appendChild(title);
+
+  // Assignee footer (compact)
+  const footer = document.createElement('div');
+  footer.className = 'spaces-shared-ticket-card-footer';
+  const assignee = ticket.ticket?.assignee ?? null;
+  if (assignee !== null) {
+    const chip = document.createElement('span');
+    chip.className = 'spaces-shared-ticket-card-assignee';
+    chip.setAttribute('data-assignee-kind', assignee.kind);
+    chip.textContent = assignee.name.length > 0 ? assignee.name : assignee.id;
+    footer.appendChild(chip);
+  }
+  if (ticket.ticket?.priority !== undefined) {
+    const pri = document.createElement('span');
+    pri.className = 'spaces-shared-ticket-card-priority';
+    pri.setAttribute('data-priority', ticket.ticket.priority);
+    pri.textContent = ticket.ticket.priority;
+    footer.appendChild(pri);
+  }
+  card.appendChild(footer);
+
+  // Open detail on title click (avoiding the pill).
+  card.addEventListener('click', (ev) => {
+    if (ev.target instanceof Element && ev.target.closest('.spaces-shared-ticket-card-pill') !== null) {
+      return;
+    }
+    void loadItemDetail(ticket.id);
+  });
+  card.setAttribute('role', 'button');
+  card.setAttribute('tabindex', '0');
+  card.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      void loadItemDetail(ticket.id);
+    }
+  });
+
+  return card;
+}
+
+/** Loader for the shared-space dashboard cache. */
+async function loadSharedSpaceDashboard(spaceId: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const [playbookRes, ticketsRes, membersRes] = await Promise.all([
+      bridge.playbooks.current(spaceId),
+      bridge.tickets.list(spaceId),
+      bridge.members.list(spaceId),
+    ]);
+    if (state.activeScopeId !== spaceId) return; // user navigated away
+
+    const playbook =
+      playbookRes.ok === true && playbookRes.value !== null
+        ? (playbookRes.value as RendererItem)
+        : null;
+    const tickets =
+      ticketsRes.ok === true ? (ticketsRes.value as RendererItem[]) : [];
+    const members =
+      membersRes.ok === true
+        ? (membersRes.value as LiteSpacesMemberView[])
+        : [];
+    state.sharedDashboards.set(spaceId, {
+      playbook,
+      tickets,
+      members,
+      fetchedAt: Date.now(),
+    });
+    // Re-render only if we're still viewing this scope.
+    if (state.activeScopeId === spaceId) {
+      renderItemList({});
+    }
+  } catch {
+    // Soft fail. The dashboard renders with empty caches; user can refresh.
+  }
+}
+
+async function cycleTicketStatus(ticket: RendererItem): Promise<void> {
+  const current = ticket.ticket?.status ?? 'open';
+  const idx = TICKET_STATUSES_ORDERED.indexOf(current as RendererTicketStatus);
+  const next = TICKET_STATUSES_ORDERED[(idx + 1) % TICKET_STATUSES_ORDERED.length];
+  if (next === undefined) return;
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.tickets.update(ticket.id, { status: next });
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    // Refresh the dashboard for the active space (the ticket may have
+    // moved between status groups).
+    if (state.activeScopeId !== '') {
+      await loadSharedSpaceDashboard(state.activeScopeId);
+    }
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
+/** Simple prompt-based "+ Ticket" UI. */
+async function openCreateTicketPrompt(spaceId: string): Promise<void> {
+  const title = window.prompt('Ticket title?');
+  if (title === null) return;
+  const trimmed = title.trim();
+  if (trimmed.length === 0) return;
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.tickets.create(spaceId, { title: trimmed });
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(`Created ticket "${trimmed}"`);
+    await loadSharedSpaceDashboard(spaceId);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
+async function openAddMemberPrompt(spaceId: string): Promise<void> {
+  const id = window.prompt('Add member by id (email for a Person, agent id for an Agent)');
+  if (id === null) return;
+  const trimmed = id.trim().toLowerCase();
+  if (trimmed.length === 0) return;
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    // First, ensure a :Person exists for an email-shaped id. Agents
+    // are assumed to exist via the upstream agent registry.
+    if (trimmed.includes('@')) {
+      await bridge.identity.getOrCreatePerson({ id: trimmed, email: trimmed });
+    }
+    const envelope = await bridge.members.add(spaceId, trimmed);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(`Added ${envelope.value.name || trimmed}`);
+    await loadSharedSpaceDashboard(spaceId);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
+async function removeMember(spaceId: string, memberId: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.members.remove(spaceId, memberId);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast('Member removed');
+    await loadSharedSpaceDashboard(spaceId);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
 function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
   const header = document.createElement('header');
   header.className = 'spaces-view-header';
@@ -1160,6 +1731,68 @@ function renderDetail(opts: RenderDetailOpts): void {
     onTagRemove: (tag) => commitTagRemove(item.id, tag),
   };
   aside.appendChild(buildDetailPane(item, onClose, 'rendered', editCallbacks));
+
+  // Phase 4 v2: "Set as playbook" affordance. Show when:
+  //  - The active scope is a shared space
+  //  - The item isn't already a playbook (no point re-promoting)
+  //  - The item is textual content (document / text / playbook itself
+  //    after a demotion path; we keep the check loose so promoting
+  //    any asset works — the SDK rewrites `a.type`)
+  const activeSpace = state.spaces.find((s) => s.id === state.activeScopeId);
+  if (activeSpace?.kind === 'shared' && item.kind !== 'playbook') {
+    aside.appendChild(buildSetAsPlaybookAffordance(activeSpace.id, item.id));
+  }
+}
+
+/**
+ * "Set as playbook" button rendered below the detail pane on shared
+ * spaces. Promotes the current asset (any kind) via
+ * `bridge.playbooks.set` and refreshes the dashboard cache.
+ */
+function buildSetAsPlaybookAffordance(spaceId: string, itemId: string): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-set-playbook-wrap';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'spaces-detail-set-playbook';
+  btn.textContent = 'Set as playbook';
+  btn.title = 'Promote this asset to be the current playbook for this space';
+  btn.addEventListener('click', () => {
+    void promoteToPlaybook(spaceId, itemId, btn);
+  });
+  wrap.appendChild(btn);
+  return wrap;
+}
+
+async function promoteToPlaybook(
+  spaceId: string,
+  itemId: string,
+  btn: HTMLButtonElement
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  btn.disabled = true;
+  btn.textContent = 'Promoting…';
+  try {
+    const envelope = await bridge.playbooks.set(spaceId, itemId);
+    if (envelope.ok === false) {
+      btn.textContent = 'Set as playbook';
+      btn.disabled = false;
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast('Set as playbook');
+    // Refresh both the detail pane (item kind has flipped to 'playbook')
+    // and the dashboard cache.
+    await Promise.all([
+      loadItemDetail(itemId),
+      loadSharedSpaceDashboard(spaceId),
+    ]);
+  } catch (err) {
+    btn.textContent = 'Set as playbook';
+    btn.disabled = false;
+    showToast(messageFrom(err));
+  }
 }
 
 interface RendererDetailEditCallbacks {
@@ -1211,24 +1844,13 @@ async function commitTagRemove(itemId: string, tag: string): Promise<void> {
 }
 
 /**
- * Best-effort `:Person.id` for the current editor. The auth session
- * surfaces an accountId but not a :Person.id directly; for now we
- * use the email's local part as a stable-ish identifier, mirroring
- * the prettyAuthor() convention. Returns null when signed-out so
- * the SDK's "anonymous edit" path runs.
+ * Best-effort `:Person.id` for the current editor. Reads from the
+ * prefetched `state.currentUser` (populated on boot by
+ * `loadCurrentUser()`). Returns null when not yet resolved or signed
+ * out — the SDK then falls into the "anonymous edit" path.
  */
 function readCurrentEditorId(): string | null {
-  try {
-    const auth = (window as unknown as { lite?: { auth?: unknown } }).lite?.auth;
-    if (auth === undefined) return null;
-    // The bridge exposes getSession but the response is async; we
-    // can't synchronously read it here. v1 returns null and the
-    // SDK falls into the anonymous edit path. Phase 3c plumbing
-    // can prefetch the editor id and stash it on state.
-    return null;
-  } catch {
-    return null;
-  }
+  return state.currentUser?.id ?? null;
 }
 
 function showDetailRail(show: boolean): void {
@@ -2040,21 +2662,15 @@ function isRendererTicketStatus(v: unknown): v is RendererTicketStatus {
 }
 
 /**
- * Playbook detail block. v1 surfaces a "Current playbook" banner +
- * a placeholder "Decompose into tickets" affordance. The decomposition
- * itself is deferred to v2 (manual ticket creation works today).
+ * Playbook detail block. Surfaces a "Playbook" banner identifying the
+ * asset as the plan that drives the shared space. Planning + ticket
+ * decomposition happen UPSTREAM in the Playbook tool — this view is
+ * read-only here; users edit the playbook over there.
  */
-export interface DetailPlaybookCallbacks {
-  /** Called when the user clicks "Decompose into tickets" (v2 wires AI). */
-  onDecompose?: () => Promise<void>;
-}
-
-export function buildDetailPlaybookBlock(
-  item: RendererItem,
-  cb?: DetailPlaybookCallbacks
-): HTMLElement {
+export function buildDetailPlaybookBlock(item: RendererItem): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'spaces-detail-playbook';
+  wrap.setAttribute('data-item-id', item.id);
 
   const banner = document.createElement('div');
   banner.className = 'spaces-detail-playbook-banner';
@@ -2073,30 +2689,13 @@ export function buildDetailPlaybookBlock(
   banner.appendChild(hint);
   wrap.appendChild(banner);
 
-  // Decompose CTA. Placeholder for v2 (AI auto-decomposition); v1 the
-  // button is wired but flips the wrap into a "coming soon" state.
-  const cta = document.createElement('button');
-  cta.type = 'button';
-  cta.className = 'spaces-detail-playbook-decompose';
-  cta.textContent = 'Decompose into tickets';
-  cta.setAttribute('data-item-id', item.id);
-  if (cb?.onDecompose !== undefined) {
-    const onDecompose = cb.onDecompose;
-    cta.addEventListener('click', () => {
-      cta.disabled = true;
-      wrap.classList.add('is-decomposing');
-      onDecompose()
-        .catch(() => undefined)
-        .finally(() => {
-          cta.disabled = false;
-          wrap.classList.remove('is-decomposing');
-        });
-    });
-  } else {
-    cta.disabled = true;
-    cta.title = 'AI decomposition is coming in v2 — for now, add tickets manually.';
-  }
-  wrap.appendChild(cta);
+  // Footnote pointing users to the Playbook tool for edits — keeps
+  // the contract explicit: this surface is consumer-side; planning
+  // happens elsewhere.
+  const footnote = document.createElement('p');
+  footnote.className = 'spaces-detail-playbook-footnote';
+  footnote.textContent = 'Edit the plan in the Playbook tool; changes flow in automatically.';
+  wrap.appendChild(footnote);
 
   return wrap;
 }
@@ -3710,10 +4309,34 @@ const toastState: ToastState = {
 /** Wire the mutation surfaces. Called once from `init()`. */
 function wireMutationsUI(): void {
   wireNewSpaceButton();
+  wireNewSharedSpaceButton();
   wireNewSpaceDialog();
   wireRowMenuTriggers();
   wireRowMenu();
   wireToast();
+}
+
+// ─── "+ Shared Space" button (Phase 4 v2) ───────────────────────────────
+
+/**
+ * Flag that the next createSpace submit should flip the space to
+ * `kind=shared` after creation. Read inside `submitNewSpace`. We use
+ * module state rather than a query param because the dialog itself
+ * is shared between flows; this lets the dialog stay generic.
+ */
+let pendingSharedFlip = false;
+
+function wireNewSharedSpaceButton(): void {
+  const button = document.getElementById('spaces-new-shared-button');
+  if (button === null) return;
+  button.addEventListener('click', () => {
+    pendingSharedFlip = true;
+    openNewSpaceDialog();
+    // Update the dialog title so the user knows they're creating a
+    // shared space (the dialog body itself is reused).
+    const title = document.getElementById('spaces-new-dialog-title');
+    if (title !== null) title.textContent = 'New shared space';
+  });
 }
 
 // ─── "+ New Space" button + modal dialog ────────────────────────────────
@@ -3745,6 +4368,11 @@ function closeNewSpaceDialog(): void {
   if (backdrop === null) return;
   backdrop.hidden = true;
   backdrop.setAttribute('aria-hidden', 'true');
+  // Reset the dialog title in case it was customized for "+ Shared".
+  const title = document.getElementById('spaces-new-dialog-title');
+  if (title !== null) title.textContent = 'New space';
+  // Clear the shared-flip flag if the user cancelled mid-flow.
+  pendingSharedFlip = false;
 }
 
 function wireNewSpaceDialog(): void {
@@ -3801,9 +4429,25 @@ async function submitNewSpace(): Promise<void> {
       if (submit instanceof HTMLButtonElement) submit.disabled = false;
       return;
     }
+    // Phase 4 v2: if the user clicked "+ Shared", flip kind to shared
+    // before refreshing the list so the new row paints with the badge.
+    // Failure here is non-fatal — the space exists, just as a regular
+    // user-managed one; the user can re-flip via the row menu.
+    const createdId = (envelope.value as { id?: unknown }).id;
+    if (pendingSharedFlip && typeof createdId === 'string') {
+      try {
+        await bridge.setSpaceKind(createdId, 'shared');
+      } catch {
+        // Soft fail: surface a softer toast instead of an error banner.
+      }
+    }
+    const wasShared = pendingSharedFlip;
+    pendingSharedFlip = false;
     closeNewSpaceDialog();
     await loadSpaces();
-    showToast(`Created "${name}"`);
+    showToast(wasShared ? `Created shared space "${name}"` : `Created "${name}"`);
+    // Auto-navigate into the new space so the user lands on something useful.
+    if (typeof createdId === 'string') setActiveScope(createdId);
   } catch (err) {
     showDialogError(error, messageFrom(err));
   } finally {
@@ -3849,6 +4493,13 @@ function openRowMenu(spaceId: string, triggerEl: HTMLButtonElement): void {
   rowMenuState.triggerEl = triggerEl;
   triggerEl.classList.add('is-open');
   triggerEl.setAttribute('aria-expanded', 'true');
+  // Phase 4 v2: flip the shared-toggle label to match the space's
+  // current kind so users see "Make shared" / "Make user-managed".
+  const space = state.spaces.find((s) => s.id === spaceId);
+  const sharedLabel = menu.querySelector<HTMLElement>('[data-toggle-shared-label]');
+  if (sharedLabel !== null) {
+    sharedLabel.textContent = space?.kind === 'shared' ? 'Make user-managed' : 'Make shared';
+  }
   // Position relative to the trigger.
   const rect = triggerEl.getBoundingClientRect();
   menu.style.top = `${Math.round(rect.bottom + 4)}px`;
@@ -3885,6 +4536,8 @@ function wireRowMenu(): void {
       startInlineRename(spaceId);
     } else if (action === 'delete') {
       void performSoftDelete(spaceId);
+    } else if (action === 'toggle-shared') {
+      void toggleSpaceKind(spaceId);
     }
   });
   // Outside-click closes the menu.
@@ -3998,6 +4651,42 @@ function cssEscape(s: string): string {
     return (globalThis as unknown as { CSS: { escape: (s: string) => string } }).CSS.escape(s);
   }
   return s.replace(/["\\]/g, '\\$&');
+}
+
+// ─── Toggle space kind (Phase 4 v2) ─────────────────────────────────────
+
+async function toggleSpaceKind(spaceId: string): Promise<void> {
+  const space = state.spaces.find((s) => s.id === spaceId);
+  if (space === undefined) {
+    showToast('Space not found.');
+    return;
+  }
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showToast('Bridge unavailable.');
+    return;
+  }
+  const nextKind: 'user' | 'shared' = space.kind === 'shared' ? 'user' : 'shared';
+  try {
+    const envelope = await bridge.setSpaceKind(spaceId, nextKind);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(
+      nextKind === 'shared'
+        ? `"${space.name}" is now a shared space`
+        : `"${space.name}" is now user-managed`
+    );
+    await loadSpaces();
+    // If the user is currently viewing this space, re-render so the
+    // dashboard layout swaps in/out immediately.
+    if (state.activeScopeId === spaceId) {
+      renderItemList({});
+    }
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
 }
 
 // ─── Delete + undo toast ────────────────────────────────────────────────

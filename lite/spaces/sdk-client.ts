@@ -57,6 +57,9 @@ import type {
   CreateTicketInput,
   UpdateTicketPatch,
   SetPlaybookResult,
+  Person,
+  PersonUpsertInput,
+  SpaceMember,
 } from './types.js';
 import {
   MAX_SPACE_NAME_LENGTH,
@@ -778,6 +781,76 @@ export const CYPHER = {
       MERGE (a)-[:ASSIGNED_TO]->(x))
     RETURN a.id AS id
   `,
+
+  // ─── Identity + sharing (Phase 4 v2) ────────────────────────────────────
+
+  /**
+   * Upsert a :Person by id. Idempotent: a re-call with the same id is
+   * a no-op (just refreshes the name/email defensively). Powers the
+   * boot-time "who am I" probe in the renderer — the current account
+   * is mapped to a stable :Person row by email (lowercased).
+   */
+  MERGE_PERSON: `
+    MERGE (p:Person {id: $id})
+      ON CREATE SET p.name = $name,
+                    p.email = $email,
+                    p.createdAt = $now,
+                    p.updatedAt = $now
+      ON MATCH SET p.name = coalesce(p.name, $name),
+                   p.email = coalesce(p.email, $email),
+                   p.updatedAt = $now
+    RETURN p.id AS id,
+           coalesce(p.name, '') AS name,
+           coalesce(p.email, '') AS email
+  `,
+
+  /**
+   * List the members of a Space — every :Person and :Agent reachable
+   * via `[:HAS_ACCESS]->(s)`. The producer side of HAS_ACCESS is
+   * either canonical edges or, when a Space pre-dates the sharing
+   * concept, an empty set.
+   */
+  LIST_SPACE_MEMBERS: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+    OPTIONAL MATCH (member)-[:HAS_ACCESS]->(s)
+      WHERE member:Person OR member:Agent
+    WITH member
+    WHERE member IS NOT NULL
+    RETURN head(labels(member)) AS kind,
+           member.id AS id,
+           coalesce(member.name, member.title, '') AS name
+    ORDER BY kind ASC, toLower(coalesce(member.name, member.id, '')) ASC
+  `,
+
+  /**
+   * Add a :Person or :Agent as a member of a Space. MERGE makes the
+   * call idempotent — adding the same member twice is a no-op.
+   * Returns the (kind, id, name) tuple so the renderer can patch its
+   * cached list without a refetch.
+   */
+  ADD_SPACE_MEMBER: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+    MATCH (member {id: $memberId})
+      WHERE member:Person OR member:Agent
+    MERGE (member)-[:HAS_ACCESS]->(s)
+    RETURN head(labels(member)) AS kind,
+           member.id AS id,
+           coalesce(member.name, member.title, '') AS name
+  `,
+
+  /**
+   * Remove a member from a Space. No-op when the edge is already
+   * absent. Returns 1 if removed, 0 otherwise (the renderer ignores
+   * the count and just re-renders).
+   */
+  REMOVE_SPACE_MEMBER: `
+    MATCH (member {id: $memberId})-[r:HAS_ACCESS]->(s:Space {id: $spaceId})
+      WHERE member:Person OR member:Agent
+    DELETE r
+    RETURN $memberId AS id
+  `,
 } as const;
 
 /**
@@ -1476,6 +1549,124 @@ export class SdkSpacesClient {
       });
     }
     return updated;
+  }
+
+  // ─── Identity + sharing (Phase 4 v2) ─────────────────────────────────
+
+  /**
+   * Upsert a Person by id. Idempotent — calling with the same id is a
+   * no-op aside from a touched `updatedAt`. The renderer calls this on
+   * boot to map the active OneReach account to a :Person row that
+   * `[:CREATED]` / `[:LAST_EDITED]` / `[:ASSIGNED_TO]` edges can MERGE
+   * against.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` if `id` is empty.
+   */
+  async getOrCreatePerson(input: PersonUpsertInput): Promise<Person> {
+    if (typeof input.id !== 'string' || input.id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'getOrCreatePerson requires a non-empty id',
+        context: { id: input.id },
+      });
+    }
+    const id = input.id.trim();
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    const email = typeof input.email === 'string' ? input.email.trim() : '';
+    const now = nowIso();
+    const rows = await this.run(CYPHER.MERGE_PERSON, { id, name, email, now });
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      // MERGE should always return one row, but if the Neo4j adapter
+      // for some reason swallows it, return what the user supplied so
+      // the renderer never crashes.
+      return { id, name };
+    }
+    const person: Person = {
+      id: requireString(row, 'id'),
+      name: optString(row, 'name') ?? '',
+    };
+    const e = optString(row, 'email');
+    if (e !== undefined && e.length > 0) person.email = e;
+    return person;
+  }
+
+  /**
+   * List the members (Persons + Agents with `[:HAS_ACCESS]`) of a
+   * Space. Used by the shared-space dashboard to show the team chip
+   * row + by the assignee picker to enumerate who can take a ticket.
+   */
+  async listSpaceMembers(spaceId: string): Promise<SpaceMember[]> {
+    const validId = validateSpaceId(spaceId);
+    const rows = await this.run(CYPHER.LIST_SPACE_MEMBERS, { spaceId: validId });
+    const out: SpaceMember[] = [];
+    for (const raw of rows) {
+      const r = raw as Record<string, unknown>;
+      const id = optString(r, 'id');
+      if (id === undefined || id.length === 0) continue;
+      out.push({
+        kind: optString(r, 'kind') ?? 'Person',
+        id,
+        name: optString(r, 'name') ?? '',
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Add a Person or Agent as a member of a Space. Idempotent — calling
+   * with the same memberId twice is a no-op (the MERGE deduplicates).
+   *
+   * @throws {SpacesError} `SPACES_NOT_FOUND` if either the Space or
+   *   the principal is missing.
+   */
+  async addSpaceMember(spaceId: string, memberId: string): Promise<SpaceMember> {
+    const validSpaceId = validateSpaceId(spaceId);
+    if (typeof memberId !== 'string' || memberId.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'addSpaceMember requires a non-empty memberId',
+        context: { memberId },
+      });
+    }
+    const rows = await this.run(CYPHER.ADD_SPACE_MEMBER, {
+      spaceId: validSpaceId,
+      memberId,
+    });
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: 'Space or member not found',
+        remediation: 'Verify both ids exist.',
+        context: { spaceId: validSpaceId, memberId },
+      });
+    }
+    return {
+      kind: optString(row, 'kind') ?? 'Person',
+      id: requireString(row, 'id'),
+      name: optString(row, 'name') ?? '',
+    };
+  }
+
+  /**
+   * Remove a member's access to a Space. No-op when the edge is
+   * already absent; returns silently in either case so callers can
+   * call without a try/catch around "edge was missing."
+   */
+  async removeSpaceMember(spaceId: string, memberId: string): Promise<void> {
+    const validSpaceId = validateSpaceId(spaceId);
+    if (typeof memberId !== 'string' || memberId.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'removeSpaceMember requires a non-empty memberId',
+        context: { memberId },
+      });
+    }
+    await this.run(CYPHER.REMOVE_SPACE_MEMBER, {
+      spaceId: validSpaceId,
+      memberId,
+    });
   }
 
   /** @internal -- helper for disambiguating empty mutation results. */

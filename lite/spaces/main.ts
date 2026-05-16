@@ -27,6 +27,8 @@ import {
   type SpacesItemsApi,
   type SpacesTicketsApi,
   type SpacesPlaybooksApi,
+  type SpacesIdentityApi,
+  type SpacesMembersApi,
 } from './api.js';
 import { SpacesError } from './errors.js';
 import { createSpacesWindow, closeSpacesWindow } from './window.js';
@@ -57,6 +59,9 @@ import type {
   CreateTicketInput,
   UpdateTicketPatch,
   SetPlaybookResult,
+  Person,
+  PersonUpsertInput,
+  SpaceMember,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -268,6 +273,24 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
   };
 
+  const identity: SpacesIdentityApi = {
+    getOrCreatePerson(input: PersonUpsertInput): Promise<Person> {
+      return client.getOrCreatePerson(input);
+    },
+  };
+
+  const members: SpacesMembersApi = {
+    list(spaceId: string): Promise<SpaceMember[]> {
+      return client.listSpaceMembers(spaceId);
+    },
+    add(spaceId: string, memberId: string): Promise<SpaceMember> {
+      return client.addSpaceMember(spaceId, memberId);
+    },
+    remove(spaceId: string, memberId: string): Promise<void> {
+      return client.removeSpaceMember(spaceId, memberId);
+    },
+  };
+
   return {
     open: handle.open,
     listSpaces(): Promise<Space[]> {
@@ -279,6 +302,8 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     items,
     tickets,
     playbooks,
+    identity,
+    members,
     setSpaceKind(id: string, kind: SpaceKind): Promise<SpaceKind> {
       return client.setSpaceKind(id, kind);
     },
