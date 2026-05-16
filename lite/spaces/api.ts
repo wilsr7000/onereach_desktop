@@ -39,6 +39,10 @@ import type {
   RecentEventsOpts,
   RecentItemsOpts,
   AgentsSampleOpts,
+  CreateSpaceInput,
+  DeleteSpaceOpts,
+  ItemUpdatePatch,
+  RecentCommitsOpts,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -62,8 +66,20 @@ export type {
   RecentEventsOpts,
   RecentItemsOpts,
   AgentsSampleOpts,
+  CreateSpaceInput,
+  RenameSpaceInput,
+  DeleteSpaceOpts,
+  ItemUpdatePatch,
+  RecentCommitsOpts,
 } from './types.js';
-export { SPACES_MODULE_VERSION } from './types.js';
+export {
+  SPACES_MODULE_VERSION,
+  MAX_SPACE_NAME_LENGTH,
+  MAX_SPACE_DESC_LENGTH,
+  MAX_ITEM_TITLE_LENGTH,
+  MAX_ITEM_DESCRIPTION_LENGTH,
+  MAX_ITEM_TAG_LENGTH,
+} from './types.js';
 
 export type { SpaceScope } from './scope.js';
 export {
@@ -97,6 +113,18 @@ export {
   type SpacesUncategorizedCountStartEvent,
   type SpacesUncategorizedCountFinishEvent,
   type SpacesUncategorizedCountFailEvent,
+  type SpacesCreateStartEvent,
+  type SpacesCreateFinishEvent,
+  type SpacesCreateFailEvent,
+  type SpacesRenameStartEvent,
+  type SpacesRenameFinishEvent,
+  type SpacesRenameFailEvent,
+  type SpacesDeleteStartEvent,
+  type SpacesDeleteFinishEvent,
+  type SpacesDeleteFailEvent,
+  type SpacesUndeleteStartEvent,
+  type SpacesUndeleteFinishEvent,
+  type SpacesUndeleteFailEvent,
 } from './events.js';
 
 // ─── Public surface ─────────────────────────────────────────────────────
@@ -138,6 +166,48 @@ export interface SpacesItemsApi {
    * item; the missing preview is a soft degrade.
    */
   resolveFileUrl(key: string): Promise<string | null>;
+
+  /**
+   * Update mutable fields on an Item (Phase 3b). Returns the freshly
+   * re-fetched Item so callers can update their state with the new
+   * `updatedAt`, `lastEditedBy`, etc. in one shape.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for missing id / bad
+   *   patch shapes (empty title, oversized description, unknown type).
+   * @throws {SpacesError} `SPACES_NOT_FOUND` if the item disappeared
+   *   between the update and the re-fetch.
+   */
+  update(id: string, patch: ItemUpdatePatch): Promise<Item>;
+
+  /**
+   * Append a tag to an Item (Phase 3b). Idempotent — duplicate calls
+   * for the same tag are a no-op at the graph level. Returns the
+   * updated tag list.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for empty tags or
+   *   tags longer than `MAX_ITEM_TAG_LENGTH`.
+   */
+  addTag(id: string, tag: string): Promise<string[]>;
+
+  /**
+   * Remove a tag from an Item. No-op when the tag is already absent.
+   * Returns the updated tag list.
+   */
+  removeTag(id: string, tag: string): Promise<string[]>;
+
+  /**
+   * Per-asset activity log (Phase 3c). Returns the most recent commits
+   * referencing the given Item, in reverse-chronological order. Row
+   * shape matches `listRecentEvents()` so the detail-pane timeline can
+   * reuse the same row renderer as the home-feed timeline.
+   *
+   * Defaults: 20 rows. Cap: 100.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` when `id` is empty.
+   *   Unknown ids soft-fail to `[]` so a stale detail view doesn't
+   *   crash on a freshly-deleted asset.
+   */
+  recentCommits(id: string, opts?: RecentCommitsOpts): Promise<Event[]>;
 }
 
 /**
@@ -228,6 +298,59 @@ export interface SpacesApi {
    * CAN'T see; renderer falls back to "you see X Spaces" copy.
    */
   getPermissionSummary(): Promise<PermissionSummary>;
+
+  // ─── Mutations (Phase 3a) ─────────────────────────────────────────────
+  //
+  // All four methods throw `SpacesError`. Common codes:
+  //   - SPACES_INVALID_INPUT   -- empty / too-long name; bad id
+  //   - SPACES_DUPLICATE_NAME  -- name collision (create / rename)
+  //   - SPACES_NOT_FOUND       -- target space missing or already hard-deleted
+  //   - SPACES_DELETE_NON_EMPTY -- hard delete refused because items remain
+  //   - SPACES_NOT_AUTHENTICATED / SPACES_NETWORK / SPACES_CYPHER (as for reads)
+  //
+  // Reversibility (ADR-048 Trust Principles):
+  //   - create  <-> delete({ soft: true })
+  //   - rename  <-> rename(id, previousName)
+  //   - delete({ soft: true }) <-> undelete
+  //   - delete({ soft: false }) -- one-way; not reversible
+  // The trust-principles test harness registers the first three pairs.
+
+  /**
+   * Create a new Space. The name must be unique within the account
+   * (case-insensitive). Returns the persisted `Space` with its
+   * server-assigned id and timestamps. Trims whitespace and enforces
+   * `MAX_SPACE_NAME_LENGTH` / `MAX_SPACE_DESC_LENGTH` client-side.
+   */
+  createSpace(input: CreateSpaceInput): Promise<Space>;
+
+  /**
+   * Rename an existing Space. Trims whitespace and enforces
+   * `MAX_SPACE_NAME_LENGTH`. Returns the updated `Space`. Throws
+   * `SPACES_NOT_FOUND` if the id doesn't exist (or is soft-deleted)
+   * and `SPACES_DUPLICATE_NAME` if the new name collides.
+   */
+  renameSpace(id: string, name: string): Promise<Space>;
+
+  /**
+   * Delete a Space. Defaults to a soft delete (sets `deletedAt`); the
+   * Space disappears from `listSpaces()` but its items keep their
+   * `[:BELONGS_TO]` edges and can be restored via `undeleteSpace()`.
+   *
+   * Hard delete (`{ soft: false }`) removes the node entirely. Hard
+   * delete refuses if items still belong to the Space (throws
+   * `SPACES_DELETE_NON_EMPTY`); soft delete first, or move the items
+   * out via `items.list()` and a future remove-from-space call.
+   *
+   * Soft-deleting an already-deleted Space is idempotent (no throw).
+   */
+  deleteSpace(id: string, opts?: DeleteSpaceOpts): Promise<void>;
+
+  /**
+   * Restore a soft-deleted Space. Throws `SPACES_NOT_FOUND` if the
+   * Space has been hard-deleted or never existed. Restoring a Space
+   * that wasn't soft-deleted is idempotent and returns the current row.
+   */
+  undeleteSpace(id: string): Promise<Space>;
 }
 
 // ─── Default uninitialized implementation ──────────────────────────────
@@ -254,6 +377,21 @@ class UninitializedSpacesApi implements SpacesApi {
       // state -- it just returns null so the detail pane degrades to
       // "no preview" instead of an error banner.
       return null;
+    },
+    async update(_id: string, _patch: ItemUpdatePatch): Promise<Item> {
+      throw notInitialized('items.update');
+    },
+    async addTag(_id: string, _tag: string): Promise<string[]> {
+      throw notInitialized('items.addTag');
+    },
+    async removeTag(_id: string, _tag: string): Promise<string[]> {
+      throw notInitialized('items.removeTag');
+    },
+    async recentCommits(
+      _id: string,
+      _opts?: RecentCommitsOpts
+    ): Promise<Event[]> {
+      throw notInitialized('items.recentCommits');
     },
   };
 
@@ -293,6 +431,22 @@ class UninitializedSpacesApi implements SpacesApi {
 
   async getPermissionSummary(): Promise<PermissionSummary> {
     throw notInitialized('getPermissionSummary');
+  }
+
+  async createSpace(_input: CreateSpaceInput): Promise<Space> {
+    throw notInitialized('createSpace');
+  }
+
+  async renameSpace(_id: string, _name: string): Promise<Space> {
+    throw notInitialized('renameSpace');
+  }
+
+  async deleteSpace(_id: string, _opts?: DeleteSpaceOpts): Promise<void> {
+    throw notInitialized('deleteSpace');
+  }
+
+  async undeleteSpace(_id: string): Promise<Space> {
+    throw notInitialized('undeleteSpace');
   }
 }
 

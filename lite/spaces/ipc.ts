@@ -26,6 +26,8 @@ import type {
   AgentSummary,
   PermissionSummary,
   ContributorWindow,
+  CreateSpaceInput,
+  DeleteSpaceOpts,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import type { DiscoveryResults } from './discovery-format.js';
@@ -37,6 +39,12 @@ export const SPACES_IPC = {
   ITEMS_LIST: 'lite:spaces:items:list',
   ITEMS_GET: 'lite:spaces:items:get',
   ITEMS_RESOLVE_FILE_URL: 'lite:spaces:items:resolveFileUrl',
+  /** Item mutations (Phase 3b). Distinct from Phase 3a Space mutations. */
+  ITEMS_UPDATE: 'lite:spaces:items:update',
+  ITEMS_ADD_TAG: 'lite:spaces:items:addTag',
+  ITEMS_REMOVE_TAG: 'lite:spaces:items:removeTag',
+  /** Per-asset activity log (Phase 3c). */
+  ITEMS_RECENT_COMMITS: 'lite:spaces:items:recentCommits',
   /** Phase 0.5: run the Q1-Q4 verification queries. */
   DISCOVERY_RUN: 'lite:spaces:discovery:run',
   /** Home view (chunk 3k + 3o). See `lite/spaces/HOME-V1.md`. */
@@ -46,6 +54,11 @@ export const SPACES_IPC = {
   HOME_RECENT_EVENTS: 'lite:spaces:home:recentEvents',
   HOME_AGENTS_SAMPLE: 'lite:spaces:home:agentsSample',
   HOME_PERMISSION_SUMMARY: 'lite:spaces:home:permissionSummary',
+  /** Mutations (Phase 3a). ADR-048. */
+  CREATE_SPACE: 'lite:spaces:create',
+  RENAME_SPACE: 'lite:spaces:rename',
+  DELETE_SPACE: 'lite:spaces:delete',
+  UNDELETE_SPACE: 'lite:spaces:undelete',
 } as const;
 
 /**
@@ -161,6 +174,107 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
             ? payload.key
             : '';
         const value = await getSpacesApi().items.resolveFileUrl(key);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // Phase 3b — item mutation handlers. Distinct from Phase 3a Space
+  // mutations: these write to :Asset / :Tag.
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_UPDATE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; patch?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id =
+          payload !== undefined && typeof payload.id === 'string'
+            ? payload.id
+            : '';
+        const patch =
+          payload !== undefined && payload.patch !== null && typeof payload.patch === 'object'
+            ? (payload.patch as Record<string, unknown>)
+            : {};
+        const value = await getSpacesApi().items.update(id, patch);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_ADD_TAG,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; tag?: unknown }
+    ): Promise<SpacesIpcResult<string[]>> => {
+      try {
+        const id =
+          payload !== undefined && typeof payload.id === 'string'
+            ? payload.id
+            : '';
+        const tag =
+          payload !== undefined && typeof payload.tag === 'string'
+            ? payload.tag
+            : '';
+        const value = await getSpacesApi().items.addTag(id, tag);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_REMOVE_TAG,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; tag?: unknown }
+    ): Promise<SpacesIpcResult<string[]>> => {
+      try {
+        const id =
+          payload !== undefined && typeof payload.id === 'string'
+            ? payload.id
+            : '';
+        const tag =
+          payload !== undefined && typeof payload.tag === 'string'
+            ? payload.tag
+            : '';
+        const value = await getSpacesApi().items.removeTag(id, tag);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // Phase 3c — per-asset activity log. Returns recent commits referencing
+  // the given asset.
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_RECENT_COMMITS,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; limit?: unknown; since?: unknown }
+    ): Promise<SpacesIpcResult<Event[]>> => {
+      try {
+        const id =
+          payload !== undefined && typeof payload.id === 'string'
+            ? payload.id
+            : '';
+        const opts: { limit?: number; since?: number } = {};
+        if (isPositiveInteger(payload?.limit)) opts.limit = payload?.limit as number;
+        if (
+          typeof payload?.since === 'number' &&
+          Number.isFinite(payload?.since) &&
+          (payload?.since as number) >= 0
+        ) {
+          opts.since = payload?.since as number;
+        }
+        const value = await getSpacesApi().items.recentCommits(id, opts);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
@@ -294,7 +408,103 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
+  // ─── Mutations (Phase 3a) ────────────────────────────────────────────
+  //
+  // Each handler validates the payload shape minimally (type guards),
+  // then delegates to the singleton. Argument validation (empty name,
+  // too-long name, etc.) happens in the SDK client; the IPC layer
+  // surfaces those as `SPACES_INVALID_INPUT` via the standard envelope.
+
+  ipcMain.handle(
+    SPACES_IPC.CREATE_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { input?: unknown }
+    ): Promise<SpacesIpcResult<Space>> => {
+      try {
+        const input = coerceCreateSpaceInput(payload?.input);
+        const value = await getSpacesApi().createSpace(input);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.RENAME_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; name?: unknown }
+    ): Promise<SpacesIpcResult<Space>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const name = typeof payload?.name === 'string' ? payload.name : '';
+        const value = await getSpacesApi().renameSpace(id, name);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.DELETE_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; opts?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const opts = coerceDeleteSpaceOpts(payload?.opts);
+        await getSpacesApi().deleteSpace(id, opts);
+        return { ok: true, value: { ok: true } };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.UNDELETE_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown }
+    ): Promise<SpacesIpcResult<Space>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const value = await getSpacesApi().undeleteSpace(id);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
   registered = true;
+}
+
+function coerceCreateSpaceInput(raw: unknown): CreateSpaceInput {
+  if (raw === null || typeof raw !== 'object') {
+    // Let the SDK throw SPACES_INVALID_INPUT with a uniform message.
+    return { name: '' };
+  }
+  const r = raw as Record<string, unknown>;
+  const input: CreateSpaceInput = {
+    name: typeof r['name'] === 'string' ? (r['name'] as string) : '',
+  };
+  if (typeof r['description'] === 'string') input.description = r['description'] as string;
+  if (typeof r['color'] === 'string') input.color = r['color'] as string;
+  if (typeof r['iconKey'] === 'string') input.iconKey = r['iconKey'] as string;
+  return input;
+}
+
+function coerceDeleteSpaceOpts(raw: unknown): DeleteSpaceOpts | undefined {
+  if (raw === undefined || raw === null || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const opts: DeleteSpaceOpts = {};
+  if (typeof r['soft'] === 'boolean') opts.soft = r['soft'] as boolean;
+  return opts;
 }
 
 /** Remove every Spaces IPC handler. Idempotent. */

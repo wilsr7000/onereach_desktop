@@ -67,6 +67,10 @@ const SPACES_UNCATEGORIZED_COUNT = 'lite:spaces:uncategorizedCount';
 const SPACES_ITEMS_LIST = 'lite:spaces:items:list';
 const SPACES_ITEMS_GET = 'lite:spaces:items:get';
 const SPACES_ITEMS_RESOLVE_FILE_URL = 'lite:spaces:items:resolveFileUrl';
+const SPACES_ITEMS_UPDATE = 'lite:spaces:items:update';
+const SPACES_ITEMS_ADD_TAG = 'lite:spaces:items:addTag';
+const SPACES_ITEMS_REMOVE_TAG = 'lite:spaces:items:removeTag';
+const SPACES_ITEMS_RECENT_COMMITS = 'lite:spaces:items:recentCommits';
 const SPACES_DISCOVERY_RUN = 'lite:spaces:discovery:run';
 // Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md.
 const SPACES_HOME_ENTITY_COUNTS = 'lite:spaces:home:entityCounts';
@@ -75,6 +79,11 @@ const SPACES_HOME_TOP_CONTRIBUTORS = 'lite:spaces:home:topContributors';
 const SPACES_HOME_RECENT_EVENTS = 'lite:spaces:home:recentEvents';
 const SPACES_HOME_AGENTS_SAMPLE = 'lite:spaces:home:agentsSample';
 const SPACES_HOME_PERMISSION_SUMMARY = 'lite:spaces:home:permissionSummary';
+// Mutations (Phase 3a). ADR-048.
+const SPACES_CREATE_SPACE = 'lite:spaces:create';
+const SPACES_RENAME_SPACE = 'lite:spaces:rename';
+const SPACES_DELETE_SPACE = 'lite:spaces:delete';
+const SPACES_UNDELETE_SPACE = 'lite:spaces:undelete';
 
 const NEON_QUERY = 'lite:neon:query';
 const NEON_STATUS = 'lite:neon:status';
@@ -457,6 +466,21 @@ interface SpacesItemsBridge {
   ): Promise<SpacesIpcResultView<unknown[]>>;
   get(id: string): Promise<SpacesIpcResultView<unknown | null>>;
   resolveFileUrl(key: string): Promise<SpacesIpcResultView<string | null>>;
+  update(
+    id: string,
+    patch: {
+      title?: string;
+      description?: string;
+      type?: string;
+      editorId?: string;
+    }
+  ): Promise<SpacesIpcResultView<unknown>>;
+  addTag(id: string, tag: string): Promise<SpacesIpcResultView<string[]>>;
+  removeTag(id: string, tag: string): Promise<SpacesIpcResultView<string[]>>;
+  recentCommits(
+    id: string,
+    opts?: { limit?: number; since?: number }
+  ): Promise<SpacesIpcResultView<unknown[]>>;
 }
 
 // Phase 0.5 discovery: result shape mirrors lite/spaces/discovery.ts.
@@ -547,6 +571,20 @@ interface SpacesHomeBridge {
   permissionSummary(): Promise<SpacesIpcResultView<SpacesPermissionSummaryView>>;
 }
 
+// ─── Mutation inputs (Phase 3a) ─────────────────────────────────────────
+
+interface SpacesCreateSpaceInputView {
+  name: string;
+  description?: string;
+  color?: string;
+  iconKey?: string;
+}
+
+interface SpacesDeleteSpaceOptsView {
+  /** Default true (soft delete). Set to false to hard-remove. */
+  soft?: boolean;
+}
+
 interface SpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
@@ -561,6 +599,14 @@ interface SpacesBridge {
   runDiscovery(): Promise<SpacesIpcResultView<SpacesDiscoveryResultsView>>;
   /** Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md. */
   home: SpacesHomeBridge;
+  /** Mutations (Phase 3a). ADR-048. Mirror `SpacesApi` write methods. */
+  createSpace(input: SpacesCreateSpaceInputView): Promise<SpacesIpcResultView<unknown>>;
+  renameSpace(id: string, name: string): Promise<SpacesIpcResultView<unknown>>;
+  deleteSpace(
+    id: string,
+    opts?: SpacesDeleteSpaceOptsView
+  ): Promise<SpacesIpcResultView<{ ok: true }>>;
+  undeleteSpace(id: string): Promise<SpacesIpcResultView<unknown>>;
 }
 
 interface HealthBridge {
@@ -1158,6 +1204,24 @@ const spaces: SpacesBridge = {
       ipcRenderer.invoke(SPACES_ITEMS_RESOLVE_FILE_URL, { key }) as Promise<
         SpacesIpcResultView<string | null>
       >,
+    update: (id, patch) =>
+      ipcRenderer.invoke(SPACES_ITEMS_UPDATE, { id, patch }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    addTag: (id, tag) =>
+      ipcRenderer.invoke(SPACES_ITEMS_ADD_TAG, { id, tag }) as Promise<
+        SpacesIpcResultView<string[]>
+      >,
+    removeTag: (id, tag) =>
+      ipcRenderer.invoke(SPACES_ITEMS_REMOVE_TAG, { id, tag }) as Promise<
+        SpacesIpcResultView<string[]>
+      >,
+    recentCommits: (id, opts) =>
+      ipcRenderer.invoke(SPACES_ITEMS_RECENT_COMMITS, {
+        id,
+        ...(opts?.limit !== undefined ? { limit: opts.limit } : {}),
+        ...(opts?.since !== undefined ? { since: opts.since } : {}),
+      }) as Promise<SpacesIpcResultView<unknown[]>>,
   },
   runDiscovery: () =>
     ipcRenderer.invoke(SPACES_DISCOVERY_RUN) as Promise<
@@ -1194,6 +1258,24 @@ const spaces: SpacesBridge = {
         SpacesIpcResultView<SpacesPermissionSummaryView>
       >,
   },
+  // Mutations (Phase 3a)
+  createSpace: (input) =>
+    ipcRenderer.invoke(SPACES_CREATE_SPACE, { input }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
+  renameSpace: (id, name) =>
+    ipcRenderer.invoke(SPACES_RENAME_SPACE, { id, name }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
+  deleteSpace: (id, opts) =>
+    ipcRenderer.invoke(SPACES_DELETE_SPACE, {
+      id,
+      ...(opts !== undefined ? { opts } : {}),
+    }) as Promise<SpacesIpcResultView<{ ok: true }>>,
+  undeleteSpace: (id) =>
+    ipcRenderer.invoke(SPACES_UNDELETE_SPACE, { id }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
 };
 
 const health: HealthBridge = {

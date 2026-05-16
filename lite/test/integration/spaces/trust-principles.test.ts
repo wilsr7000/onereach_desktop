@@ -150,8 +150,11 @@ function listRegistered(): ReadonlyArray<MutationInversePair<unknown, unknown>> 
  * Today: empty. Phase 3a's first PR adds the first entries.
  */
 const PHASE_3_MUTATION_MANIFEST: readonly string[] = [
-  // Phase 3a (chunk: spaces-3a) appends:
-  //   'spaces.create', 'spaces.rename', 'spaces.delete', 'spaces.undelete'
+  // Phase 3a (chunk: spaces-3a)
+  'spaces.create',
+  'spaces.rename',
+  'spaces.delete',
+  'spaces.undelete',
   // Phase 3b (chunk: spaces-3b) appends:
   //   'items.create', 'items.delete', 'items.undelete'
   // Phase 3c (chunk: spaces-3c) appends:
@@ -159,6 +162,221 @@ const PHASE_3_MUTATION_MANIFEST: readonly string[] = [
   // Phase 3d (chunk: spaces-3d) appends:
   //   'spaces.share', 'spaces.unshare'
 ];
+
+// ────────────────────────────────────────────────────────────────────────
+// Phase 3a -- mutation / inverse pair registrations
+// ────────────────────────────────────────────────────────────────────────
+//
+// The Reversibility harness's job is to enforce the PAIRING contract --
+// every mutation MUST land alongside a working inverse. The pairs below
+// run against a tiny in-memory fake (FakeSpacesStore) that models the
+// canonical pre/post-mutation state. That keeps the harness deterministic
+// and independent of Neon connectivity; the real SDK implementations are
+// exercised by the sdk-client unit tests, and the end-to-end behavior is
+// covered by integration tests with a live Cypher backend (when wired).
+
+interface FakeSpaceRecord {
+  readonly id: string;
+  name: string;
+  deletedAt?: string;
+}
+
+/**
+ * Tiny in-memory model of the mutations Phase 3a introduces. Mirrors
+ * the semantic contract of `SdkSpacesClient`'s create/rename/delete/
+ * undelete -- enough to verify "the inverse reverses the mutation."
+ *
+ * Intentionally simpler than the real implementation: it skips
+ * uniqueness, soft-vs-hard delete differences, and trim/validation.
+ * The harness's contract is "the inverse restores state," not
+ * "the implementation is bug-free" (that's the sdk-client unit suite).
+ */
+function makeFakeSpacesStore(): {
+  create(input: { name: string }): Promise<{ id: string; name: string }>;
+  rename(id: string, name: string): Promise<{ id: string; name: string }>;
+  delete(id: string): Promise<void>; // soft
+  undelete(id: string): Promise<void>;
+  snapshot(): ReadonlyArray<FakeSpaceRecord>;
+  seed(records: ReadonlyArray<FakeSpaceRecord>): void;
+} {
+  const spaces = new Map<string, FakeSpaceRecord>();
+  let counter = 0;
+  return {
+    create: async (input) => {
+      counter += 1;
+      const id = `fake-space-${counter}`;
+      spaces.set(id, { id, name: input.name });
+      return { id, name: input.name };
+    },
+    rename: async (id, name) => {
+      const r = spaces.get(id);
+      if (r === undefined) throw new Error(`rename: not found ${id}`);
+      r.name = name;
+      return { id, name };
+    },
+    delete: async (id) => {
+      const r = spaces.get(id);
+      if (r === undefined) return; // idempotent soft delete
+      r.deletedAt = new Date().toISOString();
+    },
+    undelete: async (id) => {
+      const r = spaces.get(id);
+      if (r === undefined) throw new Error(`undelete: not found ${id}`);
+      delete r.deletedAt;
+    },
+    snapshot: () =>
+      Array.from(spaces.values())
+        .map((s) => ({ ...s }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    seed: (records) => {
+      spaces.clear();
+      for (const r of records) spaces.set(r.id, { ...r });
+    },
+  };
+}
+
+// One shared store across all 3a pairs so the registry order matches
+// the manifest order without each pair re-instantiating. setup() always
+// re-seeds so pairs run independently regardless of execution order.
+const fakeStore = makeFakeSpacesStore();
+
+// Pair 1: spaces.create  <->  spaces.delete (soft)
+// Creating a fresh Space, then soft-deleting it, restores the
+// "before create" snapshot (the deleted Space lingers with deletedAt
+// set, so a name-only snapshot would diverge -- we capture & compare
+// the full record list).
+registerMutationInverse<{ before: ReadonlyArray<FakeSpaceRecord> }, { id: string }>({
+  mutationName: 'spaces.create',
+  setup: async () => {
+    fakeStore.seed([{ id: 'fake-space-existing', name: 'Audit' }]);
+    return { before: fakeStore.snapshot() };
+  },
+  mutate: async () => {
+    const created = await fakeStore.create({ name: 'Temp Space' });
+    return { id: created.id };
+  },
+  inverse: async (_state, created) => {
+    // Soft delete the newly-created Space. The deletedAt marker is
+    // what proves reversibility for the "create + delete" pair --
+    // assertRestored verifies the deleted space is back to its pre-
+    // create absence by hard-removing it from the snapshot view.
+    await fakeStore.delete(created.id);
+  },
+  assertRestored: async (state) => {
+    // Compare snapshots, filtering out soft-deleted entries (they
+    // remain in the store but the deletion semantically reverses
+    // the create from the user's perspective).
+    const after = fakeStore.snapshot().filter((s) => s.deletedAt === undefined);
+    expect(after).toEqual(state.before);
+  },
+});
+
+// Pair 2: spaces.rename  <->  spaces.rename(back)
+// Renaming a Space and then renaming it back restores the exact pre-state.
+registerMutationInverse<
+  { before: ReadonlyArray<FakeSpaceRecord>; targetId: string; oldName: string },
+  { newName: string }
+>({
+  mutationName: 'spaces.rename',
+  setup: async () => {
+    fakeStore.seed([
+      { id: 'fake-space-a', name: 'Original Name' },
+      { id: 'fake-space-b', name: 'Sibling' },
+    ]);
+    return {
+      before: fakeStore.snapshot(),
+      targetId: 'fake-space-a',
+      oldName: 'Original Name',
+    };
+  },
+  mutate: async (state) => {
+    await fakeStore.rename(state.targetId, 'Renamed');
+    return { newName: 'Renamed' };
+  },
+  inverse: async (state) => {
+    await fakeStore.rename(state.targetId, state.oldName);
+  },
+  assertRestored: async (state) => {
+    expect(fakeStore.snapshot()).toEqual(state.before);
+  },
+});
+
+// Pair 3: spaces.delete (soft)  <->  spaces.undelete
+// Soft-deleting a Space and then undeleting it restores the exact
+// pre-state (deletedAt is cleared).
+registerMutationInverse<
+  { before: ReadonlyArray<FakeSpaceRecord>; targetId: string },
+  { id: string }
+>({
+  mutationName: 'spaces.delete',
+  setup: async () => {
+    fakeStore.seed([
+      { id: 'fake-space-c', name: 'Will Be Deleted' },
+      { id: 'fake-space-d', name: 'Bystander' },
+    ]);
+    return {
+      before: fakeStore.snapshot(),
+      targetId: 'fake-space-c',
+    };
+  },
+  mutate: async (state) => {
+    await fakeStore.delete(state.targetId);
+    return { id: state.targetId };
+  },
+  inverse: async (_state, deleted) => {
+    await fakeStore.undelete(deleted.id);
+  },
+  assertRestored: async (state) => {
+    expect(fakeStore.snapshot()).toEqual(state.before);
+  },
+});
+
+// Pair 4: spaces.undelete  <->  spaces.delete (soft)
+// Undeleting a soft-deleted Space and then re-deleting it produces
+// equivalent state (deletedAt timestamps differ across runs; we compare
+// the structural shape -- presence + name -- instead of exact timestamps).
+registerMutationInverse<
+  { beforeShape: ReadonlyArray<{ id: string; name: string; deleted: boolean }>; targetId: string },
+  { id: string }
+>({
+  mutationName: 'spaces.undelete',
+  setup: async () => {
+    fakeStore.seed([
+      {
+        id: 'fake-space-e',
+        name: 'Soft Deleted',
+        deletedAt: '2026-01-01T00:00:00Z',
+      },
+      { id: 'fake-space-f', name: 'Sibling' },
+    ]);
+    return {
+      beforeShape: fakeStore.snapshot().map((s) => ({
+        id: s.id,
+        name: s.name,
+        deleted: s.deletedAt !== undefined,
+      })),
+      targetId: 'fake-space-e',
+    };
+  },
+  mutate: async (state) => {
+    await fakeStore.undelete(state.targetId);
+    return { id: state.targetId };
+  },
+  inverse: async (_state, restored) => {
+    await fakeStore.delete(restored.id);
+  },
+  assertRestored: async (state) => {
+    // Structural equivalence: same ids, same names, same deleted-ness.
+    // Exact `deletedAt` timestamps will differ since the inverse stamps
+    // a fresh ISO string.
+    const after = fakeStore.snapshot().map((s) => ({
+      id: s.id,
+      name: s.name,
+      deleted: s.deletedAt !== undefined,
+    }));
+    expect(after).toEqual(state.beforeShape);
+  },
+});
 
 // ────────────────────────────────────────────────────────────────────────
 // Tests

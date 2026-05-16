@@ -149,6 +149,16 @@ function buildStubConsumer(): {
         calls.itemsResolveFileUrl.push(key);
         return maybeFail(fileUrlMap.get(key) ?? null);
       },
+      // Phase 3b — item mutations. Default stubs return the
+      // canonical empty shapes; specific Phase 3b unit tests
+      // exercise the real behavior. The platform contract just
+      // asserts the surface is consumable.
+      update: async (_id, _patch) => maybeFail({} as unknown as Item),
+      addTag: async (_id, _tag) => maybeFail([] as string[]),
+      removeTag: async (_id, _tag) => maybeFail([] as string[]),
+      // Phase 3c — per-asset activity log. Stub returns an empty event
+      // list; specific behavior is exercised by spaces-sdk-client tests.
+      recentCommits: async (_id, _opts) => maybeFail([]),
     },
     // Home view (chunk 3k + 3o). Stub returns are not exercised by
     // the platform-contract tests below; they're here so the stub
@@ -160,6 +170,19 @@ function buildStubConsumer(): {
     listRecentEvents: async () => maybeFail([]),
     listAgentsSample: async () => maybeFail([]),
     getPermissionSummary: async () => maybeFail({ visibleSpaceCount: 0 }),
+    // Mutations (Phase 3a). Same rationale -- stubs to satisfy the
+    // interface; specific mutation tests live in
+    // trust-principles.test.ts and the sdk-client unit tests.
+    createSpace: async (input) =>
+      maybeFail<Space>({
+        id: `space-stub-${Date.now()}`,
+        name: input.name,
+      }),
+    renameSpace: async (id, name) => maybeFail<Space>({ id, name }),
+    deleteSpace: async () => {
+      maybeFail(undefined);
+    },
+    undeleteSpace: async (id) => maybeFail<Space>({ id, name: '' }),
   };
 
   return {

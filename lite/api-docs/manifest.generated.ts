@@ -2323,7 +2323,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "SPACES_EVENTS",
-        "count": 12,
+        "count": 24,
         "entries": [
           {
             "constantKey": "LIST_SPACES_START",
@@ -2383,6 +2383,66 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "UNCATEGORIZED_COUNT_FAIL",
             "name": "spaces.uncategorizedCount.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "CREATE_START",
+            "name": "spaces.create.start",
+            "description": ""
+          },
+          {
+            "constantKey": "CREATE_FINISH",
+            "name": "spaces.create.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "CREATE_FAIL",
+            "name": "spaces.create.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "RENAME_START",
+            "name": "spaces.rename.start",
+            "description": ""
+          },
+          {
+            "constantKey": "RENAME_FINISH",
+            "name": "spaces.rename.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "RENAME_FAIL",
+            "name": "spaces.rename.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "DELETE_START",
+            "name": "spaces.delete.start",
+            "description": ""
+          },
+          {
+            "constantKey": "DELETE_FINISH",
+            "name": "spaces.delete.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "DELETE_FAIL",
+            "name": "spaces.delete.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "UNDELETE_START",
+            "name": "spaces.undelete.start",
+            "description": ""
+          },
+          {
+            "constantKey": "UNDELETE_FINISH",
+            "name": "spaces.undelete.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "UNDELETE_FAIL",
+            "name": "spaces.undelete.fail",
             "description": ""
           }
         ]
@@ -2763,5 +2823,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-05-15T14:07:11.850Z"
+  "generatedAt": "2026-05-16T19:44:28.014Z"
 } as const;

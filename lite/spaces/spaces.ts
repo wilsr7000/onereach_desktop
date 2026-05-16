@@ -494,11 +494,44 @@ async function loadItemDetail(itemId: string): Promise<void> {
     if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
       void resolveAndInjectFileUrl(itemId, item);
     }
+    // Phase 3c: per-asset activity log. Loads in the background and
+    // populates the activity slot. Failures degrade silently — the
+    // user still sees the asset; we don't surface a banner for a
+    // missing-or-failing activity stream.
+    void loadItemActivity(itemId);
   } catch (err) {
     state.loadingDetail = false;
     renderDetail({ error: messageFrom(err) });
   }
 }
+
+/**
+ * Fetch the per-asset activity log via the bridge and inject it into
+ * the `[data-activity-slot]` placeholder on the active detail pane.
+ * Soft-fails: any error (bridge missing, envelope.ok=false, network)
+ * leaves the slot empty rather than surfacing a banner.
+ *
+ * Bails when the user switched items mid-flight (the slot's
+ * `data-activity-slot` attribute disambiguates which item the cached
+ * payload belongs to).
+ */
+async function loadItemActivity(itemId: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.items.recentCommits(itemId, { limit: 20 });
+    if (envelope.ok === false) return;
+    if (state.activeItemId !== itemId) return;
+    const slot = document.querySelector<HTMLElement>(
+      `[data-activity-slot="${cssEscape(itemId)}"]`
+    );
+    if (slot === null) return;
+    slot.replaceChildren(buildDetailActivity(envelope.value));
+  } catch {
+    // Soft failure: activity slot stays empty.
+  }
+}
+
 
 async function resolveAndInjectFileUrl(
   itemId: string,
@@ -1094,12 +1127,92 @@ function renderDetail(opts: RenderDetailOpts): void {
     return;
   }
   if (opts.item === undefined) return;
-  aside.appendChild(buildDetailPane(opts.item, () => {
+  const item = opts.item;
+  const onClose = (): void => {
     state.activeItemId = null;
     const grid = document.getElementById('spaces-card-grid');
     if (grid !== null) applyActiveCard(grid, null);
     showDetailRail(false);
-  }));
+  };
+  // Phase 3b edit callbacks. Each routes through the bridge and
+  // re-fetches the item so the renderer state reflects the updated
+  // server-side projection (timestamps, lastEditedBy, tags).
+  const editCallbacks: RendererDetailEditCallbacks = {
+    onTitleSave: (next) => commitItemUpdate(item.id, { title: next }),
+    onTypeChange: (next) => commitItemUpdate(item.id, { type: next }),
+    onTagAdd: (tag) => commitTagAdd(item.id, tag),
+    onTagRemove: (tag) => commitTagRemove(item.id, tag),
+  };
+  aside.appendChild(buildDetailPane(item, onClose, 'rendered', editCallbacks));
+}
+
+interface RendererDetailEditCallbacks {
+  onTitleSave: (next: string) => Promise<void>;
+  onTypeChange: (next: string) => Promise<void>;
+  onTagAdd: (tag: string) => Promise<void>;
+  onTagRemove: (tag: string) => Promise<void>;
+}
+
+/**
+ * Commit an item update through the bridge. After a successful
+ * write the renderer re-fetches the item so the detail pane reflects
+ * the new server state. Errors surface as a thrown promise so the
+ * editable widget can rollback.
+ */
+async function commitItemUpdate(
+  itemId: string,
+  patch: { title?: string; description?: string; type?: string }
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) throw new Error('Bridge unavailable');
+  const editorId = readCurrentEditorId();
+  const envelope = await bridge.items.update(itemId, {
+    ...patch,
+    ...(editorId !== null ? { editorId } : {}),
+  } as Parameters<typeof bridge.items.update>[1]);
+  if (envelope.ok === false) {
+    throw new Error(envelope.error.message);
+  }
+  // Refresh by re-running loadItemDetail so the pane re-paints with
+  // the freshly-fetched Item (including the new updatedAt / lastEditedBy).
+  await loadItemDetail(itemId);
+}
+
+async function commitTagAdd(itemId: string, tag: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) throw new Error('Bridge unavailable');
+  const envelope = await bridge.items.addTag(itemId, tag);
+  if (envelope.ok === false) throw new Error(envelope.error.message);
+  await loadItemDetail(itemId);
+}
+
+async function commitTagRemove(itemId: string, tag: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) throw new Error('Bridge unavailable');
+  const envelope = await bridge.items.removeTag(itemId, tag);
+  if (envelope.ok === false) throw new Error(envelope.error.message);
+  await loadItemDetail(itemId);
+}
+
+/**
+ * Best-effort `:Person.id` for the current editor. The auth session
+ * surfaces an accountId but not a :Person.id directly; for now we
+ * use the email's local part as a stable-ish identifier, mirroring
+ * the prettyAuthor() convention. Returns null when signed-out so
+ * the SDK's "anonymous edit" path runs.
+ */
+function readCurrentEditorId(): string | null {
+  try {
+    const auth = (window as unknown as { lite?: { auth?: unknown } }).lite?.auth;
+    if (auth === undefined) return null;
+    // The bridge exposes getSession but the response is async; we
+    // can't synchronously read it here. v1 returns null and the
+    // SDK falls into the anonymous edit path. Phase 3c plumbing
+    // can prefetch the editor id and stash it on state.
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function showDetailRail(show: boolean): void {
@@ -1133,22 +1246,56 @@ export type DetailPreviewMode = 'rendered' | 'source';
  * sensibly (rendered is the default; users who flipped to source
  * see it return to rendered, which is fine for a refresh-driven UI).
  */
+/**
+ * Phase 3b edit callbacks. When passed to `buildDetailPane`, the
+ * pane gains in-place edit affordances:
+ *   - Title becomes click-to-edit (Enter / blur saves; Esc cancels)
+ *   - A "Reclassify" dropdown appears in the header
+ *   - Tag chips gain × delete buttons; an "+ Add tag" input is appended
+ *
+ * When `edit` is undefined the pane is fully read-only (current Phase A
+ * behavior). Each callback returns a Promise; the renderer shows a
+ * pending UI state while it resolves and re-throws errors as inline
+ * messages so the user can retry.
+ */
+export interface DetailEditCallbacks {
+  onTitleSave?: (next: string) => Promise<void>;
+  onTypeChange?: (next: string) => Promise<void>;
+  onTagAdd?: (tag: string) => Promise<void>;
+  onTagRemove?: (tag: string) => Promise<void>;
+}
+
+const EDITABLE_ITEM_KINDS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'document', label: 'Doc' },
+  { id: 'image', label: 'Image' },
+  { id: 'url', label: 'URL' },
+  { id: 'text', label: 'Text' },
+  { id: 'audio', label: 'Audio' },
+  { id: 'video', label: 'Video' },
+  { id: 'other', label: 'Other' },
+];
+
 export function buildDetailPane(
   item: RendererItem,
   onClose: () => void,
-  initialMode: DetailPreviewMode = 'rendered'
+  initialMode: DetailPreviewMode = 'rendered',
+  edit?: DetailEditCallbacks
 ): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'spaces-detail-pane';
 
-  // ── Header: kind badge + close button ────────────────────────────────
+  // ── Header: kind badge (or reclassify dropdown) + close button ───────
   const header = document.createElement('div');
   header.className = 'spaces-detail-head';
 
-  const kind = document.createElement('span');
-  kind.className = `spaces-card-kind spaces-card-kind-${item.kind}`;
-  kind.textContent = kindLabel(item.kind);
-  header.appendChild(kind);
+  if (edit?.onTypeChange !== undefined) {
+    header.appendChild(buildKindReclassify(item, edit.onTypeChange));
+  } else {
+    const kind = document.createElement('span');
+    kind.className = `spaces-card-kind spaces-card-kind-${item.kind}`;
+    kind.textContent = kindLabel(item.kind);
+    header.appendChild(kind);
+  }
 
   // MIME-type hint when present (e.g. "image/png"). Sits next to the
   // kind badge in a muted style — useful when the canonical `a.type`
@@ -1170,11 +1317,21 @@ export function buildDetailPane(
 
   wrap.appendChild(header);
 
-  // ── Title ────────────────────────────────────────────────────────────
-  const title = document.createElement('h2');
-  title.className = 'spaces-detail-title';
-  title.textContent = item.title.length > 0 ? item.title : '(untitled)';
-  wrap.appendChild(title);
+  // ── Title (click-to-edit when callback is present) ───────────────────
+  if (edit?.onTitleSave !== undefined) {
+    wrap.appendChild(buildEditableTitle(item.title, edit.onTitleSave));
+  } else {
+    const title = document.createElement('h2');
+    title.className = 'spaces-detail-title';
+    title.textContent = item.title.length > 0 ? item.title : '(untitled)';
+    wrap.appendChild(title);
+  }
+
+  // ── Attribution chip (Phase 3c): prominent "Created by …" /
+  //    "Last edited by …" near the title. Skipped silently when there's
+  //    no meaningful attribution data on the item.
+  const chip = buildAttributionChip(item);
+  if (chip !== null) wrap.appendChild(chip);
 
   // ── Meta strip: time + size + producer + last-edited-by ──────────────
   wrap.appendChild(buildDetailMeta(item));
@@ -1189,10 +1346,9 @@ export function buildDetailPane(
     wrap.appendChild(chips);
   }
 
-  // ── Tag chips ────────────────────────────────────────────────────────
-  if (Array.isArray(item.tags) && item.tags.length > 0) {
-    wrap.appendChild(buildDetailTags(item.tags));
-  }
+  // ── Tag chips (with × buttons + "+ Add tag" when editable) ───────────
+  const tagsRow = buildDetailTags(item.tags ?? [], edit);
+  if (tagsRow.children.length > 0) wrap.appendChild(tagsRow);
 
   // ── Content body (Markdown-aware, with preview/source toggle) ────────
   if (typeof item.content === 'string' && item.content.length > 0) {
@@ -1203,6 +1359,150 @@ export function buildDetailPane(
   const subsection = buildDetailTypeBlock(item);
   if (subsection !== null) wrap.appendChild(subsection);
 
+  // ── Activity slot (Phase 3c): empty container that `loadItemActivity`
+  //    populates with `buildDetailActivity(events)` once the per-asset
+  //    commit log loads. Carries the item id so the loader can confirm
+  //    the user hasn't switched items mid-flight.
+  const activitySlot = document.createElement('section');
+  activitySlot.className = 'spaces-detail-activity-slot';
+  activitySlot.setAttribute('data-activity-slot', item.id);
+  wrap.appendChild(activitySlot);
+
+  return wrap;
+}
+
+/**
+ * Reclassify dropdown. Renders the current kind as a `<select>`
+ * styled to match the read-only kind pill. Change → invokes the
+ * onTypeChange callback; while pending, the select is disabled.
+ */
+export function buildKindReclassify(
+  item: RendererItem,
+  onTypeChange: (next: string) => Promise<void>
+): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = `spaces-detail-reclassify spaces-card-kind spaces-card-kind-${item.kind}`;
+  wrap.setAttribute('data-current-kind', item.kind);
+
+  const select = document.createElement('select');
+  select.className = 'spaces-detail-reclassify-select';
+  select.setAttribute('aria-label', 'Reclassify item');
+  for (const k of EDITABLE_ITEM_KINDS) {
+    const opt = document.createElement('option');
+    opt.value = k.id;
+    opt.textContent = k.label;
+    if (k.id === item.kind) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', () => {
+    const next = select.value;
+    if (next === item.kind) return;
+    select.disabled = true;
+    wrap.classList.add('is-saving');
+    onTypeChange(next)
+      .catch(() => {
+        // Rollback the select on error so the user sees the prior
+        // kind. The state-machine wrapper logs the failure via
+        // the bridge's normalized error envelope.
+        select.value = item.kind;
+      })
+      .finally(() => {
+        select.disabled = false;
+        wrap.classList.remove('is-saving');
+      });
+  });
+  wrap.appendChild(select);
+  return wrap;
+}
+
+/**
+ * Click-to-edit title. Plain `<h2>` until clicked, then swaps to an
+ * `<input>` with the current text pre-selected. Enter or blur saves
+ * via `onTitleSave`; Esc reverts. Pure DOM construction (no module
+ * state); the save callback owns the side-effecting bridge call.
+ */
+export function buildEditableTitle(
+  initial: string,
+  onTitleSave: (next: string) => Promise<void>
+): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-title-wrap';
+
+  const display = document.createElement('h2');
+  display.className = 'spaces-detail-title is-editable';
+  display.setAttribute('role', 'button');
+  display.setAttribute('tabindex', '0');
+  display.setAttribute('title', 'Click to rename');
+  display.textContent = initial.length > 0 ? initial : '(untitled)';
+
+  let current = initial;
+  let editing = false;
+
+  const enterEdit = (): void => {
+    if (editing) return;
+    editing = true;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'spaces-detail-title-input';
+    input.value = current;
+    input.maxLength = 200;
+    input.setAttribute('aria-label', 'Edit title');
+    wrap.replaceChildren(input);
+    input.focus();
+    input.select();
+
+    const commit = async (): Promise<void> => {
+      const next = input.value.trim();
+      if (next.length === 0 || next === current) {
+        // Empty or unchanged → bail without a network call.
+        editing = false;
+        display.textContent = current.length > 0 ? current : '(untitled)';
+        wrap.replaceChildren(display);
+        return;
+      }
+      input.disabled = true;
+      wrap.classList.add('is-saving');
+      try {
+        await onTitleSave(next);
+        current = next;
+        display.textContent = next;
+      } catch {
+        // Leave the prior value visible and the input populated so
+        // the user can retry without retyping.
+        input.disabled = false;
+        wrap.classList.remove('is-saving');
+        return;
+      }
+      editing = false;
+      wrap.classList.remove('is-saving');
+      wrap.replaceChildren(display);
+    };
+
+    const cancel = (): void => {
+      editing = false;
+      wrap.replaceChildren(display);
+    };
+
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        void commit();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        cancel();
+      }
+    });
+    input.addEventListener('blur', () => void commit());
+  };
+
+  display.addEventListener('click', enterEdit);
+  display.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      enterEdit();
+    }
+  });
+  wrap.appendChild(display);
   return wrap;
 }
 
@@ -1237,18 +1537,118 @@ export function buildDetailMeta(item: RendererItem): HTMLElement {
   return meta;
 }
 
-/** Tag chip row. Read-only in Phase A; Phase B adds add/remove. */
-export function buildDetailTags(tags: ReadonlyArray<string>): HTMLElement {
+/**
+ * Tag chip row. Phase A renders read-only chips; Phase B adds × delete
+ * buttons + an "+ Add tag" input when `edit` callbacks are supplied.
+ *
+ * When neither tags NOR an `onTagAdd` callback are present, returns
+ * an empty container (caller can skip appending).
+ */
+export function buildDetailTags(
+  tags: ReadonlyArray<string>,
+  edit?: DetailEditCallbacks
+): HTMLElement {
   const row = document.createElement('div');
   row.className = 'spaces-detail-tags';
   for (const tag of tags) {
     if (typeof tag !== 'string' || tag.trim().length === 0) continue;
     const chip = document.createElement('span');
     chip.className = 'spaces-detail-tag';
-    chip.textContent = tag.trim();
+
+    const label = document.createElement('span');
+    label.className = 'spaces-detail-tag-label';
+    label.textContent = tag.trim();
+    chip.appendChild(label);
+
+    if (edit?.onTagRemove !== undefined) {
+      const cb = edit.onTagRemove;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'spaces-detail-tag-remove';
+      x.setAttribute('aria-label', `Remove tag ${tag.trim()}`);
+      x.title = `Remove "${tag.trim()}"`;
+      x.textContent = '×';
+      x.addEventListener('click', () => {
+        x.disabled = true;
+        chip.classList.add('is-removing');
+        cb(tag.trim()).catch(() => {
+          x.disabled = false;
+          chip.classList.remove('is-removing');
+        });
+      });
+      chip.appendChild(x);
+    }
     row.appendChild(chip);
   }
+
+  if (edit?.onTagAdd !== undefined) {
+    row.appendChild(buildAddTagAffordance(edit.onTagAdd));
+  }
   return row;
+}
+
+/** "+ Add tag" affordance — button that swaps to an input on click. */
+function buildAddTagAffordance(onAdd: (tag: string) => Promise<void>): HTMLElement {
+  const wrap = document.createElement('span');
+  wrap.className = 'spaces-detail-tag-add-wrap';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'spaces-detail-tag-add';
+  button.textContent = '+ Add tag';
+  button.addEventListener('click', () => enterAddMode());
+  wrap.appendChild(button);
+
+  const enterAddMode = (): void => {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'spaces-detail-tag-input';
+    input.maxLength = 60;
+    input.placeholder = 'tag name';
+    input.setAttribute('aria-label', 'New tag');
+    wrap.replaceChildren(input);
+    input.focus();
+
+    const commit = async (): Promise<void> => {
+      const next = input.value.trim();
+      if (next.length === 0) {
+        wrap.replaceChildren(button);
+        return;
+      }
+      input.disabled = true;
+      wrap.classList.add('is-saving');
+      try {
+        await onAdd(next);
+      } catch {
+        input.disabled = false;
+        wrap.classList.remove('is-saving');
+        return;
+      }
+      wrap.classList.remove('is-saving');
+      wrap.replaceChildren(button);
+    };
+
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        void commit();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        wrap.replaceChildren(button);
+      }
+    });
+    input.addEventListener('blur', () => {
+      // Only commit if there's something to commit; otherwise just
+      // collapse back to the button. Prevents a stray empty save on
+      // every blur.
+      if (input.value.trim().length === 0) {
+        wrap.replaceChildren(button);
+      } else {
+        void commit();
+      }
+    });
+  };
+  return wrap;
 }
 
 /**
@@ -1305,6 +1705,155 @@ function renderSource(source: string): HTMLElement {
   pre.className = 'spaces-detail-source-pre';
   pre.textContent = source;
   return pre;
+}
+
+/**
+ * Attribution chip (Phase 3c). Renders a single high-visibility line
+ * summarizing the most relevant attribution for the asset:
+ *
+ *   - If `lastEditedBy` is set AND distinct from `producedBy`:
+ *       "Last edited by [name] · [recency]"
+ *   - Else if `producedBy` is set:
+ *       "Created by [name] · [recency]"
+ *   - Else: returns `null` (caller skips).
+ *
+ * The chip is purely visual: it duplicates information already in the
+ * meta strip, but in a denser, more prominent style — surfacing the
+ * "who" front-and-center for the collaborative use case.
+ */
+export function buildAttributionChip(item: RendererItem): HTMLElement | null {
+  const editor = item.lastEditedBy ?? null;
+  const producer = item.producedBy;
+  const editorDistinct = editor !== null && editor.id !== producer?.id;
+
+  let label: string;
+  let name: string;
+  let timeIso: string;
+  if (editorDistinct) {
+    label = 'Last edited by';
+    name = editor.name.length > 0 ? editor.name : '(unknown)';
+    timeIso = item.updatedAt;
+  } else if (producer !== null) {
+    label = 'Created by';
+    name = producer.name.length > 0 ? producer.name : '(unknown)';
+    timeIso = item.createdAt;
+  } else {
+    return null;
+  }
+
+  const chip = document.createElement('div');
+  chip.className = 'spaces-detail-attribution-chip';
+
+  const dot = document.createElement('span');
+  dot.className = 'spaces-detail-attribution-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  chip.appendChild(dot);
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'spaces-detail-attribution-label';
+  labelEl.textContent = label;
+  chip.appendChild(labelEl);
+
+  chip.appendChild(document.createTextNode(' '));
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'spaces-detail-attribution-name';
+  nameEl.textContent = name;
+  chip.appendChild(nameEl);
+
+  // Recency suffix; skipped when the timestamp is empty / unparseable
+  // so we never render an awkward " · " trailing chip.
+  const recency = formatRelativeTime(timeIso);
+  if (recency.length > 0) {
+    const sep = document.createElement('span');
+    sep.className = 'spaces-detail-attribution-sep';
+    sep.textContent = ' · ';
+    chip.appendChild(sep);
+    const timeEl = document.createElement('span');
+    timeEl.className = 'spaces-detail-attribution-time';
+    timeEl.textContent = recency;
+    chip.appendChild(timeEl);
+  }
+
+  return chip;
+}
+
+/**
+ * Activity log (Phase 3c). Renders a compact list of commits referencing
+ * the current asset. Pure — the caller injects the event payload from a
+ * separate bridge fetch. Empty input → returns an "empty state" line
+ * so the slot stays visually anchored (instead of jumping when activity
+ * lands).
+ *
+ * Each row: `[dot] [author] [verb] · [recency]`. We don't repeat the
+ * object — every row is implicitly about THIS asset.
+ */
+export function buildDetailActivity(
+  events: ReadonlyArray<RendererEvent>
+): HTMLElement {
+  const section = document.createElement('div');
+  section.className = 'spaces-detail-activity';
+
+  const heading = document.createElement('h3');
+  heading.className = 'spaces-detail-activity-heading';
+  heading.textContent = 'Activity';
+  section.appendChild(heading);
+
+  if (events.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'spaces-detail-activity-empty';
+    empty.textContent = 'No recent activity recorded for this asset.';
+    section.appendChild(empty);
+    return section;
+  }
+
+  const list = document.createElement('ol');
+  list.className = 'spaces-detail-activity-list';
+  for (const ev of events) {
+    list.appendChild(buildActivityRow(ev));
+  }
+  section.appendChild(list);
+  return section;
+}
+
+/** One row of the per-asset activity log. */
+function buildActivityRow(ev: RendererEvent): HTMLElement {
+  const row = document.createElement('li');
+  row.className = 'spaces-detail-activity-row';
+  row.setAttribute('data-row-id', ev.id);
+
+  const dot = document.createElement('span');
+  dot.className = 'spaces-detail-activity-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  row.appendChild(dot);
+
+  const body = document.createElement('div');
+  body.className = 'spaces-detail-activity-body';
+
+  const headline = document.createElement('div');
+  headline.className = 'spaces-detail-activity-headline';
+
+  const authorEl = document.createElement('span');
+  authorEl.className = 'spaces-detail-activity-author';
+  const authorRaw = typeof ev.author === 'string' ? ev.author.trim() : '';
+  authorEl.textContent = authorRaw.length > 0 ? prettyAuthor(authorRaw) : 'Someone';
+  headline.appendChild(authorEl);
+
+  const verbEl = document.createElement('span');
+  verbEl.className = 'spaces-detail-activity-verb';
+  verbEl.textContent = ` ${deriveVerb(ev.kind)}`;
+  headline.appendChild(verbEl);
+
+  body.appendChild(headline);
+
+  const meta = document.createElement('div');
+  meta.className = 'spaces-detail-activity-meta';
+  const recency = formatRelativeTime(ev.timestamp);
+  meta.textContent = recency.length > 0 ? recency : ev.timestamp;
+  body.appendChild(meta);
+
+  row.appendChild(body);
+  return row;
 }
 
 /**
@@ -2800,6 +3349,10 @@ function messageFrom(err: unknown): string {
   buildDetailMeta,
   buildDetailTags,
   buildDetailContent,
+  buildEditableTitle,
+  buildKindReclassify,
+  buildAttributionChip,
+  buildDetailActivity,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,

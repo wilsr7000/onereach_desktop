@@ -14,8 +14,112 @@
     <header class="spaces-header">
       <h1>Spaces</h1>
       <div class="spaces-header-spacer"></div>
+      <button
+        type="button"
+        id="spaces-new-button"
+        class="spaces-new-button"
+        title="Create a new Space"
+      >
+        <span class="spaces-new-button-glyph" aria-hidden="true">+</span>
+        <span class="spaces-new-button-label">New Space</span>
+      </button>
       <span class="spaces-phase-badge" title="Module phase indicator">v1 · Workspace Beta</span>
     </header>
+
+    <!--
+      Mutation UI surfaces (Phase 3a). Hidden until invoked. The renderer
+      (spaces.ts) populates `#spaces-new-dialog` with a name input, and
+      `#spaces-row-menu` with Rename / Delete options when the user clicks
+      a sidebar row's ⋯ button.
+    -->
+    <div
+      id="spaces-new-dialog-backdrop"
+      class="spaces-modal-backdrop"
+      hidden
+      aria-hidden="true"
+    >
+      <div
+        id="spaces-new-dialog"
+        class="spaces-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="spaces-new-dialog-title"
+      >
+        <h2 id="spaces-new-dialog-title" class="spaces-modal-title">Create a new Space</h2>
+        <p class="spaces-modal-help">
+          Names are unique within your account. You can rename later.
+        </p>
+        <form id="spaces-new-form" class="spaces-modal-form">
+          <label for="spaces-new-name-input" class="spaces-modal-label">Name</label>
+          <input
+            type="text"
+            id="spaces-new-name-input"
+            class="spaces-modal-input"
+            placeholder="e.g. Quarterly Audit"
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="80"
+            required
+          />
+          <div id="spaces-new-error" class="spaces-modal-error" hidden></div>
+          <div class="spaces-modal-actions">
+            <button type="button" id="spaces-new-cancel" class="spaces-modal-button">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              id="spaces-new-submit"
+              class="spaces-modal-button spaces-modal-button-primary"
+            >
+              Create
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!--
+      Row context menu (popover). Positioned next to the ⋯ button on the
+      sidebar row that triggered it. Hidden by default; spaces.ts opens
+      it on click and closes it on outside-click or escape.
+    -->
+    <div
+      id="spaces-row-menu"
+      class="spaces-row-menu"
+      hidden
+      role="menu"
+      aria-hidden="true"
+    >
+      <button type="button" class="spaces-row-menu-item" data-action="rename" role="menuitem">
+        Rename
+      </button>
+      <button
+        type="button"
+        class="spaces-row-menu-item spaces-row-menu-item-danger"
+        data-action="delete"
+        role="menuitem"
+      >
+        Delete
+      </button>
+    </div>
+
+    <!--
+      Toast container for undo-affordances after a soft delete.
+      Self-dismisses after ~6s; the Undo button restores the space
+      via undeleteSpace().
+    -->
+    <div
+      id="spaces-toast"
+      class="spaces-toast"
+      hidden
+      role="status"
+      aria-live="polite"
+    >
+      <span id="spaces-toast-message" class="spaces-toast-message"></span>
+      <button type="button" id="spaces-toast-action" class="spaces-toast-action" hidden>
+        Undo
+      </button>
+    </div>
 
     <div class="spaces-layout">
       <!--

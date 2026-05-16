@@ -54,8 +54,11 @@ const ASSETS_TO_COPY = [
   // Tray icons (Phase 0a). Copied next to the main bundle so
   // `lite/tray/main.ts` can resolve them via `path.join(__dirname,
   // ...)` without poking at <appPath>/assets/. Template variant
-  // enables macOS menu-bar auto-adapt; regular icon is the fallback.
+  // enables macOS menu-bar auto-adapt; the @2x sibling auto-loads
+  // when present so Retina menu bars render crisp; regular icon is
+  // the fallback for non-template builds.
   { from: 'assets/tray-iconTemplate.png', to: 'tray-iconTemplate.png' },
+  { from: 'assets/tray-iconTemplate@2x.png', to: 'tray-iconTemplate@2x.png' },
   { from: 'assets/tray-icon.png', to: 'tray-icon.png' },
   // OneReach logo used by `.spaces-or-button` in the main-window tab
   // bar. Same asset the full app's `#black-hole-button` uses; copied

@@ -240,6 +240,84 @@
           </p>
         </section>
 
+        <section id="spaces">
+          <h2>Spaces</h2>
+          <p>
+            <strong>Spaces</strong> are how you organize what your account already
+            knows. Every account starts with one shared knowledge graph: documents
+            you upload, articles you save, agents that produce things, the people
+            who created them. A Space is a workspace-shaped slice across that
+            graph &mdash; "Quarterly Audit", "Engineering", "Onboarding" &mdash;
+            and an item can live in more than one Space at the same time.
+          </p>
+          <p>
+            Open Spaces from <em>Tools &rarr; Spaces&hellip;</em>. The window
+            has three regions: a sidebar listing your Spaces, a main pane that
+            shows Home (a news-feed view across everything) or the items in a
+            single Space, and a detail rail that opens when you click an item.
+          </p>
+
+          <h3>Home</h3>
+          <p>
+            Home is the default view. It surfaces what changed recently &mdash;
+            entity counts at a glance, the people and agents who&rsquo;ve been
+            adding to the graph, the most-recent items, recent events. Click any
+            row to drill in.
+          </p>
+
+          <h3>Uncategorized</h3>
+          <p>
+            Items that haven&rsquo;t been filed into a Space land in
+            <em>Uncategorized</em> &mdash; the intake zone. The sidebar shows the
+            count so you can see at a glance how much un-filed material exists.
+          </p>
+
+          <h3>Creating, renaming, and deleting Spaces</h3>
+          <ul class="def-list">
+            <li>
+              <strong>Create.</strong> Click the <em>+ New Space</em> button in
+              the Spaces window header. Enter a name &mdash; it must be unique
+              within your account; you can rename later. Lite trims whitespace
+              and caps the name at 80 characters.
+            </li>
+            <li>
+              <strong>Rename.</strong> Hover a Space row in the sidebar and click
+              the <em>&hellip;</em> button that appears at the right. Choose
+              <em>Rename</em>. The row name turns into an inline input &mdash;
+              edit, press Enter to save, or Escape to cancel.
+            </li>
+            <li>
+              <strong>Delete.</strong> Same <em>&hellip;</em> menu, choose
+              <em>Delete</em>. By default this is a <em>soft delete</em>:
+              the Space disappears from the sidebar but its items keep their
+              links so nothing is orphaned. A toast at the bottom of the
+              window offers <em>Undo</em> for about six seconds &mdash; one
+              click restores it.
+            </li>
+          </ul>
+
+          <h3>How Spaces handle items</h3>
+          <p>
+            An item (a document, image, URL, audio clip&hellip;) can belong to
+            one Space, several Spaces, or none. Multi-Space membership shows as
+            small chips on the item card so you can see at a glance where else
+            it lives. The detail rail shows the full content, file previews
+            for images, source links for web clips, and the producer
+            (the Person or Agent that created it) when the graph carries
+            that provenance.
+          </p>
+
+          <h3>Where Spaces data lives</h3>
+          <p>
+            Spaces queries hit your account&rsquo;s <strong>OAGI / Neon graph</strong>
+            (configured under <em>Settings &rarr; OAGI</em>). The window calls
+            Cypher through Lite&rsquo;s main process &mdash; the graph
+            credentials never reach the renderer. ACLs are enforced
+            server-side; you only see Spaces and items your account has
+            permission to read.
+          </p>
+        </section>
+
         <section id="tools">
           <h2>Tools</h2>
           <p>

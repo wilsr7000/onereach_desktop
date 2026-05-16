@@ -46,6 +46,10 @@ import type {
   RecentEventsOpts,
   RecentItemsOpts,
   AgentsSampleOpts,
+  CreateSpaceInput,
+  DeleteSpaceOpts,
+  ItemUpdatePatch,
+  RecentCommitsOpts,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -222,6 +226,18 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
         return null;
       }
     },
+    update(id: string, patch: ItemUpdatePatch): Promise<Item> {
+      return client.updateItem(id, patch);
+    },
+    addTag(id: string, tag: string): Promise<string[]> {
+      return client.addTag(id, tag);
+    },
+    removeTag(id: string, tag: string): Promise<string[]> {
+      return client.removeTag(id, tag);
+    },
+    recentCommits(id: string, opts?: RecentCommitsOpts): Promise<Event[]> {
+      return client.itemRecentCommits(id, opts ?? {});
+    },
   };
 
   return {
@@ -252,6 +268,20 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
     getPermissionSummary(): Promise<PermissionSummary> {
       return client.getPermissionSummary();
+    },
+
+    // ─── Mutations (Phase 3a) ───────────────────────────────────────────
+    createSpace(input: CreateSpaceInput): Promise<Space> {
+      return client.createSpace(input);
+    },
+    renameSpace(id: string, name: string): Promise<Space> {
+      return client.renameSpace(id, name);
+    },
+    deleteSpace(id: string, opts?: DeleteSpaceOpts): Promise<void> {
+      return client.deleteSpace(id, opts);
+    },
+    undeleteSpace(id: string): Promise<Space> {
+      return client.undeleteSpace(id);
     },
   };
 }

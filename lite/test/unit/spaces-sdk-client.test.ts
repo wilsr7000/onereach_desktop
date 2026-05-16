@@ -590,6 +590,238 @@ describe('SdkSpacesClient.getItem', () => {
   });
 });
 
+// ─── Phase 3b: items.update + tag mutations ─────────────────────────────
+
+describe('CYPHER strings — Phase 3b mutations', () => {
+  it('UPDATE_ITEM uses coalesce so missing fields keep the prior value', () => {
+    expect(CYPHER.UPDATE_ITEM).toMatch(/SET a\.name = coalesce\(\$title, a\.name\)/);
+    expect(CYPHER.UPDATE_ITEM).toMatch(/SET .*a\.title = coalesce\(\$title, a\.title\)/s);
+    expect(CYPHER.UPDATE_ITEM).toMatch(/a\.description = coalesce\(\$description, a\.description\)/);
+    expect(CYPHER.UPDATE_ITEM).toMatch(/a\.type = coalesce\(\$type, a\.type\)/);
+    expect(CYPHER.UPDATE_ITEM).toMatch(/a\.updatedAt = \$now/);
+  });
+
+  it('UPDATE_ITEM maintains a single [:LAST_EDITED] edge via DELETE+MERGE', () => {
+    expect(CYPHER.UPDATE_ITEM).toMatch(/OPTIONAL MATCH \(a\)<-\[r:LAST_EDITED\]-\(:Person\)/);
+    expect(CYPHER.UPDATE_ITEM).toMatch(/DELETE r/);
+    expect(CYPHER.UPDATE_ITEM).toMatch(/MERGE \(x\)-\[:LAST_EDITED\]->\(a\)/);
+  });
+
+  it('ADD_TAG merges :Tag by name + edge by MERGE (idempotent)', () => {
+    expect(CYPHER.ADD_TAG).toMatch(/MATCH \(a:Asset \{id: \$id\}\)/);
+    expect(CYPHER.ADD_TAG).toMatch(/MERGE \(t:Tag \{name: \$tag\}\)/);
+    expect(CYPHER.ADD_TAG).toMatch(/MERGE \(a\)-\[:TAGGED_AS\]->\(t\)/);
+  });
+
+  it('REMOVE_TAG deletes only the edge (leaves :Tag node intact)', () => {
+    expect(CYPHER.REMOVE_TAG).toMatch(
+      /MATCH \(a:Asset \{id: \$id\}\)-\[r:TAGGED_AS\]->\(t:Tag \{name: \$tag\}\)/
+    );
+    expect(CYPHER.REMOVE_TAG).toMatch(/DELETE r/);
+    // Does NOT delete the tag node — that would orphan tags shared
+    // with other assets.
+    expect(CYPHER.REMOVE_TAG).not.toMatch(/DELETE t/);
+  });
+});
+
+describe('SdkSpacesClient.updateItem', () => {
+  it('rejects empty id with SPACES_INVALID_INPUT', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.updateItem('', { title: 'New' })).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('rejects an empty title (trim catches whitespace-only)', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.updateItem('i-1', { title: '   ' })).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('rejects title longer than MAX_ITEM_TITLE_LENGTH (200)', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(
+      client.updateItem('i-1', { title: 'x'.repeat(201) })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('rejects description longer than MAX_ITEM_DESCRIPTION_LENGTH (4000)', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(
+      client.updateItem('i-1', { description: 'x'.repeat(4001) })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('rejects an unknown kind in patch.type', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(
+      client.updateItem('i-1', { type: 'spreadsheet' as unknown as 'document' })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('forwards trimmed fields to the Cypher params and re-fetches', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('UPDATE (?:.*)\\bMATCH \\(a:Asset \\{id: \\$id\\}\\)', []);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 'New title',
+        kind: 'document',
+        createdAt: '',
+        updatedAt: '2026-01-01T00:00:00Z',
+        otherSpaces: [],
+        producedBy: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const result = await client.updateItem('i-1', {
+      title: '  New title  ',
+      description: '  ',
+      type: 'document',
+      editorId: '  p-1  ',
+    });
+    // Should re-fetch and return the new Item shape.
+    expect(result.title).toBe('New title');
+    // Inspect the params on the UPDATE_ITEM call (first call).
+    const update = stub.calls.find((c) => c.cypher.includes('UPDATE')) ?? stub.calls[0];
+    expect(update?.parameters).toMatchObject({
+      id: 'i-1',
+      title: 'New title',
+      description: '',
+      type: 'document',
+      editorId: 'p-1',
+    });
+    expect(typeof update?.parameters?.['now']).toBe('string');
+  });
+
+  it('omits unchanged fields from params (collapses to null)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 'i-2',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.updateItem('i-2', { title: 'Only the title' });
+    const update = stub.calls.find((c) => c.cypher.includes('SET a.name = coalesce'));
+    expect(update?.parameters).toMatchObject({
+      id: 'i-2',
+      title: 'Only the title',
+      description: null,
+      type: null,
+      editorId: null,
+    });
+  });
+
+  it('throws SPACES_NOT_FOUND when the item disappears between update and re-fetch', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', []);
+    const client = makeClient(stub);
+    await expect(
+      client.updateItem('vanished', { title: 'whatever' })
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
+  });
+});
+
+describe('SdkSpacesClient.addTag / removeTag', () => {
+  it('addTag rejects empty / whitespace-only tags', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.addTag('i-1', '   ')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('addTag rejects oversize tags (>60 chars)', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.addTag('i-1', 'x'.repeat(61))).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('addTag rejects empty id', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.addTag('', 'tag')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('addTag trims the tag + re-fetches the updated tag list', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (t:Tag {name: $tag})', [{ id: 'i-1', tag: 'q3' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: ['q3'],
+      },
+    ]);
+    const client = makeClient(stub);
+    const tags = await client.addTag('i-1', '  q3  ');
+    expect(tags).toEqual(['q3']);
+    const addCall = stub.calls.find((c) => c.cypher.includes('MERGE (t:Tag {name: $tag})'));
+    expect(addCall?.parameters).toEqual({ id: 'i-1', tag: 'q3' });
+  });
+
+  it('removeTag rejects empty / oversize tags + empty id', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.removeTag('', 'x')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+    await expect(client.removeTag('i-1', '')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+    await expect(client.removeTag('i-1', 'x'.repeat(61))).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('removeTag forwards trimmed tag to Cypher', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse(
+      'MATCH (a:Asset {id: $id})-[r:TAGGED_AS]->(t:Tag {name: $tag})',
+      []
+    );
+    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    const tags = await client.removeTag('i-1', '  policy ');
+    expect(tags).toEqual([]);
+    const removeCall = stub.calls.find((c) => c.cypher.includes('-[r:TAGGED_AS]->'));
+    expect(removeCall?.parameters).toEqual({ id: 'i-1', tag: 'policy' });
+  });
+});
+
 // ─── Error normalization ────────────────────────────────────────────────
 
 describe('SdkSpacesClient error normalization', () => {
@@ -1365,5 +1597,135 @@ describe('SdkSpacesClient.undeleteSpace', () => {
     await expect(client.undeleteSpace('gone')).rejects.toMatchObject({
       code: 'SPACES_NOT_FOUND',
     });
+  });
+});
+
+// ─── Phase 3c: per-asset activity log ───────────────────────────────────
+
+describe('CYPHER source strings — Phase 3c (per-asset activity)', () => {
+  it('ITEM_RECENT_COMMITS matches :Asset by id and tolerates multiple commit-to-asset shapes', () => {
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/MATCH \(a:Asset \{id: \$id\}\)/);
+    // Match path: singular canonical, legacy alias, canonical array, edge model.
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/c\.assetId = \$id/);
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/c\.targetId = \$id/);
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/\$id IN coalesce\(c\.assetIds, \[\]\)/);
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/\(c\)-\[:TOUCHED\]->\(a\)/);
+  });
+
+  it('ITEM_RECENT_COMMITS honors $since cutoff and orders newest first', () => {
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/\$since IS NULL OR c\.timestamp >= \$since/);
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/ORDER BY c\.timestamp DESC/);
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/LIMIT toInteger\(\$limit\)/);
+  });
+
+  it('ITEM_RECENT_COMMITS row shape matches HOME_RECENT_EVENTS so the renderer can reuse it', () => {
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/c\.hash AS id/);
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/c\.author AS author/);
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/c\.message AS kind/);
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/toString\(c\.timestamp\) AS timestamp/);
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(
+      /coalesce\(s\.name, c\.spaceId\) AS spaceName/
+    );
+  });
+
+  it('ITEM_RECENT_COMMITS resolves spaceName via OPTIONAL MATCH on :IN_SPACE', () => {
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(
+      /OPTIONAL MATCH \(c\)-\[:IN_SPACE\]->\(s:Space\)/
+    );
+  });
+});
+
+describe('SdkSpacesClient.itemRecentCommits', () => {
+  it('rejects empty id', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.itemRecentCommits('')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('defaults limit to 20 and leaves since as null', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    const client = makeClient(stub);
+    await client.itemRecentCommits('asset-1');
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toEqual({ id: 'asset-1', limit: 20, since: null });
+  });
+
+  it('caps limit at 100', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    const client = makeClient(stub);
+    await client.itemRecentCommits('asset-1', { limit: 9999 });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toMatchObject({ limit: 100 });
+  });
+
+  it('rejects zero / negative limit by falling back to default (20)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    const client = makeClient(stub);
+    await client.itemRecentCommits('asset-1', { limit: -10 });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toMatchObject({ limit: 20 });
+  });
+
+  it('forwards a numeric since cutoff', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    const client = makeClient(stub);
+    await client.itemRecentCommits('asset-1', { since: 1_700_000_000_000 });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toMatchObject({ since: 1_700_000_000_000 });
+  });
+
+  it('treats negative / NaN since as null (defensive)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    const client = makeClient(stub);
+    await client.itemRecentCommits('asset-1', { since: -1 });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toMatchObject({ since: null });
+  });
+
+  it('maps rows into Event[] with spaceId/spaceName when present', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', [
+      {
+        id: 'h1',
+        author: 'Audit Agent',
+        kind: 'item:added',
+        timestamp: '1778691652347',
+        spaceId: 'sp-1',
+        spaceName: 'Engineering',
+      },
+      {
+        id: 'h2',
+        author: 'system',
+        kind: 'item:updated',
+        timestamp: '1778691000000',
+      },
+    ]);
+    const client = makeClient(stub);
+    const events = await client.itemRecentCommits('asset-1');
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      id: 'h1',
+      author: 'Audit Agent',
+      kind: 'item:added',
+      spaceId: 'sp-1',
+      spaceName: 'Engineering',
+    });
+    expect(events[1]).not.toHaveProperty('spaceName');
+    expect(events[1]).not.toHaveProperty('spaceId');
+  });
+
+  it('returns [] when the asset has no commits (OPTIONAL MATCH absorbs not-found)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    const client = makeClient(stub);
+    const events = await client.itemRecentCommits('ghost-asset');
+    expect(events).toEqual([]);
   });
 });

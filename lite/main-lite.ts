@@ -40,6 +40,7 @@ import { initAuth, type AuthHandle } from './auth/main.js';
 import { initTotp, type TotpHandle } from './totp/main.js';
 import { initSettings, type SettingsHandle } from './settings/main.js';
 import { initHelp, type HelpHandle } from './help/main.js';
+import { initTray, type TrayHandle } from './tray/main.js';
 import { initSpaces, type SpacesHandle } from './spaces/main.js';
 import { initApiDocs, type ApiDocsHandle } from './api-docs/main.js';
 import { initHealth, type HealthHandle } from './health/main.js';
@@ -208,6 +209,7 @@ let authHandle: AuthHandle | null = null;
 let totpHandle: TotpHandle | null = null;
 let settingsHandle: SettingsHandle | null = null;
 let helpHandle: HelpHandle | null = null;
+let trayHandle: TrayHandle | null = null;
 let spacesHandle: SpacesHandle | null = null;
 let apiDocsHandle: ApiDocsHandle | null = null;
 let healthHandle: HealthHandle | null = null;
@@ -625,6 +627,30 @@ app
       });
     } catch (err) {
       getLoggingApi().error('help', 'initHelp threw', {
+        error: (err as Error).message,
+      });
+    }
+
+    // Install the tray icon (macOS menu bar / Windows system tray /
+    // Linux notification area). Returns null if no tray icon can be
+    // loaded -- the kernel continues to boot without one. Wired AFTER
+    // settings + help so the context-menu callbacks have somewhere to
+    // delegate to. `getMainWindow` is read on every click so we don't
+    // capture a stale handle if the main window is re-created later.
+    try {
+      trayHandle = initTray({
+        getMainWindow: () => mainWindow,
+        onOpenSettings: () => settingsHandle?.open(),
+        onOpenHelp: () => helpHandle?.open(),
+        onOpenSpaces: () => spacesHandle?.open(),
+        logger: {
+          info: (msg, data) => logQueue.info('tray', msg, data),
+          warn: (msg, data) => logQueue.warn('tray', msg, data),
+          error: (msg, data) => logQueue.error('tray', msg, data),
+        },
+      });
+    } catch (err) {
+      getLoggingApi().error('tray', 'initTray threw', {
         error: (err as Error).message,
       });
     }
@@ -1204,6 +1230,11 @@ app.on('before-quit', () => {
   }
   try {
     helpHandle?.teardown();
+  } catch {
+    /* shutdown best-effort */
+  }
+  try {
+    trayHandle?.teardown();
   } catch {
     /* shutdown best-effort */
   }

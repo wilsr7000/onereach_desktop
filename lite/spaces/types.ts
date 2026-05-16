@@ -174,6 +174,34 @@ export interface ListOpts {
   offset?: number;
 }
 
+/**
+ * Patch shape for `items.update(id, patch)` (Phase 3b).
+ * Every field is optional — the SDK only writes what's provided.
+ * Empty strings are treated as "clear this field" so a user can
+ * remove a description by setting it to "".
+ */
+export interface ItemUpdatePatch {
+  /** New display name. Trimmed; rejected if longer than `MAX_ITEM_TITLE_LENGTH`. */
+  title?: string;
+  /** Free-form description. Trimmed; capped at `MAX_ITEM_DESCRIPTION_LENGTH`. */
+  description?: string;
+  /** New `ItemKind`. Used by the renderer's "Reclassify" affordance. */
+  type?: ItemKind;
+  /**
+   * Optional editor id (a `:Person.id`). When provided, the SDK
+   * MERGEs a `[:LAST_EDITED]->(:Person {id})` edge so the detail
+   * pane can attribute the change. Null/missing skips the edge.
+   */
+  editorId?: string;
+}
+
+/** Max title length enforced client-side. */
+export const MAX_ITEM_TITLE_LENGTH = 200 as const;
+/** Max description length enforced client-side. */
+export const MAX_ITEM_DESCRIPTION_LENGTH = 4000 as const;
+/** Max tag name length (single tag). */
+export const MAX_ITEM_TAG_LENGTH = 60 as const;
+
 // ─── Mutation inputs (Phase 3a) ─────────────────────────────────────────
 //
 // Inputs for `spaces.create` / `.rename` / `.delete` / `.undelete`. All
@@ -359,4 +387,19 @@ export interface RecentItemsOpts {
 export interface AgentsSampleOpts {
   /** Default 3 (matches Home Card 3 row count). Capped at 200. */
   limit?: number;
+}
+
+/**
+ * Options shape for `items.recentCommits(id, opts?)` (Phase 3c).
+ * Returns commits that reference the given Asset. Used by the detail
+ * pane's per-asset activity log.
+ *
+ * Distinct from `RecentEventsOpts` (which is Space-scoped). No `spaceId`
+ * field: asset-scoping is implicit from the `id` argument.
+ */
+export interface RecentCommitsOpts {
+  /** Default 20; capped at 100. */
+  limit?: number;
+  /** Optional epoch ms cutoff; events with `timestamp >= since` only. */
+  since?: number;
 }

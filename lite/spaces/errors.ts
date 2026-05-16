@@ -31,6 +31,19 @@ export const SPACES_ERROR_CODES = {
   INVALID_INPUT: 'SPACES_INVALID_INPUT',
   /** Spaces SDK called before `initSpaces()` ran. */
   NOT_INITIALIZED: 'SPACES_NOT_INITIALIZED',
+  /**
+   * `create()` or `rename()` collided with an existing Space name in the
+   * same account. Names are unique per account; renderers surface this
+   * as "A space called 'X' already exists -- try a different name."
+   */
+  DUPLICATE_NAME: 'SPACES_DUPLICATE_NAME',
+  /**
+   * Hard `delete({ soft: false })` was attempted on a Space that still
+   * contains items. Soft-delete (the default) keeps the items reachable
+   * via Uncategorized; hard-delete refuses so data can't be orphaned
+   * accidentally. Caller should soft-delete or move items out first.
+   */
+  DELETE_NON_EMPTY: 'SPACES_DELETE_NON_EMPTY',
 } as const;
 
 export type SpacesErrorCode =

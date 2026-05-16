@@ -47,7 +47,23 @@ runApiConformanceContract<SpacesApi>({
   getInstance: getSpacesApi,
   resetForTesting: _resetSpacesApiForTesting,
   setForTesting: _setSpacesApiForTesting,
-  expectedMethods: ['open', 'listSpaces', 'getUncategorizedCount'],
+  expectedMethods: [
+    'open',
+    'listSpaces',
+    'getUncategorizedCount',
+    // Home view (chunk 3k + 3o)
+    'getEntityCounts',
+    'listRecentItems',
+    'topContributors',
+    'listRecentEvents',
+    'listAgentsSample',
+    'getPermissionSummary',
+    // Mutations (Phase 3a)
+    'createSpace',
+    'renameSpace',
+    'deleteSpace',
+    'undeleteSpace',
+  ],
 });
 
 // 2. Module-specific shape tests.
@@ -86,6 +102,40 @@ describe('SpacesApi (default singleton)', () => {
     _resetSpacesApiForTesting();
     const api = getSpacesApi();
     await expect(api.items.get('any-id')).rejects.toMatchObject({
+      code: SPACES_ERROR_CODES.NOT_INITIALIZED,
+    });
+  });
+
+  // Mutations (Phase 3a) -- each rejects with NOT_INITIALIZED before
+  // initSpaces() runs, matching the rest of the surface.
+  it('createSpace() rejects with SPACES_NOT_INITIALIZED before init', async () => {
+    _resetSpacesApiForTesting();
+    const api = getSpacesApi();
+    await expect(api.createSpace({ name: 'whatever' })).rejects.toMatchObject({
+      code: SPACES_ERROR_CODES.NOT_INITIALIZED,
+    });
+  });
+
+  it('renameSpace() rejects with SPACES_NOT_INITIALIZED before init', async () => {
+    _resetSpacesApiForTesting();
+    const api = getSpacesApi();
+    await expect(api.renameSpace('space-x', 'new name')).rejects.toMatchObject({
+      code: SPACES_ERROR_CODES.NOT_INITIALIZED,
+    });
+  });
+
+  it('deleteSpace() rejects with SPACES_NOT_INITIALIZED before init', async () => {
+    _resetSpacesApiForTesting();
+    const api = getSpacesApi();
+    await expect(api.deleteSpace('space-x')).rejects.toMatchObject({
+      code: SPACES_ERROR_CODES.NOT_INITIALIZED,
+    });
+  });
+
+  it('undeleteSpace() rejects with SPACES_NOT_INITIALIZED before init', async () => {
+    _resetSpacesApiForTesting();
+    const api = getSpacesApi();
+    await expect(api.undeleteSpace('space-x')).rejects.toMatchObject({
       code: SPACES_ERROR_CODES.NOT_INITIALIZED,
     });
   });

@@ -37,6 +37,22 @@ export const SPACES_EVENTS = {
   UNCATEGORIZED_COUNT_START: 'spaces.uncategorizedCount.start',
   UNCATEGORIZED_COUNT_FINISH: 'spaces.uncategorizedCount.finish',
   UNCATEGORIZED_COUNT_FAIL: 'spaces.uncategorizedCount.fail',
+  // ─── create (Phase 3a) ───────────────────────────────────────────────
+  CREATE_START: 'spaces.create.start',
+  CREATE_FINISH: 'spaces.create.finish',
+  CREATE_FAIL: 'spaces.create.fail',
+  // ─── rename (Phase 3a) ───────────────────────────────────────────────
+  RENAME_START: 'spaces.rename.start',
+  RENAME_FINISH: 'spaces.rename.finish',
+  RENAME_FAIL: 'spaces.rename.fail',
+  // ─── delete (Phase 3a) ───────────────────────────────────────────────
+  DELETE_START: 'spaces.delete.start',
+  DELETE_FINISH: 'spaces.delete.finish',
+  DELETE_FAIL: 'spaces.delete.fail',
+  // ─── undelete (Phase 3a) ─────────────────────────────────────────────
+  UNDELETE_START: 'spaces.undelete.start',
+  UNDELETE_FINISH: 'spaces.undelete.finish',
+  UNDELETE_FAIL: 'spaces.undelete.fail',
 } as const;
 
 export type SpacesEventName = (typeof SPACES_EVENTS)[keyof typeof SPACES_EVENTS];
@@ -140,6 +156,96 @@ export interface SpacesUncategorizedCountFailEvent extends SpacesEventBase {
   error: SerializedEventError;
 }
 
+// ─── create (Phase 3a) ───────────────────────────────────────────────────
+//
+// The mutation events carry a SPACE id where known. `start` doesn't have
+// one (the Space hasn't been created yet); `finish` carries the assigned
+// id so consumers can correlate. `fail` carries no id when the error
+// arose before assignment.
+
+interface SpacesIdData {
+  spaceId?: string;
+}
+
+export interface SpacesCreateStartEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.CREATE_START;
+  level: 'info';
+  /** `nameLength` is logged instead of the name itself -- names can be PII (project codenames, client names). */
+  data: { nameLength: number; hasDescription: boolean };
+}
+export interface SpacesCreateFinishEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.CREATE_FINISH;
+  level: 'info';
+  durationMs: number;
+  data: SpacesIdData;
+}
+export interface SpacesCreateFailEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.CREATE_FAIL;
+  level: 'error';
+  durationMs: number;
+  error: SerializedEventError;
+}
+
+// ─── rename (Phase 3a) ───────────────────────────────────────────────────
+
+export interface SpacesRenameStartEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.RENAME_START;
+  level: 'info';
+  data: SpacesIdData & { nameLength: number };
+}
+export interface SpacesRenameFinishEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.RENAME_FINISH;
+  level: 'info';
+  durationMs: number;
+  data: SpacesIdData;
+}
+export interface SpacesRenameFailEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.RENAME_FAIL;
+  level: 'error';
+  durationMs: number;
+  error: SerializedEventError;
+}
+
+// ─── delete (Phase 3a) ───────────────────────────────────────────────────
+
+export interface SpacesDeleteStartEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.DELETE_START;
+  level: 'info';
+  data: SpacesIdData & { soft: boolean };
+}
+export interface SpacesDeleteFinishEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.DELETE_FINISH;
+  level: 'info';
+  durationMs: number;
+  data: SpacesIdData & { soft: boolean };
+}
+export interface SpacesDeleteFailEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.DELETE_FAIL;
+  level: 'error';
+  durationMs: number;
+  error: SerializedEventError;
+}
+
+// ─── undelete (Phase 3a) ─────────────────────────────────────────────────
+
+export interface SpacesUndeleteStartEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.UNDELETE_START;
+  level: 'info';
+  data: SpacesIdData;
+}
+export interface SpacesUndeleteFinishEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.UNDELETE_FINISH;
+  level: 'info';
+  durationMs: number;
+  data: SpacesIdData;
+}
+export interface SpacesUndeleteFailEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.UNDELETE_FAIL;
+  level: 'error';
+  durationMs: number;
+  error: SerializedEventError;
+}
+
 /** Discriminated union -- branch on `ev.name` to narrow `ev.data`. */
 export type SpacesEvent =
   | SpacesListSpacesStartEvent
@@ -153,7 +259,19 @@ export type SpacesEvent =
   | SpacesItemsGetFailEvent
   | SpacesUncategorizedCountStartEvent
   | SpacesUncategorizedCountFinishEvent
-  | SpacesUncategorizedCountFailEvent;
+  | SpacesUncategorizedCountFailEvent
+  | SpacesCreateStartEvent
+  | SpacesCreateFinishEvent
+  | SpacesCreateFailEvent
+  | SpacesRenameStartEvent
+  | SpacesRenameFinishEvent
+  | SpacesRenameFailEvent
+  | SpacesDeleteStartEvent
+  | SpacesDeleteFinishEvent
+  | SpacesDeleteFailEvent
+  | SpacesUndeleteStartEvent
+  | SpacesUndeleteFinishEvent
+  | SpacesUndeleteFailEvent;
 
 /**
  * Type-guard. Use to narrow a generic `EventRecord` to the typed

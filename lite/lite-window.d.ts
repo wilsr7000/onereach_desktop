@@ -627,6 +627,35 @@ interface LiteSpacesItemsBridge {
    * binary download links.
    */
   resolveFileUrl(key: string): Promise<LiteSpacesIpcResult<string | null>>;
+  /**
+   * Phase 3b item mutations. Each returns the updated server state
+   * (the full Item for `update`, the post-mutation tag list for
+   * `addTag` / `removeTag`) so the renderer can refresh without
+   * issuing a follow-up `get`.
+   */
+  update(
+    id: string,
+    patch: {
+      title?: string;
+      description?: string;
+      type?: LiteSpaceItemKind;
+      editorId?: string;
+    }
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  addTag(id: string, tag: string): Promise<LiteSpacesIpcResult<string[]>>;
+  removeTag(id: string, tag: string): Promise<LiteSpacesIpcResult<string[]>>;
+  /**
+   * Phase 3c — per-asset activity log. Returns recent `:Commit` rows
+   * referencing this asset, ordered newest first. Same row shape as
+   * the home-feed event view so the detail-pane timeline can reuse the
+   * existing event-row renderer.
+   *
+   * Defaults: 20 rows. Cap: 100.
+   */
+  recentCommits(
+    id: string,
+    opts?: { limit?: number; since?: number }
+  ): Promise<LiteSpacesIpcResult<LiteSpacesEventView[]>>;
 }
 
 // ─── Home view (chunk 3k + 3o) ───────────────────────────────────────────

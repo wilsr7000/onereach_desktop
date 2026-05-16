@@ -48,8 +48,16 @@ import type {
   AgentsSampleOpts,
   CreateSpaceInput,
   DeleteSpaceOpts,
+  ItemUpdatePatch,
+  RecentCommitsOpts,
 } from './types.js';
-import { MAX_SPACE_NAME_LENGTH, MAX_SPACE_DESC_LENGTH } from './types.js';
+import {
+  MAX_SPACE_NAME_LENGTH,
+  MAX_SPACE_DESC_LENGTH,
+  MAX_ITEM_TITLE_LENGTH,
+  MAX_ITEM_DESCRIPTION_LENGTH,
+  MAX_ITEM_TAG_LENGTH,
+} from './types.js';
 import type { SpaceScope } from './scope.js';
 
 /**
@@ -172,6 +180,93 @@ export const CYPHER = {
     SKIP toInteger($offset)
     LIMIT toInteger($limit)
   `,
+  /**
+   * Update mutable fields on an :Asset node (Phase 3b). All inputs
+   * are optional; the SET clause uses the canonical field name and
+   * sets `a.updatedAt` to the current ISO timestamp via $now. The
+   * caller-side helper coerces missing fields out of $patch so we
+   * only mutate what the user actually changed.
+   *
+   * `[:LAST_EDITED]` edge is created/updated from a `:Person {id:
+   * $editorId}` when present so the detail pane's attribution can
+   * reflect the change. When `$editorId` is empty/null the edge
+   * update is skipped (anonymous edit path).
+   */
+  UPDATE_ITEM: `
+    MATCH (a:Asset {id: $id})
+    SET a.name = coalesce($title, a.name),
+        a.title = coalesce($title, a.title),
+        a.description = coalesce($description, a.description),
+        a.type = coalesce($type, a.type),
+        a.updatedAt = $now
+    WITH a
+    OPTIONAL MATCH (a)<-[r:LAST_EDITED]-(:Person)
+    DELETE r
+    WITH a
+    OPTIONAL MATCH (p:Person {id: $editorId})
+    FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
+      MERGE (x)-[:LAST_EDITED]->(a))
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Add a tag to an :Asset by edge model.
+   * MERGE the :Tag node by name, then MERGE the edge. Idempotent —
+   * duplicate `addTag('q3')` calls are no-ops.
+   */
+  ADD_TAG: `
+    MATCH (a:Asset {id: $id})
+    MERGE (t:Tag {name: $tag})
+    MERGE (a)-[:TAGGED_AS]->(t)
+    RETURN a.id AS id, t.name AS tag
+  `,
+
+  /**
+   * Remove a tag from an :Asset. Cleans up the edge; leaves the
+   * :Tag node in place (it may still be referenced by other assets).
+   */
+  REMOVE_TAG: `
+    MATCH (a:Asset {id: $id})-[r:TAGGED_AS]->(t:Tag {name: $tag})
+    DELETE r
+    RETURN a.id AS id, t.name AS tag
+  `,
+
+  /**
+   * Per-asset activity log (Phase 3c). Returns the most recent
+   * `:Commit` rows that reference the given Asset. The match is
+   * intentionally schema-tolerant — different producers attach the
+   * Asset to a commit via:
+   *   - `:Commit.assetId`  (canonical singular)
+   *   - `:Commit.targetId` (legacy alias)
+   *   - `:Commit.assetIds` (canonical array, for multi-asset commits)
+   *   - `[:TOUCHED]->(:Asset)` edge (canonical edge model)
+   *
+   * The `$since` cutoff and `$limit` mirror the home-feed
+   * `HOME_RECENT_EVENTS` query so the projection / row shape stays
+   * identical — renderer code that knows how to draw a `RendererEvent`
+   * draws an asset-scoped row without any new ceremony.
+   */
+  ITEM_RECENT_COMMITS: `
+    MATCH (a:Asset {id: $id})
+    OPTIONAL MATCH (c:Commit)
+      WHERE c.assetId = $id
+         OR c.targetId = $id
+         OR $id IN coalesce(c.assetIds, [])
+         OR (c)-[:TOUCHED]->(a)
+    WITH a, c
+    WHERE c IS NOT NULL
+      AND ($since IS NULL OR c.timestamp >= $since)
+    OPTIONAL MATCH (c)-[:IN_SPACE]->(s:Space)
+    RETURN c.hash AS id,
+           c.author AS author,
+           c.message AS kind,
+           toString(c.timestamp) AS timestamp,
+           c.spaceId AS spaceId,
+           coalesce(s.name, c.spaceId) AS spaceName
+    ORDER BY c.timestamp DESC
+    LIMIT toInteger($limit)
+  `,
+
   GET_ITEM: `
     MATCH (a:Asset {id: $id})
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
@@ -556,6 +651,128 @@ export class SdkSpacesClient {
     const rows = await this.run(CYPHER.GET_ITEM, { id });
     if (rows.length === 0) return null;
     return toItem(rows[0] as Record<string, unknown>);
+  }
+
+  /**
+   * Update mutable fields on an Item (Phase 3b). Returns the
+   * freshly-projected Item via a follow-up `getItem` so the caller
+   * gets the updated `updatedAt`, lastEditedBy, etc. in one shape.
+   *
+   * Input is validated client-side:
+   *   - title: trimmed; 1..MAX_ITEM_TITLE_LENGTH chars
+   *   - description: trimmed; 0..MAX_ITEM_DESCRIPTION_LENGTH (empty = clear)
+   *   - type: must be a valid ItemKind
+   *   - editorId: optional `:Person.id`; empty = anonymous edit
+   *
+   * Throws `SPACES_INVALID_INPUT` for missing id or bad shapes.
+   */
+  async updateItem(id: string, patch: ItemUpdatePatch): Promise<Item> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'items.update requires a non-empty id',
+        remediation: 'Pass the canonical item id from a prior list result.',
+        context: { id },
+      });
+    }
+    const params = validateUpdatePatch(patch);
+    await this.run(CYPHER.UPDATE_ITEM, { id, ...params, now: new Date().toISOString() });
+    const updated = await this.getItem(id);
+    if (updated === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: 'Item disappeared between update and re-fetch',
+        remediation:
+          'Refresh the list; the asset may have been deleted by another producer mid-edit.',
+        context: { id },
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Add a tag to an Item. Returns the updated tag list (post-merge,
+   * de-duplicated) read from the canonical edge projection. Empty /
+   * whitespace-only tags are rejected with `SPACES_INVALID_INPUT`.
+   */
+  async addTag(id: string, tag: string): Promise<string[]> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'addTag requires a non-empty id',
+        context: { id },
+      });
+    }
+    const normalized = normalizeTag(tag);
+    if (normalized === null) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `Tag must be 1..${MAX_ITEM_TAG_LENGTH} chars after trim`,
+        context: { tag },
+      });
+    }
+    await this.run(CYPHER.ADD_TAG, { id, tag: normalized });
+    const updated = await this.getItem(id);
+    return updated?.tags ?? [];
+  }
+
+  /**
+   * Remove a tag from an Item. No-op if the edge is already absent
+   * (the underlying MATCH won't find anything to DELETE — Cypher
+   * just returns empty rows). Returns the updated tag list.
+   */
+  async removeTag(id: string, tag: string): Promise<string[]> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'removeTag requires a non-empty id',
+        context: { id },
+      });
+    }
+    const normalized = normalizeTag(tag);
+    if (normalized === null) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `Tag must be 1..${MAX_ITEM_TAG_LENGTH} chars after trim`,
+        context: { tag },
+      });
+    }
+    await this.run(CYPHER.REMOVE_TAG, { id, tag: normalized });
+    const updated = await this.getItem(id);
+    return updated?.tags ?? [];
+  }
+
+  /**
+   * Per-asset activity log (Phase 3c). Returns the most recent commits
+   * touching the given Asset. Row shape mirrors `listRecentEvents()` so
+   * the renderer reuses the same event-row layout.
+   *
+   * Defaults: limit 20 (one screen of activity), no `since` cutoff.
+   * Caps: limit 100 (prevents large server-side scans).
+   *
+   * Soft-fails: an unknown asset returns `[]` rather than throwing,
+   * because the OPTIONAL MATCH on the Cypher side already absorbs the
+   * not-found case. Callers that need a hard 404 should call `getItem`
+   * first.
+   */
+  async itemRecentCommits(
+    id: string,
+    opts: RecentCommitsOpts = {}
+  ): Promise<Event[]> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'recentCommits requires a non-empty id',
+        context: { id },
+      });
+    }
+    const limit = clampSmallLimit(opts.limit, 20, 100);
+    const since =
+      typeof opts.since === 'number' && Number.isFinite(opts.since) && opts.since >= 0
+        ? Math.floor(opts.since)
+        : null;
+    const rows = await this.run(CYPHER.ITEM_RECENT_COMMITS, { id, limit, since });
+    return rows.map(toEvent).filter((e): e is Event => e !== null);
   }
 
   // ─── Home view methods (chunk 3k) ──────────────────────────────────────
@@ -1296,4 +1513,97 @@ function toPermissionSummary(
 function clampOffset(v: number | undefined): number {
   if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return 0;
   return Math.floor(v);
+}
+
+/**
+ * Validate + normalize an `ItemUpdatePatch` into the Cypher params
+ * shape ({ title, description, type, editorId } — all nullable).
+ * Throws `SPACES_INVALID_INPUT` on length / type violations.
+ *
+ * Untouched fields collapse to `null` so the Cypher's
+ * `coalesce($title, a.name)` keeps the existing value. Empty
+ * description ("") is distinct from missing — it clears the field.
+ */
+function validateUpdatePatch(
+  patch: ItemUpdatePatch
+): { title: string | null; description: string | null; type: string | null; editorId: string | null } {
+  const out = {
+    title: null as string | null,
+    description: null as string | null,
+    type: null as string | null,
+    editorId: null as string | null,
+  };
+  if (patch === null || typeof patch !== 'object') {
+    return out;
+  }
+  if (patch.title !== undefined) {
+    if (typeof patch.title !== 'string') {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'title must be a string',
+        context: { title: typeof patch.title },
+      });
+    }
+    const trimmed = patch.title.trim();
+    if (trimmed.length === 0 || trimmed.length > MAX_ITEM_TITLE_LENGTH) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `title must be 1..${MAX_ITEM_TITLE_LENGTH} chars after trim`,
+        context: { length: trimmed.length, max: MAX_ITEM_TITLE_LENGTH },
+      });
+    }
+    out.title = trimmed;
+  }
+  if (patch.description !== undefined) {
+    if (typeof patch.description !== 'string') {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'description must be a string',
+        context: { description: typeof patch.description },
+      });
+    }
+    const trimmed = patch.description.trim();
+    if (trimmed.length > MAX_ITEM_DESCRIPTION_LENGTH) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `description longer than ${MAX_ITEM_DESCRIPTION_LENGTH} chars`,
+        context: { length: trimmed.length, max: MAX_ITEM_DESCRIPTION_LENGTH },
+      });
+    }
+    out.description = trimmed;
+  }
+  if (patch.type !== undefined) {
+    if (typeof patch.type !== 'string' || !(ITEM_KINDS as Set<string>).has(patch.type)) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'type must be a valid ItemKind',
+        context: { type: patch.type },
+      });
+    }
+    out.type = patch.type;
+  }
+  if (patch.editorId !== undefined) {
+    if (typeof patch.editorId !== 'string') {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'editorId must be a string',
+        context: { editorId: typeof patch.editorId },
+      });
+    }
+    const trimmed = patch.editorId.trim();
+    if (trimmed.length > 0) out.editorId = trimmed;
+  }
+  return out;
+}
+
+/**
+ * Normalize a tag string. Returns `null` when it's empty after
+ * trim or exceeds `MAX_ITEM_TAG_LENGTH`. Pure; exported for tests
+ * (re-exported from api.ts indirectly via the SDK error path).
+ */
+function normalizeTag(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_ITEM_TAG_LENGTH) return null;
+  return trimmed;
 }
