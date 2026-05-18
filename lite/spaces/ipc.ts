@@ -38,6 +38,7 @@ import type {
   SpaceMember,
   CreateAssetInput,
   DeleteAssetOpts,
+  SearchItemsOpts,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import type { DiscoveryResults } from './discovery-format.js';
@@ -85,6 +86,11 @@ export const SPACES_IPC = {
   ITEMS_CREATE: 'lite:spaces:items:create',
   ITEMS_DELETE: 'lite:spaces:items:delete',
   ITEMS_RESTORE: 'lite:spaces:items:restore',
+  /** Sprint 3 — move / copy / search. */
+  ITEMS_MOVE_TO_SPACE: 'lite:spaces:items:moveToSpace',
+  ITEMS_ADD_TO_SPACE: 'lite:spaces:items:addToSpace',
+  ITEMS_REMOVE_FROM_SPACE: 'lite:spaces:items:removeFromSpace',
+  ITEMS_SEARCH: 'lite:spaces:items:search',
 } as const;
 
 /**
@@ -752,6 +758,87 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
       try {
         const id = typeof payload?.id === 'string' ? payload.id : '';
         const value = await getSpacesApi().items.restore(id);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // ─── Sprint 3: move / copy / search ──────────────────────────────────
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_MOVE_TO_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; fromSpaceId?: unknown; toSpaceId?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const fromSpaceId =
+          typeof payload?.fromSpaceId === 'string' ? payload.fromSpaceId : null;
+        const toSpaceId =
+          typeof payload?.toSpaceId === 'string' ? payload.toSpaceId : '';
+        const value = await getSpacesApi().items.moveToSpace(
+          id,
+          fromSpaceId,
+          toSpaceId
+        );
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_ADD_TO_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; toSpaceId?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const toSpaceId =
+          typeof payload?.toSpaceId === 'string' ? payload.toSpaceId : '';
+        const value = await getSpacesApi().items.addToSpace(id, toSpaceId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_REMOVE_FROM_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; spaceId?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const spaceId =
+          typeof payload?.spaceId === 'string' ? payload.spaceId : '';
+        const value = await getSpacesApi().items.removeFromSpace(id, spaceId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_SEARCH,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { opts?: unknown }
+    ): Promise<SpacesIpcResult<ItemSummary[]>> => {
+      try {
+        const opts =
+          payload?.opts !== null && typeof payload?.opts === 'object'
+            ? (payload?.opts as SearchItemsOpts)
+            : ({ query: '' } as SearchItemsOpts);
+        const value = await getSpacesApi().items.search(opts);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

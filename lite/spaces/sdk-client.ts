@@ -62,6 +62,7 @@ import type {
   SpaceMember,
   CreateAssetInput,
   DeleteAssetOpts,
+  SearchItemsOpts,
 } from './types.js';
 import {
   MAX_SPACE_NAME_LENGTH,
@@ -958,6 +959,107 @@ export const CYPHER = {
     MATCH (a:Asset {id: $id})
     DETACH DELETE a
   `,
+
+  // ─── Sprint 3: move + copy + search ──────────────────────────────────
+
+  /**
+   * Move an asset to a different Space. Drops the [:BELONGS_TO] edge
+   * to the source space (if present) and MERGEs a new one to the
+   * target. When `$fromSpaceId` is null/empty, the asset was
+   * uncategorized and only the new edge is created.
+   *
+   * Asset stays in any OTHER spaces it was already in — this is a
+   * primary-space move, not a "remove from everywhere".
+   */
+  MOVE_ASSET_TO_SPACE: `
+    MATCH (a:Asset {id: $id})
+      WHERE a.deletedAt IS NULL
+    MATCH (target:Space {id: $toSpaceId})
+      WHERE target.deletedAt IS NULL
+    OPTIONAL MATCH (a)-[old:BELONGS_TO]->(source:Space {id: $fromSpaceId})
+      WHERE source.deletedAt IS NULL
+    DELETE old
+    WITH a, target
+    MERGE (a)-[:BELONGS_TO]->(target)
+    SET a.updatedAt = $now
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Add an asset to ANOTHER space (multi-space membership). MERGE
+   * makes it idempotent — adding to a space the asset already lives
+   * in is a no-op.
+   */
+  ADD_ASSET_TO_SPACE: `
+    MATCH (a:Asset {id: $id})
+      WHERE a.deletedAt IS NULL
+    MATCH (target:Space {id: $toSpaceId})
+      WHERE target.deletedAt IS NULL
+    MERGE (a)-[:BELONGS_TO]->(target)
+    SET a.updatedAt = $now
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Remove an asset from a specific space (drop one [:BELONGS_TO]
+   * edge). Does NOT soft-delete the asset — the asset may still live
+   * in other spaces. Use `SOFT_DELETE_ASSET` to remove from
+   * everywhere.
+   */
+  REMOVE_ASSET_FROM_SPACE: `
+    MATCH (a:Asset {id: $id})-[r:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE a.deletedAt IS NULL
+    DELETE r
+    SET a.updatedAt = $now
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Search assets in a Space by title / description / content match.
+   * Case-insensitive substring search via `CONTAINS toLower(...)`.
+   * Scope null/empty searches across every non-soft-deleted asset
+   * the user can see; non-empty `spaceId` restricts to one space.
+   *
+   * Row shape matches LIST_ITEMS_IN_SPACE so the renderer can reuse
+   * the existing item-row builder.
+   */
+  SEARCH_ITEMS: `
+    MATCH (a:Asset)
+      WHERE a.deletedAt IS NULL
+        AND (
+          toLower(coalesce(a.name, a.title, '')) CONTAINS toLower($query)
+          OR toLower(coalesce(a.description, '')) CONTAINS toLower($query)
+          OR toLower(coalesce(a.excerpt, '')) CONTAINS toLower($query)
+        )
+        AND ($spaceId IS NULL
+             OR EXISTS { MATCH (a)-[:BELONGS_TO]->(:Space {id: $spaceId}) })
+    OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
+      WHERE s.deletedAt IS NULL
+    OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
+    WITH a,
+         collect(DISTINCT { id: s.id,
+                            name: coalesce(s.name, s.id),
+                            color: s.color,
+                            iconKey: coalesce(s.iconKey, s.icon) }) AS spacesRaw,
+         head(collect(creator)) AS producer
+    RETURN a.id AS id,
+           coalesce(a.name, a.title, a.id) AS title,
+           coalesce(a.type, a.assetType, 'other') AS kind,
+           coalesce(a.url, a.fileUrl) AS fileKey,
+           coalesce(a.sourceUrl, a.source) AS sourceUrl,
+           coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
+           coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
+           coalesce(a.excerpt, a.description, a.notes) AS excerpt,
+           [x IN spacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
+           CASE WHEN producer IS NULL
+                THEN null
+                ELSE { kind: head(labels(producer)),
+                       name: coalesce(producer.name, producer.title, ''),
+                       id: producer.id }
+           END AS producedBy
+    ORDER BY coalesce(toString(a.updatedAt), toString(a.updated_at), '') DESC
+    LIMIT toInteger($limit)
+  `,
 } as const;
 
 /**
@@ -1820,6 +1922,164 @@ export class SdkSpacesClient {
       });
     }
     return restored;
+  }
+
+  // ─── Sprint 3: move / copy / search ──────────────────────────────────
+
+  /**
+   * Move an asset to a different Space. If `fromSpaceId` is empty, the
+   * asset was uncategorized and only the new [:BELONGS_TO] edge is
+   * created. Asset stays in any other spaces it was in.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for empty id/toSpaceId;
+   *   `SPACES_NOT_FOUND` if asset OR target is missing.
+   */
+  async moveAssetToSpace(
+    id: string,
+    fromSpaceId: string | null,
+    toSpaceId: string
+  ): Promise<Item> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'moveAssetToSpace requires a non-empty id',
+        context: { id },
+      });
+    }
+    if (typeof toSpaceId !== 'string' || toSpaceId.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'moveAssetToSpace requires a non-empty toSpaceId',
+        context: { toSpaceId },
+      });
+    }
+    const now = nowIso();
+    const params = {
+      id,
+      fromSpaceId:
+        typeof fromSpaceId === 'string' && fromSpaceId.length > 0
+          ? fromSpaceId
+          : null,
+      toSpaceId,
+      now,
+    };
+    const rows = await this.run(CYPHER.MOVE_ASSET_TO_SPACE, params);
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: 'Asset or target space not found',
+        context: { id, toSpaceId },
+      });
+    }
+    const moved = await this.getItem(id);
+    if (moved === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} disappeared after move`,
+        context: { id },
+      });
+    }
+    return moved;
+  }
+
+  /**
+   * Add an asset to ANOTHER space (multi-space membership). Idempotent.
+   * Returns the re-fetched Item so callers see the updated otherSpaces
+   * projection.
+   */
+  async addAssetToSpace(id: string, toSpaceId: string): Promise<Item> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'addAssetToSpace requires a non-empty id',
+        context: { id },
+      });
+    }
+    if (typeof toSpaceId !== 'string' || toSpaceId.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'addAssetToSpace requires a non-empty toSpaceId',
+        context: { toSpaceId },
+      });
+    }
+    const now = nowIso();
+    const rows = await this.run(CYPHER.ADD_ASSET_TO_SPACE, {
+      id,
+      toSpaceId,
+      now,
+    });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: 'Asset or target space not found',
+        context: { id, toSpaceId },
+      });
+    }
+    const updated = await this.getItem(id);
+    if (updated === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} disappeared after add`,
+        context: { id },
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Remove an asset from a specific space. Does NOT soft-delete the
+   * asset — it just drops one [:BELONGS_TO] edge. If the asset is in
+   * no other spaces, it lands in Uncategorized.
+   */
+  async removeAssetFromSpace(id: string, spaceId: string): Promise<Item> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'removeAssetFromSpace requires a non-empty id',
+        context: { id },
+      });
+    }
+    if (typeof spaceId !== 'string' || spaceId.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'removeAssetFromSpace requires a non-empty spaceId',
+        context: { spaceId },
+      });
+    }
+    const now = nowIso();
+    await this.run(CYPHER.REMOVE_ASSET_FROM_SPACE, { id, spaceId, now });
+    const updated = await this.getItem(id);
+    if (updated === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} disappeared after remove-from-space`,
+        context: { id },
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Search assets by title/description/excerpt substring. Returns an
+   * `ItemSummary[]` matching the LIST_ITEMS_* row shape so callers
+   * can render results in the existing item-card chrome.
+   */
+  async searchItems(opts: SearchItemsOpts): Promise<ItemSummary[]> {
+    const query = typeof opts.query === 'string' ? opts.query.trim() : '';
+    if (query.length === 0) return [];
+    const spaceId =
+      typeof opts.spaceId === 'string' && opts.spaceId.length > 0
+        ? opts.spaceId
+        : null;
+    const limit = clampSmallLimit(opts.limit, 50, 200);
+    const rows = await this.run(CYPHER.SEARCH_ITEMS, {
+      query,
+      spaceId,
+      limit,
+    });
+    return rows.map((row) =>
+      toItemSummary(row as Record<string, unknown>, { stripOtherSpaces: false })
+    );
   }
 
   // ─── Identity + sharing (Phase 4 v2) ─────────────────────────────────

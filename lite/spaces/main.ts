@@ -64,6 +64,7 @@ import type {
   SpaceMember,
   CreateAssetInput,
   DeleteAssetOpts,
+  SearchItemsOpts,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -260,6 +261,22 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
     restore(id: string): Promise<Item> {
       return client.restoreAsset(id);
+    },
+    moveToSpace(
+      id: string,
+      fromSpaceId: string | null,
+      toSpaceId: string
+    ): Promise<Item> {
+      return client.moveAssetToSpace(id, fromSpaceId, toSpaceId);
+    },
+    addToSpace(id: string, toSpaceId: string): Promise<Item> {
+      return client.addAssetToSpace(id, toSpaceId);
+    },
+    removeFromSpace(id: string, spaceId: string): Promise<Item> {
+      return client.removeAssetFromSpace(id, spaceId);
+    },
+    search(opts: SearchItemsOpts): Promise<ItemSummary[]> {
+      return client.searchItems(opts);
     },
   };
 

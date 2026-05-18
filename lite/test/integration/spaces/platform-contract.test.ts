@@ -165,6 +165,11 @@ function buildStubConsumer(): {
         maybeFail(undefined);
       },
       restore: async (_id) => maybeFail({} as unknown as Item),
+      // Sprint 3 — move/copy/search stubs.
+      moveToSpace: async (_id, _from, _to) => maybeFail({} as unknown as Item),
+      addToSpace: async (_id, _to) => maybeFail({} as unknown as Item),
+      removeFromSpace: async (_id, _space) => maybeFail({} as unknown as Item),
+      search: async (_opts) => maybeFail([] as ItemSummary[]),
     },
     // Home view (chunk 3k + 3o). Stub returns are not exercised by
     // the platform-contract tests below; they're here so the stub

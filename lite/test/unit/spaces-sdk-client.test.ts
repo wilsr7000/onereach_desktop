@@ -2578,3 +2578,206 @@ describe('SdkSpacesClient.restoreAsset', () => {
     expect(restored.id).toBe('i-1');
   });
 });
+
+// ─── Sprint 3: move / copy / search ─────────────────────────────────────
+
+describe('CYPHER source strings — Sprint 3 (move / copy / search)', () => {
+  it('MOVE_ASSET_TO_SPACE drops old BELONGS_TO and merges new one', () => {
+    expect(CYPHER.MOVE_ASSET_TO_SPACE).toMatch(/MATCH \(a:Asset \{id: \$id\}\)/);
+    expect(CYPHER.MOVE_ASSET_TO_SPACE).toMatch(/MATCH \(target:Space \{id: \$toSpaceId\}\)/);
+    expect(CYPHER.MOVE_ASSET_TO_SPACE).toMatch(
+      /OPTIONAL MATCH \(a\)-\[old:BELONGS_TO\]->\(source:Space \{id: \$fromSpaceId\}\)/
+    );
+    expect(CYPHER.MOVE_ASSET_TO_SPACE).toMatch(/DELETE old/);
+    expect(CYPHER.MOVE_ASSET_TO_SPACE).toMatch(/MERGE \(a\)-\[:BELONGS_TO\]->\(target\)/);
+  });
+
+  it('ADD_ASSET_TO_SPACE MERGEs an additional BELONGS_TO edge (idempotent)', () => {
+    expect(CYPHER.ADD_ASSET_TO_SPACE).toMatch(/MERGE \(a\)-\[:BELONGS_TO\]->\(target\)/);
+    expect(CYPHER.ADD_ASSET_TO_SPACE).not.toMatch(/DELETE/);
+  });
+
+  it('REMOVE_ASSET_FROM_SPACE drops one BELONGS_TO edge', () => {
+    expect(CYPHER.REMOVE_ASSET_FROM_SPACE).toMatch(
+      /MATCH \(a:Asset \{id: \$id\}\)-\[r:BELONGS_TO\]->\(s:Space \{id: \$spaceId\}\)/
+    );
+    expect(CYPHER.REMOVE_ASSET_FROM_SPACE).toMatch(/DELETE r/);
+  });
+
+  it('SEARCH_ITEMS uses case-insensitive CONTAINS across name + description + excerpt', () => {
+    expect(CYPHER.SEARCH_ITEMS).toMatch(/CONTAINS toLower\(\$query\)/);
+    expect(CYPHER.SEARCH_ITEMS).toMatch(/coalesce\(a\.name, a\.title, ''\)/);
+    expect(CYPHER.SEARCH_ITEMS).toMatch(/coalesce\(a\.description, ''\)/);
+    expect(CYPHER.SEARCH_ITEMS).toMatch(/coalesce\(a\.excerpt, ''\)/);
+  });
+
+  it('SEARCH_ITEMS scopes to a Space when $spaceId is non-null', () => {
+    expect(CYPHER.SEARCH_ITEMS).toMatch(/\$spaceId IS NULL/);
+    expect(CYPHER.SEARCH_ITEMS).toMatch(
+      /EXISTS \{ MATCH \(a\)-\[:BELONGS_TO\]->\(:Space \{id: \$spaceId\}\)/
+    );
+  });
+});
+
+describe('SdkSpacesClient.moveAssetToSpace', () => {
+  it('rejects empty id / toSpaceId', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.moveAssetToSpace('', null, 'sp-2')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+    await expect(client.moveAssetToSpace('i-1', null, '')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('throws SPACES_NOT_FOUND when neither asset nor target matches', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (a)-[:BELONGS_TO]->(target)', []);
+    const client = makeClient(stub);
+    await expect(
+      client.moveAssetToSpace('i-gone', null, 'sp-2')
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
+  });
+
+  it('passes fromSpaceId=null when empty, or the provided id otherwise', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (a)-[:BELONGS_TO]->(target)', [{ id: 'i-1' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 'x',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.moveAssetToSpace('i-1', '', 'sp-2');
+    const call1 = stub.calls.find((c) => c.cypher.includes('MERGE (a)-[:BELONGS_TO]->(target)'));
+    expect(call1?.parameters).toMatchObject({ fromSpaceId: null, toSpaceId: 'sp-2' });
+
+    await client.moveAssetToSpace('i-1', 'sp-old', 'sp-2');
+    const call2 = stub.calls
+      .reverse()
+      .find((c) => c.cypher.includes('MERGE (a)-[:BELONGS_TO]->(target)'));
+    expect(call2?.parameters).toMatchObject({ fromSpaceId: 'sp-old' });
+  });
+});
+
+describe('SdkSpacesClient.addAssetToSpace', () => {
+  it('rejects empty inputs', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.addAssetToSpace('', 'sp-2')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+    await expect(client.addAssetToSpace('i-1', '')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('returns the updated Item on success', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (a)-[:BELONGS_TO]->(target)', [{ id: 'i-1' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 'x',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [{ id: 'sp-2', name: 'New Space' }],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.addAssetToSpace('i-1', 'sp-2');
+    expect(item.otherSpaces).toEqual([{ id: 'sp-2', name: 'New Space' }]);
+  });
+});
+
+describe('SdkSpacesClient.removeAssetFromSpace', () => {
+  it('forwards spaceId + id as Cypher params', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('-[r:BELONGS_TO]->(s:Space {id: $spaceId})', [{ id: 'i-1' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 'x',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.removeAssetFromSpace('i-1', 'sp-2');
+    const call = stub.calls.find((c) =>
+      c.cypher.includes('-[r:BELONGS_TO]->(s:Space {id: $spaceId})')
+    );
+    expect(call?.parameters).toMatchObject({ id: 'i-1', spaceId: 'sp-2' });
+  });
+});
+
+describe('SdkSpacesClient.searchItems', () => {
+  it('returns [] for empty query without hitting Cypher', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    const out = await client.searchItems({ query: '   ' });
+    expect(out).toEqual([]);
+    expect(stub.calls.length).toBe(0);
+  });
+
+  it('passes query lowercased + spaceId when non-empty', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CONTAINS toLower($query)', []);
+    const client = makeClient(stub);
+    await client.searchItems({ query: 'AUDIT', spaceId: 'sp-1' });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toMatchObject({ query: 'AUDIT', spaceId: 'sp-1' });
+  });
+
+  it('null spaceId when not supplied', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CONTAINS toLower($query)', []);
+    const client = makeClient(stub);
+    await client.searchItems({ query: 'hello' });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toMatchObject({ spaceId: null });
+  });
+
+  it('maps rows into ItemSummary objects', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CONTAINS toLower($query)', [
+      {
+        id: 'i-1',
+        title: 'Audit notes',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const results = await client.searchItems({ query: 'audit' });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.title).toBe('Audit notes');
+  });
+
+  it('caps limit at 200', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CONTAINS toLower($query)', []);
+    const client = makeClient(stub);
+    await client.searchItems({ query: 'x', limit: 9999 });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.parameters).toMatchObject({ limit: 200 });
+  });
+});

@@ -53,6 +53,7 @@ import type {
   SpaceMember,
   CreateAssetInput,
   DeleteAssetOpts,
+  SearchItemsOpts,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -93,6 +94,7 @@ export type {
   SpaceMember,
   CreateAssetInput,
   DeleteAssetOpts,
+  SearchItemsOpts,
 } from './types.js';
 export {
   SPACES_MODULE_VERSION,
@@ -261,6 +263,33 @@ export interface SpacesItemsApi {
    *   OR wasn't soft-deleted.
    */
   restore(id: string): Promise<Item>;
+
+  /**
+   * Sprint 3 — move an asset to a different Space. Drops the
+   * [:BELONGS_TO] edge to `fromSpaceId` (when provided) and MERGEs a
+   * new one to `toSpaceId`. The asset retains any OTHER space
+   * memberships.
+   */
+  moveToSpace(id: string, fromSpaceId: string | null, toSpaceId: string): Promise<Item>;
+
+  /**
+   * Sprint 3 — add an asset to ANOTHER space (multi-space membership).
+   * Idempotent.
+   */
+  addToSpace(id: string, toSpaceId: string): Promise<Item>;
+
+  /**
+   * Sprint 3 — remove an asset from a specific space. Does NOT
+   * soft-delete the asset; it just drops one [:BELONGS_TO] edge.
+   */
+  removeFromSpace(id: string, spaceId: string): Promise<Item>;
+
+  /**
+   * Sprint 3 — substring search across asset title / description /
+   * excerpt. Optional `spaceId` restricts the search to one space.
+   * Empty query returns `[]`.
+   */
+  search(opts: SearchItemsOpts): Promise<ItemSummary[]>;
 }
 
 /**
@@ -570,6 +599,22 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async restore(_id: string): Promise<Item> {
       throw notInitialized('items.restore');
+    },
+    async moveToSpace(
+      _id: string,
+      _fromSpaceId: string | null,
+      _toSpaceId: string
+    ): Promise<Item> {
+      throw notInitialized('items.moveToSpace');
+    },
+    async addToSpace(_id: string, _toSpaceId: string): Promise<Item> {
+      throw notInitialized('items.addToSpace');
+    },
+    async removeFromSpace(_id: string, _spaceId: string): Promise<Item> {
+      throw notInitialized('items.removeFromSpace');
+    },
+    async search(_opts: SearchItemsOpts): Promise<ItemSummary[]> {
+      throw notInitialized('items.search');
     },
   };
 

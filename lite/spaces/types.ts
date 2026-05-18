@@ -650,3 +650,13 @@ export interface DeleteAssetOpts {
    */
   soft?: boolean;
 }
+
+/** Options for `items.search(opts)`. */
+export interface SearchItemsOpts {
+  /** Substring (case-insensitive). Required. */
+  query: string;
+  /** Restrict to one space; null/missing searches across every space. */
+  spaceId?: string;
+  /** Default 50; cap is server-side. */
+  limit?: number;
+}

@@ -207,6 +207,12 @@ interface SpacesRendererState {
   >;
   /** Polling timer handle for the active scope (Tier 3c). */
   pollTimer: number | null;
+  /** Sprint 3 — current items-search query (debounced, then filters list). */
+  itemsSearchQuery: string;
+  /** Debounce timer for itemsSearchQuery. */
+  itemsSearchTimer: number | null;
+  /** Sprint 3 — last fetched search results (when query is non-empty). */
+  itemsSearchResults: RendererItemSummary[] | null;
 }
 
 const state: SpacesRendererState = {
@@ -239,6 +245,9 @@ const state: SpacesRendererState = {
   currentUser: null,
   sharedDashboards: new Map(),
   pollTimer: null,
+  itemsSearchQuery: '',
+  itemsSearchTimer: null,
+  itemsSearchResults: null,
 };
 
 // ─── Home preferences (localStorage) ────────────────────────────────────
@@ -965,6 +974,13 @@ function setActiveScope(scopeId: string): void {
   // Switching scope clears the open detail rail.
   state.activeItemId = null;
   showDetailRail(false);
+  // Sprint 3: clear any active items search on scope switch.
+  state.itemsSearchQuery = '';
+  state.itemsSearchResults = null;
+  if (state.itemsSearchTimer !== null) {
+    window.clearTimeout(state.itemsSearchTimer);
+    state.itemsSearchTimer = null;
+  }
   if (scopeId === HOME_SCOPE_ID) {
     void loadHome();
   } else {
@@ -1216,6 +1232,31 @@ function renderItemList(opts: RenderItemListOpts): void {
 
   if (opts.error !== undefined) {
     wrap.appendChild(buildBanner('error', opts.error));
+    return;
+  }
+
+  // Sprint 3: when a search is active, replace the timeline with a
+  // search-result list. The search bypasses the timeline merge entirely
+  // — it's a direct asset hit-list, not a chronological feed.
+  if (state.itemsSearchResults !== null) {
+    const heading = document.createElement('h3');
+    heading.className = 'spaces-items-search-heading';
+    heading.textContent = `Search results for "${state.itemsSearchQuery}"`;
+    wrap.appendChild(heading);
+    if (state.itemsSearchResults.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'spaces-items-search-empty';
+      empty.textContent = 'No assets match this search.';
+      wrap.appendChild(empty);
+      return;
+    }
+    const grid = document.createElement('div');
+    grid.className = 'spaces-card-grid';
+    grid.id = 'spaces-card-grid';
+    for (const item of state.itemsSearchResults) {
+      grid.appendChild(buildItemCard(item, item.id === state.activeItemId));
+    }
+    wrap.appendChild(grid);
     return;
   }
 
@@ -1735,6 +1776,22 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
 
   header.appendChild(titleWrap);
 
+  // Sprint 3: items-scoped search input. Available everywhere except
+  // Home (Home has its own discovery affordances).
+  if (state.activeScopeId !== HOME_SCOPE_ID) {
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'spaces-items-search';
+    search.id = 'spaces-items-search-input';
+    search.placeholder = 'Search this space…';
+    search.setAttribute('aria-label', 'Search assets in this space');
+    search.value = state.itemsSearchQuery;
+    search.addEventListener('input', () => {
+      onItemsSearchChange(search.value);
+    });
+    header.appendChild(search);
+  }
+
   // Sprint 1: "+ New" button to open the new-asset modal. Available
   // everywhere except Home (the news-feed view doesn't have a "create
   // here" semantic — assets need a target scope).
@@ -1989,8 +2046,158 @@ function renderDetail(opts: RenderDetailOpts): void {
     aside.appendChild(buildSetAsPlaybookAffordance(activeSpace.id, item.id));
   }
 
+  // Sprint 3: Move + Add-to-another-space affordances. Only shown
+  // outside Home (Home view doesn't have a meaningful "current space").
+  if (state.activeScopeId !== HOME_SCOPE_ID) {
+    const currentSpaceId =
+      state.activeScopeId !== UNCATEGORIZED_SPACE_ID ? state.activeScopeId : null;
+    aside.appendChild(buildMoveToSpaceAffordance(item, currentSpaceId));
+    aside.appendChild(buildAddToSpaceAffordance(item));
+  }
+
   // Sprint 1: Delete affordance at the bottom of the detail pane.
   aside.appendChild(buildAssetDeleteAffordance(item.id, item.title));
+}
+
+/**
+ * Sprint 3 — "Move to…" picker. Renders a select with every visible
+ * Space; choosing one moves the asset (drops [:BELONGS_TO] to the
+ * current scope when applicable, MERGEs new one to the target).
+ */
+function buildMoveToSpaceAffordance(
+  item: RendererItem,
+  currentSpaceId: string | null
+): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-move-wrap';
+  const label = document.createElement('span');
+  label.className = 'spaces-detail-label';
+  label.textContent = 'Move to';
+  wrap.appendChild(label);
+
+  const select = document.createElement('select');
+  select.className = 'spaces-detail-move-select';
+  select.setAttribute('aria-label', 'Move to space');
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Choose a space…';
+  placeholder.selected = true;
+  select.appendChild(placeholder);
+  for (const space of state.spaces) {
+    if (space.id === currentSpaceId) continue;
+    const opt = document.createElement('option');
+    opt.value = space.id;
+    opt.textContent = space.name.length > 0 ? space.name : '(unnamed)';
+    if (space.kind === 'shared') opt.textContent += ' (shared)';
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', () => {
+    const toSpaceId = select.value;
+    if (toSpaceId.length === 0) return;
+    select.disabled = true;
+    void performMoveAsset(item.id, currentSpaceId, toSpaceId, select);
+  });
+  wrap.appendChild(select);
+  return wrap;
+}
+
+async function performMoveAsset(
+  itemId: string,
+  fromSpaceId: string | null,
+  toSpaceId: string,
+  select: HTMLSelectElement
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showToast('Bridge unavailable.');
+    select.disabled = false;
+    return;
+  }
+  try {
+    const envelope = await bridge.items.moveToSpace(itemId, fromSpaceId, toSpaceId);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      select.disabled = false;
+      return;
+    }
+    const targetSpace = state.spaces.find((s) => s.id === toSpaceId);
+    showToast(`Moved to ${targetSpace?.name ?? toSpaceId}`);
+    // If the user was viewing the source space, the asset just left
+    // it — re-render the list. Otherwise just refresh the detail pane.
+    if (state.activeScopeId === fromSpaceId) {
+      await loadItems();
+    }
+    await loadItemDetail(itemId);
+  } catch (err) {
+    showToast(messageFrom(err));
+    select.disabled = false;
+  }
+}
+
+/**
+ * Sprint 3 — "Add to another space" picker. Mirrors `moveTo` but
+ * MERGEs an additional edge without dropping the existing one.
+ * Multi-space membership.
+ */
+function buildAddToSpaceAffordance(item: RendererItem): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-add-to-space-wrap';
+  const label = document.createElement('span');
+  label.className = 'spaces-detail-label';
+  label.textContent = 'Add to space';
+  wrap.appendChild(label);
+
+  const select = document.createElement('select');
+  select.className = 'spaces-detail-add-to-space-select';
+  select.setAttribute('aria-label', 'Add to another space');
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Pick another space…';
+  placeholder.selected = true;
+  select.appendChild(placeholder);
+  const alreadyIn = new Set<string>(item.otherSpaces.map((s) => s.id));
+  if (state.activeScopeId !== HOME_SCOPE_ID && state.activeScopeId !== UNCATEGORIZED_SPACE_ID) {
+    alreadyIn.add(state.activeScopeId);
+  }
+  for (const space of state.spaces) {
+    if (alreadyIn.has(space.id)) continue;
+    const opt = document.createElement('option');
+    opt.value = space.id;
+    opt.textContent = space.name.length > 0 ? space.name : '(unnamed)';
+    if (space.kind === 'shared') opt.textContent += ' (shared)';
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', () => {
+    const toSpaceId = select.value;
+    if (toSpaceId.length === 0) return;
+    select.disabled = true;
+    void performAddToSpace(item.id, toSpaceId, select);
+  });
+  wrap.appendChild(select);
+  return wrap;
+}
+
+async function performAddToSpace(
+  itemId: string,
+  toSpaceId: string,
+  select: HTMLSelectElement
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.items.addToSpace(itemId, toSpaceId);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      select.disabled = false;
+      return;
+    }
+    const space = state.spaces.find((s) => s.id === toSpaceId);
+    showToast(`Added to ${space?.name ?? toSpaceId}`);
+    await loadItemDetail(itemId);
+  } catch (err) {
+    showToast(messageFrom(err));
+    select.disabled = false;
+  }
 }
 
 /**
@@ -5080,6 +5287,54 @@ function wireToast(): void {
     hideToast();
     if (handler !== null) handler();
   });
+}
+
+// ─── Sprint 3: items-region search ─────────────────────────────────────
+
+function onItemsSearchChange(query: string): void {
+  state.itemsSearchQuery = query;
+  if (state.itemsSearchTimer !== null) {
+    window.clearTimeout(state.itemsSearchTimer);
+    state.itemsSearchTimer = null;
+  }
+  // Debounce 200ms — feels live but doesn't hammer the graph on every
+  // keystroke.
+  state.itemsSearchTimer = window.setTimeout(() => {
+    void runItemsSearch();
+  }, 200);
+}
+
+async function runItemsSearch(): Promise<void> {
+  const query = state.itemsSearchQuery.trim();
+  if (query.length === 0) {
+    state.itemsSearchResults = null;
+    renderItemList({});
+    return;
+  }
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const spaceId =
+    state.activeScopeId !== HOME_SCOPE_ID &&
+    state.activeScopeId !== UNCATEGORIZED_SPACE_ID
+      ? state.activeScopeId
+      : undefined;
+  try {
+    const envelope = await bridge.items.search({
+      query,
+      ...(spaceId !== undefined ? { spaceId } : {}),
+      limit: 50,
+    });
+    if (envelope.ok === false) {
+      state.itemsSearchResults = [];
+      renderItemList({ error: envelope.error.message });
+      return;
+    }
+    state.itemsSearchResults = envelope.value as RendererItemSummary[];
+    renderItemList({});
+  } catch (err) {
+    state.itemsSearchResults = [];
+    renderItemList({ error: messageFrom(err) });
+  }
 }
 
 // ─── Sprint 1: new-asset modal + drag-drop upload + delete action ───────

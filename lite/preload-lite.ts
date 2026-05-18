@@ -84,6 +84,10 @@ const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
 const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
 const SPACES_ITEMS_DELETE = 'lite:spaces:items:delete';
 const SPACES_ITEMS_RESTORE = 'lite:spaces:items:restore';
+const SPACES_ITEMS_MOVE_TO_SPACE = 'lite:spaces:items:moveToSpace';
+const SPACES_ITEMS_ADD_TO_SPACE = 'lite:spaces:items:addToSpace';
+const SPACES_ITEMS_REMOVE_FROM_SPACE = 'lite:spaces:items:removeFromSpace';
+const SPACES_ITEMS_SEARCH = 'lite:spaces:items:search';
 const SPACES_DISCOVERY_RUN = 'lite:spaces:discovery:run';
 // Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md.
 const SPACES_HOME_ENTITY_COUNTS = 'lite:spaces:home:entityCounts';
@@ -511,6 +515,21 @@ interface SpacesItemsBridge {
     opts?: { soft?: boolean }
   ): Promise<SpacesIpcResultView<{ ok: true }>>;
   restore(id: string): Promise<SpacesIpcResultView<unknown>>;
+  moveToSpace(
+    id: string,
+    fromSpaceId: string | null,
+    toSpaceId: string
+  ): Promise<SpacesIpcResultView<unknown>>;
+  addToSpace(id: string, toSpaceId: string): Promise<SpacesIpcResultView<unknown>>;
+  removeFromSpace(
+    id: string,
+    spaceId: string
+  ): Promise<SpacesIpcResultView<unknown>>;
+  search(opts: {
+    query: string;
+    spaceId?: string;
+    limit?: number;
+  }): Promise<SpacesIpcResultView<unknown[]>>;
 }
 
 // Phase 0.5 discovery: result shape mirrors lite/spaces/discovery.ts.
@@ -1329,6 +1348,24 @@ const spaces: SpacesBridge = {
     restore: (id) =>
       ipcRenderer.invoke(SPACES_ITEMS_RESTORE, { id }) as Promise<
         SpacesIpcResultView<unknown>
+      >,
+    moveToSpace: (id, fromSpaceId, toSpaceId) =>
+      ipcRenderer.invoke(SPACES_ITEMS_MOVE_TO_SPACE, {
+        id,
+        ...(fromSpaceId !== null ? { fromSpaceId } : {}),
+        toSpaceId,
+      }) as Promise<SpacesIpcResultView<unknown>>,
+    addToSpace: (id, toSpaceId) =>
+      ipcRenderer.invoke(SPACES_ITEMS_ADD_TO_SPACE, { id, toSpaceId }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    removeFromSpace: (id, spaceId) =>
+      ipcRenderer.invoke(SPACES_ITEMS_REMOVE_FROM_SPACE, { id, spaceId }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    search: (opts) =>
+      ipcRenderer.invoke(SPACES_ITEMS_SEARCH, { opts }) as Promise<
+        SpacesIpcResultView<unknown[]>
       >,
   },
   runDiscovery: () =>

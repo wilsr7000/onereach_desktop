@@ -697,6 +697,28 @@ interface LiteSpacesItemsBridge {
   ): Promise<LiteSpacesIpcResult<{ ok: true }>>;
   /** Sprint 1 — restore a soft-deleted asset. */
   restore(id: string): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Sprint 3 — move an asset to a different Space. */
+  moveToSpace(
+    id: string,
+    fromSpaceId: string | null,
+    toSpaceId: string
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Sprint 3 — add an asset to ANOTHER space (multi-space). Idempotent. */
+  addToSpace(
+    id: string,
+    toSpaceId: string
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Sprint 3 — remove an asset from one space (does not soft-delete). */
+  removeFromSpace(
+    id: string,
+    spaceId: string
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Sprint 3 — substring search across title/description/excerpt. */
+  search(opts: {
+    query: string;
+    spaceId?: string;
+    limit?: number;
+  }): Promise<LiteSpacesIpcResult<LiteSpaceItemSummary[]>>;
 }
 
 // ─── Home view (chunk 3k + 3o) ───────────────────────────────────────────

@@ -2401,6 +2401,34 @@ export const MANIFEST: Manifest = {
               }
             ],
             "examples": []
+          },
+          {
+            "name": "moveToSpace",
+            "signature": "moveToSpace(id: string, fromSpaceId: string | null, toSpaceId: string): Promise<Item>",
+            "description": "Sprint 3 — move an asset to a different Space. Drops the\n[:BELONGS_TO] edge to `fromSpaceId` (when provided) and MERGEs a\nnew one to `toSpaceId`. The asset retains any OTHER space\nmemberships.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "addToSpace",
+            "signature": "addToSpace(id: string, toSpaceId: string): Promise<Item>",
+            "description": "Sprint 3 — add an asset to ANOTHER space (multi-space membership).\nIdempotent.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "removeFromSpace",
+            "signature": "removeFromSpace(id: string, spaceId: string): Promise<Item>",
+            "description": "Sprint 3 — remove an asset from a specific space. Does NOT\nsoft-delete the asset; it just drops one [:BELONGS_TO] edge.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "search",
+            "signature": "search(opts: SearchItemsOpts): Promise<ItemSummary[]>",
+            "description": "Sprint 3 — substring search across asset title / description /\nexcerpt. Optional `spaceId` restricts the search to one space.\nEmpty query returns `[]`.",
+            "tags": [],
+            "examples": []
           }
         ]
       },
@@ -2906,5 +2934,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-05-18T05:45:36.010Z"
+  "generatedAt": "2026-05-18T05:56:58.255Z"
 } as const;
