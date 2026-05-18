@@ -54,6 +54,7 @@ import type {
   CreateAssetInput,
   DeleteAssetOpts,
   SearchItemsOpts,
+  ItemMetadata,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -95,6 +96,9 @@ export type {
   CreateAssetInput,
   DeleteAssetOpts,
   SearchItemsOpts,
+  ItemMetadata,
+  MetadataValue,
+  MetadataPrimitive,
 } from './types.js';
 export {
   SPACES_MODULE_VERSION,
@@ -290,6 +294,22 @@ export interface SpacesItemsApi {
    * Empty query returns `[]`.
    */
   search(opts: SearchItemsOpts): Promise<ItemSummary[]>;
+
+  /**
+   * Replace the metadata bag on an asset (Metadata sprint). Pass an
+   * empty `{}` to clear.
+   */
+  setMetadata(id: string, metadata: ItemMetadata): Promise<Item>;
+
+  /**
+   * Merge a patch into the existing metadata bag. `null` values in
+   * the patch remove the corresponding keys; primitives + arrays of
+   * primitives set them.
+   */
+  patchMetadata(id: string, patch: ItemMetadata): Promise<Item>;
+
+  /** Remove a single metadata key. No-op when already absent. */
+  removeMetadataKey(id: string, key: string): Promise<Item>;
 }
 
 /**
@@ -615,6 +635,15 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async search(_opts: SearchItemsOpts): Promise<ItemSummary[]> {
       throw notInitialized('items.search');
+    },
+    async setMetadata(_id: string, _metadata: ItemMetadata): Promise<Item> {
+      throw notInitialized('items.setMetadata');
+    },
+    async patchMetadata(_id: string, _patch: ItemMetadata): Promise<Item> {
+      throw notInitialized('items.patchMetadata');
+    },
+    async removeMetadataKey(_id: string, _key: string): Promise<Item> {
+      throw notInitialized('items.removeMetadataKey');
     },
   };
 

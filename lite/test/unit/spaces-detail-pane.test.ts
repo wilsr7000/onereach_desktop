@@ -1620,3 +1620,155 @@ describe('buildDetailPane — Sprint 2 content dispatch', () => {
     expect(el.querySelector('.spaces-detail-csv-table')).toBeNull();
   });
 });
+
+// ─── Metadata sprint: buildDetailMetadata ───────────────────────────────
+
+interface MetadataApi {
+  buildDetailMetadata(
+    item: RendererItem,
+    cb?: {
+      onMetadataAdd?: (k: string, v: string) => Promise<void>;
+      onMetadataRemove?: (k: string) => Promise<void>;
+    }
+  ): HTMLElement;
+}
+
+function metaApi(): MetadataApi {
+  return (window as unknown as { __spacesRendererForTesting: MetadataApi })
+    .__spacesRendererForTesting;
+}
+
+describe('buildDetailMetadata', () => {
+  const flush = async (): Promise<void> => {
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+
+  it('renders the "Metadata" heading', () => {
+    const el = metaApi().buildDetailMetadata(baseItem({}));
+    expect(el.querySelector('.spaces-detail-metadata-heading')?.textContent).toBe(
+      'Metadata'
+    );
+  });
+
+  it('renders an empty-state line when no metadata and no add callback', () => {
+    const el = metaApi().buildDetailMetadata(baseItem({}));
+    expect(el.querySelector('.spaces-detail-metadata-empty')).not.toBeNull();
+  });
+
+  it('renders one row per key in sorted order', () => {
+    const item = baseItem({});
+    (item as unknown as { metadata: Record<string, unknown> }).metadata = {
+      zebra: 1,
+      apple: 'red',
+      mango: true,
+    };
+    const el = metaApi().buildDetailMetadata(item);
+    const rows = el.querySelectorAll('.spaces-detail-metadata-row');
+    expect(rows).toHaveLength(3);
+    // Sorted alphabetically.
+    expect(rows[0]?.getAttribute('data-key')).toBe('apple');
+    expect(rows[1]?.getAttribute('data-key')).toBe('mango');
+    expect(rows[2]?.getAttribute('data-key')).toBe('zebra');
+  });
+
+  it('formats numbers / booleans / arrays for the value column', () => {
+    const item = baseItem({});
+    (item as unknown as { metadata: Record<string, unknown> }).metadata = {
+      width: 1024,
+      ratio: 1.7777,
+      enabled: true,
+      tags: ['a', 'b', 'c'],
+    };
+    const el = metaApi().buildDetailMetadata(item);
+    const values = Array.from(
+      el.querySelectorAll('.spaces-detail-metadata-value')
+    ).map((v) => v.textContent);
+    expect(values).toContain('1024');
+    expect(values).toContain('true');
+    expect(values).toContain('a, b, c');
+    // Trimmed-decimal formatter.
+    expect(values.some((v) => v?.startsWith('1.7777'))).toBe(true);
+  });
+
+  it('truncates long arrays with "+ N more"', () => {
+    const item = baseItem({});
+    (item as unknown as { metadata: Record<string, unknown> }).metadata = {
+      tags: [1, 2, 3, 4, 5, 6, 7],
+    };
+    const el = metaApi().buildDetailMetadata(item);
+    const v = el.querySelector('.spaces-detail-metadata-value')?.textContent ?? '';
+    expect(v).toMatch(/\(\+2\)/);
+  });
+
+  it('does NOT render × buttons when onMetadataRemove is omitted', () => {
+    const item = baseItem({});
+    (item as unknown as { metadata: Record<string, unknown> }).metadata = { x: 1 };
+    const el = metaApi().buildDetailMetadata(item);
+    expect(el.querySelector('.spaces-detail-metadata-remove')).toBeNull();
+  });
+
+  it('clicking × calls onMetadataRemove with the key', async () => {
+    const removed: string[] = [];
+    const item = baseItem({});
+    (item as unknown as { metadata: Record<string, unknown> }).metadata = { x: 1 };
+    const el = metaApi().buildDetailMetadata(item, {
+      onMetadataRemove: async (key) => {
+        removed.push(key);
+      },
+    });
+    el.querySelector<HTMLButtonElement>('.spaces-detail-metadata-remove')?.click();
+    await flush();
+    expect(removed).toEqual(['x']);
+  });
+
+  it('renders the "+ Add field" affordance when onMetadataAdd is supplied', () => {
+    const el = metaApi().buildDetailMetadata(baseItem({}), {
+      onMetadataAdd: async () => undefined,
+    });
+    expect(el.querySelector('.spaces-detail-metadata-add')).not.toBeNull();
+  });
+
+  it('clicking "+ Add field" swaps to two inputs', () => {
+    const el = metaApi().buildDetailMetadata(baseItem({}), {
+      onMetadataAdd: async () => undefined,
+    });
+    el.querySelector<HTMLButtonElement>('.spaces-detail-metadata-add')?.click();
+    expect(el.querySelector('input.spaces-detail-metadata-add-key')).not.toBeNull();
+    expect(el.querySelector('input.spaces-detail-metadata-add-value')).not.toBeNull();
+  });
+
+  it('Enter on value input commits via onMetadataAdd', async () => {
+    const added: Array<[string, string]> = [];
+    const el = metaApi().buildDetailMetadata(baseItem({}), {
+      onMetadataAdd: async (k, v) => {
+        added.push([k, v]);
+      },
+    });
+    el.querySelector<HTMLButtonElement>('.spaces-detail-metadata-add')?.click();
+    const k = el.querySelector<HTMLInputElement>('.spaces-detail-metadata-add-key')!;
+    const v = el.querySelector<HTMLInputElement>('.spaces-detail-metadata-add-value')!;
+    k.value = 'author';
+    v.value = 'Alice';
+    v.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+    await flush();
+    expect(added).toEqual([['author', 'Alice']]);
+    // Affordance collapses back to the "+ Add field" button.
+    expect(el.querySelector('.spaces-detail-metadata-add')).not.toBeNull();
+  });
+
+  it('Esc on either input cancels without firing onMetadataAdd', async () => {
+    const added: Array<[string, string]> = [];
+    const el = metaApi().buildDetailMetadata(baseItem({}), {
+      onMetadataAdd: async (k, v) => {
+        added.push([k, v]);
+      },
+    });
+    el.querySelector<HTMLButtonElement>('.spaces-detail-metadata-add')?.click();
+    const k = el.querySelector<HTMLInputElement>('.spaces-detail-metadata-add-key')!;
+    k.value = 'x';
+    k.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    await flush();
+    expect(added).toEqual([]);
+  });
+});

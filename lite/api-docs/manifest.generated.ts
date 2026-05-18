@@ -2429,6 +2429,27 @@ export const MANIFEST: Manifest = {
             "description": "Sprint 3 — substring search across asset title / description /\nexcerpt. Optional `spaceId` restricts the search to one space.\nEmpty query returns `[]`.",
             "tags": [],
             "examples": []
+          },
+          {
+            "name": "setMetadata",
+            "signature": "setMetadata(id: string, metadata: ItemMetadata): Promise<Item>",
+            "description": "Replace the metadata bag on an asset (Metadata sprint). Pass an\nempty `{}` to clear.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "patchMetadata",
+            "signature": "patchMetadata(id: string, patch: ItemMetadata): Promise<Item>",
+            "description": "Merge a patch into the existing metadata bag. `null` values in\nthe patch remove the corresponding keys; primitives + arrays of\nprimitives set them.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "removeMetadataKey",
+            "signature": "removeMetadataKey(id: string, key: string): Promise<Item>",
+            "description": "Remove a single metadata key. No-op when already absent.",
+            "tags": [],
+            "examples": []
           }
         ]
       },
@@ -2934,5 +2955,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-05-18T05:56:58.255Z"
+  "generatedAt": "2026-05-18T06:13:43.514Z"
 } as const;

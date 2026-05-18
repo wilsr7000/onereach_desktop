@@ -33,6 +33,10 @@ import type {
   DiscoveryQueryResult,
   DiscoveryResults,
 } from './discovery-format.js';
+import {
+  extractMetadataFromFile,
+  extractMetadataFromText,
+} from './metadata-extractor.js';
 
 // ─── Home view (chunk 3o) ───────────────────────────────────────────────
 
@@ -2032,6 +2036,8 @@ function renderDetail(opts: RenderDetailOpts): void {
     onTypeChange: (next) => commitItemUpdate(item.id, { type: next }),
     onTagAdd: (tag) => commitTagAdd(item.id, tag),
     onTagRemove: (tag) => commitTagRemove(item.id, tag),
+    onMetadataAdd: (key, value) => commitMetadataAdd(item.id, key, value),
+    onMetadataRemove: (key) => commitMetadataRemove(item.id, key),
   };
   aside.appendChild(buildDetailPane(item, onClose, 'rendered', editCallbacks));
 
@@ -2273,6 +2279,8 @@ async function promoteToPlaybook(
 }
 
 interface RendererDetailEditCallbacks {
+  onMetadataAdd: (key: string, value: string) => Promise<void>;
+  onMetadataRemove: (key: string) => Promise<void>;
   onTitleSave: (next: string) => Promise<void>;
   onTypeChange: (next: string) => Promise<void>;
   onTagAdd: (tag: string) => Promise<void>;
@@ -2318,6 +2326,68 @@ async function commitTagRemove(itemId: string, tag: string): Promise<void> {
   const envelope = await bridge.items.removeTag(itemId, tag);
   if (envelope.ok === false) throw new Error(envelope.error.message);
   await loadItemDetail(itemId);
+}
+
+/**
+ * Metadata sprint — patch one key/value pair into the bag. The value
+ * string is coerced into a primitive when possible: "true"/"false" →
+ * booleans, numeric strings → numbers, "null" → null, comma-separated
+ * lists → arrays of primitives.
+ */
+async function commitMetadataAdd(
+  itemId: string,
+  key: string,
+  value: string
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) throw new Error('Bridge unavailable');
+  const coerced = coerceMetadataValue(value);
+  // `LiteItemMetadata` is stricter (primitive | primitive[]) than the
+  // coerceMetadataValue return type. The runtime guarantees the
+  // coerced value IS a metadata value; the cast pins the type for the
+  // bridge call site.
+  const patch: Parameters<typeof bridge.items.patchMetadata>[1] = {
+    [key]: coerced as LiteMetadataValue,
+  };
+  const envelope = await bridge.items.patchMetadata(itemId, patch);
+  if (envelope.ok === false) throw new Error(envelope.error.message);
+  await loadItemDetail(itemId);
+}
+
+async function commitMetadataRemove(itemId: string, key: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) throw new Error('Bridge unavailable');
+  const envelope = await bridge.items.removeMetadataKey(itemId, key);
+  if (envelope.ok === false) throw new Error(envelope.error.message);
+  await loadItemDetail(itemId);
+}
+
+/**
+ * Coerce a string typed by the user in the metadata editor into a
+ * MetadataValue. Heuristic, not strict — the goal is to give power
+ * users smart defaults while keeping the input field plain text.
+ */
+function coerceMetadataValue(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return '';
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  if (trimmed === 'null') return null;
+  // Number coercion — accept ints, floats, scientific notation.
+  if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isFinite(n)) return n;
+  }
+  // Array literal: comma-separated values inside [].
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      /* fall through to string */
+    }
+  }
+  return trimmed;
 }
 
 /**
@@ -2378,6 +2448,10 @@ export interface DetailEditCallbacks {
   onTypeChange?: (next: string) => Promise<void>;
   onTagAdd?: (tag: string) => Promise<void>;
   onTagRemove?: (tag: string) => Promise<void>;
+  /** Metadata sprint — add a new key/value pair. */
+  onMetadataAdd?: (key: string, value: string) => Promise<void>;
+  /** Metadata sprint — remove a key. */
+  onMetadataRemove?: (key: string) => Promise<void>;
 }
 
 const EDITABLE_ITEM_KINDS: ReadonlyArray<{ id: string; label: string }> = [
@@ -2483,6 +2557,10 @@ export function buildDetailPane(
   const subsection = buildDetailTypeBlock(item);
   if (subsection !== null) wrap.appendChild(subsection);
 
+  // ── Metadata section (Metadata sprint): always rendered so users
+  //    can add fields even when the bag is empty.
+  wrap.appendChild(buildDetailMetadata(item, edit));
+
   // ── Activity slot (Phase 3c): empty container that `loadItemActivity`
   //    populates with `buildDetailActivity(events)` once the per-asset
   //    commit log loads. Carries the item id so the loader can confirm
@@ -2492,6 +2570,198 @@ export function buildDetailPane(
   activitySlot.setAttribute('data-activity-slot', item.id);
   wrap.appendChild(activitySlot);
 
+  return wrap;
+}
+
+/**
+ * Metadata-sprint detail block. Renders the item's `metadata` bag as
+ * a key/value table with a "+ Add field" affordance below. Each row
+ * has a × delete button when an `onMetadataKeyRemove` callback is
+ * provided (i.e. the pane is in editable mode).
+ *
+ * Pure DOM construction — the actual writes live in the renderer's
+ * state-machine wrapper (`commitMetadataPatch`).
+ */
+export interface DetailMetadataCallbacks {
+  /** Called when the user adds a new key/value pair. */
+  onMetadataAdd?: (key: string, value: string) => Promise<void>;
+  /** Called when the user removes a key. */
+  onMetadataRemove?: (key: string) => Promise<void>;
+}
+
+export function buildDetailMetadata(
+  item: RendererItem,
+  edit?: DetailMetadataCallbacks
+): HTMLElement {
+  const wrap = document.createElement('section');
+  wrap.className = 'spaces-detail-metadata';
+  wrap.setAttribute('data-item-id', item.id);
+
+  const heading = document.createElement('h3');
+  heading.className = 'spaces-detail-metadata-heading';
+  heading.textContent = 'Metadata';
+  wrap.appendChild(heading);
+
+  const meta = item.metadata ?? {};
+  const keys = Object.keys(meta);
+  if (keys.length === 0 && edit?.onMetadataAdd === undefined) {
+    const empty = document.createElement('p');
+    empty.className = 'spaces-detail-metadata-empty';
+    empty.textContent = 'No metadata recorded for this asset.';
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  if (keys.length > 0) {
+    const table = document.createElement('dl');
+    table.className = 'spaces-detail-metadata-table';
+    for (const key of keys.sort()) {
+      const value = meta[key];
+      const row = document.createElement('div');
+      row.className = 'spaces-detail-metadata-row';
+      row.setAttribute('data-key', key);
+
+      const dt = document.createElement('dt');
+      dt.className = 'spaces-detail-metadata-key';
+      dt.textContent = key;
+      row.appendChild(dt);
+
+      const dd = document.createElement('dd');
+      dd.className = 'spaces-detail-metadata-value';
+      dd.textContent = formatMetadataValue(value);
+      row.appendChild(dd);
+
+      if (edit?.onMetadataRemove !== undefined) {
+        const onRemove = edit.onMetadataRemove;
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'spaces-detail-metadata-remove';
+        x.setAttribute('aria-label', `Remove ${key}`);
+        x.title = `Remove "${key}"`;
+        x.textContent = '×';
+        x.addEventListener('click', () => {
+          x.disabled = true;
+          row.classList.add('is-removing');
+          onRemove(key).catch(() => {
+            x.disabled = false;
+            row.classList.remove('is-removing');
+          });
+        });
+        row.appendChild(x);
+      }
+      table.appendChild(row);
+    }
+    wrap.appendChild(table);
+  }
+
+  if (edit?.onMetadataAdd !== undefined) {
+    wrap.appendChild(buildAddMetadataAffordance(edit.onMetadataAdd));
+  }
+  return wrap;
+}
+
+/** Compact display formatter — keeps the value column readable. */
+function formatMetadataValue(v: unknown): string {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') {
+    // Trim trailing zeros after a decimal point so "1.5" beats "1.5000".
+    return Number.isInteger(v) ? String(v) : Number(v.toFixed(4)).toString();
+  }
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '[]';
+    if (v.length <= 5) return v.map((x) => formatMetadataValue(x)).join(', ');
+    return `${v.slice(0, 5).map((x) => formatMetadataValue(x)).join(', ')} … (+${v.length - 5})`;
+  }
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+/**
+ * "+ Add field" affordance for the metadata table. Swaps to two
+ * inputs (key + value) when clicked. Enter commits via onAdd; Esc
+ * cancels.
+ */
+function buildAddMetadataAffordance(
+  onAdd: (key: string, value: string) => Promise<void>
+): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-metadata-add-wrap';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'spaces-detail-metadata-add';
+  button.textContent = '+ Add field';
+  wrap.appendChild(button);
+
+  const enter = (): void => {
+    const form = document.createElement('div');
+    form.className = 'spaces-detail-metadata-add-form';
+
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.className = 'spaces-detail-metadata-add-key';
+    keyInput.placeholder = 'key';
+    keyInput.maxLength = 64;
+
+    const valueInput = document.createElement('input');
+    valueInput.type = 'text';
+    valueInput.className = 'spaces-detail-metadata-add-value';
+    valueInput.placeholder = 'value';
+    valueInput.maxLength = 400;
+
+    const commit = async (): Promise<void> => {
+      const key = keyInput.value.trim();
+      const value = valueInput.value.trim();
+      if (key.length === 0 || value.length === 0) {
+        wrap.replaceChildren(button);
+        return;
+      }
+      keyInput.disabled = true;
+      valueInput.disabled = true;
+      wrap.classList.add('is-saving');
+      try {
+        await onAdd(key, value);
+      } catch {
+        keyInput.disabled = false;
+        valueInput.disabled = false;
+        wrap.classList.remove('is-saving');
+        return;
+      }
+      wrap.classList.remove('is-saving');
+      wrap.replaceChildren(button);
+    };
+    const cancel = (): void => {
+      wrap.replaceChildren(button);
+    };
+    keyInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        valueInput.focus();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        cancel();
+      }
+    });
+    valueInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        void commit();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        cancel();
+      }
+    });
+    form.appendChild(keyInput);
+    form.appendChild(valueInput);
+    wrap.replaceChildren(form);
+    keyInput.focus();
+  };
+  button.addEventListener('click', enter);
   return wrap;
 }
 
@@ -4694,6 +4964,7 @@ function messageFrom(err: unknown): string {
   buildTicketStatusPill,
   buildDetailTicketBlock,
   buildDetailPlaybookBlock,
+  buildDetailMetadata,
   buildCodePreview,
   buildCsvPreview,
   detectTextPreviewLanguage,
@@ -5484,14 +5755,11 @@ async function submitNewAsset(): Promise<void> {
   try {
     const creatorId = readCurrentEditorId();
     if (newAssetMode === 'upload' && newAssetFile !== null) {
-      // Upload bytes via the Files bridge, then create the asset row
-      // with the resulting key. Files bridge isn't exposed on
-      // window.lite directly today (it's main-only). Fall back to
-      // creating the asset with the filename in `sourceUrl` as a
-      // placeholder until the renderer-side files bridge lands.
-      // (For v1 we'll surface the file directly via FileReader as
-      // base64 in the content field — sufficient for small files.)
       const file = newAssetFile;
+      // Auto-extract metadata before upload — image dimensions, audio/
+      // video duration, PDF page count, CSV row/col, etc. Best-effort
+      // (returns {} on failure). See lite/spaces/metadata-extractor.ts.
+      const metadata = await extractMetadataFromFile(file);
       const bytes = await readFileAsBase64(file);
       const payload: Parameters<typeof bridge.items.create>[0] = {
         spaceId,
@@ -5499,7 +5767,8 @@ async function submitNewAsset(): Promise<void> {
         kind: inferKindFromMime(file.type) as 'image' | 'video' | 'audio' | 'document' | 'other',
         mimeType: file.type,
         size: file.size,
-        content: bytes, // base64 stub for v1; replace with real upload later
+        content: bytes, // base64 stub for v1
+        metadata: metadata as Record<string, unknown>,
         ...(creatorId !== null ? { creatorId } : {}),
       };
       const envelope = await bridge.items.create(payload);
@@ -5511,11 +5780,18 @@ async function submitNewAsset(): Promise<void> {
     } else {
       const content =
         contentInput instanceof HTMLTextAreaElement ? contentInput.value : '';
+      // Auto-extract metadata for text-mode (paste) as well — word
+      // count, line count, CSV/JSON shape if the title hints at it.
+      const language = detectTextPreviewLanguage(undefined, title);
+      const meta = extractMetadataFromText(content, {
+        ...(language !== null ? { language } : {}),
+      });
       const envelope = await bridge.items.create({
         spaceId,
         title,
         kind: 'text',
         content,
+        metadata: meta as Record<string, unknown>,
         ...(creatorId !== null ? { creatorId } : {}),
       });
       if (envelope.ok === false) {

@@ -88,6 +88,9 @@ const SPACES_ITEMS_MOVE_TO_SPACE = 'lite:spaces:items:moveToSpace';
 const SPACES_ITEMS_ADD_TO_SPACE = 'lite:spaces:items:addToSpace';
 const SPACES_ITEMS_REMOVE_FROM_SPACE = 'lite:spaces:items:removeFromSpace';
 const SPACES_ITEMS_SEARCH = 'lite:spaces:items:search';
+const SPACES_ITEMS_SET_METADATA = 'lite:spaces:items:setMetadata';
+const SPACES_ITEMS_PATCH_METADATA = 'lite:spaces:items:patchMetadata';
+const SPACES_ITEMS_REMOVE_METADATA_KEY = 'lite:spaces:items:removeMetadataKey';
 const SPACES_DISCOVERY_RUN = 'lite:spaces:discovery:run';
 // Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md.
 const SPACES_HOME_ENTITY_COUNTS = 'lite:spaces:home:entityCounts';
@@ -530,6 +533,15 @@ interface SpacesItemsBridge {
     spaceId?: string;
     limit?: number;
   }): Promise<SpacesIpcResultView<unknown[]>>;
+  setMetadata(
+    id: string,
+    metadata: Record<string, unknown>
+  ): Promise<SpacesIpcResultView<unknown>>;
+  patchMetadata(
+    id: string,
+    patch: Record<string, unknown>
+  ): Promise<SpacesIpcResultView<unknown>>;
+  removeMetadataKey(id: string, key: string): Promise<SpacesIpcResultView<unknown>>;
 }
 
 // Phase 0.5 discovery: result shape mirrors lite/spaces/discovery.ts.
@@ -1366,6 +1378,18 @@ const spaces: SpacesBridge = {
     search: (opts) =>
       ipcRenderer.invoke(SPACES_ITEMS_SEARCH, { opts }) as Promise<
         SpacesIpcResultView<unknown[]>
+      >,
+    setMetadata: (id, metadata) =>
+      ipcRenderer.invoke(SPACES_ITEMS_SET_METADATA, { id, metadata }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    patchMetadata: (id, patch) =>
+      ipcRenderer.invoke(SPACES_ITEMS_PATCH_METADATA, { id, patch }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    removeMetadataKey: (id, key) =>
+      ipcRenderer.invoke(SPACES_ITEMS_REMOVE_METADATA_KEY, { id, key }) as Promise<
+        SpacesIpcResultView<unknown>
       >,
   },
   runDiscovery: () =>

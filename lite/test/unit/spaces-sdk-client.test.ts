@@ -115,7 +115,8 @@ describe('CYPHER source strings', () => {
     expect(CYPHER.GET_ITEM).toMatch(/\(a:Asset \{id: \$id\}\)/);
     expect(CYPHER.GET_ITEM).toMatch(/LIMIT 1$/m);
     expect(CYPHER.GET_ITEM).toMatch(/coalesce\(a\.content, ''\) AS content/);
-    expect(CYPHER.GET_ITEM).toMatch(/null AS metadata/);
+    // Metadata sprint: `a.metadata` is projected as the JSON string.
+    expect(CYPHER.GET_ITEM).toMatch(/a\.metadata AS metadata/);
     // Sprint 1: soft-deleted assets must be hidden from every read.
     expect(CYPHER.GET_ITEM).toMatch(/a\.deletedAt IS NULL/);
   });
@@ -2779,5 +2780,291 @@ describe('SdkSpacesClient.searchItems', () => {
     await client.searchItems({ query: 'x', limit: 9999 });
     const call = stub.calls[stub.calls.length - 1];
     expect(call?.parameters).toMatchObject({ limit: 200 });
+  });
+});
+
+// ─── Metadata sprint ────────────────────────────────────────────────────
+
+describe('CYPHER source strings — metadata sprint', () => {
+  it('GET_ITEM projects a.metadata (no longer null)', () => {
+    expect(CYPHER.GET_ITEM).toMatch(/a\.metadata AS metadata/);
+    expect(CYPHER.GET_ITEM).not.toMatch(/null AS metadata/);
+  });
+
+  it('CREATE_ASSET writes the metadata property', () => {
+    expect(CYPHER.CREATE_ASSET).toMatch(/metadata: \$metadata/);
+    expect(CYPHER.CREATE_ASSET_UNCATEGORIZED).toMatch(/metadata: \$metadata/);
+  });
+
+  it('SET_METADATA replaces the JSON blob', () => {
+    expect(CYPHER.SET_METADATA).toMatch(/MATCH \(a:Asset \{id: \$id\}\)/);
+    expect(CYPHER.SET_METADATA).toMatch(/SET a\.metadata = \$metadata/);
+  });
+});
+
+describe('toItem metadata projection', () => {
+  it('parses a JSON string from the graph into an object', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 'meta-thing',
+        kind: 'document',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        metadata: '{"width":1024,"height":768,"tags":["a","b"]}',
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-1');
+    expect(item?.metadata).toEqual({
+      width: 1024,
+      height: 768,
+      tags: ['a', 'b'],
+    });
+  });
+
+  it('tolerates a legacy object-form metadata projection', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        metadata: { author: 'Robb', version: 2 },
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-1');
+    expect(item?.metadata).toEqual({ author: 'Robb', version: 2 });
+  });
+
+  it('drops invalid metadata silently (malformed JSON / wrong shape)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        metadata: '{not json}',
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-1');
+    expect(item?.metadata).toBeUndefined();
+  });
+
+  it('drops nested-object values inside arrays (primitive-only enforcement)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        // nested object inside the array should be dropped
+        metadata: '{"good":["x",2,true],"bad":["x",{"nope":1}]}',
+      },
+    ]);
+    const client = makeClient(stub);
+    const item = await client.getItem('i-1');
+    expect(item?.metadata?.['good']).toEqual(['x', 2, true]);
+    expect(item?.metadata?.['bad']).toEqual(['x']); // nested object dropped
+  });
+});
+
+describe('SdkSpacesClient.setMetadata', () => {
+  it('rejects empty id', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.setMetadata('', { x: 1 })).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('serializes the metadata bag as a JSON string before writing', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET a.metadata = $metadata', [{ id: 'i-1' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        metadata: '{"width":1024}',
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.setMetadata('i-1', { width: 1024 });
+    const call = stub.calls.find((c) => c.cypher.includes('SET a.metadata = $metadata'));
+    expect(call?.parameters?.['metadata']).toBe('{"width":1024}');
+  });
+
+  it('throws SPACES_NOT_FOUND when the asset is missing', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET a.metadata = $metadata', []);
+    const client = makeClient(stub);
+    await expect(
+      client.setMetadata('i-gone', { x: 1 })
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
+  });
+});
+
+describe('SdkSpacesClient.patchMetadata', () => {
+  it('shallow-merges the patch with existing metadata', async () => {
+    const stub = buildStubQuery();
+    // First getItem returns existing metadata.
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        metadata: '{"width":1024,"height":768}',
+      },
+    ]);
+    stub.setResponse('SET a.metadata = $metadata', [{ id: 'i-1' }]);
+    const client = makeClient(stub);
+    await client.patchMetadata('i-1', { height: 1080, author: 'Alice' });
+    const setCall = stub.calls.find((c) => c.cypher.includes('SET a.metadata = $metadata'));
+    const written = JSON.parse(String(setCall?.parameters?.['metadata'] ?? '{}'));
+    expect(written).toMatchObject({ width: 1024, height: 1080, author: 'Alice' });
+  });
+
+  it('null in the patch removes the key', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        metadata: '{"width":1024,"height":768}',
+      },
+    ]);
+    stub.setResponse('SET a.metadata = $metadata', [{ id: 'i-1' }]);
+    const client = makeClient(stub);
+    await client.patchMetadata('i-1', { width: null });
+    const setCall = stub.calls.find((c) => c.cypher.includes('SET a.metadata = $metadata'));
+    const written = JSON.parse(String(setCall?.parameters?.['metadata'] ?? '{}'));
+    expect(written).not.toHaveProperty('width');
+    expect(written).toHaveProperty('height');
+  });
+});
+
+describe('SdkSpacesClient.removeMetadataKey', () => {
+  it('rejects empty key', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.removeMetadataKey('i-1', '')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('round-trips through patchMetadata with a null value', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 't',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        metadata: '{"width":1024,"height":768}',
+      },
+    ]);
+    stub.setResponse('SET a.metadata = $metadata', [{ id: 'i-1' }]);
+    const client = makeClient(stub);
+    await client.removeMetadataKey('i-1', 'width');
+    const setCall = stub.calls.find((c) => c.cypher.includes('SET a.metadata = $metadata'));
+    const written = JSON.parse(String(setCall?.parameters?.['metadata'] ?? '{}'));
+    expect(written).not.toHaveProperty('width');
+    expect(written).toEqual({ height: 768 });
+  });
+});
+
+describe('SdkSpacesClient.createAsset with metadata', () => {
+  it('serializes the metadata bag to JSON when present in the input', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'asset-stub',
+        title: 'X',
+        kind: 'image',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+        metadata: '{"width":4096,"height":2160}',
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.createAsset({
+      spaceId: 'sp-1',
+      title: 'X',
+      kind: 'image',
+      metadata: { width: 4096, height: 2160 },
+    });
+    const createCall = stub.calls.find((c) => c.cypher.includes('CREATE (a:Asset'));
+    expect(createCall?.parameters?.['metadata']).toBe('{"width":4096,"height":2160}');
+  });
+
+  it('writes empty string for missing metadata (preserves "absent" semantics)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'asset-stub',
+        title: 'No meta',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.createAsset({
+      spaceId: 'sp-1',
+      title: 'No meta',
+      content: 'x',
+    });
+    const createCall = stub.calls.find((c) => c.cypher.includes('CREATE (a:Asset'));
+    expect(createCall?.parameters?.['metadata']).toBe('');
   });
 });

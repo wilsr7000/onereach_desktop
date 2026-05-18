@@ -65,6 +65,7 @@ import type {
   CreateAssetInput,
   DeleteAssetOpts,
   SearchItemsOpts,
+  ItemMetadata,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -277,6 +278,15 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
     search(opts: SearchItemsOpts): Promise<ItemSummary[]> {
       return client.searchItems(opts);
+    },
+    setMetadata(id: string, metadata: ItemMetadata): Promise<Item> {
+      return client.setMetadata(id, metadata);
+    },
+    patchMetadata(id: string, patch: ItemMetadata): Promise<Item> {
+      return client.patchMetadata(id, patch);
+    },
+    removeMetadataKey(id: string, key: string): Promise<Item> {
+      return client.removeMetadataKey(id, key);
     },
   };
 

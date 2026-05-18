@@ -202,14 +202,30 @@ export interface ItemSummary {
 }
 
 /**
+ * Free-form metadata value. The renderer + SDK round-trip these
+ * through a JSON-string property on `:Asset` (`a.metadata`); Neo4j
+ * doesn't natively support nested map properties so JSON is the
+ * least-painful storage form.
+ *
+ * Nested objects are NOT allowed in v1 — flatten with dot-separated
+ * keys (e.g. `image.width: 1024`) if you need hierarchy. This keeps
+ * the editor UI simple and avoids the recursion-depth surprise.
+ */
+export type MetadataPrimitive = string | number | boolean | null;
+export type MetadataValue = MetadataPrimitive | MetadataPrimitive[];
+
+/** Canonical metadata bag for an :Asset. Persisted as JSON. */
+export type ItemMetadata = Record<string, MetadataValue>;
+
+/**
  * Full Item -- the summary plus any content the caller asked for.
  * Returned by `items.get()`.
  */
 export interface Item extends ItemSummary {
   /** Inline text content for text-kind items. */
   content?: string;
-  /** Free-form metadata bag. */
-  metadata?: Record<string, unknown>;
+  /** Free-form metadata bag (round-tripped as JSON in `a.metadata`). */
+  metadata?: ItemMetadata;
   /**
    * Size in bytes for binary assets (`fileKey` present). Read from
    * canonical `a.size`, legacy `a.fileSize`, or `a.byteCount`. Undefined
@@ -639,6 +655,12 @@ export interface CreateAssetInput {
   sourceUrl?: string;
   /** Optional :Person.id of the creator — MERGEs [:CREATED] edge. */
   creatorId?: string;
+  /**
+   * Free-form metadata to persist on creation. Round-trips through
+   * `a.metadata` (JSON). Populated automatically by the renderer's
+   * auto-extract pass when files are uploaded.
+   */
+  metadata?: ItemMetadata;
 }
 
 /** Options for `items.delete(id, opts?)`. */

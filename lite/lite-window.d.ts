@@ -689,6 +689,7 @@ interface LiteSpacesItemsBridge {
     description?: string;
     sourceUrl?: string;
     creatorId?: string;
+    metadata?: Record<string, unknown>;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
   /** Sprint 1 — soft delete (default) or hard delete an asset. */
   delete(
@@ -719,7 +720,26 @@ interface LiteSpacesItemsBridge {
     spaceId?: string;
     limit?: number;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItemSummary[]>>;
+  /** Metadata sprint — replace the whole metadata bag. */
+  setMetadata(
+    id: string,
+    metadata: LiteItemMetadata
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Metadata sprint — merge a patch (null values remove keys). */
+  patchMetadata(
+    id: string,
+    patch: LiteItemMetadata
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Metadata sprint — remove one key. */
+  removeMetadataKey(
+    id: string,
+    key: string
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
 }
+
+type LiteMetadataPrimitive = string | number | boolean | null;
+type LiteMetadataValue = LiteMetadataPrimitive | LiteMetadataPrimitive[];
+type LiteItemMetadata = Record<string, LiteMetadataValue>;
 
 // ─── Home view (chunk 3k + 3o) ───────────────────────────────────────────
 //

@@ -39,6 +39,7 @@ import type {
   CreateAssetInput,
   DeleteAssetOpts,
   SearchItemsOpts,
+  ItemMetadata,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import type { DiscoveryResults } from './discovery-format.js';
@@ -91,6 +92,10 @@ export const SPACES_IPC = {
   ITEMS_ADD_TO_SPACE: 'lite:spaces:items:addToSpace',
   ITEMS_REMOVE_FROM_SPACE: 'lite:spaces:items:removeFromSpace',
   ITEMS_SEARCH: 'lite:spaces:items:search',
+  /** Metadata sprint. */
+  ITEMS_SET_METADATA: 'lite:spaces:items:setMetadata',
+  ITEMS_PATCH_METADATA: 'lite:spaces:items:patchMetadata',
+  ITEMS_REMOVE_METADATA_KEY: 'lite:spaces:items:removeMetadataKey',
 } as const;
 
 /**
@@ -839,6 +844,65 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
             ? (payload?.opts as SearchItemsOpts)
             : ({ query: '' } as SearchItemsOpts);
         const value = await getSpacesApi().items.search(opts);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // ─── Metadata mutations ───────────────────────────────────────────────
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_SET_METADATA,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; metadata?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const metadata =
+          payload?.metadata !== null && typeof payload?.metadata === 'object'
+            ? (payload?.metadata as ItemMetadata)
+            : ({} as ItemMetadata);
+        const value = await getSpacesApi().items.setMetadata(id, metadata);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_PATCH_METADATA,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; patch?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const patch =
+          payload?.patch !== null && typeof payload?.patch === 'object'
+            ? (payload?.patch as ItemMetadata)
+            : ({} as ItemMetadata);
+        const value = await getSpacesApi().items.patchMetadata(id, patch);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_REMOVE_METADATA_KEY,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; key?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const key = typeof payload?.key === 'string' ? payload.key : '';
+        const value = await getSpacesApi().items.removeMetadataKey(id, key);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

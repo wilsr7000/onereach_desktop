@@ -63,6 +63,9 @@ import type {
   CreateAssetInput,
   DeleteAssetOpts,
   SearchItemsOpts,
+  ItemMetadata,
+  MetadataValue,
+  MetadataPrimitive,
 } from './types.js';
 import {
   MAX_SPACE_NAME_LENGTH,
@@ -317,7 +320,7 @@ export const CYPHER = {
            coalesce(a.size, a.fileSize, a.byteCount) AS size,
            coalesce(a.mimeType, a.contentType) AS mimeType,
            coalesce(a.tags, edgeTags, []) AS tags,
-           null AS metadata,
+           a.metadata AS metadata,
            [x IN spacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -887,6 +890,7 @@ export const CYPHER = {
       sourceUrl: $sourceUrl,
       mimeType: $mimeType,
       size: $size,
+      metadata: $metadata,
       createdAt: $now,
       updatedAt: $now
     })
@@ -915,6 +919,7 @@ export const CYPHER = {
       sourceUrl: $sourceUrl,
       mimeType: $mimeType,
       size: $size,
+      metadata: $metadata,
       createdAt: $now,
       updatedAt: $now
     })
@@ -1011,6 +1016,18 @@ export const CYPHER = {
       WHERE a.deletedAt IS NULL
     DELETE r
     SET a.updatedAt = $now
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Replace the entire metadata JSON on an :Asset. Pass `$metadata`
+   * as a JSON-stringified value (or empty string to clear).
+   */
+  SET_METADATA: `
+    MATCH (a:Asset {id: $id})
+      WHERE a.deletedAt IS NULL
+    SET a.metadata = $metadata,
+        a.updatedAt = $now
     RETURN a.id AS id
   `,
 
@@ -1812,6 +1829,7 @@ export class SdkSpacesClient {
         : null;
     const id = generateAssetId();
     const now = nowIso();
+    const metadata = stringifyMetadata(input.metadata);
     const params = {
       id,
       kind,
@@ -1822,6 +1840,7 @@ export class SdkSpacesClient {
       sourceUrl,
       mimeType,
       size,
+      metadata,
       creatorId,
       now,
     };
@@ -1922,6 +1941,96 @@ export class SdkSpacesClient {
       });
     }
     return restored;
+  }
+
+  // ─── Metadata mutations ──────────────────────────────────────────────
+
+  /**
+   * Replace the whole metadata bag on an asset. Pass an empty
+   * `{}` to clear. Idempotent.
+   */
+  async setMetadata(id: string, metadata: ItemMetadata): Promise<Item> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'setMetadata requires a non-empty id',
+        context: { id },
+      });
+    }
+    const serialized = stringifyMetadata(metadata);
+    const now = nowIso();
+    const rows = await this.run(CYPHER.SET_METADATA, {
+      id,
+      metadata: serialized,
+      now,
+    });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} not found`,
+        context: { id },
+      });
+    }
+    const updated = await this.getItem(id);
+    if (updated === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} disappeared after metadata write`,
+        context: { id },
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Merge a patch into the existing metadata bag. Reads the current
+   * metadata, applies the patch (shallow merge — new keys add, same
+   * keys overwrite, `null` value removes), writes the result.
+   *
+   * Not atomic across racing writers — last-writer-wins by design.
+   */
+  async patchMetadata(id: string, patch: ItemMetadata): Promise<Item> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'patchMetadata requires a non-empty id',
+        context: { id },
+      });
+    }
+    const current = await this.getItem(id);
+    if (current === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} not found`,
+        context: { id },
+      });
+    }
+    const merged: ItemMetadata = { ...(current.metadata ?? {}) };
+    for (const [key, value] of Object.entries(patch)) {
+      // null in the patch means "remove this key"; primitives + arrays
+      // set the value.
+      if (value === null) {
+        delete merged[key];
+      } else {
+        const normalized = normalizeMetadataValue(value);
+        if (normalized !== undefined) merged[key] = normalized;
+      }
+    }
+    return this.setMetadata(id, merged);
+  }
+
+  /** Remove a single metadata key. No-op if the key was already absent. */
+  async removeMetadataKey(id: string, key: string): Promise<Item> {
+    if (typeof key !== 'string' || key.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'removeMetadataKey requires a non-empty key',
+        context: { key },
+      });
+    }
+    // Implement as a patch with `null` — the patch path already
+    // handles delete semantics.
+    return this.patchMetadata(id, { [key]: null });
   }
 
   // ─── Sprint 3: move / copy / search ──────────────────────────────────
@@ -2483,10 +2592,8 @@ function toItem(row: Record<string, unknown>): Item {
   const item: Item = { ...base };
   const content = optString(row, 'content');
   if (content !== undefined) item.content = content;
-  const metaRaw = row['metadata'];
-  if (metaRaw !== null && typeof metaRaw === 'object' && !Array.isArray(metaRaw)) {
-    item.metadata = metaRaw as Record<string, unknown>;
-  }
+  const parsedMeta = parseMetadataField(row['metadata']);
+  if (parsedMeta !== null) item.metadata = parsedMeta;
   // Phase A2 detail-pane projections. Each falls through to undefined
   // when the underlying field is missing so the renderer can branch
   // on presence rather than special-case sentinel values.
@@ -2547,6 +2654,83 @@ function toTicketItem(row: Record<string, unknown>): Item {
   }
   item.ticket = ticket;
   return item;
+}
+
+/**
+ * Parse the `a.metadata` projection. The graph stores it as a JSON
+ * string (Neo4j doesn't support nested map properties natively), so
+ * we JSON.parse and defensively validate the shape.
+ *
+ * Returns `null` for missing/invalid metadata so the caller can skip
+ * assigning the field entirely (preserves "undefined means not set").
+ */
+function parseMetadataField(v: unknown): ItemMetadata | null {
+  if (v === null || v === undefined) return null;
+  // Tolerate both legacy (object) and canonical (JSON string) forms.
+  let parsed: unknown;
+  if (typeof v === 'string') {
+    if (v.length === 0) return null;
+    try {
+      parsed = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  } else if (typeof v === 'object' && !Array.isArray(v)) {
+    parsed = v;
+  } else {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  // Validate each entry; drop unknown shapes (functions, nested maps).
+  const out: ItemMetadata = {};
+  for (const [key, raw] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof key !== 'string' || key.length === 0) continue;
+    const value = normalizeMetadataValue(raw);
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+function normalizeMetadataValue(v: unknown): MetadataValue | undefined {
+  if (v === null) return null;
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  if (Array.isArray(v)) {
+    const arr: MetadataPrimitive[] = [];
+    for (const item of v) {
+      if (
+        item === null ||
+        typeof item === 'string' ||
+        typeof item === 'number' ||
+        typeof item === 'boolean'
+      ) {
+        arr.push(item as MetadataPrimitive);
+      }
+      // nested objects / functions inside arrays are dropped silently
+    }
+    return arr;
+  }
+  return undefined;
+}
+
+/**
+ * Serialize an ItemMetadata bag for storage. Returns an empty string
+ * for an empty bag so the graph property is still queryable but
+ * doesn't pretend to have data.
+ */
+function stringifyMetadata(meta: ItemMetadata | undefined): string {
+  if (meta === undefined) return '';
+  const keys = Object.keys(meta);
+  if (keys.length === 0) return '';
+  // Round-trip through normalizeMetadataValue to drop invalid entries.
+  const clean: ItemMetadata = {};
+  for (const k of keys) {
+    const v = normalizeMetadataValue(meta[k]);
+    if (v !== undefined) clean[k] = v;
+  }
+  if (Object.keys(clean).length === 0) return '';
+  return JSON.stringify(clean);
 }
 
 /**

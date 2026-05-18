@@ -170,6 +170,10 @@ function buildStubConsumer(): {
       addToSpace: async (_id, _to) => maybeFail({} as unknown as Item),
       removeFromSpace: async (_id, _space) => maybeFail({} as unknown as Item),
       search: async (_opts) => maybeFail([] as ItemSummary[]),
+      // Metadata sprint stubs.
+      setMetadata: async (_id, _metadata) => maybeFail({} as unknown as Item),
+      patchMetadata: async (_id, _patch) => maybeFail({} as unknown as Item),
+      removeMetadataKey: async (_id, _key) => maybeFail({} as unknown as Item),
     },
     // Home view (chunk 3k + 3o). Stub returns are not exercised by
     // the platform-contract tests below; they're here so the stub
