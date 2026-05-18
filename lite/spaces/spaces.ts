@@ -1503,6 +1503,20 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
 
   header.appendChild(titleWrap);
 
+  // Sprint 1: "+ New" button to open the new-asset modal. Available
+  // everywhere except Home (the news-feed view doesn't have a "create
+  // here" semantic — assets need a target scope).
+  if (state.activeScopeId !== HOME_SCOPE_ID) {
+    const newBtn = document.createElement('button');
+    newBtn.type = 'button';
+    newBtn.className = 'spaces-items-new';
+    newBtn.title = 'Add an asset to this space';
+    newBtn.setAttribute('aria-label', 'Add new asset');
+    newBtn.textContent = '+ New';
+    newBtn.addEventListener('click', () => openNewAssetDialog(null));
+    header.appendChild(newBtn);
+  }
+
   // Refresh affordance (replaces the prior toolbar refresh button).
   const refresh = document.createElement('button');
   refresh.type = 'button';
@@ -1742,6 +1756,30 @@ function renderDetail(opts: RenderDetailOpts): void {
   if (activeSpace?.kind === 'shared' && item.kind !== 'playbook') {
     aside.appendChild(buildSetAsPlaybookAffordance(activeSpace.id, item.id));
   }
+
+  // Sprint 1: Delete affordance at the bottom of the detail pane.
+  aside.appendChild(buildAssetDeleteAffordance(item.id, item.title));
+}
+
+/**
+ * Sprint 1 — "Delete asset" button. Sits at the bottom of the detail
+ * pane below other affordances. Clicking soft-deletes the asset with
+ * an undo toast; no confirm step (the toast is the undo).
+ */
+function buildAssetDeleteAffordance(itemId: string, title: string): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-delete-wrap';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'spaces-detail-delete';
+  btn.textContent = 'Delete asset';
+  btn.title = 'Soft-delete (reversible via Undo)';
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    void performAssetSoftDelete(itemId, title);
+  });
+  wrap.appendChild(btn);
+  return wrap;
 }
 
 /**
@@ -4314,6 +4352,8 @@ function wireMutationsUI(): void {
   wireRowMenuTriggers();
   wireRowMenu();
   wireToast();
+  wireNewAssetDialog();
+  wireDragDropAssetUpload();
 }
 
 // ─── "+ Shared Space" button (Phase 4 v2) ───────────────────────────────
@@ -4796,6 +4836,310 @@ function wireToast(): void {
     hideToast();
     if (handler !== null) handler();
   });
+}
+
+// ─── Sprint 1: new-asset modal + drag-drop upload + delete action ───────
+
+let newAssetMode: 'text' | 'upload' = 'text';
+let newAssetFile: File | null = null;
+
+function wireNewAssetDialog(): void {
+  const form = document.getElementById('spaces-new-asset-form');
+  const cancel = document.getElementById('spaces-new-asset-cancel');
+  const backdrop = document.getElementById('spaces-new-asset-backdrop');
+  const tabs = document.querySelectorAll<HTMLButtonElement>('[data-asset-tab]');
+  const fileInput = document.getElementById('spaces-new-asset-file-input');
+
+  if (form instanceof HTMLFormElement) {
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      void submitNewAsset();
+    });
+  }
+  if (cancel !== null) {
+    cancel.addEventListener('click', () => closeNewAssetDialog());
+  }
+  if (backdrop !== null) {
+    backdrop.addEventListener('click', (ev) => {
+      if (ev.target === backdrop) closeNewAssetDialog();
+    });
+  }
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const mode = tab.getAttribute('data-asset-tab');
+      if (mode !== 'text' && mode !== 'upload') return;
+      switchNewAssetMode(mode);
+    });
+  });
+  if (fileInput instanceof HTMLInputElement) {
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0] ?? null;
+      newAssetFile = file;
+      const hint = document.getElementById('spaces-new-asset-file-hint');
+      if (hint !== null) {
+        hint.textContent = file !== null
+          ? `${file.name} (${formatBytes(file.size)})`
+          : 'No file selected.';
+      }
+      // Auto-fill the title with the filename if empty.
+      const titleInput = document.getElementById('spaces-new-asset-title-input');
+      if (
+        file !== null &&
+        titleInput instanceof HTMLInputElement &&
+        titleInput.value.trim().length === 0
+      ) {
+        titleInput.value = file.name;
+      }
+    });
+  }
+  // Esc closes when open.
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    const bd = document.getElementById('spaces-new-asset-backdrop');
+    if (bd !== null && bd.hidden === false) {
+      closeNewAssetDialog();
+    }
+  });
+}
+
+function switchNewAssetMode(mode: 'text' | 'upload'): void {
+  newAssetMode = mode;
+  document.querySelectorAll<HTMLElement>('[data-asset-tab]').forEach((tab) => {
+    const isActive = tab.getAttribute('data-asset-tab') === mode;
+    tab.classList.toggle('is-active', isActive);
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  document.querySelectorAll<HTMLElement>('[data-asset-pane]').forEach((pane) => {
+    pane.hidden = pane.getAttribute('data-asset-pane') !== mode;
+  });
+}
+
+function openNewAssetDialog(presetFile: File | null = null): void {
+  const backdrop = document.getElementById('spaces-new-asset-backdrop');
+  const titleInput = document.getElementById('spaces-new-asset-title-input');
+  const contentInput = document.getElementById('spaces-new-asset-content-input');
+  const fileInput = document.getElementById('spaces-new-asset-file-input');
+  const error = document.getElementById('spaces-new-asset-error');
+  if (backdrop === null || !(titleInput instanceof HTMLInputElement)) return;
+
+  backdrop.hidden = false;
+  backdrop.setAttribute('aria-hidden', 'false');
+  titleInput.value = '';
+  if (contentInput instanceof HTMLTextAreaElement) contentInput.value = '';
+  if (fileInput instanceof HTMLInputElement) fileInput.value = '';
+  newAssetFile = null;
+  const hint = document.getElementById('spaces-new-asset-file-hint');
+  if (hint !== null) hint.textContent = 'No file selected.';
+  if (error !== null) {
+    error.hidden = true;
+    error.textContent = '';
+  }
+  // If a file was preset (via drag-drop), switch to upload mode and stash it.
+  if (presetFile !== null) {
+    newAssetFile = presetFile;
+    titleInput.value = presetFile.name;
+    if (hint !== null) {
+      hint.textContent = `${presetFile.name} (${formatBytes(presetFile.size)})`;
+    }
+    switchNewAssetMode('upload');
+  } else {
+    switchNewAssetMode('text');
+  }
+  requestAnimationFrame(() => titleInput.focus());
+}
+
+function closeNewAssetDialog(): void {
+  const backdrop = document.getElementById('spaces-new-asset-backdrop');
+  if (backdrop === null) return;
+  backdrop.hidden = true;
+  backdrop.setAttribute('aria-hidden', 'true');
+  newAssetFile = null;
+}
+
+async function submitNewAsset(): Promise<void> {
+  const titleInput = document.getElementById('spaces-new-asset-title-input');
+  const contentInput = document.getElementById('spaces-new-asset-content-input');
+  const error = document.getElementById('spaces-new-asset-error');
+  const submit = document.getElementById('spaces-new-asset-submit');
+  if (!(titleInput instanceof HTMLInputElement) || error === null) return;
+  const title = titleInput.value.trim();
+  if (title.length === 0) {
+    showDialogError(error, 'Please enter a title.');
+    return;
+  }
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showDialogError(error, 'Bridge unavailable. Reload the window.');
+    return;
+  }
+  if (submit instanceof HTMLButtonElement) submit.disabled = true;
+
+  // Resolve the target space — the active scope, unless it's Home, in
+  // which case we drop the asset into Uncategorized intake.
+  const spaceId =
+    state.activeScopeId === HOME_SCOPE_ID ||
+    state.activeScopeId === UNCATEGORIZED_SPACE_ID
+      ? ''
+      : state.activeScopeId;
+
+  try {
+    const creatorId = readCurrentEditorId();
+    if (newAssetMode === 'upload' && newAssetFile !== null) {
+      // Upload bytes via the Files bridge, then create the asset row
+      // with the resulting key. Files bridge isn't exposed on
+      // window.lite directly today (it's main-only). Fall back to
+      // creating the asset with the filename in `sourceUrl` as a
+      // placeholder until the renderer-side files bridge lands.
+      // (For v1 we'll surface the file directly via FileReader as
+      // base64 in the content field — sufficient for small files.)
+      const file = newAssetFile;
+      const bytes = await readFileAsBase64(file);
+      const payload: Parameters<typeof bridge.items.create>[0] = {
+        spaceId,
+        title,
+        kind: inferKindFromMime(file.type) as 'image' | 'video' | 'audio' | 'document' | 'other',
+        mimeType: file.type,
+        size: file.size,
+        content: bytes, // base64 stub for v1; replace with real upload later
+        ...(creatorId !== null ? { creatorId } : {}),
+      };
+      const envelope = await bridge.items.create(payload);
+      if (envelope.ok === false) {
+        showDialogError(error, envelope.error.message);
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+    } else {
+      const content =
+        contentInput instanceof HTMLTextAreaElement ? contentInput.value : '';
+      const envelope = await bridge.items.create({
+        spaceId,
+        title,
+        kind: 'text',
+        content,
+        ...(creatorId !== null ? { creatorId } : {}),
+      });
+      if (envelope.ok === false) {
+        showDialogError(error, envelope.error.message);
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+    }
+    closeNewAssetDialog();
+    showToast(`Created "${title}"`);
+    await loadItems();
+  } catch (err) {
+    showDialogError(error, messageFrom(err));
+  } finally {
+    if (submit instanceof HTMLButtonElement) submit.disabled = false;
+  }
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (): void => {
+      const result = reader.result;
+      if (typeof result === 'string') resolve(result);
+      else reject(new Error('Unexpected reader result'));
+    };
+    reader.onerror = (): void => reject(reader.error ?? new Error('Read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function inferKindFromMime(mime: string): string {
+  if (typeof mime !== 'string' || mime.length === 0) return 'other';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime === 'application/pdf' || mime.startsWith('text/')) return 'document';
+  return 'other';
+}
+
+/**
+ * Drag-and-drop upload: dropping files onto the items region opens
+ * the new-asset modal pre-populated with the first dropped file.
+ * Multi-file drop is supported but only the first file is loaded —
+ * batch upload is a future enhancement.
+ */
+function wireDragDropAssetUpload(): void {
+  const region = document.getElementById('spaces-items-region');
+  if (region === null) return;
+  let dragDepth = 0;
+  region.addEventListener('dragenter', (ev) => {
+    ev.preventDefault();
+    dragDepth += 1;
+    region.classList.add('is-drag-target');
+  });
+  region.addEventListener('dragleave', () => {
+    dragDepth -= 1;
+    if (dragDepth <= 0) {
+      dragDepth = 0;
+      region.classList.remove('is-drag-target');
+    }
+  });
+  region.addEventListener('dragover', (ev) => {
+    ev.preventDefault();
+  });
+  region.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    dragDepth = 0;
+    region.classList.remove('is-drag-target');
+    const file = ev.dataTransfer?.files?.[0] ?? null;
+    if (file === null) return;
+    openNewAssetDialog(file);
+  });
+}
+
+/**
+ * Sprint 1 — soft-delete an asset with an undo toast. Mirrors the
+ * existing space-soft-delete UX so the user gets a 6s window to
+ * recover from accidental deletes.
+ */
+async function performAssetSoftDelete(itemId: string, title: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showToast('Bridge unavailable.');
+    return;
+  }
+  try {
+    const envelope = await bridge.items.delete(itemId, { soft: true });
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    // Close the detail rail if this item was open.
+    if (state.activeItemId === itemId) {
+      state.activeItemId = null;
+      showDetailRail(false);
+    }
+    await loadItems();
+    showToast(`Deleted "${title}"`, {
+      undoLabel: 'Undo',
+      onUndo: () => {
+        void performAssetRestore(itemId, title);
+      },
+    });
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
+async function performAssetRestore(itemId: string, title: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.items.restore(itemId);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    await loadItems();
+    showToast(`Restored "${title}"`);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
 }
 
 // ─── Boot ───────────────────────────────────────────────────────────────

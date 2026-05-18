@@ -81,17 +81,19 @@ describe('CYPHER source strings', () => {
     expect(CYPHER.LIST_SPACES).toMatch(/count\(a\) AS itemCount/);
   });
 
-  it('uncategorized count uses NOT (a)-[:BELONGS_TO]->(:Space)', () => {
+  it('uncategorized count filters soft-deleted assets and excludes BELONGS_TO', () => {
+    expect(CYPHER.UNCATEGORIZED_COUNT).toMatch(/a\.deletedAt IS NULL/);
     expect(CYPHER.UNCATEGORIZED_COUNT).toMatch(
-      /WHERE NOT \(a\)-\[:BELONGS_TO\]->\(:Space\)/
+      /NOT \(a\)-\[:BELONGS_TO\]->\(:Space\)/
     );
     expect(CYPHER.UNCATEGORIZED_COUNT).toMatch(/count\(a\) AS count/);
   });
 
-  it('list-items-uncategorized matches :Asset with no :Space membership', () => {
+  it('list-items-uncategorized matches :Asset with no :Space membership + non-deleted', () => {
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/MATCH \(a:Asset\)/);
+    expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/a\.deletedAt IS NULL/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(
-      /WHERE NOT \(a\)-\[:BELONGS_TO\]->\(:Space\)/
+      /NOT \(a\)-\[:BELONGS_TO\]->\(:Space\)/
     );
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/\[\] AS otherSpaces/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/SKIP toInteger\(\$offset\)/);
@@ -114,6 +116,8 @@ describe('CYPHER source strings', () => {
     expect(CYPHER.GET_ITEM).toMatch(/LIMIT 1$/m);
     expect(CYPHER.GET_ITEM).toMatch(/coalesce\(a\.content, ''\) AS content/);
     expect(CYPHER.GET_ITEM).toMatch(/null AS metadata/);
+    // Sprint 1: soft-deleted assets must be hidden from every read.
+    expect(CYPHER.GET_ITEM).toMatch(/a\.deletedAt IS NULL/);
   });
 
   it('every projection uses canonical-with-legacy coalesce for renames', () => {
@@ -229,28 +233,28 @@ describe('SdkSpacesClient.listSpaces', () => {
 describe('SdkSpacesClient.getUncategorizedCount', () => {
   it('returns the count value as a number', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: 17 }]);
+    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: 17 }]);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(17);
   });
 
   it('returns 0 when no rows come back', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)', []);
+    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)', []);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(0);
   });
 
   it('clamps negative or fractional counts to a non-negative integer', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: -5 }]);
+    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: -5 }]);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(0);
   });
 
   it('returns 0 when count field is missing or non-numeric', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: 'nope' }]);
+    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: 'nope' }]);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(0);
   });
@@ -261,7 +265,7 @@ describe('SdkSpacesClient.getUncategorizedCount', () => {
 describe('SdkSpacesClient.listItems (uncategorized)', () => {
   it('emits LIST_ITEMS_UNCATEGORIZED with default offset/limit', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', []);
+    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' });
     const call = stub.calls[stub.calls.length - 1];
@@ -271,7 +275,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('always returns otherSpaces=[] for uncategorized scope', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
+    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
       {
         id: 'i-1',
         title: 'Inbox file',
@@ -289,7 +293,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('normalizes unknown kinds to "other"', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
+    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
       {
         id: 'i-2',
         title: 'Weird',
@@ -307,7 +311,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('parses producedBy when the producer projection is populated', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
+    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
       {
         id: 'i-3',
         title: 'Agent output',
@@ -329,7 +333,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('respects limit/offset opts (clamped to MAX_LIMIT=500)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('WHERE NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', []);
+    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' }, { limit: 999_999, offset: 50 });
     const call = stub.calls[stub.calls.length - 1];
@@ -668,7 +672,7 @@ describe('SdkSpacesClient.updateItem', () => {
   it('forwards trimmed fields to the Cypher params and re-fetches', async () => {
     const stub = buildStubQuery();
     stub.setResponse('UPDATE (?:.*)\\bMATCH \\(a:Asset \\{id: \\$id\\}\\)', []);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 'i-1',
         title: 'New title',
@@ -702,7 +706,7 @@ describe('SdkSpacesClient.updateItem', () => {
 
   it('omits unchanged fields from params (collapses to null)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 'i-2',
         title: 't',
@@ -727,7 +731,7 @@ describe('SdkSpacesClient.updateItem', () => {
 
   it('throws SPACES_NOT_FOUND when the item disappears between update and re-fetch', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', []);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', []);
     const client = makeClient(stub);
     await expect(
       client.updateItem('vanished', { title: 'whatever' })
@@ -763,7 +767,7 @@ describe('SdkSpacesClient.addTag / removeTag', () => {
   it('addTag trims the tag + re-fetches the updated tag list', async () => {
     const stub = buildStubQuery();
     stub.setResponse('MERGE (t:Tag {name: $tag})', [{ id: 'i-1', tag: 'q3' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 'i-1',
         title: 't',
@@ -802,7 +806,7 @@ describe('SdkSpacesClient.addTag / removeTag', () => {
       'MATCH (a:Asset {id: $id})-[r:TAGGED_AS]->(t:Tag {name: $tag})',
       []
     );
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 'i-1',
         title: 't',
@@ -1852,7 +1856,7 @@ describe('SdkSpacesClient.getCurrentPlaybook', () => {
   it('re-fetches the playbook via getItem when one is set', async () => {
     const stub = buildStubQuery();
     stub.setResponse('OPTIONAL MATCH (s)-[:CURRENT_PLAYBOOK]', [{ playbookId: 'pb-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 'pb-1',
         title: 'Q1 plan',
@@ -1886,7 +1890,7 @@ describe('SdkSpacesClient.setCurrentPlaybook', () => {
     stub.setResponse('MERGE (s)-[:CURRENT_PLAYBOOK]', [
       { playbookId: 'pb-1', ticketCount: 4 },
     ]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 'pb-1',
         title: 'Q1 plan',
@@ -1999,7 +2003,7 @@ describe('SdkSpacesClient.createTicket', () => {
   it('defaults status to open, generates an id, returns the re-fetched Item', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'ticket-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 'ticket-stub',
         title: 'Write tests',
@@ -2062,7 +2066,7 @@ describe('SdkSpacesClient.updateTicket', () => {
       "WHERE coalesce(a.type, a.assetType) = 'ticket'",
       [{ id: 't-1' }]
     );
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 't-1',
         title: 't',
@@ -2098,7 +2102,7 @@ describe('SdkSpacesClient.updateTicket', () => {
       "WHERE coalesce(a.type, a.assetType) = 'ticket'",
       [{ id: 't-1' }]
     );
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 't-1',
         title: 'ticket',
@@ -2153,7 +2157,7 @@ describe('toItem ticket projection', () => {
 
   it('toItem skips ticket sub-shape for non-ticket items', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 'doc-1',
         title: 'Whitepaper',
@@ -2176,7 +2180,7 @@ describe('toItem ticket projection', () => {
 
   it('toItem assembles ticket sub-shape with status default + assignee + playbookId', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
       {
         id: 't-1',
         title: 'Write tests',
@@ -2370,5 +2374,207 @@ describe('SdkSpacesClient.removeSpaceMember', () => {
     await client.removeSpaceMember('sp-1', 'alice');
     const call = stub.calls[stub.calls.length - 1];
     expect(call?.parameters).toEqual({ spaceId: 'sp-1', memberId: 'alice' });
+  });
+});
+
+// ─── Sprint 1: asset CRUD ───────────────────────────────────────────────
+
+describe('CYPHER source strings — Sprint 1 (asset CRUD)', () => {
+  it('CREATE_ASSET requires a Space, CREATEs :Asset, merges BELONGS_TO + optional CREATED', () => {
+    expect(CYPHER.CREATE_ASSET).toMatch(/MATCH \(s:Space \{id: \$spaceId\}\)/);
+    expect(CYPHER.CREATE_ASSET).toMatch(/WHERE s\.deletedAt IS NULL/);
+    expect(CYPHER.CREATE_ASSET).toMatch(/CREATE \(a:Asset \{/);
+    expect(CYPHER.CREATE_ASSET).toMatch(/type: \$kind/);
+    expect(CYPHER.CREATE_ASSET).toMatch(/MERGE \(a\)-\[:BELONGS_TO\]->\(s\)/);
+    expect(CYPHER.CREATE_ASSET).toMatch(/OPTIONAL MATCH \(p:Person \{id: \$creatorId\}\)/);
+    expect(CYPHER.CREATE_ASSET).toMatch(/MERGE \(x\)-\[:CREATED\]->\(a\)/);
+  });
+
+  it('CREATE_ASSET_UNCATEGORIZED creates without a BELONGS_TO edge', () => {
+    expect(CYPHER.CREATE_ASSET_UNCATEGORIZED).toMatch(/CREATE \(a:Asset \{/);
+    expect(CYPHER.CREATE_ASSET_UNCATEGORIZED).not.toMatch(/BELONGS_TO/);
+  });
+
+  it('SOFT_DELETE_ASSET sets deletedAt and only matches non-deleted rows', () => {
+    expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/MATCH \(a:Asset \{id: \$id\}\)/);
+    expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/WHERE a\.deletedAt IS NULL/);
+    expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/SET a\.deletedAt = \$now/);
+    expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/a\.updatedAt = \$now/);
+  });
+
+  it('RESTORE_ASSET clears deletedAt and only matches soft-deleted rows', () => {
+    expect(CYPHER.RESTORE_ASSET).toMatch(/WHERE a\.deletedAt IS NOT NULL/);
+    expect(CYPHER.RESTORE_ASSET).toMatch(/SET a\.deletedAt = null/);
+  });
+
+  it('HARD_DELETE_ASSET uses DETACH DELETE (drops incident edges)', () => {
+    expect(CYPHER.HARD_DELETE_ASSET).toMatch(/MATCH \(a:Asset \{id: \$id\}\)/);
+    expect(CYPHER.HARD_DELETE_ASSET).toMatch(/DETACH DELETE a/);
+  });
+});
+
+describe('SdkSpacesClient.createAsset', () => {
+  it('rejects empty title', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(
+      client.createAsset({ spaceId: 'sp-1', title: '   ' })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('infers kind=text from content when not specified', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'asset-stub',
+        title: 'Note',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    const created = await client.createAsset({
+      spaceId: 'sp-1',
+      title: 'Note',
+      content: 'Hello',
+    });
+    expect(created.kind).toBe('text');
+    const call = stub.calls.find((c) => c.cypher.includes('CREATE (a:Asset'));
+    expect(call?.parameters).toMatchObject({ kind: 'text' });
+  });
+
+  it('infers kind=other when only fileKey is provided', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'asset-stub',
+        title: 'Doc',
+        kind: 'other',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.createAsset({
+      spaceId: 'sp-1',
+      title: 'Doc',
+      fileKey: 'foo/bar.pdf',
+    });
+    const call = stub.calls.find((c) => c.cypher.includes('CREATE (a:Asset'));
+    expect(call?.parameters).toMatchObject({ kind: 'other', fileKey: 'foo/bar.pdf' });
+  });
+
+  it('uses CREATE_ASSET_UNCATEGORIZED when spaceId is empty', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'asset-stub',
+        title: 'Intake',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.createAsset({ spaceId: '', title: 'Intake', content: 'x' });
+    // Verify the uncategorized variant was used: no spaceId in params.
+    const call = stub.calls.find((c) => c.cypher.includes('CREATE (a:Asset'));
+    expect(call?.parameters).not.toHaveProperty('spaceId');
+  });
+
+  it('throws SPACES_NOT_FOUND when target space is missing', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', []);
+    const client = makeClient(stub);
+    await expect(
+      client.createAsset({ spaceId: 'sp-gone', title: 'x', content: 'y' })
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
+  });
+});
+
+describe('SdkSpacesClient.deleteAsset', () => {
+  it('rejects empty id', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.deleteAsset('')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('defaults to soft delete; throws SPACES_NOT_FOUND when 0 rows', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET a.deletedAt = $now', []);
+    const client = makeClient(stub);
+    await expect(client.deleteAsset('i-gone')).rejects.toMatchObject({
+      code: 'SPACES_NOT_FOUND',
+    });
+  });
+
+  it('soft delete returns void on success', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET a.deletedAt = $now', [{ id: 'i-1' }]);
+    const client = makeClient(stub);
+    await expect(client.deleteAsset('i-1')).resolves.toBeUndefined();
+  });
+
+  it('hard delete uses DETACH DELETE Cypher', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('DETACH DELETE a', []);
+    const client = makeClient(stub);
+    await client.deleteAsset('i-1', { soft: false });
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.cypher).toMatch(/DETACH DELETE a/);
+  });
+});
+
+describe('SdkSpacesClient.restoreAsset', () => {
+  it('rejects empty id', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(client.restoreAsset('')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('throws SPACES_NOT_FOUND when the asset is not soft-deleted', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET a.deletedAt = null', []);
+    const client = makeClient(stub);
+    await expect(client.restoreAsset('i-fresh')).rejects.toMatchObject({
+      code: 'SPACES_NOT_FOUND',
+    });
+  });
+
+  it('returns the re-fetched Item on success', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('SET a.deletedAt = null', [{ id: 'i-1' }]);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+      {
+        id: 'i-1',
+        title: 'Back',
+        kind: 'text',
+        createdAt: '',
+        updatedAt: '',
+        otherSpaces: [],
+        producedBy: null,
+        tags: [],
+      },
+    ]);
+    const client = makeClient(stub);
+    const restored = await client.restoreAsset('i-1');
+    expect(restored.id).toBe('i-1');
   });
 });

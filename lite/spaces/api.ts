@@ -51,6 +51,8 @@ import type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  CreateAssetInput,
+  DeleteAssetOpts,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -89,6 +91,8 @@ export type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  CreateAssetInput,
+  DeleteAssetOpts,
 } from './types.js';
 export {
   SPACES_MODULE_VERSION,
@@ -227,6 +231,36 @@ export interface SpacesItemsApi {
    *   crash on a freshly-deleted asset.
    */
   recentCommits(id: string, opts?: RecentCommitsOpts): Promise<Event[]>;
+
+  /**
+   * Create a new asset (Sprint 1). Either `content` (text body) or
+   * `fileKey` (already uploaded via `getFilesApi().upload(...)`)
+   * supplies the payload. Returns the freshly re-fetched Item.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for empty title;
+   *   `SPACES_NOT_FOUND` if the target space is missing/soft-deleted.
+   */
+  create(input: CreateAssetInput): Promise<Item>;
+
+  /**
+   * Delete an asset. Soft by default (sets `a.deletedAt`; reversible
+   * via `restore`). Hard-delete with `{ soft: false }` — irreversible.
+   *
+   * Soft-deleted assets disappear from every list/get because the
+   * underlying Cypher filters `WHERE a.deletedAt IS NULL`.
+   *
+   * @throws {SpacesError} `SPACES_NOT_FOUND` when the soft-delete
+   *   path finds nothing to delete.
+   */
+  delete(id: string, opts?: DeleteAssetOpts): Promise<void>;
+
+  /**
+   * Restore a soft-deleted asset. Returns the freshly-fetched Item.
+   *
+   * @throws {SpacesError} `SPACES_NOT_FOUND` when the asset is missing
+   *   OR wasn't soft-deleted.
+   */
+  restore(id: string): Promise<Item>;
 }
 
 /**
@@ -527,6 +561,15 @@ class UninitializedSpacesApi implements SpacesApi {
       _opts?: RecentCommitsOpts
     ): Promise<Event[]> {
       throw notInitialized('items.recentCommits');
+    },
+    async create(_input: CreateAssetInput): Promise<Item> {
+      throw notInitialized('items.create');
+    },
+    async delete(_id: string, _opts?: DeleteAssetOpts): Promise<void> {
+      throw notInitialized('items.delete');
+    },
+    async restore(_id: string): Promise<Item> {
+      throw notInitialized('items.restore');
     },
   };
 

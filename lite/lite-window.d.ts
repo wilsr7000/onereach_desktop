@@ -673,6 +673,30 @@ interface LiteSpacesItemsBridge {
     id: string,
     opts?: { limit?: number; since?: number }
   ): Promise<LiteSpacesIpcResult<LiteSpacesEventView[]>>;
+  /**
+   * Sprint 1 — create a new asset in a Space. Either `content`
+   * (text body) or `fileKey` (already uploaded via files.upload)
+   * supplies the payload.
+   */
+  create(input: {
+    spaceId: string;
+    title: string;
+    kind?: LiteSpaceItemKind;
+    content?: string;
+    fileKey?: string;
+    mimeType?: string;
+    size?: number;
+    description?: string;
+    sourceUrl?: string;
+    creatorId?: string;
+  }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Sprint 1 — soft delete (default) or hard delete an asset. */
+  delete(
+    id: string,
+    opts?: { soft?: boolean }
+  ): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  /** Sprint 1 — restore a soft-deleted asset. */
+  restore(id: string): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
 }
 
 // ─── Home view (chunk 3k + 3o) ───────────────────────────────────────────

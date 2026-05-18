@@ -107,6 +107,88 @@
     </div>
 
     <!--
+      Sprint 1: New-asset modal. Tabbed dialog with "Paste text" and
+      "Upload file" entry points. Hidden by default; spaces.ts opens
+      it from the "+ New" button on the items region toolbar.
+    -->
+    <div
+      id="spaces-new-asset-backdrop"
+      class="spaces-modal-backdrop"
+      hidden
+      aria-hidden="true"
+    >
+      <div
+        id="spaces-new-asset-dialog"
+        class="spaces-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="spaces-new-asset-title"
+      >
+        <h2 id="spaces-new-asset-title" class="spaces-modal-title">New asset</h2>
+        <div class="spaces-modal-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            class="spaces-modal-tab is-active"
+            data-asset-tab="text"
+            aria-selected="true"
+          >Paste text</button>
+          <button
+            type="button"
+            role="tab"
+            class="spaces-modal-tab"
+            data-asset-tab="upload"
+            aria-selected="false"
+          >Upload file</button>
+        </div>
+        <form id="spaces-new-asset-form" class="spaces-modal-form">
+          <label for="spaces-new-asset-title-input" class="spaces-modal-label">Title</label>
+          <input
+            type="text"
+            id="spaces-new-asset-title-input"
+            class="spaces-modal-input"
+            maxlength="200"
+            required
+          />
+          <div data-asset-pane="text">
+            <label for="spaces-new-asset-content-input" class="spaces-modal-label">Content</label>
+            <textarea
+              id="spaces-new-asset-content-input"
+              class="spaces-modal-input spaces-modal-textarea"
+              rows="10"
+              placeholder="Paste Markdown, notes, or any text here..."
+            ></textarea>
+          </div>
+          <div data-asset-pane="upload" hidden>
+            <label for="spaces-new-asset-file-input" class="spaces-modal-label">File</label>
+            <input
+              type="file"
+              id="spaces-new-asset-file-input"
+              class="spaces-modal-input spaces-modal-file"
+            />
+            <p
+              class="spaces-modal-help spaces-new-asset-file-hint"
+              id="spaces-new-asset-file-hint"
+            >No file selected.</p>
+          </div>
+          <div id="spaces-new-asset-error" class="spaces-modal-error" hidden></div>
+          <div class="spaces-modal-actions">
+            <button type="button" id="spaces-new-asset-cancel" class="spaces-modal-button">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              id="spaces-new-asset-submit"
+              class="spaces-modal-button spaces-modal-button-primary"
+            >
+              Create
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!--
       Toast container for undo-affordances after a soft delete.
       Self-dismisses after ~6s; the Undo button restores the space
       via undeleteSpace().

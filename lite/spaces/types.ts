@@ -602,3 +602,51 @@ export interface SpaceMember {
   /** Display name. */
   name: string;
 }
+
+// ─── Asset CRUD (Sprint 1) ───────────────────────────────────────────────
+
+/**
+ * Input shape for `items.create(input)`. Either `content` (text body)
+ * or `fileKey` (already uploaded to the Files bucket) supplies the
+ * asset's payload; both can be set when the asset is e.g. an image
+ * with an accompanying caption.
+ *
+ * The SDK stamps `id`, `createdAt`, `updatedAt`, and (when an editorId
+ * is supplied) the `[:CREATED]->(:Person)` edge.
+ */
+export interface CreateAssetInput {
+  /** Target Space id. Required — assets always live in a Space. */
+  spaceId: string;
+  /** Display title. 1..MAX_ITEM_TITLE_LENGTH after trim. */
+  title: string;
+  /**
+   * Asset kind. Defaults to `'text'` when only `content` is provided,
+   * or `'other'` when only `fileKey` is provided. Callers should set
+   * an explicit kind (`'image'`, `'video'`, etc.) when known.
+   */
+  kind?: ItemKind;
+  /** Inline text body. */
+  content?: string;
+  /** File-bucket key (from `files.upload`) for binary assets. */
+  fileKey?: string;
+  /** Optional MIME type (refines preview rendering). */
+  mimeType?: string;
+  /** Optional byte size (for binary assets). */
+  size?: number;
+  /** Free-form description. */
+  description?: string;
+  /** Optional external URL — sets `a.sourceUrl` for web-clip kinds. */
+  sourceUrl?: string;
+  /** Optional :Person.id of the creator — MERGEs [:CREATED] edge. */
+  creatorId?: string;
+}
+
+/** Options for `items.delete(id, opts?)`. */
+export interface DeleteAssetOpts {
+  /**
+   * Default true (soft delete via `a.deletedAt`). When false, hard
+   * deletes the node and its [:BELONGS_TO] / [:TAGGED_AS] / [:CREATED]
+   * edges — irreversible.
+   */
+  soft?: boolean;
+}

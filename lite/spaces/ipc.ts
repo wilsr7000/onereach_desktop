@@ -36,6 +36,8 @@ import type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  CreateAssetInput,
+  DeleteAssetOpts,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import type { DiscoveryResults } from './discovery-format.js';
@@ -79,6 +81,10 @@ export const SPACES_IPC = {
   MEMBERS_LIST: 'lite:spaces:members:list',
   MEMBERS_ADD: 'lite:spaces:members:add',
   MEMBERS_REMOVE: 'lite:spaces:members:remove',
+  /** Sprint 1 — asset CRUD. */
+  ITEMS_CREATE: 'lite:spaces:items:create',
+  ITEMS_DELETE: 'lite:spaces:items:delete',
+  ITEMS_RESTORE: 'lite:spaces:items:restore',
 } as const;
 
 /**
@@ -690,6 +696,63 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
           typeof payload?.memberId === 'string' ? payload.memberId : '';
         await getSpacesApi().members.remove(spaceId, memberId);
         return { ok: true, value: { ok: true } };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // ─── Asset CRUD (Sprint 1) ─────────────────────────────────────────────
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_CREATE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { input?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const input =
+          payload?.input !== null && typeof payload?.input === 'object'
+            ? (payload?.input as CreateAssetInput)
+            : ({ spaceId: '', title: '' } as CreateAssetInput);
+        const value = await getSpacesApi().items.create(input);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_DELETE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; opts?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const opts =
+          payload?.opts !== null && typeof payload?.opts === 'object'
+            ? (payload?.opts as DeleteAssetOpts)
+            : ({} as DeleteAssetOpts);
+        await getSpacesApi().items.delete(id, opts);
+        return { ok: true, value: { ok: true } };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    SPACES_IPC.ITEMS_RESTORE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const value = await getSpacesApi().items.restore(id);
+        return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
       }

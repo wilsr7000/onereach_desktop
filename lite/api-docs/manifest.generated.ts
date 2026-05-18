@@ -2365,6 +2365,42 @@ export const MANIFEST: Manifest = {
               }
             ],
             "examples": []
+          },
+          {
+            "name": "create",
+            "signature": "create(input: CreateAssetInput): Promise<Item>",
+            "description": "Create a new asset (Sprint 1). Either `content` (text body) or\n`fileKey` (already uploaded via `getFilesApi().upload(...)`)\nsupplies the payload. Returns the freshly re-fetched Item.",
+            "tags": [
+              {
+                "tag": "throws",
+                "value": "{SpacesError} `SPACES_INVALID_INPUT` for empty title;\n  `SPACES_NOT_FOUND` if the target space is missing/soft-deleted."
+              }
+            ],
+            "examples": []
+          },
+          {
+            "name": "delete",
+            "signature": "delete(id: string, opts?: DeleteAssetOpts): Promise<void>",
+            "description": "Delete an asset. Soft by default (sets `a.deletedAt`; reversible\nvia `restore`). Hard-delete with `{ soft: false }` — irreversible.\n\nSoft-deleted assets disappear from every list/get because the\nunderlying Cypher filters `WHERE a.deletedAt IS NULL`.",
+            "tags": [
+              {
+                "tag": "throws",
+                "value": "{SpacesError} `SPACES_NOT_FOUND` when the soft-delete\n  path finds nothing to delete."
+              }
+            ],
+            "examples": []
+          },
+          {
+            "name": "restore",
+            "signature": "restore(id: string): Promise<Item>",
+            "description": "Restore a soft-deleted asset. Returns the freshly-fetched Item.",
+            "tags": [
+              {
+                "tag": "throws",
+                "value": "{SpacesError} `SPACES_NOT_FOUND` when the asset is missing\n  OR wasn't soft-deleted."
+              }
+            ],
+            "examples": []
           }
         ]
       },
@@ -2870,5 +2906,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-05-16T23:57:46.054Z"
+  "generatedAt": "2026-05-18T05:45:36.010Z"
 } as const;

@@ -159,6 +159,12 @@ function buildStubConsumer(): {
       // Phase 3c — per-asset activity log. Stub returns an empty event
       // list; specific behavior is exercised by spaces-sdk-client tests.
       recentCommits: async (_id, _opts) => maybeFail([]),
+      // Sprint 1 — asset CRUD stubs.
+      create: async (_input) => maybeFail({} as unknown as Item),
+      delete: async (_id, _opts) => {
+        maybeFail(undefined);
+      },
+      restore: async (_id) => maybeFail({} as unknown as Item),
     },
     // Home view (chunk 3k + 3o). Stub returns are not exercised by
     // the platform-contract tests below; they're here so the stub

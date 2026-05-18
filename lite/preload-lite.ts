@@ -81,6 +81,9 @@ const SPACES_IDENTITY_GET_OR_CREATE_PERSON = 'lite:spaces:identity:getOrCreatePe
 const SPACES_MEMBERS_LIST = 'lite:spaces:members:list';
 const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
 const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
+const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
+const SPACES_ITEMS_DELETE = 'lite:spaces:items:delete';
+const SPACES_ITEMS_RESTORE = 'lite:spaces:items:restore';
 const SPACES_DISCOVERY_RUN = 'lite:spaces:discovery:run';
 // Home view (chunk 3k + 3o). See lite/spaces/HOME-V1.md.
 const SPACES_HOME_ENTITY_COUNTS = 'lite:spaces:home:entityCounts';
@@ -491,6 +494,23 @@ interface SpacesItemsBridge {
     id: string,
     opts?: { limit?: number; since?: number }
   ): Promise<SpacesIpcResultView<unknown[]>>;
+  create(input: {
+    spaceId: string;
+    title: string;
+    kind?: string;
+    content?: string;
+    fileKey?: string;
+    mimeType?: string;
+    size?: number;
+    description?: string;
+    sourceUrl?: string;
+    creatorId?: string;
+  }): Promise<SpacesIpcResultView<unknown>>;
+  delete(
+    id: string,
+    opts?: { soft?: boolean }
+  ): Promise<SpacesIpcResultView<{ ok: true }>>;
+  restore(id: string): Promise<SpacesIpcResultView<unknown>>;
 }
 
 // Phase 0.5 discovery: result shape mirrors lite/spaces/discovery.ts.
@@ -1297,6 +1317,19 @@ const spaces: SpacesBridge = {
         ...(opts?.limit !== undefined ? { limit: opts.limit } : {}),
         ...(opts?.since !== undefined ? { since: opts.since } : {}),
       }) as Promise<SpacesIpcResultView<unknown[]>>,
+    create: (input) =>
+      ipcRenderer.invoke(SPACES_ITEMS_CREATE, { input }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    delete: (id, opts) =>
+      ipcRenderer.invoke(SPACES_ITEMS_DELETE, {
+        id,
+        ...(opts !== undefined ? { opts } : {}),
+      }) as Promise<SpacesIpcResultView<{ ok: true }>>,
+    restore: (id) =>
+      ipcRenderer.invoke(SPACES_ITEMS_RESTORE, { id }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
   },
   runDiscovery: () =>
     ipcRenderer.invoke(SPACES_DISCOVERY_RUN) as Promise<

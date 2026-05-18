@@ -60,6 +60,8 @@ import type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  CreateAssetInput,
+  DeleteAssetOpts,
 } from './types.js';
 import {
   MAX_SPACE_NAME_LENGTH,
@@ -132,12 +134,14 @@ export const CYPHER = {
   `,
   UNCATEGORIZED_COUNT: `
     MATCH (a:Asset)
-    WHERE NOT (a)-[:BELONGS_TO]->(:Space)
+    WHERE a.deletedAt IS NULL
+      AND NOT (a)-[:BELONGS_TO]->(:Space)
     RETURN count(a) AS count
   `,
   LIST_ITEMS_UNCATEGORIZED: `
     MATCH (a:Asset)
-    WHERE NOT (a)-[:BELONGS_TO]->(:Space)
+    WHERE a.deletedAt IS NULL
+      AND NOT (a)-[:BELONGS_TO]->(:Space)
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     WITH a, head(collect(creator)) AS producer
     RETURN a.id AS id,
@@ -162,6 +166,7 @@ export const CYPHER = {
   LIST_ITEMS_IN_SPACE: `
     MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+        AND a.deletedAt IS NULL
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(other:Space)
       WHERE other.id <> s.id
         AND other.deletedAt IS NULL
@@ -259,6 +264,7 @@ export const CYPHER = {
    */
   ITEM_RECENT_COMMITS: `
     MATCH (a:Asset {id: $id})
+      WHERE a.deletedAt IS NULL
     OPTIONAL MATCH (c:Commit)
       WHERE c.assetId = $id
          OR c.targetId = $id
@@ -280,6 +286,7 @@ export const CYPHER = {
 
   GET_ITEM: `
     MATCH (a:Asset {id: $id})
+      WHERE a.deletedAt IS NULL
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     OPTIONAL MATCH (editor:Person)-[:LAST_EDITED]->(a)
@@ -683,6 +690,7 @@ export const CYPHER = {
   LIST_TICKETS_IN_SPACE: `
     MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+        AND a.deletedAt IS NULL
         AND coalesce(a.type, a.assetType) = 'ticket'
         AND ($status IS NULL OR coalesce(a.status, 'open') = $status)
     OPTIONAL MATCH (a)-[:ASSIGNED_TO]->(assignee)
@@ -850,6 +858,105 @@ export const CYPHER = {
       WHERE member:Person OR member:Agent
     DELETE r
     RETURN $memberId AS id
+  `,
+
+  // ─── Asset CRUD (Sprint 1) ───────────────────────────────────────────────
+
+  /**
+   * Create a new :Asset and link it to the target Space via
+   * `[:BELONGS_TO]`. Optional `[:CREATED]<-(:Person)` edge when an
+   * editor id is supplied so attribution lights up immediately.
+   *
+   * The `spaceId` is required and validated client-side; passing an
+   * empty/sentinel value would orphan the asset, which is allowed at
+   * the graph level (Uncategorized) but the caller should explicitly
+   * use the dedicated CREATE_ASSET_UNCATEGORIZED path for that.
+   */
+  CREATE_ASSET: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+    CREATE (a:Asset {
+      id: $id,
+      type: $kind,
+      name: $title,
+      title: $title,
+      content: $content,
+      description: $description,
+      url: $fileKey,
+      sourceUrl: $sourceUrl,
+      mimeType: $mimeType,
+      size: $size,
+      createdAt: $now,
+      updatedAt: $now
+    })
+    MERGE (a)-[:BELONGS_TO]->(s)
+    WITH a
+    OPTIONAL MATCH (p:Person {id: $creatorId})
+    FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
+      MERGE (x)-[:CREATED]->(a))
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Same as CREATE_ASSET but for the Uncategorized intake zone:
+   * creates the asset without a `[:BELONGS_TO]` edge. Used when the
+   * user adds an asset from outside any space.
+   */
+  CREATE_ASSET_UNCATEGORIZED: `
+    CREATE (a:Asset {
+      id: $id,
+      type: $kind,
+      name: $title,
+      title: $title,
+      content: $content,
+      description: $description,
+      url: $fileKey,
+      sourceUrl: $sourceUrl,
+      mimeType: $mimeType,
+      size: $size,
+      createdAt: $now,
+      updatedAt: $now
+    })
+    WITH a
+    OPTIONAL MATCH (p:Person {id: $creatorId})
+    FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
+      MERGE (x)-[:CREATED]->(a))
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Soft delete: mark the asset with `deletedAt` so every read path's
+   * `WHERE a.deletedAt IS NULL` filter hides it. Reversible via
+   * RESTORE_ASSET. Mirrors the Space soft-delete pattern.
+   */
+  SOFT_DELETE_ASSET: `
+    MATCH (a:Asset {id: $id})
+      WHERE a.deletedAt IS NULL
+    SET a.deletedAt = $now,
+        a.updatedAt = $now
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Restore a soft-deleted asset. 0 rows means the asset wasn't
+   * soft-deleted (or doesn't exist) — caller maps to SPACES_NOT_FOUND.
+   */
+  RESTORE_ASSET: `
+    MATCH (a:Asset {id: $id})
+      WHERE a.deletedAt IS NOT NULL
+    SET a.deletedAt = null,
+        a.updatedAt = $now
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Hard delete: drop the node + all incident edges. Use sparingly —
+   * irreversible. Tags / Persons / Spaces survive (just the
+   * relationships and the asset row itself are removed).
+   */
+  HARD_DELETE_ASSET: `
+    MATCH (a:Asset {id: $id})
+    DETACH DELETE a
   `,
 } as const;
 
@@ -1551,6 +1658,170 @@ export class SdkSpacesClient {
     return updated;
   }
 
+  // ─── Asset CRUD (Sprint 1) ───────────────────────────────────────────
+
+  /**
+   * Create a new asset. When `input.spaceId` is non-empty, the asset
+   * is linked to that Space; passing an empty string takes the
+   * Uncategorized intake path.
+   *
+   * Returns the freshly-fetched Item via a follow-up `getItem` so
+   * callers never see a half-populated row.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for empty title or
+   *   unknown kind; `SPACES_NOT_FOUND` if the target Space is missing.
+   */
+  async createAsset(input: CreateAssetInput): Promise<Item> {
+    const title = validateTitle(input.title);
+    const description = validateOptionalDescription(input.description ?? '');
+    const content = typeof input.content === 'string' ? input.content : '';
+    const fileKey =
+      typeof input.fileKey === 'string' && input.fileKey.length > 0
+        ? input.fileKey
+        : null;
+    const mimeType =
+      typeof input.mimeType === 'string' && input.mimeType.length > 0
+        ? input.mimeType
+        : null;
+    const sourceUrl =
+      typeof input.sourceUrl === 'string' && input.sourceUrl.length > 0
+        ? input.sourceUrl
+        : null;
+    const size =
+      typeof input.size === 'number' && Number.isFinite(input.size) && input.size >= 0
+        ? Math.floor(input.size)
+        : null;
+    // Kind inference: if explicit, use it; else infer from payload.
+    let kind: ItemKind;
+    if (input.kind !== undefined && (ITEM_KINDS as Set<string>).has(input.kind)) {
+      kind = input.kind;
+    } else if (fileKey !== null) {
+      kind = 'other';
+    } else if (sourceUrl !== null) {
+      kind = 'url';
+    } else if (content.length > 0) {
+      kind = 'text';
+    } else {
+      kind = 'other';
+    }
+    const creatorId =
+      typeof input.creatorId === 'string' && input.creatorId.length > 0
+        ? input.creatorId
+        : null;
+    const id = generateAssetId();
+    const now = nowIso();
+    const params = {
+      id,
+      kind,
+      title,
+      content,
+      description,
+      fileKey,
+      sourceUrl,
+      mimeType,
+      size,
+      creatorId,
+      now,
+    };
+    const targetSpaceId =
+      typeof input.spaceId === 'string' && input.spaceId.length > 0
+        ? input.spaceId
+        : null;
+    if (targetSpaceId === null) {
+      // Uncategorized intake path — no [:BELONGS_TO] edge.
+      await this.run(CYPHER.CREATE_ASSET_UNCATEGORIZED, params);
+    } else {
+      const rows = await this.run(CYPHER.CREATE_ASSET, {
+        ...params,
+        spaceId: targetSpaceId,
+      });
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Space ${targetSpaceId} not found`,
+          remediation: 'Refresh the list and try again.',
+          context: { spaceId: targetSpaceId },
+        });
+      }
+    }
+    const created = await this.getItem(id);
+    if (created === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} disappeared after creation`,
+        context: { id },
+      });
+    }
+    return created;
+  }
+
+  /**
+   * Soft delete an asset (default) or hard delete (when
+   * `opts.soft === false`). Soft is the boring default — reversible
+   * via `restoreAsset`, and the asset disappears from every listing
+   * because the read queries filter `WHERE a.deletedAt IS NULL`.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for empty id;
+   *   `SPACES_NOT_FOUND` if the soft-delete path finds nothing to
+   *   delete (id missing OR already soft-deleted).
+   */
+  async deleteAsset(id: string, opts: DeleteAssetOpts = {}): Promise<void> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'deleteAsset requires a non-empty id',
+        context: { id },
+      });
+    }
+    const soft = opts.soft !== false;
+    if (soft) {
+      const now = nowIso();
+      const rows = await this.run(CYPHER.SOFT_DELETE_ASSET, { id, now });
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Asset ${id} not found (it may already be deleted)`,
+          context: { id },
+        });
+      }
+      return;
+    }
+    await this.run(CYPHER.HARD_DELETE_ASSET, { id });
+  }
+
+  /**
+   * Restore a soft-deleted asset. Idempotent at the renderer layer
+   * (the SDK throws if there's nothing to restore so callers see
+   * exactly what happened).
+   */
+  async restoreAsset(id: string): Promise<Item> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'restoreAsset requires a non-empty id',
+        context: { id },
+      });
+    }
+    const now = nowIso();
+    const rows = await this.run(CYPHER.RESTORE_ASSET, { id, now });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} not found or wasn't soft-deleted`,
+        context: { id },
+      });
+    }
+    const restored = await this.getItem(id);
+    if (restored === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} disappeared after restore`,
+        context: { id },
+      });
+    }
+    return restored;
+  }
+
   // ─── Identity + sharing (Phase 4 v2) ─────────────────────────────────
 
   /**
@@ -1796,6 +2067,20 @@ function generateTicketId(): string {
   }
   const rand = Math.random().toString(36).slice(2, 10);
   return `ticket-${Date.now().toString(36)}-${rand}`;
+}
+
+/** Generate an :Asset id. Same UUID-with-prefix scheme as Space + Ticket. */
+function generateAssetId(): string {
+  try {
+    const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+    if (c !== undefined && typeof c.randomUUID === 'function') {
+      return `asset-${c.randomUUID()}`;
+    }
+  } catch {
+    /* fall through */
+  }
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `asset-${Date.now().toString(36)}-${rand}`;
 }
 
 /**

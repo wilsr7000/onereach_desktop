@@ -62,6 +62,8 @@ import type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  CreateAssetInput,
+  DeleteAssetOpts,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -249,6 +251,15 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
     recentCommits(id: string, opts?: RecentCommitsOpts): Promise<Event[]> {
       return client.itemRecentCommits(id, opts ?? {});
+    },
+    create(input: CreateAssetInput): Promise<Item> {
+      return client.createAsset(input);
+    },
+    delete(id: string, opts?: DeleteAssetOpts): Promise<void> {
+      return client.deleteAsset(id, opts);
+    },
+    restore(id: string): Promise<Item> {
+      return client.restoreAsset(id);
     },
   };
 
