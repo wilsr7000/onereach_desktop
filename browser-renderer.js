@@ -639,11 +639,25 @@ async function selectAccountOnPage(webview, tabId, targetAccountId) {
 }
 
 /**
- * Check if a URL is an actual auth/login page (not just any onereach page)
+ * Stateless auth-domain redirector endpoints with no login form. They
+ * bounce the user through to /login (or elsewhere) within milliseconds.
+ * Queueing an auto-login attempt for these is a guaranteed race: by the
+ * time the queue runs the page has moved on, and the legacy "no longer
+ * on auth page" branch poisoned the tab with a 10s gaveUp cooldown that
+ * then blocked the real /login page that follows. See PUNCH-LIST.md
+ * "IDW Auto-Login Doom Loop on Token Expiry" (post-v5.0.14).
+ */
+const AUTH_REDIRECTOR_PATHS = ['/expired-token', '/logout', '/sign-out', '/signout'];
+
+/**
+ * Check if a URL is an actual auth/login page (not just any onereach page).
+ * Returns false for stateless redirector endpoints (e.g. /expired-token)
+ * even though their host matches auth.*.onereach.ai -- those have no form
+ * to fill and only kick off a redirect chain.
  */
 function isAuthPage(url) {
   if (!url) return false;
-  // Only trigger for actual auth pages, not landing pages
+  if (AUTH_REDIRECTOR_PATHS.some((p) => url.includes(p))) return false;
   return (
     (url.includes('auth.') && url.includes('onereach.ai')) || (url.includes('/login') && url.includes('onereach.ai'))
   );
@@ -813,10 +827,22 @@ async function attemptAutoLoginWithRetry(webview, url, tabId, attempt) {
     return;
   }
 
-  // Only attempt on actual auth pages (check CURRENT url, not queued url)
+  // Only attempt on actual auth pages (check CURRENT url, not queued url).
+  // The page can navigate away while the login was queued -- server-side
+  // redirect chains (e.g. /expired-token -> /?sso=true -> /login) often
+  // race the queue. This is NOT a "give up" condition: calling
+  // markAutoLoginGaveUp() here was poisoning the tab with a 10s cooldown
+  // that blocked the real /login page that arrived right after. Just
+  // release the queue and let the next did-navigate event re-arm
+  // auto-login cleanly. See PUNCH-LIST.md "IDW Auto-Login Doom Loop on
+  // Token Expiry" (post-v5.0.14).
   if (!isAuthPage(currentUrl)) {
-    console.log(`[AutoLogin] Skipping ${tabId} - page is no longer on auth page: ${currentUrl}`);
-    markAutoLoginGaveUp(tabId);
+    logAuthEvent('info', 'Login skipped - page navigated away from auth before queue ran', {
+      event: 'auth:queue-page-moved',
+      tabId,
+      currentUrl,
+    });
+    clearActiveLogin(tabId);
     return;
   }
 
