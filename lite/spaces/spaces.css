@@ -3105,3 +3105,136 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ─── Sprint 2: rich previews ───────────────────────────────────────── */
+
+/* Audio + video players. */
+.spaces-detail-audio,
+.spaces-detail-video {
+  width: 100%;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: #000;
+}
+
+.spaces-detail-video {
+  max-height: 480px;
+}
+
+/* PDF inline embed. */
+.spaces-detail-pdf {
+  width: 100%;
+  height: 600px;
+  border: 1px solid rgba(244, 246, 251, 0.12);
+  border-radius: 6px;
+  background: #fff;
+  margin-bottom: 8px;
+}
+
+/* Code preview. */
+.spaces-detail-code-preview {
+  margin-top: 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(244, 246, 251, 0.08);
+  overflow: hidden;
+}
+
+.spaces-detail-code-header {
+  padding: 6px 12px;
+  background: rgba(244, 246, 251, 0.04);
+  border-bottom: 1px solid rgba(244, 246, 251, 0.08);
+}
+
+.spaces-detail-code-lang {
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--or-accent-strong, #7bdbff);
+}
+
+.spaces-detail-code-block {
+  margin: 0;
+  padding: 12px 0;
+  overflow-x: auto;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--or-text-primary, #f4f6fb);
+  background: transparent;
+}
+
+.spaces-detail-code-block code {
+  font: inherit;
+}
+
+.spaces-detail-code-line {
+  display: block;
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.spaces-detail-code-line:hover {
+  background: rgba(244, 246, 251, 0.04);
+}
+
+.spaces-detail-code-line-number {
+  display: inline-block;
+  width: 32px;
+  text-align: right;
+  margin-right: 14px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.32));
+  user-select: none;
+}
+
+/* CSV table. */
+.spaces-detail-csv-preview {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.spaces-detail-csv-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-style: italic;
+}
+
+.spaces-detail-csv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.spaces-detail-csv-table th,
+.spaces-detail-csv-table td {
+  padding: 6px 10px;
+  text-align: left;
+  border: 1px solid rgba(244, 246, 251, 0.08);
+}
+
+.spaces-detail-csv-table th {
+  background: rgba(244, 246, 251, 0.06);
+  font-weight: 600;
+  color: var(--or-text-primary, #f4f6fb);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.spaces-detail-csv-table tbody tr:nth-child(even) td {
+  background: rgba(244, 246, 251, 0.02);
+}
+
+.spaces-detail-csv-table tbody tr:hover td {
+  background: rgba(244, 246, 251, 0.05);
+}
+
+.spaces-detail-csv-footer {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  font-style: italic;
+}

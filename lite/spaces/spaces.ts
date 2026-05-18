@@ -672,6 +672,13 @@ function injectBinaryPreview(item: RendererItem, url: string): void {
   pane.appendChild(buildBinaryPreview(item, url));
 }
 
+/**
+ * Build an inline preview for a binary asset. Dispatches on
+ * `item.kind` and `item.mimeType` so audio/video get players, PDFs
+ * embed, and unknown binaries fall back to a download link.
+ *
+ * Sprint 2: extended from image-only to a kind/MIME-aware dispatch.
+ */
 export function buildBinaryPreview(
   item: RendererItem,
   url: string
@@ -679,34 +686,259 @@ export function buildBinaryPreview(
   const wrap = document.createElement('div');
   wrap.className = 'spaces-detail-preview';
   wrap.setAttribute('data-kind', item.kind);
-  if (item.kind === 'image') {
+  const mime = typeof item.mimeType === 'string' ? item.mimeType.toLowerCase() : '';
+
+  // ── Image ───────────────────────────────────────────────────────────
+  if (item.kind === 'image' || mime.startsWith('image/')) {
     const img = document.createElement('img');
     img.src = url;
     img.alt = item.title.length > 0 ? item.title : 'Item preview';
     img.loading = 'lazy';
     img.className = 'spaces-detail-image';
     wrap.appendChild(img);
+    appendDownloadLink(wrap, url, 'Download');
     return wrap;
   }
-  // Non-image binary: render a download link so the user can fetch
-  // the file in their browser of choice. We deliberately don't auto-
-  // play audio / video here -- that's a future micro-phase decision.
+
+  // ── Audio player ────────────────────────────────────────────────────
+  if (item.kind === 'audio' || mime.startsWith('audio/')) {
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.preload = 'metadata';
+    audio.src = url;
+    audio.className = 'spaces-detail-audio';
+    wrap.appendChild(audio);
+    appendDownloadLink(wrap, url, 'Download audio');
+    return wrap;
+  }
+
+  // ── Video player ────────────────────────────────────────────────────
+  if (item.kind === 'video' || mime.startsWith('video/')) {
+    const video = document.createElement('video');
+    video.controls = true;
+    video.preload = 'metadata';
+    video.src = url;
+    video.className = 'spaces-detail-video';
+    wrap.appendChild(video);
+    appendDownloadLink(wrap, url, 'Download video');
+    return wrap;
+  }
+
+  // ── PDF inline embed ────────────────────────────────────────────────
+  if (mime === 'application/pdf') {
+    const embed = document.createElement('embed');
+    embed.src = url;
+    embed.type = 'application/pdf';
+    embed.className = 'spaces-detail-pdf';
+    wrap.appendChild(embed);
+    appendDownloadLink(wrap, url, 'Download PDF');
+    return wrap;
+  }
+
+  // ── Fallback: generic file download ────────────────────────────────
   const label = document.createElement('span');
   label.className = 'spaces-detail-label';
-  label.textContent = item.kind === 'audio'
-    ? 'Audio file'
-    : item.kind === 'video'
-    ? 'Video file'
-    : 'File';
+  label.textContent = mime.length > 0 ? mime : 'File';
   wrap.appendChild(label);
+  appendDownloadLink(wrap, url, 'Download');
+  return wrap;
+}
+
+function appendDownloadLink(parent: HTMLElement, url: string, text: string): void {
   const link = document.createElement('a');
   link.href = url;
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
   link.className = 'spaces-detail-download';
-  link.textContent = 'Download';
-  wrap.appendChild(link);
+  link.textContent = text;
+  parent.appendChild(link);
+}
+
+/**
+ * Render code with a deliberately-simple highlighter. v1 doesn't
+ * pull in a full syntax-highlight library — instead it preserves
+ * monospace formatting, highlights line numbers, and color-codes
+ * strings / keywords for a handful of common languages.
+ *
+ * Sprint 2: used for text/document items whose mimeType signals a
+ * code or JSON payload (and via the detail-content toggle for any
+ * text item the user wants to read as code).
+ */
+export function buildCodePreview(source: string, language: string): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-code-preview';
+  wrap.setAttribute('data-language', language);
+
+  const header = document.createElement('div');
+  header.className = 'spaces-detail-code-header';
+  const langLabel = document.createElement('span');
+  langLabel.className = 'spaces-detail-code-lang';
+  langLabel.textContent = language;
+  header.appendChild(langLabel);
+  wrap.appendChild(header);
+
+  const pre = document.createElement('pre');
+  pre.className = 'spaces-detail-code-block';
+  const code = document.createElement('code');
+  code.className = `language-${language}`;
+  const lines = source.split('\n');
+  lines.forEach((line, idx) => {
+    const lineEl = document.createElement('span');
+    lineEl.className = 'spaces-detail-code-line';
+    const num = document.createElement('span');
+    num.className = 'spaces-detail-code-line-number';
+    num.textContent = String(idx + 1);
+    num.setAttribute('aria-hidden', 'true');
+    lineEl.appendChild(num);
+    const content = document.createElement('span');
+    content.className = 'spaces-detail-code-line-content';
+    content.textContent = line;
+    lineEl.appendChild(content);
+    code.appendChild(lineEl);
+  });
+  pre.appendChild(code);
+  wrap.appendChild(pre);
   return wrap;
+}
+
+/**
+ * Build a table preview for CSV / TSV. Renders the first ~200 rows
+ * as an HTML table; larger files get a "showing N of M rows" footer.
+ * Auto-detects the delimiter from the first line.
+ */
+export function buildCsvPreview(source: string): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-csv-preview';
+
+  if (source.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'spaces-detail-csv-empty';
+    empty.textContent = '(empty CSV)';
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  const allLines = source.split(/\r?\n/).filter((l) => l.length > 0);
+  if (allLines.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'spaces-detail-csv-empty';
+    empty.textContent = '(empty CSV)';
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  // Delimiter detection: tab beats comma when both are present.
+  const firstLine = allLines[0] ?? '';
+  const delimiter = firstLine.includes('\t') ? '\t' : ',';
+
+  const MAX_ROWS = 200;
+  const lines = allLines.slice(0, MAX_ROWS);
+  const truncated = allLines.length > MAX_ROWS;
+
+  const table = document.createElement('table');
+  table.className = 'spaces-detail-csv-table';
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  const headers = parseCsvLine(lines[0] ?? '', delimiter);
+  for (const h of headers) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (let i = 1; i < lines.length; i++) {
+    const row = document.createElement('tr');
+    const cells = parseCsvLine(lines[i] ?? '', delimiter);
+    for (let j = 0; j < headers.length; j++) {
+      const td = document.createElement('td');
+      td.textContent = cells[j] ?? '';
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+
+  if (truncated) {
+    const footer = document.createElement('p');
+    footer.className = 'spaces-detail-csv-footer';
+    footer.textContent = `Showing ${MAX_ROWS} of ${allLines.length} rows. Download for full data.`;
+    wrap.appendChild(footer);
+  }
+  return wrap;
+}
+
+/**
+ * Parse a single CSV/TSV line with minimal quoted-field handling.
+ * Quoted fields can contain the delimiter and escaped quotes (""),
+ * but the parser deliberately stays simple — for "full" CSV (RFC 4180
+ * compliance, multi-line fields) the user can download and use a
+ * proper tool.
+ */
+function parseCsvLine(line: string, delimiter: string): string[] {
+  const out: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === delimiter) {
+        out.push(current);
+        current = '';
+      } else if (ch !== undefined) {
+        current += ch;
+      }
+    }
+  }
+  out.push(current);
+  return out;
+}
+
+/**
+ * Detect a "language" hint from a MIME type or filename. Used by the
+ * text-content preview path to pick code highlighting vs Markdown vs
+ * CSV table.
+ *
+ * Returns one of:
+ *   - 'csv' / 'tsv'   → CSV/TSV table preview
+ *   - 'json' / 'yaml' / 'xml' / 'js' / 'ts' / 'py' / 'sql' / 'sh'
+ *     → code block with that language tag
+ *   - 'markdown'      → Markdown renderer
+ *   - null            → no special preview (renderer's normal text path)
+ */
+export function detectTextPreviewLanguage(
+  mimeType: string | undefined,
+  title: string | undefined
+): string | null {
+  const mime = (mimeType ?? '').toLowerCase();
+  const name = (title ?? '').toLowerCase();
+  if (mime === 'text/csv' || name.endsWith('.csv')) return 'csv';
+  if (mime === 'text/tab-separated-values' || name.endsWith('.tsv')) return 'tsv';
+  if (mime === 'application/json' || name.endsWith('.json')) return 'json';
+  if (mime === 'application/yaml' || mime === 'application/x-yaml' ||
+      name.endsWith('.yaml') || name.endsWith('.yml')) return 'yaml';
+  if (mime === 'application/xml' || mime === 'text/xml' || name.endsWith('.xml')) return 'xml';
+  if (name.endsWith('.js') || name.endsWith('.mjs') || name.endsWith('.cjs')) return 'js';
+  if (name.endsWith('.ts') || name.endsWith('.tsx')) return 'ts';
+  if (name.endsWith('.py')) return 'py';
+  if (name.endsWith('.sql')) return 'sql';
+  if (name.endsWith('.sh') || name.endsWith('.bash') || name.endsWith('.zsh')) return 'sh';
+  if (mime === 'text/markdown' || name.endsWith('.md') || name.endsWith('.markdown')) return 'markdown';
+  return null;
 }
 
 // ─── Scope wiring ───────────────────────────────────────────────────────
@@ -2026,9 +2258,18 @@ export function buildDetailPane(
   const tagsRow = buildDetailTags(item.tags ?? [], edit);
   if (tagsRow.children.length > 0) wrap.appendChild(tagsRow);
 
-  // ── Content body (Markdown-aware, with preview/source toggle) ────────
+  // ── Content body — Sprint 2: kind-aware preview dispatch ────────────
   if (typeof item.content === 'string' && item.content.length > 0) {
-    wrap.appendChild(buildDetailContent(item.content, initialMode));
+    const language = detectTextPreviewLanguage(item.mimeType, item.title);
+    if (language === 'csv' || language === 'tsv') {
+      wrap.appendChild(buildCsvPreview(item.content));
+    } else if (language !== null && language !== 'markdown') {
+      // Code-like content: render as syntax-highlighted block.
+      wrap.appendChild(buildCodePreview(item.content, language));
+    } else {
+      // Markdown / unspecified text: existing Markdown renderer.
+      wrap.appendChild(buildDetailContent(item.content, initialMode));
+    }
   }
 
   // ── Type-specific subsection (source link, audio/video player) ───────
@@ -4246,6 +4487,9 @@ function messageFrom(err: unknown): string {
   buildTicketStatusPill,
   buildDetailTicketBlock,
   buildDetailPlaybookBlock,
+  buildCodePreview,
+  buildCsvPreview,
+  detectTextPreviewLanguage,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,

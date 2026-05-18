@@ -1368,3 +1368,255 @@ describe('buildDetailPane — ticket integration', () => {
     expect(el.querySelector('.spaces-detail-playbook')).not.toBeNull();
   });
 });
+
+// ─── Sprint 2: rich previews ────────────────────────────────────────────
+
+interface BinaryPreviewApi {
+  buildBinaryPreview(item: RendererItem, url: string): HTMLElement;
+  buildCodePreview(source: string, language: string): HTMLElement;
+  buildCsvPreview(source: string): HTMLElement;
+  detectTextPreviewLanguage(
+    mimeType: string | undefined,
+    title: string | undefined
+  ): string | null;
+}
+
+function previewApi(): BinaryPreviewApi {
+  return (window as unknown as { __spacesRendererForTesting: BinaryPreviewApi })
+    .__spacesRendererForTesting;
+}
+
+describe('buildBinaryPreview — Sprint 2 dispatch', () => {
+  it('renders <img> for image kind', () => {
+    const el = previewApi().buildBinaryPreview(
+      baseItem({ kind: 'image', title: 'pic' }),
+      'blob:test'
+    );
+    const img = el.querySelector<HTMLImageElement>('img.spaces-detail-image');
+    expect(img).not.toBeNull();
+    expect(img?.src).toContain('blob:test');
+    expect(img?.alt).toBe('pic');
+    // Always offer a download link even for inline previews.
+    expect(el.querySelector('a.spaces-detail-download')).not.toBeNull();
+  });
+
+  it('renders an <audio controls> player for audio kind', () => {
+    const el = previewApi().buildBinaryPreview(
+      baseItem({ kind: 'audio' }),
+      'blob:test'
+    );
+    const audio = el.querySelector<HTMLAudioElement>('audio.spaces-detail-audio');
+    expect(audio).not.toBeNull();
+    expect(audio?.controls).toBe(true);
+    expect(audio?.preload).toBe('metadata');
+  });
+
+  it('renders a <video controls> player for video kind', () => {
+    const el = previewApi().buildBinaryPreview(
+      baseItem({ kind: 'video' }),
+      'blob:test'
+    );
+    const video = el.querySelector<HTMLVideoElement>('video.spaces-detail-video');
+    expect(video).not.toBeNull();
+    expect(video?.controls).toBe(true);
+  });
+
+  it('renders an inline <embed> for application/pdf', () => {
+    const el = previewApi().buildBinaryPreview(
+      baseItem({ kind: 'other', mimeType: 'application/pdf' }),
+      'blob:test'
+    );
+    const embed = el.querySelector<HTMLEmbedElement>('embed.spaces-detail-pdf');
+    expect(embed).not.toBeNull();
+    expect(embed?.type).toBe('application/pdf');
+  });
+
+  it('dispatches by MIME when kind is other but MIME is image/audio/video', () => {
+    expect(
+      previewApi()
+        .buildBinaryPreview(baseItem({ kind: 'other', mimeType: 'image/png' }), 'u')
+        .querySelector('img')
+    ).not.toBeNull();
+    expect(
+      previewApi()
+        .buildBinaryPreview(baseItem({ kind: 'other', mimeType: 'video/mp4' }), 'u')
+        .querySelector('video')
+    ).not.toBeNull();
+    expect(
+      previewApi()
+        .buildBinaryPreview(baseItem({ kind: 'other', mimeType: 'audio/mpeg' }), 'u')
+        .querySelector('audio')
+    ).not.toBeNull();
+  });
+
+  it('falls back to a download link for unknown MIME / kind', () => {
+    const el = previewApi().buildBinaryPreview(
+      baseItem({ kind: 'other', mimeType: 'application/octet-stream' }),
+      'blob:test'
+    );
+    expect(el.querySelector('audio')).toBeNull();
+    expect(el.querySelector('video')).toBeNull();
+    expect(el.querySelector('img')).toBeNull();
+    expect(el.querySelector('embed')).toBeNull();
+    expect(el.querySelector('a.spaces-detail-download')).not.toBeNull();
+  });
+});
+
+describe('detectTextPreviewLanguage', () => {
+  const d = (m: string | undefined, t: string | undefined): string | null =>
+    previewApi().detectTextPreviewLanguage(m, t);
+
+  it('CSV by MIME OR filename', () => {
+    expect(d('text/csv', 'x')).toBe('csv');
+    expect(d(undefined, 'export.csv')).toBe('csv');
+  });
+
+  it('TSV by MIME OR filename', () => {
+    expect(d('text/tab-separated-values', 'x')).toBe('tsv');
+    expect(d(undefined, 'export.tsv')).toBe('tsv');
+  });
+
+  it('JSON by MIME and filename', () => {
+    expect(d('application/json', 'x')).toBe('json');
+    expect(d(undefined, 'config.json')).toBe('json');
+  });
+
+  it('TypeScript + JavaScript + Python + SQL + shell by extension', () => {
+    expect(d(undefined, 'spaces.ts')).toBe('ts');
+    expect(d(undefined, 'index.tsx')).toBe('ts');
+    expect(d(undefined, 'app.js')).toBe('js');
+    expect(d(undefined, 'main.py')).toBe('py');
+    expect(d(undefined, 'query.sql')).toBe('sql');
+    expect(d(undefined, 'deploy.sh')).toBe('sh');
+  });
+
+  it('Markdown by MIME or .md / .markdown extension', () => {
+    expect(d('text/markdown', 'x')).toBe('markdown');
+    expect(d(undefined, 'README.md')).toBe('markdown');
+    expect(d(undefined, 'notes.markdown')).toBe('markdown');
+  });
+
+  it('returns null for unrecognized content', () => {
+    expect(d(undefined, 'just-a-note')).toBeNull();
+    expect(d('application/octet-stream', 'mystery')).toBeNull();
+  });
+});
+
+describe('buildCodePreview', () => {
+  it('renders a <pre><code> block with line numbers', () => {
+    const el = previewApi().buildCodePreview('one\ntwo\nthree', 'js');
+    const pre = el.querySelector('pre.spaces-detail-code-block');
+    expect(pre).not.toBeNull();
+    const lines = el.querySelectorAll('.spaces-detail-code-line');
+    expect(lines).toHaveLength(3);
+    // Line-number cells should render 1, 2, 3.
+    expect(
+      Array.from(el.querySelectorAll('.spaces-detail-code-line-number')).map(
+        (n) => n.textContent
+      )
+    ).toEqual(['1', '2', '3']);
+  });
+
+  it('preserves the language tag on the wrap + header', () => {
+    const el = previewApi().buildCodePreview('SELECT 1', 'sql');
+    expect(el.getAttribute('data-language')).toBe('sql');
+    expect(el.querySelector('.spaces-detail-code-lang')?.textContent).toBe('sql');
+    expect(el.querySelector('code.language-sql')).not.toBeNull();
+  });
+
+  it('XSS guard: angle brackets are rendered as text, not parsed', () => {
+    const el = previewApi().buildCodePreview('<script>alert(1)</script>', 'js');
+    expect(el.querySelector('script')).toBeNull();
+    expect(el.textContent).toContain('<script>alert(1)</script>');
+  });
+});
+
+describe('buildCsvPreview', () => {
+  it('renders an empty placeholder for empty input', () => {
+    const el = previewApi().buildCsvPreview('');
+    expect(el.querySelector('table')).toBeNull();
+    expect(el.querySelector('.spaces-detail-csv-empty')).not.toBeNull();
+  });
+
+  it('parses comma-delimited rows with a header row', () => {
+    const el = previewApi().buildCsvPreview('name,age\nAlice,30\nBob,40');
+    const headers = Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent);
+    expect(headers).toEqual(['name', 'age']);
+    const rows = el.querySelectorAll('tbody tr');
+    expect(rows).toHaveLength(2);
+    const aliceCells = Array.from(rows[0]?.querySelectorAll('td') ?? []).map((td) => td.textContent);
+    expect(aliceCells).toEqual(['Alice', '30']);
+  });
+
+  it('handles quoted fields with embedded commas', () => {
+    const el = previewApi().buildCsvPreview('name,role\n"Smith, Alice","Engineer"');
+    const row = el.querySelector('tbody tr');
+    const cells = Array.from(row?.querySelectorAll('td') ?? []).map((td) => td.textContent);
+    expect(cells).toEqual(['Smith, Alice', 'Engineer']);
+  });
+
+  it('auto-detects tab delimiter when the first line contains tabs', () => {
+    const el = previewApi().buildCsvPreview('name\tage\nAlice\t30');
+    const headers = Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent);
+    expect(headers).toEqual(['name', 'age']);
+  });
+
+  it('truncates display to 200 rows + shows a footer', () => {
+    const rows = ['name'];
+    for (let i = 0; i < 250; i++) rows.push(`row${i}`);
+    const el = previewApi().buildCsvPreview(rows.join('\n'));
+    expect(el.querySelectorAll('tbody tr')).toHaveLength(199);
+    expect(el.querySelector('.spaces-detail-csv-footer')?.textContent ?? '').toMatch(
+      /200 of 251/
+    );
+  });
+
+  it('XSS guard: HTML in cells is rendered as text', () => {
+    const el = previewApi().buildCsvPreview('col\n<img src=x onerror=alert(1)>');
+    expect(el.querySelector('img')).toBeNull();
+    expect(el.textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+});
+
+describe('buildDetailPane — Sprint 2 content dispatch', () => {
+  it('renders a CSV table when title ends in .csv', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({
+        title: 'data.csv',
+        kind: 'document',
+        content: 'name,value\nAlice,10',
+      }),
+      () => undefined
+    );
+    expect(el.querySelector('.spaces-detail-csv-table')).not.toBeNull();
+    // Should NOT also render the Markdown content block when in CSV mode.
+    expect(el.querySelector('.spaces-detail-content-block')).toBeNull();
+  });
+
+  it('renders a code block when title ends in .json', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({
+        title: 'config.json',
+        kind: 'document',
+        content: '{"a":1}',
+      }),
+      () => undefined
+    );
+    expect(el.querySelector('.spaces-detail-code-preview')).not.toBeNull();
+    expect(el.querySelector('.spaces-detail-csv-table')).toBeNull();
+  });
+
+  it('falls back to the Markdown content block for plain text', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({
+        title: 'just a note',
+        kind: 'text',
+        content: '# Hello\n\nWorld',
+      }),
+      () => undefined
+    );
+    expect(el.querySelector('.spaces-detail-content-block')).not.toBeNull();
+    expect(el.querySelector('.spaces-detail-code-preview')).toBeNull();
+    expect(el.querySelector('.spaces-detail-csv-table')).toBeNull();
+  });
+});

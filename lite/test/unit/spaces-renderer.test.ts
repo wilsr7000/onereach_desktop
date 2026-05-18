@@ -503,7 +503,7 @@ describe('buildBinaryPreview', () => {
     expect(preview.querySelector<HTMLImageElement>('img')?.alt).toBe('Item preview');
   });
 
-  it('renders a download link for non-image binary kinds', () => {
+  it('renders a download link alongside every preview (Sprint 2)', () => {
     for (const kind of ['document', 'audio', 'video', 'other'] as const) {
       const item: TestItem = {
         id: 'i-1',
@@ -519,7 +519,6 @@ describe('buildBinaryPreview', () => {
       expect(link).not.toBeNull();
       expect(link?.target).toBe('_blank');
       expect(link?.rel).toBe('noopener noreferrer');
-      expect(link?.textContent).toBe('Download');
     }
   });
 
@@ -537,31 +536,42 @@ describe('buildBinaryPreview', () => {
     expect(preview.getAttribute('data-kind')).toBe('video');
   });
 
-  it('labels audio / video / other clearly in the binary-link header', () => {
-    const make = (kind: TestItem['kind']): TestItem => ({
-      id: 'i',
-      title: 't',
-      kind,
-      createdAt: '',
-      updatedAt: '',
-      otherSpaces: [],
-      producedBy: null,
-    });
-    expect(
-      handle()
-        .buildBinaryPreview(make('audio'), 'https://x')
-        .querySelector('.spaces-detail-label')?.textContent
-    ).toBe('Audio file');
-    expect(
-      handle()
-        .buildBinaryPreview(make('video'), 'https://x')
-        .querySelector('.spaces-detail-label')?.textContent
-    ).toBe('Video file');
-    expect(
-      handle()
-        .buildBinaryPreview(make('document'), 'https://x')
-        .querySelector('.spaces-detail-label')?.textContent
-    ).toBe('File');
+  it('audio kind embeds an <audio controls> player (Sprint 2)', () => {
+    const item: TestItem = {
+      id: 'i', title: 't', kind: 'audio',
+      createdAt: '', updatedAt: '', otherSpaces: [], producedBy: null,
+    };
+    const audio = handle()
+      .buildBinaryPreview(item, 'https://x')
+      .querySelector<HTMLAudioElement>('audio.spaces-detail-audio');
+    expect(audio).not.toBeNull();
+    expect(audio?.controls).toBe(true);
+  });
+
+  it('video kind embeds a <video controls> player (Sprint 2)', () => {
+    const item: TestItem = {
+      id: 'i', title: 't', kind: 'video',
+      createdAt: '', updatedAt: '', otherSpaces: [], producedBy: null,
+    };
+    const video = handle()
+      .buildBinaryPreview(item, 'https://x')
+      .querySelector<HTMLVideoElement>('video.spaces-detail-video');
+    expect(video).not.toBeNull();
+    expect(video?.controls).toBe(true);
+  });
+
+  it('"other" kind without a recognized MIME falls back to a labeled download row', () => {
+    const item: TestItem = {
+      id: 'i', title: 't', kind: 'other',
+      createdAt: '', updatedAt: '', otherSpaces: [], producedBy: null,
+    };
+    const preview = handle().buildBinaryPreview(item, 'https://x');
+    // No inline player, no PDF embed — just label + download link.
+    expect(preview.querySelector('audio')).toBeNull();
+    expect(preview.querySelector('video')).toBeNull();
+    expect(preview.querySelector('embed')).toBeNull();
+    expect(preview.querySelector('a.spaces-detail-download')).not.toBeNull();
+    expect(preview.querySelector('.spaces-detail-label')?.textContent).toBe('File');
   });
 });
 
