@@ -3418,7 +3418,22 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
               if (speaker) {
                 const agentVoice = getAgentVoice(winner.agentId, agent);
                 log.info('voice', 'Speaking agent ack (deferred)', { ackMessage, agentVoice });
-                speaker.speak(ackMessage, { voice: agentVoice });
+                // taskResult: true tags this audio so the orb's idle-state
+                // "phantom audio blocked" guard lets it through. The deferred
+                // ack fires ACK_DELAY_MS after task assignment, by which
+                // point a voice session that ended on user-silence has
+                // already cleared _activeTaskId. Without this flag the
+                // ack audio was dropped entirely and the user heard
+                // nothing while the agent worked. See PUNCH-LIST.md
+                // "Voice ack audio dropped after silence-auto-stop"
+                // (post-v5.0.14) and the v5.0.13 hotfix in
+                // test/unit/orb-task-result-audio-bypass.test.js for the
+                // sister fix on task:settled audio.
+                speaker.speak(ackMessage, {
+                  voice: agentVoice,
+                  taskResult: true,
+                  agentId: winner.agentId,
+                });
               }
             } catch (_ignored) {
               /* ack TTS best-effort */

@@ -70,6 +70,44 @@ describe('exchange-bridge -- task:settled passes taskResult: true to speaker.spe
   });
 });
 
+describe('exchange-bridge -- deferred agent ack passes taskResult: true to speaker.speak', () => {
+  // Sister case: the deferred-ack timer (ACK_DELAY_MS = 2500ms after task
+  // assignment) was not stamping taskResult: true. When the user spoke a
+  // request and went silent, the orb auto-stopped on silence (~2s) and
+  // cleared _activeTaskId. Then the deferred ack fired and arrived at
+  // the orb in idle state with no taskId -- the phantom-audio guard
+  // dropped it. The user heard nothing while the agent worked. Pin the
+  // taskResult: true + agentId on this call site so a future refactor
+  // can't regress it.
+  function extractSpeakerSpeakCall() {
+    // Anchor directly on `speaker.speak(ackMessage,` -- this literal
+    // only appears at the deferred-ack call site. Slice forward enough
+    // to span the (potentially multi-line) metadata object.
+    const idx = BRIDGE_SOURCE.indexOf('speaker.speak(ackMessage,');
+    expect(idx, 'speaker.speak(ackMessage, ...) must exist (deferred-ack call site)').toBeGreaterThan(-1);
+    return BRIDGE_SOURCE.slice(idx, idx + 400);
+  }
+
+  it('speaker.speak metadata includes taskResult: true', () => {
+    const callSlice = extractSpeakerSpeakCall();
+    expect(callSlice).toMatch(/taskResult:\s*true/);
+  });
+
+  it('speaker.speak metadata includes agentId so the orb can attribute the audio', () => {
+    const callSlice = extractSpeakerSpeakCall();
+    expect(callSlice).toMatch(/agentId:\s*winner\.agentId/);
+  });
+
+  it('the deferred-ack log line still anchors the block (proves we matched the right call site)', () => {
+    // Counter-check: there must be exactly one `speaker.speak(ackMessage,`
+    // in the file (the deferred-ack site). If a future refactor adds a
+    // second one, this test fails so we know to update the anchor.
+    const matches = BRIDGE_SOURCE.match(/speaker\.speak\(ackMessage,/g);
+    expect(matches).not.toBeNull();
+    expect(matches.length).toBe(1);
+  });
+});
+
 describe('voice-speaker -- speak() reads metadata.taskResult and stamps it on broadcasts', () => {
   it('reads metadata.taskResult into a local const', () => {
     expect(SPEAKER_SOURCE).toMatch(/const\s+taskResult\s*=\s*!!metadata\?\.taskResult/);

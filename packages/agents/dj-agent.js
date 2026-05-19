@@ -299,6 +299,51 @@ const TIME_GREETINGS = {
   night: 'Hey there',
 };
 
+/**
+ * Format a one-line calendar-pressure summary from a calendar-store
+ * morning brief. Used by _gatherEventContext to give the AI bid prompt
+ * a sense of the user's day (so we don't queue a banger right before a
+ * 1:1 they're already 15 min into). Returns null when the brief has no
+ * meaningful signal.
+ */
+function _formatCalendarPressure(brief) {
+  if (!brief || typeof brief !== 'object') return null;
+  const parts = [];
+  if (brief.currentMeeting?.summary) {
+    parts.push(`In: ${brief.currentMeeting.summary}`);
+  }
+  if (brief.nextMeeting?.summary) {
+    parts.push(`Next: ${brief.nextMeeting.summary}`);
+  }
+  if (typeof brief.freeTime?.busyPercent === 'number') {
+    parts.push(`${brief.freeTime.busyPercent}% booked`);
+  }
+  if (typeof brief.freeTime?.remainingFreeHours === 'number') {
+    parts.push(`${brief.freeTime.remainingFreeHours} free hours`);
+  }
+  const totalEvents = brief.summary?.totalEvents;
+  if (typeof totalEvents === 'number' && totalEvents > 0) {
+    parts.push(`${totalEvents} events today`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/**
+ * Detect placeholder/template content in agent-memory sections. The
+ * memory system seeds new sections with instructional copy (e.g.
+ * "Add any custom preferences or notes here...") and italicised "no
+ * data yet" markers (e.g. "*No preferences learned yet.*"). These
+ * shouldn't be treated as real signal.
+ */
+function _isPlaceholderSection(text) {
+  if (!text || typeof text !== 'string') return true;
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  if (/^\*[Nn]o\s.*\*$/.test(trimmed)) return true;
+  if (/^Add any custom preferences or notes here/i.test(trimmed)) return true;
+  return false;
+}
+
 const djAgent = {
   id: 'dj-agent',
   name: 'Personal DJ',
@@ -2463,6 +2508,85 @@ ${updatedNote}
       log.error('agent', 'Error re-evaluating preferences', { error });
       // Non-fatal - don't fail the request
     }
+  },
+
+  /**
+   * Gather a compact event-context object for the bid prompt + selection
+   * heuristics. Lets the AI make time/load-aware music choices ("don't
+   * cue 'Eye of the Tiger' 5 min before a sales review").
+   *
+   * Pure-ish: takes injected accessors so it can be unit-tested without
+   * monkey-patching globals. All signal sources are queried independently
+   * so a failure in one (e.g. temporal-context throws on cold-boot)
+   * doesn't poison the others. Every field except dayOfWeek may be null.
+   *
+   * @param {object} accessors
+   * @param {() => null | { getPromptSummary: () => string }} accessors.getTemporalContext
+   * @param {() => null | { generateMorningBrief: () => Promise<object> }} accessors.getCalendarStore
+   * @returns {Promise<{
+   *   dayOfWeek: 'sun'|'mon'|'tue'|'wed'|'thu'|'fri'|'sat',
+   *   temporalSummary: string|null,
+   *   calendarPressure: string|null,
+   *   learnedPreferences: string|null,
+   *   userNotes: string|null,
+   * }>}
+   */
+  async _gatherEventContext({ getTemporalContext, getCalendarStore } = {}) {
+    const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayOfWeek = DAYS[new Date().getDay()];
+
+    let temporalSummary = null;
+    try {
+      const tc = typeof getTemporalContext === 'function' ? getTemporalContext() : null;
+      if (tc && typeof tc.getPromptSummary === 'function') {
+        const summary = tc.getPromptSummary();
+        if (summary && typeof summary === 'string' && summary.trim()) {
+          temporalSummary = summary;
+        }
+      }
+    } catch (_e) {
+      /* getTemporalContext threw -- field stays null */
+    }
+
+    let calendarPressure = null;
+    try {
+      const store = typeof getCalendarStore === 'function' ? getCalendarStore() : null;
+      if (store && typeof store.generateMorningBrief === 'function') {
+        const brief = await store.generateMorningBrief();
+        calendarPressure = _formatCalendarPressure(brief);
+      }
+    } catch (_e) {
+      /* generateMorningBrief threw -- field stays null */
+    }
+
+    let learnedPreferences = null;
+    let userNotes = null;
+    if (this.memory && typeof this.memory.getSection === 'function') {
+      try {
+        const lp = this.memory.getSection('Learned Preferences');
+        if (lp && !_isPlaceholderSection(lp)) {
+          learnedPreferences = lp;
+        }
+      } catch (_e) {
+        /* memory miss -- stays null */
+      }
+      try {
+        const un = this.memory.getSection('User Notes');
+        if (un && !_isPlaceholderSection(un)) {
+          userNotes = un;
+        }
+      } catch (_e) {
+        /* memory miss -- stays null */
+      }
+    }
+
+    return {
+      dayOfWeek,
+      temporalSummary,
+      calendarPressure,
+      learnedPreferences,
+      userNotes,
+    };
   },
 };
 

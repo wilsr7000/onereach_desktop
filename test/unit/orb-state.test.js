@@ -119,6 +119,28 @@ describe('OrbState v2', () => {
       expect(S.phase).toBe('idle');
     });
 
+    // Realtime API streams TTS audio (audio_delta, hud-speech-start)
+    // ~300-400ms after a final transcript -- frequently before the orb
+    // has had a chance to transition listening -> processing. Pre-fix,
+    // this was logged as "Invalid transition: listening -> speaking"
+    // every voice turn (11+ warnings per 200 events in the field log).
+    // Audio still played because the audio_wav handler is best-effort,
+    // but the visual orb phase lingered on 'listening' while the orb
+    // was actually speaking. This test pins the edge.
+    it('listening -> speaking (realtime audio races processSubmit)', () => {
+      S.transition('connecting');
+      S.transition('listening');
+      expect(S.transition('speaking', 'audio_delta')).toBe(true);
+      expect(S.phase).toBe('speaking');
+    });
+
+    it('listening -> speaking (hud-speech-start variant)', () => {
+      S.transition('connecting');
+      S.transition('listening');
+      expect(S.transition('speaking', 'hud-speech-start')).toBe(true);
+      expect(S.phase).toBe('speaking');
+    });
+
     it('processing -> speaking', () => {
       S.transition('connecting');
       S.transition('listening');
