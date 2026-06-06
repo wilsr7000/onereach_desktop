@@ -242,4 +242,42 @@ describe('seedKernelMenu', () => {
       expect(entry?.role).toBeUndefined();
     }
   });
+
+  it('does NOT register the Planning menu when the handler is absent', () => {
+    seedKernelMenu(handlers);
+    expect(registry.has('top:planning')).toBe(false);
+    expect(registry.has('planning:wiser-playbooks')).toBe(false);
+  });
+
+  it('registers a Planning menu hosting WISER Playbooks when the handler is provided', () => {
+    seedKernelMenu({ ...handlers, onOpenWiserPlaybooks: noop });
+    const top = registry.get('top:planning');
+    expect(top?.type).toBe('top-level');
+    expect(top?.label).toBe('Planning');
+    // No role / accelerator per ADR-015.
+    expect(top?.role).toBeUndefined();
+    expect(top?.accelerator).toBeUndefined();
+    // WISER Playbooks is nested under Planning.
+    expect(registry.getChildren('top:planning').map((e) => e.id)).toEqual([
+      'planning:wiser-playbooks',
+    ]);
+    const item = registry.get('planning:wiser-playbooks');
+    expect(item?.label).toBe('WISER Playbooks');
+    expect(item?.parentId).toBe('top:planning');
+    expect(item?.click).toBeDefined();
+    expect(item?.role).toBeUndefined();
+    expect(item?.accelerator).toBeUndefined();
+  });
+
+  it('WISER Playbooks click invokes the provided handler', () => {
+    let count = 0;
+    seedKernelMenu({
+      ...handlers,
+      onOpenWiserPlaybooks: () => {
+        count += 1;
+      },
+    });
+    registry.get('planning:wiser-playbooks')?.click?.();
+    expect(count).toBe(1);
+  });
 });

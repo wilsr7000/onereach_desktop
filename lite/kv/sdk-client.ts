@@ -141,6 +141,17 @@ export class SdkKVClient {
   }
 
   async set(collection: string, key: string, value: unknown): Promise<void> {
+    // Defense against the historical "menus disappeared" bug: a
+    // callsite once passed `undefined` here and the SDK coerced it to
+    // the string `"undefined"`, which was then persisted and silently
+    // resurrected on every subsequent read as garbage. Stores
+    // detected the bad shape and recovered to empty, leaving users
+    // with the impression that their tabs / agents / tools never
+    // saved. Now we refuse to write anything that isn't a plain
+    // structured blob — undefined, null, and primitives all reject
+    // with KV_INVALID_INPUT before the network call, so corrupt blobs
+    // can no longer enter the store.
+    rejectIfNotStructured(collection, key, value);
     return this.runRequest('set', collection, key, async () => {
       const sdk = this.getSdk();
       await sdk.setValueByKey(collection, key, value);
@@ -155,7 +166,15 @@ export class SdkKVClient {
         if (record === null || record === undefined) return null;
         // SDK returns { key, value } where value is the parsed JSON.
         const value = (record as { value?: unknown }).value;
-        return value === undefined ? null : value;
+        if (value === undefined) return null;
+        // Some OneReach KV API responses surface "key not found" as a
+        // 200 body of `{Status: "No data found."}` instead of a 404.
+        // The SDK passes that body through verbatim as the value, so
+        // we'd otherwise hand the store a sentinel object that fails
+        // shape validation and triggers an "empty" recovery. Treat
+        // the sentinel as semantically equivalent to null.
+        if (isNoDataFoundSentinel(value)) return null;
+        return value;
       } catch (err) {
         // Treat 404 / not-found as null rather than an error -- mirrors
         // the legacy client's "No data found" sentinel handling.
@@ -411,4 +430,53 @@ function kvHttpRemediation(status: number): string {
 function isNotFoundError(err: unknown): boolean {
   const e = err as { response?: { status?: number } };
   return e?.response?.status === 404;
+}
+
+/**
+ * Detect the OneReach KV "key not found" sentinel that some API
+ * deployments return as a 200 body instead of a 404. Shape:
+ *   `{ Status: "No data found." }`
+ *
+ * Case-sensitive on both the key and value because that's the exact
+ * response the server emits; matching loosely would risk eating a
+ * legitimately stored object that happens to have a `Status` field.
+ */
+function isNoDataFoundSentinel(value: unknown): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  const obj = value as Record<string, unknown>;
+  // Only a 1-key object whose sole key is `Status` with the exact
+  // server sentinel string counts. Anything else (including objects
+  // with `Status` plus other keys) is real data.
+  const keys = Object.keys(obj);
+  if (keys.length !== 1 || keys[0] !== 'Status') return false;
+  return obj['Status'] === 'No data found.';
+}
+
+/**
+ * Reject any `kv.set()` value that isn't a plain structured blob.
+ * Throws `KV_INVALID_INPUT` for `undefined`, `null`, and primitives
+ * (string / number / boolean / bigint / symbol / function).
+ *
+ * Arrays at the top level are also rejected: every callsite in the
+ * codebase wraps its data in a parent object (`{tabs: [...]}`,
+ * `{entries: [...]}`, ...), so a bare array landing here would be a
+ * shape regression and would re-introduce the same "looks like data
+ * but the store can't decode it" failure mode the readBlob guards
+ * are meant to surface.
+ */
+function rejectIfNotStructured(collection: string, key: string, value: unknown): void {
+  const t = typeof value;
+  let reason: string | null = null;
+  if (value === undefined) reason = 'value is undefined';
+  else if (value === null) reason = 'value is null';
+  else if (t !== 'object') reason = `value is a ${t}, expected an object`;
+  else if (Array.isArray(value)) reason = 'value is an array, expected a plain object';
+  if (reason === null) return;
+  throw new KVError({
+    code: KV_ERROR_CODES.INVALID_INPUT,
+    message: `kv.set rejected: ${reason}`,
+    context: { collection, key, valueType: t, isArray: Array.isArray(value) },
+    remediation:
+      'Wrap the data in a plain object before calling kv.set (e.g. `{tabs: [...]}` or `{entries: [...]}`).',
+  });
 }

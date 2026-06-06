@@ -194,6 +194,13 @@ function buildStubConsumer(): {
         name: input.name,
       }),
     renameSpace: async (id, name) => maybeFail<Space>({ id, name }),
+    updateSpace: async (id, patch) => {
+      const next: Space = { id, name: '' };
+      if (patch.description !== undefined) next.description = patch.description;
+      if (patch.color !== undefined) next.color = patch.color;
+      if (patch.iconKey !== undefined) next.iconKey = patch.iconKey;
+      return maybeFail<Space>(next);
+    },
     deleteSpace: async () => {
       maybeFail(undefined);
     },

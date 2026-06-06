@@ -127,6 +127,16 @@ export async function startInMemoryKVServer(port = 0): Promise<InMemoryKVServer>
       return;
     }
 
+    // refresh_token flow: the FLOW-token transport (FlowHttpKVClient)
+    // mints a per-account token here before any keyvalue call. Return a
+    // canned token so the client can proceed to the real PUT/GET.
+    if (url.includes('/refresh_token')) {
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ token: 'test-flow-token' }));
+      return;
+    }
+
     try {
       switch (req.method) {
         case 'PUT':

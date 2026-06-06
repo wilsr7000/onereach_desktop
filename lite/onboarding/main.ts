@@ -9,6 +9,8 @@
 
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { getOnboardingApi } from './api.js';
+import { getLoggingApi } from '../logging/api.js';
+import { ONBOARDING_EVENTS } from './events.js';
 import {
   ONBOARDING_STEP_IDS,
   type OnboardingState,
@@ -32,6 +34,7 @@ export function initOnboarding(): OnboardingHandle {
   const api = getOnboardingApi();
 
   ipcMain.handle(ONBOARDING_IPC.LOAD, async (): Promise<OnboardingState> => {
+    getLoggingApi().event(ONBOARDING_EVENTS.IPC_LOAD);
     return api.load();
   });
 
@@ -41,6 +44,7 @@ export function initOnboarding(): OnboardingHandle {
       _event: IpcMainInvokeEvent,
       payload: { stepId?: unknown }
     ): Promise<OnboardingState> => {
+      getLoggingApi().event(ONBOARDING_EVENTS.IPC_MARK_COMPLETE);
       if (typeof payload?.stepId !== 'string') {
         throw new Error('stepId must be a string');
       }
@@ -52,6 +56,7 @@ export function initOnboarding(): OnboardingHandle {
   );
 
   ipcMain.handle(ONBOARDING_IPC.DISMISS, async (): Promise<OnboardingState> => {
+    getLoggingApi().event(ONBOARDING_EVENTS.IPC_DISMISS);
     return api.dismiss();
   });
 

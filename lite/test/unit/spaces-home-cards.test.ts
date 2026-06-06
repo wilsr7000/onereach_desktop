@@ -78,6 +78,30 @@ interface RendererTestApi {
   countTimelineSince: (rows: ReadonlyArray<TimelineRow>, sinceMs: number) => number;
   looksLikeAgentAuthor: (author: string) => boolean;
   prettyAuthor: (raw: string) => string;
+  looksLikeIdString: (value: string) => boolean;
+  friendlyObjectForItem: (rawTitle: string, kind: string) => string;
+  friendlySpaceName: (rawName: string) => string;
+  generateItemTitle: (item: {
+    title?: string;
+    kind?: string;
+    id?: string;
+    sourceUrl?: string;
+    fileKey?: string;
+    excerpt?: string;
+  }) => string;
+  buildDetailEmptyContentHint: (item: { kind?: string }) => HTMLElement;
+  buildPreviewPlaceholder: (item: {
+    kind?: string;
+    mimeType?: string;
+  }) => HTMLElement;
+  buildPreviewUnavailable: (
+    item: { kind?: string; fileKey?: string; mimeType?: string },
+    reason: string | null
+  ) => HTMLElement;
+  bucketTimelineByDate: (
+    rows: ReadonlyArray<TimelineRow>,
+    nowMs: number
+  ) => Array<{ key: string; label: string; rows: TimelineRow[] }>;
   formatBigNumber: (n: number) => string;
   formatRecency: (value: string | number) => string;
   HOME_SCOPE_ID: string;
@@ -555,5 +579,561 @@ describe('buildTimelineRow', () => {
     const el = renderer.buildTimelineRow(eventRow);
     expect(el.classList.contains('home-timeline-row-event')).toBe(true);
     expect(el.querySelector('.home-timeline-object')?.textContent).toBe('an item');
+  });
+});
+
+// ─── looksLikeIdString ──────────────────────────────────────────────────
+
+describe('looksLikeIdString', () => {
+  it('flags 32-char hex hashes (md5-shaped)', () => {
+    expect(renderer.looksLikeIdString('5b4375227558baa82b0846ff0a8d8490')).toBe(true);
+  });
+
+  it('flags 64-char hex hashes (sha256-shaped)', () => {
+    expect(renderer.looksLikeIdString('a'.repeat(64))).toBe(true);
+  });
+
+  it('flags dashed UUIDs', () => {
+    expect(renderer.looksLikeIdString('402abae3-5ea4-9651-5760-deadbeefcafe')).toBe(true);
+  });
+
+  it('flags long lowercase alphanumeric blobs', () => {
+    expect(renderer.looksLikeIdString('cm8x3jq4k1z2y9wq7r6t5u3p1o2i')).toBe(true);
+  });
+
+  it('does NOT flag short strings', () => {
+    expect(renderer.looksLikeIdString('hello')).toBe(false);
+    expect(renderer.looksLikeIdString('abc123')).toBe(false);
+  });
+
+  it('does NOT flag human-typed titles with spaces', () => {
+    expect(renderer.looksLikeIdString('Quarterly audit Q4 2026')).toBe(false);
+    expect(renderer.looksLikeIdString('Onboarding meeting notes')).toBe(false);
+  });
+
+  it('does NOT flag filenames with dots / words', () => {
+    expect(renderer.looksLikeIdString('report-final-v2.pdf')).toBe(false);
+  });
+
+  it('does NOT flag readable names with vowel runs (e.g. "audit")', () => {
+    expect(renderer.looksLikeIdString('quarterlyaudit2026q4')).toBe(false);
+  });
+
+  it('returns false for non-string input', () => {
+    expect(renderer.looksLikeIdString(undefined as unknown as string)).toBe(false);
+    expect(renderer.looksLikeIdString(null as unknown as string)).toBe(false);
+    expect(renderer.looksLikeIdString(42 as unknown as string)).toBe(false);
+  });
+});
+
+// ─── friendlyObjectForItem ──────────────────────────────────────────────
+
+describe('friendlyObjectForItem', () => {
+  it('returns the title verbatim when it does not look like an id', () => {
+    expect(renderer.friendlyObjectForItem('Quarterly audit', 'document')).toBe(
+      'Quarterly audit'
+    );
+  });
+
+  it('falls back to a kind-aware noun when the title is hash-shaped', () => {
+    expect(
+      renderer.friendlyObjectForItem('5b4375227558baa82b0846ff0a8d8490', 'image')
+    ).toBe('an image');
+    expect(
+      renderer.friendlyObjectForItem('5b4375227558baa82b0846ff0a8d8490', 'document')
+    ).toBe('a document');
+    expect(
+      renderer.friendlyObjectForItem('5b4375227558baa82b0846ff0a8d8490', 'url')
+    ).toBe('a link');
+    expect(
+      renderer.friendlyObjectForItem('5b4375227558baa82b0846ff0a8d8490', 'audio')
+    ).toBe('an audio clip');
+    expect(
+      renderer.friendlyObjectForItem('5b4375227558baa82b0846ff0a8d8490', 'video')
+    ).toBe('a video');
+    expect(
+      renderer.friendlyObjectForItem('5b4375227558baa82b0846ff0a8d8490', 'text')
+    ).toBe('a note');
+  });
+
+  it('falls back to generic "an item" for unknown kinds', () => {
+    expect(
+      renderer.friendlyObjectForItem('5b4375227558baa82b0846ff0a8d8490', 'mystery')
+    ).toBe('an item');
+  });
+
+  it('falls back to a kind-aware noun for empty titles', () => {
+    expect(renderer.friendlyObjectForItem('', 'image')).toBe('an image');
+    expect(renderer.friendlyObjectForItem('   ', 'document')).toBe('a document');
+  });
+
+  it('trims whitespace from human titles', () => {
+    expect(renderer.friendlyObjectForItem('  Audit  ', 'document')).toBe('Audit');
+  });
+});
+
+// ─── friendlySpaceName ──────────────────────────────────────────────────
+
+describe('friendlySpaceName', () => {
+  it('returns the name verbatim when it looks human', () => {
+    expect(renderer.friendlySpaceName('Engineering')).toBe('Engineering');
+    expect(renderer.friendlySpaceName('Claude Conversations')).toBe('Claude Conversations');
+  });
+
+  it('returns "Unnamed space" for hash-shaped names', () => {
+    expect(renderer.friendlySpaceName('402abae35ea49651576deadbeefcafe11')).toBe(
+      'Unnamed space'
+    );
+  });
+
+  it('returns "Unnamed space" for dashed UUIDs', () => {
+    expect(
+      renderer.friendlySpaceName('402abae3-5ea4-9651-5760-deadbeefcafe')
+    ).toBe('Unnamed space');
+  });
+
+  it('returns "Unnamed space" for empty input', () => {
+    expect(renderer.friendlySpaceName('')).toBe('Unnamed space');
+    expect(renderer.friendlySpaceName('   ')).toBe('Unnamed space');
+  });
+
+  it('trims whitespace from human names', () => {
+    expect(renderer.friendlySpaceName('  Eng  ')).toBe('Eng');
+  });
+});
+
+// ─── bucketTimelineByDate ───────────────────────────────────────────────
+
+describe('bucketTimelineByDate', () => {
+  const now = Date.parse('2026-05-18T12:00:00Z');
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  function row(timestamp: string): TimelineRow {
+    return {
+      kind: 'event',
+      id: `event:${timestamp}`,
+      author: 'Someone',
+      verb: 'added',
+      object: 'an item',
+      timestamp,
+      fromAgent: false,
+    };
+  }
+
+  it('returns an empty array for empty input', () => {
+    expect(renderer.bucketTimelineByDate([], now)).toEqual([]);
+  });
+
+  it('drops empty buckets so headers never paint without rows', () => {
+    const only_today = renderer.bucketTimelineByDate(
+      [row(new Date(now - 2 * HOUR).toISOString())],
+      now
+    );
+    expect(only_today).toHaveLength(1);
+    expect(only_today[0]?.key).toBe('today');
+    expect(only_today[0]?.label).toBe('Today');
+  });
+
+  it('places rows in the right buckets and preserves order', () => {
+    const todayRow = row(new Date(now - 3 * HOUR).toISOString());
+    const yesterdayRow = row(new Date(now - 30 * HOUR).toISOString()); // ~1.25d
+    const thisWeekRow = row(new Date(now - 4 * DAY).toISOString());
+    const olderRow = row(new Date(now - 10 * DAY).toISOString());
+    const buckets = renderer.bucketTimelineByDate(
+      [todayRow, yesterdayRow, thisWeekRow, olderRow],
+      now
+    );
+    expect(buckets.map((b) => b.key)).toEqual([
+      'today',
+      'yesterday',
+      'thisWeek',
+      'older',
+    ]);
+    expect(buckets[0]?.rows).toHaveLength(1);
+    expect(buckets[1]?.rows).toHaveLength(1);
+    expect(buckets[2]?.rows).toHaveLength(1);
+    expect(buckets[3]?.rows).toHaveLength(1);
+  });
+
+  it('rows with unparseable timestamps land in "Older"', () => {
+    const garbage = row('not-a-timestamp');
+    const buckets = renderer.bucketTimelineByDate([garbage], now);
+    expect(buckets.map((b) => b.key)).toEqual(['older']);
+  });
+
+  it('headers always appear in fixed order (Today before Older)', () => {
+    // Even if input is reversed chronologically, output bucket order
+    // stays Today -> Yesterday -> ThisWeek -> Older.
+    const olderRow = row(new Date(now - 10 * DAY).toISOString());
+    const todayRow = row(new Date(now - 1 * HOUR).toISOString());
+    const buckets = renderer.bucketTimelineByDate([olderRow, todayRow], now);
+    expect(buckets.map((b) => b.key)).toEqual(['today', 'older']);
+  });
+});
+
+// ─── Integration: mergeTimeline + friendlyObjectForItem ─────────────────
+
+describe('mergeTimeline integrates friendly object labels', () => {
+  it('replaces hash-shaped item titles with a generated "<Kind> · <short-id>"', () => {
+    // Upgraded from the earlier "an image" fallback. The merged row's
+    // object now carries a generated title derived from kind + the
+    // first 6 chars of the (dash-stripped) id.
+    const rows = renderer.mergeTimeline(
+      [],
+      [
+        {
+          id: 'asset-1',
+          title: '5b4375227558baa82b0846ff0a8d8490',
+          kind: 'image',
+          createdAt: '2026-05-15T10:00:00Z',
+          updatedAt: '2026-05-15T10:00:00Z',
+          otherSpaces: [],
+          producedBy: null,
+        },
+      ]
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.object).toBe('Image · asset1');
+  });
+
+  it('preserves human-typed titles', () => {
+    const rows = renderer.mergeTimeline(
+      [],
+      [
+        {
+          id: 'asset-2',
+          title: 'Quarterly Audit',
+          kind: 'document',
+          createdAt: '2026-05-15T10:00:00Z',
+          updatedAt: '2026-05-15T10:00:00Z',
+          otherSpaces: [],
+          producedBy: null,
+        },
+      ]
+    );
+    expect(rows[0]?.object).toBe('Quarterly Audit');
+  });
+});
+
+// ─── generateItemTitle ──────────────────────────────────────────────────
+
+describe('generateItemTitle', () => {
+  it('returns the real title when it is human-shaped', () => {
+    expect(
+      renderer.generateItemTitle({ title: 'Quarterly Audit', kind: 'document' })
+    ).toBe('Quarterly Audit');
+  });
+
+  it('trims whitespace from real titles', () => {
+    expect(
+      renderer.generateItemTitle({ title: '  Audit  ', kind: 'document' })
+    ).toBe('Audit');
+  });
+
+  it('falls back to kind + short id when nothing else is available', () => {
+    expect(
+      renderer.generateItemTitle({
+        title: '5b4375227558baa82b0846ff0a8d8490',
+        kind: 'image',
+        id: '5b4375227558baa82b0846ff0a8d8490',
+      })
+    ).toBe('Image · 5b4375');
+  });
+
+  it('strips UUID dashes when shortening the id', () => {
+    expect(
+      renderer.generateItemTitle({
+        title: '',
+        kind: 'document',
+        id: '402abae3-5ea4-9651-5760-deadbeefcafe',
+      })
+    ).toBe('Doc · 402aba');
+  });
+
+  it('derives a title from a URL path segment + host', () => {
+    expect(
+      renderer.generateItemTitle({
+        kind: 'url',
+        sourceUrl: 'https://photos.example.com/2026/sunset.jpg',
+        id: 'asset-1',
+      })
+    ).toBe('sunset · photos.example.com');
+  });
+
+  it('falls back to "<Kind> · <host>" when the URL path has no meaningful segment', () => {
+    expect(
+      renderer.generateItemTitle({
+        kind: 'url',
+        sourceUrl: 'https://claude.ai/',
+        id: 'asset-2',
+      })
+    ).toBe('URL · claude.ai');
+  });
+
+  it('strips a leading "www." from the host', () => {
+    expect(
+      renderer.generateItemTitle({
+        kind: 'url',
+        sourceUrl: 'https://www.example.com/',
+        id: 'asset-x',
+      })
+    ).toBe('URL · example.com');
+  });
+
+  it('walks back through the URL path to skip id-shaped trailing segments', () => {
+    // The trailing segment is an id; the prior segment should win.
+    expect(
+      renderer.generateItemTitle({
+        kind: 'url',
+        sourceUrl:
+          'https://example.com/notes/quarterly-audit/5b4375227558baa82b0846ff0a8d8490',
+        id: 'asset-3',
+      })
+    ).toBe('quarterly audit · example.com');
+  });
+
+  it('humanizes a fileKey path segment by stripping extension and separators', () => {
+    expect(
+      renderer.generateItemTitle({
+        title: '',
+        kind: 'document',
+        fileKey: 'uploads/team/quarterly-audit-q4.pdf',
+        id: 'asset-4',
+      })
+    ).toBe('Quarterly audit q4');
+  });
+
+  it('rejects a fileKey whose filename is itself an id', () => {
+    // The fileKey segment is hash-shaped; we should fall through to
+    // the kind + short id default rather than render the hex string.
+    expect(
+      renderer.generateItemTitle({
+        title: '',
+        kind: 'document',
+        fileKey: 'uploads/5b4375227558baa82b0846ff0a8d8490.bin',
+        id: '5b4375227558baa82b0846ff0a8d8490',
+      })
+    ).toBe('Doc · 5b4375');
+  });
+
+  it('lifts the first ~6 words of an excerpt for text-kind items', () => {
+    expect(
+      renderer.generateItemTitle({
+        kind: 'text',
+        excerpt: 'Today we shipped the calmer spaces UI to production.',
+        id: 'asset-5',
+      })
+    ).toBe('Today we shipped the calmer spaces…');
+  });
+
+  it('does NOT use excerpt for non-text items (we trust the kind path more)', () => {
+    // `asset-6` -> dashes stripped -> 'asset6' -> first 6 chars -> 'asset6'
+    expect(
+      renderer.generateItemTitle({
+        kind: 'image',
+        excerpt: 'A nice sunset photo from last summer.',
+        id: 'asset-6',
+      })
+    ).toBe('Image · asset6');
+  });
+
+  it('always returns a non-empty string, even with minimal input', () => {
+    expect(renderer.generateItemTitle({ kind: 'document' })).toBe('Doc');
+    expect(renderer.generateItemTitle({})).toBe('Other');
+  });
+});
+
+// ─── Integration: generated titles flow through mergeTimeline ───────────
+
+describe('mergeTimeline uses generated titles for hash-shaped items', () => {
+  it('renders an item with a hash title as "<Kind> · <short-id>"', () => {
+    const rows = renderer.mergeTimeline(
+      [],
+      [
+        {
+          id: '5b4375227558baa82b0846ff0a8d8490',
+          title: '5b4375227558baa82b0846ff0a8d8490',
+          kind: 'image',
+          createdAt: '2026-05-15T10:00:00Z',
+          updatedAt: '2026-05-15T10:00:00Z',
+          otherSpaces: [],
+          producedBy: null,
+        },
+      ]
+    );
+    expect(rows[0]?.object).toBe('Image · 5b4375');
+  });
+
+  it('keeps real titles untouched in the merged row', () => {
+    const rows = renderer.mergeTimeline(
+      [],
+      [
+        {
+          id: 'asset-7',
+          title: 'Quarterly Audit',
+          kind: 'document',
+          createdAt: '2026-05-15T10:00:00Z',
+          updatedAt: '2026-05-15T10:00:00Z',
+          otherSpaces: [],
+          producedBy: null,
+        },
+      ]
+    );
+    expect(rows[0]?.object).toBe('Quarterly Audit');
+  });
+});
+
+// ─── buildDetailEmptyContentHint ────────────────────────────────────────
+
+describe('buildDetailEmptyContentHint', () => {
+  it('returns a section with the spaces-detail-empty class', () => {
+    const el = renderer.buildDetailEmptyContentHint({ kind: 'document' });
+    expect(el.tagName).toBe('SECTION');
+    expect(el.classList.contains('spaces-detail-empty')).toBe(true);
+    expect(el.getAttribute('role')).toBe('status');
+  });
+
+  it('always emits a non-empty headline and sub-text', () => {
+    const kinds = ['document', 'text', 'image', 'video', 'audio', 'url', '', 'unknown'];
+    for (const kind of kinds) {
+      const el = renderer.buildDetailEmptyContentHint({ kind });
+      const headline = el.querySelector('.spaces-detail-empty-headline')?.textContent ?? '';
+      const sub = el.querySelector('.spaces-detail-empty-sub')?.textContent ?? '';
+      expect(headline.length).toBeGreaterThan(0);
+      expect(sub.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('mentions the right graph property in the kind-specific sub-text', () => {
+    // text / document → :Asset.content
+    const text = renderer.buildDetailEmptyContentHint({ kind: 'text' });
+    expect(text.querySelector('.spaces-detail-empty-sub')?.textContent).toContain(
+      ':Asset.content'
+    );
+    // image → :Asset.url (the fileKey field)
+    const image = renderer.buildDetailEmptyContentHint({ kind: 'image' });
+    expect(image.querySelector('.spaces-detail-empty-sub')?.textContent).toContain(
+      ':Asset.url'
+    );
+    // url → :Asset.sourceUrl
+    const url = renderer.buildDetailEmptyContentHint({ kind: 'url' });
+    expect(url.querySelector('.spaces-detail-empty-sub')?.textContent).toContain(
+      ':Asset.sourceUrl'
+    );
+  });
+
+  it('falls back to a generic copy for unknown kinds', () => {
+    const el = renderer.buildDetailEmptyContentHint({ kind: 'mystery' });
+    const headline = el.querySelector('.spaces-detail-empty-headline')?.textContent ?? '';
+    expect(headline).toBe('This asset has no content yet.');
+  });
+});
+
+// ─── buildPreviewPlaceholder ────────────────────────────────────────────
+
+describe('buildPreviewPlaceholder', () => {
+  it('renders with the spaces-detail-preview class so injectBinaryPreview can swap it', () => {
+    const el = renderer.buildPreviewPlaceholder({ kind: 'image' });
+    expect(el.classList.contains('spaces-detail-preview')).toBe(true);
+    expect(el.classList.contains('spaces-detail-preview-loading')).toBe(true);
+    expect(el.getAttribute('data-state')).toBe('loading');
+  });
+
+  it('uses kind-aware copy in the loading label', () => {
+    const samples: Array<[{ kind?: string; mimeType?: string }, string]> = [
+      [{ kind: 'image' }, 'Loading image…'],
+      [{ kind: 'video' }, 'Loading video…'],
+      [{ kind: 'audio' }, 'Loading audio…'],
+      [{ kind: 'document', mimeType: 'application/pdf' }, 'Loading PDF…'],
+      [{ kind: 'document' }, 'Loading document…'],
+      [{ kind: 'mystery' }, 'Loading preview…'],
+      [{}, 'Loading preview…'],
+    ];
+    for (const [input, expected] of samples) {
+      const el = renderer.buildPreviewPlaceholder(input);
+      expect(el.querySelector('.spaces-detail-preview-loading-label')?.textContent).toBe(
+        expected
+      );
+    }
+  });
+});
+
+// ─── buildPreviewUnavailable ────────────────────────────────────────────
+
+describe('buildPreviewUnavailable', () => {
+  it('renders with the spaces-detail-preview class so it lands in the same slot', () => {
+    const el = renderer.buildPreviewUnavailable(
+      { kind: 'image', fileKey: 's3://x/y.png' },
+      null
+    );
+    expect(el.classList.contains('spaces-detail-preview')).toBe(true);
+    expect(el.classList.contains('spaces-detail-preview-unavailable')).toBe(true);
+    expect(el.getAttribute('data-state')).toBe('unavailable');
+  });
+
+  it('uses kind-aware headlines', () => {
+    expect(
+      renderer
+        .buildPreviewUnavailable({ kind: 'image', fileKey: 'k' }, null)
+        .querySelector('.spaces-detail-preview-unavailable-headline')?.textContent
+    ).toBe('Image preview unavailable.');
+    expect(
+      renderer
+        .buildPreviewUnavailable({ kind: 'video', fileKey: 'k' }, null)
+        .querySelector('.spaces-detail-preview-unavailable-headline')?.textContent
+    ).toBe('Video preview unavailable.');
+    expect(
+      renderer
+        .buildPreviewUnavailable(
+          { kind: 'document', mimeType: 'application/pdf', fileKey: 'k' },
+          null
+        )
+        .querySelector('.spaces-detail-preview-unavailable-headline')?.textContent
+    ).toBe('PDF preview unavailable.');
+    expect(
+      renderer
+        .buildPreviewUnavailable({ kind: 'mystery', fileKey: 'k' }, null)
+        .querySelector('.spaces-detail-preview-unavailable-headline')?.textContent
+    ).toBe('File preview unavailable.');
+  });
+
+  it('shows the raw fileKey verbatim so producers can see what path failed', () => {
+    const el = renderer.buildPreviewUnavailable(
+      {
+        kind: 'document',
+        mimeType: 'application/pdf',
+        fileKey: 's3://uxmag-assets/2026-02/design-guide-feb.pdf',
+      },
+      null
+    );
+    expect(
+      el.querySelector('.spaces-detail-preview-unavailable-key')?.textContent
+    ).toBe('s3://uxmag-assets/2026-02/design-guide-feb.pdf');
+  });
+
+  it('falls back to a generic explanation when reason is null', () => {
+    const el = renderer.buildPreviewUnavailable(
+      { kind: 'image', fileKey: 'x' },
+      null
+    );
+    expect(
+      el.querySelector('.spaces-detail-preview-unavailable-sub')?.textContent
+    ).toContain('Files module returned no URL');
+  });
+
+  it('includes the reason text when provided', () => {
+    const el = renderer.buildPreviewUnavailable(
+      { kind: 'image', fileKey: 'x' },
+      'Connection refused'
+    );
+    expect(
+      el.querySelector('.spaces-detail-preview-unavailable-sub')?.textContent
+    ).toContain('Connection refused');
+  });
+
+  it('omits the fileKey block when fileKey is absent', () => {
+    const el = renderer.buildPreviewUnavailable({ kind: 'image' }, null);
+    expect(el.querySelector('.spaces-detail-preview-unavailable-key')).toBeNull();
   });
 });

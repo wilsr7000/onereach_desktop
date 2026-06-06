@@ -53,7 +53,7 @@ export const MAIN_WINDOW_IPC = {
 // ---------------------------------------------------------------------------
 
 export interface InitMainWindowOptions {
-  /** Path to the bundled chrome.html (tab bar + home view). */
+  /** Path to the bundled chrome.html (tab bar + home view + inline chat). */
   chromeHtmlPath: string;
   /** Path to the bundled preload-lite.js. The chrome uses this; tab views do NOT. */
   preloadPath: string;
@@ -95,7 +95,11 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
   });
 
   if (registered) {
-    return { window: win, openActiveTabDevTools, teardown: teardownInternal };
+    return {
+      window: win,
+      openActiveTabDevTools,
+      teardown: teardownInternal,
+    };
   }
 
   const api = getMainWindowApi();
@@ -205,7 +209,11 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
 
   registered = true;
   log.info('main-window initialized', {});
-  return { window: win, openActiveTabDevTools, teardown: teardownInternal };
+  return {
+    window: win,
+    openActiveTabDevTools,
+    teardown: teardownInternal,
+  };
 }
 
 function teardownInternal(): void {

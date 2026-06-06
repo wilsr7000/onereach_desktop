@@ -35,7 +35,14 @@ function makeRaw(name: string, data?: unknown): EventRecord {
   };
 }
 
-function makeStore(opts: { kv?: FakeKV; persistDebounceMs?: number; now?: string } = {}): {
+function makeStore(
+  opts: {
+    kv?: FakeKV;
+    persistDebounceMs?: number;
+    now?: string;
+    activeAccountId?: string | null;
+  } = {}
+): {
   store: EventBusStore;
   kv: FakeKV;
 } {
@@ -47,6 +54,10 @@ function makeStore(opts: { kv?: FakeKV; persistDebounceMs?: number; now?: string
     skipAutoSubscribe: true, // tests drive ingest manually
     now: () => new Date(opts.now ?? '2026-05-05T12:00:00.000Z'),
     generateId: () => `ev-${++counter}`,
+    getActiveAccountId: () =>
+      Object.prototype.hasOwnProperty.call(opts, 'activeAccountId')
+        ? opts.activeAccountId ?? null
+        : 'acct-1',
   });
   return { store, kv };
 }
@@ -132,6 +143,25 @@ describe('EventBusStore hydrate from KV', () => {
 
   it('starts empty when KV has no record', async () => {
     const { store } = makeStore();
+    await store.hydrate();
+    expect(store._bufferSizeForTesting()).toBe(0);
+  });
+
+  it('skips KV hydrate while signed out', async () => {
+    const kv = new FakeKV();
+    const blob: EventBusBlob = {
+      schemaVersion: 1,
+      events: [
+        {
+          name: 'user.signed-in',
+          id: 'persisted-1',
+          ts: '2026-05-04T00:00:00.000Z',
+          data: { env: 'edison', accountId: 'acct-99' },
+        },
+      ] as DomainEvent[],
+    };
+    await kv.set(KV_COLLECTION, KV_KEY, blob);
+    const { store } = makeStore({ kv, activeAccountId: null });
     await store.hydrate();
     expect(store._bufferSizeForTesting()).toBe(0);
   });
@@ -272,6 +302,16 @@ describe('EventBusStore persistence', () => {
     );
     await store._flushPersistForTesting();
     // Buffer still has the event despite the persist failure.
+    expect(store._bufferSizeForTesting()).toBe(1);
+  });
+
+  it('skips KV persistence while signed out', async () => {
+    const { store, kv } = makeStore({ activeAccountId: null });
+    store._ingestForTesting(
+      makeRaw('auth.signIn.finish', { env: 'edison', accountId: 'a' })
+    );
+    await store._flushPersistForTesting();
+    expect(await kv.get(KV_COLLECTION, KV_KEY)).toBeNull();
     expect(store._bufferSizeForTesting()).toBe(1);
   });
 });

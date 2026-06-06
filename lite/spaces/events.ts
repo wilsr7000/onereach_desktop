@@ -45,6 +45,10 @@ export const SPACES_EVENTS = {
   RENAME_START: 'spaces.rename.start',
   RENAME_FINISH: 'spaces.rename.finish',
   RENAME_FAIL: 'spaces.rename.fail',
+  // ─── update (non-identity fields: description / color / iconKey) ──────
+  UPDATE_START: 'spaces.update.start',
+  UPDATE_FINISH: 'spaces.update.finish',
+  UPDATE_FAIL: 'spaces.update.fail',
   // ─── delete (Phase 3a) ───────────────────────────────────────────────
   DELETE_START: 'spaces.delete.start',
   DELETE_FINISH: 'spaces.delete.finish',
@@ -53,6 +57,13 @@ export const SPACES_EVENTS = {
   UNDELETE_START: 'spaces.undelete.start',
   UNDELETE_FINISH: 'spaces.undelete.finish',
   UNDELETE_FAIL: 'spaces.undelete.fail',
+  // NOTE: IPC entry events are emitted dynamically as
+  // `spaces.ipc.<verb>` by the wrapper in `ipc.ts` (the verb derived
+  // from each `lite:spaces:*` channel). They are intentionally NOT
+  // enumerated here -- the channel list in `ipc.ts` is the single
+  // source of truth, and the conformance meta-test treats the
+  // `spaces.ipc.` namespace as dynamically covered (same handling as
+  // KV's `kv.${op}` family).
 } as const;
 
 export type SpacesEventName = (typeof SPACES_EVENTS)[keyof typeof SPACES_EVENTS];
@@ -206,6 +217,26 @@ export interface SpacesRenameFailEvent extends SpacesEventBase {
   error: SerializedEventError;
 }
 
+// ─── update (description / color / iconKey) ──────────────────────────────
+
+export interface SpacesUpdateStartEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.UPDATE_START;
+  level: 'info';
+  data: SpacesIdData;
+}
+export interface SpacesUpdateFinishEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.UPDATE_FINISH;
+  level: 'info';
+  durationMs: number;
+  data: SpacesIdData;
+}
+export interface SpacesUpdateFailEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.UPDATE_FAIL;
+  level: 'error';
+  durationMs: number;
+  error: SerializedEventError;
+}
+
 // ─── delete (Phase 3a) ───────────────────────────────────────────────────
 
 export interface SpacesDeleteStartEvent extends SpacesEventBase {
@@ -266,6 +297,9 @@ export type SpacesEvent =
   | SpacesRenameStartEvent
   | SpacesRenameFinishEvent
   | SpacesRenameFailEvent
+  | SpacesUpdateStartEvent
+  | SpacesUpdateFinishEvent
+  | SpacesUpdateFailEvent
   | SpacesDeleteStartEvent
   | SpacesDeleteFinishEvent
   | SpacesDeleteFailEvent

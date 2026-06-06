@@ -24,6 +24,7 @@ import { mountNeon } from './sections/neon.js';
 import { mountIdws } from './sections/idws.js';
 import { mountDeveloper } from './sections/developer.js';
 import { mountDiagnostics } from './sections/diagnostics.js';
+import { mountAi } from './sections/ai.js';
 import type { SectionDescriptor } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,9 @@ const ICON_DEVELOPER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 
 // Robot/agent icon for the IDWs section.
 const ICON_IDWS = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="2" /><path d="M8 19v2M16 19v2" /><circle cx="9" cy="13" r="1" /><circle cx="15" cy="13" r="1" /><path d="M12 4v4" /><circle cx="12" cy="3" r="1" /></svg>`;
+
+// Sparkle icon for the AI section (auto-metadata).
+const ICON_AI = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z" /><path d="M19 14l.7 1.8L21.5 16.5l-1.8.7L19 19l-.7-1.8L16.5 16.5l1.8-.7z" /></svg>`;
 
 
 // ---------------------------------------------------------------------------
@@ -94,6 +98,12 @@ const SECTIONS: SectionDescriptor[] = [
     title: 'IDWs',
     icon: ICON_IDWS,
     mount: mountIdws,
+  },
+  {
+    id: 'ai',
+    title: 'AI',
+    icon: ICON_AI,
+    mount: mountAi,
   },
   {
     id: 'updates',

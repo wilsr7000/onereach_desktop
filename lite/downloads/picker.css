@@ -1,0 +1,256 @@
+/*
+ * Download → Save to Space picker.
+ *
+ * Small dedicated BrowserWindow (~420x540). Layout is a vertical
+ * stack: header, captured-file summary, search + space list, footer
+ * action bar. Dark theme inherits from signature.css.
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(79, 140, 255, 0.08), transparent 36%),
+    var(--or-bg-canvas, #0e0e10);
+  color: var(--or-text-primary, #f4f6fb);
+  font-family: var(--or-font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 18px 20px 16px 20px;
+  gap: 14px;
+}
+
+/* ── Header ────────────────────────────────────────────────────────── */
+
+.picker-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  margin-bottom: 2px;
+}
+
+.picker-sub {
+  font-size: 11px;
+  color: var(--or-text-faint, rgba(244, 246, 251, 0.36));
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+/* ── File summary card ─────────────────────────────────────────────── */
+
+.picker-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: var(--or-radius-md, 10px);
+}
+
+.picker-file-kind {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: var(--or-accent-soft, rgba(79, 140, 255, 0.16));
+  color: var(--or-accent-strong, #7bdbff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.picker-file-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.picker-file-name {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-file-meta-line {
+  font-size: 11px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  margin-top: 2px;
+}
+
+/* ── Search + list ─────────────────────────────────────────────────── */
+
+.picker-spaces {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.picker-search-label {
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+}
+
+.picker-search {
+  background: var(--or-bg-shell, #121216);
+  color: var(--or-text-primary, #f4f6fb);
+  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 7px 11px;
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+  transition:
+    border-color var(--or-transition-fast, 120ms ease),
+    box-shadow var(--or-transition-fast, 120ms ease);
+}
+
+.picker-search:focus {
+  border-color: var(--or-border-signal, rgba(79, 140, 255, 0.46));
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.16);
+}
+
+.picker-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--or-bg-shell, #121216);
+  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 4px;
+}
+
+.picker-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background var(--or-transition-fast, 120ms ease);
+}
+
+.picker-list-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.picker-list-row.is-active {
+  background: var(--or-accent-soft, rgba(79, 140, 255, 0.16));
+}
+
+.picker-list-row.is-active .picker-list-name {
+  color: var(--or-accent-hover, #6fa2ff);
+}
+
+.picker-list-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--or-accent, #4f8cff);
+  flex-shrink: 0;
+}
+
+.picker-list-name {
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-list-count {
+  font-size: 11px;
+  color: var(--or-text-faint, rgba(244, 246, 251, 0.36));
+  font-family: var(--or-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.picker-list-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+}
+
+/* ── Error block (e.g. spaces failed to load, upload failed) ───────── */
+
+.picker-error {
+  padding: 9px 11px;
+  background: rgba(255, 107, 122, 0.08);
+  border: 1px solid rgba(255, 107, 122, 0.24);
+  border-left: 3px solid var(--or-danger, #ff6b7a);
+  border-radius: 4px;
+  color: var(--or-danger, #ff6b7a);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* ── Action bar ────────────────────────────────────────────────────── */
+
+.picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.picker-btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: var(--or-radius-sm, 6px);
+  cursor: pointer;
+  transition:
+    background var(--or-transition-fast, 120ms ease),
+    border-color var(--or-transition-fast, 120ms ease),
+    transform var(--or-transition-fast, 120ms ease);
+}
+
+.picker-btn-cancel {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--or-text-primary, #f4f6fb);
+  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.picker-btn-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--or-border-strong, rgba(255, 255, 255, 0.12));
+}
+
+.picker-btn-save {
+  background: linear-gradient(180deg, var(--or-accent-hover, #6fa2ff), var(--or-accent, #4f8cff));
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.picker-btn-save:hover:not(:disabled) {
+  background: linear-gradient(180deg, #83b0ff, var(--or-accent-hover, #6fa2ff));
+  transform: translateY(-1px);
+}
+
+.picker-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}

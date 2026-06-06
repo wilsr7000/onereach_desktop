@@ -117,6 +117,7 @@ export async function initEventBus(opts: InitEventBusOptions = {}): Promise<Even
   );
 
   ipcMain.handle(EVENT_BUS_IPC.SIZE, async (): Promise<{ size: number }> => {
+    getLoggingApi().event(EVENT_BUS_EVENTS.IPC_SIZE);
     return { size: api.size() };
   });
 
@@ -128,7 +129,7 @@ export async function initEventBus(opts: InitEventBusOptions = {}): Promise<Even
     ): Promise<DomainEvent> => {
       const event = parseEmitPayload(payload);
       // Renderer-driven emit -- the IPC entry event makes it visible in /logs.
-      getLoggingApi().event('event-bus.ipc.emit', { name: event.name });
+      getLoggingApi().event(EVENT_BUS_EVENTS.IPC_EMIT, { name: event.name });
       // The runtime payload validation we just did is necessarily
       // weaker than the static `Omit<DomainEvent, 'id'|'ts'>` type --
       // we know the name is in the catalogue but we can't statically

@@ -126,7 +126,7 @@ verified 120+ in production already.
 ```cypher
 MATCH (c:Commit)
 WHERE ($since IS NULL OR c.timestamp >= $since)
-OPTIONAL MATCH (c)<-[:IN_SPACE]-(s:Space)
+OPTIONAL MATCH (c)-[:IN_SPACE]->(s:Space)
 RETURN c.hash AS id,
        c.author AS author,
        c.message AS kind,
@@ -137,7 +137,7 @@ ORDER BY c.timestamp DESC
 LIMIT toInteger($limit)
 ```
 
-Per Q-Home-4, the `kind` projection deliberately exposes `c.message`
+Edge direction is `(:Commit)-[:IN_SPACE]->(:Space)` per the live graph (verified 120 commits all in this direction; reverse direction matches 0). Per Q-Home-4, the `kind` projection deliberately exposes `c.message`
 verbatim (e.g. `'item:added'`, `'item:updated'`). When 3l (real sync)
 lands in v2, sync events reuse the same projection — the `kind` string
 just widens. No data-shape churn.

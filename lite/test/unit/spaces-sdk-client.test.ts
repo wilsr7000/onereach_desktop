@@ -1336,6 +1336,24 @@ describe('CYPHER source strings — mutations (Phase 3a)', () => {
     expect(CYPHER.SPACE_EXISTS_BY_ID).toMatch(/RETURN count\(s\) AS count/);
   });
 
+  it('UPDATE_SPACE gates per-field writes and skips soft-deleted spaces', () => {
+    expect(CYPHER.UPDATE_SPACE).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
+    expect(CYPHER.UPDATE_SPACE).toMatch(/WHERE s\.deletedAt IS NULL/);
+    expect(CYPHER.UPDATE_SPACE).toMatch(/SET s\.updatedAt = \$now/);
+    // Per-field FOREACH guards -- a field is only written when its flag is true.
+    expect(CYPHER.UPDATE_SPACE).toMatch(
+      /FOREACH \(_ IN CASE WHEN \$writeDescription THEN \[1\] ELSE \[\] END[\s\S]+SET s\.description = \$description/
+    );
+    expect(CYPHER.UPDATE_SPACE).toMatch(
+      /FOREACH \(_ IN CASE WHEN \$writeColor THEN \[1\] ELSE \[\] END[\s\S]+SET s\.color = \$color/
+    );
+    expect(CYPHER.UPDATE_SPACE).toMatch(
+      /FOREACH \(_ IN CASE WHEN \$writeIconKey THEN \[1\] ELSE \[\] END[\s\S]+SET s\.iconKey = \$iconKey/
+    );
+    // No s.name = $name ever sneaks in -- renames go through RENAME_SPACE.
+    expect(CYPHER.UPDATE_SPACE).not.toMatch(/SET s\.name/);
+  });
+
   it('SPACE_ITEM_COUNT measures BELONGS_TO assets for hard-delete pre-flight', () => {
     expect(CYPHER.SPACE_ITEM_COUNT).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
     expect(CYPHER.SPACE_ITEM_COUNT).toMatch(
@@ -1509,6 +1527,157 @@ describe('SdkSpacesClient.renameSpace', () => {
       code: 'SPACES_INVALID_INPUT',
     });
     expect(stub.calls.length).toBe(0);
+  });
+});
+
+describe('SdkSpacesClient.updateSpace', () => {
+  it('writes only the description field when only description is in the patch', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('s.description = $description', [
+      {
+        id: 'sp-1',
+        name: 'Original',
+        description: 'New objective',
+        color: '',
+        iconKey: '',
+        createdAt: '',
+        updatedAt: '2026-05-18T12:00:00Z',
+      },
+    ]);
+    const client = makeClient(stub);
+    const result = await client.updateSpace('sp-1', { description: 'New objective' });
+    expect(result).toMatchObject({ id: 'sp-1', description: 'New objective' });
+    const call = stub.calls.find((c) => c.cypher.includes('s.description = $description'));
+    expect(call?.parameters).toMatchObject({
+      id: 'sp-1',
+      writeDescription: true,
+      description: 'New objective',
+      writeColor: false,
+      writeIconKey: false,
+    });
+  });
+
+  it('clears the description when passed empty string', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('s.description = $description', [
+      {
+        id: 'sp-1',
+        name: 'Original',
+        description: '',
+        color: '',
+        iconKey: '',
+        createdAt: '',
+        updatedAt: '2026-05-18T12:00:00Z',
+      },
+    ]);
+    const client = makeClient(stub);
+    const result = await client.updateSpace('sp-1', { description: '' });
+    // Convention across Spaces: an empty description is projected as a
+    // missing field (toSpace() drops empty strings) rather than `''`.
+    // Consumers treat the absence as "no description".
+    expect(result.description).toBeUndefined();
+    const call = stub.calls.find((c) => c.cypher.includes('s.description = $description'));
+    // The wire payload still sends the explicit empty string so the
+    // Cypher can clear the existing value.
+    expect(call?.parameters).toMatchObject({
+      writeDescription: true,
+      description: '',
+    });
+  });
+
+  it('writes color + iconKey when both are in the patch', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('s.color = $color', [
+      {
+        id: 'sp-1',
+        name: 'Original',
+        description: '',
+        color: '#4f8cff',
+        iconKey: 'rocket',
+        createdAt: '',
+        updatedAt: '2026-05-18T12:00:00Z',
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.updateSpace('sp-1', { color: '#4f8cff', iconKey: 'rocket' });
+    const call = stub.calls.find((c) => c.cypher.includes('s.color = $color'));
+    expect(call?.parameters).toMatchObject({
+      writeDescription: false,
+      writeColor: true,
+      color: '#4f8cff',
+      writeIconKey: true,
+      iconKey: 'rocket',
+    });
+  });
+
+  it('empty patch is still a valid update (bumps updatedAt only)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('s.updatedAt = $now', [
+      {
+        id: 'sp-1',
+        name: 'Original',
+        description: '',
+        color: '',
+        iconKey: '',
+        createdAt: '',
+        updatedAt: '2026-05-18T12:00:00Z',
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.updateSpace('sp-1', {});
+    const call = stub.calls.find((c) => c.cypher.includes('s.updatedAt = $now'));
+    expect(call?.parameters).toMatchObject({
+      writeDescription: false,
+      writeColor: false,
+      writeIconKey: false,
+    });
+  });
+
+  it('throws SPACES_NOT_FOUND when the update returns 0 rows', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('s.description = $description', []);
+    const client = makeClient(stub);
+    await expect(
+      client.updateSpace('sp-x', { description: 'whatever' })
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
+  });
+
+  it('rejects empty id with SPACES_INVALID_INPUT (client-side)', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await expect(
+      client.updateSpace('', { description: 'x' })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+    expect(stub.calls.length).toBe(0);
+  });
+
+  it('rejects oversized description with SPACES_INVALID_INPUT (client-side)', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    const tooLong = 'x'.repeat(500);
+    await expect(
+      client.updateSpace('sp-1', { description: tooLong })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+    expect(stub.calls.length).toBe(0);
+  });
+
+  it('trims whitespace on description before sending', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('s.description = $description', [
+      {
+        id: 'sp-1',
+        name: 'Original',
+        description: 'New objective',
+        color: '',
+        iconKey: '',
+        createdAt: '',
+        updatedAt: '2026-05-18T12:00:00Z',
+      },
+    ]);
+    const client = makeClient(stub);
+    await client.updateSpace('sp-1', { description: '  New objective  ' });
+    const call = stub.calls.find((c) => c.cypher.includes('s.description = $description'));
+    expect(call?.parameters?.['description']).toBe('New objective');
   });
 });
 

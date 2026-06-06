@@ -41,6 +41,7 @@ import type {
   AgentsSampleOpts,
   CreateSpaceInput,
   DeleteSpaceOpts,
+  UpdateSpaceInput,
   ItemUpdatePatch,
   RecentCommitsOpts,
   SpaceKind,
@@ -80,6 +81,7 @@ export type {
   AgentsSampleOpts,
   CreateSpaceInput,
   RenameSpaceInput,
+  UpdateSpaceInput,
   DeleteSpaceOpts,
   ItemUpdatePatch,
   RecentCommitsOpts,
@@ -148,6 +150,9 @@ export {
   type SpacesRenameStartEvent,
   type SpacesRenameFinishEvent,
   type SpacesRenameFailEvent,
+  type SpacesUpdateStartEvent,
+  type SpacesUpdateFinishEvent,
+  type SpacesUpdateFailEvent,
   type SpacesDeleteStartEvent,
   type SpacesDeleteFinishEvent,
   type SpacesDeleteFailEvent,
@@ -550,6 +555,22 @@ export interface SpacesApi {
   renameSpace(id: string, name: string): Promise<Space>;
 
   /**
+   * Patch a Space's non-identity fields (`description`, `color`,
+   * `iconKey`). Each is optional; only fields present in the patch
+   * are written. Pass an empty string for `description` to clear it.
+   *
+   * Name changes go through `renameSpace` (the uniqueness check is
+   * name-specific); attempting to pass a name field here is a
+   * compile-time error -- the patch shape doesn't allow it.
+   *
+   * Returns the freshly-fetched `Space` so callers can refresh local
+   * state with the new `updatedAt`. Throws `SPACES_NOT_FOUND` when
+   * the id doesn't exist or is soft-deleted;
+   * `SPACES_INVALID_INPUT` for an oversized description.
+   */
+  updateSpace(id: string, patch: UpdateSpaceInput): Promise<Space>;
+
+  /**
    * Delete a Space. Defaults to a soft delete (sets `deletedAt`); the
    * Space disappears from `listSpaces()` but its items keep their
    * `[:BELONGS_TO]` edges and can be restored via `undeleteSpace()`.
@@ -734,6 +755,10 @@ class UninitializedSpacesApi implements SpacesApi {
 
   async renameSpace(_id: string, _name: string): Promise<Space> {
     throw notInitialized('renameSpace');
+  }
+
+  async updateSpace(_id: string, _patch: UpdateSpaceInput): Promise<Space> {
+    throw notInitialized('updateSpace');
   }
 
   async deleteSpace(_id: string, _opts?: DeleteSpaceOpts): Promise<void> {

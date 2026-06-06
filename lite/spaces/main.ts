@@ -36,6 +36,28 @@ import { registerSpacesIpc, unregisterSpacesIpc } from './ipc.js';
 import { SdkSpacesClient } from './sdk-client.js';
 import { getNeonApi } from '../neon/api.js';
 import { getFilesApi } from '../files/api.js';
+import { getAuthApi } from '../auth/api.js';
+import { getLoggingApi } from '../logging/api.js';
+import {
+  SpacesCache,
+  SPACES_CACHE_KEYS,
+  itemsListKey,
+  itemsGetKey,
+  type SpacesCacheUpdate,
+} from './cache.js';
+
+/** IPC channel: broadcasts when a cached read refreshes so the renderer can re-paint. */
+export const SPACES_CACHE_UPDATED_EVENT = 'lite:spaces:cache-updated';
+
+let activeCache: SpacesCache | null = null;
+let cacheUnsubscribe: (() => void) | null = null;
+/**
+ * Unsubscribe handle for the auth-session listener. Drops cached
+ * graph results whenever the active session goes away so the next
+ * user signing in doesn't paint the previous user's items for the
+ * remainder of the cache TTL.
+ */
+let authUnsubscribe: (() => void) | null = null;
 import type {
   Item,
   ItemSummary,
@@ -52,6 +74,7 @@ import type {
   AgentsSampleOpts,
   CreateSpaceInput,
   DeleteSpaceOpts,
+  UpdateSpaceInput,
   ItemUpdatePatch,
   RecentCommitsOpts,
   SpaceKind,
@@ -153,9 +176,55 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
   const api = createPhase0Api(handle);
   _setSpacesApiForTesting(api);
 
+  // Subscribe to cache refresh events and rebroadcast as IPC to every
+  // renderer. The Spaces window listens and triggers a local re-paint
+  // when a key it cares about refreshes -- so background timer
+  // refreshes flow through to the UI without polling.
+  if (activeCache !== null) {
+    cacheUnsubscribe = activeCache.onUpdate((update) => {
+      try {
+        broadcastCacheUpdate(update);
+      } catch (err) {
+        log.warn('spaces-cache: broadcast failed', { error: (err as Error).message });
+      }
+    });
+    activeCache.startRefreshTimer();
+  }
+
+  // Pre-warm the cache so the renderer's first paint is instant.
+  // Fire-and-forget on the next tick so the kernel boot doesn't block
+  // on Neon -- the user can keep going while these settle.
+  void Promise.resolve().then(() => prewarmSpacesCache(api, log));
+
   if (registered) return handle;
 
   registerSpacesIpc({ onOpen: handle.open });
+
+  // Drop the in-memory graph cache whenever an env's session becomes
+  // null (sign-out, expiry, manual revoke). Without this, signing
+  // back in as a DIFFERENT user paints the previous user's home
+  // feed for up to one cache TTL — measurable user-data leak across
+  // accounts in the same process. The listener is process-lifetime;
+  // teardown removes it.
+  try {
+    authUnsubscribe = getAuthApi().onSessionChanged((env, session) => {
+      if (session !== null) return;
+      if (activeCache === null) return;
+      try {
+        activeCache.invalidate(() => true);
+        log.info('spaces cache invalidated on session change', { env });
+      } catch (err) {
+        log.warn('spaces cache invalidate threw', {
+          env,
+          error: (err as Error).message,
+        });
+      }
+    });
+  } catch (err) {
+    log.warn('failed to subscribe to auth session changes', {
+      error: (err as Error).message,
+    });
+  }
 
   // Menu entry: Tools -> Spaces...
   registry.upsert({
@@ -180,6 +249,33 @@ function teardownInternal(): void {
   } catch {
     // best-effort
   }
+  // Stop the background refresh timer and drop the cache so the next
+  // initSpaces() starts fresh (e.g. across sign-out / sign-in).
+  if (cacheUnsubscribe !== null) {
+    try {
+      cacheUnsubscribe();
+    } catch {
+      /* best-effort */
+    }
+    cacheUnsubscribe = null;
+  }
+  if (authUnsubscribe !== null) {
+    try {
+      authUnsubscribe();
+    } catch {
+      /* best-effort */
+    }
+    authUnsubscribe = null;
+  }
+  if (activeCache !== null) {
+    try {
+      activeCache.stopRefreshTimer();
+      activeCache.invalidate(() => true);
+    } catch {
+      /* best-effort */
+    }
+    activeCache = null;
+  }
   registered = false;
   initOptions = null;
   closeSpacesWindow();
@@ -194,6 +290,16 @@ export function _isSpacesRegisteredForTesting(): boolean {
 /** @internal -- exposed for tests so they can re-init cleanly. */
 export function _resetSpacesRegistrationForTesting(): void {
   teardownInternal();
+}
+
+/** @internal -- public asset URLs do not need Files signing. */
+export function _isDirectDownloadUrlForTesting(key: string): boolean {
+  try {
+    const url = new URL(key);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 // ─── Phase 0 backing implementation ─────────────────────────────────────
@@ -213,11 +319,48 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
   // initialize before this point.
   const client = new SdkSpacesClient({
     query: (cypher, parameters) => getNeonApi().query(cypher, parameters),
+    // ADR-030: wrap each instrumented SDK op in a span so Neon-backed
+    // reads/writes are traceable in /logs?category=spaces -- including
+    // the boot prewarm + background refresh paths that never cross IPC.
+    spanEmitter: (name, data) => getLoggingApi().start(name, data),
   });
 
+  // In-process cache. Pre-warms the home-view + sidebar reads at boot
+  // so the renderer's first paint is instant. Mutations invalidate
+  // via `nukeReadCache(...)` below; the background refresh timer
+  // (started in `initSpaces`) keeps long-running sessions fresh.
+  const cache = new SpacesCache({
+    ttlMs: 30_000,
+    refreshIntervalMs: 60_000,
+  });
+  activeCache = cache;
+
+  /**
+   * Coarse invalidation -- nukes every cached read entry so the next
+   * call re-fetches. Used after Space / Item mutations. The
+   * refresh timer + the renderer's onCacheUpdate subscription mean
+   * the data shows up within ~1 second of the mutation completing.
+   *
+   * Fine-grained invalidation (only the specific keys touched by the
+   * mutation) is a sensible follow-up; coarse is correct and
+   * simple for now.
+   */
+  const nukeReadCache = (): void => {
+    cache.invalidate(() => true);
+  };
+
+  // ── items sub-surface ────────────────────────────────────────────────
+  // Reads (list / get) go through the cache. Writes (update / addTag /
+  // removeTag / create / delete / restore / move / metadata) nuke the
+  // read cache so the next read sees the new state.
   const items: SpacesItemsApi = {
     list(scope: SpaceScope, opts?: ListOpts): Promise<ItemSummary[]> {
-      return client.listItems(scope, opts);
+      // Cache key is per-scope (each Space + Uncategorized is its
+      // own slot). Opts (limit/offset) are intentionally NOT in the
+      // key for now -- v1 uses default pagination only; revisit if
+      // we wire infinite scroll.
+      const scopeId = scope.kind === 'uncategorized' ? '__uncategorized__' : scope.spaceId;
+      return cache.getOrFetch(itemsListKey(scopeId), () => client.listItems(scope, opts));
     },
     get(id: string): Promise<Item | null> {
       if (typeof id !== 'string' || id.length === 0) {
@@ -228,156 +371,279 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
           context: { id },
         });
       }
-      return client.getItem(id);
+      return cache.getOrFetch(itemsGetKey(id), () => client.getItem(id));
     },
     async resolveFileUrl(key: string): Promise<string | null> {
       // Soft API: missing/empty key, no auth, or any Files error
       // returns null so the detail panel degrades to "no preview" --
       // never an error banner. Real callers can still inspect the
       // logging stream if they care about the failure reason.
+      //
+      // NOT cached -- signed URLs have short server-side TTLs and the
+      // Files module already memoizes its own short-lived results.
       if (typeof key !== 'string' || key.length === 0) return null;
+      if (_isDirectDownloadUrlForTesting(key)) return key;
       try {
         return await getFilesApi().getDownloadUrl(key);
       } catch {
         return null;
       }
     },
-    update(id: string, patch: ItemUpdatePatch): Promise<Item> {
-      return client.updateItem(id, patch);
+    async update(id: string, patch: ItemUpdatePatch): Promise<Item> {
+      const result = await client.updateItem(id, patch);
+      nukeReadCache();
+      return result;
     },
-    addTag(id: string, tag: string): Promise<string[]> {
-      return client.addTag(id, tag);
+    async addTag(id: string, tag: string): Promise<string[]> {
+      const result = await client.addTag(id, tag);
+      nukeReadCache();
+      return result;
     },
-    removeTag(id: string, tag: string): Promise<string[]> {
-      return client.removeTag(id, tag);
+    async removeTag(id: string, tag: string): Promise<string[]> {
+      const result = await client.removeTag(id, tag);
+      nukeReadCache();
+      return result;
     },
     recentCommits(id: string, opts?: RecentCommitsOpts): Promise<Event[]> {
+      // Activity log is small + scrolls in the detail rail; skip
+      // caching so it always reflects the latest commit history.
       return client.itemRecentCommits(id, opts ?? {});
     },
-    create(input: CreateAssetInput): Promise<Item> {
-      return client.createAsset(input);
+    async create(input: CreateAssetInput): Promise<Item> {
+      const result = await client.createAsset(input);
+      nukeReadCache();
+      return result;
     },
-    delete(id: string, opts?: DeleteAssetOpts): Promise<void> {
-      return client.deleteAsset(id, opts);
+    async delete(id: string, opts?: DeleteAssetOpts): Promise<void> {
+      await client.deleteAsset(id, opts);
+      nukeReadCache();
     },
-    restore(id: string): Promise<Item> {
-      return client.restoreAsset(id);
+    async restore(id: string): Promise<Item> {
+      const result = await client.restoreAsset(id);
+      nukeReadCache();
+      return result;
     },
-    moveToSpace(
+    async moveToSpace(
       id: string,
       fromSpaceId: string | null,
       toSpaceId: string
     ): Promise<Item> {
-      return client.moveAssetToSpace(id, fromSpaceId, toSpaceId);
+      const result = await client.moveAssetToSpace(id, fromSpaceId, toSpaceId);
+      nukeReadCache();
+      return result;
     },
-    addToSpace(id: string, toSpaceId: string): Promise<Item> {
-      return client.addAssetToSpace(id, toSpaceId);
+    async addToSpace(id: string, toSpaceId: string): Promise<Item> {
+      const result = await client.addAssetToSpace(id, toSpaceId);
+      nukeReadCache();
+      return result;
     },
-    removeFromSpace(id: string, spaceId: string): Promise<Item> {
-      return client.removeAssetFromSpace(id, spaceId);
+    async removeFromSpace(id: string, spaceId: string): Promise<Item> {
+      const result = await client.removeAssetFromSpace(id, spaceId);
+      nukeReadCache();
+      return result;
     },
     search(opts: SearchItemsOpts): Promise<ItemSummary[]> {
+      // Search results depend on the query; don't cache since the
+      // user is actively typing/refining.
       return client.searchItems(opts);
     },
-    setMetadata(id: string, metadata: ItemMetadata): Promise<Item> {
-      return client.setMetadata(id, metadata);
+    async setMetadata(id: string, metadata: ItemMetadata): Promise<Item> {
+      const result = await client.setMetadata(id, metadata);
+      nukeReadCache();
+      return result;
     },
-    patchMetadata(id: string, patch: ItemMetadata): Promise<Item> {
-      return client.patchMetadata(id, patch);
+    async patchMetadata(id: string, patch: ItemMetadata): Promise<Item> {
+      const result = await client.patchMetadata(id, patch);
+      nukeReadCache();
+      return result;
     },
-    removeMetadataKey(id: string, key: string): Promise<Item> {
-      return client.removeMetadataKey(id, key);
+    async removeMetadataKey(id: string, key: string): Promise<Item> {
+      const result = await client.removeMetadataKey(id, key);
+      nukeReadCache();
+      return result;
     },
   };
 
   const tickets: SpacesTicketsApi = {
     list(spaceId: string, opts?: ListTicketsOpts): Promise<Item[]> {
-      return client.listTickets(spaceId, opts ?? {});
+      return cache.getOrFetch(`spaces.tickets.list:${spaceId}`, () =>
+        client.listTickets(spaceId, opts ?? {})
+      );
     },
-    create(spaceId: string, input: CreateTicketInput): Promise<Item> {
-      return client.createTicket(spaceId, input);
+    async create(spaceId: string, input: CreateTicketInput): Promise<Item> {
+      const result = await client.createTicket(spaceId, input);
+      nukeReadCache();
+      return result;
     },
-    update(id: string, patch: UpdateTicketPatch): Promise<Item> {
-      return client.updateTicket(id, patch);
+    async update(id: string, patch: UpdateTicketPatch): Promise<Item> {
+      const result = await client.updateTicket(id, patch);
+      nukeReadCache();
+      return result;
     },
   };
 
   const playbooks: SpacesPlaybooksApi = {
     current(spaceId: string): Promise<Item | null> {
-      return client.getCurrentPlaybook(spaceId);
+      return cache.getOrFetch(`spaces.playbooks.current:${spaceId}`, () =>
+        client.getCurrentPlaybook(spaceId)
+      );
     },
-    set(spaceId: string, playbookId: string): Promise<SetPlaybookResult> {
-      return client.setCurrentPlaybook(spaceId, playbookId);
+    async set(spaceId: string, playbookId: string): Promise<SetPlaybookResult> {
+      const result = await client.setCurrentPlaybook(spaceId, playbookId);
+      nukeReadCache();
+      return result;
     },
   };
 
   const identity: SpacesIdentityApi = {
-    getOrCreatePerson(input: PersonUpsertInput): Promise<Person> {
-      return client.getOrCreatePerson(input);
+    async getOrCreatePerson(input: PersonUpsertInput): Promise<Person> {
+      const result = await client.getOrCreatePerson(input);
+      // Person changes can ripple into producedBy on items; nuke
+      // reads so the next item fetch picks up the resolved name.
+      nukeReadCache();
+      return result;
     },
   };
 
   const members: SpacesMembersApi = {
     list(spaceId: string): Promise<SpaceMember[]> {
-      return client.listSpaceMembers(spaceId);
+      return cache.getOrFetch(`spaces.members.list:${spaceId}`, () =>
+        client.listSpaceMembers(spaceId)
+      );
     },
-    add(spaceId: string, memberId: string): Promise<SpaceMember> {
-      return client.addSpaceMember(spaceId, memberId);
+    async add(spaceId: string, memberId: string): Promise<SpaceMember> {
+      const result = await client.addSpaceMember(spaceId, memberId);
+      nukeReadCache();
+      return result;
     },
-    remove(spaceId: string, memberId: string): Promise<void> {
-      return client.removeSpaceMember(spaceId, memberId);
+    async remove(spaceId: string, memberId: string): Promise<void> {
+      await client.removeSpaceMember(spaceId, memberId);
+      nukeReadCache();
     },
   };
 
   return {
     open: handle.open,
     listSpaces(): Promise<Space[]> {
-      return client.listSpaces();
+      return cache.getOrFetch(SPACES_CACHE_KEYS.LIST_SPACES, () => client.listSpaces());
     },
     getUncategorizedCount(): Promise<number> {
-      return client.getUncategorizedCount();
+      return cache.getOrFetch(SPACES_CACHE_KEYS.UNCATEGORIZED_COUNT, () =>
+        client.getUncategorizedCount()
+      );
     },
     items,
     tickets,
     playbooks,
     identity,
     members,
-    setSpaceKind(id: string, kind: SpaceKind): Promise<SpaceKind> {
-      return client.setSpaceKind(id, kind);
+    async setSpaceKind(id: string, kind: SpaceKind): Promise<SpaceKind> {
+      const result = await client.setSpaceKind(id, kind);
+      nukeReadCache();
+      return result;
     },
 
     // ─── Home view (chunk 3k + 3o) ──────────────────────────────────────
     getEntityCounts(): Promise<EntityCounts> {
-      return client.getEntityCounts();
+      return cache.getOrFetch(SPACES_CACHE_KEYS.HOME_ENTITY_COUNTS, () =>
+        client.getEntityCounts()
+      );
     },
     listRecentItems(opts?: RecentItemsOpts): Promise<ItemSummary[]> {
-      return client.listRecentItems(opts);
+      return cache.getOrFetch(SPACES_CACHE_KEYS.HOME_RECENT_ITEMS, () =>
+        client.listRecentItems(opts)
+      );
     },
     topContributors(opts?: TopContributorsOpts): Promise<Contributor[]> {
-      return client.topContributors(opts);
+      return cache.getOrFetch(SPACES_CACHE_KEYS.HOME_TOP_CONTRIBUTORS, () =>
+        client.topContributors(opts)
+      );
     },
     listRecentEvents(opts?: RecentEventsOpts): Promise<Event[]> {
-      return client.listRecentEvents(opts);
+      return cache.getOrFetch(SPACES_CACHE_KEYS.HOME_RECENT_EVENTS, () =>
+        client.listRecentEvents(opts)
+      );
     },
     listAgentsSample(opts?: AgentsSampleOpts): Promise<AgentSummary[]> {
-      return client.listAgentsSample(opts);
+      return cache.getOrFetch(SPACES_CACHE_KEYS.HOME_AGENTS_SAMPLE, () =>
+        client.listAgentsSample(opts)
+      );
     },
     getPermissionSummary(): Promise<PermissionSummary> {
-      return client.getPermissionSummary();
+      return cache.getOrFetch(SPACES_CACHE_KEYS.HOME_PERMISSION_SUMMARY, () =>
+        client.getPermissionSummary()
+      );
     },
 
     // ─── Mutations (Phase 3a) ───────────────────────────────────────────
-    createSpace(input: CreateSpaceInput): Promise<Space> {
-      return client.createSpace(input);
+    async createSpace(input: CreateSpaceInput): Promise<Space> {
+      const result = await client.createSpace(input);
+      nukeReadCache();
+      return result;
     },
-    renameSpace(id: string, name: string): Promise<Space> {
-      return client.renameSpace(id, name);
+    async renameSpace(id: string, name: string): Promise<Space> {
+      const result = await client.renameSpace(id, name);
+      nukeReadCache();
+      return result;
     },
-    deleteSpace(id: string, opts?: DeleteSpaceOpts): Promise<void> {
-      return client.deleteSpace(id, opts);
+    async updateSpace(id: string, patch: UpdateSpaceInput): Promise<Space> {
+      const result = await client.updateSpace(id, patch);
+      nukeReadCache();
+      return result;
     },
-    undeleteSpace(id: string): Promise<Space> {
-      return client.undeleteSpace(id);
+    async deleteSpace(id: string, opts?: DeleteSpaceOpts): Promise<void> {
+      await client.deleteSpace(id, opts);
+      nukeReadCache();
+    },
+    async undeleteSpace(id: string): Promise<Space> {
+      const result = await client.undeleteSpace(id);
+      nukeReadCache();
+      return result;
     },
   };
+}
+
+// ─── Pre-warm + broadcast ────────────────────────────────────────────────
+
+/**
+ * Pre-warm the cache at app launch. Fires off every read the Spaces
+ * window's first paint needs, in parallel, fire-and-forget. By the
+ * time the user opens Tools -> Spaces..., these have usually settled,
+ * so the first paint is instant.
+ *
+ * Soft-fails per query -- a single bad fetcher doesn't stall the others.
+ */
+function prewarmSpacesCache(api: SpacesApi, log: NonNullable<InitSpacesOptions['logger']>): void {
+  const tasks: Array<Promise<unknown>> = [
+    api.listSpaces().catch(() => undefined),
+    api.getUncategorizedCount().catch(() => undefined),
+    api.getEntityCounts().catch(() => undefined),
+    api.listRecentItems().catch(() => undefined),
+    api.topContributors().catch(() => undefined),
+    api.listRecentEvents().catch(() => undefined),
+    api.listAgentsSample().catch(() => undefined),
+    api.getPermissionSummary().catch(() => undefined),
+  ];
+  void Promise.allSettled(tasks).then(() => {
+    log.info('spaces-cache: pre-warm complete', {
+      entries: activeCache?._sizeForTesting() ?? 0,
+    });
+  });
+}
+
+/**
+ * Broadcast a cache-refresh event to every renderer. The Spaces
+ * renderer subscribes via `window.lite.spaces.onCacheUpdate(...)` and
+ * triggers a local re-fetch on receipt; the bridge call returns the
+ * already-refreshed cached value, so the re-paint is free.
+ */
+function broadcastCacheUpdate(update: SpacesCacheUpdate): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    try {
+      win.webContents.send(SPACES_CACHE_UPDATED_EVENT, update);
+    } catch {
+      /* best-effort -- a closed/crashed renderer shouldn't break others */
+    }
+  }
 }

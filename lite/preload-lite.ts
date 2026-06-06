@@ -81,6 +81,7 @@ const SPACES_IDENTITY_GET_OR_CREATE_PERSON = 'lite:spaces:identity:getOrCreatePe
 const SPACES_MEMBERS_LIST = 'lite:spaces:members:list';
 const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
 const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
+
 const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
 const SPACES_ITEMS_DELETE = 'lite:spaces:items:delete';
 const SPACES_ITEMS_RESTORE = 'lite:spaces:items:restore';
@@ -102,8 +103,15 @@ const SPACES_HOME_PERMISSION_SUMMARY = 'lite:spaces:home:permissionSummary';
 // Mutations (Phase 3a). ADR-048.
 const SPACES_CREATE_SPACE = 'lite:spaces:create';
 const SPACES_RENAME_SPACE = 'lite:spaces:rename';
+const SPACES_UPDATE_SPACE = 'lite:spaces:update';
 const SPACES_DELETE_SPACE = 'lite:spaces:delete';
 const SPACES_UNDELETE_SPACE = 'lite:spaces:undelete';
+// Cache refresh broadcast: fires when an entry in the main-process
+// Spaces cache refreshes (from background timer, on-demand
+// revalidation, or post-mutation invalidation). Renderer subscribes
+// via window.lite.spaces.onCacheUpdate(handler) and triggers a local
+// re-fetch; the next bridge call returns the already-refreshed value.
+const SPACES_CACHE_UPDATED = 'lite:spaces:cache-updated';
 
 const NEON_QUERY = 'lite:neon:query';
 const NEON_STATUS = 'lite:neon:status';
@@ -159,6 +167,32 @@ const UNIVERSITY_OPEN_TUTORIALS = 'lite:university:open-tutorials';
 const ONBOARDING_LOAD = 'lite:onboarding:load';
 const ONBOARDING_MARK_COMPLETE = 'lite:onboarding:mark-complete';
 const ONBOARDING_DISMISS = 'lite:onboarding:dismiss';
+
+// AI module IPC channels (Claude metadata extraction + key management).
+// The Anthropic API key is write-only across this bridge: the renderer
+// can save / check / clear it but never read the value back.
+const AI_STATUS = 'lite:ai:status';
+const AI_SPACE_ASSIST = 'lite:ai:space-assist';
+const AI_ENRICH_ASSET = 'lite:ai:enrich-asset';
+const AI_KEY_SAVE = 'lite:ai:key-save';
+const AI_KEY_HAS = 'lite:ai:key-has';
+const AI_KEY_DELETE = 'lite:ai:key-delete';
+
+// Boot-chat → host IPC channel. Fired when the chat (now inline inside
+// chrome.html's home view) reaches its settled resting state — either
+// after a verified session or a successful in-chat sign-in. Main-lite
+// listens once to un-suspend the re-sign-in prompter so background
+// dialogs can fire again. There is no longer a separate boot-chat
+// HTML to swap from; the channel name is kept for backward IPC compat.
+const BOOT_CHAT_FINISH = 'lite:boot-chat:finish';
+
+// Download → Save to Space picker IPC channels. Consumed only by the
+// picker window's renderer (lite/downloads/picker.ts). The main process
+// stashes the bootstrap payload under the per-download id at open
+// time; the renderer reads it back here, then resolves with either
+// `{spaceId, spaceName}` or null on cancel.
+const DOWNLOAD_PICKER_BOOTSTRAP = 'lite:download-picker:bootstrap';
+const DOWNLOAD_PICKER_RESOLVE = 'lite:download-picker:resolve';
 
 // AI Run Times IPC channels
 const ART_LIST_ARTICLES = 'lite:ai-run-times:list-articles';
@@ -646,6 +680,12 @@ interface SpacesDeleteSpaceOptsView {
   soft?: boolean;
 }
 
+interface SpacesUpdateSpaceInputView {
+  description?: string;
+  color?: string;
+  iconKey?: string;
+}
+
 interface SpacesTicketsBridge {
   list(
     spaceId: string,
@@ -701,6 +741,14 @@ interface SpacesMembersBridge {
   remove(spaceId: string, memberId: string): Promise<SpacesIpcResultView<{ ok: true }>>;
 }
 
+/** Payload of the cache-updated event broadcast by the main process. */
+interface SpacesCacheUpdateView {
+  /** Cache key whose value just refreshed (e.g. 'spaces.listSpaces'). */
+  key: string;
+  /** Epoch ms when the refresh landed. */
+  at: number;
+}
+
 interface SpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
@@ -718,6 +766,10 @@ interface SpacesBridge {
   /** Mutations (Phase 3a). ADR-048. Mirror `SpacesApi` write methods. */
   createSpace(input: SpacesCreateSpaceInputView): Promise<SpacesIpcResultView<unknown>>;
   renameSpace(id: string, name: string): Promise<SpacesIpcResultView<unknown>>;
+  updateSpace(
+    id: string,
+    patch: SpacesUpdateSpaceInputView
+  ): Promise<SpacesIpcResultView<unknown>>;
   deleteSpace(
     id: string,
     opts?: SpacesDeleteSpaceOptsView
@@ -733,6 +785,16 @@ interface SpacesBridge {
   /** Phase 4 v2 — identity + sharing. */
   identity: SpacesIdentityBridge;
   members: SpacesMembersBridge;
+  /**
+   * Subscribe to cache-refresh events from the main process. Fires
+   * whenever a cached read (listSpaces, home view queries,
+   * items.list, items.get) refreshes -- pre-warm at launch,
+   * background timer, or post-mutation invalidation. Returns an
+   * unsubscribe function. The renderer uses this to trigger local
+   * re-fetches; the bridge call then returns the already-refreshed
+   * cached value, so the re-paint is free.
+   */
+  onCacheUpdate(handler: (update: SpacesCacheUpdateView) => void): () => void;
 }
 
 interface HealthBridge {
@@ -1436,6 +1498,10 @@ const spaces: SpacesBridge = {
     ipcRenderer.invoke(SPACES_RENAME_SPACE, { id, name }) as Promise<
       SpacesIpcResultView<unknown>
     >,
+  updateSpace: (id, patch) =>
+    ipcRenderer.invoke(SPACES_UPDATE_SPACE, { id, patch }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
   deleteSpace: (id, opts) =>
     ipcRenderer.invoke(SPACES_DELETE_SPACE, {
       id,
@@ -1495,6 +1561,26 @@ const spaces: SpacesBridge = {
       ipcRenderer.invoke(SPACES_MEMBERS_REMOVE, { spaceId, memberId }) as Promise<
         SpacesIpcResultView<{ ok: true }>
       >,
+  },
+  onCacheUpdate(handler) {
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      update: SpacesCacheUpdateView
+    ): void => {
+      try {
+        handler(update);
+      } catch {
+        /* renderer handler threw -- isolate so other listeners survive */
+      }
+    };
+    ipcRenderer.on(SPACES_CACHE_UPDATED, wrapped);
+    return () => {
+      try {
+        ipcRenderer.off(SPACES_CACHE_UPDATED, wrapped);
+      } catch {
+        /* best-effort */
+      }
+    };
   },
 };
 
@@ -1922,6 +2008,149 @@ const onboarding: OnboardingBridge = {
   dismiss: () => ipcRenderer.invoke(ONBOARDING_DISMISS) as Promise<OnboardingStateView>,
 };
 
+// ---------------------------------------------------------------------------
+// AI bridge -- Claude metadata extraction + Anthropic key management.
+// Every method returns the `{ ok, value | error }` envelope the AI IPC
+// handlers produce. The API key is write-only: `saveKey` / `hasKey` /
+// `deleteKey` never return the value.
+// ---------------------------------------------------------------------------
+
+interface AiIpcErrorView {
+  code: string;
+  message: string;
+  remediation?: string;
+  context?: Record<string, unknown>;
+}
+type AiIpcResultView<T> = { ok: true; value: T } | { ok: false; error: AiIpcErrorView };
+
+interface AiStatusView {
+  configured: boolean;
+  provider: 'claude' | 'onereach-flow' | null;
+}
+interface AiSpaceAssistResultView {
+  description: string;
+  objectives: string[];
+}
+interface AiEnrichResultView {
+  metadata: {
+    summary: string;
+    suggestedTitle: string;
+    tags: string[];
+    topics: string[];
+    entities: string[];
+    contentType: string;
+    language: string;
+    keyPoints: string[];
+  };
+  written: Record<string, string | string[]>;
+  modality: 'text' | 'image' | 'pdf' | 'hints';
+}
+
+interface AiBridge {
+  getStatus(): Promise<AiIpcResultView<AiStatusView>>;
+  /** Provider-flexible Space-creation assist (purpose -> description + objectives). */
+  spaceAssist(
+    purpose: string,
+    name?: string
+  ): Promise<AiIpcResultView<AiSpaceAssistResultView>>;
+  /** Claude 4.8 metadata extraction for one asset, persisted under `ai_*` keys. */
+  enrichAsset(assetId: string): Promise<AiIpcResultView<AiEnrichResultView>>;
+  /** Persist the Anthropic key to the OS keychain (write-only). */
+  saveKey(key: string): Promise<AiIpcResultView<{ ok: true }>>;
+  /** Whether a key is configured (never returns the value). */
+  hasKey(): Promise<AiIpcResultView<{ hasKey: boolean }>>;
+  /** Remove the stored key. */
+  deleteKey(): Promise<AiIpcResultView<{ ok: true }>>;
+}
+
+const ai: AiBridge = {
+  getStatus: () => ipcRenderer.invoke(AI_STATUS) as Promise<AiIpcResultView<AiStatusView>>,
+  spaceAssist: (purpose, name) =>
+    ipcRenderer.invoke(AI_SPACE_ASSIST, {
+      purpose,
+      ...(name !== undefined ? { name } : {}),
+    }) as Promise<AiIpcResultView<AiSpaceAssistResultView>>,
+  enrichAsset: (assetId) =>
+    ipcRenderer.invoke(AI_ENRICH_ASSET, { assetId }) as Promise<
+      AiIpcResultView<AiEnrichResultView>
+    >,
+  saveKey: (key) =>
+    ipcRenderer.invoke(AI_KEY_SAVE, { key }) as Promise<AiIpcResultView<{ ok: true }>>,
+  hasKey: () => ipcRenderer.invoke(AI_KEY_HAS) as Promise<AiIpcResultView<{ hasKey: boolean }>>,
+  deleteKey: () => ipcRenderer.invoke(AI_KEY_DELETE) as Promise<AiIpcResultView<{ ok: true }>>,
+};
+
+// ---------------------------------------------------------------------------
+// Download picker bridge — consumed by lite/downloads/picker.ts.
+// The renderer reads its bootstrap (file summary + spaces) and resolves
+// with the user's pick (or null on cancel). The main process owns the
+// upload + asset-create that happens once the picker resolves.
+// ---------------------------------------------------------------------------
+
+type DownloadPickerKindView =
+  | 'document'
+  | 'image'
+  | 'url'
+  | 'text'
+  | 'audio'
+  | 'video'
+  | 'other';
+
+interface DownloadPickerSpaceView {
+  id: string;
+  name: string;
+  color?: string;
+  itemCount?: number;
+}
+
+interface DownloadPickerBootstrapView {
+  download: {
+    fileName: string;
+    mimeType: string;
+    kind: DownloadPickerKindView;
+    totalBytes: number;
+    source: string;
+  };
+  spaces: DownloadPickerSpaceView[];
+  defaultSpaceId?: string;
+}
+
+interface DownloadPickerResultView {
+  spaceId: string;
+  spaceName: string;
+}
+
+interface DownloadPickerBridge {
+  bootstrap(downloadId: string): Promise<DownloadPickerBootstrapView>;
+  resolve(
+    downloadId: string,
+    result: DownloadPickerResultView | null
+  ): Promise<{ ok: true }>;
+}
+
+const downloadPicker: DownloadPickerBridge = {
+  bootstrap: (downloadId: string) =>
+    ipcRenderer.invoke(DOWNLOAD_PICKER_BOOTSTRAP, {
+      downloadId,
+    }) as Promise<DownloadPickerBootstrapView>,
+  resolve: (downloadId: string, result: DownloadPickerResultView | null) =>
+    ipcRenderer.invoke(DOWNLOAD_PICKER_RESOLVE, {
+      downloadId,
+      result,
+    }) as Promise<{ ok: true }>,
+};
+
+interface BootChatBridge {
+  /** Signal the main process to swap this window to chrome.html. */
+  finish(): void;
+}
+
+const bootChat: BootChatBridge = {
+  finish: () => {
+    ipcRenderer.send(BOOT_CHAT_FINISH);
+  },
+};
+
 contextBridge.exposeInMainWorld('lite', {
   ...liteMetadata,
   auth,
@@ -1933,11 +2162,14 @@ contextBridge.exposeInMainWorld('lite', {
   neon,
   idw,
   tools,
+  ai,
   mainWindow,
   events,
   university,
   aiRunTimes,
   onboarding,
+  downloadPicker,
+  bootChat,
 });
 contextBridge.exposeInMainWorld('logging', logging);
 contextBridge.exposeInMainWorld('bugReport', bugReport);

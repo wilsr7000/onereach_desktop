@@ -46,6 +46,19 @@ export interface AiRunTimesStoreOptions {
   kvApi?: ReturnType<typeof getKVApi>;
   collection?: string;
   key?: string;
+  /**
+   * Returns the active accountId or `null` when signed out. Used to
+   * invalidate the in-memory cache whenever the active session
+   * changes — without this resolver, signing out then signing in as
+   * a different user would keep showing the previous user's
+   * articles / reading log / preferences until a refresh fired.
+   *
+   * `lite/ai-run-times/api.ts` wires this to
+   * `getAuthApi().getSession('edison')?.accountId ?? null`.
+   * Omitting it (e.g. in unit tests) falls back to a sentinel that
+   * keeps caching working but never invalidates.
+   */
+  getActiveAccountId?: () => string | null;
 }
 
 type ChangeReason = 'articles' | 'preferences' | 'feed-sources' | 'reading-log';
@@ -58,11 +71,32 @@ export class AiRunTimesStore {
   private readonly key: string;
   private readonly changeListeners = new Set<ChangeListener>();
   private readonly eventUnsubs = new Set<() => void>();
+  private readonly getActiveAccountId: (() => string | null) | null;
+  /** Cached blob — read on first access, refreshed after every write. */
+  private cache: AiRunTimesStorageBlob | null = null;
+  /**
+   * The accountId the cache was populated for. Drives multi-user
+   * isolation across sign-out/sign-in flows in the same process —
+   * when the active accountId changes the cache resets so user A's
+   * reading log can't leak to user B.
+   */
+  private cachedForAccountId: string | null | undefined = undefined;
 
   constructor(options: AiRunTimesStoreOptions = {}) {
     this.kvApi = options.kvApi ?? getKVApi();
     this.collection = options.collection ?? KV_COLLECTION;
     this.key = options.key ?? KV_KEY;
+    this.getActiveAccountId = options.getActiveAccountId ?? null;
+  }
+
+  /**
+   * Force a fresh KV read on next access + clear cached state.
+   * Wired onto `auth.onSessionChanged` by `ai-run-times/api.ts`.
+   * Idempotent.
+   */
+  invalidateCache(): void {
+    this.cache = null;
+    this.cachedForAccountId = undefined;
   }
 
   // ── reads ─────────────────────────────────────────────────────────────
@@ -341,13 +375,58 @@ export class AiRunTimesStore {
 
   // ── internals ─────────────────────────────────────────────────────────
 
+  private currentAccountId(): string | null {
+    if (this.getActiveAccountId === null) return '__legacy__';
+    const accountId = this.getActiveAccountId();
+    if (typeof accountId !== 'string' || accountId.length === 0) return null;
+    return accountId;
+  }
+
   private async readBlob(): Promise<AiRunTimesStorageBlob> {
+    const accountId = this.currentAccountId();
+    // Signed-out short-circuit: return defaults without touching KV
+    // so an unauthenticated read can't surface stale cross-user data.
+    if (accountId === null) {
+      return defaultBlob();
+    }
+    // Cache invalidation on account switch — same pattern as
+    // lite/idw/store.ts and lite/tools/store.ts. A different
+    // accountId means a different KV bucket, so the cached blob is
+    // wrong.
+    if (this.cache !== null && this.cachedForAccountId === accountId) return this.cache;
+
     try {
       const value = await this.kvApi.get(this.collection, this.key);
-      if (value === null || value === undefined || typeof value !== 'object') {
-        return defaultBlob();
+      if (value === null || value === undefined) {
+        this.cache = defaultBlob();
+        this.cachedForAccountId = accountId;
+        return this.cache;
       }
-      return normalizeBlob(value as Partial<AiRunTimesStorageBlob>);
+      if (typeof value !== 'object' || Array.isArray(value)) {
+        this.log('warn', 'ai-run-times-store: unexpected KV blob shape, resetting in-memory', {
+          actualType: Array.isArray(value) ? 'array' : typeof value,
+        });
+        getLoggingApi().event(AI_RUN_TIMES_EVENTS.SELF_HEAL, {
+          actualType: Array.isArray(value) ? 'array' : typeof value,
+        });
+        // Self-heal: overwrite the corrupt blob with a fresh empty
+        // record. Fire-and-forget; a transient write failure just
+        // defers the heal to the next read. Same pattern that
+        // shipped in main-window / idw / tools.
+        const fresh = defaultBlob();
+        void this.kvApi.set(this.collection, this.key, fresh).catch((err) => {
+          this.log('warn', 'ai-run-times-store: self-heal write failed', {
+            error: (err as Error).message,
+          });
+        });
+        this.cache = fresh;
+        this.cachedForAccountId = accountId;
+        return this.cache;
+      }
+      const normalized = normalizeBlob(value as Partial<AiRunTimesStorageBlob>);
+      this.cache = normalized;
+      this.cachedForAccountId = accountId;
+      return normalized;
     } catch (err) {
       if (err instanceof KVError) {
         throw new AiRunTimesError({
@@ -362,12 +441,37 @@ export class AiRunTimesStore {
     }
   }
 
+  /**
+   * Minimal logger — defaults to silent. Real wiring lands when the
+   * api factory passes a logger via options (next step).
+   */
+  private log(level: 'info' | 'warn' | 'error', message: string, data?: unknown): void {
+    try {
+      getLoggingApi()[level]('ai-run-times', message, data);
+    } catch {
+      /* best-effort */
+    }
+  }
+
   private async writeBlob(
     blob: AiRunTimesStorageBlob,
     reason: ChangeReason
   ): Promise<void> {
+    const accountId = this.currentAccountId();
+    if (accountId === null) {
+      throw new AiRunTimesError({
+        code: AI_RUN_TIMES_ERROR_CODES.PERSISTENCE_FAILED,
+        message: 'Cannot save AI Run Times state while signed out.',
+        context: { reason, op: 'write', signedOut: true },
+        remediation: 'Sign in to OneReach first.',
+      });
+    }
     try {
       await this.kvApi.set(this.collection, this.key, blob);
+      // Refresh the cache for THIS accountId so subsequent reads
+      // pick up the new state without a round-trip.
+      this.cache = blob;
+      this.cachedForAccountId = accountId;
     } catch (err) {
       if (err instanceof KVError) {
         throw new AiRunTimesError({

@@ -6,16 +6,24 @@
  * renders the tab bar from the live tab list, and forwards click
  * events back through the bridge.
  *
- * Also hosts the Home view's auth/welcome logic, ported from the
- * retired `lite/placeholder.ts`. Home is what the user sees when
- * `activeId === null` -- the main process hides every tab view in
- * that state, so the home content is uncovered.
+ * The Home tab IS the conversational chat surface — what used to be
+ * the standalone boot-chat page now lives inside this renderer. The
+ * chat verifies the session, offers sign-in inline when needed, and
+ * settles into a welcome + recent-activity digest. Opening an IDW
+ * (ChatGPT, Claude, …) covers the chat with that tab's
+ * WebContentsView; closing the tab restores the chat.
  *
  * Loaded as an external script (not inline) so the strict CSP
  * `script-src 'self'` allows execution.
  */
 
 /// <reference path="../lite-window.d.ts" />
+
+import {
+  runBootChat,
+  type BootChatDeps,
+} from '../boot-chat/boot-chat.js';
+import type { CompressableEvent } from '../boot-chat/event-compressor.js';
 
 // File is a module so esbuild treats it as ESM input.
 export {};
@@ -28,6 +36,9 @@ const ENV: LiteAuthEnvironment = 'edison';
 
 let tabs: LiteMainWindowTab[] = [];
 let activeId: string | null = null;
+
+/** Re-run guard so duplicate runChat() calls during sign-in races don't double-render. */
+let chatRunning = false;
 
 // ---------------------------------------------------------------------------
 // Tab bar render
@@ -50,10 +61,10 @@ function renderTabBar(): void {
   homePill.classList.toggle('active', activeId === null);
   homePill.setAttribute('aria-selected', String(activeId === null));
 
-  // Toggle home view visibility -- when an agent tab is active in the
+  // Toggle home view visibility — when an agent tab is active in the
   // main process, its WebContentsView covers the home content; when
-  // not, we still want a smooth fade rather than a stark slot. v1:
-  // just hide the home content visually when something else is foregrounded.
+  // not, the chat surface is revealed underneath. Hidden visually so
+  // the renderer keeps running (no rehydration cost on tab switch).
   const homeView = document.getElementById('home-view');
   if (homeView !== null) {
     homeView.style.visibility = activeId === null ? 'visible' : 'hidden';
@@ -106,189 +117,183 @@ function wireHomePill(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Home view: auth + welcome (ported from placeholder.ts)
+// Home view: chat surface (formerly boot-chat.html)
 // ---------------------------------------------------------------------------
 
-function getAuthBlock(): HTMLElement | null {
-  return document.getElementById('auth-block');
+/**
+ * Adapter from the live `window.lite.spaces.home.recentEvents` bridge
+ * to the simpler `listRecentEvents` shape `runBootChat` expects. Kept
+ * inside chrome.ts so the boot-chat module stays free of the full
+ * spaces type surface (Rule 11).
+ */
+function buildSpacesAdapter(): BootChatDeps['spaces'] | undefined {
+  const spaces = window.lite?.spaces;
+  if (spaces === undefined) return undefined;
+  return {
+    listRecentEvents: async (
+      opts?: { limit?: number; since?: number }
+    ) => {
+      try {
+        const result = await spaces.home.recentEvents(opts ?? {});
+        if (result.ok === true) {
+          return { ok: true as const, value: result.value as CompressableEvent[] };
+        }
+        return {
+          ok: false as const,
+          error: { code: result.error.code, message: result.error.message },
+        };
+      } catch (err) {
+        return {
+          ok: false as const,
+          error: {
+            code: 'BRIDGE_THREW',
+            message: (err as Error).message,
+          },
+        };
+      }
+    },
+  };
 }
 
-type SignedOutHint =
-  | { kind: 'error'; text: string }
-  | { kind: 'cancelled' }
-  | { kind: 'twofa-needs-setup' }
-  | null;
-
-function renderSignedOut(hint: SignedOutHint): void {
-  const block = getAuthBlock();
-  if (block === null) return;
-  block.innerHTML = '';
-
-  const btn = document.createElement('button');
-  btn.id = 'signin-btn';
-  btn.className = 'signin-button';
-  btn.type = 'button';
-  btn.textContent = 'Sign in to GSX';
-  btn.addEventListener('click', () => {
-    void startSignIn();
-  });
-  block.appendChild(btn);
-  appendSettingsShortcut(block);
-
-  if (hint === null) return;
-
-  if (hint.kind === 'error') {
-    const banner = document.createElement('div');
-    banner.className = 'error-banner';
-    banner.textContent = hint.text;
-    block.appendChild(banner);
-    return;
-  }
-
-  if (hint.kind === 'cancelled') {
-    const banner = document.createElement('div');
-    banner.className = 'info-banner';
-    banner.textContent = 'Sign-in window closed. Click Sign in to GSX to try again.';
-    block.appendChild(banner);
-    return;
-  }
-
-  if (hint.kind === 'twofa-needs-setup') {
-    const banner = document.createElement('div');
-    banner.className = 'warn-banner';
-    const headline = document.createElement('div');
-    headline.className = 'warn-banner-headline';
-    headline.textContent = 'OneReach is asking for a 2FA code.';
-    banner.appendChild(headline);
-    const body = document.createElement('div');
-    body.className = 'warn-banner-body';
-    body.textContent =
-      'Lite has no authenticator secret saved yet. Open Settings -> Two-Factor and paste your setup secret, then try signing in again.';
-    banner.appendChild(body);
-    const settings = window.lite?.settings;
-    if (settings !== undefined) {
-      const link = document.createElement('button');
-      link.type = 'button';
-      link.className = 'warn-banner-action';
-      link.textContent = 'Open Settings -> Two-Factor';
-      link.addEventListener('click', () => {
-        void settings.open('two-factor');
-      });
-      banner.appendChild(link);
-    }
-    block.appendChild(banner);
-  }
+function getThreadEl(): HTMLElement | null {
+  return document.getElementById('boot-chat-thread');
 }
 
-function renderSigningIn(): void {
-  const block = getAuthBlock();
-  if (block === null) return;
-  block.innerHTML = '';
-  const btn = document.createElement('button');
-  btn.id = 'signin-btn';
-  btn.className = 'signin-button';
-  btn.type = 'button';
-  btn.disabled = true;
-  btn.textContent = 'Signing in...';
-  block.appendChild(btn);
-  appendSettingsShortcut(block);
+function getActionsEl(): HTMLElement | null {
+  return document.getElementById('boot-chat-actions');
 }
 
-function renderSignedIn(session: LiteAuthSessionRendererView): void {
-  const block = getAuthBlock();
-  if (block === null) return;
-  block.innerHTML = '';
-
-  const wrap = document.createElement('div');
-  wrap.className = 'signed-in';
-
-  const email = document.createElement('div');
-  email.className = 'email';
-  email.textContent =
-    session.email !== undefined && session.email.length > 0
-      ? 'Signed in as ' + session.email
-      : 'Signed in';
-  wrap.appendChild(email);
-
-  // The "edison / <accountId>" line was useful for verifying
-  // capture during dev but is noise for users -- the env name and
-  // partial account id mean nothing to them. The full details
-  // still live in Settings -> Account for diagnostics.
-
-  const signOutBtn = document.createElement('button');
-  signOutBtn.className = 'signout-link';
-  signOutBtn.type = 'button';
-  signOutBtn.textContent = 'Sign out';
-  signOutBtn.addEventListener('click', () => {
-    void startSignOut();
-  });
-  wrap.appendChild(signOutBtn);
-
-  block.appendChild(wrap);
-}
-
-function appendSettingsShortcut(block: HTMLElement): void {
-  const settings = window.lite?.settings;
-  if (settings === undefined) return;
-  const link = document.createElement('button');
-  link.type = 'button';
-  link.className = 'settings-shortcut';
-  link.textContent = 'Need a 2FA code? Open Settings -> Two-Factor';
-  link.addEventListener('click', () => {
-    // Pass the section id so the link goes directly to Two-Factor
-    // instead of dropping the user on the default Account section.
-    void settings.open('two-factor');
-  });
-  block.appendChild(link);
-}
-
-async function startSignIn(): Promise<void> {
+/**
+ * Run the chat in the home view. Soft-resets the thread + actions so
+ * repeat invocations (e.g. after sign-out) start clean. The chat fires
+ * onFinish once it settles, which un-suspends the re-sign-in prompter
+ * in main-lite so background dialogs can surface again.
+ */
+async function runChat(): Promise<void> {
+  if (chatRunning) return;
+  const thread = getThreadEl();
+  const actions = getActionsEl();
+  if (thread === null || actions === null) return;
   const auth = window.lite?.auth;
   if (auth === undefined) {
-    renderSignedOut({ kind: 'error', text: 'Auth bridge unavailable. Try restarting the app.' });
+    // Bridge missing — surface a static error and bail.
+    thread.replaceChildren();
+    const err = document.createElement('div');
+    err.className = 'boot-chat-bubble boot-chat-bubble-bot is-error';
+    const body = document.createElement('div');
+    body.className = 'boot-chat-bubble-body';
+    body.textContent = 'Auth bridge unavailable. Restart the app.';
+    err.appendChild(body);
+    thread.appendChild(err);
     return;
   }
-  renderSigningIn();
+
+  chatRunning = true;
+  thread.replaceChildren();
+  actions.replaceChildren();
+  actions.hidden = true;
+
+  // The chat's preload-facing auth shape is a narrow subset of the
+  // real bridge; pass the methods runBootChat cares about. (Casts are
+  // safe — the bridge surface is a superset.)
+  const chatAuth: BootChatDeps['auth'] = {
+    getSession: (env) => auth.getSession(env) as ReturnType<BootChatDeps['auth']['getSession']>,
+    hasValidSession: (env) =>
+      auth.hasValidSession(env) as ReturnType<BootChatDeps['auth']['hasValidSession']>,
+    signIn: (env) =>
+      auth.signIn(env) as ReturnType<BootChatDeps['auth']['signIn']>,
+  };
+
+  const spaces = buildSpacesAdapter();
+  const host = window.lite?.bootChat;
+
   try {
-    const result = await auth.signIn(ENV);
-    renderSignedIn(result.session);
-  } catch (err) {
-    const parsed = auth.parseError(err);
-    if (parsed !== null && parsed.code === 'AUTH_CANCELLED') {
-      // Surface a friendly hint instead of silently flipping back to
-      // the bare button -- new users sometimes close the window
-      // expecting it to do something else and end up confused why
-      // the app "did nothing."
-      renderSignedOut({ kind: 'cancelled' });
-      return;
-    }
-    let message: string;
-    if (parsed !== null) {
-      message =
-        parsed.remediation.length > 0
-          ? parsed.message + ' ' + parsed.remediation
-          : parsed.message;
-    } else if (err !== null && typeof err === 'object' && 'message' in err) {
-      message = String((err as { message: unknown }).message);
-    } else {
-      message = 'Sign-in failed.';
-    }
-    renderSignedOut({ kind: 'error', text: message });
+    await runBootChat({
+      thread,
+      actions,
+      auth: chatAuth,
+      ...(spaces !== undefined ? { spaces } : {}),
+      onFinish: () => {
+        // Un-suspend the main-process re-sign-in prompter. The IPC
+        // payload is intentionally empty — the host treats this as a
+        // one-shot "chat has settled" signal.
+        try {
+          host?.finish();
+        } catch {
+          /* best-effort — boot-chat bridge is optional */
+        }
+      },
+    });
+  } finally {
+    chatRunning = false;
+  }
+}
+
+/**
+ * Toggle the Sign-in / Sign-out button visibility based on session state.
+ * The two buttons share the shortcuts row; exactly one is visible at a
+ * time so the user always has the right action available even when the
+ * home-view boot-chat is hidden behind an open IDW tab.
+ */
+function updateSignOutButton(signedIn: boolean): void {
+  const out = document.getElementById('signout-btn');
+  const inBtn = document.getElementById('signin-btn');
+  if (signedIn) {
+    out?.removeAttribute('hidden');
+    inBtn?.setAttribute('hidden', '');
+  } else {
+    out?.setAttribute('hidden', '');
+    inBtn?.removeAttribute('hidden');
   }
 }
 
 async function startSignOut(): Promise<void> {
   const auth = window.lite?.auth;
-  if (auth === undefined) {
-    renderSignedOut(null);
-    return;
-  }
+  if (auth === undefined) return;
   try {
     await auth.signOut(ENV);
   } catch {
     /* best-effort */
   }
-  renderSignedOut(null);
+  updateSignOutButton(false);
+  // Re-run the chat so the user lands on the welcome + sign-in CTA.
+  await runChat();
+}
+
+/**
+ * Trigger a fresh sign-in from the always-available chrome button.
+ * Coalesces against any in-flight sign-in via the auth store's
+ * `inFlight` map, so clicking this while the boot-chat's sign-in is
+ * already running joins the same auth window rather than spawning a
+ * duplicate.
+ */
+async function startSignIn(): Promise<void> {
+  const auth = window.lite?.auth;
+  if (auth === undefined) return;
+  const btn = document.getElementById('signin-btn');
+  if (btn instanceof HTMLButtonElement) {
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+  }
+  try {
+    await auth.signIn(ENV);
+    updateSignOutButton(true);
+  } catch {
+    // User cancelled or sign-in failed. Restore the button so they can
+    // retry; the cookie listener still sets the session up if cookies
+    // landed before the throw, so we re-probe.
+    try {
+      const result = await auth.getSession(ENV);
+      updateSignOutButton(result.session !== null);
+    } catch {
+      updateSignOutButton(false);
+    }
+  } finally {
+    if (btn instanceof HTMLButtonElement) {
+      btn.disabled = false;
+      btn.textContent = 'Sign in to OneReach';
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,13 +308,7 @@ async function bootstrap(): Promise<void> {
     versionEl.textContent = 'v' + version;
   }
 
-  // 2. Wire static buttons in the home view.
-  const initialBtn = document.getElementById('signin-btn');
-  if (initialBtn !== null) {
-    initialBtn.addEventListener('click', () => {
-      void startSignIn();
-    });
-  }
+  // 2. Wire shortcut buttons in the home view.
   const openStoreBtn = document.getElementById('open-store-btn');
   if (openStoreBtn !== null) {
     openStoreBtn.addEventListener('click', () => {
@@ -326,11 +325,20 @@ async function bootstrap(): Promise<void> {
       void settings.open('idws').catch(() => undefined);
     });
   }
+  const signOutBtn = document.getElementById('signout-btn');
+  if (signOutBtn !== null) {
+    signOutBtn.addEventListener('click', () => {
+      void startSignOut();
+    });
+  }
+  const signInBtn = document.getElementById('signin-btn');
+  if (signInBtn !== null) {
+    signInBtn.addEventListener('click', () => {
+      void startSignIn();
+    });
+  }
   // Spaces OR-logo button (upper-left of the tab bar) — ported from
-  // the full app's `#black-hole-button` (Quick Capture / Spaces). Same
-  // single-instance bridge as the Tools → Spaces… menu entry; repeat
-  // clicks focus the existing window. Soft no-op if the bridge isn't
-  // wired yet (signed-out boot before initSpaces runs).
+  // the full app's `#black-hole-button`. Single-instance bridge.
   const spacesOrBtn = document.getElementById('spaces-or-button');
   if (spacesOrBtn !== null) {
     spacesOrBtn.addEventListener('click', () => {
@@ -343,33 +351,35 @@ async function bootstrap(): Promise<void> {
   // 3. Wire the Home pill click.
   wireHomePill();
 
-  // 4. Wire auth flows.
+  // 4. Wire auth lifecycle. The chat owns the visible sign-in flow;
+  //    this listener just keeps the Sign-out shortcut button in sync
+  //    and re-runs the chat when the user drops a session externally
+  //    (e.g. server-side revoke triggered through a background KV op).
   const auth = window.lite?.auth;
   if (auth !== undefined) {
     auth.onSessionChanged((payload) => {
       if (payload.env !== ENV) return;
-      if (payload.session !== null) {
-        renderSignedIn(payload.session);
-      } else {
-        renderSignedOut(null);
+      const signedIn = payload.session !== null;
+      updateSignOutButton(signedIn);
+      if (!signedIn) {
+        // Soft-restart so the chat lands on the welcome + sign-in CTA.
+        void runChat();
       }
     });
-    // Subscribe to 2FA-needs-setup broadcasts so the user gets a
-    // contextual banner the moment the autofill watcher discovers
-    // they need to save their authenticator setup secret.
+    // 2FA-needs-setup is handled by the chat itself now — when sign-in
+    // throws with `AUTH_TWO_FACTOR_NEEDS_SETUP` the chat shows an
+    // error bubble. We still listen so the Settings shortcut on the
+    // shortcut row gets a fresh entry. v1: no-op (the chat error
+    // copy is enough; the user can hit Manage Agents → Two-Factor).
     auth.on2FANeedsSetup(() => {
-      renderSignedOut({ kind: 'twofa-needs-setup' });
+      /* future: route to Settings → Two-Factor */
     });
-    void auth
-      .getSession(ENV)
-      .then((result) => {
-        if (result.session !== null) {
-          renderSignedIn(result.session);
-        }
-      })
-      .catch(() => {
-        /* leave the default button */
-      });
+    try {
+      const result = await auth.getSession(ENV);
+      updateSignOutButton(result.session !== null);
+    } catch {
+      /* leave the sign-out button hidden */
+    }
   }
 
   // 5. Subscribe to tab list changes from the main process.
@@ -380,7 +390,7 @@ async function bootstrap(): Promise<void> {
       activeId = payload.activeId;
       renderTabBar();
     });
-    // Initial fetch -- in case we missed an early broadcast.
+    // Initial fetch — in case we missed an early broadcast.
     try {
       const initialTabs = await mw.listTabs();
       tabs = initialTabs;
@@ -388,233 +398,12 @@ async function bootstrap(): Promise<void> {
       activeId = active.activeId;
       renderTabBar();
     } catch {
-      /* tab bar starts empty; nothing to do */
+      /* tab bar starts empty */
     }
   }
 
-  // 6. Onboarding checklist: show + auto-update on every relevant
-  //    state change.
-  void wireOnboardingCard();
-}
-
-// ─── onboarding card ─────────────────────────────────────────────────────
-//
-// Renders a small "Set up your workspace" card on the home view AFTER
-// the user signs in. Each row has a plain-language outcome title, a
-// one-line subtitle that explains the actual benefit, and a button
-// labeled with the next action. Hidden when:
-//   - The user is not yet signed in (the big Sign-In button above is
-//     the CTA in that state -- a checklist row repeating "Sign in to
-//     GSX" is noise).
-//   - All visible steps are complete.
-//   - The user explicitly clicked the X to dismiss.
-//
-// The 'signed-in' step is still tracked in KV so we can decide
-// whether to show the card at all, but it is NOT rendered as a row
-// (would be redundant with the visible Sign-In button).
-
-interface OnboardingStep {
-  id: LiteOnboardingStepId;
-  /** Plain-language outcome -- what the user gets, not the feature name. */
-  title: string;
-  /** One-line "what this gives you" copy. */
-  subtitle: string;
-  /** Action button label. */
-  buttonLabel: string;
-  /** Run on button click. */
-  action: () => void;
-}
-
-async function wireOnboardingCard(): Promise<void> {
-  const card = document.getElementById('onboarding-card');
-  if (card === null) return;
-  const onboardingBridge = window.lite?.onboarding;
-  if (onboardingBridge === undefined) return;
-
-  // Mark steps complete as they happen.
-  const auth = window.lite?.auth;
-  const mw = window.lite?.mainWindow;
-  const totp = window.lite?.totp;
-
-  // Initial sync: read live state and mark anything already true.
-  try {
-    if (auth !== undefined) {
-      const session = await auth.getSession(ENV);
-      if (session.session !== null) {
-        await onboardingBridge.markComplete('signed-in');
-      }
-    }
-    if (totp !== undefined) {
-      const result = await totp.hasSecret();
-      if (result.hasSecret === true) {
-        await onboardingBridge.markComplete('two-factor-saved');
-      }
-    }
-    if (mw !== undefined) {
-      const tabsList = await mw.listTabs();
-      if (tabsList.length > 0) {
-        await onboardingBridge.markComplete('first-agent-opened');
-      }
-    }
-  } catch {
-    /* best-effort */
-  }
-
-  // Subscribe to changes that should auto-tick the boxes.
-  if (auth !== undefined) {
-    auth.onSessionChanged((payload) => {
-      if (payload.env !== ENV) return;
-      if (payload.session !== null) {
-        void onboardingBridge.markComplete('signed-in').then(refreshOnboardingCard);
-      }
-    });
-  }
-  if (mw !== undefined) {
-    mw.onTabsChanged((payload) => {
-      if (payload.tabs.length > 0) {
-        void onboardingBridge.markComplete('first-agent-opened').then(refreshOnboardingCard);
-      }
-    });
-  }
-  // The two-factor secret can change while Settings is open in a
-  // child window. The chrome doesn't get a direct event, but we can
-  // re-poll on focus (cheap enough).
-  window.addEventListener('focus', () => {
-    void rePollOnboardingState();
-  });
-
-  // Wire dismiss button.
-  const dismissBtn = document.getElementById('onboarding-dismiss');
-  if (dismissBtn !== null) {
-    dismissBtn.addEventListener('click', () => {
-      void onboardingBridge.dismiss().then(() => {
-        const c = document.getElementById('onboarding-card');
-        if (c !== null) c.setAttribute('hidden', '');
-      });
-    });
-  }
-
-  await refreshOnboardingCard();
-}
-
-async function rePollOnboardingState(): Promise<void> {
-  const onboardingBridge = window.lite?.onboarding;
-  if (onboardingBridge === undefined) return;
-  const totp = window.lite?.totp;
-  try {
-    if (totp !== undefined) {
-      const result = await totp.hasSecret();
-      if (result.hasSecret === true) {
-        await onboardingBridge.markComplete('two-factor-saved');
-      }
-    }
-    await refreshOnboardingCard();
-  } catch {
-    /* best-effort */
-  }
-}
-
-async function refreshOnboardingCard(): Promise<void> {
-  const card = document.getElementById('onboarding-card');
-  if (card === null) return;
-  const onboardingBridge = window.lite?.onboarding;
-  if (onboardingBridge === undefined) return;
-
-  let state;
-  try {
-    state = await onboardingBridge.load();
-  } catch {
-    return;
-  }
-
-  // Explicit dismissal wins.
-  if (state.dismissedAt !== null) {
-    card.setAttribute('hidden', '');
-    return;
-  }
-
-  // Hide the card until the user is signed in. The Sign-In button
-  // above the card is the call to action when signed out; a "Sign in
-  // to GSX" row in the card is just noise (and confusing -- "GSX"
-  // means nothing to a brand-new user).
-  const signedIn = state.completedAt['signed-in'] !== undefined;
-  if (!signedIn) {
-    card.setAttribute('hidden', '');
-    return;
-  }
-
-  // Visible steps: outcome titles + subtitles + action buttons.
-  // 'signed-in' is intentionally NOT rendered (already implied by
-  // the card being visible at all).
-  const steps: OnboardingStep[] = [
-    {
-      id: 'two-factor-saved',
-      title: 'Skip the 2FA copy-paste',
-      subtitle:
-        'If your OneReach account uses two-factor sign-in, save your authenticator setup once and Lite fills in the 6-digit codes for you.',
-      buttonLabel: 'Set up auto-fill',
-      action: () => {
-        void window.lite?.settings?.open('two-factor');
-      },
-    },
-    {
-      id: 'first-agent-opened',
-      title: 'Open an AI agent',
-      subtitle:
-        'Pick ChatGPT, Claude, Gemini, or one of your team\u2019s agents from the IDW menu. Each one opens as a tab here.',
-      buttonLabel: 'Browse agents',
-      action: () => {
-        void window.lite?.idw?.openStore();
-      },
-    },
-  ];
-
-  // Hide the card when every visible step is done -- the user has
-  // finished setup; no reason to keep nagging.
-  const allDone = steps.every((s) => state.completedAt[s.id] !== undefined);
-  if (allDone) {
-    card.setAttribute('hidden', '');
-    return;
-  }
-
-  card.removeAttribute('hidden');
-  const list = document.getElementById('onboarding-list');
-  if (list === null) return;
-  list.innerHTML = '';
-  for (const step of steps) {
-    const done = state.completedAt[step.id] !== undefined;
-    const row = document.createElement('div');
-    row.className = 'onboarding-row' + (done ? ' done' : '');
-
-    const status = document.createElement('span');
-    status.className = 'onboarding-status';
-    status.setAttribute('aria-hidden', 'true');
-    status.textContent = done ? '\u2713' : '';
-    row.appendChild(status);
-
-    const text = document.createElement('div');
-    text.className = 'onboarding-text';
-    const title = document.createElement('div');
-    title.className = 'onboarding-row-title';
-    title.textContent = step.title;
-    text.appendChild(title);
-    const sub = document.createElement('div');
-    sub.className = 'onboarding-row-subtitle';
-    sub.textContent = step.subtitle;
-    text.appendChild(sub);
-    row.appendChild(text);
-
-    if (!done) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'onboarding-row-action';
-      btn.textContent = step.buttonLabel;
-      btn.addEventListener('click', () => step.action());
-      row.appendChild(btn);
-    }
-
-    list.appendChild(row);
-  }
+  // 6. Start the chat. Drives verify → welcome → digest (or sign-in).
+  await runChat();
 }
 
 if (document.readyState === 'loading') {

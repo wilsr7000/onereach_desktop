@@ -44,6 +44,14 @@ export const KV_ERROR_CODES = {
   HTTP: 'KV_HTTP',
   /** Underlying fetch threw (DNS, TCP, TLS, abort-not-timeout). */
   NETWORK: 'KV_NETWORK',
+  /**
+   * Caller passed an invalid value to a KV write (undefined, null,
+   * or a primitive when a structured blob was expected). Surfacing
+   * this as a hard rejection prevents the historical "value got
+   * String()-coerced to `'undefined'` and persisted" corruption that
+   * destroyed user data on subsequent reads.
+   */
+  INVALID_INPUT: 'KV_INVALID_INPUT',
 } as const;
 
 export type KVErrorCode = (typeof KV_ERROR_CODES)[keyof typeof KV_ERROR_CODES];

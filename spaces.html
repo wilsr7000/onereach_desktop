@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:"
+    />
+    <title>Spaces</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./spaces.css" />
+  </head>
+  <body>
+    <header class="spaces-header">
+      <h1>Spaces</h1>
+      <div class="spaces-header-spacer"></div>
+      <button
+        type="button"
+        id="spaces-new-button"
+        class="spaces-new-button"
+        title="Create a new Space"
+      >
+        <span class="spaces-new-button-glyph" aria-hidden="true">+</span>
+        <span class="spaces-new-button-label">New Space</span>
+      </button>
+      <span class="spaces-phase-badge" title="Module phase indicator">v1 · Workspace Beta</span>
+    </header>
+
+    <!--
+      Mutation UI surfaces (Phase 3a). Hidden until invoked. The renderer
+      (spaces.ts) populates `#spaces-new-dialog` with a name input, and
+      `#spaces-row-menu` with Rename / Delete options when the user clicks
+      a sidebar row's ⋯ button.
+    -->
+    <div
+      id="spaces-new-dialog-backdrop"
+      class="spaces-modal-backdrop"
+      hidden
+      aria-hidden="true"
+    >
+      <div
+        id="spaces-new-dialog"
+        class="spaces-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="spaces-new-dialog-title"
+      >
+        <h2 id="spaces-new-dialog-title" class="spaces-modal-title">Create a new Space</h2>
+        <p class="spaces-modal-help">
+          Names are unique within your account. You can rename later.
+        </p>
+        <form id="spaces-new-form" class="spaces-modal-form">
+          <label for="spaces-new-name-input" class="spaces-modal-label">Name</label>
+          <input
+            type="text"
+            id="spaces-new-name-input"
+            class="spaces-modal-input"
+            placeholder="e.g. Quarterly Audit"
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="80"
+            required
+          />
+          <div id="spaces-new-error" class="spaces-modal-error" hidden></div>
+          <div class="spaces-modal-actions">
+            <button type="button" id="spaces-new-cancel" class="spaces-modal-button">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              id="spaces-new-submit"
+              class="spaces-modal-button spaces-modal-button-primary"
+            >
+              Create
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!--
+      Row context menu (popover). Positioned next to the ⋯ button on the
+      sidebar row that triggered it. Hidden by default; spaces.ts opens
+      it on click and closes it on outside-click or escape.
+    -->
+    <div
+      id="spaces-row-menu"
+      class="spaces-row-menu"
+      hidden
+      role="menu"
+      aria-hidden="true"
+    >
+      <button type="button" class="spaces-row-menu-item" data-action="rename" role="menuitem">
+        Rename
+      </button>
+      <button type="button" class="spaces-row-menu-item" data-action="toggle-shared" role="menuitem">
+        <span data-toggle-shared-label>Make shared</span>
+      </button>
+      <button
+        type="button"
+        class="spaces-row-menu-item spaces-row-menu-item-danger"
+        data-action="delete"
+        role="menuitem"
+      >
+        Delete
+      </button>
+    </div>
+
+    <!--
+      Sprint 1: New-asset modal. Tabbed dialog with "Paste text" and
+      "Upload file" entry points. Hidden by default; spaces.ts opens
+      it from the "+ New" button on the items region toolbar.
+    -->
+    <div
+      id="spaces-new-asset-backdrop"
+      class="spaces-modal-backdrop spaces-new-asset-backdrop"
+      hidden
+      aria-hidden="true"
+    >
+      <div
+        id="spaces-new-asset-dialog"
+        class="spaces-modal spaces-new-asset-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="spaces-new-asset-title"
+      >
+        <header class="spaces-new-asset-header">
+          <h2 id="spaces-new-asset-title" class="spaces-modal-title">Create asset</h2>
+          <button
+            type="button"
+            id="spaces-new-asset-close"
+            class="spaces-new-asset-close"
+            aria-label="Close"
+            title="Close"
+          >×</button>
+        </header>
+
+        <div class="spaces-new-asset-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            class="spaces-new-asset-tab is-active"
+            data-asset-tab="text"
+            aria-selected="true"
+          >
+            <span class="spaces-new-asset-tab-icon" aria-hidden="true">¶</span>
+            <span>Paste text</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="spaces-new-asset-tab"
+            data-asset-tab="upload"
+            aria-selected="false"
+          >
+            <span class="spaces-new-asset-tab-icon" aria-hidden="true">↑</span>
+            <span>Upload file</span>
+          </button>
+        </div>
+
+        <form id="spaces-new-asset-form" class="spaces-new-asset-form">
+          <div class="spaces-new-asset-field">
+            <label for="spaces-new-asset-title-input" class="spaces-new-asset-label">Title</label>
+            <input
+              type="text"
+              id="spaces-new-asset-title-input"
+              class="spaces-new-asset-input"
+              placeholder="Give your asset a name"
+              maxlength="200"
+              required
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="spaces-new-asset-field" data-asset-pane="text">
+            <div class="spaces-new-asset-label-row">
+              <label for="spaces-new-asset-content-input" class="spaces-new-asset-label">Content</label>
+              <span class="spaces-new-asset-label-hint">Markdown supported — auto-saves word count</span>
+            </div>
+            <textarea
+              id="spaces-new-asset-content-input"
+              class="spaces-new-asset-textarea"
+              rows="12"
+              placeholder="Type or paste anything here — notes, a transcript, a URL list, raw Markdown…"
+              spellcheck="true"
+            ></textarea>
+          </div>
+
+          <div class="spaces-new-asset-field" data-asset-pane="upload" hidden>
+            <label for="spaces-new-asset-file-input" class="spaces-new-asset-label">File</label>
+            <label
+              class="spaces-new-asset-dropzone"
+              for="spaces-new-asset-file-input"
+              id="spaces-new-asset-dropzone"
+            >
+              <div class="spaces-new-asset-dropzone-icon" aria-hidden="true">↑</div>
+              <p class="spaces-new-asset-dropzone-primary">Drop a file here, or click to browse</p>
+              <p class="spaces-new-asset-dropzone-hint">
+                Auto-extracts metadata from images, audio, video, PDF, CSV, JSON, and text.
+              </p>
+              <input
+                type="file"
+                id="spaces-new-asset-file-input"
+                class="spaces-new-asset-file-input"
+              />
+            </label>
+            <div
+              class="spaces-new-asset-file-chip"
+              id="spaces-new-asset-file-hint"
+              hidden
+            ></div>
+          </div>
+
+          <div id="spaces-new-asset-error" class="spaces-modal-error" hidden></div>
+
+          <div class="spaces-new-asset-actions">
+            <button type="button" id="spaces-new-asset-cancel" class="spaces-new-asset-button">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              id="spaces-new-asset-submit"
+              class="spaces-new-asset-button spaces-new-asset-button-primary"
+            >
+              Create asset
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!--
+      Toast container for undo-affordances after a soft delete.
+      Self-dismisses after ~6s; the Undo button restores the space
+      via undeleteSpace().
+    -->
+    <div
+      id="spaces-toast"
+      class="spaces-toast"
+      hidden
+      role="status"
+      aria-live="polite"
+    >
+      <span id="spaces-toast-message" class="spaces-toast-message"></span>
+      <button type="button" id="spaces-toast-action" class="spaces-toast-action" hidden>
+        Undo
+      </button>
+    </div>
+
+    <div class="spaces-layout">
+      <!--
+        Left rail: Home + dynamic Spaces navigator. Home is the default
+        scope (chunk 3o). Uncategorized is the intake + exception zone
+        (always present below Home, above the user's Spaces).
+      -->
+      <nav id="spaces-sidebar" class="spaces-sidebar" aria-label="Spaces">
+        <div class="spaces-sidebar-section spaces-sidebar-section-home">
+          <ul class="spaces-list" id="spaces-list-home">
+            <li
+              class="spaces-row spaces-row-home is-active"
+              data-scope-id="__home__"
+              role="button"
+              tabindex="0"
+            >
+              <span class="spaces-row-dot spaces-row-dot-home" aria-hidden="true"></span>
+              <span class="spaces-row-name">Home</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="spaces-sidebar-search">
+          <input
+            type="search"
+            id="spaces-sidebar-search-input"
+            class="spaces-sidebar-search-input"
+            placeholder="Search Spaces…"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="Filter Spaces by name"
+          />
+        </div>
+        <div class="spaces-sidebar-sort">
+          <label for="spaces-sidebar-sort-select" class="spaces-sidebar-sort-label">Sort</label>
+          <select
+            id="spaces-sidebar-sort-select"
+            class="spaces-sidebar-sort-select"
+            aria-label="Sort Spaces"
+          >
+            <option value="name">Name (A→Z)</option>
+            <option value="recent">Recently updated</option>
+          </select>
+        </div>
+
+        <div class="spaces-sidebar-section">
+          <div class="spaces-sidebar-title">Intake</div>
+          <ul class="spaces-list" id="spaces-list-intake">
+            <li class="spaces-row spaces-row-intake" data-scope-id="__uncategorized__">
+              <span class="spaces-row-dot spaces-row-dot-intake"></span>
+              <span class="spaces-row-name">Uncategorized</span>
+              <span class="spaces-row-count" data-count-target="uncategorized">—</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="spaces-sidebar-section">
+          <div class="spaces-sidebar-title spaces-sidebar-title-with-action">
+            <span>Spaces</span>
+            <button
+              type="button"
+              id="spaces-new-shared-button"
+              class="spaces-new-shared-button"
+              title="Create a new shared space (AI-managed)"
+              aria-label="Create a new shared space"
+            >+ Shared</button>
+          </div>
+          <ul class="spaces-list" id="spaces-list-spaces">
+            <!--
+              Loading skeleton: three shimmer rows mirror the typical
+              Space-row shape so first paint shows structure, not text.
+              spaces.ts replaces these once listSpaces() resolves.
+            -->
+            <li class="spaces-skeleton-row" aria-hidden="true">
+              <span class="spaces-skeleton-dot"></span>
+              <span class="spaces-skeleton-name"></span>
+            </li>
+            <li class="spaces-skeleton-row" aria-hidden="true">
+              <span class="spaces-skeleton-dot"></span>
+              <span class="spaces-skeleton-name spaces-skeleton-name-short"></span>
+            </li>
+            <li class="spaces-skeleton-row" aria-hidden="true">
+              <span class="spaces-skeleton-dot"></span>
+              <span class="spaces-skeleton-name"></span>
+            </li>
+          </ul>
+        </div>
+      </nav>
+
+      <!--
+        Main pane: Home news-feed view (chunk 3o, default) OR item
+        canvas (chunk 3a-3i, when a Space or Uncategorized is the
+        active scope).
+      -->
+      <main class="spaces-main" id="spaces-main">
+        <!--
+          Home view region (chunk 3o). Visible when activeScopeId ===
+          '__home__'. spaces.ts hides this region when a Space or
+          Uncategorized is selected, and shows the items region instead.
+          See lite/spaces/HOME-V1.md for the per-card spec.
+        -->
+        <section
+          id="spaces-home-region"
+          class="spaces-home-region"
+          aria-label="Home"
+        ></section>
+
+        <!--
+          Items region populated at runtime by spaces.ts when a Space
+          or Uncategorized is the active scope. Hidden when Home is
+          active.
+        -->
+        <section
+          id="spaces-items-region"
+          class="spaces-items-region"
+          hidden
+        ></section>
+      </main>
+
+      <!--
+        Right rail: item detail panel. Hidden in Phase 0 (no items to
+        select); placeholder kept in the DOM so the Phase 2 wiring has
+        a stable mount target.
+      -->
+      <aside class="spaces-detail" id="spaces-detail" hidden></aside>
+    </div>
+
+    <script src="./spaces.js"></script>
+  </body>
+</html>

@@ -544,13 +544,126 @@ describe('AuthStore.signIn -- failure modes', () => {
     await expect(promise).rejects.toMatchObject({ code: AUTH_ERROR_CODES.INVALID_COOKIE });
   });
 
-  it('rejects AUTH_UNSUPPORTED_ENV for environments not in SUPPORTED_ENVIRONMENTS', async () => {
+  it('rejects AUTH_UNSUPPORTED_ENV only for environments not in SUPPORTED_ENVIRONMENTS', async () => {
     const handle = makeFakeWindow();
     const { store } = buildStore({ windowHandle: handle });
 
-    await expect(store.signIn('staging')).rejects.toMatchObject({ code: AUTH_ERROR_CODES.UNSUPPORTED_ENV });
+    // Production is the only env still missing — bare onereach.ai
+    // requires extracted-env regex changes scheduled separately.
     await expect(store.signIn('production')).rejects.toMatchObject({ code: AUTH_ERROR_CODES.UNSUPPORTED_ENV });
-    await expect(store.signIn('dev')).rejects.toMatchObject({ code: AUTH_ERROR_CODES.UNSUPPORTED_ENV });
+    // Unknown env strings (TS-cast for runtime defense) also reject.
+    await expect(
+      store.signIn('mystery' as unknown as 'edison')
+    ).rejects.toMatchObject({ code: AUTH_ERROR_CODES.UNSUPPORTED_ENV });
+  });
+
+  it('signs into staging with staging-domain cookies', async () => {
+    const handle = makeFakeWindow({
+      initialUrl: 'https://studio.staging.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID,
+    });
+    const { store, session } = buildStore({ windowHandle: handle });
+
+    const promise = store.signIn('staging');
+    session.cookies.emit(
+      multCookie({ domain: '.staging.api.onereach.ai' })
+    );
+    session.cookies.emit(
+      orCookie(undefined, { domain: '.staging.onereach.ai' })
+    );
+
+    const result = await promise;
+    expect(result.environment).toBe('staging');
+    expect(result.accountId).toBe(SAMPLE_ACCOUNT_ID);
+    expect(store.getToken('staging')).toBe(SAMPLE_TOKEN);
+    expect(store.hasValidSession('staging')).toBe(true);
+  });
+
+  it('signs into dev with dev-domain cookies', async () => {
+    const handle = makeFakeWindow({
+      initialUrl: 'https://studio.dev.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID,
+    });
+    const { store, session } = buildStore({ windowHandle: handle });
+
+    const promise = store.signIn('dev');
+    session.cookies.emit(multCookie({ domain: '.dev.api.onereach.ai' }));
+    session.cookies.emit(orCookie(undefined, { domain: '.dev.onereach.ai' }));
+
+    const result = await promise;
+    expect(result.environment).toBe('dev');
+    expect(store.hasValidSession('dev')).toBe(true);
+  });
+
+  it('holds sessions for edison + staging + dev simultaneously without collision', async () => {
+    // Three separate signIn calls, three separate sessions per env. The
+    // store's per-env maps must keep them independent: signing into
+    // staging must not touch the edison session, etc.
+    const acctEd = '11111111-1111-1111-1111-111111111111';
+    const acctSt = '22222222-2222-2222-2222-222222222222';
+    const acctDv = '33333333-3333-3333-3333-333333333333';
+
+    // Edison
+    const edHandle = makeFakeWindow({
+      initialUrl: 'https://studio.edison.onereach.ai/?accountId=' + acctEd,
+    });
+    const { store, session } = buildStore({ windowHandle: edHandle });
+    const p1 = store.signIn('edison');
+    session.cookies.emit(multCookie());
+    session.cookies.emit(
+      orCookie({ accountId: acctEd, email: 'a@example.com' })
+    );
+    await p1;
+
+    // Staging — reuse the same store (cross-env isolation lives in the store,
+    // not in the window). Build a new fake window/handle for the next call.
+    // Note: in production each signIn opens a fresh window; here the fakes
+    // share a session-emitter, but the per-env partition lookup keeps the
+    // capture buffers separate.
+    const stHandle = makeFakeWindow({
+      initialUrl: 'https://studio.staging.onereach.ai/?accountId=' + acctSt,
+    });
+    // Re-wire windowFactory so the next signIn picks up the staging handle.
+    // (buildStore stitched a one-shot factory; signing in again would reuse
+    // the prior handle. Reach into the store's internals via a fresh
+    // FakeWindowFactoryRecorder bound to stHandle.)
+    (store as unknown as { windowFactory: FakeWindowFactoryRecorder }).windowFactory =
+      new FakeWindowFactoryRecorder(() => stHandle);
+    const p2 = store.signIn('staging');
+    session.cookies.emit(
+      multCookie({ domain: '.staging.api.onereach.ai' })
+    );
+    session.cookies.emit(
+      orCookie(
+        { accountId: acctSt, email: 'b@example.com' },
+        { domain: '.staging.onereach.ai' }
+      )
+    );
+    await p2;
+
+    // Dev
+    const dvHandle = makeFakeWindow({
+      initialUrl: 'https://studio.dev.onereach.ai/?accountId=' + acctDv,
+    });
+    (store as unknown as { windowFactory: FakeWindowFactoryRecorder }).windowFactory =
+      new FakeWindowFactoryRecorder(() => dvHandle);
+    const p3 = store.signIn('dev');
+    session.cookies.emit(
+      multCookie({ domain: '.dev.api.onereach.ai' })
+    );
+    session.cookies.emit(
+      orCookie(
+        { accountId: acctDv, email: 'c@example.com' },
+        { domain: '.dev.onereach.ai' }
+      )
+    );
+    await p3;
+
+    // All three sessions present and distinct.
+    expect(store.getSession('edison')?.accountId).toBe(acctEd);
+    expect(store.getSession('staging')?.accountId).toBe(acctSt);
+    expect(store.getSession('dev')?.accountId).toBe(acctDv);
+    expect(store.hasValidSession('edison')).toBe(true);
+    expect(store.hasValidSession('staging')).toBe(true);
+    expect(store.hasValidSession('dev')).toBe(true);
   });
 
   it('ignores cookies on non-OneReach domains (subdomain attack defense)', async () => {

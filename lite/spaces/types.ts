@@ -224,6 +224,14 @@ export type ItemMetadata = Record<string, MetadataValue>;
 export interface Item extends ItemSummary {
   /** Inline text content for text-kind items. */
   content?: string;
+  /**
+   * Free-form description / abstract / caption / notes. Distinct from
+   * `excerpt` (which is a derived preview snippet of `content`):
+   * `description` is user-authored prose about the asset. Edited via
+   * `items.update({ description })`; rendered in the detail rail
+   * between the meta strip and any preview.
+   */
+  description?: string;
   /** Free-form metadata bag (round-tripped as JSON in `a.metadata`). */
   metadata?: ItemMetadata;
   /**
@@ -285,6 +293,14 @@ export interface ItemUpdatePatch {
   /** New `ItemKind`. Used by the renderer's "Reclassify" affordance. */
   type?: ItemKind;
   /**
+   * Inline content body -- the Markdown / text payload rendered by
+   * the detail pane's content block. Empty string clears the content.
+   * Trimmed only for length validation (the body is stored verbatim
+   * so trailing newlines / formatting survive). Capped at
+   * `MAX_ITEM_CONTENT_LENGTH`.
+   */
+  content?: string;
+  /**
    * Optional editor id (a `:Person.id`). When provided, the SDK
    * MERGEs a `[:LAST_EDITED]->(:Person {id})` edge so the detail
    * pane can attribute the change. Null/missing skips the edge.
@@ -296,6 +312,8 @@ export interface ItemUpdatePatch {
 export const MAX_ITEM_TITLE_LENGTH = 200 as const;
 /** Max description length enforced client-side. */
 export const MAX_ITEM_DESCRIPTION_LENGTH = 4000 as const;
+/** Max content body length enforced client-side. ~50 pages of Markdown. */
+export const MAX_ITEM_CONTENT_LENGTH = 200_000 as const;
 /** Max tag name length (single tag). */
 export const MAX_ITEM_TAG_LENGTH = 60 as const;
 
@@ -324,6 +342,25 @@ export interface CreateSpaceInput {
 /** Input to `spaces.rename(id, name)`. (Wrapped for symmetry; same constraints as `create.name`.) */
 export interface RenameSpaceInput {
   name: string;
+}
+
+/**
+ * Input to `spaces.updateSpace(id, patch)` — partial update of the
+ * non-identity fields on a Space. Each field is optional; only those
+ * present in the patch are written. Pass an empty string for
+ * `description` to clear it. Name changes go through `renameSpace`
+ * (uniqueness check is name-specific), not this method.
+ *
+ * Validation mirrors `CreateSpaceInput`:
+ *   - description: trimmed; capped at `MAX_SPACE_DESC_LENGTH`
+ *   - color: any string (typically a hex like `#4f8cff`); not validated
+ *     beyond type (renderer is the source of truth on visual semantics)
+ *   - iconKey: any string (lucide-style key); not validated beyond type
+ */
+export interface UpdateSpaceInput {
+  description?: string;
+  color?: string;
+  iconKey?: string;
 }
 
 /** Options for `spaces.delete(id, opts?)`. */

@@ -13,6 +13,7 @@
 
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { getSpacesApi } from './api.js';
+import { getLoggingApi } from '../logging/api.js';
 import type { SpacesError } from './errors.js';
 import { resolveSpaceScope } from './scope.js';
 import type {
@@ -28,6 +29,7 @@ import type {
   ContributorWindow,
   CreateSpaceInput,
   DeleteSpaceOpts,
+  UpdateSpaceInput,
   SpaceKind,
   TicketStatus,
   CreateTicketInput,
@@ -69,6 +71,7 @@ export const SPACES_IPC = {
   /** Mutations (Phase 3a). ADR-048. */
   CREATE_SPACE: 'lite:spaces:create',
   RENAME_SPACE: 'lite:spaces:rename',
+  UPDATE_SPACE: 'lite:spaces:update',
   DELETE_SPACE: 'lite:spaces:delete',
   UNDELETE_SPACE: 'lite:spaces:undelete',
   /** Phase 4 — shared spaces (playbooks + tickets). */
@@ -123,6 +126,28 @@ interface RegisterOpts {
 
 let registered = false;
 
+/** Electron's `ipcMain.handle` listener type (uses `any[]` args). */
+type SpacesIpcHandler = Parameters<typeof ipcMain.handle>[1];
+
+/**
+ * Register an IPC handler that emits a `spaces.ipc.<verb>` instant
+ * event (ADR-030) before delegating, so every renderer-driven Spaces
+ * call is visible in `/logs?category=spaces`. The verb is derived from
+ * the `lite:spaces:<verb>` channel (colons -> hyphens) -- the channel
+ * list is the single source of truth, so handlers stay declarative.
+ *
+ * Uses `ipcMain.handle.bind` internally so the module's wrapping of
+ * each handler registration doesn't recurse into this function.
+ */
+function handleSpacesIpc(channel: string, handler: SpacesIpcHandler): void {
+  const register = ipcMain.handle.bind(ipcMain);
+  const verb = channel.replace(/^lite:spaces:/, '').replace(/:/g, '-');
+  register(channel, (event, ...args) => {
+    getLoggingApi().event(`spaces.ipc.${verb}`);
+    return handler(event, ...args);
+  });
+}
+
 /**
  * Register every Spaces IPC handler. Idempotent: safe to call across
  * test re-init cycles. Pair with `unregisterSpacesIpc()` on teardown.
@@ -130,12 +155,12 @@ let registered = false;
 export function registerSpacesIpc(opts: RegisterOpts): void {
   if (registered) return;
 
-  ipcMain.handle(SPACES_IPC.OPEN, (_event: IpcMainInvokeEvent): { ok: true } => {
+  handleSpacesIpc(SPACES_IPC.OPEN, (_event: IpcMainInvokeEvent): { ok: true } => {
     opts.onOpen();
     return { ok: true };
   });
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.LIST_SPACES,
     async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<Space[]>> => {
       try {
@@ -147,7 +172,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.UNCATEGORIZED_COUNT,
     async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<number>> => {
       try {
@@ -159,7 +184,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_LIST,
     async (
       _event: IpcMainInvokeEvent,
@@ -180,7 +205,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_GET,
     async (
       _event: IpcMainInvokeEvent,
@@ -199,7 +224,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_RESOLVE_FILE_URL,
     async (
       _event: IpcMainInvokeEvent,
@@ -220,7 +245,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
 
   // Phase 3b — item mutation handlers. Distinct from Phase 3a Space
   // mutations: these write to :Asset / :Tag.
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_UPDATE,
     async (
       _event: IpcMainInvokeEvent,
@@ -243,7 +268,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_ADD_TAG,
     async (
       _event: IpcMainInvokeEvent,
@@ -266,7 +291,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_REMOVE_TAG,
     async (
       _event: IpcMainInvokeEvent,
@@ -291,7 +316,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
 
   // Phase 3c — per-asset activity log. Returns recent commits referencing
   // the given asset.
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_RECENT_COMMITS,
     async (
       _event: IpcMainInvokeEvent,
@@ -323,7 +348,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
   // structured envelope. runDiscovery() never throws -- per-query
   // failures land in the envelope -- so this handler always returns
   // ok=true. The runner result itself encodes pass/fail per query.
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.DISCOVERY_RUN,
     async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<DiscoveryResults>> => {
       try {
@@ -342,7 +367,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
   // existing `serializeError` helper. Detail in
   // `lite/spaces/HOME-V1.md`.
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.HOME_ENTITY_COUNTS,
     async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<EntityCounts>> => {
       try {
@@ -354,7 +379,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.HOME_RECENT_ITEMS,
     async (
       _event: IpcMainInvokeEvent,
@@ -371,7 +396,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.HOME_TOP_CONTRIBUTORS,
     async (
       _event: IpcMainInvokeEvent,
@@ -389,7 +414,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.HOME_RECENT_EVENTS,
     async (
       _event: IpcMainInvokeEvent,
@@ -416,7 +441,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.HOME_AGENTS_SAMPLE,
     async (
       _event: IpcMainInvokeEvent,
@@ -433,7 +458,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.HOME_PERMISSION_SUMMARY,
     async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<PermissionSummary>> => {
       try {
@@ -452,7 +477,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
   // too-long name, etc.) happens in the SDK client; the IPC layer
   // surfaces those as `SPACES_INVALID_INPUT` via the standard envelope.
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.CREATE_SPACE,
     async (
       _event: IpcMainInvokeEvent,
@@ -468,7 +493,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.RENAME_SPACE,
     async (
       _event: IpcMainInvokeEvent,
@@ -485,7 +510,24 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
+    SPACES_IPC.UPDATE_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; patch?: unknown }
+    ): Promise<SpacesIpcResult<Space>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const patch = coerceUpdateSpaceInput(payload?.patch);
+        const value = await getSpacesApi().updateSpace(id, patch);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
     SPACES_IPC.DELETE_SPACE,
     async (
       _event: IpcMainInvokeEvent,
@@ -502,7 +544,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.UNDELETE_SPACE,
     async (
       _event: IpcMainInvokeEvent,
@@ -520,7 +562,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
 
   // ─── Phase 4: shared spaces (playbooks + tickets) ──────────────────────
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.SET_SPACE_KIND,
     async (
       _event: IpcMainInvokeEvent,
@@ -540,7 +582,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.PLAYBOOKS_CURRENT,
     async (
       _event: IpcMainInvokeEvent,
@@ -556,7 +598,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.PLAYBOOKS_SET,
     async (
       _event: IpcMainInvokeEvent,
@@ -574,7 +616,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.TICKETS_LIST,
     async (
       _event: IpcMainInvokeEvent,
@@ -600,7 +642,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.TICKETS_CREATE,
     async (
       _event: IpcMainInvokeEvent,
@@ -620,7 +662,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.TICKETS_UPDATE,
     async (
       _event: IpcMainInvokeEvent,
@@ -642,7 +684,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
 
   // ─── Identity + sharing (Phase 4 v2) ──────────────────────────────────
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.IDENTITY_GET_OR_CREATE_PERSON,
     async (
       _event: IpcMainInvokeEvent,
@@ -661,7 +703,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.MEMBERS_LIST,
     async (
       _event: IpcMainInvokeEvent,
@@ -677,7 +719,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.MEMBERS_ADD,
     async (
       _event: IpcMainInvokeEvent,
@@ -695,7 +737,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.MEMBERS_REMOVE,
     async (
       _event: IpcMainInvokeEvent,
@@ -715,7 +757,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
 
   // ─── Asset CRUD (Sprint 1) ─────────────────────────────────────────────
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_CREATE,
     async (
       _event: IpcMainInvokeEvent,
@@ -734,7 +776,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_DELETE,
     async (
       _event: IpcMainInvokeEvent,
@@ -754,7 +796,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_RESTORE,
     async (
       _event: IpcMainInvokeEvent,
@@ -772,7 +814,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
 
   // ─── Sprint 3: move / copy / search ──────────────────────────────────
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_MOVE_TO_SPACE,
     async (
       _event: IpcMainInvokeEvent,
@@ -796,7 +838,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_ADD_TO_SPACE,
     async (
       _event: IpcMainInvokeEvent,
@@ -814,7 +856,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_REMOVE_FROM_SPACE,
     async (
       _event: IpcMainInvokeEvent,
@@ -832,7 +874,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_SEARCH,
     async (
       _event: IpcMainInvokeEvent,
@@ -853,7 +895,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
 
   // ─── Metadata mutations ───────────────────────────────────────────────
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_SET_METADATA,
     async (
       _event: IpcMainInvokeEvent,
@@ -873,7 +915,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_PATCH_METADATA,
     async (
       _event: IpcMainInvokeEvent,
@@ -893,7 +935,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     }
   );
 
-  ipcMain.handle(
+  handleSpacesIpc(
     SPACES_IPC.ITEMS_REMOVE_METADATA_KEY,
     async (
       _event: IpcMainInvokeEvent,
@@ -938,6 +980,22 @@ function coerceDeleteSpaceOpts(raw: unknown): DeleteSpaceOpts | undefined {
   const opts: DeleteSpaceOpts = {};
   if (typeof r['soft'] === 'boolean') opts.soft = r['soft'] as boolean;
   return opts;
+}
+
+/**
+ * Coerce a renderer-supplied UpdateSpace patch payload. Only string
+ * fields are forwarded; anything else is dropped so the SDK sees a
+ * clean shape. The patch is intentionally tolerant of an empty
+ * description string (that's how you clear it).
+ */
+function coerceUpdateSpaceInput(raw: unknown): UpdateSpaceInput {
+  if (raw === null || typeof raw !== 'object') return {};
+  const r = raw as Record<string, unknown>;
+  const patch: UpdateSpaceInput = {};
+  if (typeof r['description'] === 'string') patch.description = r['description'] as string;
+  if (typeof r['color'] === 'string') patch.color = r['color'] as string;
+  if (typeof r['iconKey'] === 'string') patch.iconKey = r['iconKey'] as string;
+  return patch;
 }
 
 /** Remove every Spaces IPC handler. Idempotent. */

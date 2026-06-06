@@ -257,6 +257,123 @@ describe('IdwApi -> menu-builder cross-wiring', () => {
   });
 });
 
+/**
+ * Full chat-platform lifecycle: simulates what happens when a user
+ * clicks a third-party tile in Settings → IDWs through to the
+ * top-of-window menu entry firing its click handler.
+ *
+ * Chain:
+ *   1. Settings tile click   → api.add({kind:'external-bot', url, botType})
+ *   2. Store broadcasts change → menu-builder repaints
+ *   3. Menu entry exists under top:idw with the preset URL
+ *   4. Menu entry click → onOpenEntry called with the full IdwEntry
+ *      (the renderer's browser-window launcher reads .url from there)
+ *   5. Remove path: api.remove(id) → menu collapses
+ *
+ * Mirrors `Settings → IDWs third-party tile row` unit tests but
+ * crosses module boundaries (store + menu-builder + onChange wiring)
+ * to confirm the data actually flows end-to-end.
+ */
+describe('chat-platform tile → install → menu → launch → remove', () => {
+  it('clicking ChatGPT tile makes the entry launchable from the IDW menu', async () => {
+    const api: IdwApi = {
+      list: () => store.list(),
+      listByKind: (kind) => store.listByKind(kind),
+      get: (id) => store.get(id),
+      add: async (input) => store.add(input),
+      update: (id, patch) => store.update(id, patch),
+      remove: (id) => store.remove(id),
+      onChange: (handler) => store.onChange(handler),
+      onEvent: (handler) => store.onEvent(handler),
+    };
+
+    const opens: IdwEntry[] = [];
+    initMenuBuilder({
+      api,
+      onOpenEntry: (entry) => opens.push(entry),
+      onOpenSettings: () => undefined,
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Step 1+2: simulate the tile-click handler (which lives in
+    // Settings/idws.ts → wireThirdPartyTiles → idw().add(...)).
+    const { entry } = await api.add({
+      kind: 'external-bot',
+      label: 'ChatGPT',
+      url: 'https://chat.openai.com',
+      botType: 'chatgpt',
+    });
+
+    // Step 3: the menu now has a stable id for this entry.
+    const menuId = `idw:external-bot:${entry.id}`;
+    const menuEntry = registry.get(menuId);
+    expect(menuEntry).toBeDefined();
+    expect(menuEntry?.parentId).toBe(TOP_LEVEL_ID);
+    expect(menuEntry?.label).toBe('ChatGPT');
+    expect(menuEntry?.click).toBeTypeOf('function');
+
+    // Step 4: clicking the menu entry routes the FULL IdwEntry (with
+    // url) to the launcher. The renderer's browser-window opens
+    // `entry.url`; we just verify the right entry lands in the handler.
+    menuEntry?.click?.();
+    expect(opens).toHaveLength(1);
+    expect(opens[0]?.url).toBe('https://chat.openai.com');
+    expect(opens[0]?.botType).toBe('chatgpt');
+
+    // Step 5: removal flows back through the same wiring.
+    await api.remove(entry.id);
+    expect(registry.has(menuId)).toBe(false);
+  });
+
+  it('all 5 preset URLs land correctly when each tile is installed', async () => {
+    const api: IdwApi = {
+      list: () => store.list(),
+      listByKind: (kind) => store.listByKind(kind),
+      get: (id) => store.get(id),
+      add: async (input) => store.add(input),
+      update: (id, patch) => store.update(id, patch),
+      remove: (id) => store.remove(id),
+      onChange: (handler) => store.onChange(handler),
+      onEvent: (handler) => store.onEvent(handler),
+    };
+
+    const opens: IdwEntry[] = [];
+    initMenuBuilder({
+      api,
+      onOpenEntry: (e) => opens.push(e),
+      onOpenSettings: () => undefined,
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const presets: Array<{
+      botType: 'chatgpt' | 'claude' | 'gemini' | 'perplexity' | 'grok';
+      label: string;
+      url: string;
+    }> = [
+      { botType: 'chatgpt', label: 'ChatGPT', url: 'https://chat.openai.com' },
+      { botType: 'claude', label: 'Claude', url: 'https://claude.ai/new' },
+      { botType: 'gemini', label: 'Gemini', url: 'https://gemini.google.com' },
+      { botType: 'perplexity', label: 'Perplexity', url: 'https://www.perplexity.ai' },
+      { botType: 'grok', label: 'Grok', url: 'https://grok.com' },
+    ];
+
+    for (const p of presets) {
+      const { entry } = await api.add({
+        kind: 'external-bot',
+        label: p.label,
+        url: p.url,
+        botType: p.botType,
+      });
+      const menuEntry = registry.get(`idw:external-bot:${entry.id}`);
+      menuEntry?.click?.();
+    }
+
+    expect(opens).toHaveLength(5);
+    expect(opens.map((e) => e.url)).toEqual(presets.map((p) => p.url));
+    expect(opens.map((e) => e.botType)).toEqual(presets.map((p) => p.botType));
+  });
+});
+
 describe('cross-window onChange (simulated)', () => {
   it('two listeners receive every mutation', async () => {
     const a: number[] = [];

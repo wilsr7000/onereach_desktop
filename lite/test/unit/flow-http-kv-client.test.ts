@@ -243,7 +243,7 @@ describe('FlowHttpKVClient token acquisition', () => {
 // ─── KV operation wire format ──────────────────────────────────────────────
 
 describe('FlowHttpKVClient.set', () => {
-  it('PUTs to /keyvalue?id=...&key=... with body { id, key, value }', async () => {
+  it('PUTs to /keyvalue?id=...&key=... with the value JSON-encoded as a string', async () => {
     const { client, stub } = makeClient();
     stub.responses = [
       { body: { token: 'abc' } },
@@ -255,11 +255,31 @@ describe('FlowHttpKVClient.set', () => {
     expect(req?.url).toBe(
       `https://em.edison.api.onereach.ai/http/${ACCOUNT_ID}/keyvalue?id=lite-tool-entries&key=default`
     );
+    // The value is sent under `itemValue` (the field the flow actually
+    // stores) as a JSON STRING, plus `n` for older flow versions. Sending
+    // it under `value` was ignored by the flow -> round-tripped to the
+    // literal "undefined" and wiped persisted state.
+    const enc = JSON.stringify({ foo: 'bar' });
     expect(JSON.parse(req?.body ?? '{}')).toEqual({
       id: 'lite-tool-entries',
       key: 'default',
-      value: { foo: 'bar' },
+      itemValue: enc,
+      n: enc,
     });
+  });
+
+  it('round-trips an object: set() stringifies, get() unwraps it back', async () => {
+    const { client, stub } = makeClient();
+    // Simulate the flow echoing back the stringified value under { value }.
+    const stored = JSON.stringify({ schemaVersion: 1, entries: [{ id: 'a' }] });
+    stub.responses = [
+      { body: { token: 'abc' } }, // refresh_token (minted once, then cached)
+      { status: 200, body: { ok: true } }, // PUT
+      { status: 200, body: { value: stored } }, // GET returns the string
+    ];
+    await client.set('lite-idw-entries', 'default', { schemaVersion: 1, entries: [{ id: 'a' }] });
+    const got = await client.get('lite-idw-entries', 'default');
+    expect(got).toEqual({ schemaVersion: 1, entries: [{ id: 'a' }] });
   });
 
   it('URL-encodes collection + key', async () => {
@@ -319,6 +339,38 @@ describe('FlowHttpKVClient.get', () => {
       { status: 200, body: { value: '{"nested":true}' } },
     ];
     expect(await client.get('c', 'k')).toEqual({ nested: true });
+  });
+
+  it('unwraps a TOP-LEVEL double-encoded JSON string into the object', async () => {
+    // Regression: the flow (esp. after the sign-in KV migration) can
+    // return the whole body as a JSON-stringified blob, so JSON.parse
+    // yields a *string*, not an object. Previously this returned the
+    // raw string, which made object-shaped stores (tabs, IDW menu,
+    // tools) treat their blob as corrupt and reset to empty on boot —
+    // i.e. agents/menu/tabs vanished across restarts. The client must
+    // unwrap one more level. `body` is a JS string here, so the stub's
+    // JSON.stringify produces a double-encoded response body.
+    const { client, stub } = makeClient();
+    stub.responses = [
+      { body: { token: 'abc' } },
+      { status: 200, body: '{"schemaVersion":1,"tabs":[{"id":"t1"}],"activeId":"t1"}' },
+    ];
+    expect(await client.get('lite-main-window-tabs', 'default')).toEqual({
+      schemaVersion: 1,
+      tabs: [{ id: 't1' }],
+      activeId: 't1',
+    });
+  });
+
+  it('leaves a legitimate plain-string value as a string (no over-coercion)', async () => {
+    // A stored value that is genuinely a string like "hello" must NOT
+    // be coerced — only object/array re-parses are unwrapped.
+    const { client, stub } = makeClient();
+    stub.responses = [
+      { body: { token: 'abc' } },
+      { status: 200, body: 'hello' },
+    ];
+    expect(await client.get('c', 'k')).toBe('hello');
   });
 });
 

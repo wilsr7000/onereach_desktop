@@ -81,7 +81,10 @@ interface RendererTestApi {
     mode?: 'rendered' | 'source',
     edit?: DetailEditCallbacks
   ): HTMLElement;
-  buildDetailMeta(item: RendererItem): HTMLElement;
+  buildDetailMeta(
+    item: RendererItem,
+    opts?: { suppressProvenance?: boolean }
+  ): HTMLElement;
   buildDetailTags(tags: ReadonlyArray<string>, edit?: DetailEditCallbacks): HTMLElement;
   buildDetailContent(source: string, mode: 'rendered' | 'source'): HTMLElement;
   buildEditableTitle(initial: string, onTitleSave: (next: string) => Promise<void>): HTMLElement;
@@ -285,6 +288,18 @@ describe('buildDetailMeta', () => {
       'Last edited by'
     );
   });
+
+  it('omits the provenance line entirely when suppressProvenance is set', () => {
+    // buildDetailPane passes this when the attribution chip already
+    // carries the producer name, so it isn't printed twice.
+    const el = renderer.buildDetailMeta(
+      baseItem({ producedBy: { kind: 'Agent', name: 'Audit Agent', id: 'ag-1' } }),
+      { suppressProvenance: true }
+    );
+    expect(el.querySelector('.spaces-detail-provenance')).toBeNull();
+    // The primary "Updated …" facts still render.
+    expect(el.textContent ?? '').toMatch(/Updated/);
+  });
 });
 
 // ─── buildDetailTags ────────────────────────────────────────────────────
@@ -423,9 +438,17 @@ describe('buildDetailPane', () => {
     expect(closed).toBe(true);
   });
 
-  it('falls back to "(untitled)" when title is empty', () => {
+  it('generates a "<Kind> · <short-id>" title when the raw title is empty', () => {
+    // Updated alongside the calm-spaces pass: an empty title no longer
+    // renders the placeholder "(untitled)" -- buildDetailPane now
+    // derives the display from generateItemTitle(item) so the rail
+    // never shows an opaque hex id in place of a label.
     const el = renderer.buildDetailPane(baseItem({ title: '' }), () => undefined);
-    expect(el.querySelector('.spaces-detail-title')?.textContent).toBe('(untitled)');
+    const rendered = el.querySelector('.spaces-detail-title')?.textContent ?? '';
+    expect(rendered.length).toBeGreaterThan(0);
+    expect(rendered).not.toBe('(untitled)');
+    // baseItem's default kind ('text') resolves to "Text · <short-id>".
+    expect(rendered.startsWith('Text · ')).toBe(true);
   });
 });
 
@@ -1170,6 +1193,53 @@ describe('buildDetailPane (Phase C)', () => {
     );
     expect(slot.querySelectorAll('li.spaces-detail-activity-row')).toHaveLength(1);
   });
+
+  it('does not print the producer name twice (chip suppresses meta provenance)', () => {
+    // The attribution chip carries "Created by Audit Agent"; the meta
+    // strip must NOT also render "Produced by Audit Agent (Agent)".
+    const el = renderer.buildDetailPane(
+      baseItem({ producedBy: { kind: 'Agent', name: 'Audit Agent', id: 'ag-1' } }),
+      () => undefined
+    );
+    expect(el.querySelector('.spaces-detail-attribution-chip')).not.toBeNull();
+    // The redundant provenance sub-line is suppressed inside the pane.
+    expect(el.querySelector('.spaces-detail-meta .spaces-detail-provenance')).toBeNull();
+    // "Audit Agent" appears exactly once across the identity surfaces.
+    const occurrences = (el.textContent ?? '').match(/Audit Agent/g) ?? [];
+    expect(occurrences.length).toBe(1);
+  });
+
+  it('leads with the asset content, not metadata (content before tags/metadata)', () => {
+    // A preview should put the asset itself near the top. Assert the
+    // content body precedes the tag row and the metadata section in
+    // document order.
+    const el = renderer.buildDetailPane(
+      baseItem({
+        kind: 'text',
+        content: 'The actual document body lives here.',
+        tags: ['spec', 'draft'],
+      }),
+      () => undefined
+    );
+    const content = el.querySelector('.spaces-detail-content');
+    const tags = el.querySelector('.spaces-detail-tags');
+    const metadata = el.querySelector('.spaces-detail-metadata');
+    expect(content).not.toBeNull();
+    expect(metadata).not.toBeNull();
+    // compareDocumentPosition: FOLLOWING (4) means the arg comes after.
+    if (content !== null && metadata !== null) {
+      expect(
+        content.compareDocumentPosition(metadata) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    }
+    if (content !== null && tags !== null) {
+      expect(
+        content.compareDocumentPosition(tags) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    }
+  });
 });
 
 // ─── Phase 4: shared-space primitives (ticket + playbook) ───────────────
@@ -1421,14 +1491,30 @@ describe('buildBinaryPreview — Sprint 2 dispatch', () => {
     expect(video?.controls).toBe(true);
   });
 
-  it('renders an inline <embed> for application/pdf', () => {
+  it('renders an inline <embed> for a base64 data-URL PDF', () => {
     const el = previewApi().buildBinaryPreview(
       baseItem({ kind: 'other', mimeType: 'application/pdf' }),
-      'blob:test'
+      'data:application/pdf;base64,JVBERi0xLjQK'
     );
     const embed = el.querySelector<HTMLEmbedElement>('embed.spaces-detail-pdf');
     expect(embed).not.toBeNull();
     expect(embed?.type).toBe('application/pdf');
+  });
+
+  it('renders a dark "Open PDF" card (not a blank white embed) for a remote PDF', () => {
+    // Remote signed URLs frequently render blank in the embedded viewer
+    // (Content-Disposition: attachment), which showed as a giant white
+    // slab. For remote PDFs we render an intentional dark card instead.
+    const el = previewApi().buildBinaryPreview(
+      baseItem({ kind: 'other', mimeType: 'application/pdf', title: 'Design guide', size: 1_000_000 }),
+      'https://signed.example.com/design-guide.pdf'
+    );
+    expect(el.querySelector('embed.spaces-detail-pdf')).toBeNull();
+    const card = el.querySelector('.spaces-detail-pdf-card');
+    expect(card).not.toBeNull();
+    const open = card?.querySelector<HTMLAnchorElement>('.spaces-detail-pdf-card-open');
+    expect(open?.getAttribute('href')).toBe('https://signed.example.com/design-guide.pdf');
+    expect(card?.querySelector('.spaces-detail-pdf-card-name')?.textContent).toBe('Design guide');
   });
 
   it('dispatches by MIME when kind is other but MIME is image/audio/video', () => {
@@ -1618,6 +1704,110 @@ describe('buildDetailPane — Sprint 2 content dispatch', () => {
     expect(el.querySelector('.spaces-detail-content-block')).not.toBeNull();
     expect(el.querySelector('.spaces-detail-code-preview')).toBeNull();
     expect(el.querySelector('.spaces-detail-csv-table')).toBeNull();
+  });
+});
+
+// ─── Bug fix: data-URL content routes to binary preview ─────────────────
+
+/**
+ * When the in-app uploader stashes a file as a base64 data URL in
+ * `Item.content` (the current path until Files-API upload lands), the
+ * detail pane must route it through `buildBinaryPreview` rather than
+ * the Markdown renderer. Specifically: a PDF data URL should produce
+ * an <embed>, not a wall of base64 text.
+ */
+interface DataUrlPreviewApi {
+  isBase64DataUrl(s: string): boolean;
+}
+
+function dataUrlApi(): DataUrlPreviewApi {
+  return (window as unknown as { __spacesRendererForTesting: DataUrlPreviewApi })
+    .__spacesRendererForTesting;
+}
+
+describe('isBase64DataUrl', () => {
+  it('recognizes a typical base64 PDF data URL', () => {
+    expect(
+      dataUrlApi().isBase64DataUrl('data:application/pdf;base64,JVBERi0xLjQK')
+    ).toBe(true);
+  });
+
+  it('recognizes image / audio / video data URLs', () => {
+    expect(dataUrlApi().isBase64DataUrl('data:image/png;base64,iVBORw0K')).toBe(true);
+    expect(dataUrlApi().isBase64DataUrl('data:audio/mpeg;base64,ID3')).toBe(true);
+    expect(dataUrlApi().isBase64DataUrl('data:video/mp4;base64,AAAAGGZ')).toBe(true);
+  });
+
+  it('rejects plain markdown that happens to start with the word "data"', () => {
+    expect(
+      dataUrlApi().isBase64DataUrl('data engineering notes — see [link](https://x)')
+    ).toBe(false);
+  });
+
+  it('rejects non-base64 data URLs (charset, percent-encoded, etc.)', () => {
+    expect(dataUrlApi().isBase64DataUrl('data:text/plain;charset=utf-8,Hello')).toBe(false);
+    expect(dataUrlApi().isBase64DataUrl('')).toBe(false);
+  });
+});
+
+describe('buildDetailPane — data-URL content dispatch (PDF preview fix)', () => {
+  it('a PDF stashed as a data URL renders an <embed>, NOT the Markdown block', () => {
+    const dataUrl = 'data:application/pdf;base64,JVBERi0xLjQKJYCBgoMK';
+    const el = renderer.buildDetailPane(
+      baseItem({
+        title: 'spec.pdf',
+        kind: 'other',
+        mimeType: 'application/pdf',
+        content: dataUrl,
+      }),
+      () => undefined
+    );
+    expect(el.querySelector('embed.spaces-detail-pdf')).not.toBeNull();
+    expect(el.querySelector('embed.spaces-detail-pdf')?.getAttribute('src')).toBe(dataUrl);
+    // Critically: NO Markdown renderer for the base64 blob.
+    expect(el.querySelector('.spaces-detail-content-block')).toBeNull();
+  });
+
+  it('an image stashed as a data URL renders an <img>', () => {
+    const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg';
+    const el = renderer.buildDetailPane(
+      baseItem({
+        title: 'pic.png',
+        kind: 'image',
+        mimeType: 'image/png',
+        content: dataUrl,
+      }),
+      () => undefined
+    );
+    expect(el.querySelector('img.spaces-detail-image')).not.toBeNull();
+    expect(el.querySelector('img.spaces-detail-image')?.getAttribute('src')).toBe(dataUrl);
+    expect(el.querySelector('.spaces-detail-content-block')).toBeNull();
+  });
+
+  it('an audio data URL renders an <audio controls> player', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({
+        title: 'voice.mp3',
+        kind: 'audio',
+        mimeType: 'audio/mpeg',
+        content: 'data:audio/mpeg;base64,SUQzAwAAAAAA',
+      }),
+      () => undefined
+    );
+    expect(el.querySelector('audio.spaces-detail-audio')).not.toBeNull();
+  });
+
+  it('plain text content still goes through the Markdown path (regression guard)', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({
+        title: 'notes.md',
+        kind: 'text',
+        content: '# Hello\n\nThis is normal markdown.',
+      }),
+      () => undefined
+    );
+    expect(el.querySelector('.spaces-detail-content-block')).not.toBeNull();
+    expect(el.querySelector('embed')).toBeNull();
   });
 });
 

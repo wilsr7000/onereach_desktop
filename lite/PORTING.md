@@ -1195,7 +1195,7 @@ Pending ports, ordered roughly by likely value but not committed:
 - auth-menu-entry -- `app:sign-in` menu item under top:app with a label flip ("Sign in to GSX..." vs "Sign out of GSX")
 - auth-autofill-email-password -- credential-manager port + email/password form fill into the OneReach auth window. TOTP-only autofill is active as `chunk: auth-totp-autofill-v1`.
 - auth-multi-account -- multi-account picker UI in Lite (one button -> picker -> per-account sign-in)
-- auth-multi-env -- enable staging/dev/production environments behind the `Environment` type union
+- auth-multi-env-production -- enable the `production` environment (bare `onereach.ai` / `my.onereach.ai` domains). Requires extending `extractEnvironment` + cookie-suffix matcher to recognize the bare-domain pattern. `edison`, `staging`, and `dev` ship today via the multi-env-mvp chunk (ADR-042 amendment, IDW tab cookies)
 - totp-authenticator-e2e -- Playwright spec that opens Settings, asserts the Two-Factor section renders a code, advances time, asserts countdown
 - settings-e2e -- Playwright spec that opens Settings via the menu, asserts the Two-Factor section renders, asserts single-instance focus on second open
 

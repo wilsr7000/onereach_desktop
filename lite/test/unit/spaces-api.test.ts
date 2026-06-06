@@ -35,6 +35,7 @@ import {
   SPACES_ERROR_CODES,
   type SpacesApi,
 } from '../../spaces/api.js';
+import { _isDirectDownloadUrlForTesting } from '../../spaces/main.js';
 import { UNCATEGORIZED_SPACE_ID } from '../../spaces/scope.js';
 
 // 1. Conformance contract.
@@ -61,6 +62,7 @@ runApiConformanceContract<SpacesApi>({
     // Mutations (Phase 3a)
     'createSpace',
     'renameSpace',
+    'updateSpace',
     'deleteSpace',
     'undeleteSpace',
   ],
@@ -124,6 +126,16 @@ describe('SpacesApi (default singleton)', () => {
     });
   });
 
+  it('updateSpace() rejects with SPACES_NOT_INITIALIZED before init', async () => {
+    _resetSpacesApiForTesting();
+    const api = getSpacesApi();
+    await expect(
+      api.updateSpace('space-x', { description: 'goal' })
+    ).rejects.toMatchObject({
+      code: SPACES_ERROR_CODES.NOT_INITIALIZED,
+    });
+  });
+
   it('deleteSpace() rejects with SPACES_NOT_INITIALIZED before init', async () => {
     _resetSpacesApiForTesting();
     const api = getSpacesApi();
@@ -148,6 +160,15 @@ describe('SpacesApi.items sub-surface', () => {
     expect(typeof api.items).toBe('object');
     expect(typeof api.items.list).toBe('function');
     expect(typeof api.items.get).toBe('function');
+  });
+
+  it('recognizes dereferenceable http URLs before Files signing', () => {
+    expect(
+      _isDirectDownloadUrlForTesting('https://picsum.photos/seed/uxmag-feb-cover/1200/630')
+    ).toBe(true);
+    expect(_isDirectDownloadUrlForTesting('http://example.test/file.png')).toBe(true);
+    expect(_isDirectDownloadUrlForTesting('images/file.png')).toBe(false);
+    expect(_isDirectDownloadUrlForTesting('s3://bucket/file.png')).toBe(false);
   });
 });
 

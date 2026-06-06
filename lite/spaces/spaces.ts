@@ -217,6 +217,14 @@ interface SpacesRendererState {
   itemsSearchTimer: number | null;
   /** Sprint 3 — last fetched search results (when query is non-empty). */
   itemsSearchResults: RendererItemSummary[] | null;
+  /**
+   * Bulk-select state. Holds the ids of items the user has Cmd/Ctrl-
+   * clicked. Empty Set = no selection active = toolbar hidden. The
+   * timeline / card builders read this to render the row's selected
+   * state; the toolbar reads it to render its "Move N" / "Delete N"
+   * labels.
+   */
+  selectedItemIds: Set<string>;
 }
 
 const state: SpacesRendererState = {
@@ -252,6 +260,7 @@ const state: SpacesRendererState = {
   itemsSearchQuery: '',
   itemsSearchTimer: null,
   itemsSearchResults: null,
+  selectedItemIds: new Set<string>(),
 };
 
 // ─── Home preferences (localStorage) ────────────────────────────────────
@@ -309,11 +318,90 @@ function init(): void {
   wireSidebarSearch();
   wireSidebarSort();
   wireMutationsUI();
+  wireCacheUpdates();
   // Home is the default scope -- show its region, hide the items
   // region. This ensures first paint matches state even if
   // `setActiveScope` never runs.
   applyScopeRegions(state.activeScopeId);
   void initialLoad();
+}
+
+/**
+ * Subscribe to main-process cache-refresh broadcasts and trigger the
+ * matching local re-fetch. Three sources fire these events:
+ *   1. App-launch pre-warm completing.
+ *   2. The background refresh timer (~60s cadence).
+ *   3. Post-mutation invalidation (each write nukes the read cache;
+ *      the next read repopulates and fires this event).
+ *
+ * The renderer's reload functions all call through `window.lite.spaces.*`,
+ * which is now cache-fronted, so the re-fetch is essentially free --
+ * the bridge call returns the already-refreshed cached value.
+ *
+ * Idempotent: calling `init()` twice (e.g. via reinitForTesting) only
+ * subscribes once because the previous subscription is dropped on the
+ * second call via `cacheUpdateUnsubscribe`.
+ */
+let cacheUpdateUnsubscribe: (() => void) | null = null;
+function wireCacheUpdates(): void {
+  if (cacheUpdateUnsubscribe !== null) {
+    try {
+      cacheUpdateUnsubscribe();
+    } catch {
+      /* best-effort */
+    }
+    cacheUpdateUnsubscribe = null;
+  }
+  const sub = window.lite?.spaces?.onCacheUpdate;
+  if (typeof sub !== 'function') return; // bridge not present (test env)
+  cacheUpdateUnsubscribe = sub((update) => {
+    routeCacheUpdate(update.key);
+  });
+}
+
+function routeCacheUpdate(key: string): void {
+  // listSpaces / uncategorizedCount -- sidebar.
+  if (key === 'spaces.listSpaces') {
+    void loadSpaces();
+    return;
+  }
+  if (key === 'spaces.uncategorizedCount') {
+    void loadUncategorizedCount();
+    return;
+  }
+  // Any home-view key -- reload Home if it's the active scope.
+  if (key.startsWith('spaces.home.')) {
+    if (state.activeScopeId === HOME_SCOPE_ID) {
+      void loadHome();
+    }
+    return;
+  }
+  // items.list:<scopeId> -- reload items only if it's the active scope.
+  if (key.startsWith('spaces.items.list:')) {
+    const scopeId = key.slice('spaces.items.list:'.length);
+    const activeMatches =
+      (scopeId === '__uncategorized__' && state.activeScopeId === UNCATEGORIZED_SPACE_ID) ||
+      scopeId === state.activeScopeId;
+    if (activeMatches) void loadItems();
+    return;
+  }
+  // items.get:<id> -- reload detail rail only if the item is open.
+  if (key.startsWith('spaces.items.get:')) {
+    const itemId = key.slice('spaces.items.get:'.length);
+    if (itemId === state.activeItemId) void loadItemDetail(itemId);
+    return;
+  }
+  // tickets / playbooks / members per-space -- only refresh if it's the
+  // active scope. The dashboard renderer keys off state.activeScopeId
+  // for its own data so a generic loadItems() is enough.
+  if (
+    key.startsWith('spaces.tickets.list:') ||
+    key.startsWith('spaces.playbooks.current:') ||
+    key.startsWith('spaces.members.list:')
+  ) {
+    const scopeId = key.split(':')[1] ?? '';
+    if (scopeId === state.activeScopeId) void loadItems();
+  }
 }
 
 async function initialLoad(): Promise<void> {
@@ -652,37 +740,89 @@ async function resolveAndInjectFileUrl(
   itemId: string,
   item: RendererItem
 ): Promise<void> {
-  const bridge = window.lite?.spaces;
-  if (bridge === undefined) return;
   if (typeof item.fileKey !== 'string' || item.fileKey.length === 0) return;
+
+  // Fast path: when the producer wrote an already-dereferenceable
+  // HTTP(S) URL into `:Asset.url`, render it directly. The Files
+  // module's signer is for storage keys (`s3://`, `gs://`, plain
+  // bucket paths) -- it has nothing to add for full URLs. Skipping
+  // the bridge call means image / video / audio / PDF previews land
+  // synchronously without a round-trip.
+  if (/^https?:\/\//i.test(item.fileKey)) {
+    injectBinaryPreview(item, item.fileKey);
+    return;
+  }
+
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    swapPreviewToUnavailable(item, 'Bridge unavailable. Reload the window.');
+    return;
+  }
   try {
     const envelope = await bridge.items.resolveFileUrl(item.fileKey);
     // Bail if the user switched items mid-flight.
     if (state.activeItemId !== itemId) return;
-    if (envelope.ok === false) return;
+    if (envelope.ok === false) {
+      swapPreviewToUnavailable(item, envelope.error.message);
+      return;
+    }
     const url = envelope.value;
-    if (typeof url !== 'string' || url.length === 0) return;
+    if (typeof url !== 'string' || url.length === 0) {
+      // Resolver returned null -- the fileKey doesn't map to a
+      // signed-download URL (e.g. the producer wrote a placeholder
+      // `s3://...` path that the Files module can't sign). Tell the
+      // user honestly rather than rendering an invisible empty space.
+      swapPreviewToUnavailable(item, null);
+      return;
+    }
     injectBinaryPreview(item, url);
-  } catch {
-    // Soft failure: no preview, no banner. The item is still readable.
+  } catch (err) {
+    // Soft failure: keep the rail readable, swap the placeholder to
+    // the unavailable state so the user knows the attempt happened.
+    swapPreviewToUnavailable(item, (err as Error).message);
   }
 }
 
 /**
  * Render an image preview (`kind=image`) or a binary download link
  * (any other kind with a fileKey) into the active detail pane. Called
- * after the URL resolves; idempotent if the user re-opens the same
- * item, since each render rebuilds the pane.
+ * after the URL resolves; replaces the upfront placeholder slot so
+ * the preview lands in the same position regardless of when it
+ * arrives.
  */
 function injectBinaryPreview(item: RendererItem, url: string): void {
   const pane = document.querySelector<HTMLElement>(
     '#spaces-detail .spaces-detail-pane'
   );
   if (pane === null) return;
-  // Drop any existing preview block so re-resolutions don't stack.
+  const next = buildBinaryPreview(item, url);
+  // Replace the placeholder (or any prior preview) in place.
   const existing = pane.querySelector('.spaces-detail-preview');
-  if (existing !== null) existing.remove();
-  pane.appendChild(buildBinaryPreview(item, url));
+  if (existing !== null) {
+    existing.replaceWith(next);
+  } else {
+    pane.appendChild(next);
+  }
+}
+
+/**
+ * Swap the upfront preview placeholder to an "unavailable" state.
+ * Renders a small block explaining that the file couldn't be resolved
+ * and showing the raw `fileKey` so a data producer can see exactly
+ * which property would need to be fixed.
+ */
+function swapPreviewToUnavailable(item: RendererItem, reason: string | null): void {
+  const pane = document.querySelector<HTMLElement>(
+    '#spaces-detail .spaces-detail-pane'
+  );
+  if (pane === null) return;
+  const existing = pane.querySelector('.spaces-detail-preview');
+  const next = buildPreviewUnavailable(item, reason);
+  if (existing !== null) {
+    existing.replaceWith(next);
+  } else {
+    pane.appendChild(next);
+  }
 }
 
 /**
@@ -692,6 +832,23 @@ function injectBinaryPreview(item: RendererItem, url: string): void {
  *
  * Sprint 2: extended from image-only to a kind/MIME-aware dispatch.
  */
+/**
+ * Detect a base64 data URL (e.g. `data:application/pdf;base64,JVBER…`).
+ * Used by `buildDetailPane` to route in-app uploads (which stash the
+ * file as a data URL in `Item.content` until a real Files-API upload
+ * lands) through the binary-preview path instead of the Markdown
+ * renderer. Strict — only recognizes the `;base64,` form to avoid
+ * collisions with arbitrary `data:` strings inside markdown.
+ */
+export function isBase64DataUrl(s: string): boolean {
+  if (typeof s !== 'string' || s.length < 16) return false;
+  if (!s.startsWith('data:')) return false;
+  // The MIME and ;base64, marker must appear within the first ~120
+  // chars; longer prefixes are almost certainly not actual data URLs.
+  const head = s.slice(0, 120);
+  return head.includes(';base64,');
+}
+
 export function buildBinaryPreview(
   item: RendererItem,
   url: string
@@ -737,14 +894,25 @@ export function buildBinaryPreview(
     return wrap;
   }
 
-  // ── PDF inline embed ────────────────────────────────────────────────
+  // ── PDF ──────────────────────────────────────────────────────────────
   if (mime === 'application/pdf') {
-    const embed = document.createElement('embed');
-    embed.src = url;
-    embed.type = 'application/pdf';
-    embed.className = 'spaces-detail-pdf';
-    wrap.appendChild(embed);
-    appendDownloadLink(wrap, url, 'Download PDF');
+    // Base64 data-URL PDFs render reliably in the embedded viewer, so
+    // keep the inline <embed> for those. But a *remote* signed URL —
+    // the common case for uploaded files — is frequently served with
+    // `Content-Disposition: attachment`, which makes the embedded
+    // viewer render a blank white page. A 600px white slab in a dark
+    // pane reads as "broken / blank screen", so for remote PDFs show a
+    // clean dark document card with an explicit open action instead.
+    if (url.startsWith('data:')) {
+      const embed = document.createElement('embed');
+      embed.src = url;
+      embed.type = 'application/pdf';
+      embed.className = 'spaces-detail-pdf';
+      wrap.appendChild(embed);
+      appendDownloadLink(wrap, url, 'Download PDF');
+      return wrap;
+    }
+    wrap.appendChild(buildPdfCard(item, url));
     return wrap;
   }
 
@@ -765,6 +933,137 @@ function appendDownloadLink(parent: HTMLElement, url: string, text: string): voi
   link.className = 'spaces-detail-download';
   link.textContent = text;
   parent.appendChild(link);
+}
+
+/**
+ * Clean dark "PDF document" card for remote PDFs that the embedded
+ * viewer can't reliably display inline. A red PDF chip + filename +
+ * size + an "Open PDF" button — intentional and never a blank white
+ * slab. Opens the signed URL externally (where the OS PDF viewer
+ * renders it correctly).
+ */
+function buildPdfCard(
+  item: { title: string; size?: number },
+  url: string
+): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'spaces-detail-pdf-card';
+
+  const icon = document.createElement('div');
+  icon.className = 'spaces-detail-pdf-card-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = 'PDF';
+  card.appendChild(icon);
+
+  const meta = document.createElement('div');
+  meta.className = 'spaces-detail-pdf-card-meta';
+  const name = document.createElement('div');
+  name.className = 'spaces-detail-pdf-card-name';
+  name.textContent = item.title.length > 0 ? item.title : 'PDF document';
+  meta.appendChild(name);
+  const sub = document.createElement('div');
+  sub.className = 'spaces-detail-pdf-card-sub';
+  sub.textContent =
+    typeof item.size === 'number' && item.size > 0
+      ? `PDF · ${formatBytes(item.size)}`
+      : 'PDF document';
+  meta.appendChild(sub);
+  card.appendChild(meta);
+
+  const open = document.createElement('a');
+  open.className = 'spaces-detail-pdf-card-open';
+  open.href = url;
+  open.target = '_blank';
+  open.rel = 'noopener noreferrer';
+  open.textContent = 'Open PDF';
+  card.appendChild(open);
+
+  return card;
+}
+
+/**
+ * Upfront placeholder rendered in the detail rail while the file URL
+ * resolves. Replaced by `buildBinaryPreview` on success or
+ * `buildPreviewUnavailable` on failure. Shares the `.spaces-detail-
+ * preview` class so the swap targets the same slot.
+ *
+ * Pure; exported for tests.
+ */
+export function buildPreviewPlaceholder(item: {
+  kind?: string;
+  mimeType?: string;
+}): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-preview spaces-detail-preview-loading';
+  wrap.setAttribute('data-state', 'loading');
+  const label = document.createElement('div');
+  label.className = 'spaces-detail-preview-loading-label';
+  const kind = typeof item.kind === 'string' ? item.kind : '';
+  const mime = typeof item.mimeType === 'string' ? item.mimeType : '';
+  // Friendly kind-aware copy. Avoids the dread "Loading…" by naming
+  // what's being fetched.
+  let text = 'Loading preview…';
+  if (kind === 'image' || mime.startsWith('image/')) text = 'Loading image…';
+  else if (kind === 'video' || mime.startsWith('video/')) text = 'Loading video…';
+  else if (kind === 'audio' || mime.startsWith('audio/')) text = 'Loading audio…';
+  else if (mime === 'application/pdf') text = 'Loading PDF…';
+  else if (kind === 'document') text = 'Loading document…';
+  label.textContent = text;
+  wrap.appendChild(label);
+  return wrap;
+}
+
+/**
+ * Replacement for the placeholder when the file URL doesn't resolve.
+ * Names the kind, surfaces the raw `fileKey` so a data producer can
+ * see exactly which path failed, and (when available) includes the
+ * reason. Stays in the same slot as the placeholder.
+ *
+ * Pure; exported for tests.
+ */
+export function buildPreviewUnavailable(
+  item: { kind?: string; fileKey?: string; mimeType?: string },
+  reason: string | null
+): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-preview spaces-detail-preview-unavailable';
+  wrap.setAttribute('data-state', 'unavailable');
+
+  const headline = document.createElement('p');
+  headline.className = 'spaces-detail-preview-unavailable-headline';
+  const kind = typeof item.kind === 'string' ? item.kind : '';
+  const mime = typeof item.mimeType === 'string' ? item.mimeType : '';
+  if (kind === 'image' || mime.startsWith('image/')) {
+    headline.textContent = 'Image preview unavailable.';
+  } else if (kind === 'video' || mime.startsWith('video/')) {
+    headline.textContent = 'Video preview unavailable.';
+  } else if (kind === 'audio' || mime.startsWith('audio/')) {
+    headline.textContent = 'Audio preview unavailable.';
+  } else if (mime === 'application/pdf') {
+    headline.textContent = 'PDF preview unavailable.';
+  } else {
+    headline.textContent = 'File preview unavailable.';
+  }
+  wrap.appendChild(headline);
+
+  const sub = document.createElement('p');
+  sub.className = 'spaces-detail-preview-unavailable-sub';
+  sub.textContent =
+    reason !== null && reason.length > 0
+      ? `The Files module couldn’t resolve a download URL: ${reason}`
+      : 'The Files module returned no URL — the underlying file may not exist at the recorded path.';
+  wrap.appendChild(sub);
+
+  // Show the raw fileKey verbatim so a producer reading the screen
+  // can see exactly which property points at a missing file.
+  if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
+    const key = document.createElement('code');
+    key.className = 'spaces-detail-preview-unavailable-key';
+    key.textContent = item.fileKey;
+    wrap.appendChild(key);
+  }
+
+  return wrap;
 }
 
 /**
@@ -1265,44 +1564,84 @@ function renderItemList(opts: RenderItemListOpts): void {
   }
 
   // Filter chips: shared with Home so the user's "Agents-only" or
-  // "24h" preference survives a scope switch.
+  // "24h" preference survives a scope switch. Applies to assets in
+  // the grid below — events are NOT rendered in the per-Space view
+  // anymore (they're an activity feed, not an asset surface).
   wrap.appendChild(buildFilterChips());
 
-  // Build the timeline rows from items + (scope-matching) events.
-  // For Uncategorized, the events array is empty by design.
-  const events =
-    state.spaceEventsForScopeId === state.activeScopeId &&
-    state.spaceEvents.value !== null
-      ? state.spaceEvents.value
-      : [];
-  const merged = mergeTimeline(events, state.items);
-  const filtered = filterTimeline(merged, state.homeFilter, Date.now());
+  // Per-Space view used to merge events + items into a chat-style
+  // timeline. The user pushed back: "they look like Slack messages
+  // vs assets." So this view is now an asset-first grid — content-
+  // forward tiles built by `buildItemCard`. Events stay on Home,
+  // which is the dedicated activity surface.
+  const filteredItems = filterItemsByHomeFilter(
+    state.items,
+    state.homeFilter,
+    Date.now()
+  );
 
   if (opts.loading === true && state.items.length === 0) {
     wrap.appendChild(buildTimelineSkeleton(6));
     return;
   }
 
-  if (filtered.length === 0) {
+  if (filteredItems.length === 0) {
     wrap.appendChild(buildEmptyItemsState(state.activeScopeId));
     return;
   }
 
-  const list = document.createElement('div');
-  list.className = 'home-timeline-list';
-  list.setAttribute('aria-label', 'Activity timeline');
-  for (const row of filtered) {
-    list.appendChild(buildTimelineRow(row));
+  // Bulk-select toolbar -- only when at least one item is selected.
+  // Lives above the grid so move/delete actions read top-to-bottom.
+  const bulkBar = buildBulkSelectToolbar();
+  if (bulkBar !== null) wrap.appendChild(bulkBar);
+
+  const grid = document.createElement('div');
+  grid.className = 'spaces-card-grid';
+  grid.id = 'spaces-card-grid';
+  grid.setAttribute('aria-label', 'Assets');
+  for (const item of filteredItems) {
+    grid.appendChild(buildItemCard(item, item.id === state.activeItemId));
   }
-  wrap.appendChild(list);
+  wrap.appendChild(grid);
 
   // End-of-feed cue when nothing is filtered out.
-  if (filtered.length >= 5 && filtered.length === merged.length) {
+  if (filteredItems.length >= 5 && filteredItems.length === state.items.length) {
     const tail = document.createElement('div');
     tail.className = 'home-timeline-tail';
     tail.textContent = 'You are all caught up.';
     wrap.appendChild(tail);
   }
+}
+
+/**
+ * Filter items by the same HomeFilter rules `filterTimeline` applies
+ * to timeline rows, but operating directly on item summaries. The
+ * per-Space view doesn't render events anymore, so the timeline
+ * adapter is no longer worth the round-trip.
+ *
+ * - `all` — pass through.
+ * - `people` / `agents` — branch on `producedBy.kind === 'Agent'`.
+ * - `24h` / `week` — branch on `updatedAt` falling inside the window.
+ */
+export function filterItemsByHomeFilter(
+  items: ReadonlyArray<RendererItemSummary>,
+  filter: HomeFilter,
+  nowMs: number
+): RendererItemSummary[] {
+  if (filter === 'all') return [...items];
+  if (filter === 'people') {
+    return items.filter((i) => i.producedBy?.kind !== 'Agent');
+  }
+  if (filter === 'agents') {
+    return items.filter((i) => i.producedBy?.kind === 'Agent');
+  }
+  const horizonMs =
+    filter === '24h' ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+  const cutoff = nowMs - horizonMs;
+  return items.filter((i) => {
+    const t = Date.parse(i.updatedAt || i.createdAt);
+    return Number.isFinite(t) && t >= cutoff;
+  });
 }
 
 /**
@@ -1757,28 +2096,30 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
   }
   titleWrap.appendChild(title);
 
-  // Optional description (real Spaces only — Uncategorized has a
-  // fixed one-liner below the title).
+  // Description / "objective" row. Real Spaces get a click-to-edit
+  // affordance; Uncategorized + Home get a fixed one-liner.
   if (state.activeScopeId === UNCATEGORIZED_SPACE_ID) {
     const sub = document.createElement('p');
     sub.className = 'spaces-view-header-sub';
     sub.textContent = 'Items that arrive without a Space land here for triage.';
     titleWrap.appendChild(sub);
+  } else if (state.activeScopeId === HOME_SCOPE_ID) {
+    // Home doesn't get a description editor — it isn't a Space.
   } else {
     const space = state.spaces.find((s) => s.id === state.activeScopeId);
-    if (
-      space !== undefined &&
-      typeof space.description === 'string' &&
-      space.description.length > 0
-    ) {
-      const sub = document.createElement('p');
-      sub.className = 'spaces-view-header-sub';
-      sub.textContent = space.description;
-      titleWrap.appendChild(sub);
+    if (space !== undefined) {
+      titleWrap.appendChild(buildSpaceObjectiveRow(space));
     }
   }
 
   header.appendChild(titleWrap);
+
+  // Actions row -- holds search + New + Refresh. Stacked under the
+  // title/description (rather than sharing one flex row with them)
+  // so a long Space description never gets crushed into a single
+  // narrow column by the buttons' natural width.
+  const actions = document.createElement('div');
+  actions.className = 'spaces-view-header-actions';
 
   // Sprint 3: items-scoped search input. Available everywhere except
   // Home (Home has its own discovery affordances).
@@ -1793,7 +2134,7 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
     search.addEventListener('input', () => {
       onItemsSearchChange(search.value);
     });
-    header.appendChild(search);
+    actions.appendChild(search);
   }
 
   // Sprint 1: "+ New" button to open the new-asset modal. Available
@@ -1807,7 +2148,7 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
     newBtn.setAttribute('aria-label', 'Add new asset');
     newBtn.textContent = '+ New';
     newBtn.addEventListener('click', () => openNewAssetDialog(null));
-    header.appendChild(newBtn);
+    actions.appendChild(newBtn);
   }
 
   // Refresh affordance (replaces the prior toolbar refresh button).
@@ -1823,9 +2164,195 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
     if (state.loadingItems) return;
     void loadItems();
   });
-  header.appendChild(refresh);
+  actions.appendChild(refresh);
+
+  header.appendChild(actions);
 
   return header;
+}
+
+/**
+ * Per-Space objective row -- the description-line under the title.
+ *
+ * Behavior:
+ *   - When the space has a description, renders it as flowing prose
+ *     with a click target that swaps in an editor.
+ *   - When the space has no description, renders a muted placeholder
+ *     ("Add an objective for this space…") that doubles as the click
+ *     target.
+ *   - Editor is a `<textarea>` with Cmd/Ctrl+Enter to save, Esc to
+ *     cancel; Save / Cancel buttons mirror the keyboard affordances.
+ *
+ * The "objective" framing matches the user-facing language used in
+ * Spaces — describes the purpose of the space, edited in-place so
+ * adoption follows naturally from a click.
+ */
+function buildSpaceObjectiveRow(space: RendererSpace): HTMLElement {
+  const sub = document.createElement('p');
+  sub.className = 'spaces-view-header-sub';
+  sub.setAttribute('data-space-id', space.id);
+
+  const hasDescription =
+    typeof space.description === 'string' && space.description.length > 0;
+  if (hasDescription) {
+    sub.textContent = space.description ?? '';
+    sub.title = 'Click to edit the objective for this space';
+  } else {
+    sub.textContent = 'Add an objective for this space…';
+    sub.classList.add('spaces-view-header-sub-placeholder');
+    sub.title = 'Click to add an objective for this space';
+  }
+
+  sub.addEventListener('click', () => {
+    enterSpaceObjectiveEdit(sub, space);
+  });
+
+  return sub;
+}
+
+/**
+ * Swap the rendered description for an inline textarea editor. Anchored
+ * on the existing `<p>` so the layout doesn't shift on enter/exit.
+ */
+function enterSpaceObjectiveEdit(
+  anchor: HTMLElement,
+  space: RendererSpace
+): void {
+  if (!anchor.isConnected) return;
+
+  const original = anchor.textContent ?? '';
+  const startingValue =
+    typeof space.description === 'string' ? space.description : '';
+
+  const editor = document.createElement('div');
+  editor.className = 'spaces-view-header-objective-editor';
+  editor.setAttribute('data-space-id', space.id);
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'spaces-view-header-objective-input';
+  textarea.value = startingValue;
+  textarea.placeholder =
+    'What is this space for? (e.g. "Weekly UX research findings for the redesign.")';
+  textarea.rows = 2;
+  // The Cypher caps at MAX_SPACE_DESC_LENGTH server-side; mirror the
+  // client cap so the user gets immediate feedback rather than a
+  // round-trip error.
+  textarea.maxLength = 400;
+  textarea.spellcheck = true;
+  editor.appendChild(textarea);
+
+  const actions = document.createElement('div');
+  actions.className = 'spaces-view-header-objective-actions';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'spaces-view-header-objective-save';
+  saveBtn.textContent = 'Save';
+  actions.appendChild(saveBtn);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'spaces-view-header-objective-cancel';
+  cancelBtn.textContent = 'Cancel';
+  actions.appendChild(cancelBtn);
+
+  const hint = document.createElement('span');
+  hint.className = 'spaces-view-header-objective-hint';
+  hint.textContent = '⌘↵ Save · Esc Cancel';
+  actions.appendChild(hint);
+
+  editor.appendChild(actions);
+
+  anchor.replaceWith(editor);
+  // Defer focus until after the DOM swap so cursors land predictably.
+  textarea.focus();
+  textarea.select();
+
+  let didSettle = false;
+
+  const restorePlain = (description: string): void => {
+    if (didSettle) return;
+    didSettle = true;
+    const restored = buildSpaceObjectiveRow({
+      ...space,
+      description,
+    });
+    if (editor.isConnected) {
+      editor.replaceWith(restored);
+    }
+  };
+
+  const cancelEdit = (): void => {
+    restorePlain(startingValue);
+    // Restore original text rendering (handles the empty-state path).
+    void original;
+  };
+
+  const commit = async (): Promise<void> => {
+    if (didSettle) return;
+    const next = textarea.value.trim();
+    if (next === startingValue.trim()) {
+      cancelEdit();
+      return;
+    }
+    if (next.length > 400) {
+      showToast('Objective is too long (max 400 chars).');
+      return;
+    }
+    const bridge = window.lite?.spaces;
+    if (bridge === undefined) {
+      showToast('Bridge unavailable.');
+      cancelEdit();
+      return;
+    }
+    textarea.disabled = true;
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const envelope = await bridge.updateSpace(space.id, {
+        description: next,
+      });
+      if (envelope.ok === false) {
+        showToast(envelope.error.message);
+        textarea.disabled = false;
+        saveBtn.disabled = false;
+        cancelBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+        return;
+      }
+      // Mutation already nuked the read cache server-side; pull a fresh
+      // listSpaces so any other affordance (sidebar / row metadata)
+      // sees the new value too.
+      await loadSpaces();
+      restorePlain(envelope.value.description ?? next);
+      showToast('Objective updated.');
+    } catch (err) {
+      showToast(messageFrom(err));
+      textarea.disabled = false;
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  };
+
+  saveBtn.addEventListener('click', () => {
+    void commit();
+  });
+  cancelBtn.addEventListener('click', () => {
+    cancelEdit();
+  });
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEdit();
+      return;
+    }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void commit();
+    }
+  });
 }
 
 interface ItemsToolbarOpts {
@@ -1882,6 +2409,213 @@ function ensureItemsRegion(main: HTMLElement): HTMLElement {
   return region;
 }
 
+// ─── Bulk-select toolbar ────────────────────────────────────────────────
+//
+// Selection is opt-in via Cmd/Ctrl-click on a timeline row. Once one or
+// more rows are selected, the toolbar slides in above the timeline with:
+//   - selection summary: "N items selected"
+//   - Move to … (select)
+//   - Delete (button) — confirms via native dialog, runs delete in
+//     parallel with the same soft-delete defaults as single delete
+//   - Clear (button) — drops the selection without acting on anything
+//
+// Implementation is intentionally minimal: each bulk action loops over
+// the selected ids and calls the existing single-item bridge methods,
+// then reloads the items list once. We don't introduce a bulk RPC at
+// the SDK layer yet — the per-item methods are cheap and the parallel
+// fan-out keeps the UI snappy without complicating the platform.
+
+/**
+ * Render the bulk-select toolbar when one or more items are selected.
+ * Returns `null` when the selection is empty so callers can short-circuit.
+ *
+ * Reads from `state.selectedItemIds`. Each action drops back through
+ * `loadItems()` so the timeline re-paints from the freshly-fetched
+ * server state and the selection clears.
+ */
+export function buildBulkSelectToolbar(): HTMLElement | null {
+  if (state.selectedItemIds.size === 0) return null;
+
+  const bar = document.createElement('div');
+  bar.className = 'spaces-bulk-toolbar';
+  bar.setAttribute('role', 'toolbar');
+  bar.setAttribute('aria-label', 'Bulk actions');
+
+  const count = state.selectedItemIds.size;
+  const summary = document.createElement('span');
+  summary.className = 'spaces-bulk-summary';
+  summary.textContent = `${count} selected`;
+  bar.appendChild(summary);
+
+  // ── Move to <space> ────────────────────────────────────────────────
+  const moveWrap = document.createElement('span');
+  moveWrap.className = 'spaces-bulk-action-wrap';
+  const moveLabel = document.createElement('label');
+  moveLabel.className = 'spaces-bulk-action-label';
+  moveLabel.textContent = 'Move to';
+  moveWrap.appendChild(moveLabel);
+
+  const moveSelect = document.createElement('select');
+  moveSelect.className = 'spaces-bulk-move-select';
+  moveSelect.setAttribute('aria-label', `Move ${count} items to a space`);
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Choose a space…';
+  placeholder.selected = true;
+  moveSelect.appendChild(placeholder);
+  const fromSpaceId =
+    state.activeScopeId !== HOME_SCOPE_ID &&
+    state.activeScopeId !== UNCATEGORIZED_SPACE_ID
+      ? state.activeScopeId
+      : null;
+  for (const space of state.spaces) {
+    if (space.id === fromSpaceId) continue;
+    const opt = document.createElement('option');
+    opt.value = space.id;
+    opt.textContent = space.name.length > 0 ? space.name : '(unnamed)';
+    if (space.kind === 'shared') opt.textContent += ' (shared)';
+    moveSelect.appendChild(opt);
+  }
+  moveSelect.addEventListener('change', () => {
+    const target = moveSelect.value;
+    if (target.length === 0) return;
+    moveSelect.disabled = true;
+    void performBulkMove(target, fromSpaceId, moveSelect);
+  });
+  moveWrap.appendChild(moveSelect);
+  bar.appendChild(moveWrap);
+
+  // ── Delete N ──────────────────────────────────────────────────────
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'spaces-bulk-delete';
+  deleteBtn.textContent = `Delete ${count}`;
+  deleteBtn.title = `Soft-delete ${count} item${count === 1 ? '' : 's'}`;
+  deleteBtn.addEventListener('click', () => {
+    void performBulkDelete(deleteBtn);
+  });
+  bar.appendChild(deleteBtn);
+
+  // ── Clear ─────────────────────────────────────────────────────────
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'spaces-bulk-clear';
+  clearBtn.textContent = 'Clear';
+  clearBtn.title = 'Clear selection (Esc)';
+  clearBtn.addEventListener('click', () => {
+    clearBulkSelection();
+  });
+  bar.appendChild(clearBtn);
+
+  return bar;
+}
+
+/**
+ * Toggle the row's selection state. Idempotent. Re-renders the items
+ * region so the toolbar updates and the row shows its selected styling.
+ */
+function toggleBulkSelection(itemId: string): void {
+  if (state.selectedItemIds.has(itemId)) {
+    state.selectedItemIds.delete(itemId);
+  } else {
+    state.selectedItemIds.add(itemId);
+  }
+  renderItemList({});
+}
+
+function clearBulkSelection(): void {
+  if (state.selectedItemIds.size === 0) return;
+  state.selectedItemIds.clear();
+  renderItemList({});
+}
+
+async function performBulkMove(
+  toSpaceId: string,
+  fromSpaceId: string | null,
+  selectEl: HTMLSelectElement
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showToast('Bridge unavailable.');
+    selectEl.disabled = false;
+    return;
+  }
+  const ids = Array.from(state.selectedItemIds);
+  let succeeded = 0;
+  const failures: string[] = [];
+  // Run in parallel — the per-item Cypher writes are independent.
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const envelope = await bridge.items.moveToSpace(id, fromSpaceId, toSpaceId);
+        if (envelope.ok === false) {
+          failures.push(envelope.error.message);
+        } else {
+          succeeded += 1;
+        }
+      } catch (err) {
+        failures.push(messageFrom(err));
+      }
+    })
+  );
+  state.selectedItemIds.clear();
+  await loadItems();
+  if (failures.length === 0) {
+    showToast(`Moved ${succeeded} item${succeeded === 1 ? '' : 's'}.`);
+  } else if (succeeded > 0) {
+    showToast(
+      `Moved ${succeeded} of ${ids.length}; ${failures.length} failed (${failures[0]}).`
+    );
+  } else {
+    showToast(`Move failed: ${failures[0] ?? 'unknown error'}`);
+  }
+}
+
+async function performBulkDelete(btn: HTMLButtonElement): Promise<void> {
+  const ids = Array.from(state.selectedItemIds);
+  const count = ids.length;
+  // Native confirm keeps the surface area small; a future iteration
+  // could swap in a custom modal with an undo countdown.
+  const ok = window.confirm(
+    `Delete ${count} item${count === 1 ? '' : 's'}?\n\n` +
+      'They will be soft-deleted (hidden from listings) and can be restored from the asset menu.'
+  );
+  if (!ok) return;
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showToast('Bridge unavailable.');
+    return;
+  }
+  btn.disabled = true;
+  let succeeded = 0;
+  const failures: string[] = [];
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const envelope = await bridge.items.delete(id, { soft: true });
+        if (envelope.ok === false) {
+          failures.push(envelope.error.message);
+        } else {
+          succeeded += 1;
+        }
+      } catch (err) {
+        failures.push(messageFrom(err));
+      }
+    })
+  );
+  state.selectedItemIds.clear();
+  await loadItems();
+  if (failures.length === 0) {
+    showToast(`Deleted ${succeeded} item${succeeded === 1 ? '' : 's'}.`);
+  } else if (succeeded > 0) {
+    showToast(
+      `Deleted ${succeeded} of ${ids.length}; ${failures.length} failed (${failures[0]}).`
+    );
+  } else {
+    showToast(`Delete failed: ${failures[0] ?? 'unknown error'}`);
+  }
+}
+
 // `wireCardClicks` removed when the per-Space view switched from the
 // card grid to the timeline (timeline rows wire their own clicks via
 // `buildTimelineRow`). `applyActiveCard` survives because the close-
@@ -1895,61 +2629,463 @@ function applyActiveCard(grid: HTMLElement, itemId: string | null): void {
   }
 }
 
+/**
+ * Build an asset tile — content-forward, NOT chat-row-shaped.
+ *
+ * The tile is two stacked regions:
+ *
+ *   ┌─────────────────────────┐
+ *   │   [content-shaped       │  ← spaces-card-preview
+ *   │      preview surface]   │     (image / paper / waveform / etc.)
+ *   ├─────────────────────────┤
+ *   │ Title …          ✎       │  ← spaces-card-meta
+ *   │ Doc · 3h ago             │     (kind label + relative time)
+ *   └─────────────────────────┘
+ *
+ * The preview region is what makes the asset *look like the asset it
+ * is*: an image tile shows the actual thumbnail, a doc shows the
+ * excerpt as typeset paragraph text (paper-style), audio shows a
+ * waveform glyph, a URL shows the host. No "Produced by …" line, no
+ * Space chips, no kind pill above the title — those were the parts
+ * that made every asset read like a chat message.
+ *
+ * Class names `spaces-card`, `spaces-card-title`, `spaces-card-kind`,
+ * `spaces-card-time`, `spaces-card-excerpt`, `spaces-card-kind-<kind>`,
+ * `is-active`, and the `data-item-id` attribute are preserved so the
+ * existing wiring + tests still find the right hooks.
+ */
 export function buildItemCard(
   item: RendererItemSummary,
   active: boolean
 ): HTMLElement {
   const card = document.createElement('article');
-  card.className = 'spaces-card';
+  card.className = `spaces-card spaces-card-${item.kind}`;
   if (active) card.classList.add('is-active');
+  // Bulk-select visual: mirror the selection set so the toolbar's
+  // selected items read as selected tiles (Cmd/Ctrl-click toggles).
+  if (state.selectedItemIds.has(item.id)) card.classList.add('is-selected');
   card.setAttribute('data-item-id', item.id);
   card.setAttribute('role', 'button');
   card.setAttribute('tabindex', '0');
+  // Accessible name folds in the badge meaning, since the badges
+  // themselves live inside the aria-hidden preview.
+  const isNew = isNewSinceLastVisit(item);
+  const byAgent = item.producedBy?.kind === 'Agent';
+  card.setAttribute(
+    'aria-label',
+    generateItemTitle(item) +
+      (isNew ? ', new' : '') +
+      (byAgent ? `, produced by ${item.producedBy?.name ?? 'an agent'}` : '')
+  );
 
-  const head = document.createElement('div');
-  head.className = 'spaces-card-head';
+  // Click → open the detail pane. Cmd/Ctrl-click → toggle bulk
+  // selection without opening the pane (parity with the former
+  // timeline-row behavior). Keyboard: Enter / Space opens the pane,
+  // since the tile is role="button". Without this wiring the tile
+  // would be inert — `buildItemCard` is a pure builder and there is
+  // no delegated click handler on the grid/region.
+  card.addEventListener('click', (ev) => {
+    if (ev.metaKey || ev.ctrlKey) {
+      ev.preventDefault();
+      toggleBulkSelection(item.id);
+      return;
+    }
+    void loadItemDetail(item.id);
+  });
+  card.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      void loadItemDetail(item.id);
+    }
+  });
+
+  // Top: content-shaped preview. Decorative; the title below carries
+  // the accessible label, so the preview is aria-hidden. Status badges
+  // (New / AI) overlay the preview's top-left corner.
+  const preview = buildAssetTilePreview(item);
+  const badges = buildTileBadgeStack(isNew, byAgent);
+  if (badges !== null) {
+    // `has-badges` lets text/doc/ticket previews reserve top padding so
+    // the badge row doesn't cover the first line of the excerpt.
+    preview.classList.add('has-badges');
+    preview.appendChild(badges);
+  }
+  card.appendChild(preview);
+
+  // Bottom: title + tight meta line.
+  const meta = document.createElement('div');
+  meta.className = 'spaces-card-meta';
+
+  const titleRow = document.createElement('div');
+  titleRow.className = 'spaces-card-title-row';
+
+  const title = document.createElement('h3');
+  title.className = 'spaces-card-title';
+  // generateItemTitle returns the real title when it's a normal human
+  // string, or a derived one ("Image · 5b4375", "sunset · example.com",
+  // …) when the title was missing or hash-shaped. Never empty.
+  title.textContent = generateItemTitle(item);
+  titleRow.appendChild(title);
+
+  // Hover-reveal pencil. Click opens the detail pane (which has the
+  // inline title editor) — the pencil is a visual cue that the title
+  // is editable, not a separate action target.
+  const editHint = document.createElement('span');
+  editHint.className = 'spaces-card-edit-hint';
+  editHint.setAttribute('aria-hidden', 'true');
+  editHint.textContent = '✎';
+  titleRow.appendChild(editHint);
+
+  meta.appendChild(titleRow);
+
+  const metaRow = document.createElement('div');
+  metaRow.className = 'spaces-card-meta-row';
 
   const kind = document.createElement('span');
   kind.className = `spaces-card-kind spaces-card-kind-${item.kind}`;
   kind.textContent = kindLabel(item.kind);
-  head.appendChild(kind);
+  metaRow.appendChild(kind);
+
+  const dot = document.createElement('span');
+  dot.className = 'spaces-card-meta-sep';
+  dot.setAttribute('aria-hidden', 'true');
+  dot.textContent = '·';
+  metaRow.appendChild(dot);
 
   const time = document.createElement('span');
   time.className = 'spaces-card-time';
   time.textContent = formatRelativeTime(item.updatedAt);
-  head.appendChild(time);
+  metaRow.appendChild(time);
 
-  card.appendChild(head);
-
-  const title = document.createElement('h3');
-  title.className = 'spaces-card-title';
-  title.textContent = item.title.length > 0 ? item.title : '(untitled)';
-  card.appendChild(title);
-
-  if (typeof item.excerpt === 'string' && item.excerpt.length > 0) {
-    const excerpt = document.createElement('p');
-    excerpt.className = 'spaces-card-excerpt';
-    excerpt.textContent = item.excerpt;
-    card.appendChild(excerpt);
-  }
-
+  // Multi-space indicator: signals an asset filed in more than the
+  // current Space. Quiet "⧉ N" with the space names in the tooltip.
   if (item.otherSpaces.length > 0) {
-    const chipRow = document.createElement('div');
-    chipRow.className = 'spaces-card-chips';
-    for (const chip of item.otherSpaces) {
-      chipRow.appendChild(buildSpaceChip(chip));
-    }
-    card.appendChild(chipRow);
+    const sep2 = document.createElement('span');
+    sep2.className = 'spaces-card-meta-sep';
+    sep2.setAttribute('aria-hidden', 'true');
+    sep2.textContent = '·';
+    metaRow.appendChild(sep2);
+
+    const spaces = document.createElement('span');
+    spaces.className = 'spaces-card-spaces';
+    spaces.textContent = `⧉ ${item.otherSpaces.length}`;
+    const names = item.otherSpaces
+      .map((s) => friendlySpaceName(s.name))
+      .join(', ');
+    spaces.title = `Also in: ${names}`;
+    spaces.setAttribute(
+      'aria-label',
+      `also in ${item.otherSpaces.length} other space${item.otherSpaces.length === 1 ? '' : 's'}`
+    );
+    metaRow.appendChild(spaces);
   }
 
-  if (item.producedBy !== null) {
-    const provenance = document.createElement('div');
-    provenance.className = 'spaces-card-provenance';
-    provenance.textContent = `Produced by ${item.producedBy.name} (${item.producedBy.kind})`;
-    card.appendChild(provenance);
-  }
+  meta.appendChild(metaRow);
+
+  card.appendChild(meta);
 
   return card;
+}
+
+/**
+ * True when the asset was created/updated since the user's last visit.
+ * Returns false on the first-ever visit (`lastVisitMs === null`) — with
+ * no baseline, everything would read as "new", which is noise.
+ */
+function isNewSinceLastVisit(item: RendererItemSummary): boolean {
+  const lastVisit = state.lastVisitMs;
+  if (lastVisit === null) return false;
+  const t = Date.parse(item.updatedAt || item.createdAt);
+  return Number.isFinite(t) && t > lastVisit;
+}
+
+/**
+ * Build the preview-corner status badge stack. Returns null when there
+ * are no badges so the caller can skip appending. The badges are
+ * visual-only (the card's aria-label already conveys "new" / "by
+ * agent"), so the stack is aria-hidden.
+ */
+function buildTileBadgeStack(isNew: boolean, byAgent: boolean): HTMLElement | null {
+  if (!isNew && !byAgent) return null;
+  const stack = document.createElement('div');
+  stack.className = 'spaces-card-badges';
+  stack.setAttribute('aria-hidden', 'true');
+  if (isNew) {
+    const b = document.createElement('span');
+    b.className = 'spaces-card-badge spaces-card-badge-new';
+    b.textContent = 'New';
+    stack.appendChild(b);
+  }
+  if (byAgent) {
+    const b = document.createElement('span');
+    b.className = 'spaces-card-badge spaces-card-badge-agent';
+    b.textContent = '✨ AI';
+    stack.appendChild(b);
+  }
+  return stack;
+}
+
+/**
+ * Dispatcher for the per-kind tile preview. Each branch builds a
+ * visually distinct surface that reads as "the thing it is" — the
+ * shape of the preview encodes the asset kind, so the kind label
+ * underneath can recede instead of competing for attention.
+ */
+function buildAssetTilePreview(item: RendererItemSummary): HTMLElement {
+  const preview = document.createElement('div');
+  preview.className = `spaces-card-preview spaces-card-preview-${item.kind}`;
+  preview.setAttribute('aria-hidden', 'true');
+
+  switch (item.kind) {
+    case 'image':
+      buildImageTilePreview(item, preview);
+      break;
+    case 'audio':
+      buildAudioTilePreview(preview);
+      break;
+    case 'video':
+      buildVideoTilePreview(preview);
+      break;
+    case 'url':
+      buildUrlTilePreview(item, preview);
+      break;
+    case 'playbook':
+      buildPlaybookTilePreview(preview);
+      break;
+    case 'ticket':
+      buildTicketTilePreview(item, preview);
+      break;
+    case 'document':
+    case 'text':
+    case 'other':
+    default:
+      buildTextTilePreview(item, preview);
+      break;
+  }
+  return preview;
+}
+
+/**
+ * Lazy thumbnail observer. An image-heavy Space would otherwise fire
+ * one `resolveFileUrl` (signed-URL mint, typically a network call)
+ * per tile the instant the grid renders — a thundering herd where
+ * off-screen tiles compete with the ones the user can actually see,
+ * and images pop in out of order. Instead we resolve a tile's URL
+ * only once it scrolls within ~300px of the viewport.
+ *
+ * Lazily constructed (and null in jsdom / SSR where IntersectionObserver
+ * doesn't exist) so tests fall back to the eager path.
+ */
+let tileImageObserver: IntersectionObserver | null = null;
+let tileImageObserverTried = false;
+
+function getTileImageObserver(): IntersectionObserver | null {
+  if (tileImageObserverTried) return tileImageObserver;
+  tileImageObserverTried = true;
+  if (typeof IntersectionObserver === 'undefined') {
+    tileImageObserver = null;
+    return null;
+  }
+  tileImageObserver = new IntersectionObserver(
+    (entries, observer) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const el = entry.target as HTMLElement;
+        observer.unobserve(el);
+        const key = el.getAttribute('data-thumb-key');
+        if (key !== null && key.length > 0) loadTileThumbnail(el, key);
+      }
+    },
+    { rootMargin: '300px' }
+  );
+  return tileImageObserver;
+}
+
+/**
+ * Image tile: shows a soft placeholder until the bridge resolves the
+ * fileKey to a signed URL, then swaps in the real `<img>`. Resolution
+ * is deferred until the tile nears the viewport (see
+ * `getTileImageObserver`). Best-effort — when there's no bridge
+ * (jsdom tests) or no fileKey, the placeholder is what the tile
+ * renders permanently.
+ */
+function buildImageTilePreview(
+  item: RendererItemSummary,
+  preview: HTMLElement
+): void {
+  preview.classList.add('is-loading');
+  const glyph = document.createElement('span');
+  glyph.className = 'spaces-card-glyph spaces-card-glyph-image';
+  glyph.setAttribute('aria-hidden', 'true');
+  glyph.textContent = '◾';
+  preview.appendChild(glyph);
+
+  if (typeof item.fileKey !== 'string' || item.fileKey.length === 0) return;
+  // Fast path: producer wrote an already-dereferenceable URL — no
+  // bridge round-trip, so no reason to defer.
+  if (/^https?:\/\//i.test(item.fileKey)) {
+    swapTilePreviewToImage(preview, item.fileKey);
+    return;
+  }
+
+  // Stash the key on the element and defer the signed-URL mint until
+  // the tile scrolls into view. When IntersectionObserver isn't
+  // available (jsdom), resolve eagerly so the behavior degrades to
+  // the previous always-load path.
+  preview.setAttribute('data-thumb-key', item.fileKey);
+  const observer = getTileImageObserver();
+  if (observer === null) {
+    loadTileThumbnail(preview, item.fileKey);
+    return;
+  }
+  observer.observe(preview);
+}
+
+/** Resolve a stashed fileKey to a signed URL and swap in the image. */
+function loadTileThumbnail(preview: HTMLElement, key: string): void {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  void bridge.items
+    .resolveFileUrl(key)
+    .then((env) => {
+      if (env.ok === false) return;
+      const url = env.value;
+      if (typeof url !== 'string' || url.length === 0) return;
+      swapTilePreviewToImage(preview, url);
+    })
+    .catch(() => undefined);
+}
+
+function swapTilePreviewToImage(preview: HTMLElement, url: string): void {
+  preview.classList.remove('is-loading');
+  preview.removeAttribute('data-thumb-key');
+  preview.replaceChildren();
+  const img = document.createElement('img');
+  img.className = 'spaces-card-image';
+  img.src = url;
+  img.alt = '';
+  img.loading = 'lazy';
+  preview.appendChild(img);
+}
+
+/**
+ * Audio tile: five CSS-only waveform bars + a centered play glyph.
+ * Reads as "this is audio" without any real audio file or computed
+ * waveform — pure ornament that says "play me."
+ */
+function buildAudioTilePreview(preview: HTMLElement): void {
+  const wave = document.createElement('span');
+  wave.className = 'spaces-card-wave';
+  // Exactly 9 bars — the CSS shapes the envelope via :nth-child, so
+  // the count here must stay in sync with the nth-child rules in
+  // spaces.css (.spaces-card-wave-bar:nth-child(1..9)).
+  for (let i = 0; i < 9; i++) {
+    const bar = document.createElement('span');
+    bar.className = 'spaces-card-wave-bar';
+    wave.appendChild(bar);
+  }
+  preview.appendChild(wave);
+  const play = document.createElement('span');
+  play.className = 'spaces-card-play';
+  play.setAttribute('aria-hidden', 'true');
+  play.textContent = '▶';
+  preview.appendChild(play);
+}
+
+/**
+ * Video tile: centered large play glyph on a darker surface.
+ * Distinct from audio (no waveform) and from generic "other" file
+ * tiles. When real frame thumbnails arrive in the summary payload
+ * later this can swap in a poster `<img>`.
+ */
+function buildVideoTilePreview(preview: HTMLElement): void {
+  const play = document.createElement('span');
+  play.className = 'spaces-card-play spaces-card-play-large';
+  play.setAttribute('aria-hidden', 'true');
+  play.textContent = '▶';
+  preview.appendChild(play);
+}
+
+/**
+ * URL tile: host name on a soft "card" surface. Reads as a bookmark.
+ */
+function buildUrlTilePreview(
+  item: RendererItemSummary,
+  preview: HTMLElement
+): void {
+  const host = document.createElement('span');
+  host.className = 'spaces-card-url-host';
+  const sourceUrl = item.sourceUrl;
+  if (typeof sourceUrl === 'string' && sourceUrl.length > 0) {
+    try {
+      const parsed = new URL(sourceUrl);
+      host.textContent = parsed.hostname.replace(/^www\./, '');
+    } catch {
+      host.textContent = sourceUrl;
+    }
+  } else {
+    host.textContent = 'Link';
+  }
+  preview.appendChild(host);
+}
+
+/**
+ * Playbook tile: four stacked rule lines — reads as a ruled notebook
+ * page. Distinct enough from generic doc tiles to be scan-able.
+ */
+function buildPlaybookTilePreview(preview: HTMLElement): void {
+  for (let i = 0; i < 4; i++) {
+    const line = document.createElement('span');
+    line.className = 'spaces-card-playbook-line';
+    line.style.setProperty('--line-index', String(i));
+    preview.appendChild(line);
+  }
+}
+
+/**
+ * Ticket tile: hash glyph + truncated excerpt. The excerpt carries
+ * the body so the tile reads as a sticky-note, not a generic icon.
+ */
+function buildTicketTilePreview(
+  item: RendererItemSummary,
+  preview: HTMLElement
+): void {
+  const tag = document.createElement('span');
+  tag.className = 'spaces-card-ticket-tag';
+  tag.setAttribute('aria-hidden', 'true');
+  tag.textContent = '#';
+  preview.appendChild(tag);
+  if (typeof item.excerpt === 'string' && item.excerpt.length > 0) {
+    const body = document.createElement('p');
+    body.className = 'spaces-card-excerpt';
+    body.textContent = item.excerpt;
+    preview.appendChild(body);
+  }
+}
+
+/**
+ * Text / document tile: renders the excerpt as typeset paragraph
+ * text on a paper-style surface. This is the move that flips a
+ * text asset from "row with an icon" to "a document you can read
+ * a few lines of." When there's no excerpt at all, falls back to
+ * a quiet `¶` glyph so the tile still says "document."
+ */
+function buildTextTilePreview(
+  item: RendererItemSummary,
+  preview: HTMLElement
+): void {
+  if (typeof item.excerpt === 'string' && item.excerpt.length > 0) {
+    const paper = document.createElement('p');
+    paper.className = 'spaces-card-excerpt';
+    paper.textContent = item.excerpt;
+    preview.appendChild(paper);
+    return;
+  }
+  const glyph = document.createElement('span');
+  glyph.className = 'spaces-card-glyph spaces-card-glyph-doc';
+  glyph.setAttribute('aria-hidden', 'true');
+  glyph.textContent = '¶';
+  preview.appendChild(glyph);
 }
 
 export function buildSpaceChip(chip: RendererSpaceChipRef): HTMLElement {
@@ -1966,7 +3102,11 @@ export function buildSpaceChip(chip: RendererSpaceChipRef): HTMLElement {
 
   const label = document.createElement('span');
   label.className = 'spaces-chip-name';
-  label.textContent = chip.name.length > 0 ? chip.name : '(unnamed)';
+  // Treat hash / UUID-shaped names the same as missing names so a
+  // chip never reads as "402abae35ea49651...". The data-side fix is
+  // for producers to write real names; this is the renderer's guard
+  // until that backfills.
+  label.textContent = friendlySpaceName(chip.name);
   el.appendChild(label);
 
   return el;
@@ -2037,7 +3177,15 @@ function renderDetail(opts: RenderDetailOpts): void {
     onTagAdd: (tag) => commitTagAdd(item.id, tag),
     onTagRemove: (tag) => commitTagRemove(item.id, tag),
     onMetadataAdd: (key, value) => commitMetadataAdd(item.id, key, value),
+    onMetadataValueEdit: (key, value) => commitMetadataAdd(item.id, key, value),
     onMetadataRemove: (key) => commitMetadataRemove(item.id, key),
+    // Only expose Auto-fill when the AI bridge is present.
+    ...(window.lite?.ai !== undefined
+      ? { onMetadataAutoFill: () => autoFillMetadata(item.id) }
+      : {}),
+    onContentSave: (next) => commitItemUpdate(item.id, { content: next }),
+    onDescriptionSave: (next) =>
+      commitItemUpdate(item.id, { description: next }),
   };
   aside.appendChild(buildDetailPane(item, onClose, 'rendered', editCallbacks));
 
@@ -2281,10 +3429,23 @@ async function promoteToPlaybook(
 interface RendererDetailEditCallbacks {
   onMetadataAdd: (key: string, value: string) => Promise<void>;
   onMetadataRemove: (key: string) => Promise<void>;
+  /** Replace a metadata value in place. Called from the click-to-edit
+   *  affordance on the value cell. The string is re-coerced server-side
+   *  the same way `onMetadataAdd` coerces (numeric → number, etc). */
+  onMetadataValueEdit: (key: string, value: string) => Promise<void>;
+  /** Auto-fill metadata via Claude 4.8. Optional -- only wired when the
+   *  AI bridge (`window.lite.ai`) is present. */
+  onMetadataAutoFill?: () => Promise<void>;
   onTitleSave: (next: string) => Promise<void>;
   onTypeChange: (next: string) => Promise<void>;
   onTagAdd: (tag: string) => Promise<void>;
   onTagRemove: (tag: string) => Promise<void>;
+  /** Save the Markdown / text content body. Triggered by the Edit
+   *  affordance in the detail content block. */
+  onContentSave: (next: string) => Promise<void>;
+  /** Save the asset description. Empty string clears it. Reaches every
+   *  kind via the meta strip's editable subtitle row. */
+  onDescriptionSave: (next: string) => Promise<void>;
 }
 
 /**
@@ -2295,7 +3456,7 @@ interface RendererDetailEditCallbacks {
  */
 async function commitItemUpdate(
   itemId: string,
-  patch: { title?: string; description?: string; type?: string }
+  patch: { title?: string; description?: string; content?: string; type?: string }
 ): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) throw new Error('Bridge unavailable');
@@ -2360,6 +3521,76 @@ async function commitMetadataRemove(itemId: string, key: string): Promise<void> 
   const envelope = await bridge.items.removeMetadataKey(itemId, key);
   if (envelope.ok === false) throw new Error(envelope.error.message);
   await loadItemDetail(itemId);
+}
+
+/**
+ * Manual "✨ Auto-fill metadata" action. Asks the main process to run
+ * Claude over the asset and persist `ai_*` metadata, then refreshes the
+ * detail pane. Surfaces a toast on success and (re-)throws on failure so
+ * the button restores its label.
+ */
+async function autoFillMetadata(itemId: string): Promise<void> {
+  const ai = window.lite?.ai;
+  if (ai === undefined) throw new Error('AI is not available');
+  const envelope = await ai.enrichAsset(itemId);
+  if (envelope.ok === false) {
+    showToast(envelope.error.message);
+    throw new Error(envelope.error.message);
+  }
+  const n = Object.keys(envelope.value.written).length;
+  showToast(`✨ Added ${n} metadata field${n === 1 ? '' : 's'}`);
+  await loadItemDetail(itemId);
+}
+
+/**
+ * Renderer-side eligibility for auto-on-create enrichment: only fire when
+ * Claude has something to read (text body, an image, or a PDF). This is a
+ * token-saving pre-check before the IPC round-trip; the main-side
+ * `enrichAsset` itself never gates (the manual button always runs).
+ */
+function isAutoEnrichEligibleRenderer(opts: {
+  kind: string;
+  mimeType?: string;
+  hasContent: boolean;
+}): boolean {
+  if (opts.hasContent) return true;
+  if (opts.kind === 'image') return true;
+  const mime = (opts.mimeType ?? '').toLowerCase();
+  if (mime === 'application/pdf') return true;
+  // Uploaded text-like files (.txt/.md/.csv/.json/code) store their bytes
+  // as a base64 data-URL, so hasContent is false at this layer -- but the
+  // enricher decodes the data-URL back to text, so they ARE enrichable.
+  if (mime.startsWith('text/') || /(json|csv|xml|yaml|markdown|javascript|ecmascript|typescript|html)/.test(mime)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Background auto-enrichment fired right after an asset is created.
+ * Best-effort + silent: skips when AI isn't configured (so we never
+ * toast a "not configured" error on every create), and swallows
+ * failures. On success it refreshes the item list so the new metadata
+ * is reflected.
+ */
+async function autoEnrichOnCreate(
+  itemId: string,
+  opts: { kind: string; mimeType?: string; hasContent: boolean }
+): Promise<void> {
+  const ai = window.lite?.ai;
+  if (ai === undefined) return;
+  if (!isAutoEnrichEligibleRenderer(opts)) return;
+  try {
+    const has = await ai.hasKey();
+    if (!has.ok || !has.value.hasKey) return; // not configured -> stay silent
+    const envelope = await ai.enrichAsset(itemId);
+    if (envelope.ok) {
+      showToast('✨ Metadata added automatically');
+      await loadItems();
+    }
+  } catch {
+    // best-effort: a failed auto-enrich never disrupts the create flow.
+  }
 }
 
 /**
@@ -2450,8 +3681,27 @@ export interface DetailEditCallbacks {
   onTagRemove?: (tag: string) => Promise<void>;
   /** Metadata sprint — add a new key/value pair. */
   onMetadataAdd?: (key: string, value: string) => Promise<void>;
+  /** Metadata sprint — overwrite the value at an existing key. Powers the
+   *  click-to-edit affordance on the `<dd>` cell. Re-uses the same
+   *  coercion path as `onMetadataAdd` (numeric strings → numbers,
+   *  "true"/"false" → booleans, comma-separated → arrays). */
+  onMetadataValueEdit?: (key: string, value: string) => Promise<void>;
   /** Metadata sprint — remove a key. */
   onMetadataRemove?: (key: string) => Promise<void>;
+  /**
+   * Save the Markdown / text content body. When provided, the detail
+   * content block grows an "Edit" affordance that swaps the rendered
+   * Markdown for a textarea + Save/Cancel buttons.
+   */
+  onContentSave?: (next: string) => Promise<void>;
+  /**
+   * Save the asset description (the short prose blurb under the meta
+   * strip). When provided, the detail rail grows a click-to-edit
+   * description block that reaches every kind — captions for images,
+   * summaries for videos, notes on tickets, abstracts on PDFs.
+   * Pass an empty string to clear.
+   */
+  onDescriptionSave?: (next: string) => Promise<void>;
 }
 
 const EDITABLE_ITEM_KINDS: ReadonlyArray<{ id: string; label: string }> = [
@@ -2507,25 +3757,112 @@ export function buildDetailPane(
   wrap.appendChild(header);
 
   // ── Title (click-to-edit when callback is present) ───────────────────
+  // The displayed value is always `generateItemTitle(item)` so the
+  // detail rail never shows an opaque hex id even when the underlying
+  // `:Asset.name`/`:Asset.title` is unset. If the user opens the
+  // editor the field pre-populates with the generated title; saving
+  // unchanged is a no-op (per `buildEditableTitle.commit`), so the
+  // user can accept the generated label by editing then re-saving.
+  const displayTitle = generateItemTitle(item);
   if (edit?.onTitleSave !== undefined) {
-    wrap.appendChild(buildEditableTitle(item.title, edit.onTitleSave));
+    wrap.appendChild(buildEditableTitle(displayTitle, edit.onTitleSave));
   } else {
     const title = document.createElement('h2');
     title.className = 'spaces-detail-title';
-    title.textContent = item.title.length > 0 ? item.title : '(untitled)';
+    title.textContent = displayTitle;
     wrap.appendChild(title);
   }
 
-  // ── Attribution chip (Phase 3c): prominent "Created by …" /
-  //    "Last edited by …" near the title. Skipped silently when there's
-  //    no meaningful attribution data on the item.
+  // ── Identity line: ONE "who · when" surface near the title.
+  //    The attribution chip ("Created by … / Last edited by … · 3h")
+  //    is the primary identity; the meta strip carries the
+  //    complementary "Updated … · size". When the chip renders we
+  //    suppress the meta strip's redundant producer line so the
+  //    producer name isn't printed twice — that stacked who/when text
+  //    was the heaviness in the old layout.
   const chip = buildAttributionChip(item);
   if (chip !== null) wrap.appendChild(chip);
+  wrap.appendChild(buildDetailMeta(item, { suppressProvenance: chip !== null }));
 
-  // ── Meta strip: time + size + producer + last-edited-by ──────────────
-  wrap.appendChild(buildDetailMeta(item));
+  // ── HERO: the asset itself ───────────────────────────────────────────
+  // A preview should lead with the content, not with six lines of
+  // metadata. The file preview + content body now sit directly under
+  // the identity line; description / tags / spaces / metadata flow
+  // below as supporting detail.
 
-  // ── Space chips ──────────────────────────────────────────────────────
+  // File preview slot (binary assets). For items with a fileKey we
+  // render a placeholder block upfront so the user sees "loading" /
+  // "unavailable" feedback; `resolveAndInjectFileUrl` swaps in the
+  // real preview (image / audio / video / PDF embed / download link).
+  if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
+    wrap.appendChild(buildPreviewPlaceholder(item));
+  }
+
+  // Content body — kind-aware preview dispatch.
+  const hasContent =
+    typeof item.content === 'string' && item.content.length > 0;
+  if (hasContent) {
+    const content = item.content as string;
+    // Inline uploads stash the file's bytes as a base64 data URL in
+    // `content` (no Files-API upload yet — that's a future
+    // enhancement). Route those straight to the binary preview so
+    // PDFs / images / audio / video render via <embed> / <img> /
+    // <audio> / <video> instead of dumping the base64 blob into the
+    // Markdown renderer.
+    if (isBase64DataUrl(content)) {
+      wrap.appendChild(buildBinaryPreview(item, content));
+    } else {
+      const language = detectTextPreviewLanguage(item.mimeType, item.title);
+      if (language === 'csv' || language === 'tsv') {
+        wrap.appendChild(buildCsvPreview(content));
+      } else if (language !== null && language !== 'markdown') {
+        // Code-like content: render as syntax-highlighted block.
+        wrap.appendChild(buildCodePreview(content, language));
+      } else {
+        // Markdown / unspecified text: existing Markdown renderer.
+        // When the pane was wired with edit callbacks, pass the
+        // content-save callback so the block grows an "✎ Edit"
+        // affordance for in-place Markdown editing.
+        wrap.appendChild(
+          buildDetailContent(
+            content,
+            initialMode,
+            edit?.onContentSave !== undefined
+              ? { onSave: edit.onContentSave }
+              : {}
+          )
+        );
+      }
+    }
+  }
+
+  // Type-specific subsection (source link, audio/video player).
+  const subsection = buildDetailTypeBlock(item);
+  if (subsection !== null) wrap.appendChild(subsection);
+
+  // Empty-content hint: when the asset has nothing renderable -- no
+  // inline content, no fileKey preview, no sourceUrl, no type-specific
+  // block -- show an honest empty state explaining what's missing for
+  // this kind, so the rail doesn't read as "click did nothing."
+  const hasFilePreview =
+    typeof item.fileKey === 'string' && item.fileKey.length > 0;
+  if (!hasContent && !hasFilePreview && subsection === null) {
+    wrap.appendChild(buildDetailEmptyContentHint(item));
+  }
+
+  // ── Supporting detail (below the hero) ───────────────────────────────
+
+  // Description: prose blurb / caption / abstract. Click-to-edit when
+  // editable; reaches every kind via the same affordance (captions on
+  // images, summaries on videos, abstracts on PDFs, notes on tickets).
+  const descBlock = buildEditableDescription(item, edit?.onDescriptionSave);
+  if (descBlock !== null) wrap.appendChild(descBlock);
+
+  // Tag chips (with × buttons + "+ Add tag" when editable).
+  const tagsRow = buildDetailTags(item.tags ?? [], edit);
+  if (tagsRow.children.length > 0) wrap.appendChild(tagsRow);
+
+  // Space-membership chips.
   if (item.otherSpaces.length > 0) {
     const chips = document.createElement('div');
     chips.className = 'spaces-detail-chips';
@@ -2535,30 +3872,8 @@ export function buildDetailPane(
     wrap.appendChild(chips);
   }
 
-  // ── Tag chips (with × buttons + "+ Add tag" when editable) ───────────
-  const tagsRow = buildDetailTags(item.tags ?? [], edit);
-  if (tagsRow.children.length > 0) wrap.appendChild(tagsRow);
-
-  // ── Content body — Sprint 2: kind-aware preview dispatch ────────────
-  if (typeof item.content === 'string' && item.content.length > 0) {
-    const language = detectTextPreviewLanguage(item.mimeType, item.title);
-    if (language === 'csv' || language === 'tsv') {
-      wrap.appendChild(buildCsvPreview(item.content));
-    } else if (language !== null && language !== 'markdown') {
-      // Code-like content: render as syntax-highlighted block.
-      wrap.appendChild(buildCodePreview(item.content, language));
-    } else {
-      // Markdown / unspecified text: existing Markdown renderer.
-      wrap.appendChild(buildDetailContent(item.content, initialMode));
-    }
-  }
-
-  // ── Type-specific subsection (source link, audio/video player) ───────
-  const subsection = buildDetailTypeBlock(item);
-  if (subsection !== null) wrap.appendChild(subsection);
-
-  // ── Metadata section (Metadata sprint): always rendered so users
-  //    can add fields even when the bag is empty.
+  // Metadata section: always rendered so users can add fields even
+  // when the bag is empty.
   wrap.appendChild(buildDetailMetadata(item, edit));
 
   // ── Activity slot (Phase 3c): empty container that `loadItemActivity`
@@ -2585,8 +3900,14 @@ export function buildDetailPane(
 export interface DetailMetadataCallbacks {
   /** Called when the user adds a new key/value pair. */
   onMetadataAdd?: (key: string, value: string) => Promise<void>;
+  /** Called when the user overwrites the value at an existing key.
+   *  Powers the click-to-edit affordance on the value cell. */
+  onMetadataValueEdit?: (key: string, value: string) => Promise<void>;
   /** Called when the user removes a key. */
   onMetadataRemove?: (key: string) => Promise<void>;
+  /** Called when the user clicks "Auto-fill metadata" (Claude 4.8).
+   *  Present only when the AI bridge is available. */
+  onMetadataAutoFill?: () => Promise<void>;
 }
 
 export function buildDetailMetadata(
@@ -2597,10 +3918,18 @@ export function buildDetailMetadata(
   wrap.className = 'spaces-detail-metadata';
   wrap.setAttribute('data-item-id', item.id);
 
+  const headingRow = document.createElement('div');
+  headingRow.className = 'spaces-detail-metadata-heading-row';
   const heading = document.createElement('h3');
   heading.className = 'spaces-detail-metadata-heading';
   heading.textContent = 'Metadata';
-  wrap.appendChild(heading);
+  headingRow.appendChild(heading);
+  // "✨ Auto-fill metadata" (Claude 4.8) lives in the heading row so it's
+  // reachable whether or not the asset already has metadata.
+  if (edit?.onMetadataAutoFill !== undefined) {
+    headingRow.appendChild(buildAutoFillButton(edit.onMetadataAutoFill));
+  }
+  wrap.appendChild(headingRow);
 
   const meta = item.metadata ?? {};
   const keys = Object.keys(meta);
@@ -2631,6 +3960,27 @@ export function buildDetailMetadata(
       dd.textContent = formatMetadataValue(value);
       row.appendChild(dd);
 
+      // Click-to-edit on the value cell. Calls `onMetadataValueEdit`
+      // which goes through the same coercion path as `onMetadataAdd`
+      // (numeric strings → numbers, "true"/"false" → booleans, etc).
+      if (edit?.onMetadataValueEdit !== undefined) {
+        const onEdit = edit.onMetadataValueEdit;
+        dd.classList.add('is-editable');
+        dd.title = 'Click to edit';
+        dd.setAttribute('role', 'button');
+        dd.setAttribute('tabindex', '0');
+        const startEdit = (): void => {
+          enterMetadataValueEdit(dd, key, value, onEdit);
+        };
+        dd.addEventListener('click', startEdit);
+        dd.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            startEdit();
+          }
+        });
+      }
+
       if (edit?.onMetadataRemove !== undefined) {
         const onRemove = edit.onMetadataRemove;
         const x = document.createElement('button');
@@ -2658,6 +4008,38 @@ export function buildDetailMetadata(
     wrap.appendChild(buildAddMetadataAffordance(edit.onMetadataAdd));
   }
   return wrap;
+}
+
+/**
+ * "✨ Auto-fill metadata" button. Calls the Claude-backed enrichment
+ * callback; shows an in-flight state and restores on completion. The
+ * callback itself refreshes the detail pane on success, so this button's
+ * node may be replaced out from under it — guard every DOM touch.
+ */
+function buildAutoFillButton(onAutoFill: () => Promise<void>): HTMLElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'spaces-detail-metadata-autofill';
+  button.textContent = '✨ Auto-fill';
+  button.title = 'Use Claude to generate a summary, tags, topics, and more';
+  button.addEventListener('click', () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = '✨ Extracting…';
+    void onAutoFill()
+      .catch(() => {
+        // Errors surface as a toast inside the callback; nothing to do
+        // here beyond restoring the button if it's still mounted.
+      })
+      .finally(() => {
+        if (button.isConnected) {
+          button.disabled = false;
+          button.textContent = original;
+        }
+      });
+  });
+  return button;
 }
 
 /** Compact display formatter — keeps the value column readable. */
@@ -2900,8 +4282,260 @@ export function buildEditableTitle(
   return wrap;
 }
 
+/**
+ * Editable asset-description block. Behaviour parallels
+ * `buildEditableTitle` but in textarea form:
+ *   - Read mode (callback present, has description): prose paragraph
+ *     with a click target that swaps in the editor.
+ *   - Read mode (callback present, no description): muted placeholder
+ *     ("Add a description…") that also doubles as the click target.
+ *   - Read-only mode (no callback): renders the paragraph when there's
+ *     a description; returns `null` (caller omits the block) when not.
+ *
+ * The editor uses Cmd/Ctrl+Enter to save and Esc to cancel, mirroring
+ * the space-objective editor + the Markdown content editor so the
+ * keyboard shortcuts are uniform across in-place editors.
+ */
+export function buildEditableDescription(
+  item: RendererItem,
+  onSave?: (next: string) => Promise<void>
+): HTMLElement | null {
+  // `description` isn't on the canonical RendererItem (LiteSpaceItem) —
+  // some producers project it onto Item.metadata or Item.excerpt
+  // instead. We read it via a structural cast so typecheck stays clean
+  // and the runtime branch handles "undefined" gracefully.
+  const desc = (item as { description?: unknown }).description;
+  const initial = typeof desc === 'string' ? desc : '';
+  const editable = typeof onSave === 'function';
+
+  if (!editable && initial.length === 0) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-detail-description-wrap';
+
+  const display = document.createElement('p');
+  display.className = 'spaces-detail-description';
+  if (initial.length > 0) {
+    display.textContent = initial;
+  } else {
+    display.textContent = 'Add a description…';
+    display.classList.add('is-placeholder');
+  }
+  if (editable) {
+    display.classList.add('is-editable');
+    display.setAttribute('role', 'button');
+    display.setAttribute('tabindex', '0');
+    display.title =
+      initial.length > 0 ? 'Click to edit description' : 'Click to add a description';
+  }
+
+  let current = initial;
+  let editing = false;
+
+  const enterEdit = (): void => {
+    if (!editable || editing) return;
+    editing = true;
+    const editor = document.createElement('div');
+    editor.className = 'spaces-detail-description-editor';
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'spaces-detail-description-input';
+    textarea.value = current;
+    textarea.rows = 3;
+    // Description field is capped at 1000 chars in the SDK's
+    // validateUpdatePatch (matches MAX_ITEM_DESCRIPTION_LENGTH).
+    textarea.maxLength = 1000;
+    textarea.placeholder =
+      'What is this asset about? Captions, abstracts, notes, context — anything that helps you (or another agent) find it later.';
+    textarea.spellcheck = true;
+    editor.appendChild(textarea);
+
+    const actions = document.createElement('div');
+    actions.className = 'spaces-detail-description-actions';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'spaces-detail-description-save';
+    saveBtn.textContent = 'Save';
+    actions.appendChild(saveBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'spaces-detail-description-cancel';
+    cancelBtn.textContent = 'Cancel';
+    actions.appendChild(cancelBtn);
+
+    const hint = document.createElement('span');
+    hint.className = 'spaces-detail-description-hint';
+    hint.textContent = '⌘↵ Save · Esc Cancel';
+    actions.appendChild(hint);
+
+    editor.appendChild(actions);
+    wrap.replaceChildren(editor);
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+    const restoreDisplay = (value: string): void => {
+      current = value;
+      if (value.length > 0) {
+        display.textContent = value;
+        display.classList.remove('is-placeholder');
+        display.title = 'Click to edit description';
+      } else {
+        display.textContent = 'Add a description…';
+        display.classList.add('is-placeholder');
+        display.title = 'Click to add a description';
+      }
+      editing = false;
+      wrap.replaceChildren(display);
+    };
+
+    const cancel = (): void => {
+      restoreDisplay(current);
+    };
+
+    const commit = async (): Promise<void> => {
+      const next = textarea.value.trim();
+      if (next === current.trim()) {
+        cancel();
+        return;
+      }
+      textarea.disabled = true;
+      saveBtn.disabled = true;
+      cancelBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        await onSave!(next);
+        restoreDisplay(next);
+      } catch {
+        // Leave the editor open with the typed text intact so the user
+        // can retry without retyping. The bridge surface logs the
+        // failure via the normalized error envelope.
+        textarea.disabled = false;
+        saveBtn.disabled = false;
+        cancelBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+      }
+    };
+
+    saveBtn.addEventListener('click', () => {
+      void commit();
+    });
+    cancelBtn.addEventListener('click', cancel);
+    textarea.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        cancel();
+        return;
+      }
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+        ev.preventDefault();
+        void commit();
+      }
+    });
+  };
+
+  if (editable) {
+    display.addEventListener('click', enterEdit);
+    display.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        enterEdit();
+      }
+    });
+  }
+
+  wrap.appendChild(display);
+  return wrap;
+}
+
+/**
+ * In-place metadata value editor. Swaps the `<dd>` cell for an input
+ * pre-populated with the current value. Enter saves; Esc cancels. The
+ * value flows through the same coercion path as `onMetadataAdd`
+ * (numeric strings → numbers, "true"/"false" → booleans, comma
+ * separated → arrays).
+ */
+function enterMetadataValueEdit(
+  dd: HTMLElement,
+  key: string,
+  currentValue: unknown,
+  onEdit: (key: string, value: string) => Promise<void>
+): void {
+  // If a previous edit on this row is in flight we'd overwrite its
+  // pending state — guard by checking for an existing input child.
+  if (dd.querySelector('input') !== null) return;
+
+  const initial = formatMetadataValue(currentValue);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'spaces-detail-metadata-value-input';
+  input.value = initial === '—' ? '' : initial;
+  input.maxLength = 400;
+  input.setAttribute('aria-label', `Edit value for ${key}`);
+
+  const oldContent = dd.textContent ?? '';
+  dd.textContent = '';
+  dd.appendChild(input);
+  input.focus();
+  input.select();
+
+  const restore = (text: string): void => {
+    dd.textContent = text;
+  };
+
+  const cancel = (): void => {
+    restore(oldContent);
+  };
+
+  const commit = async (): Promise<void> => {
+    const next = input.value.trim();
+    if (next === initial.trim() || next.length === 0) {
+      cancel();
+      return;
+    }
+    input.disabled = true;
+    dd.classList.add('is-saving');
+    try {
+      await onEdit(key, next);
+      // The renderer re-paints from the freshly-fetched item; this DOM
+      // node is about to be replaced. Leaving the input in place is
+      // fine — the parent <dd> goes away on the re-render.
+    } catch {
+      input.disabled = false;
+      dd.classList.remove('is-saving');
+      // Leave the input populated so the user can retry without
+      // retyping. The bridge surface logged the failure already.
+    }
+  };
+
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      void commit();
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      cancel();
+    }
+  });
+  // Blur outside the row → cancel rather than commit so accidental
+  // clicks elsewhere don't write a partial value. The user must
+  // explicitly press Enter to save.
+  input.addEventListener('blur', () => {
+    if (!input.isConnected) return;
+    // Defer to the next tick so a click on a different chrome element
+    // (the × delete button, say) doesn't race the blur handler.
+    setTimeout(() => {
+      if (input.isConnected) cancel();
+    }, 50);
+  });
+}
+
 /** Meta strip: relative time · size · producer · last-edited-by. */
-export function buildDetailMeta(item: RendererItem): HTMLElement {
+export function buildDetailMeta(
+  item: RendererItem,
+  opts: { suppressProvenance?: boolean } = {}
+): HTMLElement {
   const meta = document.createElement('div');
   meta.className = 'spaces-detail-meta';
 
@@ -2914,7 +4548,17 @@ export function buildDetailMeta(item: RendererItem): HTMLElement {
 
   // Provenance + last-edited-by on a second line so the primary
   // updated/size info reads clean.
-  if (item.producedBy !== null || (item.lastEditedBy ?? null) !== null) {
+  //
+  // `suppressProvenance` is set by `buildDetailPane` when the
+  // attribution chip is already rendered above this strip — otherwise
+  // the producer name prints twice ("Created by X" in the chip AND
+  // "Produced by X (Agent)" here), which is the stacked who/when text
+  // that made the preview read heavy. Standalone callers (and the
+  // builder's own unit tests) keep the default — provenance shown.
+  if (
+    opts.suppressProvenance !== true &&
+    (item.producedBy !== null || (item.lastEditedBy ?? null) !== null)
+  ) {
     const provLine = document.createElement('div');
     provLine.className = 'spaces-detail-provenance';
     const segments: string[] = [];
@@ -3053,29 +4697,47 @@ function buildAddTagAffordance(onAdd: (tag: string) => Promise<void>): HTMLEleme
  */
 export function buildDetailContent(
   source: string,
-  initialMode: DetailPreviewMode
+  initialMode: DetailPreviewMode,
+  opts: { onSave?: (next: string) => Promise<void> } = {}
 ): HTMLElement {
   const block = document.createElement('div');
   block.className = 'spaces-detail-content-block';
   block.setAttribute('data-mode', initialMode);
 
-  // Toggle row.
+  // Toggle row: Rendered / Source / (optional) Edit.
   const toggleRow = document.createElement('div');
   toggleRow.className = 'spaces-detail-content-toggle';
+
   const renderedBtn = document.createElement('button');
   renderedBtn.type = 'button';
   renderedBtn.className =
     'spaces-detail-toggle-btn' + (initialMode === 'rendered' ? ' is-active' : '');
   renderedBtn.textContent = 'Rendered';
   renderedBtn.setAttribute('data-mode', 'rendered');
+
   const sourceBtn = document.createElement('button');
   sourceBtn.type = 'button';
   sourceBtn.className =
     'spaces-detail-toggle-btn' + (initialMode === 'source' ? ' is-active' : '');
   sourceBtn.textContent = 'Source';
   sourceBtn.setAttribute('data-mode', 'source');
+
   toggleRow.appendChild(renderedBtn);
   toggleRow.appendChild(sourceBtn);
+
+  // Edit affordance (appears when an `onSave` callback is supplied).
+  // Clicking it swaps the body for a Markdown textarea + Save/Cancel.
+  let editBtn: HTMLButtonElement | null = null;
+  if (opts.onSave !== undefined) {
+    editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'spaces-detail-toggle-btn spaces-detail-edit-btn';
+    editBtn.textContent = '✎ Edit';
+    editBtn.title = 'Edit the Markdown content';
+    editBtn.setAttribute('aria-label', 'Edit content');
+    toggleRow.appendChild(editBtn);
+  }
+
   block.appendChild(toggleRow);
 
   const body = document.createElement('div');
@@ -3091,7 +4753,137 @@ export function buildDetailContent(
   };
   renderedBtn.addEventListener('click', () => setMode('rendered'));
   sourceBtn.addEventListener('click', () => setMode('source'));
+
+  if (editBtn !== null && opts.onSave !== undefined) {
+    const onSave = opts.onSave;
+    editBtn.addEventListener('click', () => {
+      enterContentEditMode(block, toggleRow, body, source, onSave);
+    });
+  }
+
   return block;
+}
+
+/**
+ * Swap the detail-content body for a Markdown textarea + Save / Cancel
+ * row. Cancel restores the original rendered view (unsaved edits
+ * discarded); Save calls the supplied `onSave` callback. On a
+ * successful save the parent will trigger a `loadItemDetail` refresh
+ * which re-paints the whole rail with the freshly-fetched content --
+ * so we don't need to manually update the rendered view; the rail
+ * just re-mounts. On error, the textarea stays open with an inline
+ * message so the user can retry.
+ */
+function enterContentEditMode(
+  block: HTMLElement,
+  toggleRow: HTMLElement,
+  body: HTMLElement,
+  source: string,
+  onSave: (next: string) => Promise<void>
+): void {
+  block.setAttribute('data-mode', 'edit');
+  // Hide the rendered/source toggle while editing -- a "you're
+  // editing right now" indicator is more useful than the toggle.
+  toggleRow.hidden = true;
+
+  body.replaceChildren();
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'spaces-detail-content-textarea';
+  textarea.value = source;
+  textarea.setAttribute('aria-label', 'Edit Markdown content');
+  textarea.spellcheck = true;
+  body.appendChild(textarea);
+
+  // Auto-size to content. Recompute on every keystroke so the editor
+  // grows with the document rather than stuck at a fixed height.
+  const autoSize = (): void => {
+    textarea.style.height = 'auto';
+    // +2 to dodge a 1-row scrollbar flicker on some platforms.
+    textarea.style.height = `${textarea.scrollHeight + 2}px`;
+  };
+  // Defer until the element is in the DOM so scrollHeight is correct.
+  requestAnimationFrame(autoSize);
+  textarea.addEventListener('input', autoSize);
+
+  const errorEl = document.createElement('div');
+  errorEl.className = 'spaces-detail-content-edit-error';
+  errorEl.hidden = true;
+
+  const actions = document.createElement('div');
+  actions.className = 'spaces-detail-content-edit-actions';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'spaces-detail-content-edit-cancel';
+  cancelBtn.textContent = 'Cancel';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'spaces-detail-content-edit-save';
+  saveBtn.textContent = 'Save';
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(saveBtn);
+
+  body.appendChild(errorEl);
+  body.appendChild(actions);
+
+  const exitToRendered = (renderSource_: string): void => {
+    toggleRow.hidden = false;
+    block.setAttribute('data-mode', 'rendered');
+    body.replaceChildren(renderMarkdown(renderSource_));
+  };
+
+  cancelBtn.addEventListener('click', () => {
+    exitToRendered(source);
+  });
+
+  // Ctrl+Enter / Cmd+Enter saves; Escape cancels. Keyboard shortcuts
+  // match what most Markdown editors do, so muscle memory carries over.
+  textarea.addEventListener('keydown', (ev: KeyboardEvent) => {
+    if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
+      ev.preventDefault();
+      saveBtn.click();
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      cancelBtn.click();
+    }
+  });
+
+  saveBtn.addEventListener('click', () => {
+    void (async () => {
+      const next = textarea.value;
+      saveBtn.disabled = true;
+      cancelBtn.disabled = true;
+      textarea.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      errorEl.hidden = true;
+      errorEl.textContent = '';
+      try {
+        await onSave(next);
+        // commitItemUpdate re-paints the whole rail via loadItemDetail,
+        // so this block is typically replaced. If somehow it's still
+        // mounted (callback was a no-op stub, e.g. in tests), drop
+        // back into rendered view with the new content.
+        if (block.isConnected) {
+          exitToRendered(next);
+        }
+      } catch (err) {
+        errorEl.textContent = (err as Error).message;
+        errorEl.hidden = false;
+        saveBtn.disabled = false;
+        cancelBtn.disabled = false;
+        textarea.disabled = false;
+        saveBtn.textContent = 'Save';
+        textarea.focus();
+      }
+    })();
+  });
+
+  textarea.focus();
+  // Cursor at the end so Cmd+End-style editors continue typing.
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
 }
 
 function renderSource(source: string): HTMLElement {
@@ -3099,6 +4891,70 @@ function renderSource(source: string): HTMLElement {
   pre.className = 'spaces-detail-source-pre';
   pre.textContent = source;
   return pre;
+}
+
+/**
+ * Empty-content hint -- shown in the detail rail when an asset has no
+ * inline content, no binary fileKey, and no sourceUrl. Instead of
+ * rendering a silent gap (which the user reads as "click did
+ * nothing"), this block names what's missing for the asset's kind
+ * and -- in dev -- offers a hint about which graph property would
+ * surface here.
+ *
+ * Pure; exported for tests.
+ */
+export function buildDetailEmptyContentHint(item: {
+  kind?: string;
+}): HTMLElement {
+  const wrap = document.createElement('section');
+  wrap.className = 'spaces-detail-empty';
+  wrap.setAttribute('role', 'status');
+  wrap.setAttribute('aria-live', 'polite');
+
+  const headline = document.createElement('p');
+  headline.className = 'spaces-detail-empty-headline';
+
+  const sub = document.createElement('p');
+  sub.className = 'spaces-detail-empty-sub';
+
+  const kind = typeof item.kind === 'string' ? item.kind : '';
+  switch (kind) {
+    case 'text':
+    case 'document':
+      headline.textContent = 'No text content saved for this item.';
+      sub.textContent =
+        'Once a transcript, note, or document body lands on this asset (graph property `:Asset.content`), it appears here.';
+      break;
+    case 'image':
+      headline.textContent = 'No image attached.';
+      sub.textContent =
+        'When an image fileKey is set (graph property `:Asset.url`), a preview appears here.';
+      break;
+    case 'video':
+      headline.textContent = 'No video attached.';
+      sub.textContent =
+        'When a video fileKey is set, a player appears here.';
+      break;
+    case 'audio':
+      headline.textContent = 'No audio attached.';
+      sub.textContent =
+        'When an audio fileKey is set, a player appears here.';
+      break;
+    case 'url':
+      headline.textContent = 'No external URL saved.';
+      sub.textContent =
+        'When `:Asset.sourceUrl` is set, the link appears here.';
+      break;
+    default:
+      headline.textContent = 'This asset has no content yet.';
+      sub.textContent =
+        'Add a transcript, file, or link to make it useful. Authors and tags can be set independently.';
+      break;
+  }
+
+  wrap.appendChild(headline);
+  wrap.appendChild(sub);
+  return wrap;
 }
 
 /**
@@ -4066,6 +5922,230 @@ export function looksLikeAgentAuthor(author: string): boolean {
 }
 
 /**
+ * Heuristic: does this string look like an opaque id (hash / UUID /
+ * long alphanumeric blob) rather than something a human typed?
+ *
+ *   "5b4375227558baa82b0846ff0a8d8490" (32 char hex)      -> true
+ *   "402abae3-5ea4-9651-5760-deadbeefcafe" (UUID)         -> true
+ *   "402abae35ea49651576deadbeefcafe11" (UUID-ish, dashed) -> true
+ *   "Quarterly audit"                                    -> false
+ *   "doc-with-words.pdf"                                 -> false
+ *
+ * Used to decide whether to render the raw string verbatim or to fall
+ * back to a kind-driven label like "an image" / "Unnamed space". The
+ * rule errs on the side of false-negatives (preserve real titles)
+ * over false-positives (hide a real title), so short / spaced strings
+ * always pass through.
+ *
+ * Pure; exported for tests.
+ */
+export function looksLikeIdString(value: string): boolean {
+  if (typeof value !== 'string') return false;
+  const s = value.trim();
+  if (s.length < 16) return false;
+  if (/\s/.test(s)) return false;
+  // Strip dashes (UUIDs sometimes carry them) and inspect remainder.
+  const stripped = s.replace(/-/g, '');
+  if (stripped.length < 16) return false;
+  // Hex-only: classic MD5/SHA-1/SHA-256 hash shapes.
+  if (/^[0-9a-f]+$/i.test(stripped) && stripped.length >= 16) return true;
+  // Lowercase alphanumeric with no spaces and at least 24 chars --
+  // covers base36/base58 ids without false-positiving things like
+  // "QuarterlyAuditQ4" (mixed case).
+  if (/^[a-z0-9]+$/i.test(stripped) && stripped.length >= 24) {
+    // Reject if it contains BOTH letters AND digits AND a vowel run --
+    // those are likely human-typed identifiers like "auditQ42026".
+    const hasVowelRun = /[aeiou]{2,}/i.test(stripped);
+    if (hasVowelRun && stripped.length < 32) return false;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Pick a friendly label for a timeline row's object when the raw
+ * title looks like an opaque id. Falls back to a kind-aware noun
+ * ("an image", "a document") so the row reads as "Someone added an
+ * image" rather than "Someone added 5b43752275...".
+ *
+ * Pure; exported for tests.
+ */
+export function friendlyObjectForItem(rawTitle: string, kind: string): string {
+  const trimmed = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+  if (trimmed.length > 0 && !looksLikeIdString(trimmed)) return trimmed;
+  switch (kind) {
+    case 'document':
+      return 'a document';
+    case 'image':
+      return 'an image';
+    case 'url':
+      return 'a link';
+    case 'text':
+      return 'a note';
+    case 'audio':
+      return 'an audio clip';
+    case 'video':
+      return 'a video';
+    default:
+      return 'an item';
+  }
+}
+
+/**
+ * Pick a friendly Space display name. If the raw name is missing or
+ * looks like an id, fall back to "Unnamed space" so chips don't show
+ * a 32-char hex string in place of a human label.
+ *
+ * Pure; exported for tests.
+ */
+export function friendlySpaceName(rawName: string): string {
+  const trimmed = typeof rawName === 'string' ? rawName.trim() : '';
+  if (trimmed.length === 0) return 'Unnamed space';
+  if (looksLikeIdString(trimmed)) return 'Unnamed space';
+  return trimmed;
+}
+
+/**
+ * Shape `generateItemTitle` consumes. Defined here (rather than reusing
+ * `RendererItemSummary`) so tests can pass a minimal record without
+ * filling in unrelated fields like `otherSpaces` or `producedBy`.
+ */
+export interface GenerateItemTitleInput {
+  title?: string;
+  kind?: string;
+  id?: string;
+  sourceUrl?: string;
+  fileKey?: string;
+  excerpt?: string;
+}
+
+/**
+ * Derive a human-readable title for an item when the raw `title` field
+ * is missing or hash-shaped (the Cypher `coalesce(a.name, a.title, a.id)`
+ * fallback often returns the asset's hex id verbatim).
+ *
+ * Generation strategy, in priority order:
+ *   1. Real title (non-empty, doesn't look like an id) — used as-is.
+ *   2. URL items with `sourceUrl` — pull a meaningful path segment
+ *      ("sunset" from "/photos/sunset.jpg") and tag with the host
+ *      ("sunset · photos.example.com"), or fall back to "Link · <host>".
+ *   3. File-backed items with `fileKey` — humanize the last path
+ *      segment ("quarterly-audit-q4.pdf" → "Quarterly audit q4"),
+ *      stripping the extension and underscores / dashes.
+ *   4. Text-kind items with an `excerpt` — take the first ~6 words and
+ *      ellipsize, so a note shows its opening line as its label.
+ *   5. Last resort — "<Kind> · <short-id>" where `<short-id>` is the
+ *      first 6 characters of the asset id (stripping UUID dashes
+ *      first). Always returns something; never empty.
+ *
+ * Pure; exported for tests.
+ */
+export function generateItemTitle(item: GenerateItemTitleInput): string {
+  // 1. Real, human-shaped title wins.
+  const rawTitle = typeof item.title === 'string' ? item.title.trim() : '';
+  if (rawTitle.length > 0 && !looksLikeIdString(rawTitle)) return rawTitle;
+
+  const kind = typeof item.kind === 'string' ? item.kind : '';
+  const kindLabelText = kindLabel(kind);
+
+  // 2. URL items: synthesize from the source URL.
+  if (typeof item.sourceUrl === 'string' && item.sourceUrl.length > 0) {
+    const urlTitle = titleFromUrl(item.sourceUrl, kindLabelText);
+    if (urlTitle !== null) return urlTitle;
+  }
+
+  // 3. File-backed items: derive from `fileKey` path segment.
+  if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
+    const fileTitle = titleFromFileKey(item.fileKey);
+    if (fileTitle !== null) return fileTitle;
+  }
+
+  // 4. Text-kind items: lift the first sentence of the excerpt.
+  if (kind === 'text' && typeof item.excerpt === 'string') {
+    const excerptTitle = titleFromExcerpt(item.excerpt);
+    if (excerptTitle !== null) return excerptTitle;
+  }
+
+  // 5. Last resort: "<Kind> · <short-id>". The kind label always exists
+  // (`kindLabel('whatever')` returns "Other") so this path never produces
+  // an empty string; the short id is omitted only if no id is present.
+  const shortId = typeof item.id === 'string' ? shortenIdForTitle(item.id) : '';
+  return shortId.length > 0 ? `${kindLabelText} · ${shortId}` : kindLabelText;
+}
+
+/**
+ * Try to compose a title from a URL. Returns `null` when the URL isn't
+ * parseable or when nothing meaningful can be lifted from it. Strategy:
+ *   - If the path has a non-id, non-empty trailing segment, humanize
+ *     and pair it with the host: "sunset · photos.example.com".
+ *   - Otherwise return "<Kind> · <host>" so the row still reads as
+ *     "from somewhere" rather than collapsing to a hex id.
+ */
+function titleFromUrl(rawUrl: string, kindLabelText: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  const host = parsed.hostname.replace(/^www\./i, '');
+  const segments = parsed.pathname.split('/').filter((s) => s.length > 0);
+  // Look from the back of the path for a meaningful segment.
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const raw = decodeURIComponent(segments[i] ?? '');
+    const noExt = raw.replace(/\.[a-z0-9]{1,5}$/i, '');
+    if (noExt.length === 0) continue;
+    if (looksLikeIdString(noExt)) continue;
+    const humanized = noExt.replace(/[-_]+/g, ' ').trim();
+    if (humanized.length === 0) continue;
+    return `${humanized} · ${host}`;
+  }
+  if (host.length === 0) return null;
+  return `${kindLabelText} · ${host}`;
+}
+
+/**
+ * Lift a title from a `fileKey` (typically a path-like string). Drops
+ * the extension, humanizes separators, and rejects the whole thing if
+ * the cleaned name still looks like an id.
+ */
+function titleFromFileKey(fileKey: string): string | null {
+  const segments = fileKey.split('/').filter((s) => s.length > 0);
+  if (segments.length === 0) return null;
+  const last = segments[segments.length - 1] ?? '';
+  const noExt = last.replace(/\.[a-z0-9]{1,5}$/i, '');
+  if (noExt.length === 0) return null;
+  if (looksLikeIdString(noExt)) return null;
+  const humanized = noExt.replace(/[-_]+/g, ' ').trim();
+  if (humanized.length === 0) return null;
+  return humanized.charAt(0).toUpperCase() + humanized.slice(1);
+}
+
+/**
+ * Use the first few words of an excerpt as a title surrogate. Caps at
+ * 6 words and appends an ellipsis when the excerpt was longer.
+ */
+function titleFromExcerpt(excerpt: string): string | null {
+  const cleaned = excerpt.trim().replace(/\s+/g, ' ');
+  if (cleaned.length === 0) return null;
+  if (looksLikeIdString(cleaned)) return null;
+  const words = cleaned.split(' ');
+  const slice = words.slice(0, 6).join(' ').replace(/[.,;:!?]+$/, '');
+  return words.length > 6 ? `${slice}…` : slice;
+}
+
+/**
+ * Take a short, scannable prefix of an asset id. Strips UUID dashes
+ * first so e.g. `402abae3-5ea4-9651-...` collapses to `402aba` (more
+ * entropy than `402aba` from the dashed form).
+ */
+function shortenIdForTitle(rawId: string): string {
+  const stripped = rawId.replace(/-/g, '');
+  return stripped.slice(0, 6);
+}
+
+/**
  * Pretty-print a raw `:Commit.author` string into something a human
  * wants to read.
  *
@@ -4129,7 +6209,11 @@ export function mergeTimeline(
       // is there so device-shaped values still read clean.
       author: prettyAuthor(item.producedBy?.name ?? ''),
       verb: 'added',
-      object: item.title.length > 0 ? item.title : '(untitled)',
+      // Hash-shaped or missing titles get a real generated title --
+      // "Image · 5b4375", "sunset · photos.example.com", "Quarterly
+      // audit q4" etc. -- so the row reads as "added Image · 5b4375"
+      // rather than "added 5b4375227558...". Real titles pass through.
+      object: generateItemTitle(item),
       timestamp: item.updatedAt || item.createdAt,
       fromAgent: item.producedBy?.kind === 'Agent',
       itemId: item.id,
@@ -4155,7 +6239,14 @@ export function mergeTimeline(
       typeof e.spaceId === 'string' && e.spaceId.length > 0
         ? {
             id: e.spaceId,
-            name: typeof e.spaceName === 'string' && e.spaceName.length > 0 ? e.spaceName : e.spaceId,
+            // Apply the same friendly-name guard so events whose
+            // server-side Space-name fallback collapsed to the id
+            // render as "Unnamed space" instead of a hash.
+            name: friendlySpaceName(
+              typeof e.spaceName === 'string' && e.spaceName.length > 0
+                ? e.spaceName
+                : ''
+            ),
           }
         : undefined;
 
@@ -4217,6 +6308,65 @@ function deriveObject(kind: string): string {
   if (before === 'agent') return 'an agent';
   if (before === 'comment' || before === 'message') return 'a comment';
   return 'an event';
+}
+
+/** Time bucket categories used by `bucketTimelineByDate`. */
+export type TimelineBucketKey = 'today' | 'yesterday' | 'thisWeek' | 'older';
+
+/** One bucket of rows in chronological order, newest first. */
+export interface TimelineBucket {
+  key: TimelineBucketKey;
+  label: string;
+  rows: TimelineRow[];
+}
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Group a chronologically-sorted timeline into Today / Yesterday /
+ * This week / Older buckets so the renderer can insert sticky-ish
+ * section headers and break the wall-of-rows feel.
+ *
+ * Buckets are derived from the row's `timestamp` against `nowMs`:
+ *   - Today:       within the calendar-day window of nowMs (rolling 24h
+ *                  rather than literal midnight so timezone math stays
+ *                  local-time-free)
+ *   - Yesterday:   24-48h before nowMs
+ *   - This week:   2-7 days before nowMs
+ *   - Older:       7+ days, plus anything with an unparseable timestamp
+ *
+ * Empty buckets are dropped from the output so the renderer doesn't
+ * paint headers with nothing under them. Bucket order is fixed
+ * (Today first, Older last) regardless of input.
+ *
+ * Pure; exported for tests.
+ */
+export function bucketTimelineByDate(
+  rows: ReadonlyArray<TimelineRow>,
+  nowMs: number
+): TimelineBucket[] {
+  const buckets: Record<TimelineBucketKey, TimelineRow[]> = {
+    today: [],
+    yesterday: [],
+    thisWeek: [],
+    older: [],
+  };
+  for (const row of rows) {
+    const t = Date.parse(row.timestamp);
+    const ageMs = Number.isFinite(t) ? nowMs - t : Number.POSITIVE_INFINITY;
+    if (ageMs < ONE_DAY_MS) buckets.today.push(row);
+    else if (ageMs < 2 * ONE_DAY_MS) buckets.yesterday.push(row);
+    else if (ageMs < 7 * ONE_DAY_MS) buckets.thisWeek.push(row);
+    else buckets.older.push(row);
+  }
+  const out: TimelineBucket[] = [];
+  if (buckets.today.length > 0) out.push({ key: 'today', label: 'Today', rows: buckets.today });
+  if (buckets.yesterday.length > 0)
+    out.push({ key: 'yesterday', label: 'Yesterday', rows: buckets.yesterday });
+  if (buckets.thisWeek.length > 0)
+    out.push({ key: 'thisWeek', label: 'This week', rows: buckets.thisWeek });
+  if (buckets.older.length > 0) out.push({ key: 'older', label: 'Older', rows: buckets.older });
+  return out;
 }
 
 /**
@@ -4281,10 +6431,18 @@ function buildHomeTimeline(): HTMLElement {
     return region;
   }
 
+  // Time-bucket the rows into Today / Yesterday / This week / Older
+  // groups so the wall-of-rows breaks into scannable sections. Each
+  // bucket prints its header before its rows; empty buckets are
+  // dropped so we never paint a header with nothing under it.
+  const buckets = bucketTimelineByDate(filtered, Date.now());
   const list = document.createElement('div');
   list.className = 'home-timeline-list';
-  for (const row of filtered) {
-    list.appendChild(buildTimelineRow(row));
+  for (const bucket of buckets) {
+    list.appendChild(buildTimelineBucketHeader(bucket.label));
+    for (const row of bucket.rows) {
+      list.appendChild(buildTimelineRow(row));
+    }
   }
   region.appendChild(list);
 
@@ -4297,6 +6455,20 @@ function buildHomeTimeline(): HTMLElement {
   }
 
   return region;
+}
+
+/**
+ * Sticky-ish section header for a timeline bucket ("Today", "This week",
+ * etc.). Tiny, subdued -- the goal is to break the row monotony, not
+ * to compete with the row content for attention.
+ */
+function buildTimelineBucketHeader(label: string): HTMLElement {
+  const header = document.createElement('div');
+  header.className = 'home-timeline-bucket-header';
+  header.setAttribute('role', 'separator');
+  header.setAttribute('aria-label', label);
+  header.textContent = label;
+  return header;
 }
 
 function buildTimelineEmpty(filter: HomeFilter, hasUnfilteredRows: boolean): HTMLElement {
@@ -4357,6 +6529,16 @@ export function buildTimelineRow(row: TimelineRow): HTMLElement {
   el.setAttribute('data-row-id', row.id);
   if (row.fromAgent) el.classList.add('is-agent');
 
+  // Bulk-select: a row that's part of the current selection set
+  // gets the `is-selected` modifier. The renderer reads this every
+  // re-paint so toggling state and re-rendering is enough to update
+  // visual state without touching the row's instance fields.
+  const itemIdForSelection =
+    row.kind === 'item' && typeof row.itemId === 'string' ? row.itemId : null;
+  if (itemIdForSelection !== null && state.selectedItemIds.has(itemIdForSelection)) {
+    el.classList.add('is-selected');
+  }
+
   // Icon: dot whose color signals the producer kind. Agent rows
   // get a square-ish accent, person rows get a circle. (Subtle;
   // accessibility cue is still the text.)
@@ -4414,16 +6596,32 @@ export function buildTimelineRow(row: TimelineRow): HTMLElement {
 
   el.appendChild(body);
 
-  el.addEventListener('click', () => {
+  el.addEventListener('click', (ev) => {
+    // Cmd / Ctrl click — toggle bulk-selection without opening the
+    // detail rail or switching scope. Only available on item rows
+    // (event rows have no asset to act on).
+    if ((ev.metaKey || ev.ctrlKey) && itemIdForSelection !== null) {
+      ev.preventDefault();
+      toggleBulkSelection(itemIdForSelection);
+      return;
+    }
+    // Always open the detail rail when the row represents an item --
+    // the user explicitly clicked an asset and expects to see its
+    // preview. Previously this branch only fired when the row had a
+    // `spaceId`, so clicking an item that wasn't filed into any Space
+    // dumped the user into the (often empty) Uncategorized pane with
+    // no detail visible. Now the detail rail opens regardless.
+    if (row.kind === 'item' && typeof row.itemId === 'string' && row.itemId.length > 0) {
+      void loadItemDetail(row.itemId);
+    }
+    // Switch scope only when we have a real Space -- gives the user
+    // context for where the asset lives. For unfiled items we leave
+    // the user in their current scope (typically Home) so the main
+    // pane stays useful while the detail rail shows the asset; we no
+    // longer auto-warp into Uncategorized just because the asset
+    // hasn't been filed yet.
     if (typeof row.spaceId === 'string' && row.spaceId.length > 0) {
       setActiveScope(row.spaceId);
-      if (typeof row.itemId === 'string' && row.itemId.length > 0) {
-        void loadItemDetail(row.itemId);
-      }
-    } else if (row.kind === 'item') {
-      // Item not in any Space → take the user to Uncategorized so
-      // they can see it in context.
-      setActiveScope(UNCATEGORIZED_SPACE_ID);
     }
   });
 
@@ -4958,6 +7156,7 @@ function messageFrom(err: unknown): string {
   buildDetailTags,
   buildDetailContent,
   buildEditableTitle,
+  buildEditableDescription,
   buildKindReclassify,
   buildAttributionChip,
   buildDetailActivity,
@@ -4968,26 +7167,41 @@ function messageFrom(err: unknown): string {
   buildCodePreview,
   buildCsvPreview,
   detectTextPreviewLanguage,
+  isBase64DataUrl,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,
   buildBinaryPreview,
   buildItemsToolbar,
+  buildBulkSelectToolbar,
   formatCount,
   formatRelativeTime,
   normalizeSearchQuery,
   matchesSearchQuery,
   sortSpaces,
+  composeSpaceDescription,
+  normalizeWizardPerson,
   // Home (chunk 3o) — timeline-first builders + pure helpers.
   buildWelcomeCard,
   buildFilterChips,
   buildTimelineRow,
   mergeTimeline,
   filterTimeline,
+  filterItemsByHomeFilter,
   formatSinceLastVisit,
   countTimelineSince,
   looksLikeAgentAuthor,
   prettyAuthor,
+  // Noise-reduction helpers used by mergeTimeline + buildSpaceChip to
+  // hide hash/UUID-shaped fallback strings (Phase 3 / "calm spaces").
+  looksLikeIdString,
+  friendlyObjectForItem,
+  friendlySpaceName,
+  generateItemTitle,
+  bucketTimelineByDate,
+  buildDetailEmptyContentHint,
+  buildPreviewPlaceholder,
+  buildPreviewUnavailable,
   formatBigNumber,
   formatRecency,
   HOME_SCOPE_ID,
@@ -5078,30 +7292,57 @@ function wireMutationsUI(): void {
   wireDragDropAssetUpload();
 }
 
-// ─── "+ Shared Space" button (Phase 4 v2) ───────────────────────────────
+// ─── "+ New Space" guided wizard ────────────────────────────────────────
+//
+// AI-driven Space creation. The "+ New Space" (and "+ Shared") buttons open
+// a 4-step wizard that captures the metadata the old name-only dialog
+// skipped: a purpose, 3-5 high-level objectives, and people to add up
+// front. Step 2 offers an optional "Draft with AI" action that calls
+// window.lite.ai (Claude API or a OneReach flow) to turn a rough purpose
+// into a polished description + objectives the user can edit. AI is
+// strictly optional -- the wizard works end-to-end with manual entry when
+// no provider is configured.
+//
+// Objectives are folded into the Space `description` (the only metadata
+// text field the data model exposes today) via composeSpaceDescription;
+// people are added via identity.getOrCreatePerson + members.add.
 
-/**
- * Flag that the next createSpace submit should flip the space to
- * `kind=shared` after creation. Read inside `submitNewSpace`. We use
- * module state rather than a query param because the dialog itself
- * is shared between flows; this lets the dialog stay generic.
- */
-let pendingSharedFlip = false;
+interface WizardPerson {
+  name: string;
+  email: string;
+}
+
+interface NewSpaceWizardState {
+  step: 1 | 2 | 3 | 4;
+  name: string;
+  purpose: string;
+  description: string;
+  objectives: string[];
+  people: WizardPerson[];
+  shared: boolean;
+  aiConfigured: boolean;
+  aiProvider: 'claude' | 'onereach-flow' | null;
+  busy: boolean;
+}
+
+const WIZARD_STEP_LABELS: Record<NewSpaceWizardState['step'], string> = {
+  1: 'Basics',
+  2: 'Purpose & objectives',
+  3: 'People',
+  4: 'Review',
+};
+
+const MAX_WIZARD_OBJECTIVES = 6;
+
+let newSpaceWizard: NewSpaceWizardState | null = null;
 
 function wireNewSharedSpaceButton(): void {
   const button = document.getElementById('spaces-new-shared-button');
   if (button === null) return;
   button.addEventListener('click', () => {
-    pendingSharedFlip = true;
-    openNewSpaceDialog();
-    // Update the dialog title so the user knows they're creating a
-    // shared space (the dialog body itself is reused).
-    const title = document.getElementById('spaces-new-dialog-title');
-    if (title !== null) title.textContent = 'New shared space';
+    openNewSpaceDialog({ shared: true });
   });
 }
-
-// ─── "+ New Space" button + modal dialog ────────────────────────────────
 
 function wireNewSpaceButton(): void {
   const button = document.getElementById('spaces-new-button');
@@ -5111,109 +7352,630 @@ function wireNewSpaceButton(): void {
   });
 }
 
-function openNewSpaceDialog(): void {
+function openNewSpaceDialog(opts: { shared?: boolean } = {}): void {
   const backdrop = document.getElementById('spaces-new-dialog-backdrop');
-  const input = document.getElementById('spaces-new-name-input');
-  const error = document.getElementById('spaces-new-error');
-  if (backdrop === null || !(input instanceof HTMLInputElement) || error === null) return;
+  const host = document.getElementById('spaces-new-wizard');
+  if (backdrop === null || host === null) return;
+  newSpaceWizard = {
+    step: 1,
+    name: '',
+    purpose: '',
+    description: '',
+    objectives: [],
+    people: [],
+    shared: opts.shared === true,
+    aiConfigured: false,
+    aiProvider: null,
+    busy: false,
+  };
   backdrop.hidden = false;
   backdrop.setAttribute('aria-hidden', 'false');
-  input.value = '';
-  error.hidden = true;
-  error.textContent = '';
-  // Defer focus so the browser doesn't fight the modal animation.
-  requestAnimationFrame(() => input.focus());
+  renderNewSpaceWizard();
+  requestAnimationFrame(() => {
+    const first = document.getElementById('spaces-new-name-input');
+    if (first instanceof HTMLInputElement) first.focus();
+  });
+  // Probe AI availability in the background and refresh the step-2
+  // affordance when it resolves. Never blocks the wizard.
+  const aiBridge = window.lite?.ai;
+  if (aiBridge !== undefined) {
+    void aiBridge
+      .getStatus()
+      .then((res) => {
+        if (newSpaceWizard === null || res.ok === false) return;
+        newSpaceWizard.aiConfigured = res.value.configured;
+        newSpaceWizard.aiProvider = res.value.provider;
+        if (newSpaceWizard.step === 2) renderNewSpaceWizard();
+      })
+      .catch(() => {
+        /* status probe is best-effort */
+      });
+  }
 }
 
 function closeNewSpaceDialog(): void {
   const backdrop = document.getElementById('spaces-new-dialog-backdrop');
+  newSpaceWizard = null;
   if (backdrop === null) return;
   backdrop.hidden = true;
   backdrop.setAttribute('aria-hidden', 'true');
-  // Reset the dialog title in case it was customized for "+ Shared".
-  const title = document.getElementById('spaces-new-dialog-title');
-  if (title !== null) title.textContent = 'New space';
-  // Clear the shared-flip flag if the user cancelled mid-flow.
-  pendingSharedFlip = false;
 }
 
 function wireNewSpaceDialog(): void {
-  const form = document.getElementById('spaces-new-form');
-  const cancel = document.getElementById('spaces-new-cancel');
   const backdrop = document.getElementById('spaces-new-dialog-backdrop');
-  if (form instanceof HTMLFormElement) {
-    form.addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      void submitNewSpace();
-    });
-  }
-  if (cancel !== null) {
-    cancel.addEventListener('click', () => closeNewSpaceDialog());
-  }
   if (backdrop !== null) {
-    // Click on the dim area (NOT the modal itself) closes the dialog.
+    // Click on the dim area (NOT the modal itself) closes the dialog,
+    // unless a request is in flight.
     backdrop.addEventListener('click', (ev) => {
-      if (ev.target === backdrop) closeNewSpaceDialog();
+      if (ev.target === backdrop && newSpaceWizard !== null && newSpaceWizard.busy === false) {
+        closeNewSpaceDialog();
+      }
     });
   }
-  // Esc closes when the dialog is open.
+  // Single Enter-to-advance handler (attached once; reads live state).
+  const host = document.getElementById('spaces-new-wizard');
+  if (host !== null) {
+    host.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter') return;
+      const w = newSpaceWizard;
+      if (w === null || w.busy) return;
+      const target = ev.target;
+      if (target instanceof HTMLTextAreaElement) return; // newline in textareas
+      if (!(target instanceof HTMLInputElement)) return;
+      ev.preventDefault();
+      if (w.step === 4) void createSpaceFromWizard();
+      else handleWizardNext();
+    });
+  }
+  // Esc closes the wizard (when not busy); otherwise falls through to the
+  // existing row-menu / bulk-selection handling.
   document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') {
-      if (backdrop !== null && backdrop.hidden === false) closeNewSpaceDialog();
-      if (rowMenuState.spaceId !== null) closeRowMenu();
+    if (ev.key !== 'Escape') return;
+    if (newSpaceWizard !== null) {
+      if (newSpaceWizard.busy === false) closeNewSpaceDialog();
+      return;
     }
+    if (rowMenuState.spaceId !== null) {
+      closeRowMenu();
+      return;
+    }
+    if (state.selectedItemIds.size > 0) clearBulkSelection();
   });
 }
 
-async function submitNewSpace(): Promise<void> {
-  const input = document.getElementById('spaces-new-name-input');
-  const error = document.getElementById('spaces-new-error');
-  const submit = document.getElementById('spaces-new-submit');
-  if (!(input instanceof HTMLInputElement) || error === null) return;
-  const name = input.value.trim();
-  if (name.length === 0) {
-    showDialogError(error, 'Please enter a name.');
-    return;
-  }
-  if (submit instanceof HTMLButtonElement) submit.disabled = true;
+// ── Pure helpers (exported for tests via __spacesRendererForTesting) ──────
+
+/**
+ * Fold the polished description and objectives into a single Space
+ * `description` string -- the only metadata text field the data model
+ * exposes today. Objectives render as a bulleted block beneath the
+ * purpose. Empty objectives are dropped.
+ */
+function composeSpaceDescription(description: string, objectives: string[]): string {
+  const desc = description.trim();
+  const objs = objectives.map((o) => o.trim()).filter((o) => o.length > 0);
+  if (objs.length === 0) return desc;
+  const block = `Objectives:\n${objs.map((o) => `• ${o}`).join('\n')}`;
+  return desc.length > 0 ? `${desc}\n\n${block}` : block;
+}
+
+/**
+ * Turn a wizard person row into an identity-upsert payload, or null when
+ * the row is blank. The id is the email when present (stable per person),
+ * otherwise a slug + random suffix.
+ */
+function normalizeWizardPerson(
+  p: WizardPerson
+): { identity: { id: string; name?: string; email?: string } } | null {
+  const name = p.name.trim();
+  const email = p.email.trim();
+  if (name.length === 0 && email.length === 0) return null;
+  const id = email.length > 0 ? email.toLowerCase() : `person-${slugify(name)}-${randomSuffix()}`;
+  const identity: { id: string; name?: string; email?: string } = { id };
+  if (name.length > 0) identity.name = name;
+  if (email.length > 0) identity.email = email;
+  return { identity };
+}
+
+function slugify(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug.length > 0 ? slug : 'person';
+}
+
+function randomSuffix(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
+
+// ── DOM construction ──────────────────────────────────────────────────────
+
+function wizEl<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className?: string,
+  text?: string
+): HTMLElementTagNameMap[K] {
+  const el = document.createElement(tag);
+  if (className !== undefined) el.className = className;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function renderNewSpaceWizard(): void {
+  const w = newSpaceWizard;
+  const host = document.getElementById('spaces-new-wizard');
+  if (w === null || host === null) return;
+  host.replaceChildren();
+
+  const head = wizEl('div', 'spaces-wizard-head');
+  const title = wizEl('h2', 'spaces-wizard-title', w.shared ? 'New shared space' : 'New space');
+  title.id = 'spaces-new-dialog-title';
+  head.appendChild(title);
+  const steps = wizEl('div', 'spaces-wizard-steps');
+  steps.setAttribute('aria-hidden', 'true');
+  ([1, 2, 3, 4] as const).forEach((n) => {
+    const pill = wizEl('span', 'spaces-wizard-step-pill', String(n));
+    if (n === w.step) pill.classList.add('is-active');
+    else if (n < w.step) pill.classList.add('is-done');
+    steps.appendChild(pill);
+  });
+  head.appendChild(steps);
+  host.appendChild(head);
+
+  host.appendChild(
+    wizEl('p', 'spaces-modal-help', `Step ${w.step} of 4 · ${WIZARD_STEP_LABELS[w.step]}`)
+  );
+
+  const body = wizEl('div', 'spaces-wizard-body');
+  if (w.step === 1) body.appendChild(buildWizardStepBasics(w));
+  else if (w.step === 2) body.appendChild(buildWizardStepDetails(w));
+  else if (w.step === 3) body.appendChild(buildWizardStepPeople(w));
+  else body.appendChild(buildWizardStepReview(w));
+  host.appendChild(body);
+
+  const error = wizEl('div', 'spaces-modal-error');
+  error.id = 'spaces-new-error';
   error.hidden = true;
-  error.textContent = '';
-  const bridge = window.lite?.spaces;
-  if (bridge === undefined) {
-    showDialogError(error, 'Bridge unavailable. Reload the window.');
-    if (submit instanceof HTMLButtonElement) submit.disabled = false;
+  host.appendChild(error);
+
+  const foot = wizEl('div', 'spaces-wizard-foot');
+  const left = wizEl('button', 'spaces-modal-button', w.step === 1 ? 'Cancel' : 'Back');
+  left.type = 'button';
+  left.disabled = w.busy;
+  left.addEventListener('click', () => {
+    if (w.step === 1) closeNewSpaceDialog();
+    else handleWizardBack();
+  });
+  foot.appendChild(left);
+
+  const rightLabel = w.step === 4 ? (w.busy ? 'Creating…' : 'Create space') : 'Next';
+  const right = wizEl('button', 'spaces-modal-button spaces-modal-button-primary', rightLabel);
+  right.type = 'button';
+  right.disabled = w.busy;
+  right.addEventListener('click', () => {
+    if (w.step === 4) void createSpaceFromWizard();
+    else handleWizardNext();
+  });
+  foot.appendChild(right);
+  host.appendChild(foot);
+}
+
+function buildWizardStepBasics(w: NewSpaceWizardState): HTMLElement {
+  const step = wizEl('div', 'spaces-wizard-step');
+
+  const nameField = wizEl('div', 'spaces-wizard-field');
+  const nameLabel = wizEl('label', 'spaces-modal-label', 'Name');
+  nameLabel.setAttribute('for', 'spaces-new-name-input');
+  const nameInput = wizEl('input', 'spaces-modal-input');
+  nameInput.id = 'spaces-new-name-input';
+  nameInput.type = 'text';
+  nameInput.value = w.name;
+  nameInput.placeholder = 'e.g. Quarterly Audit';
+  nameInput.maxLength = 80;
+  nameInput.autocomplete = 'off';
+  nameInput.spellcheck = false;
+  nameField.append(nameLabel, nameInput);
+
+  const purposeField = wizEl('div', 'spaces-wizard-field');
+  const purposeLabel = wizEl('label', 'spaces-modal-label', 'What is this Space for?');
+  purposeLabel.setAttribute('for', 'spaces-new-purpose-input');
+  const purposeInput = wizEl('textarea', 'spaces-modal-input spaces-wizard-textarea');
+  purposeInput.id = 'spaces-new-purpose-input';
+  purposeInput.value = w.purpose;
+  purposeInput.rows = 3;
+  purposeInput.placeholder =
+    'A sentence or two about the purpose — the AI can polish this and suggest objectives next.';
+  const hint = wizEl(
+    'p',
+    'spaces-wizard-hint',
+    'Optional, but it powers the AI draft on the next step.'
+  );
+  purposeField.append(purposeLabel, purposeInput, hint);
+
+  step.append(nameField, purposeField);
+  return step;
+}
+
+function buildWizardStepDetails(w: NewSpaceWizardState): HTMLElement {
+  const step = wizEl('div', 'spaces-wizard-step');
+
+  if (window.lite?.ai !== undefined) {
+    const aiBox = wizEl('div', 'spaces-wizard-ai');
+    const aiBtn = wizEl('button', 'spaces-wizard-ai-btn', w.busy ? 'Drafting…' : '✨ Draft with AI');
+    aiBtn.type = 'button';
+    aiBtn.disabled = w.busy || !w.aiConfigured;
+    aiBtn.addEventListener('click', () => {
+      void handleDraftWithAi();
+    });
+    const providerLabel =
+      w.aiProvider === 'claude' ? 'Claude' : w.aiProvider === 'onereach-flow' ? 'OneReach flow' : null;
+    const hint = wizEl(
+      'span',
+      'spaces-wizard-hint',
+      w.aiConfigured
+        ? `Turns your purpose into a polished description + objectives${providerLabel !== null ? ` (via ${providerLabel})` : ''}.`
+        : 'Connect a Claude API key or a OneReach flow to enable AI drafting (see lite/ai/README.md). You can still fill these in manually.'
+    );
+    aiBox.append(aiBtn, hint);
+    step.appendChild(aiBox);
+  }
+
+  const descField = wizEl('div', 'spaces-wizard-field');
+  const descLabel = wizEl('label', 'spaces-modal-label', 'Description');
+  descLabel.setAttribute('for', 'spaces-new-desc-input');
+  const descInput = wizEl('textarea', 'spaces-modal-input spaces-wizard-textarea');
+  descInput.id = 'spaces-new-desc-input';
+  descInput.rows = 3;
+  descInput.value = w.description.length > 0 ? w.description : w.purpose;
+  descInput.placeholder = "A clear statement of the Space's purpose.";
+  descField.append(descLabel, descInput);
+  step.appendChild(descField);
+
+  const objField = wizEl('div', 'spaces-wizard-field');
+  objField.appendChild(wizEl('label', 'spaces-modal-label', 'High-level objectives'));
+  const list = wizEl('div', 'spaces-wizard-rows');
+  list.id = 'spaces-new-objectives';
+  const objs = w.objectives.length > 0 ? w.objectives : [''];
+  objs.forEach((obj, i) => list.appendChild(buildObjectiveRow(obj, i)));
+  objField.appendChild(list);
+  const addBtn = wizEl('button', 'spaces-wizard-add', '+ Add objective');
+  addBtn.type = 'button';
+  addBtn.disabled = w.busy;
+  addBtn.addEventListener('click', () => {
+    captureNewSpaceStep();
+    if (newSpaceWizard === null || newSpaceWizard.objectives.length >= MAX_WIZARD_OBJECTIVES) return;
+    newSpaceWizard.objectives.push('');
+    renderNewSpaceWizard();
+    focusLast('#spaces-new-objectives .spaces-wizard-row-input');
+  });
+  objField.appendChild(addBtn);
+  step.appendChild(objField);
+
+  return step;
+}
+
+function buildObjectiveRow(value: string, index: number): HTMLElement {
+  const row = wizEl('div', 'spaces-wizard-row');
+  const input = wizEl('input', 'spaces-modal-input spaces-wizard-row-input');
+  input.type = 'text';
+  input.value = value;
+  input.placeholder = 'e.g. Centralize vendor contracts';
+  const remove = wizEl('button', 'spaces-wizard-row-remove', '×');
+  remove.type = 'button';
+  remove.title = 'Remove objective';
+  remove.setAttribute('aria-label', 'Remove objective');
+  remove.addEventListener('click', () => {
+    captureNewSpaceStep();
+    if (newSpaceWizard === null) return;
+    newSpaceWizard.objectives.splice(index, 1);
+    renderNewSpaceWizard();
+  });
+  row.append(input, remove);
+  return row;
+}
+
+function buildWizardStepPeople(w: NewSpaceWizardState): HTMLElement {
+  const step = wizEl('div', 'spaces-wizard-step');
+  step.appendChild(
+    wizEl(
+      'p',
+      'spaces-modal-help',
+      'Add people to this Space now, or skip and add them later. A name or an email is enough.'
+    )
+  );
+  const list = wizEl('div', 'spaces-wizard-rows');
+  list.id = 'spaces-new-people';
+  const people = w.people.length > 0 ? w.people : [{ name: '', email: '' }];
+  people.forEach((p, i) => list.appendChild(buildPersonRow(p, i)));
+  step.appendChild(list);
+  const addBtn = wizEl('button', 'spaces-wizard-add', '+ Add person');
+  addBtn.type = 'button';
+  addBtn.disabled = w.busy;
+  addBtn.addEventListener('click', () => {
+    captureNewSpaceStep();
+    if (newSpaceWizard === null) return;
+    newSpaceWizard.people.push({ name: '', email: '' });
+    renderNewSpaceWizard();
+    focusLast('#spaces-new-people .spaces-wizard-person-name');
+  });
+  step.appendChild(addBtn);
+  return step;
+}
+
+function buildPersonRow(p: WizardPerson, index: number): HTMLElement {
+  const row = wizEl('div', 'spaces-wizard-row');
+  const name = wizEl('input', 'spaces-modal-input spaces-wizard-person-name');
+  name.type = 'text';
+  name.value = p.name;
+  name.placeholder = 'Name';
+  name.setAttribute('data-person-field', 'name');
+  const email = wizEl('input', 'spaces-modal-input spaces-wizard-person-email');
+  email.type = 'email';
+  email.value = p.email;
+  email.placeholder = 'Email';
+  email.setAttribute('data-person-field', 'email');
+  const remove = wizEl('button', 'spaces-wizard-row-remove', '×');
+  remove.type = 'button';
+  remove.title = 'Remove person';
+  remove.setAttribute('aria-label', 'Remove person');
+  remove.addEventListener('click', () => {
+    captureNewSpaceStep();
+    if (newSpaceWizard === null) return;
+    newSpaceWizard.people.splice(index, 1);
+    renderNewSpaceWizard();
+  });
+  row.append(name, email, remove);
+  return row;
+}
+
+function buildWizardStepReview(w: NewSpaceWizardState): HTMLElement {
+  const step = wizEl('div', 'spaces-wizard-step spaces-wizard-review');
+  step.appendChild(buildReviewRow('Name', w.name.trim().length > 0 ? w.name.trim() : '—'));
+  if (w.shared) step.appendChild(buildReviewRow('Kind', 'Shared · AI-managed'));
+
+  const desc = (w.description.trim().length > 0 ? w.description : w.purpose).trim();
+  step.appendChild(buildReviewRow('Description', desc.length > 0 ? desc : '—'));
+
+  const objs = w.objectives.map((o) => o.trim()).filter((o) => o.length > 0);
+  step.appendChild(buildReviewListRow('Objectives', objs, '—'));
+
+  const people = w.people
+    .map(normalizeWizardPerson)
+    .filter((p): p is NonNullable<ReturnType<typeof normalizeWizardPerson>> => p !== null)
+    .map((p) => {
+      const id = p.identity;
+      if (id.name !== undefined && id.email !== undefined) return `${id.name} · ${id.email}`;
+      return id.name ?? id.email ?? id.id;
+    });
+  step.appendChild(buildReviewListRow('People', people, 'None yet'));
+
+  return step;
+}
+
+function buildReviewRow(label: string, value: string): HTMLElement {
+  const row = wizEl('div', 'spaces-wizard-review-row');
+  row.appendChild(wizEl('span', 'spaces-wizard-review-label', label));
+  row.appendChild(wizEl('span', 'spaces-wizard-review-value', value));
+  return row;
+}
+
+function buildReviewListRow(label: string, values: string[], emptyText: string): HTMLElement {
+  const row = wizEl('div', 'spaces-wizard-review-row');
+  row.appendChild(wizEl('span', 'spaces-wizard-review-label', label));
+  if (values.length === 0) {
+    row.appendChild(wizEl('span', 'spaces-wizard-review-value', emptyText));
+  } else {
+    const ul = wizEl('ul', 'spaces-wizard-review-list');
+    values.forEach((v) => ul.appendChild(wizEl('li', undefined, v)));
+    row.appendChild(ul);
+  }
+  return row;
+}
+
+function focusLast(selector: string): void {
+  const nodes = document.querySelectorAll(selector);
+  const last = nodes[nodes.length - 1];
+  if (last instanceof HTMLElement) last.focus();
+}
+
+// ── State capture + navigation ────────────────────────────────────────────
+
+function captureNewSpaceStep(): void {
+  const w = newSpaceWizard;
+  if (w === null) return;
+  if (w.step === 1) {
+    const name = document.getElementById('spaces-new-name-input');
+    const purpose = document.getElementById('spaces-new-purpose-input');
+    if (name instanceof HTMLInputElement) w.name = name.value;
+    if (purpose instanceof HTMLTextAreaElement) w.purpose = purpose.value;
+  } else if (w.step === 2) {
+    const desc = document.getElementById('spaces-new-desc-input');
+    if (desc instanceof HTMLTextAreaElement) w.description = desc.value;
+    const list = document.getElementById('spaces-new-objectives');
+    if (list !== null) {
+      w.objectives = Array.from(list.querySelectorAll('.spaces-wizard-row-input')).map((el) =>
+        el instanceof HTMLInputElement ? el.value : ''
+      );
+    }
+  } else if (w.step === 3) {
+    const list = document.getElementById('spaces-new-people');
+    if (list !== null) {
+      w.people = Array.from(list.querySelectorAll('.spaces-wizard-row')).map((row) => {
+        const nameEl = row.querySelector('[data-person-field="name"]');
+        const emailEl = row.querySelector('[data-person-field="email"]');
+        return {
+          name: nameEl instanceof HTMLInputElement ? nameEl.value : '',
+          email: emailEl instanceof HTMLInputElement ? emailEl.value : '',
+        };
+      });
+    }
+  }
+}
+
+function handleWizardNext(): void {
+  const w = newSpaceWizard;
+  if (w === null) return;
+  captureNewSpaceStep();
+  if (w.step === 1 && w.name.trim().length === 0) {
+    showWizardError('Please enter a name.');
+    const name = document.getElementById('spaces-new-name-input');
+    if (name instanceof HTMLInputElement) name.focus();
     return;
   }
+  if (w.step < 4) {
+    w.step = (w.step + 1) as NewSpaceWizardState['step'];
+    renderNewSpaceWizard();
+  }
+}
+
+function handleWizardBack(): void {
+  const w = newSpaceWizard;
+  if (w === null) return;
+  captureNewSpaceStep();
+  if (w.step > 1) {
+    w.step = (w.step - 1) as NewSpaceWizardState['step'];
+    renderNewSpaceWizard();
+  }
+}
+
+function setWizardBusy(busy: boolean): void {
+  if (newSpaceWizard === null) return;
+  newSpaceWizard.busy = busy;
+  renderNewSpaceWizard();
+}
+
+function showWizardError(message: string): void {
+  const error = document.getElementById('spaces-new-error');
+  if (error === null) return;
+  error.textContent = message;
+  error.hidden = false;
+}
+
+async function handleDraftWithAi(): Promise<void> {
+  const w = newSpaceWizard;
+  if (w === null) return;
+  captureNewSpaceStep();
+  const aiBridge = window.lite?.ai;
+  if (aiBridge === undefined) {
+    showWizardError('AI assist is unavailable in this build.');
+    return;
+  }
+  const purpose = (w.description.trim().length > 0 ? w.description : w.purpose).trim();
+  if (purpose.length === 0) {
+    showWizardError('Add a sentence about the purpose first, then draft with AI.');
+    const desc = document.getElementById('spaces-new-desc-input');
+    if (desc instanceof HTMLTextAreaElement) desc.focus();
+    return;
+  }
+  setWizardBusy(true);
   try {
-    const envelope = await bridge.createSpace({ name });
-    if (envelope.ok === false) {
-      showDialogError(error, envelope.error.message);
-      if (submit instanceof HTMLButtonElement) submit.disabled = false;
+    const name = w.name.trim();
+    const res = await aiBridge.spaceAssist(purpose, name.length > 0 ? name : undefined);
+    if (newSpaceWizard === null) return;
+    newSpaceWizard.busy = false;
+    if (res.ok === false) {
+      renderNewSpaceWizard();
+      const remediation = res.error.remediation;
+      showWizardError(
+        remediation !== undefined && remediation.length > 0
+          ? `${res.error.message} ${remediation}`
+          : res.error.message
+      );
       return;
     }
-    // Phase 4 v2: if the user clicked "+ Shared", flip kind to shared
-    // before refreshing the list so the new row paints with the badge.
-    // Failure here is non-fatal — the space exists, just as a regular
-    // user-managed one; the user can re-flip via the row menu.
-    const createdId = (envelope.value as { id?: unknown }).id;
-    if (pendingSharedFlip && typeof createdId === 'string') {
+    newSpaceWizard.description = res.value.description;
+    newSpaceWizard.objectives = res.value.objectives.slice(0, MAX_WIZARD_OBJECTIVES);
+    renderNewSpaceWizard();
+  } catch (err) {
+    if (newSpaceWizard !== null) {
+      newSpaceWizard.busy = false;
+      renderNewSpaceWizard();
+    }
+    showWizardError(messageFrom(err));
+  }
+}
+
+async function createSpaceFromWizard(): Promise<void> {
+  const w = newSpaceWizard;
+  if (w === null) return;
+  captureNewSpaceStep();
+  const name = w.name.trim();
+  if (name.length === 0) {
+    w.step = 1;
+    renderNewSpaceWizard();
+    showWizardError('Please enter a name.');
+    return;
+  }
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    showWizardError('Bridge unavailable. Reload the window.');
+    return;
+  }
+  setWizardBusy(true);
+  try {
+    const description = composeSpaceDescription(
+      w.description.trim().length > 0 ? w.description : w.purpose,
+      w.objectives
+    );
+    const created = await bridge.createSpace(
+      description.length > 0 ? { name, description } : { name }
+    );
+    if (created.ok === false) {
+      setWizardBusy(false);
+      showWizardError(created.error.message);
+      return;
+    }
+    const createdId = (created.value as { id?: unknown }).id;
+    const id = typeof createdId === 'string' ? createdId : null;
+
+    // Flip to a shared (AI-managed) space when requested. Soft-fail: the
+    // space exists either way; the user can re-flip via the row menu.
+    if (w.shared && id !== null) {
       try {
-        await bridge.setSpaceKind(createdId, 'shared');
+        await bridge.setSpaceKind(id, 'shared');
       } catch {
-        // Soft fail: surface a softer toast instead of an error banner.
+        /* non-fatal */
       }
     }
-    const wasShared = pendingSharedFlip;
-    pendingSharedFlip = false;
+
+    // Add people up front. Per-person soft-fail; we report the tally.
+    let peopleAdded = 0;
+    let peopleFailed = 0;
+    if (id !== null) {
+      for (const row of w.people) {
+        const person = normalizeWizardPerson(row);
+        if (person === null) continue;
+        try {
+          const upserted = await bridge.identity.getOrCreatePerson(person.identity);
+          if (upserted.ok === false) {
+            peopleFailed += 1;
+            continue;
+          }
+          const added = await bridge.members.add(id, upserted.value.id);
+          if (added.ok === false) peopleFailed += 1;
+          else peopleAdded += 1;
+        } catch {
+          peopleFailed += 1;
+        }
+      }
+    }
+
+    const wasShared = w.shared;
     closeNewSpaceDialog();
     await loadSpaces();
-    showToast(wasShared ? `Created shared space "${name}"` : `Created "${name}"`);
-    // Auto-navigate into the new space so the user lands on something useful.
-    if (typeof createdId === 'string') setActiveScope(createdId);
+    let toast = wasShared ? `Created shared space "${name}"` : `Created "${name}"`;
+    if (peopleAdded > 0) {
+      toast += ` · ${peopleAdded} ${peopleAdded === 1 ? 'person' : 'people'} added`;
+    }
+    if (peopleFailed > 0) {
+      toast += ` · ${peopleFailed} couldn't be added`;
+    }
+    showToast(toast);
+    if (id !== null) setActiveScope(id);
   } catch (err) {
-    showDialogError(error, messageFrom(err));
-  } finally {
-    if (submit instanceof HTMLButtonElement) submit.disabled = false;
+    setWizardBusy(false);
+    showWizardError(messageFrom(err));
   }
 }
 
@@ -5616,9 +8378,11 @@ let newAssetFile: File | null = null;
 function wireNewAssetDialog(): void {
   const form = document.getElementById('spaces-new-asset-form');
   const cancel = document.getElementById('spaces-new-asset-cancel');
+  const close = document.getElementById('spaces-new-asset-close');
   const backdrop = document.getElementById('spaces-new-asset-backdrop');
   const tabs = document.querySelectorAll<HTMLButtonElement>('[data-asset-tab]');
   const fileInput = document.getElementById('spaces-new-asset-file-input');
+  const dropzone = document.getElementById('spaces-new-asset-dropzone');
 
   if (form instanceof HTMLFormElement) {
     form.addEventListener('submit', (ev) => {
@@ -5628,6 +8392,9 @@ function wireNewAssetDialog(): void {
   }
   if (cancel !== null) {
     cancel.addEventListener('click', () => closeNewAssetDialog());
+  }
+  if (close !== null) {
+    close.addEventListener('click', () => closeNewAssetDialog());
   }
   if (backdrop !== null) {
     backdrop.addEventListener('click', (ev) => {
@@ -5644,22 +8411,24 @@ function wireNewAssetDialog(): void {
   if (fileInput instanceof HTMLInputElement) {
     fileInput.addEventListener('change', () => {
       const file = fileInput.files?.[0] ?? null;
-      newAssetFile = file;
-      const hint = document.getElementById('spaces-new-asset-file-hint');
-      if (hint !== null) {
-        hint.textContent = file !== null
-          ? `${file.name} (${formatBytes(file.size)})`
-          : 'No file selected.';
-      }
-      // Auto-fill the title with the filename if empty.
-      const titleInput = document.getElementById('spaces-new-asset-title-input');
-      if (
-        file !== null &&
-        titleInput instanceof HTMLInputElement &&
-        titleInput.value.trim().length === 0
-      ) {
-        titleInput.value = file.name;
-      }
+      handleNewAssetFileSelection(file);
+    });
+  }
+  // Dropzone drag-drop (modal-scoped — separate from the items-region
+  // dropzone which opens the modal in the first place).
+  if (dropzone !== null) {
+    dropzone.addEventListener('dragover', (ev) => {
+      ev.preventDefault();
+      dropzone.classList.add('is-drag-target');
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('is-drag-target');
+    });
+    dropzone.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      dropzone.classList.remove('is-drag-target');
+      const file = ev.dataTransfer?.files?.[0] ?? null;
+      handleNewAssetFileSelection(file);
     });
   }
   // Esc closes when open.
@@ -5670,6 +8439,37 @@ function wireNewAssetDialog(): void {
       closeNewAssetDialog();
     }
   });
+}
+
+function handleNewAssetFileSelection(file: File | null): void {
+  newAssetFile = file;
+  const chip = document.getElementById('spaces-new-asset-file-hint');
+  if (chip !== null) {
+    if (file !== null) {
+      chip.hidden = false;
+      chip.innerHTML = '';
+      const name = document.createElement('span');
+      name.className = 'spaces-new-asset-file-chip-name';
+      name.textContent = file.name;
+      const meta = document.createElement('span');
+      meta.className = 'spaces-new-asset-file-chip-meta';
+      meta.textContent = `${formatBytes(file.size)}${file.type.length > 0 ? ` · ${file.type}` : ''}`;
+      chip.appendChild(name);
+      chip.appendChild(meta);
+    } else {
+      chip.hidden = true;
+      chip.replaceChildren();
+    }
+  }
+  // Auto-fill the title with the filename if empty.
+  const titleInput = document.getElementById('spaces-new-asset-title-input');
+  if (
+    file !== null &&
+    titleInput instanceof HTMLInputElement &&
+    titleInput.value.trim().length === 0
+  ) {
+    titleInput.value = file.name;
+  }
 }
 
 function switchNewAssetMode(mode: 'text' | 'upload'): void {
@@ -5697,20 +8497,16 @@ function openNewAssetDialog(presetFile: File | null = null): void {
   titleInput.value = '';
   if (contentInput instanceof HTMLTextAreaElement) contentInput.value = '';
   if (fileInput instanceof HTMLInputElement) fileInput.value = '';
-  newAssetFile = null;
-  const hint = document.getElementById('spaces-new-asset-file-hint');
-  if (hint !== null) hint.textContent = 'No file selected.';
+  // Reset the file chip (and clear stashed file).
+  handleNewAssetFileSelection(null);
   if (error !== null) {
     error.hidden = true;
     error.textContent = '';
   }
-  // If a file was preset (via drag-drop), switch to upload mode and stash it.
+  // If a file was preset (via items-region drag-drop), switch to upload
+  // mode and seed the chip + title.
   if (presetFile !== null) {
-    newAssetFile = presetFile;
-    titleInput.value = presetFile.name;
-    if (hint !== null) {
-      hint.textContent = `${presetFile.name} (${formatBytes(presetFile.size)})`;
-    }
+    handleNewAssetFileSelection(presetFile);
     switchNewAssetMode('upload');
   } else {
     switchNewAssetMode('text');
@@ -5752,6 +8548,12 @@ async function submitNewAsset(): Promise<void> {
       ? ''
       : state.activeScopeId;
 
+  // Captured on success so we can fire background Claude enrichment after
+  // the dialog closes (auto-on-create). `null` until a create succeeds.
+  let createdEnrich:
+    | { id: string; kind: string; mimeType?: string; hasContent: boolean }
+    | null = null;
+
   try {
     const creatorId = readCurrentEditorId();
     if (newAssetMode === 'upload' && newAssetFile !== null) {
@@ -5761,10 +8563,16 @@ async function submitNewAsset(): Promise<void> {
       // (returns {} on failure). See lite/spaces/metadata-extractor.ts.
       const metadata = await extractMetadataFromFile(file);
       const bytes = await readFileAsBase64(file);
+      const kind = inferKindFromMime(file.type) as
+        | 'image'
+        | 'video'
+        | 'audio'
+        | 'document'
+        | 'other';
       const payload: Parameters<typeof bridge.items.create>[0] = {
         spaceId,
         title,
-        kind: inferKindFromMime(file.type) as 'image' | 'video' | 'audio' | 'document' | 'other',
+        kind,
         mimeType: file.type,
         size: file.size,
         content: bytes, // base64 stub for v1
@@ -5777,6 +8585,9 @@ async function submitNewAsset(): Promise<void> {
         if (submit instanceof HTMLButtonElement) submit.disabled = false;
         return;
       }
+      // hasContent: false — the base64 stub isn't readable text; image/
+      // PDF eligibility is driven by kind + mimeType in the enricher.
+      createdEnrich = { id: envelope.value.id, kind, mimeType: file.type, hasContent: false };
     } else {
       const content =
         contentInput instanceof HTMLTextAreaElement ? contentInput.value : '';
@@ -5799,10 +8610,25 @@ async function submitNewAsset(): Promise<void> {
         if (submit instanceof HTMLButtonElement) submit.disabled = false;
         return;
       }
+      createdEnrich = {
+        id: envelope.value.id,
+        kind: 'text',
+        hasContent: content.trim().length > 0,
+      };
     }
     closeNewAssetDialog();
     showToast(`Created "${title}"`);
     await loadItems();
+    // Fire Claude enrichment in the background (no await) so the create
+    // flow stays snappy. Silent when AI isn't configured.
+    if (createdEnrich !== null) {
+      const enrich = createdEnrich;
+      void autoEnrichOnCreate(enrich.id, {
+        kind: enrich.kind,
+        ...(enrich.mimeType !== undefined ? { mimeType: enrich.mimeType } : {}),
+        hasContent: enrich.hasContent,
+      });
+    }
   } catch (err) {
     showDialogError(error, messageFrom(err));
   } finally {

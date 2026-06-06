@@ -26,6 +26,10 @@ export const AI_RUN_TIMES_EVENTS = {
   READING_LOG_EXPORTED: 'ai-run-times.reading-log.exported',
   READING_LOG_CLEARED: 'ai-run-times.reading-log.cleared',
   CHANGED: 'ai-run-times.changed',
+  // Self-heal: emitted when a corrupt KV blob is detected on read and
+  // overwritten with a fresh default. Surfaced so operators can see
+  // data-recovery events instead of them hiding in a warn log line.
+  SELF_HEAL: 'ai-run-times.self-heal',
   // IPC entry events (per ADR-030). Every IPC handler emits its
   // entry event BEFORE doing any real work, so renderer-driven
   // activity is observable in `/logs?category=ai-run-times` even

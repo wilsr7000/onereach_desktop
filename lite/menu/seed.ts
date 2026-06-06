@@ -46,6 +46,8 @@ export interface SeedHandlers {
   onOpenActiveTabDevTools?: () => void;
   /** Called when the user clicks Open DevTools for All Windows. */
   onOpenAllDevTools?: () => void;
+  /** Called when the user clicks Open WISER Playbooks (opens the web app in a dedicated Lite window). */
+  onOpenWiserPlaybooks?: () => void;
 }
 
 let seeded = false;
@@ -254,6 +256,33 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
       label: 'Open DevTools for All Windows',
       order: 20,
       click: openAllDevTools,
+    });
+  }
+
+  // Planning menu (top-level). Groups planning apps; currently hosts the
+  // WISER Playbooks launcher, which opens the WISER Playbooks web app in a
+  // dedicated Lite browser window (see lite/wiser-playbooks-window.ts).
+  // Gated on the handler so the kernel stays minimal when a host doesn't
+  // wire it (same pattern as Dev Tools / Settings). Order 85 slots it
+  // after the module menus that register themselves on init (idw 60 /
+  // tools 70 / university 80) and before Dev Tools (90) / Help (100).
+  // No accelerator + no role per ADR-015. Additional planning tools can
+  // register more children under top:planning later.
+  if (handlers.onOpenWiserPlaybooks !== undefined) {
+    const openWiser = handlers.onOpenWiserPlaybooks;
+    registry.upsert({
+      id: 'top:planning',
+      type: 'top-level',
+      label: 'Planning',
+      order: 85,
+    });
+    registry.upsert({
+      id: 'planning:wiser-playbooks',
+      type: 'item',
+      parentId: 'top:planning',
+      label: 'WISER Playbooks',
+      order: 0,
+      click: openWiser,
     });
   }
 

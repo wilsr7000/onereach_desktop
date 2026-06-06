@@ -121,13 +121,46 @@ describe('SdkKVClient.set', () => {
   it('throws KVError with status 401 when signed-out (no accountId)', async () => {
     const { client } = makeClient({ accountId: null });
     try {
-      await client.set('coll', 'key', 'value');
+      // Pass a structured blob so the input validator (which would
+      // otherwise reject a primitive with KV_INVALID_INPUT before the
+      // SDK runs) lets the request through to the auth path.
+      await client.set('coll', 'key', { value: 'x' });
       throw new Error('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(KVError);
       expect((err as KVError).status).toBe(401);
       expect((err as KVError).code).toBe(KV_ERROR_CODES.HTTP);
     }
+  });
+
+  // Regression guard for the "menus disappeared" bug: a bare
+  // `undefined` once landed in KV as the string `"undefined"` and
+  // poisoned reads forever after. The validator now blocks every
+  // shape that previously corrupted the store.
+  describe('rejects malformed inputs before they reach the SDK', () => {
+    it.each<[string, unknown]>([
+      ['undefined', undefined],
+      ['null', null],
+      ['string primitive', 'a string'],
+      ['number primitive', 42],
+      ['boolean primitive', true],
+      ['array', [{ tabs: [] }]],
+    ])('throws KV_INVALID_INPUT for %s', async (_label, badValue) => {
+      const { client, sdks } = makeClient({ store: new Map() });
+      await expect(client.set('coll', 'k', badValue)).rejects.toMatchObject({
+        code: KV_ERROR_CODES.INVALID_INPUT,
+      });
+      // No SDK ever instantiated → no network traffic.
+      expect(sdks).toHaveLength(0);
+    });
+
+    it('accepts plain objects (including empty ones)', async () => {
+      const { client, sdks } = makeClient({ store: new Map() });
+      await client.set('coll', 'k', {});
+      await client.set('coll', 'k', { entries: [] });
+      expect(sdks).toHaveLength(1);
+      expect(sdks[0]?.calls.length).toBe(2);
+    });
   });
 });
 
@@ -285,6 +318,41 @@ describe('SdkKVClient.get', () => {
       expect((err as KVError).status).toBe(500);
     }
   });
+
+  describe('translates the "No data found" sentinel to null', () => {
+    // Some OneReach KV API deployments respond 200 with the body
+    // `{Status: "No data found."}` instead of a 404 when a key is
+    // absent. The SDK forwards the body verbatim as the stored value,
+    // so without translation the store sees an object that fails its
+    // shape check and triggers a (now-self-healing) recovery. Cleaner
+    // to short-circuit the sentinel here than to leak it downstream.
+    const SENTINEL = { Status: 'No data found.' };
+
+    it('returns null when value matches the sentinel exactly', async () => {
+      const store = new Map<string, unknown>([['coll/missing', SENTINEL]]);
+      const { client } = makeClient({ store });
+      const result = await client.get('coll', 'missing');
+      expect(result).toBeNull();
+    });
+
+    it('passes through legitimate objects that happen to have a Status field', async () => {
+      // An object with `Status` PLUS other keys is real data, not the
+      // sentinel — must NOT be coerced to null.
+      const realData = { Status: 'open', priority: 'low' };
+      const store = new Map<string, unknown>([['coll/k', realData]]);
+      const { client } = makeClient({ store });
+      const result = await client.get('coll', 'k');
+      expect(result).toEqual(realData);
+    });
+
+    it('passes through objects with a Status field of a different value', async () => {
+      const otherStatus = { Status: 'something else' };
+      const store = new Map<string, unknown>([['coll/k', otherStatus]]);
+      const { client } = makeClient({ store });
+      const result = await client.get('coll', 'k');
+      expect(result).toEqual(otherStatus);
+    });
+  });
 });
 
 describe('SdkKVClient.listKeys + .list', () => {
@@ -336,14 +404,18 @@ describe('SdkKVClient account switch', () => {
       accountId: () => activeAccountId,
       sdkCtor: SdkCtor,
     });
-    await client.set('coll', 'k', 'v').catch(() => undefined);
-    await client.set('coll', 'k', 'v').catch(() => undefined);
+    // Structured blob: the input validator rejects bare primitives
+    // (which would have skipped the SDK construction we're trying to
+    // measure here), so wrap the payload in a plain object.
+    const blob = { value: 'v' };
+    await client.set('coll', 'k', blob).catch(() => undefined);
+    await client.set('coll', 'k', blob).catch(() => undefined);
     expect(sdks).toHaveLength(1);
     expect(sdks[0]?.storedAccountId).toBe('acct-A');
 
     // Switch user.
     activeAccountId = 'acct-B';
-    await client.set('coll', 'k', 'v').catch(() => undefined);
+    await client.set('coll', 'k', blob).catch(() => undefined);
     expect(sdks).toHaveLength(2);
     expect(sdks[1]?.storedAccountId).toBe('acct-B');
   });

@@ -50,46 +50,58 @@
       <div id="tab-list" class="tab-list" aria-live="polite"></div>
     </div>
 
-    <!-- Home view: visible when no agent tab is active. Tab views in
-         the main process cover this region when a tab is foregrounded. -->
-    <main id="home-view" class="home-view">
+    <!-- Home view: the chat surface IS the Home tab. When the user
+         opens an IDW, its WebContentsView covers this region; closing
+         the IDW returns the user here. The chat handles sign-in inline
+         (no separate boot screen), then sits with the welcome + recent
+         activity digest for the life of the window. -->
+    <main id="home-view" class="home-view" role="main">
       <!-- Decorative orb mark -- partially off-screen bottom-right,
            heavily faded. Pure CSS (no asset to ship); pointer-events
            none so it never intercepts clicks; aria-hidden because
            it carries no semantic meaning. -->
       <div class="home-orb" aria-hidden="true"></div>
 
-      <div class="home-inner">
-        <div class="wordmark">Onereach.ai <span class="lite">Lite</span></div>
-
-        <div class="auth-block" id="auth-block">
-          <button id="signin-btn" class="signin-button" type="button">Sign in to GSX</button>
-        </div>
-
-        <div class="home-cta-row">
-          <button id="open-store-btn" class="btn-primary" type="button">Open OAGI Store</button>
-          <button id="manage-agents-btn" class="btn-secondary" type="button">Manage Agents</button>
-        </div>
-
-        <!-- Onboarding card: only visible AFTER the user signs in
-             (the giant Sign In button above is the CTA when signed
-             out). Each row is a plain-language outcome ("Skip the
-             2FA copy-paste") + one-line subtitle + action button,
-             not a checklist with jargon labels. KV-backed via
-             `lite/onboarding/`. -->
-        <div id="onboarding-card" class="onboarding-card" hidden>
-          <div class="onboarding-card-header">
-            <div class="onboarding-card-headings">
-              <span class="onboarding-card-title">Set up your workspace</span>
-              <span class="onboarding-card-subtitle">Optional one-time setup. Skip whatever you don't need.</span>
-            </div>
-            <button type="button" id="onboarding-dismiss" class="onboarding-dismiss" title="Hide this card" aria-label="Dismiss">&times;</button>
+      <div class="home-chat">
+        <header class="home-chat-header">
+          <div class="boot-chat-logo" aria-hidden="true">
+            <span class="boot-chat-logo-glyph">iDW</span>
+            <span class="boot-chat-logo-tag">Lite</span>
           </div>
-          <div class="onboarding-list" id="onboarding-list"></div>
-        </div>
+          <h1 class="boot-chat-app-name">Onereach.ai</h1>
+        </header>
 
-        <div class="hint">
-          Open an agent from the <strong>IDW</strong> menu to spin up a new tab. Each tab has its own session, so you can stay signed into more than one at a time.
+        <section
+          class="boot-chat-thread"
+          id="boot-chat-thread"
+          aria-live="polite"
+          aria-label="Workspace conversation"
+        >
+          <!-- Bubbles injected by chrome.ts via runBootChat() -->
+        </section>
+
+        <section
+          class="boot-chat-actions"
+          id="boot-chat-actions"
+          hidden
+          aria-label="Actions"
+        >
+          <!-- Sign-in / Retry button injected by chrome.ts when the
+               chat reaches a state that needs user input. The settled
+               (signed-in) state has no action row. -->
+        </section>
+
+        <div class="home-chat-shortcuts">
+          <button id="open-store-btn" class="btn-secondary" type="button">Browse OAGI Store</button>
+          <button id="manage-agents-btn" class="btn-secondary" type="button">Manage Agents</button>
+          <!-- Always-available Sign-in CTA. Visible when no edison session
+               exists; hidden once signed in (the Sign-out button takes
+               its place). The boot-chat in the home view drives the
+               primary flow, but this button gives the user an explicit
+               escape hatch when an IDW tab is foregrounded and the chat
+               is hidden, or when their session expires mid-session. -->
+          <button id="signin-btn" class="btn-primary" type="button" hidden>Sign in to OneReach</button>
+          <button id="signout-btn" class="btn-secondary" type="button" hidden>Sign out</button>
         </div>
       </div>
     </main>

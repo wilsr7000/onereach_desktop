@@ -54,6 +54,14 @@ export interface InstallReSignInPrompterConfig {
     parent: BrowserWindow | null,
     options: MessageBoxOptions
   ) => Promise<{ response: number }>;
+  /**
+   * Start the prompter in a suspended state. main-lite passes `true`
+   * on every boot so a background KV failure can't race a native
+   * dialog in front of chrome.html's home-view chat. Resumed via
+   * `handle.setSuspended(false)` when the chat fires its `finish`
+   * IPC after settling (post-verify or post-sign-in).
+   */
+  initiallySuspended?: boolean;
 }
 
 export interface ReSignInPrompterHandle {
@@ -71,6 +79,17 @@ export interface ReSignInPrompterHandle {
   isInCooldown(): boolean;
   /** Reset internal state. Useful for tests + after a manual signOut. */
   reset(): void;
+  /**
+   * Suspend / resume the prompter. While suspended, `promptReSignIn`
+   * is a no-op (the request is logged but no dialog opens). Used by
+   * main-lite to keep the dialog from racing the boot-chat: while
+   * the chat is doing its own conversational sign-in, we don't want
+   * a parallel native dialog popping up because some background KV
+   * op failed.
+   */
+  setSuspended(suspended: boolean): void;
+  /** True iff the prompter is currently suspended. For tests. */
+  isSuspended(): boolean;
 }
 
 let installed = false;
@@ -93,6 +112,8 @@ export function installReSignInPrompter(
   let prompting = false;
   /** Timestamp (Date.now) when the cool-down expires, or 0 when not in cool-down. */
   let cooldownUntil = 0;
+  /** Default false; main-lite flips this to true while boot-chat is active. */
+  let suspended = config.initiallySuspended === true;
 
   const showDialog: (
     parent: BrowserWindow | null,
@@ -133,6 +154,10 @@ export function installReSignInPrompter(
   }
 
   async function runPrompt(reason: string): Promise<void> {
+    if (suspended) {
+      getLoggingApi().event('auth.re-signin.suppressed-while-suspended', { reason });
+      return;
+    }
     if (prompting || isInCooldown()) return;
     prompting = true;
     try {
@@ -213,6 +238,18 @@ export function installReSignInPrompter(
     reset(): void {
       prompting = false;
       cooldownUntil = 0;
+    },
+    setSuspended(next: boolean): void {
+      const prev = suspended;
+      suspended = next;
+      if (prev !== next) {
+        getLoggingApi().event('auth.re-signin.suspended-changed', {
+          suspended: next,
+        });
+      }
+    },
+    isSuspended(): boolean {
+      return suspended;
     },
   };
   installed = true;

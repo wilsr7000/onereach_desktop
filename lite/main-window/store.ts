@@ -408,7 +408,18 @@ export class TabStore {
         this.log('warn', 'main-window-store: unexpected KV blob shape, resetting in-memory', {
           actualType: Array.isArray(raw) ? 'array' : typeof raw,
         });
-        this.cache = { schemaVersion: 1, tabs: [], activeId: null };
+        // Self-heal: overwrite the corrupt blob in KV with a fresh
+        // empty record so the next read returns clean data. Without
+        // this, the corruption survives every relaunch and the store
+        // recovers to empty forever. Fire-and-forget — a write
+        // failure here is fine, we'll just retry on the next reset.
+        const fresh: TabsBlob = { schemaVersion: 1, tabs: [], activeId: null };
+        void this.kv.set(KV_COLLECTION, KV_KEY, fresh).catch((err) => {
+          this.log('warn', 'main-window-store: self-heal write failed', {
+            error: (err as Error).message,
+          });
+        });
+        this.cache = fresh;
         this.cachedForAccountId = accountId;
         return this.cache;
       }

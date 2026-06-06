@@ -13,6 +13,8 @@
 
 import { OnboardingStore } from './store.js';
 import type { OnboardingState, OnboardingStepId } from './types.js';
+import { getAuthApi } from '../auth/api.js';
+import { getLoggingApi } from '../logging/api.js';
 
 export type {
   OnboardingState,
@@ -61,5 +63,27 @@ export function buildOnboardingApi(store: OnboardingStore): OnboardingApi {
 }
 
 function buildDefaultApi(): OnboardingApi {
-  return buildOnboardingApi(new OnboardingStore());
+  // Multi-user isolation: pass the active accountId resolver so the
+  // store invalidates its cache + refuses signed-out writes.
+  // Without this, signing out then signing in as another user would
+  // surface the previous user's checklist progress until the next
+  // explicit refresh.
+  const store = new OnboardingStore({
+    getActiveAccountId: () =>
+      getAuthApi().getSession('edison')?.accountId ?? null,
+  });
+
+  // Re-invalidate on session-changed (sign-in, sign-out, env switch
+  // — though only edison drives this module today).
+  try {
+    getAuthApi().onSessionChanged((env) => {
+      if (env !== 'edison') return;
+      store.invalidateCache();
+    });
+  } catch (err) {
+    getLoggingApi().warn('onboarding', 'failed to subscribe to onSessionChanged', {
+      error: (err as Error).message,
+    });
+  }
+  return buildOnboardingApi(store);
 }

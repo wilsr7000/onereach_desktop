@@ -263,4 +263,41 @@ describe('installReSignInPrompter', () => {
     expect(handle.isInCooldown()).toBe(false);
     expect(handle.isPrompting()).toBe(false);
   });
+
+  it('initiallySuspended: prompts are dropped until setSuspended(false)', async () => {
+    const showDialog = vi.fn(() => Promise.resolve({ response: 0 }));
+    const handle = installReSignInPrompter({
+      env: 'edison',
+      getParentWindow: () => null,
+      showDialog,
+      initiallySuspended: true,
+    });
+    expect(handle.isSuspended()).toBe(true);
+
+    // While suspended, prompts are dropped — no dialog opens.
+    handle.promptReSignIn('background-kv-rejection');
+    await vi.runAllTimersAsync();
+    expect(showDialog).not.toHaveBeenCalled();
+    expect(handle.isPrompting()).toBe(false);
+
+    // Resume: subsequent prompts surface normally.
+    handle.setSuspended(false);
+    expect(handle.isSuspended()).toBe(false);
+    handle.promptReSignIn('post-boot-rejection');
+    await vi.runAllTimersAsync();
+    expect(showDialog).toHaveBeenCalledTimes(1);
+  });
+
+  it('setSuspended(true) suppresses prompts mid-session', async () => {
+    const showDialog = vi.fn(() => Promise.resolve({ response: 1 }));
+    const handle = installReSignInPrompter({
+      env: 'edison',
+      getParentWindow: () => null,
+      showDialog,
+    });
+    handle.setSuspended(true);
+    handle.promptReSignIn('shouldnt-show');
+    await vi.runAllTimersAsync();
+    expect(showDialog).not.toHaveBeenCalled();
+  });
 });

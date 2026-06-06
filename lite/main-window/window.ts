@@ -21,7 +21,7 @@
  *  during boot.
  */
 
-import { BrowserWindow, WebContentsView } from 'electron';
+import { BrowserWindow, WebContentsView, session as electronSession } from 'electron';
 import type { Rectangle } from 'electron';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
@@ -45,6 +45,13 @@ interface AttachedTab {
   view: WebContentsView;
   /** Tracks the tab object we mounted; used to detect navigation churn. */
   lastUrl: string;
+  /**
+   * Electron partition string the view's session is bound to. Stashed
+   * here so the session-change listener can re-inject cookies into the
+   * right partition without rummaging through the store. Set at attach
+   * time from the Tab record.
+   */
+  partition: string;
   /** Set on first navigation after creation -- guards against the load-time race. */
   initialLoadStarted: boolean;
   /** Detaches the main-process 2FA detector from this tab's webContents. */
@@ -59,6 +66,16 @@ const BACKGROUND = '#0e0e10';
 
 let mainWindow: BrowserWindow | null = null;
 let unsubscribeStore: (() => void) | null = null;
+/**
+ * Unsubscribe handle for the auth session-change listener. We attach
+ * one listener for the whole window so that whenever the user signs
+ * into an env (via the home-view boot-chat OR the chrome "Sign in to
+ * OneReach" button OR the IDW-tab auto-trigger), every already-open
+ * tab that's stuck on a OneReach login interstitial gets refreshed
+ * cookies and a reload. Closes the loop: sign in once → all your
+ * IDW tabs auto-login on the next paint.
+ */
+let unsubscribeAuth: (() => void) | null = null;
 const attachedTabs = new Map<string, AttachedTab>();
 let activeAttachedTabId: string | null = null;
 
@@ -97,8 +114,11 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
   });
 
   // The chrome (tab bar + home view) lives in the BrowserWindow's
-  // main webContents. Tab views are added on TOP of it via
-  // contentView.addChildView -- they cover the area below the tab bar.
+  // main webContents. The chat surface lives inside chrome.html on
+  // the home view, so we always load chrome directly — no separate
+  // boot-chat page, no mid-boot swap. Tab views are added on TOP of
+  // the chrome via contentView.addChildView (they cover the home
+  // view region below the tab bar).
   void win.loadFile(config.chromeHtmlPath);
 
   win.once('ready-to-show', () => {
@@ -133,8 +153,114 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     reconcileViews(mainWindow, tabs, activeId);
   });
 
+  // Subscribe to auth session changes. When a session becomes non-null
+  // for an env (sign-in just completed), refresh cookies in every
+  // attached tab whose URL belongs to that env AND whose live
+  // webContents URL looks like it landed on a OneReach login page.
+  // Tabs that are happily loaded against the agent are left alone.
+  unsubscribeAuth = getAuthApi().onSessionChanged((env, session) => {
+    if (session === null) return; // Sign-out path doesn't auto-reload.
+    if (mainWindow === null || mainWindow.isDestroyed()) return;
+    void refreshAttachedTabsForEnv(env);
+  });
+
   mainWindow = win;
   return win;
+}
+
+/**
+ * Iterate `attachedTabs` and reload any tab that (a) belongs to the
+ * given env (per its stored URL) and (b) is currently sitting on a
+ * OneReach login interstitial in its live webContents. Cookies are
+ * re-injected before the reload so the IDW handshake sees a fresh
+ * `mult` and skips the login form.
+ */
+async function refreshAttachedTabsForEnv(env: ReturnType<typeof getEnvironmentForUrl>): Promise<void> {
+  if (env === null) return;
+  const auth = getAuthApi();
+  for (const attached of Array.from(attachedTabs.values())) {
+    try {
+      const tabEnv = getEnvironmentForUrl(getTabUrl(attached));
+      if (tabEnv !== env) continue;
+      const liveUrl = safeWebContentsUrl(attached.view.webContents);
+      if (!looksLikeOneReachLoginUrl(liveUrl, env)) continue;
+      // Inject fresh cookies into the tab partition first, then reload
+      // so the next request carries the new `mult`.
+      const result = await auth.injectTokenIntoPartition(env, getTabPartition(attached));
+      if (!result.injected) {
+        getLoggingApi().info('main-window', 'session-changed reload skipped (injection failed)', {
+          id: attached.id,
+          env,
+          reason: result.reason,
+        });
+        getLoggingApi().event(MAIN_WINDOW_EVENTS.SESSION_RELOAD_SKIPPED, {
+          id: attached.id,
+          env,
+          reason: result.reason,
+        });
+        continue;
+      }
+      getLoggingApi().info('main-window', 'session-changed reload firing', {
+        id: attached.id,
+        env,
+        liveUrl: liveUrl.slice(0, 80),
+      });
+      getLoggingApi().event(MAIN_WINDOW_EVENTS.SESSION_RELOAD_FIRING, {
+        id: attached.id,
+        env,
+      });
+      attached.view.webContents.reload();
+    } catch (err) {
+      getLoggingApi().warn('main-window', 'session-changed reload threw', {
+        id: attached.id,
+        error: (err as Error).message,
+      });
+    }
+  }
+}
+
+/**
+ * Best-effort detector for the "this tab is stuck on a OneReach login
+ * page" condition. Looks for the SSO interstitial host (`auth.<env>.…`)
+ * or paths that include `/login` on a OneReach host. False negatives
+ * (we miss a stuck tab) are fine — the user can refresh manually. False
+ * positives (we reload a tab that's actually fine) are also tolerable
+ * given this only fires on a session change.
+ */
+function looksLikeOneReachLoginUrl(url: string, env: ReturnType<typeof getEnvironmentForUrl>): boolean {
+  if (url.length === 0 || env === null) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host.startsWith(`auth.${env}.`)) return true;
+  // Some IDW flows land on `studio.<env>.onereach.ai/login`.
+  if (host === `studio.${env}.onereach.ai` && parsed.pathname.includes('/login')) {
+    return true;
+  }
+  return false;
+}
+
+/** Best-effort accessor for the tab's stored URL. */
+function getTabUrl(attached: AttachedTab): string {
+  // `lastUrl` tracks what we mounted; tabs may have navigated since.
+  // We use the stored value because we care about the agent the user
+  // INTENDED to open, not whichever auth page they were bounced to.
+  return attached.lastUrl;
+}
+
+/** Best-effort accessor for the tab's partition string. */
+function getTabPartition(attached: AttachedTab): string {
+  // The partition is set on attach; pulling it off webContents.session
+  // would require knowing the session's partition string, which
+  // Electron doesn't expose directly. We stash it on the attached
+  // record at mount time; readback here is a synchronous lookup.
+  // For tabs that pre-date this field, fall back to an empty string —
+  // injection will reject with `unsupported-env` and we skip.
+  return attached.partition ?? '';
 }
 
 /** @internal -- exposed for tests. */
@@ -211,6 +337,11 @@ function stopAllAttachedTabWatchers(): void {
 
 async function rehydrateFromStore(win: BrowserWindow): Promise<void> {
   try {
+    // `listTabs()` / `getActiveTabId()` await auth hydration internally
+    // (see `lite/main-window/api.ts`) — the TabStore reads the
+    // signed-in accountId synchronously, so without that await a
+    // freshly-launched window would see "no session yet" and drop
+    // the user's persisted tabs.
     const api = getMainWindowApi();
     const tabs = await api.listTabs();
     const activeId = await api.getActiveTabId();
@@ -250,6 +381,14 @@ function reconcileViews(win: BrowserWindow, tabs: Tab[], activeId: string | null
       } catch {
         /* best-effort -- some Electron versions throw if already destroyed */
       }
+      // Drop the partition's persisted state (cookies, IndexedDB,
+      // localStorage, service workers, cache) so closing a tab
+      // doesn't leak `<userData>/Partitions/tab-<8hex>/` directories
+      // and ambient identities forever. Without this, long-running
+      // installs accumulate megabytes per closed tab and a future
+      // partition-string collision could resurrect stale credentials.
+      // Fire-and-forget — failures are logged, never thrown.
+      clearTabPartitionStorage(attached.partition, attached.id);
       attachedTabs.delete(id);
     }
   }
@@ -332,6 +471,7 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     id: tab.id,
     view,
     lastUrl: tab.url,
+    partition: tab.partition,
     initialLoadStarted: false,
     stopTotpAutofill,
   };
@@ -449,7 +589,7 @@ async function prepareTabAndLoad(tab: Tab, view: WebContentsView): Promise<void>
   try {
     const env = getEnvironmentForUrl(tab.url);
     if (env !== null) {
-      const result = await getAuthApi().injectTokenIntoPartition(env, tab.partition);
+      const result = await ensureTokenInPartitionForTab(env, tab);
       if (!result.injected && result.reason !== undefined) {
         // Reason is informational; agent will fall back to its own
         // picker when no token. Logged at debug-equivalent level.
@@ -477,6 +617,87 @@ async function prepareTabAndLoad(tab: Tab, view: WebContentsView): Promise<void>
   }
 }
 
+/**
+ * Multi-env auto-sign-in (ADR-042 amendment): when an IDW tab loads a
+ * OneReach URL whose env doesn't have a captured session, automatically
+ * trigger `signIn(env)` to open the studio sign-in window, then
+ * re-attempt injection so the tab lands with cookies already in place.
+ *
+ * Falls through (returns the original failure) when:
+ *   - The env isn't in `SUPPORTED_ENVIRONMENTS` (`unsupported-env`)
+ *   - The user cancels the sign-in window
+ *   - The sign-in succeeds but cookies still won't clone (very rare,
+ *     usually a transient timing issue) — surfaced for diagnostics
+ *
+ * Coalesces naturally: `signIn(env)` returns the same in-flight Promise
+ * to every caller, so opening three tabs at once for the same env
+ * triggers ONE auth window, and all three injections re-run once the
+ * Promise resolves.
+ */
+async function ensureTokenInPartitionForTab(
+  env: ReturnType<typeof getEnvironmentForUrl>,
+  tab: Tab
+): Promise<{ injected: boolean; reason?: string }> {
+  if (env === null) return { injected: false, reason: 'unsupported-env' };
+  const auth = getAuthApi();
+  const first = await auth.injectTokenIntoPartition(env, tab.partition);
+  if (first.injected) return first;
+  // Reasons that warrant an auto sign-in attempt — anything that says
+  // "no usable cookie for this env." `unsupported-env` and
+  // `cookie-write-failed` are NOT in this list: the former isn't fixable
+  // by signing in; the latter retried would just refail.
+  const NEEDS_SIGN_IN: ReadonlySet<string> = new Set([
+    'no-cookies',
+    'no-mult',
+    'expired',
+  ]);
+  if (first.reason === undefined || !NEEDS_SIGN_IN.has(first.reason)) {
+    return first;
+  }
+  // Defer to the auth store. signIn coalesces in-flight calls for the
+  // same env, so concurrent tabs for the same env open one auth window.
+  getLoggingApi().info('main-window', 'auto-signin triggered by tab open', {
+    id: tab.id,
+    env,
+    reason: first.reason,
+  });
+  getLoggingApi().event(MAIN_WINDOW_EVENTS.AUTO_SIGNIN_TRIGGERED, {
+    id: tab.id,
+    env,
+    reason: first.reason,
+  });
+  try {
+    await auth.signIn(env);
+  } catch (err) {
+    // The user cancelled or sign-in failed. Don't navigate-and-pray —
+    // surface the reason so the caller logs it; the agent's own
+    // sign-in screen will appear when loadURL runs.
+    getLoggingApi().warn('main-window', 'auto-signin rejected', {
+      id: tab.id,
+      env,
+      error: (err as Error).message,
+    });
+    getLoggingApi().event(MAIN_WINDOW_EVENTS.AUTO_SIGNIN_REJECTED, {
+      id: tab.id,
+      env,
+    });
+    return { injected: false, reason: 'sign-in-cancelled' };
+  }
+  // Re-try injection now that cookies should be in the auth partition.
+  const second = await auth.injectTokenIntoPartition(env, tab.partition);
+  if (second.injected) {
+    getLoggingApi().info('main-window', 'auto-signin succeeded; cookies injected', {
+      id: tab.id,
+      env,
+    });
+    getLoggingApi().event(MAIN_WINDOW_EVENTS.AUTO_SIGNIN_SUCCEEDED, {
+      id: tab.id,
+      env,
+    });
+  }
+  return second;
+}
+
 function extractAccountIdFromUrl(url: string): string | null {
   if (typeof url !== 'string' || url.length === 0) return null;
   try {
@@ -494,6 +715,53 @@ function safeWebContentsUrl(webContents: Electron.WebContents): string {
     return webContents.getURL();
   } catch {
     return '';
+  }
+}
+
+/**
+ * Wipe a tab partition's persisted storage on close. Tab partitions
+ * are `persist:tab-<8hex>` and every closed tab leaves a directory in
+ * `<userData>/Partitions/` behind unless we clear it. The clear is
+ * fire-and-forget (we don't await it from the reconcile loop) and any
+ * failure becomes a warn log — Electron may refuse the call mid-quit
+ * or on certain platform locks, neither of which should block the
+ * tab-close path.
+ */
+function clearTabPartitionStorage(partition: string, tabId: string): void {
+  // Refuse to touch any non-tab partition (auth, idw, university,
+  // shared singletons) so a misconfiguration can't wipe a partition
+  // we depend on for authentication. The `persist:tab-` prefix is
+  // assigned exclusively by `lite/main-window/store.ts:generateId`.
+  if (typeof partition !== 'string' || !partition.startsWith('persist:tab-')) {
+    return;
+  }
+  try {
+    const ses = electronSession.fromPartition(partition);
+    // Synchronously promise-chain so a thrown error is observable in
+    // the catch below rather than as an unhandled rejection.
+    void ses
+      .clearStorageData()
+      .then(() => {
+        getLoggingApi().info('main-window', 'cleared tab partition storage', {
+          id: tabId,
+          partition,
+        });
+        getLoggingApi().event(MAIN_WINDOW_EVENTS.PARTITION_CLEARED, { id: tabId });
+      })
+      .catch((err: unknown) => {
+        getLoggingApi().warn('main-window', 'clearStorageData failed for tab partition', {
+          id: tabId,
+          partition,
+          error: (err as Error).message,
+        });
+        getLoggingApi().event(MAIN_WINDOW_EVENTS.PARTITION_CLEAR_FAILED, { id: tabId });
+      });
+  } catch (err) {
+    getLoggingApi().warn('main-window', 'sessionFromPartition threw on tab close', {
+      id: tabId,
+      partition,
+      error: (err as Error).message,
+    });
   }
 }
 
@@ -527,5 +795,13 @@ function teardownStoreSubscription(): void {
       /* best-effort */
     }
     unsubscribeStore = null;
+  }
+  if (unsubscribeAuth !== null) {
+    try {
+      unsubscribeAuth();
+    } catch {
+      /* best-effort */
+    }
+    unsubscribeAuth = null;
   }
 }

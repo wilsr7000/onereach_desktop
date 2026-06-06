@@ -51,6 +51,14 @@ const ASSETS_TO_COPY = [
   { from: 'lite/help/help.css', to: 'help.css' },
   { from: 'lite/spaces/spaces.html', to: 'spaces.html' },
   { from: 'lite/spaces/spaces.css', to: 'spaces.css' },
+  // boot-chat.html / boot-chat.css were retired when the chat surface
+  // moved inline into chrome.html — the module source lives at
+  // lite/boot-chat/ and is imported by chrome.ts, but the page is no
+  // longer loaded as a standalone window.
+  // Download → Save to Space picker. Spawned by lite/downloads/handler.ts
+  // for every captured will-download event the user routes to Spaces.
+  { from: 'lite/downloads/picker.html', to: 'download-picker.html' },
+  { from: 'lite/downloads/picker.css', to: 'download-picker.css' },
   // Tray icons (Phase 0a). Copied next to the main bundle so
   // `lite/tray/main.ts` can resolve them via `path.join(__dirname,
   // ...)` without poking at <appPath>/assets/. Template variant
@@ -100,7 +108,16 @@ const mainProcessOptions = {
   platform: 'node',
   target: 'node20',
   format: 'cjs',
-  external: ['electron', 'electron-log', 'electron-updater', 'better-sqlite3', 'keytar', 'otplib', 'jsqr'],
+  external: [
+    'electron',
+    'electron-log',
+    'electron-updater',
+    'better-sqlite3',
+    'keytar',
+    'otplib',
+    'jsqr',
+    '@anthropic-ai/sdk',
+  ],
 };
 
 /** @type {esbuild.BuildOptions} */
@@ -235,6 +252,22 @@ const spacesOptions = {
   globalName: 'OnereachLiteSpaces',
 };
 
+/** @type {esbuild.BuildOptions} */
+const downloadPickerOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'downloads/picker.ts')],
+  outfile: resolve(outDir, 'download-picker.js'),
+  platform: 'browser',
+  target: 'chrome130',
+  format: 'iife',
+  globalName: 'OnereachLiteDownloadPicker',
+};
+
+// boot-chat is no longer a standalone bundle — the module lives at
+// lite/boot-chat/ and is imported by chrome.ts, so esbuild inlines it
+// into chrome.js automatically. Removed entry retired alongside the
+// boot-chat → chrome swap.
+
 const allConfigs = [
   mainProcessOptions,
   preloadOptions,
@@ -249,6 +282,7 @@ const allConfigs = [
   aiRunTimesOptions,
   helpOptions,
   spacesOptions,
+  downloadPickerOptions,
 ];
 
 if (isWatch) {

@@ -67,6 +67,17 @@ export const AUTH_EVENTS = {
   TOTP_NO_SECRET: 'auth.totp.no-secret',
   ACCOUNT_PICKER_DETECTED: 'auth.account-picker.detected',
   ACCOUNT_PICKER_SELECTED: 'auth.account-picker.selected',
+  // Re-sign-in prompter (emitted by auth/re-signin-prompt.ts when a
+  // stale-token KV rejection triggers the system "session expired"
+  // dialog + SSO recovery flow). No secrets logged — only the reason
+  // string + lifecycle state.
+  RE_SIGNIN_SUPPRESSED_WHILE_SUSPENDED: 'auth.re-signin.suppressed-while-suspended',
+  RE_SIGNIN_PROMPT_SHOWN: 'auth.re-signin.prompt-shown',
+  RE_SIGNIN_ACCEPTED: 'auth.re-signin.accepted',
+  RE_SIGNIN_COMPLETED: 'auth.re-signin.completed',
+  RE_SIGNIN_KV_REJECTED_FRESH_TOKEN: 'auth.re-signin.kv-rejected-fresh-token',
+  RE_SIGNIN_DISMISSED: 'auth.re-signin.dismissed',
+  RE_SIGNIN_SUSPENDED_CHANGED: 'auth.re-signin.suspended-changed',
   // IPC entries (5)
   IPC_SIGN_IN: 'auth.ipc.sign-in',
   IPC_SIGN_OUT: 'auth.ipc.sign-out',

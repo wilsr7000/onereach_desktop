@@ -131,10 +131,23 @@ export class FlowHttpKVClient {
       const auth = await this.getAuthHeader(accountId);
       const url =
         `${this.kvUrl(accountId)}?id=${encodeURIComponent(collection)}&key=${encodeURIComponent(key)}`;
+      // The Edison flow KV stores the value under `itemValue`, as a JSON
+      // STRING -- confirmed by the live PUT response (which echoes
+      // `itemValue`) AND the in-memory contract server the integration
+      // tests run against. Earlier builds sent the value under `value`,
+      // which the flow IGNORES: every blob silently round-tripped to the
+      // literal string "undefined", so the IDW menu / tabs / tools list
+      // were wiped on every relaunch (the read-side self-heal then
+      // overwrote them with an empty list). We also send `n` (the field
+      // the legacy EdisonKVClient documents) so we're robust to whichever
+      // field a given account's flow version reads. The read path unwraps
+      // the string back to an object (parseKvBody -> unwrapJsonString).
+      const encoded = JSON.stringify(value);
+      const body = JSON.stringify({ id: collection, key, itemValue: encoded, n: encoded });
       const resp = await this.fetchImpl(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: auth },
-        body: JSON.stringify({ id: collection, key, value }),
+        body,
       });
       await this.assertOk(resp, 'set', collection, key);
     });
@@ -155,44 +168,7 @@ export class FlowHttpKVClient {
       await this.assertOk(resp, 'get', collection, key);
       const text = await resp.text();
       if (text === '' || text === 'null' || text === '""') return null;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        // Body was not JSON -- treat as raw string.
-        return text;
-      }
-      // The flow returns shapes like
-      //   { Status: 'No data found.' }
-      //   { value: ... }
-      //   { get: { value: ... } }
-      //   { data: { value: ... } }
-      // and sometimes the value itself wrapped in another JSON string.
-      const obj = parsed as Record<string, unknown>;
-      if (obj['Status'] === 'No data found.' || obj['status'] === 'No data found.') {
-        return null;
-      }
-      const inner =
-        (obj['get'] as { value?: unknown } | undefined)?.value ??
-        obj['value'] ??
-        (obj['data'] as { value?: unknown } | undefined)?.value;
-      if (inner === undefined) {
-        // Some paths return the raw value at the top level. Fall back
-        // to the parsed body itself.
-        return parsed;
-      }
-      if (typeof inner === 'string') {
-        // The flow occasionally double-encodes the value (the original
-        // PUT body was a JSON string of a JSON object). Try one more
-        // parse, but never throw -- if the inner string isn't JSON,
-        // return it verbatim.
-        try {
-          return JSON.parse(inner);
-        } catch {
-          return inner;
-        }
-      }
-      return inner;
+      return parseKvBody(text);
     });
   }
 
@@ -528,4 +504,66 @@ async function safeReadBody(resp: Response): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Parse a non-empty KV response body into the stored value. Tolerant of
+ * the flow's several response shapes:
+ *   { Status: 'No data found.' }     -> null
+ *   { value: ... } | { get: { value } } | { data: { value } }
+ *   <object|array at top level>
+ * AND of multi-level JSON-string encoding — the value (or the whole
+ * body) can come back as a JSON-stringified blob, e.g. after the
+ * sign-in KV migration double-encodes it. Without unwrapping, callers
+ * get a raw string and object-shaped stores (tabs, IDW menu, tools)
+ * treat their blob as corrupt and reset to empty on every boot.
+ */
+function parseKvBody(text: string): unknown {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text; // body wasn't JSON -- return the raw string
+  }
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    if (obj['Status'] === 'No data found.' || obj['status'] === 'No data found.') {
+      return null;
+    }
+    const inner =
+      (obj['get'] as { value?: unknown } | undefined)?.value ??
+      obj['value'] ??
+      (obj['data'] as { value?: unknown } | undefined)?.value;
+    if (inner !== undefined) return unwrapJsonString(inner);
+    return parsed; // raw object stored at the top level
+  }
+  // Top-level string / array / primitive. A string may be an encoded blob.
+  return unwrapJsonString(parsed);
+}
+
+/**
+ * If `value` is a JSON-encoded string of an object/array (possibly
+ * several encoding layers deep), unwrap it to the underlying value. A
+ * legitimate plain-string value (e.g. "hello") is returned unchanged —
+ * only strings that look like JSON (`{`, `[`, or a quoted string) are
+ * unwrapped, and a bare number/boolean is never coerced.
+ */
+function unwrapJsonString(value: unknown): unknown {
+  let cur = value;
+  for (let depth = 0; depth < 5 && typeof cur === 'string'; depth++) {
+    const trimmed = cur.trim();
+    if (trimmed.length === 0 || !/^[[{"]/.test(trimmed)) break;
+    let next: unknown;
+    try {
+      next = JSON.parse(cur);
+    } catch {
+      break;
+    }
+    if (typeof next === 'string') {
+      cur = next; // another encoding layer -- keep unwrapping
+      continue;
+    }
+    return next; // object / array / number / boolean / null
+  }
+  return cur;
 }

@@ -617,6 +617,10 @@ interface LiteSpaceItemSummary {
 
 interface LiteSpaceItem extends LiteSpaceItemSummary {
   content?: string;
+  /** User-authored description / caption / abstract / notes. Distinct
+   *  from `excerpt` (auto-derived content snippet). Edited via
+   *  `items.update({ description })`. */
+  description?: string;
   metadata?: Record<string, unknown>;
   /** Byte size for binary kinds. Floored non-negative integer. */
   size?: number;
@@ -822,6 +826,12 @@ interface LiteSpacesDeleteSpaceOpts {
   soft?: boolean;
 }
 
+interface LiteSpacesUpdateSpaceInput {
+  description?: string;
+  color?: string;
+  iconKey?: string;
+}
+
 interface LiteSpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
@@ -840,6 +850,15 @@ interface LiteSpacesBridge {
    */
   createSpace(input: LiteSpacesCreateSpaceInput): Promise<LiteSpacesIpcResult<LiteSpace>>;
   renameSpace(id: string, name: string): Promise<LiteSpacesIpcResult<LiteSpace>>;
+  /**
+   * Patch a Space's non-identity fields (description, color, iconKey).
+   * Name changes go through `renameSpace` (uniqueness checks differ).
+   * Pass `description: ''` to clear the description.
+   */
+  updateSpace(
+    id: string,
+    patch: LiteSpacesUpdateSpaceInput
+  ): Promise<LiteSpacesIpcResult<LiteSpace>>;
   deleteSpace(
     id: string,
     opts?: LiteSpacesDeleteSpaceOpts
@@ -860,6 +879,23 @@ interface LiteSpacesBridge {
   /** Phase 4 v2 — identity + sharing. */
   identity: LiteSpacesIdentityBridge;
   members: LiteSpacesMembersBridge;
+  /**
+   * Subscribe to cache-refresh events from the main process. The
+   * Spaces cache pre-warms at app launch and refreshes on a background
+   * timer (or after mutations); this event lets the renderer trigger
+   * a local re-fetch when a key it cares about refreshes. Returns an
+   * unsubscribe function.
+   */
+  onCacheUpdate(
+    handler: (update: LiteSpacesCacheUpdateView) => void
+  ): () => void;
+}
+
+interface LiteSpacesCacheUpdateView {
+  /** Cache key whose value just refreshed (e.g. 'spaces.listSpaces'). */
+  key: string;
+  /** Epoch ms when the refresh landed. */
+  at: number;
 }
 
 interface LiteSpacesIdentityBridge {
@@ -1098,6 +1134,63 @@ interface LiteEventBusBridge {
   emit(payload: { name: string; data?: unknown }): Promise<LiteEventBusEvent>;
 }
 
+// ─── AI bridge -- mirrors lite/ai/api.ts AiApi (main-process only) ───────
+// Provider-flexible Space-creation assist (Claude API or a OneReach flow).
+// Secrets never cross this bridge: the renderer sends a purpose string and
+// receives a polished description + objectives, or a structured error.
+interface LiteAiIpcError {
+  code: string;
+  message: string;
+  remediation?: string;
+  context?: Record<string, unknown>;
+}
+type LiteAiIpcResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: LiteAiIpcError };
+interface LiteAiStatus {
+  configured: boolean;
+  provider: 'claude' | 'onereach-flow' | null;
+}
+interface LiteAiSpaceAssistResult {
+  description: string;
+  objectives: string[];
+}
+interface LiteAiEnrichResult {
+  metadata: {
+    summary: string;
+    suggestedTitle: string;
+    tags: string[];
+    topics: string[];
+    entities: string[];
+    contentType: string;
+    language: string;
+    keyPoints: string[];
+  };
+  written: Record<string, string | string[]>;
+  modality: 'text' | 'image' | 'pdf' | 'hints';
+}
+interface LiteAiBridge {
+  /** Whether an AI provider is configured (+ which). Carries no secrets. */
+  getStatus(): Promise<LiteAiIpcResult<LiteAiStatus>>;
+  /** Draft a polished description + 3-5 objectives from a rough purpose. */
+  spaceAssist(
+    purpose: string,
+    name?: string
+  ): Promise<LiteAiIpcResult<LiteAiSpaceAssistResult>>;
+  /**
+   * Extract structured metadata for one asset via Claude 4.8 and persist
+   * it under `ai_*` metadata keys. Used by the Spaces "Auto-fill
+   * metadata" button + the auto-on-create path.
+   */
+  enrichAsset(assetId: string): Promise<LiteAiIpcResult<LiteAiEnrichResult>>;
+  /** Persist the Anthropic API key to the OS keychain (write-only). */
+  saveKey(key: string): Promise<LiteAiIpcResult<{ ok: true }>>;
+  /** Whether an Anthropic key is configured (never returns the value). */
+  hasKey(): Promise<LiteAiIpcResult<{ hasKey: boolean }>>;
+  /** Remove the stored Anthropic key. */
+  deleteKey(): Promise<LiteAiIpcResult<{ ok: true }>>;
+}
+
 interface LiteWindowBridge {
   version?: string;
   platform?: string;
@@ -1114,9 +1207,22 @@ interface LiteWindowBridge {
   mainWindow?: LiteMainWindowBridge;
   events?: LiteEventBusBridge;
   university?: LiteUniversityBridge;
-  // ai bridge removed -- TTS + lite/ai/ pulled.
+  ai?: LiteAiBridge;
   aiRunTimes?: LiteAiRunTimesBridge;
   onboarding?: LiteOnboardingBridge;
+  downloadPicker?: LiteDownloadPickerBridge;
+  bootChat?: LiteBootChatBridge;
+}
+
+/**
+ * Boot-chat handshake bridge. The chat surface lives inline in
+ * chrome.html (it IS the Home tab); `finish()` signals the main
+ * process that the chat has settled into its post-verify state so
+ * the re-sign-in prompter can un-suspend. Idempotent on the renderer
+ * side — main-lite only listens once.
+ */
+interface LiteBootChatBridge {
+  finish(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1243,6 +1349,60 @@ interface LiteOnboardingBridge {
   load(): Promise<LiteOnboardingState>;
   markComplete(stepId: LiteOnboardingStepId): Promise<LiteOnboardingState>;
   dismiss(): Promise<LiteOnboardingState>;
+}
+
+// ---------------------------------------------------------------------------
+// Download picker bridge — used only by the picker BrowserWindow renderer
+// (lite/downloads/picker.ts). Other lite windows never need this bridge,
+// but it lives on `window.lite` because every lite preload exposes the
+// same global; this declaration just gives the picker renderer types.
+// ---------------------------------------------------------------------------
+
+type LiteDownloadPickerKind =
+  | 'document'
+  | 'image'
+  | 'url'
+  | 'text'
+  | 'audio'
+  | 'video'
+  | 'other';
+
+interface LiteDownloadPickerSpace {
+  id: string;
+  name: string;
+  color?: string;
+  itemCount?: number;
+}
+
+interface LiteDownloadPickerBootstrap {
+  download: {
+    fileName: string;
+    mimeType: string;
+    kind: LiteDownloadPickerKind;
+    totalBytes: number;
+    source: string;
+  };
+  spaces: LiteDownloadPickerSpace[];
+  defaultSpaceId?: string;
+}
+
+interface LiteDownloadPickerResult {
+  spaceId: string;
+  spaceName: string;
+}
+
+interface LiteDownloadPickerBridge {
+  /** Fetch the captured-file summary + spaces list. Throws on missing payload. */
+  bootstrap(downloadId: string): Promise<LiteDownloadPickerBootstrap>;
+  /**
+   * Settle the picker with either the user's pick (spaceId + spaceName)
+   * or `null` for cancel. After this resolves the main process closes
+   * the picker window.
+   */
+  resolve(
+    downloadId: string,
+    result: LiteDownloadPickerResult | null
+  ): Promise<{ ok: true }>;
 }
 
 // ---------------------------------------------------------------------------

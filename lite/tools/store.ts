@@ -248,7 +248,17 @@ export class ToolsStore {
         this.log('warn', 'tools-store: unexpected KV blob shape, resetting in-memory', {
           actualType: Array.isArray(raw) ? 'array' : typeof raw,
         });
-        this.cache = { schemaVersion: 1, entries: [] };
+        // Self-heal: overwrite the corrupt blob in KV with a fresh
+        // empty record so the bad value can't survive another launch.
+        // Fire-and-forget; a transient write failure just defers the
+        // heal to the next read.
+        const fresh: ToolStorageBlob = { schemaVersion: 1, entries: [] };
+        void this.kv.set(KV_COLLECTION, KV_KEY, fresh).catch((err) => {
+          this.log('warn', 'tools-store: self-heal write failed', {
+            error: (err as Error).message,
+          });
+        });
+        this.cache = fresh;
         this.cachedForAccountId = accountId;
         return this.cache;
       }

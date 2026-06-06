@@ -256,6 +256,34 @@ describe('TabStore persistence error handling', () => {
   });
 });
 
+describe('TabStore self-heals corrupted blobs', () => {
+  // Production logs showed the tabs blob persisted as the literal
+  // string `"undefined"` after some past write bug. Without
+  // self-heal, the bad blob survives every relaunch (the store
+  // resets in-memory only). The heal now overwrites it with a
+  // fresh empty record on first read.
+
+  it('overwrites a `"undefined"` string blob with an empty record', async () => {
+    const { store, kv } = makeStore();
+    await kv.set(KV_COLLECTION, KV_KEY, 'undefined');
+    expect(await store.list()).toEqual([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    const healed = await kv.get(KV_COLLECTION, KV_KEY);
+    expect(healed).toEqual({ schemaVersion: 1, tabs: [], activeId: null });
+  });
+
+  it('overwrites a top-level array blob with an empty record', async () => {
+    const { store, kv } = makeStore();
+    await kv.set(KV_COLLECTION, KV_KEY, [
+      { id: 'orphan' },
+    ] as unknown as never);
+    expect(await store.list()).toEqual([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    const healed = await kv.get(KV_COLLECTION, KV_KEY);
+    expect(healed).toEqual({ schemaVersion: 1, tabs: [], activeId: null });
+  });
+});
+
 // Helper: extract the underlying KV from a TabStore for tests that
 // need to swap `now`.
 async function getKVUnderlying(store: TabStore): Promise<FakeKV> {

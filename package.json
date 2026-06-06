@@ -263,6 +263,7 @@
     "zod": "^3.23.8"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@duckdb/node-api": "^1.4.2-r.1",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",

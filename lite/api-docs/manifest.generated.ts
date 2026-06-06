@@ -8,6 +8,95 @@ import type { Manifest } from './types.js';
 export const MANIFEST: Manifest = {
   "modules": [
     {
+      "slug": "ai",
+      "title": "Ai",
+      "summary": "AI module -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports go\nthrough `<module>/api.ts` -- never reach into `service.ts`, `client.ts`,\nor `config.ts`.\n\nThis file is deliberately electron-free so the conformance unit test\ncan import it under Node without an electron mock. The userData config\ndirectory is injected by the main-process wiring via\n{@link setAiConfigDir} (called from `ai/main.ts` `initAi`).",
+      "surface": {
+        "interfaceName": "AiApi",
+        "interfaceDescription": "Public surface of the AI module. The IPC layer (`ai/main.ts`) wraps\nthese in the standard `{ ok, value | error }` envelope; the renderer\nsees that envelope via `window.lite.ai`.",
+        "methods": [
+          {
+            "name": "getStatus",
+            "signature": "getStatus(): Promise<AiStatus>",
+            "description": "Whether an AI provider is configured (and which one). Carries no secrets.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "spaceAssist",
+            "signature": "spaceAssist(input: SpaceAssistInput): Promise<SpaceAssistResult>",
+            "description": "Draft a polished description + 3-5 high-level objectives from a\nshort, rough purpose. Throws `AiError` (`AI_NOT_CONFIGURED`,\n`AI_INVALID_INPUT`, `AI_NETWORK`, `AI_AUTH_REJECTED`,\n`AI_RATE_LIMITED`, `AI_PROVIDER_ERROR`, or `AI_BAD_RESPONSE`).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "extractAssetMetadata",
+            "signature": "extractAssetMetadata(input: AssetMetadataInput): Promise<AssetMetadataResult>",
+            "description": "Extract structured metadata (summary, tags, topics, entities, ...)\nfor a single asset via Claude 4.8. Multimodal: a text body, an image\n(vision), or a PDF document. **Claude-only** — throws\n`AI_NOT_CONFIGURED` when the active provider isn't Claude (the\nOneReach flow contract only covers `spaceAssist`).\n\nThrows `AiError` (`AI_NOT_CONFIGURED`, `AI_INVALID_INPUT`,\n`AI_NETWORK`, `AI_AUTH_REJECTED`, `AI_RATE_LIMITED`,\n`AI_PROVIDER_ERROR`, `AI_BAD_RESPONSE`).",
+            "tags": [],
+            "examples": []
+          }
+        ]
+      },
+      "events": {
+        "constantName": "AI_EVENTS",
+        "count": 10,
+        "entries": [
+          {
+            "constantKey": "ENRICH_ASSET_START",
+            "name": "ai.enrich-asset.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ENRICH_ASSET_FINISH",
+            "name": "ai.enrich-asset.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ENRICH_ASSET_FAIL",
+            "name": "ai.enrich-asset.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ENRICH_MODALITY",
+            "name": "ai.enrich.modality",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_STATUS",
+            "name": "ai.ipc.status",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_SPACE_ASSIST",
+            "name": "ai.ipc.space-assist",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_ENRICH_ASSET",
+            "name": "ai.ipc.enrich-asset",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_KEY_SAVE",
+            "name": "ai.ipc.key-save",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_KEY_HAS",
+            "name": "ai.ipc.key-has",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_KEY_DELETE",
+            "name": "ai.ipc.key-delete",
+            "description": ""
+          }
+        ]
+      },
+      "readme": "# lite/ai\n\nMain-process AI assist for Spaces. Drafts metadata for a new Space — a\npolished purpose statement and 3–5 high-level objectives — from a short,\nrough note the user types in the Space-creation wizard.\n\nProvider-flexible: the same `spaceAssist()` surface is served by **either**\nthe Anthropic **Claude API** **or** a user-supplied **OneReach HTTP flow**.\nThe renderer reaches it through `window.lite.ai`; the key/token never leave\nthe main process.\n\n## How it talks to providers\n\n- **Claude** uses the official `@anthropic-ai/sdk` (added to\n  `lite/package.json` and externalized in `lite/esbuild.config.mjs` per\n  ADR-047's dependency recipe; ships with its tiny transitive deps). Model\n  defaults to `claude-opus-4-8`, with structured JSON output.\n- **OneReach flow** uses raw HTTP to a user-supplied flow URL, authenticated\n  with a **FLOW token minted from the logged-in session** — the same\n  `/http/{accountId}/refresh_token` mechanism `kv/flow-http-client.ts` uses.\n  The user supplies only the flow URL; the token comes from login.\n\nThe SDK is reached through an injectable seam (`makeClaudeMessageCreator`),\nso `callClaude` and the service unit-test without a network or the SDK.\n\n## Configuration\n\nResolved by `config.ts`. **Environment variables win over the file, per\nfield.** Nothing here is committed; the user owns the file/env (analogous to\ntheir `.env.notarization`). The secret stays in the main process and is\nnever logged or sent over the bridge.\n\n### Environment variables\n\n| Var | Meaning |\n|---|---|\n| `ANTHROPIC_API_KEY` | Use Claude. The key. |\n| `ANTHROPIC_MODEL` | Optional. Defaults to `claude-opus-4-8`. |\n| `ANTHROPIC_BASE_URL` | Optional. Defaults to `https://api.anthropic.com`. |\n| `ONEREACH_FLOW_URL` | Use a OneReach flow. The flow's HTTP URL. |\n| `ONEREACH_FLOW_TOKEN` | Optional token override. Normally the token is minted from login — leave unset. |\n| `ONEREACH_FLOW_TOKEN_BASE_URL` | Optional. Override the `/refresh_token` host (defaults to edison). |\n| `AI_PROVIDER` | Optional. Force `claude` or `onereach-flow`. |\n\n### `ai-config.json` (in the app's userData dir)\n\n```json\n{\n  \"provider\": \"claude\",\n  \"claude\": { \"apiKey\": \"sk-ant-...\", \"model\": \"claude-opus-4-8\" },\n  \"onereachFlow\": { \"url\": \"https://...\", \"token\": \"...\" }\n}\n```\n\nFor the OneReach flow, `onereachFlow.token` is optional — omit it and the\nFLOW token is minted from the logged-in session at call time. When both\nproviders are present, `provider` (or `AI_PROVIDER`) decides; otherwise\nClaude is preferred, then the OneReach flow. If nothing is configured,\n`getStatus()` reports `{ configured: false }` and the wizard falls back to\nfully manual entry.\n\n## OneReach flow contract\n\nThe flow is called with `Authorization: FLOW <token>` (minted from the\nlogged-in session via `/http/{accountId}/refresh_token`) and a `POST` body:\n\n```json\n{ \"purpose\": \"<user text>\", \"name\": \"<optional space name>\" }\n```\n\nIt must return JSON containing `description` (string) and `objectives`\n(string[]), either at the top level or nested under `value` / `data` /\n`result` / `output` / `response` / `body`. (The user supplies only the flow\nURL — they never paste a token; `spaceAssist` fails with\n`AI_NOT_CONFIGURED` if no one is signed in and no token override is set.)\n\n## Public surface (`api.ts`)\n\n- `getAiApi(): AiApi` — singleton.\n- `AiApi.getStatus()` → `{ configured, provider }` (no secrets).\n- `AiApi.spaceAssist({ purpose, name? })` → `{ description, objectives }`.\n- `setAiConfigDir(dir)` — main-wiring hook (`initAi` calls it).\n- `_resetAiApiForTesting()` / `_setAiApiForTesting(api)`.\n\n## Error catalog (`AI_ERROR_CODES`)\n\n| Code | When |\n|---|---|\n| `AI_NOT_CONFIGURED` | No provider configured. |\n| `AI_INVALID_INPUT` | Blank/empty purpose. |\n| `AI_NETWORK` | Request couldn't be sent (DNS/offline/TLS/abort). |\n| `AI_AUTH_REJECTED` | Provider rejected the key/token (401/403). |\n| `AI_RATE_LIMITED` | Provider rate-limited (429). |\n| `AI_PROVIDER_ERROR` | Non-2xx status or an explicit refusal. |\n| `AI_BAD_RESPONSE` | Response wasn't the expected `{description,objectives}` shape. |\n\n## Security notes\n\n- The API key / flow token enter only via `config.ts` and stay in the main\n  process. They are never returned by `getStatus()`, never sent over the\n  bridge, and never placed in error context or logs.\n- The renderer (strict CSP, `default-src 'self'`) cannot make this network\n  call itself — it goes through the `lite:ai:*` IPC handlers here.\n"
+    },
+    {
       "slug": "ai-run-times",
       "title": "Ai Run Times",
       "summary": "AI Run Times module -- PUBLIC API.\n\nThe only file other lite modules should import from in this\nmodule. Per ADR-019 / Rule 11, cross-module imports go through\n`<module>/api.ts` -- never reach into `store.ts`, `fetcher.ts`,\nor any other internal file.\n\nAI Run Times is the polished Flipboard-style article reader: it\nfetches RSS feeds, displays tiles, lets users read articles in\nan overlay, supports content preferences, persists a reading\nlog (with JSON export), and (when an OpenAI key is configured)\ngenerates TTS audio with a queueable playlist.\n\nv1 ships with one default feed source (UX Magazine -- OneReach's\narticle home). Users can add / remove feed sources in\nSettings -> AI Run Times.\n\nTests: `_setAiRunTimesApiForTesting(stub)`, `_resetAiRunTimesApiForTesting()`.",
@@ -124,7 +213,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "AI_RUN_TIMES_EVENTS",
-        "count": 31,
+        "count": 32,
         "entries": [
           {
             "constantKey": "REFRESH_FEED_START",
@@ -204,6 +293,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "CHANGED",
             "name": "ai-run-times.changed",
+            "description": ""
+          },
+          {
+            "constantKey": "SELF_HEAL",
+            "name": "ai-run-times.self-heal",
             "description": ""
           },
           {
@@ -411,7 +505,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "AUTH_EVENTS",
-        "count": 43,
+        "count": 50,
         "entries": [
           {
             "constantKey": "SIGN_IN_START",
@@ -601,6 +695,41 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "ACCOUNT_PICKER_SELECTED",
             "name": "auth.account-picker.selected",
+            "description": ""
+          },
+          {
+            "constantKey": "RE_SIGNIN_SUPPRESSED_WHILE_SUSPENDED",
+            "name": "auth.re-signin.suppressed-while-suspended",
+            "description": ""
+          },
+          {
+            "constantKey": "RE_SIGNIN_PROMPT_SHOWN",
+            "name": "auth.re-signin.prompt-shown",
+            "description": ""
+          },
+          {
+            "constantKey": "RE_SIGNIN_ACCEPTED",
+            "name": "auth.re-signin.accepted",
+            "description": ""
+          },
+          {
+            "constantKey": "RE_SIGNIN_COMPLETED",
+            "name": "auth.re-signin.completed",
+            "description": ""
+          },
+          {
+            "constantKey": "RE_SIGNIN_KV_REJECTED_FRESH_TOKEN",
+            "name": "auth.re-signin.kv-rejected-fresh-token",
+            "description": ""
+          },
+          {
+            "constantKey": "RE_SIGNIN_DISMISSED",
+            "name": "auth.re-signin.dismissed",
+            "description": ""
+          },
+          {
+            "constantKey": "RE_SIGNIN_SUSPENDED_CHANGED",
+            "name": "auth.re-signin.suspended-changed",
             "description": ""
           },
           {
@@ -988,6 +1117,76 @@ export const MANIFEST: Manifest = {
       "readme": "# `lite/discovery/` -- Service URL resolver\n\nWraps `@or-sdk/discovery` so other Lite modules can resolve OneReach service URLs (KV, Flows, Bots, etc.) at runtime instead of hardcoding endpoints. This is the seam that lets every subsequent SDK call ride on the signed-in user's `mult` token.\n\n- **Public API**: [`api.ts`](api.ts) -- `DiscoveryApi`, `getDiscoveryApi()`, `DiscoveryError`, `DISCOVERY_ERROR_CODES`\n- **Internal**:\n  - [`store.ts`](store.ts) -- `DiscoveryStore` SDK wrapper + cache (`@internal`)\n  - [`types.ts`](types.ts) -- `DiscoveryService`\n  - [`events.ts`](events.ts) -- typed event surface (ADR-032)\n- **Tests**: [`../test/unit/discovery-api.test.ts`](../test/unit/discovery-api.test.ts), [`../test/unit/discovery-store.test.ts`](../test/unit/discovery-store.test.ts)\n\n## Usage\n\n```typescript\nimport { getDiscoveryApi } from '../discovery/api.js';\n\nconst kvUrl = await getDiscoveryApi().resolve('key-value-storage');\n// 'https://...sdk-api.onereach.ai/keyvalue'\n```\n\n`resolve()` requires a signed-in user (token is read from `getAuthApi().getToken('edison')`). Signed-out callers see `DISCOVERY_NOT_AUTHENTICATED`.\n\n## Caching\n\nResolved URLs are cached per `serviceKey` for 5 minutes. Calling `resolve('key-value-storage')` 100 times pays the discovery roundtrip once. `invalidateCache()` clears the cache (called on sign-out).\n\n## Error catalog\n\n| Code | When | Remediation |\n|------|------|-------------|\n| `DISCOVERY_NOT_AUTHENTICATED` | No `mult` token (user signed out) | Sign in via Settings -> Account |\n| `DISCOVERY_NOT_FOUND` | Discovery returned 404 or no URL for the serviceKey | Confirm the serviceKey is registered |\n| `DISCOVERY_HTTP` | Non-2xx, non-404 response (incl. 401/403) | Check token freshness; sign out + back in |\n| `DISCOVERY_NETWORK` | Underlying fetch rejected (DNS / TCP / TLS) | Check network connectivity |\n\n## Discovery URL\n\nEdison uses `https://discovery.edison.api.onereach.ai`. Other environments (staging, dev, production) would land in `lite/auth/types.ts:ENVIRONMENT_CONFIGS` as part of the `auth-multi-env` chunk in `lite/PORTING.md`.\n\n## Borrowed pattern\n\nThe construction shape (token getter + discoveryUrl) mirrors `lib/edison-sdk-manager.js:298-308` -- the full app's pattern, studied but not imported (per `lite/LITE-RULES.md`).\n"
     },
     {
+      "slug": "downloads",
+      "title": "Downloads",
+      "summary": "Downloads module — PUBLIC API.\n\nPer ADR-019 / Rule 11 (`lite/LITE-RULES.md`), cross-module imports go\nthrough this file — never reach into `handler.ts`, `picker-window.ts`,\nor any other internal file from outside the module.\n\nToday the public surface is tiny: most of the module's work is\ntriggered implicitly by Electron's `will-download` event, not by\nother modules calling in. The one entry point is\n`attachToSession(s)` — used when a new per-tab session is created\nafter boot (the chrome session is wired by default in\n`initDownloads`).\n\nRe-exports the public types + the typed `DownloadsError` codes for\nconsumers that need them (currently none; placeholder for parity\nwith sibling modules' api.ts shape).",
+      "surface": {
+        "interfaceName": "DownloadsApi",
+        "interfaceDescription": "The public surface of the downloads module.\n\n**Lifecycle**: returned from `initDownloads(...)` and also exposed\nas a singleton via `getDownloadsApi()` so peer modules can call in\nwithout holding the boot-time handle.\n\n**Behavior**: callers normally never invoke any of these methods.\nThe `will-download` listener installed at init handles every\ndownload surface (main window, secure windows, IDW tabs, ...) on\nits own. The method below exists for the rare case where a new\n`Session` is created at runtime (e.g. a freshly-created tab with\na custom partition) and needs the handler attached.",
+        "methods": [
+          {
+            "name": "attachToSession",
+            "signature": "attachToSession(s: Session): () => void;",
+            "description": "Attach the `will-download` handler to an additional session.\nReturns an unhook function. Idempotent — calling for a session\nthat's already attached returns a no-op unhook.",
+            "tags": [],
+            "examples": []
+          }
+        ]
+      },
+      "events": {
+        "constantName": "DOWNLOADS_EVENTS",
+        "count": 9,
+        "entries": [
+          {
+            "constantKey": "CAPTURED",
+            "name": "downloads.captured",
+            "description": ""
+          },
+          {
+            "constantKey": "ROUTED_TO_DOWNLOADS",
+            "name": "downloads.routed-to-downloads",
+            "description": ""
+          },
+          {
+            "constantKey": "CANCELLED",
+            "name": "downloads.cancelled",
+            "description": ""
+          },
+          {
+            "constantKey": "PICKER_BUSY_FALLBACK",
+            "name": "downloads.picker-busy-fallback",
+            "description": ""
+          },
+          {
+            "constantKey": "SAVE_TO_SPACE_START",
+            "name": "downloads.save-to-space.start",
+            "description": ""
+          },
+          {
+            "constantKey": "SAVE_TO_SPACE_FINISH",
+            "name": "downloads.save-to-space.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "SAVE_TO_SPACE_FAIL",
+            "name": "downloads.save-to-space.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_PICKER_BOOTSTRAP",
+            "name": "downloads.ipc.picker-bootstrap",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_PICKER_RESOLVE",
+            "name": "downloads.ipc.picker-resolve",
+            "description": ""
+          }
+        ]
+      },
+      "readme": "# lite/downloads\n\nCaptures every `will-download` event and offers the user a choice:\n\n1. **Save to Downloads** — drops the file into the OS Downloads folder.\n   Same behaviour as the default Electron handler.\n2. **Save to Space** — opens a small picker window, then uploads the\n   captured bytes via `getFilesApi().upload(...)` and creates a matching\n   `:Asset` in the picked Space via `getSpacesApi().items.create({...})`.\n3. **Cancel** — `item.cancel()`.\n\nMirrors the full app's `handleDownloadWithSpaceOption` (`browserWindow.js`)\nbehaviour but writes to the Neon graph + Files bucket instead of the\nclipboard-manager-v2-adapter local store. ADR-019 / Rule 11 applies:\npeer modules import only from [`api.ts`](api.ts).\n\n## Module layout\n\n| File              | Role |\n|-------------------|------|\n| `api.ts`          | Public surface (`getDownloadsApi`, `DownloadsApi`). Rule 11 boundary. |\n| `main.ts`         | `initDownloads()` orchestrator. Attaches `will-download`, registers IPC. |\n| `handler.ts`      | The 3-button dialog + upload + asset-create flow. |\n| `picker-window.ts`| Single-instance picker BrowserWindow factory + lifecycle. |\n| `picker.ts`       | Bundled renderer that runs inside the picker window. |\n| `picker.html` / `picker.css` | UI scaffold + dark-theme styles. |\n| `ipc.ts`          | `lite:download-picker:bootstrap` + `:resolve` channels. |\n| `types.ts`        | Shared types (`CapturedDownload`, `PickerBootstrap`, ...). |\n| `mime.ts`         | Pure helpers: MIME → ItemKind, sanitizeFileName, storage-key composer. |\n\n## Boot wiring\n\n`lite/main-lite.ts` calls `initDownloads({ pickerHtmlPath, preloadPath, getParentWindow, logger })`\nafter the main window exists. The downloads orchestrator:\n\n- registers `lite:download-picker:bootstrap` + `:resolve` on `ipcMain`\n- attaches `will-download` to `session.defaultSession`\n- publishes the live api singleton via `_setDownloadsApiForTesting`\n\nWhen new per-tab partitions are created at runtime, call\n`getDownloadsApi().attachToSession(s)` to wire them too.\n\n## Picker UX\n\nWindow:\n- 420×540, no menu bar, application-modal, centered on parent.\n- Header: \"Save to Space\".\n- File card: kind badge (DOC/IMG/TXT/...) + filename + \"{size} · {mime} · from {source}\".\n- Search input filters spaces by name.\n- Scrollable list of spaces. Mouse + Up/Down navigate; Enter saves;\n  Esc / Cancel button / window-close all resolve as cancel.\n- Inline error block (e.g. \"Failed to load spaces: …\") shown without\n  closing the window so the user keeps their context.\n\n## Storage layout\n\nFiles land at:\n\n```\nlite-downloads/<spaceId>/<download-id>/<filename>\n```\n\n`<download-id>` is a 10-char hex prefix randomly generated at capture\ntime, so two downloads of the same filename to the same Space don't\ncollide.\n\n## Error surfaces\n\n- Picker fails to bootstrap → inline error block; user can cancel.\n- Download interrupted before user picks → temp file scrubbed,\n  native notification: \"Save to Space failed\".\n- Upload or asset-create throws → same failure notification; upload\n  bytes remain in the bucket until a future janitor sweep\n  (`lite-downloads/<spaceId>/<id>/` prefixes that don't match an :Asset).\n\n## Single-instance discipline\n\nOne picker open at a time (the BrowserWindow factory enforces this).\nIf a second download fires while the picker is busy, the second\ndownload is silently routed to the OS Downloads folder — no\nqueue, no error dialog: the user still gets their file.\n\n## Tests\n\n- `test/unit/downloads/mime.test.ts` — pure helpers (MIME mapping,\n  sanitizer, storage key composition).\n- `test/unit/downloads/picker-window.test.ts` — single-instance lifecycle.\n\nEnd-to-end coverage (drives a real picker window through Playwright)\nis intentionally deferred — the unit-level coverage exercises every\nbranch with the heavy Electron bits stubbed.\n"
+    },
+    {
       "slug": "event-bus",
       "title": "Event Bus",
       "summary": "Event bus -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11, cross-module imports go through `<module>/api.ts` --\nnever reach into `store.ts`, `translator.ts`, or any other internal file.\n\nThe bus projects raw module events (from the central logging queue)\ninto a small typed catalogue of `DomainEvent`s that other systems\nsubscribe to without coupling to module internals. Per ADR-043, the\nsubscription surface (`on`, `onPattern`, `recent`, `emit`) IS the\npublic API -- bridged to renderers via `window.lite.events.*`, and\ncalled directly by main-process consumers via `getEventBusApi()`.\n\nUsage from another lite module (main process):\n\n  import { getEventBusApi } from '../event-bus/api.js';\n  getEventBusApi().on('user.signed-in', (ev) => {\n    console.log(ev.data.email);\n  });\n\nUsage from a renderer (window):\n\n  window.lite.events.on('agent.tab.opened', (ev) => { ... });\n  const recent = await window.lite.events.recent('user.signed-in', 5);\n\nTests: `_setEventBusApiForTesting(stub)` to inject a custom\nimplementation, `_resetEventBusApiForTesting()` to clear the singleton.",
@@ -1008,7 +1207,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "EVENT_BUS_EVENTS",
-        "count": 8,
+        "count": 9,
         "entries": [
           {
             "constantKey": "TRANSLATED",
@@ -1041,13 +1240,18 @@ export const MANIFEST: Manifest = {
             "description": ""
           },
           {
-            "constantKey": "IPC_SUBSCRIBE",
-            "name": "event-bus.ipc.subscribe",
+            "constantKey": "IPC_RECENT",
+            "name": "event-bus.ipc.recent",
             "description": ""
           },
           {
-            "constantKey": "IPC_RECENT",
-            "name": "event-bus.ipc.recent",
+            "constantKey": "IPC_SIZE",
+            "name": "event-bus.ipc.size",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_EMIT",
+            "name": "event-bus.ipc.emit",
             "description": ""
           }
         ]
@@ -1964,7 +2168,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "MAIN_WINDOW_EVENTS",
-        "count": 18,
+        "count": 28,
         "entries": [
           {
             "constantKey": "OPEN_TAB_START",
@@ -2034,6 +2238,56 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "TAB_LOAD_FAIL",
             "name": "main-window.tab.load-fail",
+            "description": ""
+          },
+          {
+            "constantKey": "DEVTOOLS_OPEN_ACTIVE_TAB",
+            "name": "main-window.devtools.open-active-tab",
+            "description": ""
+          },
+          {
+            "constantKey": "TAB_TWO_FACTOR_DETECTED",
+            "name": "main-window.tab.two-factor-detected",
+            "description": ""
+          },
+          {
+            "constantKey": "TAB_ACCOUNT_PICKER_DETECTED",
+            "name": "main-window.tab.account-picker-detected",
+            "description": ""
+          },
+          {
+            "constantKey": "AUTO_SIGNIN_TRIGGERED",
+            "name": "main-window.auto-signin.triggered",
+            "description": ""
+          },
+          {
+            "constantKey": "AUTO_SIGNIN_SUCCEEDED",
+            "name": "main-window.auto-signin.succeeded",
+            "description": ""
+          },
+          {
+            "constantKey": "AUTO_SIGNIN_REJECTED",
+            "name": "main-window.auto-signin.rejected",
+            "description": ""
+          },
+          {
+            "constantKey": "SESSION_RELOAD_FIRING",
+            "name": "main-window.session-reload.firing",
+            "description": ""
+          },
+          {
+            "constantKey": "SESSION_RELOAD_SKIPPED",
+            "name": "main-window.session-reload.skipped",
+            "description": ""
+          },
+          {
+            "constantKey": "PARTITION_CLEARED",
+            "name": "main-window.partition.cleared",
+            "description": ""
+          },
+          {
+            "constantKey": "PARTITION_CLEAR_FAILED",
+            "name": "main-window.partition.clear-failed",
             "description": ""
           },
           {
@@ -2262,7 +2516,42 @@ export const MANIFEST: Manifest = {
           }
         ]
       },
-      "events": null,
+      "events": {
+        "constantName": "ONBOARDING_EVENTS",
+        "count": 6,
+        "entries": [
+          {
+            "constantKey": "STEP_COMPLETED",
+            "name": "onboarding.step.completed",
+            "description": ""
+          },
+          {
+            "constantKey": "DISMISSED",
+            "name": "onboarding.dismissed",
+            "description": ""
+          },
+          {
+            "constantKey": "SELF_HEAL",
+            "name": "onboarding.self-heal",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_LOAD",
+            "name": "onboarding.ipc.load",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_MARK_COMPLETE",
+            "name": "onboarding.ipc.mark-complete",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_DISMISS",
+            "name": "onboarding.ipc.dismiss",
+            "description": ""
+          }
+        ]
+      },
       "readme": "# lite/onboarding\n\nKV-backed first-run checklist for the chrome home view. Tracks\nwhich onboarding steps the user has completed; the chrome card\nauto-ticks them off and hides itself when everything is done OR\nthe user explicitly dismisses it.\n\nPer ADR-046.\n\n## Steps\n\nStable IDs in [`./types.ts`](./types.ts) -- new steps APPEND, existing\nIDs never change so prior completion state survives upgrades.\n\n| Step ID | Renderer label | Auto-completes when |\n|---|---|---|\n| `signed-in` | Sign in to GSX | `auth.onSessionChanged` fires with a non-null session |\n| `two-factor-saved` | Save your 2FA setup secret (optional) | `totp.hasSecret()` returns true (polled on focus) |\n| `openai-key-set` | Add an OpenAI API key (optional, for TTS) | `ai.status().hasApiKey === true` (polled on focus) |\n| `first-agent-opened` | Open your first agent | `mainWindow.onTabsChanged` reports a non-empty tab list |\n\n## Surface\n\n```typescript\nimport { getOnboardingApi } from '../onboarding/api.js';\n\nconst api = getOnboardingApi();\nconst state = await api.load();\nawait api.markComplete('signed-in');\nawait api.dismiss();\nconst unsub = api.onChange((newState) => { ... });\n```\n\nRenderer side via `window.lite.onboarding`:\n\n```typescript\nconst state = await window.lite!.onboarding!.load();\nawait window.lite!.onboarding!.markComplete('signed-in');\nawait window.lite!.onboarding!.dismiss();\n```\n\n## Persistence\n\nKV collection: `lite-onboarding`, key: `default`. Single blob:\n\n```typescript\n{\n  schemaVersion: 1,\n  completedAt: { 'signed-in': '2026-05-05T...', ... },\n  dismissedAt: '2026-05-05T...' | null,\n}\n```\n\nAtomic writes via `lite/kv/api.ts`. `markComplete` is idempotent;\nrepeated calls preserve the earliest timestamp.\n\n## Listener semantics\n\n`onChange` listeners are isolated -- a throwing listener doesn't\nprevent the others from receiving the change. Same pattern as\n`lite/idw/store.ts`.\n\n## What's NOT in scope (named so we don't lose them)\n\n- **A wizard / coach-mark tour**: rejected for v1; the checklist\n  card is the lighter pattern.\n- **Per-account onboarding state**: today's state is per-device.\n  If we need per-account, add `accountId` to the KV key.\n- **More steps**: append to `ONBOARDING_STEP_IDS` and add a\n  matching auto-complete trigger in `lite/main-window/chrome.ts`.\n\n## Tests\n\n[`lite/test/unit/onboarding-store.test.ts`](../test/unit/onboarding-store.test.ts):\ndefault state, `markComplete` idempotence, `dismiss`, `reset`,\nlistener isolation, persistence across `OnboardingStore`\ninstances.\n\n[`lite/test/unit/onboarding-api.test.ts`](../test/unit/onboarding-api.test.ts):\nRule-12 conformance contract (api singleton + reset + override).\n"
     },
     {
@@ -2455,7 +2744,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "SPACES_EVENTS",
-        "count": 24,
+        "count": 27,
         "entries": [
           {
             "constantKey": "LIST_SPACES_START",
@@ -2548,6 +2837,21 @@ export const MANIFEST: Manifest = {
             "description": ""
           },
           {
+            "constantKey": "UPDATE_START",
+            "name": "spaces.update.start",
+            "description": ""
+          },
+          {
+            "constantKey": "UPDATE_FINISH",
+            "name": "spaces.update.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "UPDATE_FAIL",
+            "name": "spaces.update.fail",
+            "description": ""
+          },
+          {
             "constantKey": "DELETE_START",
             "name": "spaces.delete.start",
             "description": ""
@@ -2579,7 +2883,7 @@ export const MANIFEST: Manifest = {
           }
         ]
       },
-      "readme": "# Spaces Module\n\n**Status**: Phase 1 + Phase 2 shipped. The Spaces window opens, lists every `:Space` the active account can see, surfaces the Uncategorized intake count, fetches `:Asset` cards (surfaced as \"Items\" in the renderer naming) for the selected scope (Uncategorized or a chosen Space), renders multi-Space chips and optional provenance on each card, and pops a detail panel with full content when a card is clicked. Cypher-backed throughout; no stubs remain. Phase 0.5 Discovery panel kept as a collapsible diagnostic at the bottom of the page.\n\n**Schema**: queries follow the canonical OneReach graph schema documented in the `(:Schema)` nodes themselves: node label `:Asset`, edge `[:BELONGS_TO]` from Asset to Space, creator edge `[:CREATED]` from Person to Asset. Every projected field uses `coalesce(canonical, legacy, default)` so existing data written by the legacy `omnigraph-client.js` push path (which writes `title` / `assetType` / `fileUrl` / snake_case timestamps) still renders alongside data using the canonical names. The TypeScript surface (`Item`, `ItemSummary`) keeps the friendlier \"Item\" naming for renderers; only the Cypher uses the storage label.\n\n> Spaces is a **platform primitive**, not a Lite-only feature. The Lite UI in this module is the first consumer of the SDK; future consumers include GSX agents, Cowork integrations, and the Approval + Audit event stream. The methods on `SpacesApi` ARE the platform contract -- treat them with that level of stability discipline. See the spaces plan (\"Spaces as Platform Primitive\" section).\n\n## Public surface (`api.ts`)\n\n```ts\nimport { getSpacesApi } from '../spaces/api.js';\n\nconst api = getSpacesApi();\napi.open();                                          // launch / focus the window\nawait api.listSpaces();                              // every :Space the account can read\nawait api.getUncategorizedCount();                   // :Asset nodes with no :BELONGS_TO edge\nawait api.items.list({ kind: 'uncategorized' });     // Items without a :Space\nawait api.items.list({ kind: 'space', spaceId: '…' }); // Items in one :Space (+ chips)\nawait api.items.get(itemId);                          // full Item incl. content + metadata\n```\n\nUse `resolveSpaceScope(id)` at any UI/IPC boundary that hands a plain id into the SDK. The synthetic Uncategorized id is exported as `UNCATEGORIZED_SPACE_ID` and is the only string the renderer/IPC layer ever uses; the typed `SpaceScope` union is what every internal call site sees.\n\n### Cypher\n\nAll five queries live as module constants on `lite/spaces/sdk-client.ts` so they're greppable, diffable in code review, and asserted on by unit tests (regression-guarded against accidental drift). See `CYPHER.LIST_SPACES`, `UNCATEGORIZED_COUNT`, `LIST_ITEMS_UNCATEGORIZED`, `LIST_ITEMS_IN_SPACE`, `GET_ITEM`.\n\n### Provenance projection\n\nEach item-list query and `getItem` optionally project a `producedBy` row via the canonical creator edge `(:Person)-[:CREATED]->(:Asset)` (per the `_RelationshipTypes` Schema node). When the edge is absent, the projection collapses to `null` and the renderer omits the provenance line. Future producer types (`:Agent`, `:Workflow`, etc.) will widen the OPTIONAL MATCH as those modules port over.\n\n## Internal layout\n\n| File                  | Role                                                                       |\n| --------------------- | -------------------------------------------------------------------------- |\n| `api.ts`              | Public surface + singleton swap pattern. The only allowed importer.        |\n| `types.ts`            | `Space`, `Item`, `ItemSummary`, `ListOpts`, etc.                           |\n| `scope.ts`            | `SpaceScope` union + `resolveSpaceScope` helper.                           |\n| `errors.ts`           | `SpacesError` + `SPACES_ERROR_CODES`.                                      |\n| `events.ts`           | `SpacesEvent` taxonomy + `SPACES_EVENTS` catalog.                          |\n| `sdk-client.ts`       | Cypher wrapper. Phase 1+ injects `getNeonApi().query` at boot.             |\n| `discovery.ts`        | Phase 0.5 query runner (main-process; uses `getNeonApi()`).                |\n| `discovery-format.ts` | Renderer-safe types + Markdown formatter for discovery results.            |\n| `window.ts`           | Single-instance `BrowserWindow` factory.                                   |\n| `ipc.ts`              | `lite:spaces:*` IPC handler registration.                                  |\n| `main.ts`             | `initSpaces()` orchestrator + Tools-menu wiring.                           |\n| `spaces.html/css`     | Renderer chrome + item card / chip / detail-pane styles + Discovery panel. |\n| `spaces.ts`           | Renderer entrypoint (IIFE bundled by esbuild).                             |\n| `DISCOVERY.md`        | Phase 0.5 reference: Q1–Q6 queries + Q5/Q6 operational template.           |\n| `ROADMAP.md`          | Phases shipped / sketched / out of scope.                                  |\n\n## Error catalog\n\n| Code                          | Trigger                                                          |\n| ----------------------------- | ---------------------------------------------------------------- |\n| `SPACES_NOT_AUTHENTICATED`    | No `mult` token / no active account.                             |\n| `SPACES_NOT_FOUND`            | Space / item missing, or filtered out by ACL.                    |\n| `SPACES_FORBIDDEN`            | Caller lacks read/mutate permission on the target.               |\n| `SPACES_CYPHER`               | Neon query failed (transient, syntax, or malformed result).      |\n| `SPACES_NETWORK`              | DNS / TCP / TLS / fetch reject on the way to Edison.             |\n| `SPACES_INVALID_INPUT`        | Empty id, bad limit, malformed payload.                          |\n| `SPACES_NOT_INITIALIZED`      | SDK called before `initSpaces()` ran.                            |\n\nThe SDK client normalizes the underlying `NEON_*` codes to the spaces-side codes above so callers only ever see one error taxonomy. See `normalizeError()` in `sdk-client.ts`.\n\n## Conformance\n\n`lite/test/unit/spaces-api.test.ts` runs `runApiConformanceContract` per Rule 12. Required surface: `['open', 'listSpaces', 'getUncategorizedCount', 'items']`.\n\n## Test coverage\n\n| File                                       | Layer covered                                                                |\n| ------------------------------------------ | ---------------------------------------------------------------------------- |\n| `spaces-api.test.ts`                       | Singleton swap + conformance contract.                                       |\n| `spaces-discovery.test.ts`                 | Phase 0.5 Q1–Q4 runner shape.                                                |\n| `spaces-sdk-client.test.ts`                | Cypher source regression guards, row-to-domain mapping, error normalization. |\n| `spaces-renderer.test.ts`                  | Pure DOM builders (sidebar rows, item cards, chips, detail pane, formatters). |\n\n## Out of scope (this phase)\n\n- `addToSpace` / `removeFromSpace` mutations (Phase 3)\n- Create / rename / delete Space (Phase 3)\n- Pin / favorite Spaces (small follow-up chunk; not roadmap-level)\n- Suggestions / Librarian agents (Phase 4)\n- Local cache / offline support\n- Real-time activity pulse (server WebSocket prerequisite; no plan to add)\n"
+      "readme": "# Spaces Module\n\n**Status**: Phase 1 + Phase 2 + chunk 3k/3o (Home view) shipped. The Spaces window opens with **Home** as the default scope — a 5-card news feed that surfaces what's in your data room (entity counts + 30-day sparklines, top contributors over the last week, agents in your account, your visible-Space count, and the most-recently-added items). Sidebar lists every `:Space` the active account can see and surfaces the Uncategorized intake count. When you click into a Space (or Uncategorized) the main pane switches to the existing item-cards view: `:Asset` cards (surfaced as \"Items\" in the renderer naming) with multi-Space chips, optional provenance, and a right-rail detail panel. Cypher-backed throughout; no stubs remain.\n\nThe Phase 0.5 Discovery panel that previously lived at the bottom of the Spaces window has moved to **Settings → Diagnostics → \"Spaces Discovery (engineer)\"** — same runner, same JSON output, but no longer crowding the user-facing UI. See [`HOME-V1.md`](./HOME-V1.md) for the chunk detail.\n\n**Schema**: queries follow the canonical OneReach graph schema documented in the `(:Schema)` nodes themselves: node label `:Asset`, edge `[:BELONGS_TO]` from Asset to Space, creator edge `[:CREATED]` from Person to Asset. Every projected field uses `coalesce(canonical, legacy, default)` so existing data written by the legacy `omnigraph-client.js` push path (which writes `title` / `assetType` / `fileUrl` / snake_case timestamps) still renders alongside data using the canonical names. The TypeScript surface (`Item`, `ItemSummary`) keeps the friendlier \"Item\" naming for renderers; only the Cypher uses the storage label.\n\n> Spaces is a **platform primitive**, not a Lite-only feature. The Lite UI in this module is the first consumer of the SDK; future consumers include GSX agents, Cowork integrations, and the Approval + Audit event stream. The methods on `SpacesApi` ARE the platform contract -- treat them with that level of stability discipline. See the spaces plan (\"Spaces as Platform Primitive\" section).\n\n## Public surface (`api.ts`)\n\n```ts\nimport { getSpacesApi } from '../spaces/api.js';\n\nconst api = getSpacesApi();\napi.open();                                          // launch / focus the window\n\n// Phase 1 + 2 (browse)\nawait api.listSpaces();                              // every :Space the account can read\nawait api.getUncategorizedCount();                   // :Asset nodes with no :BELONGS_TO edge\nawait api.items.list({ kind: 'uncategorized' });     // Items without a :Space\nawait api.items.list({ kind: 'space', spaceId: '…' }); // Items in one :Space (+ chips)\nawait api.items.get(itemId);                          // full Item incl. content + metadata\n\n// Home view (chunk 3k + 3o) — read-only news-feed data\nawait api.getEntityCounts();                          // { spaces, assets, people, agents }\nawait api.listRecentItems({ limit: 3 });              // most-recent :Asset, ItemSummary shape\nawait api.topContributors({ window: 'week', limit: 4 }); // :Commit aggregates by author\nawait api.listRecentEvents({ limit: 50 });            // :Commit projection (id/author/kind/timestamp/space)\nawait api.listAgentsSample({ limit: 3 });             // first N :Agent alphabetically\nawait api.getPermissionSummary();                     // { visibleSpaceCount, totalSpaceCount? }\n```\n\nUse `resolveSpaceScope(id)` at any UI/IPC boundary that hands a plain id into the SDK. The synthetic Uncategorized id is exported as `UNCATEGORIZED_SPACE_ID` and is the only string the renderer/IPC layer ever uses; the typed `SpaceScope` union is what every internal call site sees.\n\n### Cypher\n\nAll eleven queries live as module constants on `lite/spaces/sdk-client.ts` so they're greppable, diffable in code review, and asserted on by unit tests (regression-guarded against accidental drift):\n\n- `CYPHER.LIST_SPACES`, `UNCATEGORIZED_COUNT`, `LIST_ITEMS_UNCATEGORIZED`, `LIST_ITEMS_IN_SPACE`, `GET_ITEM` — Phase 1 + 2 browse\n- `CYPHER.HOME_ENTITY_COUNTS` (+ `_FALLBACK`), `HOME_RECENT_ITEMS`, `HOME_TOP_CONTRIBUTORS`, `HOME_RECENT_EVENTS`, `HOME_AGENTS_SAMPLE`, `HOME_PERMISSION_SUMMARY` — Home view (chunk 3k)\n\n### Provenance projection\n\nEach item-list query and `getItem` optionally project a `producedBy` row via the canonical creator edge `(:Person)-[:CREATED]->(:Asset)` (per the `_RelationshipTypes` Schema node). When the edge is absent, the projection collapses to `null` and the renderer omits the provenance line. Future producer types (`:Agent`, `:Workflow`, etc.) will widen the OPTIONAL MATCH as those modules port over.\n\n## Internal layout\n\n| File                  | Role                                                                       |\n| --------------------- | -------------------------------------------------------------------------- |\n| `api.ts`              | Public surface + singleton swap pattern. The only allowed importer.        |\n| `types.ts`            | `Space`, `Item`, `ItemSummary`, `ListOpts`, etc.                           |\n| `scope.ts`            | `SpaceScope` union + `resolveSpaceScope` helper.                           |\n| `errors.ts`           | `SpacesError` + `SPACES_ERROR_CODES`.                                      |\n| `events.ts`           | `SpacesEvent` taxonomy + `SPACES_EVENTS` catalog.                          |\n| `sdk-client.ts`       | Cypher wrapper. Phase 1+ injects `getNeonApi().query` at boot.             |\n| `discovery.ts`        | Phase 0.5 query runner (main-process; uses `getNeonApi()`). Now invoked from Settings → Diagnostics, not the Spaces window. |\n| `discovery-format.ts` | Renderer-safe types + Markdown formatter for discovery results.            |\n| `window.ts`           | Single-instance `BrowserWindow` factory.                                   |\n| `ipc.ts`              | `lite:spaces:*` IPC handler registration (incl. `lite:spaces:home:*`).      |\n| `main.ts`             | `initSpaces()` orchestrator + Tools-menu wiring.                           |\n| `spaces.html/css`     | Renderer chrome + Home view + item card / chip / detail-pane styles.       |\n| `spaces.ts`           | Renderer entrypoint (IIFE bundled by esbuild). Default scope is Home.       |\n| `DISCOVERY.md`        | Phase 0.5 reference: Q1–Q6 queries + Q5/Q6 operational template.           |\n| `DISCOVERY-PHASE-3.md`| Phase 3 D-series operational questions for Edison; gates 3d/3g.             |\n| `HOME-V1.md`          | Chunk detail for Home (3k + 3o).                                            |\n| `ROADMAP.md`          | Phases shipped / sketched / out of scope.                                  |\n\n## Error catalog\n\n| Code                          | Trigger                                                          |\n| ----------------------------- | ---------------------------------------------------------------- |\n| `SPACES_NOT_AUTHENTICATED`    | No `mult` token / no active account.                             |\n| `SPACES_NOT_FOUND`            | Space / item missing, or filtered out by ACL.                    |\n| `SPACES_FORBIDDEN`            | Caller lacks read/mutate permission on the target.               |\n| `SPACES_CYPHER`               | Neon query failed (transient, syntax, or malformed result).      |\n| `SPACES_NETWORK`              | DNS / TCP / TLS / fetch reject on the way to Edison.             |\n| `SPACES_INVALID_INPUT`        | Empty id, bad limit, malformed payload.                          |\n| `SPACES_NOT_INITIALIZED`      | SDK called before `initSpaces()` ran.                            |\n\nThe SDK client normalizes the underlying `NEON_*` codes to the spaces-side codes above so callers only ever see one error taxonomy. See `normalizeError()` in `sdk-client.ts`.\n\n## Conformance\n\n`lite/test/unit/spaces-api.test.ts` runs `runApiConformanceContract` per Rule 12. Required surface: `['open', 'listSpaces', 'getUncategorizedCount', 'items']` (the new Home methods extend the surface but are not part of the conformance baseline yet).\n\n## Test coverage\n\n| File                                       | Layer covered                                                                |\n| ------------------------------------------ | ---------------------------------------------------------------------------- |\n| `spaces-api.test.ts`                       | Singleton swap + conformance contract.                                       |\n| `spaces-discovery.test.ts`                 | Phase 0.5 Q1–Q4 runner shape.                                                |\n| `spaces-sdk-client.test.ts`                | Cypher source regression guards (incl. 6 Home queries), row-to-domain mapping, error normalization. |\n| `spaces-renderer.test.ts`                  | Pure DOM builders (sidebar rows, item cards, chips, detail pane, formatters). |\n| `spaces-home-cards.test.ts`                | Home view pure builders + `formatBigNumber` / `formatRecency` / `sparklinePath` rules. |\n| `spaces-renderer-integration.test.ts`      | Sidebar search filter + intake pulse (driven via the renderer bundle).        |\n| `spaces/home-flow.test.ts` (integration)   | End-to-end Home view: 5 cards loaded / empty / error states against an in-memory bridge. |\n| `spaces/platform-contract.test.ts` (integration) | Platform-primitive contract assertions across the SDK surface.            |\n| `spaces/trust-principles.test.ts` (integration)  | Reversibility harness across mutation methods (Phase 3+).                  |\n\n## Out of scope (this phase)\n\n- `addToSpace` / `removeFromSpace` mutations (Phase 3 chunks 3a-3c)\n- Per-Space activity-tab drill-down (extension of 3k in v2)\n- Real bidirectional sync (v2 chunk 3l)\n- Auto-metadata pipeline beyond Space suggestions (v2 chunk 3j)\n- Ontology-aware navigation (v2 chunk 3m)\n- Agents as first-class room participants — subscribe-and-react (v2 chunk 3n)\n- Real-time activity pulse (server WebSocket prerequisite; no plan to add)\n- Pin / favorite Spaces (small follow-up; not roadmap-level)\n"
     },
     {
       "slug": "tools",
@@ -2853,7 +3157,107 @@ export const MANIFEST: Manifest = {
           }
         ]
       },
-      "events": null,
+      "events": {
+        "constantName": "TOTP_EVENTS",
+        "count": 19,
+        "entries": [
+          {
+            "constantKey": "SAVE_SECRET_START",
+            "name": "totp.save-secret.start",
+            "description": ""
+          },
+          {
+            "constantKey": "SAVE_SECRET_FINISH",
+            "name": "totp.save-secret.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "SAVE_SECRET_FAIL",
+            "name": "totp.save-secret.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "GET_CODE_START",
+            "name": "totp.get-code.start",
+            "description": ""
+          },
+          {
+            "constantKey": "GET_CODE_FINISH",
+            "name": "totp.get-code.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "GET_CODE_FAIL",
+            "name": "totp.get-code.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "SCAN_QR_SCREEN_START",
+            "name": "totp.scan-qr-screen.start",
+            "description": ""
+          },
+          {
+            "constantKey": "SCAN_QR_SCREEN_FINISH",
+            "name": "totp.scan-qr-screen.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "SCAN_QR_SCREEN_FAIL",
+            "name": "totp.scan-qr-screen.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "SCAN_QR_CLIPBOARD_START",
+            "name": "totp.scan-qr-clipboard.start",
+            "description": ""
+          },
+          {
+            "constantKey": "SCAN_QR_CLIPBOARD_FINISH",
+            "name": "totp.scan-qr-clipboard.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "SCAN_QR_CLIPBOARD_FAIL",
+            "name": "totp.scan-qr-clipboard.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_HAS_SECRET",
+            "name": "totp.ipc.has-secret",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_GET_METADATA",
+            "name": "totp.ipc.get-metadata",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_SAVE_SECRET",
+            "name": "totp.ipc.save-secret",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_SCAN_QR_SCREEN",
+            "name": "totp.ipc.scan-qr-screen",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_SCAN_QR_CLIPBOARD",
+            "name": "totp.ipc.scan-qr-clipboard",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_GET_CURRENT_CODE",
+            "name": "totp.ipc.get-current-code",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_DELETE_SECRET",
+            "name": "totp.ipc.delete-secret",
+            "description": ""
+          }
+        ]
+      },
       "readme": "# `lite/totp/` — Authenticator (2FA codes)\n\nA built-in OneReach 2FA authenticator: stores the user's OneReach authenticator secret in the OS keychain, generates the current 6-digit GSX / OneReach 2FA code from that secret, and exposes QR-scan / clipboard-scan / manual secret-entry helpers. The renderer UI lives in Settings -> Two-Factor.\n\n- **Public API**: [`api.ts`](api.ts) — `TotpApi` interface, `getTotpApi()` singleton, error class & codes\n- **Internal**:\n  - [`store.ts`](store.ts) — keychain wrapper via `keytar` (`@internal`)\n  - [`manager.ts`](manager.ts) — pure TOTP code generation via `otplib` (`@internal`)\n  - [`qr-scanner.ts`](qr-scanner.ts) — `desktopCapturer` + `jsqr` + clipboard scanning (`@internal`)\n  - [`errors.ts`](errors.ts) — `TotpError` + `TOTP_ERROR_CODES` (extracted to break a cycle between store + manager)\n  - [`main.ts`](main.ts) — main-process IPC handlers + `initTotp` / teardown (`@internal`)\n  - The authenticator UI now lives at [`../settings/sections/two-factor.ts`](../settings/sections/two-factor.ts), hosted by the Settings window per [ADR-031](../DECISIONS.md#adr-031-settings-window-with-one-section-per-adr-019-two-factor-migrates-from-standalone-tools-window). The standalone `lite/totp/window.ts` was deleted as part of that chunk; this module is now data-only (keychain, code generation, QR scan).\n  - [`types.ts`](types.ts) — `Environment`-style types + protocol constants (`TOTP_STEP_SECONDS = 30`, `TOTP_CODE_DIGITS = 6`)\n  - Renderer UI is bundled with Settings (see [`../settings/settings.html`](../settings/settings.html), [`../settings/settings.css`](../settings/settings.css), and the [`mountTwoFactor`](../settings/sections/two-factor.ts) section).\n- **Tests**: [`../test/unit/totp-api.test.ts`](../test/unit/totp-api.test.ts), [`../test/unit/totp-errors.test.ts`](../test/unit/totp-errors.test.ts), [`../test/unit/totp-manager.test.ts`](../test/unit/totp-manager.test.ts), [`../test/unit/totp-store.test.ts`](../test/unit/totp-store.test.ts), [`../test/integration/totp-integration.test.ts`](../test/integration/totp-integration.test.ts)\n- **Decision rationale**: [DECISIONS.md ADR-027](../DECISIONS.md#adr-027-lite-totp-authenticator-widget-auto-fill-remains-deferred)\n\n---\n\n## What it is\n\nThe OneReach sign-in flow (`lite/auth/`) per [ADR-026](../DECISIONS.md#adr-026-lite-gsx-sign-in-v1-captures-session-cookies-user-fills-the-onereach-form) lets the user fill the OneReach form themselves — including the 6-digit 2FA code. That code is generated from a long-lived authenticator secret (the same secret your phone authenticator stores after scanning the setup QR code). This module stores that secret on this Mac and generates the current GSX / OneReach 2FA code when Settings -> Two-Factor is open.\n\nImportant distinction:\n\n- **Input**: the OneReach authenticator secret / setup QR code (configured once).\n- **Output**: the rotating 6-digit GSX / OneReach 2FA code (copied into the login popup).\n\nDo not paste the current 6-digit login code into Settings. Paste or scan the setup secret.\n\nSecurity guarantees:\n\n- The authenticator secret is stored in the macOS Keychain / system credential vault.\n- The secret is not written to app settings, logs, bug reports, or KV storage.\n- Lite never shows the saved secret again after setup.\n- Lite only displays the temporary six-digit code, which expires every 30 seconds.\n- Lite reads the same OneReach authenticator secret used by the full Onereach.ai app, so existing full-app 2FA setup can generate codes here too.\n\nDuring Lite sign-in, `lite/auth/` can now auto-fill the OneReach 2FA prompt from this module's generated code (ADR-034). The Settings -> Two-Factor UI remains the setup/trust/fallback surface: configure the authenticator secret here, verify the generated code, or copy it manually if auto-fill ever cannot run.\n\n```typescript\nimport { getTotpApi } from '../totp/api.js';\n\nconst totp = getTotpApi();\n\n// Setup paths\nawait totp.saveSecret('JBSWY3DPEHPK3PXP', { issuer: 'OneReach', account: 'alice' });\nconst fromQr = await totp.scanQrFromScreen();   // returns { saved, issuer?, account? }\nconst fromClip = await totp.scanQrFromClipboard();\n\n// Read the live code\nconst info = await totp.getCurrentCode();\nconsole.log(info.formattedCode, '-- expires in', info.timeRemaining, 's');\n\n// Remove\nawait totp.deleteSecret();\n```\n\n---\n\n## v1 scope\n\n| Ships in v1 | Deferred |\n|---|---|\n| Live code + 30s countdown UI | Email/password auto-fill |\n| TOTP auto-fill during Lite sign-in | Account-picker auto-select |\n| QR scan from screen, clipboard, or manual entry | Backup / recovery codes UI |\n| Two-Factor section inside `Onereach.ai Lite -> Settings...` (single-instance window via [`lite/settings/`](../settings/)) | E2E spec (`totp-authenticator-e2e`, `settings-e2e`) |\n| Single TOTP secret per app | Multi-secret / multi-account authenticator |\n\nSee [`../PORTING.md`](../PORTING.md) chunks `totp-authenticator-v1` and `auth-totp-autofill-v1` for the full scope.\n\n---\n\n## API quick reference\n\n| Method | Returns | Throws? | Notes |\n|---|---|---|---|\n| `hasSecret()` | `Promise<boolean>` | No | Cheap keychain probe. |\n| `getMetadata()` | `Promise<TotpSecretMetadata \\| null>` | No | Returns `null` if nothing stored or read fails. |\n| `saveSecret(secret, extra?)` | `Promise<SaveSecretResult>` | Yes (`TotpError`) | Validates Base32 + writes to keychain. |\n| `scanQrFromScreen()` | `Promise<QrScanResult>` | Yes (`TOTP_SCREEN_CAPTURE_FAILED`) | One-shot scan + parse + save. |\n| `scanQrFromClipboard()` | `Promise<QrScanResult>` | No | Empty clipboard returns `{saved: false, reason: 'no-qr-found'}`. |\n| `getCurrentCode()` | `Promise<TotpCodeInfo>` | Yes (`TotpError`) | The hot path the authenticator UI polls every second. |\n| `deleteSecret()` | `Promise<void>` | Yes (`TOTP_KEYCHAIN_FAILED`) | Idempotent for the \"nothing to delete\" case. |\n\nSee [`api.ts`](api.ts) for the full JSDoc.\n\n---\n\n## Persistence\n\nOS Keychain via `keytar`. Two entries:\n\n| Service | Account | Value |\n|---|---|---|\n| `OneReach.ai-TOTP` | `onereach-unified-login` | Raw Base32 secret string (same service/account as the full app) |\n| `OneReach.ai-TOTP-meta` | `onereach-unified-login` | Lite metadata JSON: `{issuer?, account?, savedAt, secretLength}` |\n\n**Shared with the full app.** Full uses `OneReach.ai-TOTP` / `onereach-unified-login`, and Lite now reads/writes the same secret so an existing full-app OneReach 2FA setup immediately generates codes in Lite. For backward compatibility, Lite also reads and deletes the earlier spike-only fallback entry (`OneReach.ai-Lite-TOTP` / `lite-totp-secret`) if no shared secret exists.\n\n---\n\n## Error catalog\n\nEvery error is a `TotpError` (extends `LiteError`). Inspect `.code` to branch.\n\n| Code | Meaning | Remediation hint |\n|---|---|---|\n| `TOTP_NO_SECRET` | `getCurrentCode` was called but no secret is stored. | Open Settings -> Two-Factor and add the OneReach authenticator secret or setup QR first. |\n| `TOTP_INVALID_SECRET` | The given string isn't valid Base32 or is too short. | Make sure you copied the full secret. A-Z and 2-7 only, ≥16 chars. |\n| `TOTP_KEYCHAIN_FAILED` | `keytar` rejected the read/write/delete. | Make sure macOS Keychain is unlocked. |\n| `TOTP_GENERATION_FAILED` | `otplib` rejected the secret at code-generation time. | The stored secret is malformed; remove and re-add. |\n| `TOTP_NO_QR_FOUND` | The scanner ran but no QR code was found in the image. | Make sure the QR is fully visible, then try again. |\n| `TOTP_NOT_AUTHENTICATOR_QR` | A QR was decoded but it's not an `otpauth://` URI. | Re-scan the OneReach 2FA setup QR (not a website link). |\n| `TOTP_SCREEN_CAPTURE_FAILED` | `desktopCapturer.getSources` returned nothing or threw. | Grant Screen Recording permission in macOS System Settings. |\n\n```typescript\nimport { getTotpApi, TotpError, TOTP_ERROR_CODES } from '../totp/api.js';\n\ntry {\n  await getTotpApi().getCurrentCode();\n} catch (err) {\n  if (err instanceof TotpError) {\n    if (err.code === TOTP_ERROR_CODES.NO_SECRET) {\n      promptUserToSetupTotp();\n    } else {\n      toast(err.formatForUser());\n    }\n  }\n}\n```\n\n---\n\n## Secret redaction guarantee\n\nThe TOTP secret value is **NEVER** logged. Only metadata: `secretLength`, `hasIssuer`, `hasAccount`, `savedAt`, etc. This invariant is enforced by [`../test/unit/totp-store.test.ts`](../test/unit/totp-store.test.ts) which captures every log call during a full save → read → delete cycle and asserts the secret value never appears as a substring in any message or data payload.\n\nIf you add a new log call in `store.ts` or `manager.ts`, do not log `secret` directly. Use the metadata fields the existing log calls demonstrate.\n\nThe ephemeral 6-digit code IS allowed to be logged (it's regenerated every 30s and has low blast radius), but only the QR-scan and code-generation paths actually do.\n\n---\n\n## Renderer bridge (`window.lite.totp`)\n\nThe preload exposes a narrowed surface. The secret bytes are write-only; there is no `getSecret`.\n\n```typescript\nconst { hasSecret } = await window.lite.totp.hasSecret();\nif (!hasSecret) {\n  await window.lite.totp.saveSecret(userInputBase32);\n}\nconst info = await window.lite.totp.getCurrentCode();\ndisplay(info.formattedCode, info.timeRemaining);\n\n// Subscribe to errors via the standard parseError helper\ntry {\n  await window.lite.totp.scanQrFromScreen();\n} catch (err) {\n  const totpErr = window.lite.totp.parseError(err);\n  if (totpErr) showBanner(totpErr.message + ' ' + totpErr.remediation);\n}\n```\n\nThe Two-Factor section in [`lite/settings/sections/two-factor.ts`](../settings/sections/two-factor.ts) is the canonical consumer. The section calls `window.lite.totp.*` from inside the Settings window's renderer.\n\n---\n\n## macOS screen-recording permission\n\n`scanQrFromScreen()` uses Electron's `desktopCapturer.getSources({types: ['screen']})`, which requires Screen Recording permission on macOS. On first use, macOS prompts. If denied:\n\n- The call resolves with `TOTP_SCREEN_CAPTURE_FAILED` (no sources or empty thumbnail).\n- The renderer's friendly error tells the user to grant the permission in System Settings → Privacy & Security → Screen Recording, restart the app, and try again.\n- The clipboard and manual paths don't need this permission, so the user has fallbacks.\n\n---\n\n## Testing\n\nPer Rule 12 (LITE-RULES.md / ADR-024):\n\n- **API conformance** — [`totp-api.test.ts`](../test/unit/totp-api.test.ts) runs `runApiConformanceContract`.\n- **Error conformance** — [`totp-errors.test.ts`](../test/unit/totp-errors.test.ts) runs `runErrorConformanceContract` for `TotpError`.\n- **Manager** — [`totp-manager.test.ts`](../test/unit/totp-manager.test.ts) tests pure TOTP math against `otplib` (no mocks).\n- **Store** — [`totp-store.test.ts`](../test/unit/totp-store.test.ts) covers happy path, all error codes, idempotent delete, and the **secret redaction assertion**.\n- **Integration** — [`totp-integration.test.ts`](../test/integration/totp-integration.test.ts) drives the full pipeline (manager + store + scanner) with a Map-backed `FakeKeychain` and a `FakeScanner` emitting canned `otpauth://` URIs. Verifies QR-path and manual-path persistence are equivalent.\n- **`window.ts` coverage**: not applicable -- the standalone authenticator window was deleted in ADR-031. The Two-Factor section is hosted inside the Settings window; coverage is via `settings-e2e` + `totp-authenticator-e2e` in `PORTING.md` deferred queue.\n\nTests mock `electron`, `keytar`, and `jsqr` with `vi.mock` so they run under Node's vitest runner without an Electron host or system keychain.\n\n---\n\n## Borrowed patterns (studied, never imported)\n\nPer LITE-RULES.md cherry-pick discipline:\n\n- `lib/totp-manager.js` — TOTP `generate` / `verify` / `parseOTPAuthURI` shape (rewritten in TS-strict around `otplib`)\n- `lib/qr-scanner.js` — `desktopCapturer` + `jsqr` + BGRA→RGBA conversion (rewritten in TS-strict)\n- `credential-manager.js:512-572` — TOTP keychain save/get/delete (rewritten in TS-strict, narrower surface, separate service name)\n- `settings.html:943-1026` — live-code + countdown UI shape (rewritten in TS, no jQuery, no inline scripts per CSP)\n\nAll rewritten in TS-strict within `lite/totp/`. No `import` from full's root files or `packages/`.\n\n---\n\n## How auto-fill uses this module\n\n`lite/auth/totp-autofill.ts` consumes `getTotpApi().getCurrentCode()` when the Lite sign-in popup reaches the OneReach TOTP prompt. It fills and submits the current code, but never receives or logs the saved secret.\n\nThe full app's `gsx-autologin.js` ports the entire OneReach auth ceremony — form detection, email/password fill, TOTP timing windows, retry/backoff, account-picker autoclick. Lite ports only the TOTP slice: user still types email/password and chooses an account, while Lite handles the generated 2FA code if a secret is configured.\n"
     },
     {
@@ -2955,5 +3359,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-05-18T06:13:43.514Z"
+  "generatedAt": "2026-06-06T20:48:01.175Z"
 } as const;

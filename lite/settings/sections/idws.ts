@@ -173,6 +173,8 @@ function render(state: SectionState): void {
         </span>
       </div>
 
+      ${renderThirdPartyTiles(state.entries)}
+
       <div class="idw-actions-row">
         <button type="button" id="idw-open-store" class="btn-primary">Open OAGI Store</button>
         <button type="button" id="idw-add-custom" class="btn-secondary">Add Custom Agent</button>
@@ -192,6 +194,7 @@ function render(state: SectionState): void {
 
   buildFilterPills(state);
   wireActions(state);
+  wireThirdPartyTiles(state);
 }
 
 function renderEmpty(state: SectionState): void {
@@ -209,11 +212,104 @@ function renderEmpty(state: SectionState): void {
           <button type="button" id="idw-add-custom" class="btn-secondary">Add Custom Agent</button>
         </div>
       </div>
+
+      ${renderThirdPartyTiles(state.entries)}
+
       <div class="idw-add-form-wrap" id="idw-add-form-wrap" hidden></div>
       <div id="idw-banner" class="banner" style="display:none;"></div>
     </div>
   `;
   wireActions(state);
+  wireThirdPartyTiles(state);
+}
+
+/**
+ * Top-level "Third-party agents" row of tile-buttons. Mirrors the
+ * full app's setup-wizard quick-add. Each tile is a one-click install
+ * of an external-bot pointing at the preset URL. Already-installed
+ * presets are shown as disabled "Installed" chips so users can see
+ * what's there at a glance without opening the row menu.
+ */
+function renderThirdPartyTiles(entries: ReadonlyArray<LiteIdwEntry>): string {
+  const installedBotTypes = new Set<string>();
+  for (const e of entries) {
+    if (e.kind === 'external-bot' && typeof e.botType === 'string' && e.botType.length > 0) {
+      installedBotTypes.add(e.botType);
+    }
+  }
+  const presets = BOT_PRESETS.filter((p) => p.id !== 'custom');
+  const tiles = presets
+    .map((p) => {
+      const installed = installedBotTypes.has(p.id);
+      const cls = installed ? 'idw-tp-tile is-installed' : 'idw-tp-tile';
+      const ariaPress = installed ? 'true' : 'false';
+      const status = installed
+        ? `<span class="idw-tp-tile-status">Installed</span>`
+        : `<span class="idw-tp-tile-add">+ Add</span>`;
+      return `
+        <button
+          type="button"
+          class="${cls}"
+          data-third-party-add="${escapeAttr(p.id)}"
+          aria-pressed="${ariaPress}"
+          ${installed ? 'disabled' : ''}
+          title="${escapeAttr(p.defaultUrl)}"
+        >
+          <span class="idw-tp-tile-glyph" aria-hidden="true">${escapeHtml(p.label.charAt(0))}</span>
+          <span class="idw-tp-tile-name">${escapeHtml(p.label)}</span>
+          ${status}
+        </button>`;
+    })
+    .join('');
+  return `
+    <div class="idw-third-party" aria-label="Quick-add third-party agents">
+      <div class="idw-third-party-head">
+        <span class="idw-third-party-title">Third-party agents</span>
+        <span class="idw-third-party-hint">One click to add ChatGPT, Claude, Gemini, Perplexity, or Grok.</span>
+      </div>
+      <div class="idw-third-party-row">${tiles}</div>
+    </div>
+  `;
+}
+
+/**
+ * Wire the click handlers for the third-party tiles. Each tile fires
+ * `idw().add({ kind: 'external-bot', label, url, botType })`. The
+ * existing `onChange` subscription re-renders the section so the tile
+ * flips to "Installed" automatically.
+ */
+function wireThirdPartyTiles(state: SectionState): void {
+  const buttons = state.container.querySelectorAll<HTMLButtonElement>('[data-third-party-add]');
+  for (const btn of Array.from(buttons)) {
+    btn.addEventListener('click', () => {
+      const presetId = btn.dataset['thirdPartyAdd'];
+      if (typeof presetId !== 'string' || presetId.length === 0) return;
+      const preset = findBotPreset(presetId);
+      if (preset === null) return;
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+      void (async (): Promise<void> => {
+        try {
+          await idw().add({
+            kind: 'external-bot',
+            label: preset.defaultEntryLabel,
+            url: preset.defaultUrl,
+            botType: preset.id,
+          });
+          showBanner(state, `${preset.label} added.`, 'success');
+          // onChange listener re-renders; no manual reload needed.
+        } catch (err) {
+          const parsed = idw().parseError(err);
+          const msg = parsed !== null
+            ? `${parsed.message} ${parsed.remediation}`.trim()
+            : (err as Error).message;
+          showBanner(state, msg, 'error');
+          btn.disabled = false;
+          btn.classList.remove('is-loading');
+        }
+      })();
+    });
+  }
 }
 
 function renderRow(entry: LiteIdwEntry): string {

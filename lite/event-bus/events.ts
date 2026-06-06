@@ -14,8 +14,9 @@ export const EVENT_BUS_EVENTS = {
   HYDRATE_START: 'event-bus.hydrate.start',
   HYDRATE_FINISH: 'event-bus.hydrate.finish',
   HYDRATE_FAIL: 'event-bus.hydrate.fail',
-  IPC_SUBSCRIBE: 'event-bus.ipc.subscribe',
   IPC_RECENT: 'event-bus.ipc.recent',
+  IPC_SIZE: 'event-bus.ipc.size',
+  IPC_EMIT: 'event-bus.ipc.emit',
 } as const;
 
 export type EventBusEventName =
@@ -62,13 +63,18 @@ export interface EventBusHydrateFailEvent extends EventBusSpanBase {
   durationMs: number;
   error: SerializedEventError;
 }
-export interface EventBusIpcSubscribeEvent extends EventBusEventBase {
-  name: typeof EVENT_BUS_EVENTS.IPC_SUBSCRIBE;
-  level: 'info';
-}
 export interface EventBusIpcRecentEvent extends EventBusEventBase {
   name: typeof EVENT_BUS_EVENTS.IPC_RECENT;
   level: 'info';
+}
+export interface EventBusIpcSizeEvent extends EventBusEventBase {
+  name: typeof EVENT_BUS_EVENTS.IPC_SIZE;
+  level: 'info';
+}
+export interface EventBusIpcEmitEvent extends EventBusEventBase {
+  name: typeof EVENT_BUS_EVENTS.IPC_EMIT;
+  level: 'info';
+  data: { name: string };
 }
 
 export type EventBusEvent =
@@ -78,8 +84,9 @@ export type EventBusEvent =
   | EventBusHydrateStartEvent
   | EventBusHydrateFinishEvent
   | EventBusHydrateFailEvent
-  | EventBusIpcSubscribeEvent
-  | EventBusIpcRecentEvent;
+  | EventBusIpcRecentEvent
+  | EventBusIpcSizeEvent
+  | EventBusIpcEmitEvent;
 
 export function isEventBusEvent(ev: EventRecord): ev is EventRecord & EventBusEvent {
   return Object.values(EVENT_BUS_EVENTS).includes(ev.name as EventBusEventName);

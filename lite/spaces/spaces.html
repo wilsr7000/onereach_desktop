@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob: https:; media-src 'self' data: blob:; object-src 'self' data: blob:; frame-src 'self' data: blob:"
     />
     <title>Spaces</title>
     <link rel="stylesheet" href="./signature.css" />
@@ -40,41 +40,17 @@
     >
       <div
         id="spaces-new-dialog"
-        class="spaces-modal"
+        class="spaces-modal spaces-wizard-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="spaces-new-dialog-title"
       >
-        <h2 id="spaces-new-dialog-title" class="spaces-modal-title">Create a new Space</h2>
-        <p class="spaces-modal-help">
-          Names are unique within your account. You can rename later.
-        </p>
-        <form id="spaces-new-form" class="spaces-modal-form">
-          <label for="spaces-new-name-input" class="spaces-modal-label">Name</label>
-          <input
-            type="text"
-            id="spaces-new-name-input"
-            class="spaces-modal-input"
-            placeholder="e.g. Quarterly Audit"
-            autocomplete="off"
-            spellcheck="false"
-            maxlength="80"
-            required
-          />
-          <div id="spaces-new-error" class="spaces-modal-error" hidden></div>
-          <div class="spaces-modal-actions">
-            <button type="button" id="spaces-new-cancel" class="spaces-modal-button">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              id="spaces-new-submit"
-              class="spaces-modal-button spaces-modal-button-primary"
-            >
-              Create
-            </button>
-          </div>
-        </form>
+        <!--
+          The guided Space-creation wizard is rendered into this host by
+          spaces.ts (renderNewSpaceWizard). Steps: Basics -> Purpose &
+          objectives (with an optional AI draft) -> People -> Review.
+        -->
+        <div id="spaces-new-wizard" class="spaces-wizard"></div>
       </div>
     </div>
 
@@ -113,75 +89,116 @@
     -->
     <div
       id="spaces-new-asset-backdrop"
-      class="spaces-modal-backdrop"
+      class="spaces-modal-backdrop spaces-new-asset-backdrop"
       hidden
       aria-hidden="true"
     >
       <div
         id="spaces-new-asset-dialog"
-        class="spaces-modal"
+        class="spaces-modal spaces-new-asset-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="spaces-new-asset-title"
       >
-        <h2 id="spaces-new-asset-title" class="spaces-modal-title">New asset</h2>
-        <div class="spaces-modal-tabs" role="tablist">
+        <header class="spaces-new-asset-header">
+          <h2 id="spaces-new-asset-title" class="spaces-modal-title">Create asset</h2>
+          <button
+            type="button"
+            id="spaces-new-asset-close"
+            class="spaces-new-asset-close"
+            aria-label="Close"
+            title="Close"
+          >×</button>
+        </header>
+
+        <div class="spaces-new-asset-tabs" role="tablist">
           <button
             type="button"
             role="tab"
-            class="spaces-modal-tab is-active"
+            class="spaces-new-asset-tab is-active"
             data-asset-tab="text"
             aria-selected="true"
-          >Paste text</button>
+          >
+            <span class="spaces-new-asset-tab-icon" aria-hidden="true">¶</span>
+            <span>Paste text</span>
+          </button>
           <button
             type="button"
             role="tab"
-            class="spaces-modal-tab"
+            class="spaces-new-asset-tab"
             data-asset-tab="upload"
             aria-selected="false"
-          >Upload file</button>
+          >
+            <span class="spaces-new-asset-tab-icon" aria-hidden="true">↑</span>
+            <span>Upload file</span>
+          </button>
         </div>
-        <form id="spaces-new-asset-form" class="spaces-modal-form">
-          <label for="spaces-new-asset-title-input" class="spaces-modal-label">Title</label>
-          <input
-            type="text"
-            id="spaces-new-asset-title-input"
-            class="spaces-modal-input"
-            maxlength="200"
-            required
-          />
-          <div data-asset-pane="text">
-            <label for="spaces-new-asset-content-input" class="spaces-modal-label">Content</label>
+
+        <form id="spaces-new-asset-form" class="spaces-new-asset-form">
+          <div class="spaces-new-asset-field">
+            <label for="spaces-new-asset-title-input" class="spaces-new-asset-label">Title</label>
+            <input
+              type="text"
+              id="spaces-new-asset-title-input"
+              class="spaces-new-asset-input"
+              placeholder="Give your asset a name"
+              maxlength="200"
+              required
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="spaces-new-asset-field" data-asset-pane="text">
+            <div class="spaces-new-asset-label-row">
+              <label for="spaces-new-asset-content-input" class="spaces-new-asset-label">Content</label>
+              <span class="spaces-new-asset-label-hint">Markdown supported — auto-saves word count</span>
+            </div>
             <textarea
               id="spaces-new-asset-content-input"
-              class="spaces-modal-input spaces-modal-textarea"
-              rows="10"
-              placeholder="Paste Markdown, notes, or any text here..."
+              class="spaces-new-asset-textarea"
+              rows="12"
+              placeholder="Type or paste anything here — notes, a transcript, a URL list, raw Markdown…"
+              spellcheck="true"
             ></textarea>
           </div>
-          <div data-asset-pane="upload" hidden>
-            <label for="spaces-new-asset-file-input" class="spaces-modal-label">File</label>
-            <input
-              type="file"
-              id="spaces-new-asset-file-input"
-              class="spaces-modal-input spaces-modal-file"
-            />
-            <p
-              class="spaces-modal-help spaces-new-asset-file-hint"
+
+          <div class="spaces-new-asset-field" data-asset-pane="upload" hidden>
+            <label for="spaces-new-asset-file-input" class="spaces-new-asset-label">File</label>
+            <label
+              class="spaces-new-asset-dropzone"
+              for="spaces-new-asset-file-input"
+              id="spaces-new-asset-dropzone"
+            >
+              <div class="spaces-new-asset-dropzone-icon" aria-hidden="true">↑</div>
+              <p class="spaces-new-asset-dropzone-primary">Drop a file here, or click to browse</p>
+              <p class="spaces-new-asset-dropzone-hint">
+                Auto-extracts metadata from images, audio, video, PDF, CSV, JSON, and text.
+              </p>
+              <input
+                type="file"
+                id="spaces-new-asset-file-input"
+                class="spaces-new-asset-file-input"
+              />
+            </label>
+            <div
+              class="spaces-new-asset-file-chip"
               id="spaces-new-asset-file-hint"
-            >No file selected.</p>
+              hidden
+            ></div>
           </div>
+
           <div id="spaces-new-asset-error" class="spaces-modal-error" hidden></div>
-          <div class="spaces-modal-actions">
-            <button type="button" id="spaces-new-asset-cancel" class="spaces-modal-button">
+
+          <div class="spaces-new-asset-actions">
+            <button type="button" id="spaces-new-asset-cancel" class="spaces-new-asset-button">
               Cancel
             </button>
             <button
               type="submit"
               id="spaces-new-asset-submit"
-              class="spaces-modal-button spaces-modal-button-primary"
+              class="spaces-new-asset-button spaces-new-asset-button-primary"
             >
-              Create
+              Create asset
             </button>
           </div>
         </form>

@@ -195,3 +195,32 @@ describe('ToolsStore onChange', () => {
     unsub();
   });
 });
+
+describe('ToolsStore self-heals corrupted blobs', () => {
+  // Tools-specific manifestation of the menus-disappeared bug:
+  // production logs showed the blob persisted as
+  // `{Status: "No data found."}` (a 200-body sentinel the upstream
+  // SDK didn't translate to null). With the SDK-level translation +
+  // store-level self-heal both in place, the corruption can't
+  // survive past the first read after launch.
+
+  it('overwrites a `"undefined"` string blob with an empty record', async () => {
+    const { store, kv } = makeStore();
+    await kv.set(KV_COLLECTION, KV_KEY, 'undefined');
+    expect(await store.list()).toEqual([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    const healed = await kv.get(KV_COLLECTION, KV_KEY);
+    expect(healed).toEqual({ schemaVersion: 1, entries: [] });
+  });
+
+  it('overwrites a top-level array blob with an empty record', async () => {
+    const { store, kv } = makeStore();
+    await kv.set(KV_COLLECTION, KV_KEY, [
+      { id: 'orphan' },
+    ] as unknown as never);
+    expect(await store.list()).toEqual([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    const healed = await kv.get(KV_COLLECTION, KV_KEY);
+    expect(healed).toEqual({ schemaVersion: 1, entries: [] });
+  });
+});

@@ -1508,6 +1508,123 @@ body {
   color: rgba(255, 255, 255, 0.5);
 }
 
+/* Top-level third-party tile row (visible in the IDW manager without
+   needing to open the Add form). One-click installs the corresponding
+   external-bot preset (ChatGPT / Claude / Gemini / Perplexity / Grok). */
+.idw-third-party {
+  margin: 16px 0 18px;
+  padding: 16px;
+  background: linear-gradient(180deg,
+    rgba(123, 219, 255, 0.04),
+    rgba(106, 169, 255, 0.02));
+  border: 1px solid rgba(123, 219, 255, 0.16);
+  border-radius: 10px;
+}
+
+.idw-third-party-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.idw-third-party-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.idw-third-party-hint {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.idw-third-party-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.idw-tp-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.92);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.idw-tp-tile:hover:not(:disabled) {
+  background: rgba(106, 169, 255, 0.10);
+  border-color: rgba(123, 219, 255, 0.46);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(79, 140, 255, 0.18);
+}
+
+.idw-tp-tile:disabled,
+.idw-tp-tile.is-installed {
+  opacity: 0.7;
+  cursor: default;
+  background: rgba(120, 222, 145, 0.06);
+  border-color: rgba(120, 222, 145, 0.22);
+}
+
+.idw-tp-tile.is-loading {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.idw-tp-tile-glyph {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  background: linear-gradient(135deg, rgba(123, 219, 255, 0.28), rgba(106, 169, 255, 0.18));
+  color: #0a1018;
+  border: 1px solid rgba(123, 219, 255, 0.40);
+}
+
+.idw-tp-tile.is-installed .idw-tp-tile-glyph {
+  background: linear-gradient(135deg, rgba(149, 234, 177, 0.32), rgba(120, 222, 145, 0.22));
+  border-color: rgba(149, 234, 177, 0.42);
+}
+
+.idw-tp-tile-name {
+  font-weight: 600;
+}
+
+.idw-tp-tile-add,
+.idw-tp-tile-status {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(123, 219, 255, 0.86);
+}
+
+.idw-tp-tile-status {
+  color: rgba(149, 234, 177, 0.86);
+}
+
 .idw-form-field {
   display: flex;
   flex-direction: column;

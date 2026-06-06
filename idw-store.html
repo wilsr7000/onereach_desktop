@@ -62,7 +62,7 @@
 
       .search-box input {
         width: 100%;
-        padding: 14px 16px 14px 48px;
+        padding: 14px 16px;
         background: #1c1c1e;
         border: none;
         border-radius: 12px;
@@ -81,12 +81,7 @@
       }
 
       .search-icon {
-        position: absolute;
-        left: 16px;
-        top: 50%;
-        transform: translateY(-50%);
-        font-size: 18px;
-        color: #6e6e73;
+        display: none;
       }
 
       .category-filter {
@@ -340,6 +335,24 @@
         font-size: 13px;
         color: #6e6e73;
         font-weight: 500;
+      }
+
+      .idw-card-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .btn-card {
+        padding: 8px 14px;
+        border-radius: 10px;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .btn[disabled] {
+        cursor: not-allowed;
+        opacity: 0.55;
       }
 
       /* All IDWs Grid */
@@ -599,7 +612,7 @@
 
     <div class="controls">
       <div class="search-box">
-        <span class="search-icon">🔍</span>
+        <span class="search-icon">Search</span>
         <input type="text" id="searchInput" placeholder="Search" />
       </div>
     </div>
@@ -624,7 +637,7 @@
           <div class="modal-title" id="modalTitle">
             <!-- Title will be inserted here -->
           </div>
-          <button class="close-btn" onclick="IDWStore.closeModal()">×</button>
+          <button class="close-btn" onclick="IDWStore.closeModal()">X</button>
         </div>
         <div class="modal-body" id="modalBody">
           <!-- Details will be inserted here -->
@@ -641,69 +654,69 @@
         filteredIDWs: [],
         selectedCategory: 'all',
 
-        // Map SF Symbol names to emojis
+        // Map SF Symbol names to short text labels
         sfSymbolToEmoji(symbolName) {
           const mapping = {
             // People & Users
-            'person.crop.circle.badge.checkmark': '👤',
-            'person.2.circle': '👥',
-            'person.text.rectangle': '📇',
-            'person.crop.circle': '👤',
-            'person.3': '👥',
+            'person.crop.circle.badge.checkmark': 'IDW',
+            'person.2.circle': 'Team',
+            'person.text.rectangle': 'CRM',
+            'person.crop.circle': 'User',
+            'person.3': 'Team',
 
             // Charts & Analytics
-            'chart.line.uptrend.xyaxis.circle': '📈',
-            'chart.bar.fill': '📊',
-            'chart.pie.fill': '📊',
+            'chart.line.uptrend.xyaxis.circle': 'Data',
+            'chart.bar.fill': 'Data',
+            'chart.pie.fill': 'Data',
 
             // Business
-            'briefcase.fill': '💼',
-            'bag.fill': '🛍️',
+            'briefcase.fill': 'Biz',
+            'bag.fill': 'Shop',
 
             // Communication
-            'message.fill': '💬',
-            'phone.fill': '📞',
-            'envelope.fill': '📧',
+            'message.fill': 'Chat',
+            'phone.fill': 'Call',
+            'envelope.fill': 'Mail',
 
             // Media
-            'photo.fill': '🖼️',
-            'video.fill': '🎬',
-            'music.note': '🎵',
+            'photo.fill': 'Img',
+            'video.fill': 'Vid',
+            'music.note': 'Aud',
 
             // Tools
-            'wrench.fill': '🔧',
-            'hammer.fill': '🔨',
-            'gearshape.fill': '⚙️',
+            'wrench.fill': 'Tool',
+            'hammer.fill': 'Build',
+            'gearshape.fill': 'Ops',
 
             // Generic defaults by category
-            'default.customer.service': '🎧',
-            'default.sales': '💼',
-            'default.marketing': '📢',
-            'default.main': '🏢',
-            default: '🤖',
+            'default.customer.service': 'CS',
+            'default.sales': 'Sales',
+            'default.marketing': 'Mktg',
+            'default.main': 'IDW',
+            default: 'IDW',
           };
 
           return mapping[symbolName] || mapping['default'];
         },
 
-        // Get emoji icon for an IDW (helper function)
+        // Get compact text icon for an IDW (helper function)
         getEmojiIcon(idw) {
           if (idw.iconName) {
             return this.sfSymbolToEmoji(idw.iconName);
           } else if (idw.category) {
             const categoryMap = {
-              'Customer Service': '🎧',
-              Sales: '💼',
-              Marketing: '📢',
-              Main: '🏢',
-              HR: '👥',
-              Finance: '💰',
-              Support: '🆘',
-              Analytics: '📊',
+              'Customer Service': 'CS',
+              Sales: 'Sales',
+              Marketing: 'Mktg',
+              Main: 'IDW',
+              HR: 'HR',
+              Finance: 'Fin',
+              Support: 'Help',
+              Analytics: 'Data',
             };
-            return categoryMap[idw.category] || '🤖';
+            return categoryMap[idw.category] || 'IDW';
           }
-          return '🤖';
+          return 'IDW';
         },
 
         async init() {
@@ -745,7 +758,7 @@
           if (rateLimit && rateLimit.remaining < 10) {
             rateLimitWarning = `
                         <div class="rate-limit-warning">
-                            ⚠️ API Rate Limit: ${rateLimit.remaining}/${rateLimit.limit} requests remaining. 
+                            API Rate Limit: ${rateLimit.remaining}/${rateLimit.limit} requests remaining.
                             Resets at ${new Date(rateLimit.reset).toLocaleTimeString()}
                         </div>
                     `;
@@ -759,7 +772,7 @@
 
           if (this.data.availableIDWs.featured.length > 0) {
             html += `
-                        <div class="section-title">⭐ Featured IDWs</div>
+                        <div class="section-title">Featured IDWs</div>
                         <div class="featured-grid">
                             ${this.data.availableIDWs.featured.map((idw) => this.renderIDWCard(idw)).join('')}
                         </div>
@@ -823,26 +836,23 @@
         renderIDWCard(idw) {
           const isInstalled = this.data.installedIDWs.some((i) => i.idwId === idw.id);
           const hasAPI = !!idw.apiEndpoint;
+          const hasURL = !!idw.url;
 
-          // Render stars
-          const fullStars = Math.floor(idw.rating);
-          const halfStar = idw.rating % 1 >= 0.5;
-          const emptyStars = 5 - fullStars - (halfStar ? 1 : 0);
-          const stars = '⭐'.repeat(fullStars) + (halfStar ? '✨' : '') + '☆'.repeat(emptyStars);
+          const ratingText = `${Number(idw.rating || 0).toFixed(1)}/5`;
 
-          // Get emoji fallback
+          // Get text fallback
           const emojiIcon = this.getEmojiIcon(idw);
 
-          // Determine icon display - prefer images, fallback to emoji
+          // Determine icon display - prefer images, fallback to text
           let iconHTML = '';
           if (idw.thumbnailUrl) {
-            // Use thumbnail image with emoji fallback
+            // Use thumbnail image with text fallback
             iconHTML = `<img src="${idw.thumbnailUrl}" alt="${idw.name}" onerror="this.outerHTML='${emojiIcon}';" style="width: 100%; height: 100%; object-fit: cover; border-radius: 16px;">`;
           } else if (idw.imageUrl) {
             // Use full image as fallback
             iconHTML = `<img src="${idw.imageUrl}" alt="${idw.name}" onerror="this.outerHTML='${emojiIcon}';" style="width: 100%; height: 100%; object-fit: cover; border-radius: 16px;">`;
           } else {
-            // Use emoji directly
+            // Use compact text directly
             iconHTML = emojiIcon;
           }
 
@@ -860,19 +870,26 @@
                         
                         <div class="idw-badges">
                             <span class="badge">${idw.category}</span>
-                            ${hasAPI ? '<span class="badge api">🔌 API</span>' : ''}
-                            ${isInstalled ? '<span class="badge installed">✓ Installed</span>' : ''}
+                            ${hasAPI ? '<span class="badge api">API</span>' : ''}
+                            ${isInstalled ? '<span class="badge installed">Installed</span>' : ''}
                         </div>
                         
                         <div class="idw-description">${idw.description}</div>
                         
                         <div class="idw-footer">
                             <div class="idw-rating">
-                                <span class="stars">${stars}</span>
+                                <span class="stars">${ratingText}</span>
                                 <span style="color: #6e6e73;">(${idw.reviewCount})</span>
                             </div>
-                            <div class="idw-price">
-                                ${this.formatPrice(idw.pricing)}
+                            <div class="idw-card-actions">
+                                <div class="idw-price">
+                                    ${this.formatPrice(idw.pricing)}
+                                </div>
+                                ${
+                                  isInstalled
+                                    ? `<button class="btn btn-secondary btn-card" onclick="event.stopPropagation(); IDWStore.openIDW('${idw.id}')" ${hasURL ? '' : 'disabled'}>Open</button>`
+                                    : `<button class="btn btn-primary btn-card" onclick="event.stopPropagation(); IDWStore.addToMenu('${idw.id}')" ${hasURL ? '' : 'disabled'}>Add</button>`
+                                }
                             </div>
                         </div>
                     </div>
@@ -1020,7 +1037,7 @@
           if (hasAPI) {
             bodyHTML += `
                         <div class="detail-section">
-                            <h3>🔌 API Integration</h3>
+                            <h3>API Integration</h3>
                             <div class="info-item">
                                 <div class="info-label">Endpoint</div>
                                 <div class="info-value" style="font-family: monospace; font-size: 12px; word-break: break-all;">${idw.apiEndpoint}</div>
@@ -1029,7 +1046,7 @@
                               idw.apiKeyRequired
                                 ? `
                             <div style="margin-top: 8px; padding: 8px; background: rgba(255, 149, 0, 0.1); border-radius: 4px; font-size: 12px; color: #ff9500;">
-                                🔑 API Key Required: ${idw.apiKeyName || 'X-API-Key'}
+                                API Key Required: ${idw.apiKeyName || 'X-API-Key'}
                             </div>
                             `
                                 : ''
@@ -1046,7 +1063,7 @@
                       idw.homePageURL
                         ? `
                     <button class="btn btn-secondary" onclick="IDWStore.openHomePage('${idw.homePageURL}')">
-                        🌐 Visit Website
+                        Visit Website
                     </button>
                     `
                         : ''
@@ -1054,13 +1071,13 @@
                     ${
                       isInstalled
                         ? `
-                    <button class="btn btn-primary" onclick="IDWStore.openIDW('${idw.id}')">
-                        ▶ Open
+                    <button class="btn btn-primary" onclick="IDWStore.openIDW('${idw.id}')" ${idw.url ? '' : 'disabled'}>
+                        Open
                     </button>
                     `
                         : `
-                    <button class="btn btn-primary" onclick="IDWStore.addToMenu('${idw.id}')">
-                        ➕ Add to Menu
+                    <button class="btn btn-primary" onclick="IDWStore.addToMenu('${idw.id}')" ${idw.url ? '' : 'disabled'}>
+                        Add to Menu
                     </button>
                     `
                     }
@@ -1074,13 +1091,19 @@
         },
 
         async openHomePage(url) {
-          const { shell } = require('electron');
-          await shell.openExternal(url);
+          if (window.api && typeof window.api.openExternal === 'function') {
+            await window.api.openExternal(url);
+            return;
+          }
+          window.api.send('open-external-url', url);
         },
 
         async openIDW(idwId) {
           const idw = this.data.availableIDWs.all.find((i) => i.id === idwId);
-          if (!idw || !idw.url) return;
+          if (!idw || !idw.url) {
+            alert('This IDW does not have a URL to open.');
+            return;
+          }
 
           // Open the IDW URL in a new tab
           window.api.send('menu-action', {
@@ -1096,12 +1119,15 @@
           if (!idw) return;
 
           try {
-            await window.api.invoke('idw-store:add-to-menu', idw);
+            const result = await window.api.invoke('idw-store:add-to-menu', idw);
+            if (!result || result.success === false) {
+              throw new Error(result?.error || 'Unable to add IDW to the menu');
+            }
 
             // Reload data to refresh installed status
             await this.init();
 
-            alert(`${idw.name} has been added to your IDW menu!`);
+            alert(`${idw.name} has been added to your IDW menu.`);
             this.closeModal();
           } catch (error) {
             alert(`Failed to add ${idw.name}: ${error.message}`);
@@ -1112,7 +1138,7 @@
           const content = document.getElementById('content');
           content.innerHTML = `
                     <div class="error-state">
-                        <h2>❌ Failed to Load IDW Store</h2>
+                        <h2>Failed to Load IDW Store</h2>
                         <p>${message}</p>
                         <button onclick="IDWStore.init()">Retry</button>
                     </div>

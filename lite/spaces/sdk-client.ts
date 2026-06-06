@@ -28,6 +28,7 @@
  */
 
 import { SpacesError } from './errors.js';
+import type { Span } from '../logging/events.js';
 import type {
   Space,
   Item,
@@ -48,6 +49,7 @@ import type {
   AgentsSampleOpts,
   CreateSpaceInput,
   DeleteSpaceOpts,
+  UpdateSpaceInput,
   ItemUpdatePatch,
   RecentCommitsOpts,
   SpaceKind,
@@ -72,6 +74,7 @@ import {
   MAX_SPACE_DESC_LENGTH,
   MAX_ITEM_TITLE_LENGTH,
   MAX_ITEM_DESCRIPTION_LENGTH,
+  MAX_ITEM_CONTENT_LENGTH,
   MAX_ITEM_TAG_LENGTH,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
@@ -95,6 +98,16 @@ export interface SdkSpacesClientConfig {
    * surface a clear error instead of a runtime crash.
    */
   query?: SpacesQueryFn;
+  /**
+   * Span emitter (ADR-030). When provided, every instrumented
+   * operation wraps in a `spaces.<op>.start` / `.finish` / `.fail`
+   * span so Neon-backed reads/writes are traceable in
+   * `/logs?category=spaces` -- including the boot prewarm + background
+   * refresh paths that never cross IPC. Wired to
+   * `getLoggingApi().start(name, data)` by `main.ts`; omitted in tests
+   * (silent fallback). Mirrors `SdkFilesClientConfig.spanEmitter`.
+   */
+  spanEmitter?: (name: string, data?: unknown) => Span;
 }
 
 const DEFAULT_LIMIT = 100;
@@ -217,6 +230,7 @@ export const CYPHER = {
     SET a.name = coalesce($title, a.name),
         a.title = coalesce($title, a.title),
         a.description = coalesce($description, a.description),
+        a.content = coalesce($content, a.content),
         a.type = coalesce($type, a.type),
         a.updatedAt = $now
     WITH a
@@ -316,6 +330,7 @@ export const CYPHER = {
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
            coalesce(a.excerpt, a.description, a.notes) AS excerpt,
+           coalesce(a.description, '') AS description,
            coalesce(a.content, '') AS content,
            coalesce(a.size, a.fileSize, a.byteCount) AS size,
            coalesce(a.mimeType, a.contentType) AS mimeType,
@@ -542,6 +557,39 @@ export const CYPHER = {
     WHERE other IS NULL
     SET s.name = $name,
         s.updatedAt = $now
+    RETURN s.id AS id,
+           coalesce(s.name, s.id) AS name,
+           coalesce(s.description, '') AS description,
+           coalesce(s.color, '') AS color,
+           coalesce(s.iconKey, '') AS iconKey,
+           toString(s.createdAt) AS createdAt,
+           toString(s.updatedAt) AS updatedAt
+  `,
+
+  /**
+   * UPDATE_SPACE -- patch the non-identity fields of a Space
+   * (description / color / iconKey). Each clause is gated on a
+   * boolean flag so the caller can pass only the fields it wants
+   * to write; absent fields are left untouched. Name is intentionally
+   * not in this Cypher -- renames need the uniqueness probe handled
+   * by RENAME_SPACE.
+   *
+   * Empty result set means the Space doesn't exist (or was
+   * soft-deleted) -- caller maps to `SPACES_NOT_FOUND`.
+   */
+  UPDATE_SPACE: `
+    MATCH (s:Space {id: $id})
+      WHERE s.deletedAt IS NULL
+    SET s.updatedAt = $now
+    FOREACH (_ IN CASE WHEN $writeDescription THEN [1] ELSE [] END |
+      SET s.description = $description
+    )
+    FOREACH (_ IN CASE WHEN $writeColor THEN [1] ELSE [] END |
+      SET s.color = $color
+    )
+    FOREACH (_ IN CASE WHEN $writeIconKey THEN [1] ELSE [] END |
+      SET s.iconKey = $iconKey
+    )
     RETURN s.id AS id,
            coalesce(s.name, s.id) AS name,
            coalesce(s.description, '') AS description,
@@ -1087,9 +1135,11 @@ export const CYPHER = {
 export class SdkSpacesClient {
   protected readonly getAuthEnv: () => string | null;
   protected readonly queryFn: SpacesQueryFn;
+  protected readonly spanEmitter: NonNullable<SdkSpacesClientConfig['spanEmitter']> | null;
 
   constructor(config: SdkSpacesClientConfig = {}) {
     this.getAuthEnv = config.getAuthEnv ?? ((): string | null => null);
+    this.spanEmitter = config.spanEmitter ?? null;
     this.queryFn =
       config.query ??
       (async (): Promise<Array<Record<string, unknown>>> => {
@@ -1102,48 +1152,78 @@ export class SdkSpacesClient {
       });
   }
 
+  /**
+   * Wrap an operation in a span (ADR-030). The base `name` auto-emits
+   * `<name>.start` immediately and `<name>.finish` / `<name>.fail` on
+   * settle. No-op when no `spanEmitter` is wired (tests). The function
+   * runs unchanged whether instrumented or not.
+   */
+  protected async withSpan<T>(
+    name: string,
+    fn: () => Promise<T>,
+    data?: unknown
+  ): Promise<T> {
+    const span = this.spanEmitter?.(name, data);
+    try {
+      const result = await fn();
+      span?.finish();
+      return result;
+    } catch (err) {
+      span?.fail(err);
+      throw err;
+    }
+  }
+
   async listSpaces(): Promise<Space[]> {
-    const rows = await this.run(CYPHER.LIST_SPACES);
-    return rows.map(toSpace);
+    return this.withSpan('spaces.listSpaces', async () => {
+      const rows = await this.run(CYPHER.LIST_SPACES);
+      return rows.map(toSpace);
+    });
   }
 
   async getUncategorizedCount(): Promise<number> {
-    const rows = await this.run(CYPHER.UNCATEGORIZED_COUNT);
-    return toCount(rows[0]);
+    return this.withSpan('spaces.uncategorizedCount', async () => {
+      const rows = await this.run(CYPHER.UNCATEGORIZED_COUNT);
+      return toCount(rows[0]);
+    });
   }
 
   async listItems(scope: SpaceScope, opts: ListOpts = {}): Promise<ItemSummary[]> {
-    const limit = clampLimit(opts.limit);
-    const offset = clampOffset(opts.offset);
-    if (scope.kind === 'uncategorized') {
-      const rows = await this.run(CYPHER.LIST_ITEMS_UNCATEGORIZED, { offset, limit });
-      return rows.map((r) => toItemSummary(r, { stripOtherSpaces: true }));
-    }
-    const spaceId = scope.spaceId;
-    if (typeof spaceId !== 'string' || spaceId.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'listItems(scope=space) requires a non-empty spaceId',
-        remediation: 'Pass a SpaceScope with a real space.id from a prior listSpaces() result.',
-        context: { spaceId },
-      });
-    }
-    const rows = await this.run(CYPHER.LIST_ITEMS_IN_SPACE, { spaceId, offset, limit });
-    return rows.map((r) => toItemSummary(r, { stripOtherSpaces: false }));
+    return this.withSpan('spaces.items.list', async () => {
+      const limit = clampLimit(opts.limit);
+      const offset = clampOffset(opts.offset);
+      if (scope.kind === 'uncategorized') {
+        const rows = await this.run(CYPHER.LIST_ITEMS_UNCATEGORIZED, { offset, limit });
+        return rows.map((r) => toItemSummary(r, { stripOtherSpaces: true }));
+      }
+      const spaceId = scope.spaceId;
+      if (typeof spaceId !== 'string' || spaceId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'listItems(scope=space) requires a non-empty spaceId',
+          remediation: 'Pass a SpaceScope with a real space.id from a prior listSpaces() result.',
+          context: { spaceId },
+        });
+      }
+      const rows = await this.run(CYPHER.LIST_ITEMS_IN_SPACE, { spaceId, offset, limit });
+      return rows.map((r) => toItemSummary(r, { stripOtherSpaces: false }));
+    });
   }
 
   async getItem(id: string): Promise<Item | null> {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'getItem requires a non-empty id',
-        remediation: 'Pass the canonical item id from a prior list result.',
-        context: { id },
-      });
-    }
-    const rows = await this.run(CYPHER.GET_ITEM, { id });
-    if (rows.length === 0) return null;
-    return toItem(rows[0] as Record<string, unknown>);
+    return this.withSpan('spaces.items.get', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'getItem requires a non-empty id',
+          remediation: 'Pass the canonical item id from a prior list result.',
+          context: { id },
+        });
+      }
+      const rows = await this.run(CYPHER.GET_ITEM, { id });
+      if (rows.length === 0) return null;
+      return toItem(rows[0] as Record<string, unknown>);
+    });
   }
 
   /**
@@ -1368,29 +1448,31 @@ export class SdkSpacesClient {
    * `SPACES_DUPLICATE_NAME`.
    */
   async createSpace(input: CreateSpaceInput): Promise<Space> {
-    const name = validateSpaceName(input.name);
-    const description = validateOptionalDescription(input.description);
-    const color = typeof input.color === 'string' ? input.color : '';
-    const iconKey = typeof input.iconKey === 'string' ? input.iconKey : '';
-    const id = generateSpaceId();
-    const now = nowIso();
-    const rows = await this.run(CYPHER.CREATE_SPACE, {
-      id,
-      name,
-      description,
-      color,
-      iconKey,
-      now,
-    });
-    if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_DUPLICATE_NAME',
-        message: `A space named "${name}" already exists`,
-        remediation: 'Pick a different name. Names are unique within an account.',
-        context: { name },
+    return this.withSpan('spaces.create', async () => {
+      const name = validateSpaceName(input.name);
+      const description = validateOptionalDescription(input.description);
+      const color = typeof input.color === 'string' ? input.color : '';
+      const iconKey = typeof input.iconKey === 'string' ? input.iconKey : '';
+      const id = generateSpaceId();
+      const now = nowIso();
+      const rows = await this.run(CYPHER.CREATE_SPACE, {
+        id,
+        name,
+        description,
+        color,
+        iconKey,
+        now,
       });
-    }
-    return toSpace(rows[0] as Record<string, unknown>);
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_DUPLICATE_NAME',
+          message: `A space named "${name}" already exists`,
+          remediation: 'Pick a different name. Names are unique within an account.',
+          context: { name },
+        });
+      }
+      return toSpace(rows[0] as Record<string, unknown>);
+    });
   }
 
   /**
@@ -1400,17 +1482,71 @@ export class SdkSpacesClient {
    * the right error code.
    */
   async renameSpace(id: string, name: string): Promise<Space> {
-    const validId = validateSpaceId(id);
-    const validName = validateSpaceName(name);
-    const now = nowIso();
-    const rows = await this.run(CYPHER.RENAME_SPACE, {
-      id: validId,
-      name: validName,
-      now,
+    return this.withSpan('spaces.rename', async () => {
+      const validId = validateSpaceId(id);
+      const validName = validateSpaceName(name);
+      const now = nowIso();
+      const rows = await this.run(CYPHER.RENAME_SPACE, {
+        id: validId,
+        name: validName,
+        now,
+      });
+      if (rows.length === 0) {
+        const exists = await this.spaceExists(validId);
+        if (!exists) {
+          throw new SpacesError({
+            code: 'SPACES_NOT_FOUND',
+            message: `Space ${validId} not found (it may have been deleted)`,
+            remediation: 'Refresh the list and try again.',
+            context: { id: validId },
+          });
+        }
+        throw new SpacesError({
+          code: 'SPACES_DUPLICATE_NAME',
+          message: `A space named "${validName}" already exists`,
+          remediation: 'Pick a different name. Names are unique within an account.',
+          context: { id: validId, name: validName },
+        });
+      }
+      return toSpace(rows[0] as Record<string, unknown>);
     });
-    if (rows.length === 0) {
-      const exists = await this.spaceExists(validId);
-      if (!exists) {
+  }
+
+  /**
+   * Patch a Space's non-identity fields (description / color /
+   * iconKey). Empty patches are a no-op that still bumps
+   * `s.updatedAt` (so the cache invalidation surface stays uniform).
+   *
+   * 0 rows from UPDATE_SPACE means the Space doesn't exist or is
+   * soft-deleted. Renames go through `renameSpace` so the uniqueness
+   * probe stays scoped to the name-change path.
+   */
+  async updateSpace(id: string, patch: UpdateSpaceInput): Promise<Space> {
+    return this.withSpan('spaces.update', async () => {
+      const validId = validateSpaceId(id);
+      const writeDescription = patch.description !== undefined;
+      const writeColor = patch.color !== undefined;
+      const writeIconKey = patch.iconKey !== undefined;
+
+      // Normalize + validate description when present.
+      const description = writeDescription
+        ? validateOptionalDescription(patch.description)
+        : '';
+      const color = writeColor ? String(patch.color ?? '') : '';
+      const iconKey = writeIconKey ? String(patch.iconKey ?? '') : '';
+
+      const now = nowIso();
+      const rows = await this.run(CYPHER.UPDATE_SPACE, {
+        id: validId,
+        now,
+        writeDescription,
+        description,
+        writeColor,
+        color,
+        writeIconKey,
+        iconKey,
+      });
+      if (rows.length === 0) {
         throw new SpacesError({
           code: 'SPACES_NOT_FOUND',
           message: `Space ${validId} not found (it may have been deleted)`,
@@ -1418,14 +1554,8 @@ export class SdkSpacesClient {
           context: { id: validId },
         });
       }
-      throw new SpacesError({
-        code: 'SPACES_DUPLICATE_NAME',
-        message: `A space named "${validName}" already exists`,
-        remediation: 'Pick a different name. Names are unique within an account.',
-        context: { id: validId, name: validName },
-      });
-    }
-    return toSpace(rows[0] as Record<string, unknown>);
+      return toSpace(rows[0] as Record<string, unknown>);
+    });
   }
 
   /**
@@ -1434,50 +1564,52 @@ export class SdkSpacesClient {
    * Space still has items so data can't orphan accidentally.
    */
   async deleteSpace(id: string, opts: DeleteSpaceOpts = {}): Promise<void> {
-    const validId = validateSpaceId(id);
-    const soft = opts.soft !== false; // default true
+    return this.withSpan('spaces.delete', async () => {
+      const validId = validateSpaceId(id);
+      const soft = opts.soft !== false; // default true
 
-    if (soft) {
-      const now = nowIso();
-      const rows = await this.run(CYPHER.SOFT_DELETE_SPACE, { id: validId, now });
-      if (rows.length === 0) {
-        const exists = await this.spaceExists(validId);
-        if (!exists) {
-          throw new SpacesError({
-            code: 'SPACES_NOT_FOUND',
-            message: `Space ${validId} not found`,
-            remediation: 'Refresh the list and try again.',
-            context: { id: validId },
-          });
+      if (soft) {
+        const now = nowIso();
+        const rows = await this.run(CYPHER.SOFT_DELETE_SPACE, { id: validId, now });
+        if (rows.length === 0) {
+          const exists = await this.spaceExists(validId);
+          if (!exists) {
+            throw new SpacesError({
+              code: 'SPACES_NOT_FOUND',
+              message: `Space ${validId} not found`,
+              remediation: 'Refresh the list and try again.',
+              context: { id: validId },
+            });
+          }
+          // Space exists but the WHERE filtered it out -- already soft-deleted.
+          // Idempotent: treat as success.
         }
-        // Space exists but the WHERE filtered it out -- already soft-deleted.
-        // Idempotent: treat as success.
+        return;
       }
-      return;
-    }
 
-    // Hard delete: pre-flight the item count.
-    const countRows = await this.run(CYPHER.SPACE_ITEM_COUNT, { id: validId });
-    const itemCount = toCount(countRows[0]);
-    if (countRows.length === 0) {
-      // The MATCH didn't bind -- Space doesn't exist.
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Space ${validId} not found`,
-        remediation: 'Refresh the list and try again.',
-        context: { id: validId },
-      });
-    }
-    if (itemCount > 0) {
-      throw new SpacesError({
-        code: 'SPACES_DELETE_NON_EMPTY',
-        message: `Cannot hard-delete a Space that still contains ${itemCount} item(s)`,
-        remediation:
-          'Move the items out first (or use soft delete -- the default -- which keeps items reachable via Uncategorized).',
-        context: { id: validId, itemCount },
-      });
-    }
-    await this.run(CYPHER.HARD_DELETE_SPACE, { id: validId });
+      // Hard delete: pre-flight the item count.
+      const countRows = await this.run(CYPHER.SPACE_ITEM_COUNT, { id: validId });
+      const itemCount = toCount(countRows[0]);
+      if (countRows.length === 0) {
+        // The MATCH didn't bind -- Space doesn't exist.
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Space ${validId} not found`,
+          remediation: 'Refresh the list and try again.',
+          context: { id: validId },
+        });
+      }
+      if (itemCount > 0) {
+        throw new SpacesError({
+          code: 'SPACES_DELETE_NON_EMPTY',
+          message: `Cannot hard-delete a Space that still contains ${itemCount} item(s)`,
+          remediation:
+            'Move the items out first (or use soft delete -- the default -- which keeps items reachable via Uncategorized).',
+          context: { id: validId, itemCount },
+        });
+      }
+      await this.run(CYPHER.HARD_DELETE_SPACE, { id: validId });
+    });
   }
 
   /**
@@ -1486,34 +1618,36 @@ export class SdkSpacesClient {
    * disambiguates so the caller sees the right error code.
    */
   async undeleteSpace(id: string): Promise<Space> {
-    const validId = validateSpaceId(id);
-    const now = nowIso();
-    const rows = await this.run(CYPHER.UNDELETE_SPACE, { id: validId, now });
-    if (rows.length === 0) {
-      const exists = await this.spaceExists(validId);
-      if (!exists) {
+    return this.withSpan('spaces.undelete', async () => {
+      const validId = validateSpaceId(id);
+      const now = nowIso();
+      const rows = await this.run(CYPHER.UNDELETE_SPACE, { id: validId, now });
+      if (rows.length === 0) {
+        const exists = await this.spaceExists(validId);
+        if (!exists) {
+          throw new SpacesError({
+            code: 'SPACES_NOT_FOUND',
+            message: `Space ${validId} not found`,
+            remediation: 'Verify the id; the Space may have been hard-deleted.',
+            context: { id: validId },
+          });
+        }
+        // Exists but wasn't soft-deleted -- nothing to restore. Idempotent:
+        // re-fetch and return the current row.
+        const refreshed = await this.run(CYPHER.LIST_SPACES);
+        const match = refreshed
+          .map(toSpace)
+          .find((s) => s.id === validId);
+        if (match !== undefined) return match;
         throw new SpacesError({
           code: 'SPACES_NOT_FOUND',
-          message: `Space ${validId} not found`,
-          remediation: 'Verify the id; the Space may have been hard-deleted.',
+          message: `Space ${validId} not found after undelete`,
+          remediation: 'Refresh the list and try again.',
           context: { id: validId },
         });
       }
-      // Exists but wasn't soft-deleted -- nothing to restore. Idempotent:
-      // re-fetch and return the current row.
-      const refreshed = await this.run(CYPHER.LIST_SPACES);
-      const match = refreshed
-        .map(toSpace)
-        .find((s) => s.id === validId);
-      if (match !== undefined) return match;
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Space ${validId} not found after undelete`,
-        remediation: 'Refresh the list and try again.',
-        context: { id: validId },
-      });
-    }
-    return toSpace(rows[0] as Record<string, unknown>);
+      return toSpace(rows[0] as Record<string, unknown>);
+    });
   }
 
   // ─── Phase 4: shared spaces (playbooks + tickets) ────────────────────
@@ -2590,6 +2724,8 @@ function toItemSummary(row: Record<string, unknown>, opts: SummaryOpts): ItemSum
 function toItem(row: Record<string, unknown>): Item {
   const base = toItemSummary(row, { stripOtherSpaces: false });
   const item: Item = { ...base };
+  const description = optString(row, 'description');
+  if (description !== undefined) item.description = description;
   const content = optString(row, 'content');
   if (content !== undefined) item.content = content;
   const parsedMeta = parseMetadataField(row['metadata']);
@@ -3027,10 +3163,17 @@ function clampOffset(v: number | undefined): number {
  */
 function validateUpdatePatch(
   patch: ItemUpdatePatch
-): { title: string | null; description: string | null; type: string | null; editorId: string | null } {
+): {
+  title: string | null;
+  description: string | null;
+  content: string | null;
+  type: string | null;
+  editorId: string | null;
+} {
   const out = {
     title: null as string | null,
     description: null as string | null,
+    content: null as string | null,
     type: null as string | null,
     editorId: null as string | null,
   };
@@ -3072,6 +3215,25 @@ function validateUpdatePatch(
       });
     }
     out.description = trimmed;
+  }
+  if (patch.content !== undefined) {
+    if (typeof patch.content !== 'string') {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'content must be a string',
+        context: { content: typeof patch.content },
+      });
+    }
+    // Content is stored verbatim -- we cap LENGTH but don't trim, so
+    // intentional trailing newlines / leading whitespace survive.
+    if (patch.content.length > MAX_ITEM_CONTENT_LENGTH) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `content longer than ${MAX_ITEM_CONTENT_LENGTH} chars`,
+        context: { length: patch.content.length, max: MAX_ITEM_CONTENT_LENGTH },
+      });
+    }
+    out.content = patch.content;
   }
   if (patch.type !== undefined) {
     if (typeof patch.type !== 'string' || !(ITEM_KINDS as Set<string>).has(patch.type)) {

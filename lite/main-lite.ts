@@ -34,6 +34,7 @@ import * as fs from 'node:fs';
 
 import { initMenu } from './menu/build-menu.js';
 import { seedKernelMenu } from './menu/seed.js';
+import { openWiserPlaybooksWindow } from './wiser-playbooks-window.js';
 import { registry as menuRegistry } from './menu/registry.js';
 import { openBugReportModal, initBugReport } from './bug-report/main.js';
 import { initAuth, type AuthHandle } from './auth/main.js';
@@ -47,6 +48,7 @@ import { initHealth, type HealthHandle } from './health/main.js';
 import { initNeon, type NeonHandle } from './neon/main.js';
 import { initIdw, type IdwHandle } from './idw/main.js';
 import { initTools, type ToolsHandle } from './tools/main.js';
+import { initAi, type AiHandle } from './ai/main.js';
 import { initMainWindow, type MainWindowHandle } from './main-window/main.js';
 import { initEventBus, type EventBusHandle } from './event-bus/main.js';
 import { initUniversity, type UniversityHandle } from './university/main.js';
@@ -55,6 +57,7 @@ import { initUniversity, type UniversityHandle } from './university/main.js';
 // Bringing TTS back is a separate chunk that re-introduces lite/ai/.
 import { initAiRunTimes, type AiRunTimesHandle } from './ai-run-times/main.js';
 import { initOnboarding, type OnboardingHandle } from './onboarding/main.js';
+import { initDownloads, type DownloadsHandle } from './downloads/main.js';
 import { initUpdater, verifyUpdateOnStartup, type UpdaterHandle } from './updater/index.js';
 import { getLoggingApi, LOGGING_SELF_CATEGORY } from './logging/api.js';
 import { getAuthApi } from './auth/api.js';
@@ -216,11 +219,13 @@ let healthHandle: HealthHandle | null = null;
 let neonHandle: NeonHandle | null = null;
 let idwHandle: IdwHandle | null = null;
 let toolsHandle: ToolsHandle | null = null;
+let aiHandle: AiHandle | null = null;
 let mainWindowHandle: MainWindowHandle | null = null;
 let eventBusHandle: EventBusHandle | null = null;
 let universityHandle: UniversityHandle | null = null;
 let aiRunTimesHandle: AiRunTimesHandle | null = null;
 let onboardingHandle: OnboardingHandle | null = null;
+let downloadsHandle: DownloadsHandle | null = null;
 
 app.on('second-instance', () => {
   // Best-effort event emission: if logging isn't initialized yet, skip
@@ -481,9 +486,16 @@ app
     // KV layer can call `promptReSignIn(reason)` the moment the SDK
     // surfaces a stale-token rejection. The prompter dedupes
     // concurrent rejections itself, so the KV layer never has to.
+    //
+    // Start the prompter SUSPENDED. The home-view chat owns the
+    // sign-in conversation for first-time / expired users; we don't
+    // want a background KV op racing a native dialog in front of it.
+    // The BOOT_CHAT_FINISH handler below un-suspends the prompter
+    // once the chat has settled (post-verify or post-sign-in).
     const reSignInHandle = installReSignInPrompter({
       env: 'edison',
       getParentWindow: () => mainWindow,
+      initiallySuspended: true,
     });
 
     // Wire KV's default config to live auth. Per ADR-044, lite/kv/api.ts
@@ -761,6 +773,24 @@ app
       });
     }
 
+    // Initialize AI module. Registers IPC handlers (lite:ai:status,
+    // lite:ai:space-assist) for the provider-flexible Space-creation
+    // assist (Claude API or a OneReach flow). Reads ai-config.json from
+    // userData; the key/token never cross the renderer bridge.
+    try {
+      aiHandle = initAi({
+        logger: {
+          info: (msg, data) => getLoggingApi().info('ai', msg, data),
+          warn: (msg, data) => getLoggingApi().warn('ai', msg, data),
+          error: (msg, data) => getLoggingApi().error('ai', msg, data),
+        },
+      });
+    } catch (err) {
+      getLoggingApi().error('ai', 'initAi threw', {
+        error: (err as Error).message,
+      });
+    }
+
     // Initialize Agentic University module. Registers the
     // top:university menu (Open LMS / Quick Starts -> View All
     // Tutorials + courses / AI Run Times / Wiser Method), the
@@ -888,6 +918,7 @@ app
       onOpenFocusedDevTools: () => openFocusedWindowDevTools(),
       onOpenActiveTabDevTools: () => openActiveTabDevTools(),
       onOpenAllDevTools: () => openAllWindowDevTools(),
+      onOpenWiserPlaybooks: () => openWiserPlaybooksWindow(),
     });
     initMenu();
 
@@ -936,6 +967,14 @@ app
     // store subscription, IPC handlers, and tab-view orchestration;
     // we just hold a reference for the parent-window resolvers
     // already wired into Settings / IDW / API Docs / etc.
+    //
+    // The home view inside chrome.html owns the welcome / sign-in
+    // chat — there is no longer a separate boot-chat page that
+    // swaps over. We still listen for `lite:boot-chat:finish` so the
+    // chat can un-suspend the re-sign-in prompter once it settles
+    // (either after a verified session or after a successful sign-in
+    // inside the chat); background dialogs stay suppressed until then
+    // so they don't race the chat at boot.
     try {
       mainWindowHandle = initMainWindow({
         chromeHtmlPath: path.join(__dirname, 'chrome.html'),
@@ -947,14 +986,47 @@ app
         },
       });
       mainWindow = mainWindowHandle.window;
+      // One-shot un-suspend on the chat's settle signal.
+      ipcMain.once('lite:boot-chat:finish', () => {
+        getLoggingApi().info('boot-chat', 'finish received; un-suspending prompter', {});
+        reSignInHandle.setSuspended(false);
+      });
     } catch (err) {
       getLoggingApi().error('main-window', 'initMainWindow threw', {
         error: (err as Error).message,
       });
       // Fallback: spin up the legacy placeholder so the kernel still
       // boots while the tabbed window is being debugged. Reachable
-      // only on hard errors during ADR-038 rollout.
+      // only on hard errors during ADR-038 rollout. Un-suspend the
+      // prompter so the user still gets sign-in dialogs in the
+      // degraded path.
       mainWindow = createMainWindow(preloadPath);
+      reSignInHandle.setSuspended(false);
+    }
+
+    // Initialize downloads capture (Save to Space). Wired AFTER the
+    // main window so the picker can anchor on it. Installs:
+    //   - `will-download` listener on session.defaultSession
+    //   - `lite:download-picker:*` IPC handlers
+    //   - Single-instance picker BrowserWindow factory
+    // See lite/downloads/README.md for the user-visible UX.
+    try {
+      downloadsHandle = initDownloads({
+        pickerHtmlPath: path.join(__dirname, 'download-picker.html'),
+        preloadPath,
+        getParentWindow: () => mainWindow,
+        logger: {
+          info: (msg, data) => getLoggingApi().info('downloads', msg, data),
+          warn: (msg, data) => getLoggingApi().warn('downloads', msg, data),
+          error: (msg, data) => getLoggingApi().error('downloads', msg, data),
+        },
+        describeSource: (wc) =>
+          wc === null ? 'unknown' : `webContents:${wc.id}`,
+      });
+    } catch (err) {
+      getLoggingApi().error('downloads', 'initDownloads threw', {
+        error: (err as Error).message,
+      });
     }
 
     // Boot span -- close the success path. The window is on screen but
@@ -1284,12 +1356,22 @@ app.on('before-quit', () => {
     /* shutdown best-effort */
   }
   try {
+    aiHandle?.teardown();
+  } catch {
+    /* shutdown best-effort */
+  }
+  try {
     mainWindowHandle?.teardown();
   } catch {
     /* shutdown best-effort */
   }
   try {
     eventBusHandle?.teardown();
+  } catch {
+    /* shutdown best-effort */
+  }
+  try {
+    downloadsHandle?.dispose();
   } catch {
     /* shutdown best-effort */
   }

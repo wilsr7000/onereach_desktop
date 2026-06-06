@@ -476,6 +476,55 @@ describe('IdwStore persistence error handling', () => {
   });
 });
 
+describe('IdwStore self-heals corrupted blobs', () => {
+  // The "menus disappeared" bug: a `"undefined"` string (or any other
+  // non-object blob) once stored under `lite-idw-entries/default`
+  // survives every relaunch because the store's recovery branch only
+  // resets the in-memory cache — leaving the bad blob in KV forever.
+  // The self-heal now overwrites that blob with a fresh empty record
+  // so the next read returns clean data.
+
+  it('overwrites a `"undefined"` string blob with an empty record', async () => {
+    const { store, kv } = makeStore();
+    // Seed the exact corruption pattern from the production logs.
+    await kv.set(KV_COLLECTION, KV_KEY, 'undefined');
+    expect(await kv.get(KV_COLLECTION, KV_KEY)).toBe('undefined');
+
+    // First list() trips the bad-shape branch.
+    expect(await store.list()).toEqual([]);
+
+    // Wait a tick for the fire-and-forget self-heal to complete.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // KV now holds a fresh empty blob instead of the corrupt string.
+    const healed = await kv.get(KV_COLLECTION, KV_KEY);
+    expect(healed).toEqual({ schemaVersion: 1, entries: [] });
+  });
+
+  it('overwrites a top-level array blob with an empty record', async () => {
+    const { store, kv } = makeStore();
+    // Some other shape regression: a bare array instead of {entries: [...]}.
+    await kv.set(KV_COLLECTION, KV_KEY, [
+      { id: 'orphan' },
+    ] as unknown as never);
+    expect(await store.list()).toEqual([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    const healed = await kv.get(KV_COLLECTION, KV_KEY);
+    expect(healed).toEqual({ schemaVersion: 1, entries: [] });
+  });
+
+  it('does not write when the heal itself fails (logs only)', async () => {
+    const { store, kv } = makeStore();
+    await kv.set(KV_COLLECTION, KV_KEY, 'undefined');
+    kv.failSet = true; // every subsequent kv.set rejects
+    // list() still returns [] — the heal failure is swallowed.
+    expect(await store.list()).toEqual([]);
+    await new Promise((resolve) => setImmediate(resolve));
+    // KV value unchanged — the broken write surfaced only as a log.
+    expect(await kv.get(KV_COLLECTION, KV_KEY)).toBe('undefined');
+  });
+});
+
 // Helper: extract the underlying KV from an IdwStore instance for
 // the rare test that needs to swap `now`.
 async function getKVUnderlying(store: IdwStore): Promise<FakeKV> {

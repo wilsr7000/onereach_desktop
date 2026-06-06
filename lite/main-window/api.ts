@@ -192,9 +192,26 @@ function buildDefaultApi(): MainWindowApi {
     getActiveAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
   });
   return {
-    listTabs: () => store.list(),
-    get: (id) => store.get(id),
-    getActiveTabId: () => store.getActiveId(),
+    // The TabStore reads accountId from auth synchronously, so a read
+    // that fires before the auth store has hydrated from KV sees a
+    // signed-out user and returns an empty list — dropping the user's
+    // persisted tabs on every cold start. Wait for `auth.hydrate()`
+    // (duck-typed; the method is intentionally not on the public
+    // surface) before every read so the resolver returns the
+    // restored accountId. The auth store coalesces concurrent
+    // hydrate() calls, so this is cheap after the first await.
+    listTabs: async () => {
+      await awaitAuthHydration();
+      return store.list();
+    },
+    get: async (id) => {
+      await awaitAuthHydration();
+      return store.get(id);
+    },
+    getActiveTabId: async () => {
+      await awaitAuthHydration();
+      return store.getActiveId();
+    },
     openTab: (input) => store.openTab(input),
     closeTab: (id) => store.closeTab(id),
     activateTab: (id) => store.activateTab(id),
@@ -204,4 +221,22 @@ function buildDefaultApi(): MainWindowApi {
     onTabsChanged: (handler) => store.onChange(handler),
     onEvent: (handler) => store.onEvent(handler),
   };
+}
+
+/**
+ * Best-effort wait for the AuthStore's background hydration. The
+ * store exposes `hydrate()` (coalesces concurrent calls) but it is
+ * intentionally not on the public `AuthApi` surface, so we duck-type
+ * the call. Silent on failure — the next read falls through to
+ * whatever in-memory state exists, matching the legacy behavior.
+ */
+async function awaitAuthHydration(): Promise<void> {
+  try {
+    const auth = getAuthApi() as unknown as { hydrate?: () => Promise<void> };
+    if (typeof auth.hydrate === 'function') {
+      await auth.hydrate();
+    }
+  } catch {
+    /* best-effort */
+  }
 }

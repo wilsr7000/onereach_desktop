@@ -453,6 +453,32 @@
 
     .section-link:hover { color: var(--accent); }
 
+    .marketplace-actions {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin: -4px 0 18px;
+      padding: 14px 16px;
+      border: 1px solid rgba(251,191,36,0.18);
+      border-radius: 12px;
+      background: rgba(251,191,36,0.06);
+    }
+
+    .marketplace-actions.visible { display: flex; }
+
+    .marketplace-actions-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 3px;
+    }
+
+    .marketplace-actions-copy {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
     .agent-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -954,7 +980,7 @@
     </div>
     <div class="nav-right">
       <button class="btn-ghost" id="openManagerBtn">Manage Agents</button>
-      <button class="btn-ghost" id="addIDWBtn">Add IDW</button>
+      <button class="btn-ghost" id="addIDWBtn">Add IDW Manually</button>
       <button class="btn-accent" id="buildAgentBtn">Build Agent</button>
       <button class="titlebar-close" id="closeBtn">&times;</button>
     </div>
@@ -1084,6 +1110,14 @@
       <div class="section-header">
         <div class="section-title" id="gridTitle">All agents</div>
         <div class="section-link" id="gridCount"></div>
+      </div>
+
+      <div class="marketplace-actions" id="idwMarketplaceActions">
+        <div>
+          <div class="marketplace-actions-title">Need an IDW that is not listed?</div>
+          <div class="marketplace-actions-copy">Add it manually with a name and chat URL.</div>
+        </div>
+        <button class="btn-accent" onclick="showAddIDWForm()">Add IDW Manually</button>
       </div>
 
       <div class="agent-grid" id="agentGrid"></div>
@@ -1528,16 +1562,31 @@
       const empty = document.getElementById('emptyState');
       const gridTitle = document.getElementById('gridTitle');
       const gridCount = document.getElementById('gridCount');
+      const idwMarketplaceActions = document.getElementById('idwMarketplaceActions');
 
       const titleMap = { all: 'All items', custom: 'Custom agents', tools: 'Web Tools', idw: 'IDW Store' };
       const catLabel = titleMap[currentCategory] || CATEGORY_LABELS[currentCategory] || currentCategory;
+      const showingIDWMarketplace = currentCategory === 'idw' || currentChipFilter === 'idw';
 
       gridTitle.textContent = catLabel;
       gridCount.textContent = `${filtered.length} item${filtered.length !== 1 ? 's' : ''}`;
+      if (idwMarketplaceActions) {
+        idwMarketplaceActions.classList.toggle('visible', showingIDWMarketplace);
+      }
 
       if (filtered.length === 0) {
         grid.style.display = 'none';
         empty.style.display = 'block';
+        const emptyTitle = empty.querySelector('.empty-state-title');
+        const emptyCopy = empty.querySelector('p');
+        if (emptyTitle) {
+          emptyTitle.textContent = showingIDWMarketplace ? 'No IDWs match your filters' : 'No agents match your filters';
+        }
+        if (emptyCopy) {
+          emptyCopy.textContent = showingIDWMarketplace
+            ? 'Use Add IDW Manually to add one by name and chat URL.'
+            : 'Try a different search term or category.';
+        }
         return;
       }
 
@@ -1893,7 +1942,8 @@
         ${idw.idwUrl || idw.homePageURL ? `<div style="margin-bottom:12px;"><span class="tag">${escapeHtml(idw.idwUrl || idw.homePageURL)}</span></div>` : ''}
         <div class="detail-actions">
           ${idw.installed
-            ? `<button class="btn-ghost btn-danger" onclick="removeIDW('${escapeHtml(idw._menuEntry ? idw.id : 'store-' + idw.id)}')">Remove from Menu</button>`
+            ? `${idw._menuEntry ? `<button class="btn-accent" onclick="showEditIDWForm('${escapeHtml(idw.id)}')">Edit</button>` : ''}
+               <button class="btn-ghost btn-danger" onclick="removeIDW('${escapeHtml(idw._menuEntry ? idw.id : 'store-' + idw.id)}')">Remove from Menu</button>`
             : `<button class="btn-accent" onclick="installIDW('${idw.id}')">Add to Menu</button>`}
           <button class="btn-ghost" onclick="closeDetail()">Close</button>
         </div>
@@ -1980,6 +2030,91 @@
       } catch (err) {
         console.error('[AgentExplorer] Add IDW error:', err);
         if (errEl) { errEl.textContent = err.message || 'Failed to add IDW.'; errEl.style.display = 'block'; }
+      }
+    }
+
+    function showEditIDWForm(idwId) {
+      const idw = allAgents.find(a => a.itemType === 'idw' && a.id === idwId);
+      if (!idw) return;
+
+      document.getElementById('detailPanel').innerHTML = `
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <div class="detail-title" style="margin-bottom:20px;">Edit IDW</div>
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">Name</label>
+            <input id="editIdwName" type="text" value="${escapeAttrValue(idw.name || '')}"
+              style="width:100%;padding:9px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.03);color:#fff;font-size:14px;outline:none;">
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">Chat URL</label>
+            <input id="editIdwChatUrl" type="url" value="${escapeAttrValue(idw.idwUrl || '')}"
+              style="width:100%;padding:9px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.03);color:#fff;font-size:14px;outline:none;">
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">Home URL (optional)</label>
+            <input id="editIdwHomeUrl" type="url" value="${escapeAttrValue(idw.homePageURL || '')}"
+              style="width:100%;padding:9px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.03);color:#fff;font-size:14px;outline:none;">
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;color:#888;margin-bottom:4px;">Description (optional)</label>
+            <input id="editIdwDesc" type="text" value="${escapeAttrValue(idw.description || '')}"
+              style="width:100%;padding:9px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.03);color:#fff;font-size:14px;outline:none;">
+          </div>
+        </div>
+        <div id="editIdwError" style="color:#ef4444;font-size:12px;margin-top:8px;display:none;"></div>
+        <div class="detail-actions" style="margin-top:20px;">
+          <button class="btn-accent" onclick="submitEditIDW('${escapeHtml(idw.id)}')">Save Changes</button>
+          <button class="btn-ghost" onclick="showDetail('${escapeHtml(idw.id)}')">Cancel</button>
+        </div>
+      `;
+      document.getElementById('detailOverlay').classList.add('visible');
+      setTimeout(() => document.getElementById('editIdwName')?.focus(), 100);
+    }
+
+    async function submitEditIDW(idwId) {
+      const idw = allAgents.find(a => a.itemType === 'idw' && a.id === idwId);
+      if (!idw) return;
+
+      const name = document.getElementById('editIdwName')?.value?.trim();
+      const chatUrl = document.getElementById('editIdwChatUrl')?.value?.trim();
+      const homeUrl = document.getElementById('editIdwHomeUrl')?.value?.trim();
+      const description = document.getElementById('editIdwDesc')?.value?.trim();
+      const errEl = document.getElementById('editIdwError');
+
+      if (!name || !chatUrl) {
+        if (errEl) { errEl.textContent = 'Name and Chat URL are required.'; errEl.style.display = 'block'; }
+        return;
+      }
+
+      const menuId = idw._menuEntry?.id || (idw.id.startsWith('store-') ? idw.id : `store-${idw.id}`);
+      const updates = {
+        ...(idw._menuEntry || {}),
+        id: menuId,
+        label: name,
+        chatUrl,
+        homeUrl: homeUrl || '',
+        type: 'idw',
+        environment: idw._menuEntry?.environment || 'custom',
+        description: description || '',
+      };
+
+      try {
+        const result = await window.agentExplorer.updateIDWEnvironment(menuId, updates);
+        if (result && result.success === false) {
+          const detail = result.error
+            || (Array.isArray(result.errors) && result.errors.length > 0 ? result.errors.join('; ') : null)
+            || 'Failed to update IDW.';
+          if (errEl) { errEl.textContent = detail; errEl.style.display = 'block'; }
+          return;
+        }
+
+        closeDetail();
+        await loadData();
+        showDetail(menuId);
+      } catch (err) {
+        console.error('[AgentExplorer] Edit IDW error:', err);
+        if (errEl) { errEl.textContent = err.message || 'Failed to update IDW.'; errEl.style.display = 'block'; }
       }
     }
 
@@ -2079,6 +2214,10 @@
       const div = document.createElement('div');
       div.textContent = str;
       return div.innerHTML;
+    }
+
+    function escapeAttrValue(str) {
+      return escapeHtml(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     function safeAttr(str) {

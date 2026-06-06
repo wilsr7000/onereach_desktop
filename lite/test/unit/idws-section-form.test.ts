@@ -430,3 +430,168 @@ describe('Settings -> IDWs Add form: submit payload includes botType', () => {
     expect(payload.botType).toBeUndefined();
   });
 });
+
+// ─── Top-level third-party tile row (one-click install) ─────────────────
+
+/**
+ * The 5 well-known third-party agents (ChatGPT / Claude / Gemini /
+ * Perplexity / Grok) get a quick-add tile row at the top of the IDWs
+ * section. Covers:
+ *   - the 5 tiles render with the right preset id + URL
+ *   - clicking a tile fires `idw().add` with the canonical payload
+ *   - already-installed tiles show "Installed" state and are disabled
+ *   - the row re-renders via onChange after a successful install
+ */
+describe('Settings -> IDWs third-party tile row', () => {
+  it('renders one tile per non-custom preset', async () => {
+    installBridge([]);
+    await mountInto(container);
+    const tiles = container.querySelectorAll<HTMLButtonElement>('[data-third-party-add]');
+    expect(tiles).toHaveLength(5);
+    const ids = Array.from(tiles).map((t) => t.dataset['thirdPartyAdd']);
+    expect(ids).toEqual(['chatgpt', 'claude', 'gemini', 'perplexity', 'grok']);
+  });
+
+  it('each tile carries the preset URL in title for hover discoverability', async () => {
+    installBridge([]);
+    await mountInto(container);
+    const chatgpt = container.querySelector<HTMLButtonElement>(
+      '[data-third-party-add="chatgpt"]'
+    );
+    expect(chatgpt?.getAttribute('title')).toBe('https://chat.openai.com');
+    const claude = container.querySelector<HTMLButtonElement>(
+      '[data-third-party-add="claude"]'
+    );
+    expect(claude?.getAttribute('title')).toBe('https://claude.ai/new');
+  });
+
+  it('clicking a tile fires idw().add with kind=external-bot + the preset URL/label/botType', async () => {
+    const { spies } = installBridge([]);
+    await mountInto(container);
+    const claude = container.querySelector<HTMLButtonElement>(
+      '[data-third-party-add="claude"]'
+    );
+    claude?.click();
+    await flushMicrotasks();
+    expect(spies.add).toHaveBeenCalledTimes(1);
+    const payload = spies.add.mock.calls[0]?.[0] as LiteIdwAddInput;
+    expect(payload).toMatchObject({
+      kind: 'external-bot',
+      label: 'Claude',
+      url: 'https://claude.ai/new',
+      botType: 'claude',
+    });
+  });
+
+  it('shows "Installed" state for presets the user already has', async () => {
+    installBridge([
+      {
+        id: 'existing-chatgpt',
+        kind: 'external-bot',
+        label: 'ChatGPT',
+        url: 'https://chat.openai.com',
+        botType: 'chatgpt',
+        source: 'manual',
+        order: 100,
+        createdAt: '2026-05-01T00:00:00Z',
+        updatedAt: '2026-05-01T00:00:00Z',
+      } as LiteIdwEntry,
+    ]);
+    await mountInto(container);
+    const chatgpt = container.querySelector<HTMLButtonElement>(
+      '[data-third-party-add="chatgpt"]'
+    );
+    expect(chatgpt?.classList.contains('is-installed')).toBe(true);
+    expect(chatgpt?.disabled).toBe(true);
+    expect(chatgpt?.querySelector('.idw-tp-tile-status')?.textContent).toBe('Installed');
+
+    // Other presets remain addable.
+    const gemini = container.querySelector<HTMLButtonElement>(
+      '[data-third-party-add="gemini"]'
+    );
+    expect(gemini?.disabled).toBe(false);
+    expect(gemini?.querySelector('.idw-tp-tile-add')?.textContent).toBe('+ Add');
+  });
+
+  it('disables the clicked tile while the add is in flight', async () => {
+    const { spies } = installBridge([]);
+    // Stall the add() promise so we can observe the disabled mid-flight.
+    // `resolveAdd` is captured in the Promise executor closure; the
+    // cast pins the type once we read it at the bottom of the test.
+    type AddResolver = (v: { entry: LiteIdwEntry; wasUpdate: boolean }) => void;
+    const resolveBox: { fn: AddResolver | null } = { fn: null };
+    spies.add.mockImplementationOnce(
+      () =>
+        new Promise<{ entry: LiteIdwEntry; wasUpdate: boolean }>((r) => {
+          resolveBox.fn = r;
+        })
+    );
+    await mountInto(container);
+    const grok = container.querySelector<HTMLButtonElement>(
+      '[data-third-party-add="grok"]'
+    );
+    grok?.click();
+    // After click, before promise resolves.
+    expect(grok?.disabled).toBe(true);
+    expect(grok?.classList.contains('is-loading')).toBe(true);
+    // Drain.
+    resolveBox.fn?.({ entry: {} as unknown as LiteIdwEntry, wasUpdate: false });
+    await flushMicrotasks();
+  });
+
+  it('surfaces an error banner when add fails (rolls back tile disabled state)', async () => {
+    const { spies } = installBridge([]);
+    spies.add.mockRejectedValueOnce(new Error('network down'));
+    await mountInto(container);
+    const perplexity = container.querySelector<HTMLButtonElement>(
+      '[data-third-party-add="perplexity"]'
+    );
+    perplexity?.click();
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(perplexity?.disabled).toBe(false);
+    expect(perplexity?.classList.contains('is-loading')).toBe(false);
+    const banner = container.querySelector('#idw-banner');
+    expect(banner?.textContent ?? '').toMatch(/network down/);
+  });
+
+  it('re-renders the tile row to "Installed" after onChange fires post-add', async () => {
+    const { spies, changeHandlers } = installBridge([]);
+    await mountInto(container);
+
+    // Initial state: ChatGPT tile is addable.
+    let chatgpt = container.querySelector<HTMLButtonElement>(
+      '[data-third-party-add="chatgpt"]'
+    );
+    expect(chatgpt?.classList.contains('is-installed')).toBe(false);
+
+    // Click → spied add fires; then simulate the onChange listener
+    // receiving the updated entry list (this is what idw().add does
+    // in production via the store's broadcast).
+    chatgpt?.click();
+    await flushMicrotasks();
+    expect(spies.add).toHaveBeenCalledTimes(1);
+
+    changeHandlers.forEach((h) =>
+      h([
+        {
+          id: 'new-chatgpt',
+          kind: 'external-bot',
+          label: 'ChatGPT',
+          url: 'https://chat.openai.com',
+          botType: 'chatgpt',
+          source: 'manual',
+          order: 100,
+          createdAt: '2026-05-18T00:00:00Z',
+          updatedAt: '2026-05-18T00:00:00Z',
+        } as LiteIdwEntry,
+      ])
+    );
+    // Re-render is synchronous within the onChange callback.
+    chatgpt = container.querySelector<HTMLButtonElement>(
+      '[data-third-party-add="chatgpt"]'
+    );
+    expect(chatgpt?.classList.contains('is-installed')).toBe(true);
+    expect(chatgpt?.disabled).toBe(true);
+  });
+});

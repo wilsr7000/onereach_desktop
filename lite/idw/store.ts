@@ -457,7 +457,18 @@ export class IdwStore {
         this.log('warn', 'idw-store: unexpected KV blob shape, resetting in-memory', {
           actualType: Array.isArray(raw) ? 'array' : typeof raw,
         });
-        this.cache = { schemaVersion: 1, entries: [] };
+        // Self-heal: overwrite the corrupt blob in KV with a fresh
+        // empty record. Without this, the bad value survives every
+        // relaunch and the user sees an empty IDW menu forever.
+        // Fire-and-forget — a transient write failure is fine; next
+        // read will retry the heal.
+        const fresh: IdwStorageBlob = { schemaVersion: 1, entries: [] };
+        void this.kv.set(KV_COLLECTION, KV_KEY, fresh).catch((err) => {
+          this.log('warn', 'idw-store: self-heal write failed', {
+            error: (err as Error).message,
+          });
+        });
+        this.cache = fresh;
         this.cachedForAccountId = accountId;
         return this.cache;
       }

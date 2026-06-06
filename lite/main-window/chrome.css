@@ -260,7 +260,13 @@ body {
 }
 
 /* ============================================================
- * HOME VIEW (visible when no tab is active)
+ * HOME VIEW — the chat IS the Home tab.
+ *
+ * Layout: header (Onereach logo + wordmark) → scrollable chat thread
+ * → action row (only when an action is pending) → shortcut row
+ * (Browse OAGI Store / Manage Agents / Sign out). The chat surface
+ * replaces the legacy auth-block + sign-in button + onboarding card.
+ * IDW WebContentsViews cover this region when an agent tab is active.
  * ============================================================ */
 
 .home-view {
@@ -270,18 +276,15 @@ body {
     radial-gradient(circle at 50% 12%, rgba(79, 140, 255, 0.12), transparent 36%),
     var(--or-bg-canvas);
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  padding: 40px;
+  padding: 36px 28px 18px;
   overflow: hidden;
 }
 
 /* Decorative orb mark: partially off-screen bottom-right, heavily
    faded so it reads as a soft brand watermark, not page chrome.
-   Same visual language as `.brand-mark` in placeholder.html
-   (concentric rings + radial inner glow) but scaled up to 720px and
-   muted with low opacity. pointer-events:none so the auth block /
-   buttons stay clickable through it. */
+   pointer-events:none so the chat stays clickable through it. */
 .home-orb {
   position: absolute;
   bottom: -260px;
@@ -309,13 +312,11 @@ body {
   pointer-events: none;
 }
 
-/* Inner ring -- echoes the placeholder's concentric ring detail. */
 .home-orb::before {
   inset: 110px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-/* Hot center: small bright dot, the focal point of the orb. */
 .home-orb::after {
   top: 50%;
   left: 50%;
@@ -327,46 +328,29 @@ body {
   filter: blur(2px);
 }
 
-.home-inner {
+/* Chat column: grid so the thread can scroll while header + actions +
+   shortcut row stay pinned. Max-width keeps long lines readable. */
+.home-chat {
   position: relative;
   z-index: 1;
-  max-width: 520px;
-  text-align: center;
+  width: 100%;
+  max-width: 720px;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  gap: 18px;
+  align-self: stretch;
+  min-height: 0;
+}
+
+.home-chat-header {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 12px;
 }
 
-.wordmark {
-  position: relative;
-  font-size: 36px;
-  font-weight: 300;
-  letter-spacing: -0.02em;
-  margin-bottom: 12px;
-}
-.wordmark::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: -96px;
-  width: 160px;
-  height: 160px;
-  transform: translateX(-50%);
-  border: 1px solid rgba(79, 140, 255, 0.14);
-  border-radius: 50%;
-  box-shadow: inset 0 0 44px rgba(79, 140, 255, 0.045);
-  pointer-events: none;
-}
-.wordmark .lite {
-  font-weight: 500;
-  opacity: 0.6;
-}
-
-/* Bottom-right version badge: subtle, fixed-position so it stays
-   in the corner regardless of home-view content height. Tab views
-   in the main process cover the home view region, which means the
-   badge naturally hides itself when an agent tab is active --
-   exactly the behavior we want. */
+/* Bottom-right version badge — fixed so it stays put regardless of
+   home-view content height. Hides naturally behind IDW tab views. */
 .version-badge {
   position: fixed;
   right: 14px;
@@ -380,299 +364,19 @@ body {
   user-select: none;
 }
 
-.tagline {
-  font-size: 13px;
-  opacity: 0.4;
-  margin-bottom: 32px;
-}
-
-.auth-block {
-  margin-bottom: 24px;
-  min-height: 84px;
+/* Shortcut row sits below the chat actions; secondary tone so it
+   doesn't compete with primary chat actions. Sign-out is hidden
+   until chrome.ts detects a live session. */
+.home-chat-shortcuts {
   display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-}
-
-.signin-button {
-  background: linear-gradient(180deg, var(--or-accent-hover), var(--or-accent));
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  padding: 10px 24px;
-  border-radius: var(--or-radius-sm);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  font-family: inherit;
-  transition:
-    background var(--or-transition-fast),
-    box-shadow var(--or-transition-fast),
-    opacity var(--or-transition-fast),
-    transform var(--or-transition-fast);
-}
-.signin-button:hover:not(:disabled) {
-  background: linear-gradient(180deg, #83b0ff, var(--or-accent-hover));
-  box-shadow: 0 10px 30px rgba(79, 140, 255, 0.3);
-  transform: translateY(-1px);
-}
-.signin-button:disabled {
-  opacity: 0.5;
-  cursor: progress;
-}
-
-.signed-in {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.signed-in .email {
-  font-size: 14px;
-  opacity: 0.85;
-}
-.signed-in .account {
-  font-size: 11px;
-  font-family: var(--or-font-mono);
-  opacity: 0.4;
-}
-.signed-in .signout-link {
-  margin-top: 8px;
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 12px;
-  cursor: pointer;
-  font-family: inherit;
-  text-decoration: underline;
-  text-decoration-color: rgba(255, 255, 255, 0.2);
-  padding: 4px 8px;
-}
-.signed-in .signout-link:hover {
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.error-banner {
-  background: rgba(255, 107, 107, 0.12);
-  border: 1px solid rgba(255, 107, 107, 0.35);
-  color: #ff8e8e;
-  font-size: 12px;
-  padding: 8px 14px;
-  border-radius: 6px;
-  margin-top: 12px;
-  max-width: 360px;
-  line-height: 1.5;
-}
-
-.info-banner {
-  background: rgba(79, 140, 255, 0.10);
-  border: 1px solid rgba(79, 140, 255, 0.30);
-  color: #aac6ff;
-  font-size: 12px;
-  padding: 8px 14px;
-  border-radius: 6px;
-  margin-top: 12px;
-  max-width: 360px;
-  line-height: 1.5;
-}
-
-.warn-banner {
-  background: rgba(255, 193, 7, 0.10);
-  border: 1px solid rgba(255, 193, 7, 0.35);
-  color: #ffd76b;
-  font-size: 12px;
-  padding: 10px 14px;
-  border-radius: 6px;
-  margin-top: 12px;
-  max-width: 380px;
-  line-height: 1.5;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  text-align: left;
-}
-
-.warn-banner-headline {
-  font-weight: 500;
-  color: #ffe9a8;
-}
-
-.warn-banner-body {
-  color: rgba(255, 217, 121, 0.85);
-}
-
-.warn-banner-action {
-  align-self: flex-start;
-  margin-top: 4px;
-  background: transparent;
-  border: 1px solid rgba(255, 193, 7, 0.4);
-  color: #ffd76b;
-  font-family: inherit;
-  font-size: 11.5px;
-  padding: 4px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background 120ms;
-}
-
-.warn-banner-action:hover {
-  background: rgba(255, 193, 7, 0.12);
-}
-
-/* ============================================================
- * Onboarding card -- "Set up your workspace"
- *
- * Three-row card visible AFTER sign-in. Each row is title + subtitle
- * + action button. NOT a checklist of jargon labels.
- * ============================================================ */
-
-.onboarding-card {
-  margin-top: 28px;
-  padding: 18px 22px 16px;
-  background: rgba(79, 140, 255, 0.06);
-  border: 1px solid rgba(79, 140, 255, 0.20);
-  border-radius: 12px;
-  max-width: 540px;
-  text-align: left;
-}
-
-.onboarding-card[hidden] { display: none; }
-
-.onboarding-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 12px;
-  gap: 12px;
-}
-
-.onboarding-card-headings {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.onboarding-card-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.92);
-}
-
-.onboarding-card-subtitle {
-  font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.onboarding-dismiss {
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 18px;
-  cursor: pointer;
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  padding: 0;
-  line-height: 1;
-  flex: 0 0 auto;
-}
-
-.onboarding-dismiss:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
-}
-
-.onboarding-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.onboarding-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.onboarding-row:first-child {
-  border-top: none;
-}
-
-.onboarding-row.done .onboarding-row-title,
-.onboarding-row.done .onboarding-row-subtitle {
-  color: rgba(255, 255, 255, 0.45);
-}
-
-.onboarding-status {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.20);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  color: #6bff8a;
-  font-weight: 700;
-  background: transparent;
-}
-
-.onboarding-row.done .onboarding-status {
-  background: rgba(107, 255, 138, 0.18);
-  border-color: rgba(107, 255, 138, 0.45);
-}
-
-.onboarding-text {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.onboarding-row-title {
-  font-size: 12.5px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.92);
-  line-height: 1.35;
-}
-
-.onboarding-row-subtitle {
-  font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.55);
-  line-height: 1.45;
-}
-
-.onboarding-row-action {
-  flex: 0 0 auto;
-  background: rgba(79, 140, 255, 0.14);
-  border: 1px solid rgba(79, 140, 255, 0.40);
-  color: #aac6ff;
-  font-family: inherit;
-  font-size: 11.5px;
-  font-weight: 500;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 120ms, border-color 120ms, color 120ms;
-}
-
-.onboarding-row-action:hover {
-  background: rgba(79, 140, 255, 0.22);
-  border-color: rgba(79, 140, 255, 0.65);
-  color: #ffffff;
-}
-
-.home-cta-row {
-  display: flex;
   gap: 10px;
-  margin-bottom: 28px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.home-chat-shortcuts button[hidden] {
+  display: none;
 }
 
 .btn-primary,
@@ -709,25 +413,258 @@ body {
   border-color: var(--or-border-signal);
 }
 
-.hint {
-  font-size: 12px;
-  opacity: 0.55;
-  max-width: 460px;
-  line-height: 1.6;
+/* ============================================================
+ * CHAT SURFACE (boot-chat-* classes; shared with the former
+ * standalone boot-chat.html so the renderer is identical).
+ *
+ * Logo block (iDW + Lite chip), conversation bubbles, typing
+ * indicator, primary action button, event-digest list.
+ * ============================================================ */
+
+.boot-chat-logo {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(106, 169, 255, 0.18), rgba(123, 219, 255, 0.10));
+  border: 1px solid rgba(123, 219, 255, 0.40);
+  border-radius: 16px;
+  color: var(--or-accent-strong, #7bdbff);
+  font-family: var(--or-font-mono, 'SF Mono', Menlo, Consolas, monospace);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
 }
 
-.settings-shortcut {
-  margin-top: 10px;
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 12px;
-  cursor: pointer;
+.boot-chat-logo-tag {
+  position: absolute;
+  bottom: -6px;
+  right: -8px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #7bdbff, #6aa9ff);
+  color: #0a1018;
   font-family: inherit;
-  text-decoration: underline;
-  text-decoration-color: rgba(255, 255, 255, 0.2);
-  padding: 4px 8px;
+  text-transform: uppercase;
 }
-.settings-shortcut:hover {
-  color: rgba(255, 255, 255, 0.8);
+
+.boot-chat-app-name {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: #f4f6fb;
+}
+
+/* Conversation thread */
+
+.boot-chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 8px 4px;
+  min-height: 0;
+}
+
+.boot-chat-bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 90%;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: boot-chat-bubble-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.boot-chat-bubble-bot {
+  align-self: flex-start;
+}
+
+.boot-chat-bubble-user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+@keyframes boot-chat-bubble-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.boot-chat-avatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.boot-chat-bubble-bot .boot-chat-avatar {
+  background: linear-gradient(135deg, #7bdbff, #6aa9ff);
+  color: #0a1018;
+}
+
+.boot-chat-bubble-user .boot-chat-avatar {
+  background: rgba(255, 255, 255, 0.12);
+  color: #e8e8ea;
+}
+
+.boot-chat-bubble-body {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #f4f6fb;
+}
+
+.boot-chat-bubble-bot .boot-chat-bubble-body {
+  border-top-left-radius: 4px;
+}
+
+.boot-chat-bubble-user .boot-chat-bubble-body {
+  background: rgba(106, 169, 255, 0.14);
+  border-color: rgba(106, 169, 255, 0.32);
+  border-top-right-radius: 4px;
+}
+
+.boot-chat-bubble-body strong {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* Typing indicator */
+.boot-chat-bubble-typing .boot-chat-bubble-body {
+  padding: 14px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.boot-chat-typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(244, 246, 251, 0.48);
+  animation: boot-chat-typing 1.2s ease-in-out infinite;
+}
+
+.boot-chat-typing-dot:nth-child(2) { animation-delay: 160ms; }
+.boot-chat-typing-dot:nth-child(3) { animation-delay: 320ms; }
+
+@keyframes boot-chat-typing {
+  0%, 100% { opacity: 0.32; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* Actions */
+
+.boot-chat-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding: 4px 0 0;
+}
+
+.boot-chat-actions[hidden] {
+  display: none;
+}
+
+.boot-chat-button {
+  background: linear-gradient(180deg, #7fb3ff, #4f8cff);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 12px 28px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  transition:
+    background var(--or-transition-fast, 120ms ease),
+    transform var(--or-transition-fast, 120ms ease),
+    box-shadow var(--or-transition-fast, 120ms ease);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.boot-chat-button:hover:not(:disabled) {
+  background: linear-gradient(180deg, #95c2ff, #5f99ff);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(79, 140, 255, 0.32);
+}
+
+.boot-chat-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.boot-chat-button-secondary {
+  background: transparent;
+  color: var(--or-text-secondary, rgba(244, 246, 251, 0.72));
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.boot-chat-button-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.22);
+  transform: none;
+  box-shadow: none;
+}
+
+.boot-chat-button-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* Error state */
+.boot-chat-bubble.is-error .boot-chat-bubble-body {
+  background: rgba(255, 110, 110, 0.10);
+  border-color: rgba(255, 110, 110, 0.32);
+}
+
+/* Event-log digest list inside a bot bubble. */
+.boot-chat-digest-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.boot-chat-digest-list li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: rgba(244, 246, 251, 0.92);
+}
+
+.boot-chat-digest-list li::before {
+  content: '•';
+  position: absolute;
+  left: 4px;
+  top: 0;
+  color: var(--or-accent-strong, #7bdbff);
+}
+
+.boot-chat-digest-more {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(244, 246, 251, 0.48);
+  font-style: italic;
 }

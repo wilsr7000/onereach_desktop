@@ -44,6 +44,8 @@ export interface StoreConfig {
   generateId?: () => string;
   /** Override the persistence debounce window (ms). Tests use 0. */
   persistDebounceMs?: number;
+  /** Returns the active account id, or null when KV persistence should be skipped. */
+  getActiveAccountId?: () => string | null;
   /**
    * If true, the store does NOT subscribe to the logging queue on
    * construction. Tests set this so they can drive the translator
@@ -64,6 +66,7 @@ export class EventBusStore {
   private readonly nowFn: () => Date;
   private readonly genIdFn: () => string;
   private readonly persistDebounceMs: number;
+  private readonly getActiveAccountId: () => string | null;
   private readonly emitter = new EventEmitter();
   /** Most-recent-last. Bounded by RING_BUFFER_MAX. */
   private buffer: DomainEvent[] = [];
@@ -83,6 +86,7 @@ export class EventBusStore {
     this.nowFn = config.now ?? ((): Date => new Date());
     this.genIdFn = config.generateId ?? ((): string => randomUUID());
     this.persistDebounceMs = config.persistDebounceMs ?? PERSIST_DEBOUNCE_MS;
+    this.getActiveAccountId = config.getActiveAccountId ?? ((): string | null => 'default');
 
     if (config.skipAutoSubscribe !== true) {
       this.attachToLoggingQueue();
@@ -342,6 +346,10 @@ export class EventBusStore {
   private async persistNow(): Promise<void> {
     if (!this.dirty) return;
     this.dirty = false;
+    if (this.getActiveAccountId() === null) {
+      this.log('info', 'event-bus: KV persist skipped (signed out)', {});
+      return;
+    }
     const blob: EventBusBlob = {
       schemaVersion: 1,
       events: this.buffer.slice(),
@@ -351,17 +359,38 @@ export class EventBusStore {
       getLoggingApi().event(EVENT_BUS_EVENTS.PERSIST_OK, { count: blob.events.length });
     } catch (err) {
       const message = err instanceof KVError ? err.formatForUser() : (err as Error).message;
-      this.log('warn', 'event-bus: KV persist failed (in-memory state still authoritative)', {
+      const kvCode = err instanceof KVError ? err.code : undefined;
+      // Permanent vs transient. INVALID_INPUT means the blob shape is
+      // wrong — retrying with the same shape would hit the same wall
+      // forever and flood the log queue. 4xx HTTP status from the SDK
+      // (auth-rejected, malformed request) is similarly permanent at
+      // this push attempt. Drop the dirty flag for those; keep
+      // retrying only for transient categories (TIMEOUT / NETWORK /
+      // 5xx HTTP).
+      const httpStatus =
+        err instanceof KVError && typeof err.status === 'number' ? err.status : null;
+      const isPermanent =
+        kvCode === 'KV_INVALID_INPUT' ||
+        (httpStatus !== null && httpStatus >= 400 && httpStatus < 500 && httpStatus !== 401);
+      const level: 'warn' | 'error' = isPermanent ? 'error' : 'warn';
+      this.log(level, 'event-bus: KV persist failed' + (isPermanent ? ' (dropping retry — permanent error)' : ' (in-memory state still authoritative)'), {
         error: message,
-        ...(err instanceof KVError ? { kvCode: err.code } : {}),
+        permanent: isPermanent,
+        ...(kvCode !== undefined ? { kvCode } : {}),
+        ...(httpStatus !== null ? { httpStatus } : {}),
       });
       getLoggingApi().event(
         EVENT_BUS_EVENTS.PERSIST_FAIL,
-        { reason: message },
+        { reason: message, permanent: isPermanent },
         'error'
       );
-      // Mark dirty again so the next push tries again.
-      this.dirty = true;
+      // Only re-mark dirty when retry stands a chance. Permanent
+      // errors stay un-dirty so we don't loop the log forever; the
+      // next domain event push will re-mark and re-try with a fresh
+      // (presumably valid) buffer.
+      if (!isPermanent) {
+        this.dirty = true;
+      }
     }
   }
 
@@ -370,6 +399,12 @@ export class EventBusStore {
     // `.start` / `.finish` / `.fail`, so pass the bare prefix.
     const span = getLoggingApi().start('event-bus.hydrate');
     try {
+      if (this.getActiveAccountId() === null) {
+        this.hydrated = true;
+        span.finish({ count: 0, skipped: 'signed-out' });
+        this.log('info', 'event-bus: hydrate skipped (signed out)', {});
+        return;
+      }
       const raw = await this.kv.get(KV_COLLECTION, KV_KEY);
       if (raw === null || raw === undefined) {
         this.hydrated = true;

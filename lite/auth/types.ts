@@ -27,7 +27,28 @@ export type Environment = 'edison' | 'staging' | 'dev' | 'production';
  *   2. Adding it here.
  *   3. Updating the auth-multi-env chunk in `lite/PORTING.md`.
  */
-export const SUPPORTED_ENVIRONMENTS: readonly Environment[] = ['edison'] as const;
+/**
+ * Environments Lite can sign into.
+ *
+ * Multi-env story (ADR-042 amendment): every consumer that needs an
+ * "active account / token" — KV, Files, Discovery, Neon, Spaces — reads
+ * from edison (the primary). The non-edison entries exist so IDW tabs
+ * whose URLs point at other environments can clone the right cookies
+ * into the tab partition (see `injectTokenIntoPartition`). Cookies are
+ * captured per-env into `persist:lite-auth-<env>`; the store keeps
+ * per-env session / token / tokenBundle maps so envs do not collide.
+ *
+ * Production is intentionally NOT in this list yet — its bare
+ * `onereach.ai` / `my.onereach.ai` domains require extending
+ * `extractEnvironment` and the cookie-suffix matcher. Tracked as a
+ * follow-up; until then, production IDW URLs fall through to the
+ * agent's own sign-in screen (same as third-party agents).
+ */
+export const SUPPORTED_ENVIRONMENTS: readonly Environment[] = [
+  'edison',
+  'staging',
+  'dev',
+] as const;
 
 /**
  * Per-environment configuration: the URL the auth window opens to, and
@@ -67,6 +88,18 @@ export const ENVIRONMENT_CONFIGS: Readonly<Partial<Record<Environment, Environme
     cookieDomainSuffixes: ['.edison.onereach.ai', '.edison.api.onereach.ai'] as const,
     authHostnamePrefix: 'auth.',
     discoveryUrl: 'https://discovery.edison.api.onereach.ai',
+  },
+  staging: {
+    studioUrl: 'https://studio.staging.onereach.ai',
+    cookieDomainSuffixes: ['.staging.onereach.ai', '.staging.api.onereach.ai'] as const,
+    authHostnamePrefix: 'auth.',
+    discoveryUrl: 'https://discovery.staging.api.onereach.ai',
+  },
+  dev: {
+    studioUrl: 'https://studio.dev.onereach.ai',
+    cookieDomainSuffixes: ['.dev.onereach.ai', '.dev.api.onereach.ai'] as const,
+    authHostnamePrefix: 'auth.',
+    discoveryUrl: 'https://discovery.dev.api.onereach.ai',
   },
 };
 

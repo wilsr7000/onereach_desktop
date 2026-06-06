@@ -30,6 +30,7 @@
 
 import { EventBusStore } from './store.js';
 import { getLoggingApi } from '../logging/api.js';
+import { getAuthApi } from '../auth/api.js';
 import { EventBusError, EVENT_BUS_ERROR_CODES } from './errors.js';
 
 // Re-export the domain catalogue (the public schema).
@@ -71,8 +72,9 @@ export type {
   EventBusHydrateStartEvent,
   EventBusHydrateFinishEvent,
   EventBusHydrateFailEvent,
-  EventBusIpcSubscribeEvent,
   EventBusIpcRecentEvent,
+  EventBusIpcSizeEvent,
+  EventBusIpcEmitEvent,
 } from './events.js';
 export { EVENT_BUS_EVENTS, isEventBusEvent } from './events.js';
 
@@ -228,6 +230,7 @@ function buildDefault(): { api: EventBusApi; store: EventBusStore } {
       const log = getLoggingApi();
       log[level]('event-bus', message, data);
     },
+    getActiveAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
   });
   const api: EventBusApi = {
     on: (name, handler, opts) => store.on(name, handler, opts),

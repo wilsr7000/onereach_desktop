@@ -5373,40 +5373,77 @@ function setupModuleManagerIPC() {
     try {
       console.log('[IDW Store] Adding IDW to menu:', idw.name);
 
-      // Get from settings manager (single source of truth)
+      if (!idw || !idw.id) {
+        return { success: false, error: 'IDW store entry is missing an id' };
+      }
+
+      const chatUrl = idw.url || idw.chatUrl || idw.homePageURL || idw.homePageUrl || '';
+      if (!chatUrl) {
+        return { success: false, error: `${idw.name || 'This IDW'} does not have a usable URL` };
+      }
+
+      const menuDataManager = global.menuDataManager;
       const settingsManager = global.settingsManager;
-      let idwEnvironments = settingsManager.get('idwEnvironments') || [];
-      console.log('[IDW Store] Current IDWs in settings:', idwEnvironments.length);
+      let idwEnvironments =
+        menuDataManager && typeof menuDataManager.getIDWEnvironments === 'function'
+          ? menuDataManager.getIDWEnvironments()
+          : settingsManager
+            ? settingsManager.get('idwEnvironments') || []
+            : [];
+      console.log('[IDW Store] Current IDWs:', idwEnvironments.length);
 
       // Check if this IDW is already installed
       const storeIdwId = `store-${idw.id}`;
       const existingIndex = idwEnvironments.findIndex((env) => {
         if (env.id === storeIdwId) return true;
         if (env.storeData && env.storeData.idwId === idw.id) return true;
-        if (env.chatUrl === idw.url) return true;
+        if (env.chatUrl === chatUrl) return true;
         if (env.label === idw.name && env.storeData && env.storeData.developer === idw.developer) return true;
         return false;
       });
 
+      const existingEntry = existingIndex !== -1 ? idwEnvironments[existingIndex] : null;
+      const entry = {
+        id: existingEntry?.id || storeIdwId,
+        label: idw.name,
+        chatUrl,
+        homeUrl: idw.homePageURL || idw.homePageUrl || '',
+        environment: 'store',
+        type: 'idw',
+        description: idw.description,
+        category: idw.category,
+        storeData: {
+          idwId: idw.id,
+          developer: idw.developer,
+          version: idw.version,
+          installedAt: existingEntry?.storeData?.installedAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+
+      if (menuDataManager && typeof menuDataManager.addIDWEnvironment === 'function') {
+        const result =
+          existingEntry && typeof menuDataManager.updateIDWEnvironment === 'function'
+            ? await menuDataManager.updateIDWEnvironment(existingEntry.id, entry)
+            : await menuDataManager.addIDWEnvironment(entry);
+
+        if (!result || result.success === false) {
+          const message = result?.error || (Array.isArray(result?.errors) ? result.errors.join(', ') : 'Unable to save IDW');
+          return { success: false, error: message };
+        }
+
+        console.log('[IDW Store] Menu data manager saved IDW');
+        return { success: true, updated: existingIndex !== -1 };
+      }
+
       if (existingIndex !== -1) {
         console.log('[IDW Store] IDW already exists, updating...');
-        idwEnvironments[existingIndex] = {
-          id: storeIdwId,
-          label: idw.name,
-          chatUrl: idw.url,
-          environment: 'store',
-          description: idw.description,
-          category: idw.category,
-          storeData: {
-            idwId: idw.id,
-            developer: idw.developer,
-            version: idw.version,
-            installedAt: idwEnvironments[existingIndex].storeData?.installedAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        };
+        idwEnvironments[existingIndex] = entry;
 
         // Save to settings
+        if (!settingsManager) {
+          return { success: false, error: 'Settings manager not available' };
+        }
         settingsManager.set('idwEnvironments', idwEnvironments);
         console.log('[IDW Store] ✅ Saved update to settings');
 
@@ -5428,24 +5465,12 @@ function setupModuleManagerIPC() {
       }
 
       // Add new IDW
-      const newEntry = {
-        id: storeIdwId,
-        label: idw.name,
-        chatUrl: idw.url,
-        environment: 'store',
-        description: idw.description,
-        category: idw.category,
-        storeData: {
-          idwId: idw.id,
-          developer: idw.developer,
-          version: idw.version,
-          installedAt: new Date().toISOString(),
-        },
-      };
-
-      idwEnvironments.push(newEntry);
+      idwEnvironments.push(entry);
 
       // Save to settings
+      if (!settingsManager) {
+        return { success: false, error: 'Settings manager not available' };
+      }
       settingsManager.set('idwEnvironments', idwEnvironments);
       console.log('[IDW Store] ✅ Saved to settings, total:', idwEnvironments.length);
 

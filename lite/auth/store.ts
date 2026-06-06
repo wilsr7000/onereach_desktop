@@ -478,7 +478,7 @@ export class AuthStore {
       try {
         const ses = this.sessionFromPartition(partition);
         const cookies = await this.collectAuthPartitionCookies(env);
-        let removed = 0;
+        const removeResults: Array<{ name: string; host: string; ok: boolean; err?: string }> = [];
         for (const c of cookies) {
           // Build the URL Electron expects -- the cookie's actual
           // host (strip leading dot from domain) plus its path.
@@ -490,19 +490,44 @@ export class AuthStore {
           const url = `${scheme}://${host}${cookiePath}`;
           try {
             await ses.cookies.remove(url, c.name);
-            removed += 1;
-          } catch {
-            /* per-cookie best-effort -- continue */
+            removeResults.push({ name: c.name, host, ok: true });
+          } catch (err) {
+            removeResults.push({
+              name: c.name,
+              host,
+              ok: false,
+              err: (err as Error).message,
+            });
           }
         }
         if (typeof ses.cookies.flushStore === 'function') {
           await ses.cookies.flushStore().catch(() => undefined);
         }
-        this.log('info', 'auth: cleared partition cookies on signOut', {
-          env,
-          removed,
-          totalCookies: cookies.length,
-        });
+        // Re-probe the partition to catch any cookie whose `remove`
+        // call appeared to succeed but didn't actually flush — a
+        // re-emerged `mult+or` pair would resurrect the session on
+        // the next hydrate. Loud warning so the regression is
+        // immediately visible in the log feed.
+        const survivors = await this.collectAuthPartitionCookies(env);
+        const survivorNames = survivors.map((c) => `${c.name}@${(c.domain ?? '').replace(/^\./, '')}`);
+        const removed = removeResults.filter((r) => r.ok).length;
+        const failed = removeResults.filter((r) => !r.ok);
+        if (survivors.length > 0) {
+          this.log('warn', 'auth: signOut left cookies behind (next hydrate may resurrect)', {
+            env,
+            survivorCount: survivors.length,
+            survivorNames,
+            attemptedRemovals: removeResults.length,
+            failedRemovals: failed.length,
+          });
+        } else {
+          this.log('info', 'auth: cleared partition cookies on signOut', {
+            env,
+            removed,
+            totalCookies: cookies.length,
+            failedRemovals: failed.length,
+          });
+        }
       } catch (err) {
         this.log('warn', 'auth: cookie removal during signOut failed', {
           env,
@@ -951,7 +976,17 @@ export class AuthStore {
         /* best-effort */
       }
     }
-    return pickFreshest(candidates);
+    const picked = pickFreshest(candidates);
+    // Telemetry only -- never the cookie VALUE. Surfaces the
+    // hydrate/recovery partition probe in the log stream so a
+    // "signed out after relaunch" report can be traced to whether the
+    // probe found the cookie. ADR-026 redaction: value never logged.
+    this.eventEmitter?.(AUTH_EVENTS.COOKIE_PROBED, {
+      env,
+      name,
+      found: picked !== null,
+    });
+    return picked;
   }
 
   // -------------------------------------------------------------------------
@@ -1251,6 +1286,14 @@ export class AuthStore {
         : {}),
     });
 
+    // Dual purpose: (a) persist a record of the active session
+    // (read by Settings → Account UI + Health snapshot, NOT by
+    // `runHydrate` which deliberately reads from cookies only — see
+    // line ~818); (b) act as a "token verify probe". If the captured
+    // mult token is rejected by the OneReach KV service we want to
+    // know NOW, not on the first real read after a renderer launches.
+    // The verify is why this stays a `set` instead of a cheaper
+    // `list` — the rejection codes are clearer on writes.
     try {
       await this.kv.set(KV_COLLECTION, kvKeyFor(session), session);
       this.eventEmitter?.(AUTH_EVENTS.PERSIST_OK, {

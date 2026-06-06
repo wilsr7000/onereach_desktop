@@ -35,6 +35,24 @@ export const MAIN_WINDOW_EVENTS = {
   TAB_LOAD_START: 'main-window.tab.load-start',
   TAB_LOAD_FINISH: 'main-window.tab.load-finish',
   TAB_LOAD_FAIL: 'main-window.tab.load-fail',
+  // DevTools + auth-page detection (instant) -- previously emitted
+  // without a catalog entry.
+  DEVTOOLS_OPEN_ACTIVE_TAB: 'main-window.devtools.open-active-tab',
+  TAB_TWO_FACTOR_DETECTED: 'main-window.tab.two-factor-detected',
+  TAB_ACCOUNT_PICKER_DETECTED: 'main-window.tab.account-picker-detected',
+  // Multi-env auto-sign-in (ADR-042 amendment). Fires when an IDW tab
+  // loads a OneReach URL whose env has no captured session, triggering
+  // signIn(env) + a token re-injection.
+  AUTO_SIGNIN_TRIGGERED: 'main-window.auto-signin.triggered',
+  AUTO_SIGNIN_SUCCEEDED: 'main-window.auto-signin.succeeded',
+  AUTO_SIGNIN_REJECTED: 'main-window.auto-signin.rejected',
+  // Session-changed tab reload: re-inject cookies + reload tabs stuck
+  // on a OneReach login interstitial after sign-in completes.
+  SESSION_RELOAD_FIRING: 'main-window.session-reload.firing',
+  SESSION_RELOAD_SKIPPED: 'main-window.session-reload.skipped',
+  // Tab partition storage cleanup on close.
+  PARTITION_CLEARED: 'main-window.partition.cleared',
+  PARTITION_CLEAR_FAILED: 'main-window.partition.clear-failed',
   // IPC entry events (per ADR-030)
   IPC_OPEN_TAB: 'main-window.ipc.open-tab',
   IPC_CLOSE_TAB: 'main-window.ipc.close-tab',

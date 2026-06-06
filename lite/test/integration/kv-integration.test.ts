@@ -139,9 +139,13 @@ describe('KV integration (SdkKVClient): round-trip', () => {
 
   it('listKeys returns the keys for a collection', async () => {
     const client = makeClient();
-    await client.set('coll-a', 'k1', 'a');
-    await client.set('coll-a', 'k2', 'b');
-    await client.set('coll-b', 'kx', 'c');
+    // Wrap each primitive payload in a plain object — the SDK
+    // client now rejects bare strings/numbers/booleans with
+    // KV_INVALID_INPUT, defending against the "undefined → string"
+    // corruption that historically wiped out persisted menus.
+    await client.set('coll-a', 'k1', { value: 'a' });
+    await client.set('coll-a', 'k2', { value: 'b' });
+    await client.set('coll-b', 'kx', { value: 'c' });
 
     expect((await client.listKeys('coll-a')).sort()).toEqual(['k1', 'k2']);
     expect(await client.listKeys('coll-b')).toEqual(['kx']);
@@ -158,8 +162,9 @@ describe('KV integration (SdkKVClient): round-trip', () => {
 
   it('delete removes the key', async () => {
     const client = makeClient();
-    await client.set('coll', 'doomed', 'x');
-    expect(await client.get('coll', 'doomed')).toBe('x');
+    const payload = { value: 'x' };
+    await client.set('coll', 'doomed', payload);
+    expect(await client.get('coll', 'doomed')).toEqual(payload);
     await client.delete('coll', 'doomed');
     expect(await client.get('coll', 'doomed')).toBeNull();
   });
@@ -170,20 +175,25 @@ describe('KV integration: per-account isolation (server-side scoping)', () => {
     const aliceClient = makeClient({ accountId: 'alice' });
     const bobClient = makeClient({ accountId: 'bob' });
 
-    await aliceClient.set('coll', 'shared-key', 'alice-data');
-    await bobClient.set('coll', 'shared-key', 'bob-data');
+    const aliceBlob = { value: 'alice-data' };
+    const bobBlob = { value: 'bob-data' };
+    await aliceClient.set('coll', 'shared-key', aliceBlob);
+    await bobClient.set('coll', 'shared-key', bobBlob);
 
-    expect(await aliceClient.get('coll', 'shared-key')).toBe('alice-data');
-    expect(await bobClient.get('coll', 'shared-key')).toBe('bob-data');
+    expect(await aliceClient.get('coll', 'shared-key')).toEqual(aliceBlob);
+    expect(await bobClient.get('coll', 'shared-key')).toEqual(bobBlob);
   });
 });
 
 describe('KV integration: signed-out gating', () => {
   it('throws KV_HTTP 401 on set when no accountId is available', async () => {
     const client = makeClient({ accountId: null });
-    await expect(client.set('coll', 'key', 'value')).rejects.toBeInstanceOf(KVError);
+    // Structured blob so the input validator forwards to the auth
+    // gate rather than rejecting earlier with KV_INVALID_INPUT.
+    const blob = { value: 'v' };
+    await expect(client.set('coll', 'key', blob)).rejects.toBeInstanceOf(KVError);
     try {
-      await client.set('coll', 'key', 'value');
+      await client.set('coll', 'key', blob);
     } catch (err) {
       expect((err as KVError).status).toBe(401);
       expect((err as KVError).code).toBe(KV_ERROR_CODES.HTTP);
@@ -205,7 +215,7 @@ describe('KV integration: SDK error mapping', () => {
       response: { status: 500 },
     });
     try {
-      await client.set('coll', 'key', 'v');
+      await client.set('coll', 'key', { value: 'v' });
       throw new Error('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(KVError);
@@ -247,7 +257,7 @@ describe('KV integration: SDK error mapping', () => {
       response: { status: 503 },
     });
     try {
-      await client.set('my-coll', 'my-key', 'v');
+      await client.set('my-coll', 'my-key', { value: 'v' });
       throw new Error('should have thrown');
     } catch (err) {
       const kv = err as KVError;
@@ -264,8 +274,8 @@ describe('KV integration: SDK error mapping', () => {
 describe('KV integration: SDK reuse', () => {
   it('reuses the same SDK across calls with the same accountId', async () => {
     const client = makeClient();
-    await client.set('coll', 'k1', 'v1');
-    await client.set('coll', 'k2', 'v2');
+    await client.set('coll', 'k1', { value: 'v1' });
+    await client.set('coll', 'k2', { value: 'v2' });
     await client.get('coll', 'k1');
     // SDK ctor called exactly once -- no rebuild on each call.
     expect(service.constructorParams).toHaveLength(1);

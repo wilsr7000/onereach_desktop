@@ -42,6 +42,7 @@ import type {
   ReadingLogEntry,
 } from './types.js';
 import { getLoggingApi } from '../logging/api.js';
+import { getAuthApi } from '../auth/api.js';
 import type { EventRecord } from '../logging/events.js';
 
 // ── Re-export public types ────────────────────────────────────────────────
@@ -181,7 +182,32 @@ export function buildAiRunTimesApi(store: AiRunTimesStore): AiRunTimesApi {
 // ── default implementation ────────────────────────────────────────────────
 
 function buildDefaultApi(): AiRunTimesApi {
-  return makeApi(new AiRunTimesStore());
+  // Per ADR-026 / multi-user isolation: pass the active accountId
+  // resolver so the store can short-circuit signed-out reads + drop
+  // the in-memory cache on account switch. Without this, signing
+  // out then signing in as a different user would surface the
+  // previous user's reading log + article cache until the next
+  // refresh.
+  const store = new AiRunTimesStore({
+    getActiveAccountId: () =>
+      getAuthApi().getSession('edison')?.accountId ?? null,
+  });
+
+  // Re-invalidate the store cache whenever the active session
+  // changes. `onSessionChanged` fires on sign-in, sign-out, and
+  // env switches. We only care about edison (the primary env that
+  // backs Spaces/KV/Files); other envs don't drive ai-run-times.
+  try {
+    getAuthApi().onSessionChanged((env) => {
+      if (env !== 'edison') return;
+      store.invalidateCache();
+    });
+  } catch (err) {
+    getLoggingApi().warn('ai-run-times', 'failed to subscribe to onSessionChanged', {
+      error: (err as Error).message,
+    });
+  }
+  return makeApi(store);
 }
 
 function makeApi(store: AiRunTimesStore): AiRunTimesApi {
