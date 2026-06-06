@@ -3359,5 +3359,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-06-06T20:48:01.175Z"
+  "generatedAt": "2026-06-06T21:36:04.126Z"
 } as const;
