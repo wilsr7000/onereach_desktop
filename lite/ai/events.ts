@@ -33,6 +33,9 @@ export const AI_EVENTS = {
   IPC_KEY_SAVE: 'ai.ipc.key-save',
   IPC_KEY_HAS: 'ai.ipc.key-has',
   IPC_KEY_DELETE: 'ai.ipc.key-delete',
+  // Generic chat (embedded WISER Playbooks `window.ai` bridge).
+  IPC_CHAT: 'ai.ipc.chat',
+  IPC_CHAT_STREAM: 'ai.ipc.chat-stream',
 } as const;
 
 export type AiEventName = (typeof AI_EVENTS)[keyof typeof AI_EVENTS];
@@ -90,6 +93,12 @@ export interface AiIpcKeyHasEvent extends AiIpcEventBase {
 export interface AiIpcKeyDeleteEvent extends AiIpcEventBase {
   name: typeof AI_EVENTS.IPC_KEY_DELETE;
 }
+export interface AiIpcChatEvent extends AiIpcEventBase {
+  name: typeof AI_EVENTS.IPC_CHAT;
+}
+export interface AiIpcChatStreamEvent extends AiIpcEventBase {
+  name: typeof AI_EVENTS.IPC_CHAT_STREAM;
+}
 
 export type AiEvent =
   | AiEnrichAssetStartEvent
@@ -101,7 +110,9 @@ export type AiEvent =
   | AiIpcEnrichAssetEvent
   | AiIpcKeySaveEvent
   | AiIpcKeyHasEvent
-  | AiIpcKeyDeleteEvent;
+  | AiIpcKeyDeleteEvent
+  | AiIpcChatEvent
+  | AiIpcChatStreamEvent;
 
 export function isAiEvent(ev: EventRecord): ev is EventRecord & AiEvent {
   return Object.values(AI_EVENTS).includes(ev.name as AiEventName);

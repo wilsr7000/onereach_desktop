@@ -35,12 +35,26 @@ export const MANIFEST: Manifest = {
             "description": "Extract structured metadata (summary, tags, topics, entities, ...)\nfor a single asset via Claude 4.8. Multimodal: a text body, an image\n(vision), or a PDF document. **Claude-only** — throws\n`AI_NOT_CONFIGURED` when the active provider isn't Claude (the\nOneReach flow contract only covers `spaceAssist`).\n\nThrows `AiError` (`AI_NOT_CONFIGURED`, `AI_INVALID_INPUT`,\n`AI_NETWORK`, `AI_AUTH_REJECTED`, `AI_RATE_LIMITED`,\n`AI_PROVIDER_ERROR`, `AI_BAD_RESPONSE`).",
             "tags": [],
             "examples": []
+          },
+          {
+            "name": "chat",
+            "signature": "chat(input: AiChatInput): Promise<AiChatResult>",
+            "description": "Generic single-shot Claude chat. Powers the embedded WISER Playbooks\n`window.ai.chat` bridge so the hosted app runs on the Onereach Claude\nkey without the key ever leaving the main process. **Claude-only** —\nthrows `AI_NOT_CONFIGURED` when the active provider isn't Claude.\n\nThrows `AiError` (`AI_NOT_CONFIGURED`, `AI_INVALID_INPUT`,\n`AI_NETWORK`, `AI_AUTH_REJECTED`, `AI_RATE_LIMITED`,\n`AI_PROVIDER_ERROR`).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "chatStream",
+            "signature": "chatStream(input: AiChatInput, onDelta: (delta: string) => void): Promise<AiChatResult>;",
+            "description": "Streaming variant of {@link AiApi.chat}: invokes `onDelta` for each\ntext chunk as it arrives and resolves with the full result. The IPC\nlayer forwards each delta to the WISER renderer via the\n`window.ai.onStreamChunk` callback. Same error surface as `chat`.",
+            "tags": [],
+            "examples": []
           }
         ]
       },
       "events": {
         "constantName": "AI_EVENTS",
-        "count": 10,
+        "count": 12,
         "entries": [
           {
             "constantKey": "ENRICH_ASSET_START",
@@ -90,6 +104,16 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "IPC_KEY_DELETE",
             "name": "ai.ipc.key-delete",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_CHAT",
+            "name": "ai.ipc.chat",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_CHAT_STREAM",
+            "name": "ai.ipc.chat-stream",
             "description": ""
           }
         ]
@@ -3359,5 +3383,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-06-06T21:36:04.126Z"
+  "generatedAt": "2026-06-09T01:03:51.445Z"
 } as const;

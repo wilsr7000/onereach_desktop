@@ -29,6 +29,15 @@ import {
   type ClaudeMessageCreator,
 } from './client.js';
 import { callClaudeMetadata } from './metadata.js';
+import {
+  runClaudeChat,
+  runClaudeChatStream,
+  assertValidChatInput,
+  profileToModel,
+  type AiChatInput,
+  type AiChatResult,
+  type ClaudeChatClient,
+} from './chat.js';
 import type {
   AiStatus,
   SpaceAssistInput,
@@ -48,6 +57,8 @@ export interface AiServiceDeps {
   logger?: (level: 'info' | 'warn' | 'error', message: string, data?: unknown) => void;
   /** Test seam: build the Claude message-creator. Defaults to the SDK one. */
   makeClaudeMessageCreator?: (config: ClaudeConfig) => ClaudeMessageCreator;
+  /** Test seam: build the Claude chat client (chat/chatStream). Defaults to the SDK one. */
+  makeClaudeChatClient?: (config: ClaudeConfig) => ClaudeChatClient;
 }
 
 export class AiService {
@@ -55,6 +66,7 @@ export class AiService {
   private readonly fetchImpl: typeof fetch;
   private readonly accountId: () => string | null;
   private readonly makeCreator: (config: ClaudeConfig) => ClaudeMessageCreator;
+  private readonly makeChatClient: ((config: ClaudeConfig) => ClaudeChatClient) | undefined;
   private readonly log: NonNullable<AiServiceDeps['logger']>;
 
   constructor(deps: AiServiceDeps) {
@@ -62,6 +74,7 @@ export class AiService {
     this.fetchImpl = deps.fetchImpl;
     this.accountId = deps.accountId;
     this.makeCreator = deps.makeClaudeMessageCreator ?? makeClaudeMessageCreator;
+    this.makeChatClient = deps.makeClaudeChatClient;
     this.log =
       deps.logger ??
       ((): void => {
@@ -212,6 +225,93 @@ export class AiService {
         cause: err,
       });
     }
+  }
+
+  async chat(input: AiChatInput): Promise<AiChatResult> {
+    assertValidChatInput(input);
+    const cfg = this.requireClaudeConfig('chat');
+    this.log('info', 'chat start', {
+      provider: 'claude',
+      model: profileToModel(input.profile, cfg.model),
+      messages: Array.isArray(input.messages) ? input.messages.length : 0,
+      feature: typeof input.feature === 'string' ? input.feature : undefined,
+    });
+    try {
+      const result = await runClaudeChat(input, {
+        config: cfg,
+        ...(this.makeChatClient !== undefined ? { client: this.makeChatClient(cfg) } : {}),
+      });
+      this.log('info', 'chat ok', {
+        provider: 'claude',
+        model: result.model,
+        outputTokens: result.usage.outputTokens,
+      });
+      return result;
+    } catch (err) {
+      throw this.normalizeChatError(err, 'chat');
+    }
+  }
+
+  async chatStream(
+    input: AiChatInput,
+    onDelta: (delta: string) => void
+  ): Promise<AiChatResult> {
+    assertValidChatInput(input);
+    const cfg = this.requireClaudeConfig('chat-stream');
+    this.log('info', 'chat-stream start', {
+      provider: 'claude',
+      model: profileToModel(input.profile, cfg.model),
+      messages: Array.isArray(input.messages) ? input.messages.length : 0,
+      feature: typeof input.feature === 'string' ? input.feature : undefined,
+    });
+    try {
+      const result = await runClaudeChatStream(input, {
+        config: cfg,
+        onDelta,
+        ...(this.makeChatClient !== undefined ? { client: this.makeChatClient(cfg) } : {}),
+      });
+      this.log('info', 'chat-stream ok', {
+        provider: 'claude',
+        model: result.model,
+        outputTokens: result.usage.outputTokens,
+      });
+      return result;
+    } catch (err) {
+      throw this.normalizeChatError(err, 'chat-stream');
+    }
+  }
+
+  /**
+   * Chat is Claude-only (the OneReach flow contract covers `spaceAssist`
+   * only). Require an active Claude config or throw `AI_NOT_CONFIGURED`.
+   */
+  private requireClaudeConfig(op: string): ClaudeConfig {
+    const cfg = this.loadConfig();
+    if (cfg === null || cfg.provider !== 'claude') {
+      throw new AiError({
+        code: AI_ERROR_CODES.NOT_CONFIGURED,
+        message: 'Claude is not configured.',
+        context: { op, provider: cfg?.provider ?? null },
+        remediation: 'Open Settings -> AI and paste your Anthropic API key (or set ANTHROPIC_API_KEY).',
+      });
+    }
+    return cfg;
+  }
+
+  /** Pass AiErrors through; wrap anything else as a provider error. */
+  private normalizeChatError(err: unknown, op: string): AiError {
+    if (err instanceof AiError) {
+      this.log('warn', `${op} rejected`, { provider: 'claude', code: err.code });
+      return err;
+    }
+    this.log('error', `${op} unexpected`, { provider: 'claude', error: (err as Error).message });
+    return new AiError({
+      code: AI_ERROR_CODES.PROVIDER_ERROR,
+      message: `AI provider error: ${(err as Error).message}`,
+      context: { provider: 'claude', op },
+      remediation: 'Try again in a moment.',
+      cause: err,
+    });
   }
 
   /**

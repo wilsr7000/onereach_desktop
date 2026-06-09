@@ -6,8 +6,12 @@
  * than spawning a second one.
  *
  * Security posture (borrowed from lite/idw/browser-window.ts):
- *  - NO preload -- the hosted web app must not see `window.lite.*` or any
- *    Lite IPC bridge. WISER talks to its own backend over HTTPS directly.
+ *  - MINIMAL preload (`preload-lite-wiser.js`) exposing ONLY `window.ai` --
+ *    a Claude chat proxy backed by the app's OS-keychain key. The hosted
+ *    page never sees `window.lite.*`, any other IPC channel, or the key
+ *    itself (the Claude call happens in the main process). This lets the
+ *    embedded Playbooks run on the Onereach app's token. WISER still talks
+ *    to its own backend over HTTPS for everything else.
  *  - Sandboxed + contextIsolated + no node integration + webSecurity on.
  *  - Persistent partition (`persist:lite-wiser-playbooks`) so the app's
  *    cookies / localStorage / IndexedDB survive window closures.
@@ -24,6 +28,7 @@
  */
 
 import { BrowserWindow, screen, shell } from 'electron';
+import { join } from 'node:path';
 import { getLoggingApi } from './logging/api.js';
 
 /**
@@ -72,7 +77,12 @@ export function openWiserPlaybooksWindow(): void {
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      // No preload -- the hosted page must not see window.lite.*
+      // Minimal preload: exposes ONLY `window.ai` (a Claude chat proxy
+      // backed by the app's keychain key) -- never `window.lite.*` and
+      // never the key itself. See preload-lite-wiser.ts for the rationale.
+      // Sandbox-safe: the built bundle's only runtime require is `electron`
+      // (contextBridge/ipcRenderer); everything else is inlined by esbuild.
+      preload: join(__dirname, 'preload-lite-wiser.js'),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,

@@ -131,6 +131,22 @@ const preloadOptions = {
   external: ['electron'],
 };
 
+/**
+ * Minimal preload for the embedded WISER Playbooks window. Exposes ONLY
+ * `window.ai` (a Claude chat proxy on the app's keychain key) -- never the
+ * full `window.lite.*` bridge. Same build shape as the main preload; the
+ * only runtime require is `electron`, so it is sandbox-safe.
+ */
+const wiserPreloadOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'preload-lite-wiser.ts')],
+  outfile: resolve(outDir, 'preload-lite-wiser.js'),
+  platform: 'node',
+  target: 'node20',
+  format: 'cjs',
+  external: ['electron'],
+};
+
 /** @type {esbuild.BuildOptions} */
 const bugReportModalOptions = {
   ...commonOptions,
@@ -271,6 +287,7 @@ const downloadPickerOptions = {
 const allConfigs = [
   mainProcessOptions,
   preloadOptions,
+  wiserPreloadOptions,
   bugReportModalOptions,
   placeholderOptions,
   settingsOptions,

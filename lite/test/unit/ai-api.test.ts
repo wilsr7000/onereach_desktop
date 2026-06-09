@@ -19,7 +19,7 @@ runApiConformanceContract<AiApi>({
   getInstance: getAiApi,
   resetForTesting: _resetAiApiForTesting,
   setForTesting: _setAiApiForTesting,
-  expectedMethods: ['getStatus', 'spaceAssist', 'extractAssetMetadata'],
+  expectedMethods: ['getStatus', 'spaceAssist', 'extractAssetMetadata', 'chat', 'chatStream'],
 });
 
 // 2. Error class conformance.
@@ -51,6 +51,20 @@ describe('AiApi override', () => {
         contentType: '',
         language: '',
         keyPoints: [],
+      }),
+      chat: async () => ({
+        content: 'hi',
+        usage: { inputTokens: 1, outputTokens: 1 },
+        model: 'claude-opus-4-8',
+        provider: 'claude',
+        cost: 0,
+      }),
+      chatStream: async () => ({
+        content: 'hi',
+        usage: { inputTokens: 1, outputTokens: 1 },
+        model: 'claude-opus-4-8',
+        provider: 'claude',
+        cost: 0,
       }),
     };
     _setAiApiForTesting(stub);

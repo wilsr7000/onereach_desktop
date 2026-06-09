@@ -30,9 +30,14 @@ import {
   _resetAiApiForTesting,
   type AiStatus,
   type SpaceAssistResult,
+  type AiChatInput,
+  type AiChatResult,
+  type AiChatMessage,
+  type AiChatProfile,
 } from './api.js';
 import { enrichAsset, type EnrichResult } from './enrich.js';
 import { AI_EVENTS } from './events.js';
+import { WISER_AI_CHANNELS } from './wiser-bridge-channels.js';
 import { getAuthApi } from '../auth/api.js';
 import { getLoggingApi } from '../logging/api.js';
 
@@ -44,7 +49,40 @@ export const AI_IPC = {
   KEY_SAVE: 'lite:ai:key-save',
   KEY_HAS: 'lite:ai:key-has',
   KEY_DELETE: 'lite:ai:key-delete',
+  // Generic chat for the embedded WISER Playbooks `window.ai` bridge.
+  CHAT: WISER_AI_CHANNELS.CHAT,
+  CHAT_STREAM: WISER_AI_CHANNELS.CHAT_STREAM,
 } as const;
+
+/** Monotonic id for streaming chat requests (per main-process session). */
+let chatStreamSeq = 0;
+
+/**
+ * Coerce a renderer-supplied chat payload into a typed {@link AiChatInput}.
+ * Defensive: the WISER window is a hosted page, so every field is validated
+ * / defaulted rather than trusted.
+ */
+function parseChatInput(payload: unknown): AiChatInput {
+  const p = (payload ?? {}) as Record<string, unknown>;
+  const rawMessages = Array.isArray(p['messages']) ? (p['messages'] as unknown[]) : [];
+  const messages: AiChatMessage[] = rawMessages.map((m) => {
+    const mm = (m ?? {}) as Record<string, unknown>;
+    return {
+      role: mm['role'] === 'assistant' ? 'assistant' : 'user',
+      content: typeof mm['content'] === 'string' ? mm['content'] : '',
+    };
+  });
+  const profile = typeof p['profile'] === 'string' ? (p['profile'] as AiChatProfile) : undefined;
+  return {
+    ...(profile !== undefined ? { profile } : {}),
+    ...(typeof p['system'] === 'string' ? { system: p['system'] as string } : {}),
+    messages,
+    ...(typeof p['maxTokens'] === 'number' ? { maxTokens: p['maxTokens'] as number } : {}),
+    ...(typeof p['temperature'] === 'number' ? { temperature: p['temperature'] as number } : {}),
+    ...(typeof p['jsonMode'] === 'boolean' ? { jsonMode: p['jsonMode'] as boolean } : {}),
+    ...(typeof p['feature'] === 'string' ? { feature: p['feature'] as string } : {}),
+  };
+}
 
 interface AiIpcError {
   code: string;
@@ -219,6 +257,71 @@ export function initAi(opts: InitAiOptions = {}): AiHandle {
       return { ok: false, error: serializeAiError(err) };
     }
   });
+
+  // ─── Generic chat (embedded WISER Playbooks `window.ai` bridge) ───────
+  //
+  // The key never crosses to the renderer: the WISER window's preload
+  // exposes only chat/chatStream, and the Claude call is made here in the
+  // main process with the keychain key. See `ai/wiser-bridge-channels.ts`
+  // and `preload-lite-wiser.ts`.
+  ipcMain.handle(
+    AI_IPC.CHAT,
+    async (_event: IpcMainInvokeEvent, payload?: unknown): Promise<AiIpcResult<AiChatResult>> => {
+      getLoggingApi().event(AI_EVENTS.IPC_CHAT);
+      try {
+        const value = await api.chat(parseChatInput(payload));
+        log.info('chat ok', { model: value.model, outputTokens: value.usage.outputTokens });
+        return { ok: true, value };
+      } catch (err) {
+        const code = err instanceof AiError ? err.code : 'AI_PROVIDER_ERROR';
+        log.warn('chat rejected', { code });
+        return { ok: false, error: serializeAiError(err) };
+      }
+    }
+  );
+
+  // Streaming chat: returns `{ requestId }` immediately, then pushes chunks
+  // on CHAT_STREAM_CHUNK (each tagged with the requestId). The renderer
+  // subscribes via `window.ai.onStreamChunk(requestId, ...)` right after
+  // this resolves; the preload buffers any chunk that races ahead of the
+  // subscription so none are lost.
+  ipcMain.handle(
+    AI_IPC.CHAT_STREAM,
+    async (
+      event: IpcMainInvokeEvent,
+      payload?: unknown
+    ): Promise<AiIpcResult<{ requestId: string }>> => {
+      getLoggingApi().event(AI_EVENTS.IPC_CHAT_STREAM);
+      let input: AiChatInput;
+      try {
+        input = parseChatInput(payload);
+      } catch (err) {
+        return { ok: false, error: serializeAiError(err) };
+      }
+      const requestId = `wiser-chat-${++chatStreamSeq}`;
+      const sender = event.sender;
+      const send = (chunk: Record<string, unknown>): void => {
+        if (!sender.isDestroyed()) {
+          sender.send(WISER_AI_CHANNELS.CHAT_STREAM_CHUNK, { requestId, ...chunk });
+        }
+      };
+      void (async () => {
+        try {
+          const finalResult = await api.chatStream(input, (delta) => send({ delta, done: false }));
+          send({ done: true, finalResult });
+          log.info('chat-stream ok', {
+            model: finalResult.model,
+            outputTokens: finalResult.usage.outputTokens,
+          });
+        } catch (err) {
+          const code = err instanceof AiError ? err.code : 'AI_PROVIDER_ERROR';
+          log.warn('chat-stream rejected', { code });
+          send({ done: true, error: serializeAiError(err) });
+        }
+      })();
+      return { ok: true, value: { requestId } };
+    }
+  );
 
   registered = true;
   log.info('ai initialized', {});

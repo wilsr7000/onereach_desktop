@@ -24,6 +24,7 @@ import type {
   AssetMetadataInput,
   AssetMetadataResult,
 } from './types.js';
+import type { AiChatInput, AiChatResult } from './chat.js';
 
 // Re-export the public types + error surface consumers need.
 export type {
@@ -34,6 +35,7 @@ export type {
   AssetMetadataInput,
   AssetMetadataResult,
 } from './types.js';
+export type { AiChatInput, AiChatResult, AiChatMessage, AiChatProfile } from './chat.js';
 export { AI_MODULE_VERSION } from './types.js';
 export type { AiErrorCode, AiErrorOptions } from './errors.js';
 export { AiError, AI_ERROR_CODES };
@@ -67,6 +69,26 @@ export interface AiApi {
    * `AI_PROVIDER_ERROR`, `AI_BAD_RESPONSE`).
    */
   extractAssetMetadata(input: AssetMetadataInput): Promise<AssetMetadataResult>;
+
+  /**
+   * Generic single-shot Claude chat. Powers the embedded WISER Playbooks
+   * `window.ai.chat` bridge so the hosted app runs on the Onereach Claude
+   * key without the key ever leaving the main process. **Claude-only** —
+   * throws `AI_NOT_CONFIGURED` when the active provider isn't Claude.
+   *
+   * Throws `AiError` (`AI_NOT_CONFIGURED`, `AI_INVALID_INPUT`,
+   * `AI_NETWORK`, `AI_AUTH_REJECTED`, `AI_RATE_LIMITED`,
+   * `AI_PROVIDER_ERROR`).
+   */
+  chat(input: AiChatInput): Promise<AiChatResult>;
+
+  /**
+   * Streaming variant of {@link AiApi.chat}: invokes `onDelta` for each
+   * text chunk as it arrives and resolves with the full result. The IPC
+   * layer forwards each delta to the WISER renderer via the
+   * `window.ai.onStreamChunk` callback. Same error surface as `chat`.
+   */
+  chatStream(input: AiChatInput, onDelta: (delta: string) => void): Promise<AiChatResult>;
 }
 
 let _instance: AiApi | null = null;
