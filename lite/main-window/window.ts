@@ -64,6 +64,28 @@ const MIN_WIDTH = 720;
 const MIN_HEIGHT = 480;
 const BACKGROUND = '#0e0e10';
 
+/**
+ * The IDW Feed shown as the Home-tab CONTENT (deployed to Edison). The
+ * chrome shell — the 36px tab bar with the Spaces button, the Home pill,
+ * and open IDW tab pills — is ALWAYS present. The feed is mounted as a
+ * WebContentsView that fills the content area BELOW the tab bar and is
+ * visible only while the Home pill is active. Opening an IDW tab hides
+ * the feed (the tab covers the same region); closing all tabs returns to
+ * the feed. If the feed URL fails to load, the view is hidden and the
+ * bundled boot-chat home view shows through underneath, so the window is
+ * never blank.
+ *
+ * Set env `LITE_HOME=chrome` to disable the feed entirely and use the
+ * original boot-chat home view as the Home-tab content.
+ */
+const IDW_HOME_URL: string | null =
+  process.env.LITE_HOME === 'chrome'
+    ? null
+    : 'https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/idw-feed/index.html';
+
+/** Partition for the home feed — shares the IDW browser's signed-in session. */
+const HOME_FEED_PARTITION = 'persist:lite-idw-browser';
+
 let mainWindow: BrowserWindow | null = null;
 let unsubscribeStore: (() => void) | null = null;
 /**
@@ -78,6 +100,14 @@ let unsubscribeStore: (() => void) | null = null;
 let unsubscribeAuth: (() => void) | null = null;
 const attachedTabs = new Map<string, AttachedTab>();
 let activeAttachedTabId: string | null = null;
+
+/**
+ * The IDW home feed view (default Home-tab content). Mounted once per
+ * window at ready-to-show when IDW_HOME_URL is set; null in
+ * `LITE_HOME=chrome` mode and before the window is shown. Owned by the
+ * BrowserWindow — destroyed when the window closes.
+ */
+let homeFeedView: WebContentsView | null = null;
 
 /**
  * Create (or focus) the main window. Idempotent: subsequent calls
@@ -113,18 +143,23 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     },
   });
 
-  // The chrome (tab bar + home view) lives in the BrowserWindow's
-  // main webContents. The chat surface lives inside chrome.html on
-  // the home view, so we always load chrome directly — no separate
-  // boot-chat page, no mid-boot swap. Tab views are added on TOP of
-  // the chrome via contentView.addChildView (they cover the home
-  // view region below the tab bar).
+  // The chrome (tab bar + home view) lives in the BrowserWindow's main
+  // webContents — ALWAYS loaded, so the Spaces button and tab bar are
+  // always present. The boot-chat home surface lives inside chrome.html;
+  // tab views (and, by default, the IDW home feed) are added on TOP via
+  // contentView.addChildView and cover the home-view region BELOW the
+  // 36px tab bar — never the tab bar itself.
   void win.loadFile(config.chromeHtmlPath);
 
   win.once('ready-to-show', () => {
     if (mainWindow === null || mainWindow.isDestroyed()) return;
     win.show();
-    // Initial reconcile + rehydrate any persisted tabs.
+    // Mount the IDW home feed (default) as the Home-tab content, then
+    // reconcile + rehydrate any persisted tabs. The feed sits below the
+    // tab bar and reconcileViews shows it only while Home is active.
+    if (IDW_HOME_URL !== null) {
+      attachHomeFeed(win);
+    }
     void rehydrateFromStore(win);
   });
 
@@ -143,6 +178,7 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     // window destroys them. Clear our refs.
     attachedTabs.clear();
     activeAttachedTabId = null;
+    homeFeedView = null;
   });
 
   // Subscribe to store changes -- mounts/unmounts tab views in
@@ -278,6 +314,7 @@ export function _resetMainWindowForTesting(): void {
   mainWindow = null;
   attachedTabs.clear();
   activeAttachedTabId = null;
+  homeFeedView = null;
 }
 
 /** Close the main window if open. Idempotent. */
@@ -289,6 +326,7 @@ export function closeMainWindow(): void {
   stopAllAttachedTabWatchers();
   mainWindow = null;
   activeAttachedTabId = null;
+  homeFeedView = null;
 }
 
 /** Get the current main window (or null if not open). */
@@ -412,6 +450,18 @@ function reconcileViews(win: BrowserWindow, tabs: Tab[], activeId: string | null
     const active = attachedTabs.get(activeId);
     if (active !== undefined) {
       active.view.setBounds(computeContentBounds(win));
+    }
+  }
+
+  // The IDW home feed is the Home-tab content: visible only while Home
+  // is active (no tab foregrounded), covering the same content region as
+  // a tab — never the tab bar. When an IDW tab is active it hides so the
+  // tab shows through; closing all tabs returns to the feed.
+  if (homeFeedView !== null) {
+    const showFeed = activeId === null;
+    homeFeedView.setVisible(showFeed);
+    if (showFeed) {
+      homeFeedView.setBounds(computeContentBounds(win));
     }
   }
 }
@@ -765,6 +815,87 @@ function clearTabPartitionStorage(partition: string, tabId: string): void {
   }
 }
 
+/**
+ * Mount the IDW home feed as the Home-tab content. A `WebContentsView`
+ * with NO preload (remote content must not see `window.lite.*`, per
+ * ADR-038) in the shared IDW partition, positioned to fill the content
+ * area below the 36px tab bar. Shown immediately; `reconcileViews`
+ * toggles its visibility as tabs come and go.
+ *
+ * The feed IS the home surface, so navigations stay inside this view.
+ * External links (`target=_blank` / `window.open`) route per
+ * `buildPopupHandler`. If the URL fails to load, the view hides so the
+ * bundled boot-chat home view shows through underneath — the Home tab is
+ * never blank.
+ */
+function attachHomeFeed(win: BrowserWindow): void {
+  if (IDW_HOME_URL === null || homeFeedView !== null) return;
+
+  const view = new WebContentsView({
+    webPreferences: {
+      // NO preload -- remote content must not reach window.lite.*. ADR-038.
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      partition: HOME_FEED_PARTITION,
+    },
+  });
+
+  // External links open per the shared popup policy (OAuth IdP popups in
+  // this partition; everything else to the OS browser).
+  view.webContents.setWindowOpenHandler(
+    buildPopupHandler({
+      partition: HOME_FEED_PARTITION,
+      source: 'main-window-home-feed',
+      logger: (level, message, data) => getLoggingApi()[level]('auth', message, data),
+    })
+  );
+
+  // Auto-skip the OneReach SSO interstitial if the feed ever redirects
+  // through it (cheap no-op for any other URL).
+  const maybeSkipSso = (url: string): void => {
+    const ssoMatch = isOneReachSsoSkipUrl(url);
+    if (ssoMatch.match && ssoMatch.env !== null) {
+      void tryAutoSkipSso(view.webContents, ssoMatch.env, url);
+    }
+  };
+  view.webContents.on('did-navigate', (_e, url) => maybeSkipSso(url));
+  view.webContents.on('did-navigate-in-page', (_e, url) => maybeSkipSso(url));
+  view.webContents.on('did-finish-load', () => {
+    maybeSkipSso(safeWebContentsUrl(view.webContents));
+  });
+
+  // On load failure, hide the feed so the boot-chat home view shows
+  // through. Never leave a blank Home tab.
+  view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
+    if (errorCode === -3) return; // ABORTED -- navigated away.
+    getLoggingApi().warn('main-window', 'home feed failed to load; revealing boot-chat home', {
+      errorCode,
+      errorDescription,
+    });
+    try {
+      view.setVisible(false);
+    } catch {
+      /* best-effort */
+    }
+  });
+
+  homeFeedView = view;
+  win.contentView.addChildView(view);
+  // Default visible + positioned; reconcileViews adjusts as tabs change.
+  view.setBounds(computeContentBounds(win));
+  view.setVisible(true);
+
+  // Cache-bust each launch so the window picks up the latest Edison deploy.
+  const sep = IDW_HOME_URL.includes('?') ? '&' : '?';
+  void view.webContents.loadURL(`${IDW_HOME_URL}${sep}t=${Date.now()}`).catch((err: unknown) => {
+    getLoggingApi().warn('main-window', 'home feed initial load rejected', {
+      error: (err as Error).message,
+    });
+  });
+}
+
 function repositionActiveTab(win: BrowserWindow): void {
   // On every resize, the active tab's bounds need to track the window.
   // Inactive tabs are hidden anyway; their bounds don't matter until
@@ -774,6 +905,10 @@ function repositionActiveTab(win: BrowserWindow): void {
     if (attached.view.getVisible()) {
       attached.view.setBounds(computeContentBounds(win));
     }
+  }
+  // Keep the home feed (when visible) tracking the content area too.
+  if (homeFeedView !== null && homeFeedView.getVisible()) {
+    homeFeedView.setBounds(computeContentBounds(win));
   }
 }
 

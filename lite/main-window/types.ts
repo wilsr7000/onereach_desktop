@@ -81,8 +81,15 @@ export interface OpenTabResult {
 /** Sentinel constant so types.ts has a value-level export (avoids dep-cruiser orphan warning). */
 export const MAIN_WINDOW_MODULE_VERSION = 1 as const;
 
-/** Tab-bar height in CSS pixels. The window factory subtracts this from content bounds. */
-export const CHROME_HEIGHT_PX = 36 as const;
+/**
+ * Tab-bar height in CSS pixels. The window factory subtracts this from
+ * content bounds when positioning tab / home-feed WebContentsViews, so it
+ * MUST match `.tab-bar { height }` in `chrome.css` (currently 48px; with
+ * `box-sizing: border-box` that includes the 1px bottom border, so the
+ * content area starts at exactly this y). If they drift, the views clip
+ * the bottom of the tab bar / Spaces button.
+ */
+export const CHROME_HEIGHT_PX = 48 as const;
 
 /** KV collection + key for tab persistence. */
 export const KV_COLLECTION = 'lite-main-window-tabs';

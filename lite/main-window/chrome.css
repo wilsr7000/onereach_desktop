@@ -1,11 +1,11 @@
 /*
  * Chrome (tab bar + home view) styles.
  *
- * The tab bar lives at the top in a 36px row. Below it, the home
+ * The tab bar lives at the top in a 48px row. Below it, the home
  * view fills the remaining space; tab WebContentsViews in the main
  * process cover it when an agent is foregrounded. The CHROME_HEIGHT_PX
  * constant in `lite/main-window/types.ts` MUST match the tab bar
- * height defined here.
+ * height defined here (`.tab-bar { height }`).
  *
  * Design tokens come from signature.css (loaded first in chrome.html);
  * everything below assumes those CSS variables are available.
