@@ -69,9 +69,13 @@ describe('profileToModel', () => {
 });
 
 describe('estimateCost', () => {
-  it('prices the opus family', () => {
-    expect(estimateCost('claude-opus-4-8', { inputTokens: 1_000_000, outputTokens: 0 })).toBeCloseTo(15);
-    expect(estimateCost('claude-opus-4-8', { inputTokens: 0, outputTokens: 1_000_000 })).toBeCloseTo(75);
+  it('prices the opus family at current-generation rates', () => {
+    expect(estimateCost('claude-opus-4-8', { inputTokens: 1_000_000, outputTokens: 0 })).toBeCloseTo(5);
+    expect(estimateCost('claude-opus-4-8', { inputTokens: 0, outputTokens: 1_000_000 })).toBeCloseTo(25);
+  });
+  it('prices the fable family', () => {
+    expect(estimateCost('claude-fable-5', { inputTokens: 1_000_000, outputTokens: 0 })).toBeCloseTo(10);
+    expect(estimateCost('claude-fable-5', { inputTokens: 0, outputTokens: 1_000_000 })).toBeCloseTo(50);
   });
   it('returns 0 for unknown families rather than guessing', () => {
     expect(estimateCost('mystery-model', { inputTokens: 9_999, outputTokens: 9_999 })).toBe(0);

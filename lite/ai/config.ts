@@ -5,7 +5,7 @@
  *
  *   1. Environment variables (great for `npm run lite` dev):
  *        ANTHROPIC_API_KEY        -> use Claude
- *        ANTHROPIC_MODEL          -> optional, defaults to claude-opus-4-8
+ *        ANTHROPIC_MODEL          -> optional, defaults to claude-fable-5
  *        ANTHROPIC_BASE_URL       -> optional, defaults to api.anthropic.com
  *        ONEREACH_FLOW_URL        -> use a OneReach HTTP flow
  *        ONEREACH_FLOW_TOKEN      -> token for that flow
@@ -16,7 +16,7 @@
  *      app, analogous to the user's `.env.notarization`:
  *        {
  *          "provider": "claude",
- *          "claude": { "apiKey": "sk-ant-...", "model": "claude-opus-4-8" },
+ *          "claude": { "apiKey": "sk-ant-...", "model": "claude-fable-5" },
  *          "onereachFlow": { "url": "https://...", "token": "..." }
  *        }
  *
@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AiProvider } from './types.js';
 
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-8';
+export const DEFAULT_CLAUDE_MODEL = 'claude-fable-5';
 export const DEFAULT_ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
 export const AI_CONFIG_FILENAME = 'ai-config.json';
 

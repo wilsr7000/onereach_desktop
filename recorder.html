@@ -3455,6 +3455,15 @@
         border-radius: var(--radius-sm);
       }
 
+      /* Captions must not cover the participant strip in layouts that pin
+         tiles to the bottom edge */
+      .preview-container.layout-presentation .caption-overlay,
+      .preview-container.layout-speaker-view .caption-overlay {
+        bottom: 140px;
+        background: rgba(10, 10, 18, 0.55);
+        border-radius: var(--radius-sm);
+      }
+
       /* Sharing banner shown when host is sharing */
       .sharing-banner {
         display: none;
@@ -4108,6 +4117,20 @@
       .hud-active .audio-meter,
       .hud-active .hud-toggle-btn {
         display: none !important;
+      }
+
+      /* HUD exceptions: flows that live in the bottom panel must surface.
+         session-on  -> live meeting controls (mute/cam/share/End Session)
+         review-on   -> review bar (don't-lose-the-recording fallback)
+         settings-on -> settings panel opened from the context menu */
+      .hud-active.session-on .bottom-panel,
+      .hud-active.review-on .bottom-panel,
+      .hud-active.settings-on .bottom-panel {
+        display: block !important;
+      }
+
+      .hud-active.session-on .controls-bar {
+        display: flex !important;
       }
 
       .hud-active .main-layout {
@@ -5349,6 +5372,10 @@
                     <span class="ctx-item-label">Screen + Camera</span>
                     <span class="ctx-item-state" id="ctxBothState">OFF</span>
                   </div>
+                  <div class="ctx-item" onclick="app.ctxAction('switchMode', 'camera')">
+                    <span class="ctx-item-label">Camera Only</span>
+                    <span class="ctx-item-state" id="ctxCameraOnlyState">--</span>
+                  </div>
                 </div>
 
                 <!-- Background -->
@@ -6310,9 +6337,26 @@
             if (this.elements.captionOverlay) this.elements.captionOverlay.classList.add('visible');
           }
 
+          // Don't lose an in-flight recording to a window close: stop the
+          // recorder (auto-save kicks in) and block this close attempt.
+          window.addEventListener('beforeunload', (e) => {
+            if (this.isRecording || this._isSaving) {
+              e.preventDefault();
+              e.returnValue = false;
+              if (this.isRecording) {
+                this.stopRecording();
+                this.showStatus('Recording stopped -- saving. Close again once saved.', 'warning');
+              } else {
+                this.showStatus('Still saving -- close again once saved.', 'warning');
+              }
+              return;
+            }
+          });
+
           // Clean up meeting tokens when window is closed without clicking End Session
           window.addEventListener('beforeunload', () => {
-            if (this._meetingRoomName && window.recorder) {
+            // Guests must not clear the host's tokens
+            if (this._meetingRoomName && this.sessionRole === 'host' && window.recorder) {
               const roomName = this._meetingRoomName;
               console.log('[Recorder] Window closing — clearing meeting tokens for:', roomName);
               window.recorder.clearMeetingTokens(roomName).catch(() => {});
@@ -6718,6 +6762,10 @@
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')
               return;
 
+            // The hub landing page covers the preview — recording shortcuts
+            // would start an invisible recording behind it.
+            if (this.hubActive) return;
+
             switch (e.code) {
               case 'Space':
                 e.preventDefault();
@@ -6730,6 +6778,11 @@
                 }
                 break;
               case 'Escape':
+                if (this._ctxOpen) {
+                  // The context menu's own keydown handler closes it; don't
+                  // also stop the recording underneath.
+                  break;
+                }
                 if (this.isRecording) {
                   this.stopRecording();
                 } else if (this.elements.saveDialog.classList.contains('active')) {
@@ -6758,10 +6811,18 @@
         switchMode(mode) {
           if (mode === this.currentMode) return;
 
-          // During an active LiveKit session, screen/both requests toggle screen sharing
-          // without leaving session mode
-          if ((mode === 'screen' || mode === 'both') && this.sessionConnected && this._livekitRoom) {
+          // While a LiveKit room is live (hosting-and-waiting included),
+          // screen/both requests toggle screen sharing without tearing down
+          // the published tracks or leaving session mode.
+          if ((mode === 'screen' || mode === 'both') && this._livekitRoom) {
             this.sessionToggleScreenShare();
+            return;
+          }
+
+          // Mode switches stop every track; mid-recording that would silently
+          // truncate the take while the UI still says REC.
+          if (this.isRecording || this.countdownActive) {
+            this.showStatus('Stop the recording before switching modes', 'warning');
             return;
           }
 
@@ -6826,6 +6887,8 @@
           this.settingsOpen = !this.settingsOpen;
           this.elements.settingsPanel.classList.toggle('open', this.settingsOpen);
           this.elements.settingsToggle.classList.toggle('active', this.settingsOpen);
+          // The settings panel lives in the HUD-hidden bottom panel
+          document.querySelector('.main-layout')?.classList.toggle('settings-on', this.settingsOpen);
         },
 
         // Load available media devices
@@ -7094,7 +7157,12 @@
           this.pipModeSelection = false;
           this._sessionScreenSharePending = false;
           if (!this.stream) {
+            // Cancelled with no active stream (e.g. mode switch already
+            // stopped the camera): restore the placeholder instead of
+            // leaving a dead black preview
             this.elements.videoSource.value = '';
+            this.elements.previewVideo.srcObject = null;
+            this.elements.previewPlaceholder.style.display = 'flex';
           }
         },
 
@@ -7654,21 +7722,12 @@
         async toggleCaptions() {
           if (!this.captionsEnabled) {
             try {
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:toggleCaptions',message:'toggleCaptions calling getOpenAIKey',data:{hasRecorder:!!window.recorder,hasFn:typeof window.recorder?.getOpenAIKey},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
-              // #endregion
               const keyResult = await window.recorder.getOpenAIKey();
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:toggleCaptions-result',message:'getOpenAIKey returned',data:{keyResult:{success:keyResult?.success,hasKey:!!keyResult?.key,error:keyResult?.error}},timestamp:Date.now(),hypothesisId:'A,B,C,E'})}).catch(()=>{});
-              // #endregion
               if (!keyResult.success || !keyResult.key) {
                 this.showStatus('Live captions require an OpenAI API key. Add one in Settings.', 'error');
                 return;
               }
             } catch (e) {
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:toggleCaptions-error',message:'getOpenAIKey threw exception',data:{error:e.message,stack:e.stack?.substring(0,300)},timestamp:Date.now(),hypothesisId:'D,E'})}).catch(()=>{});
-              // #endregion
               this.showStatus('Could not verify API key for captions.', 'error');
               return;
             }
@@ -7733,22 +7792,21 @@
         },
 
         async startLiveTranscription() {
-          // Only start if we have a mixed audio destination to tap
-          if (!this.pipAudioDestination) {
-            console.log('[Transcription] No audio destination to transcribe');
+          this._transcriptionUnavailableReason = null;
+
+          // Need at least one live audio source (mixed destination, session
+          // mix, or the recording stream's mic) to feed the realtime API.
+          const audioStream = this._getTranscriptionAudioStream();
+          if (!audioStream || audioStream.getAudioTracks().length === 0) {
+            this._transcriptionUnavailableReason = 'no-audio';
+            console.log('[Transcription] No audio source to transcribe');
             return;
           }
 
           try {
-            // Get API key
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:startLiveTranscription',message:'startLiveTranscription calling getOpenAIKey',data:{hasPipAudioDest:!!this.pipAudioDestination},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
-            // #endregion
             const keyResult = await window.recorder.getOpenAIKey();
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.html:startLiveTranscription-result',message:'getOpenAIKey result in startLiveTranscription',data:{keyResult:{success:keyResult?.success,hasKey:!!keyResult?.key,error:keyResult?.error}},timestamp:Date.now(),hypothesisId:'A,B,C,E'})}).catch(()=>{});
-            // #endregion
             if (!keyResult.success || !keyResult.key) {
+              this._transcriptionUnavailableReason = 'no-key';
               console.log('[Transcription] No OpenAI API key available, skipping live captions');
               return;
             }
@@ -7808,7 +7866,14 @@
               this.startTranscriptFileFlush();
 
               // Start streaming audio
-              this.startAudioStreaming();
+              try {
+                this.startAudioStreaming();
+                console.log('[Transcription] Audio streaming started at 24kHz');
+              } catch (err) {
+                this._transcriptionUnavailableReason = 'error';
+                this._trackError('audio-streaming', err.message);
+                console.error('[Transcription] Audio streaming failed:', err);
+              }
             };
 
             this.transcriptionWs.onmessage = (event) => {
@@ -7819,6 +7884,7 @@
             };
 
             this.transcriptionWs.onerror = (error) => {
+              this._transcriptionUnavailableReason = 'error';
               console.error('[Transcription] WebSocket error:', error);
               this._trackError('transcription-ws', error?.message || 'WebSocket error');
             };
@@ -7826,24 +7892,130 @@
             this.transcriptionWs.onclose = (ev) => {
               console.log('[Transcription] WebSocket closed');
             };
-
-            // Log first non-silent audio frame to verify audio is actually flowing
-            let _audioCheckCount = 0;
-            const _origHandler = this.transcriptionProcessor.onaudioprocess;
-            this.transcriptionProcessor.onaudioprocess = (e) => {
-              if (_audioCheckCount < 3) {
-                const samples = e.inputBuffer.getChannelData(0);
-                const maxAmp = Math.max(...Array.from(samples).map(Math.abs));
-                _audioCheckCount++;
-              }
-              _origHandler.call(this, e);
-            };
-
-            console.log('[Transcription] Audio streaming started at 24kHz');
           } catch (error) {
-            this._trackError('audio-streaming', error.message);
-            console.error('[Transcription] Audio streaming failed:', error);
+            this._transcriptionUnavailableReason = 'error';
+            this._trackError('transcription-start', error.message);
+            console.error('[Transcription] Failed to start:', error);
           }
+        },
+
+        // Pick the audio stream that feeds live transcription. Screen modes
+        // already mix mic+desktop into pipAudioDestination; LiveKit sessions
+        // get a dedicated mix of local mic + every remote participant; plain
+        // camera mode taps the recording stream's mic track directly.
+        _getTranscriptionAudioStream() {
+          if (this.pipAudioDestination) {
+            return this.pipAudioDestination.stream;
+          }
+          if (this._livekitRoom) {
+            const mix = this._ensureSessionAudioMix();
+            if (mix) return mix.destination.stream;
+          }
+          if (this.stream && this.stream.getAudioTracks().length > 0) {
+            return new MediaStream(this.stream.getAudioTracks());
+          }
+          return null;
+        },
+
+        // Capture PCM16 @24kHz from the active audio source and stream it to
+        // the realtime API. Also feeds _lastAudioRMS for the HUD meter and
+        // health metrics.
+        startAudioStreaming() {
+          const audioStream = this._getTranscriptionAudioStream();
+          if (!audioStream || audioStream.getAudioTracks().length === 0) {
+            throw new Error('No audio source available for transcription');
+          }
+
+          this.transcriptionAudioCtx = new AudioContext({ sampleRate: 24000 });
+          const source = this.transcriptionAudioCtx.createMediaStreamSource(audioStream);
+          this.transcriptionProcessor = this.transcriptionAudioCtx.createScriptProcessor(4096, 1, 1);
+
+          this.transcriptionProcessor.onaudioprocess = (e) => {
+            const samples = e.inputBuffer.getChannelData(0);
+
+            let sumSquares = 0;
+            for (let i = 0; i < samples.length; i++) {
+              sumSquares += samples[i] * samples[i];
+            }
+            this._lastAudioRMS = Math.sqrt(sumSquares / samples.length);
+
+            if (!this.transcriptionWs || this.transcriptionWs.readyState !== WebSocket.OPEN) return;
+            if (this.isPaused) return;
+
+            // Float32 [-1,1] -> PCM16 little-endian -> base64
+            const pcm = new Int16Array(samples.length);
+            for (let i = 0; i < samples.length; i++) {
+              const s = Math.max(-1, Math.min(1, samples[i]));
+              pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            }
+            const bytes = new Uint8Array(pcm.buffer);
+            let binary = '';
+            const CHUNK = 0x8000;
+            for (let i = 0; i < bytes.length; i += CHUNK) {
+              binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+            }
+            this.transcriptionWs.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: btoa(binary) }));
+          };
+
+          source.connect(this.transcriptionProcessor);
+          // ScriptProcessor only fires when routed to a sink; keep it silent.
+          const silentGain = this.transcriptionAudioCtx.createGain();
+          silentGain.gain.value = 0;
+          this.transcriptionProcessor.connect(silentGain);
+          silentGain.connect(this.transcriptionAudioCtx.destination);
+        },
+
+        // ── Session audio mix (local mic + all remote audio) ──
+        // Lets meeting recordings and live transcription hear everyone.
+        _sessionAudioMix: null,
+
+        _ensureSessionAudioMix() {
+          if (!this._livekitRoom) return null;
+          if (this._sessionAudioMix) return this._sessionAudioMix;
+          try {
+            const ctx = new AudioContext();
+            const destination = ctx.createMediaStreamDestination();
+            this._sessionAudioMix = { ctx, destination, sources: new Map() };
+
+            const localMicPub = this._livekitRoom.localParticipant?.getTrackPublication(
+              LivekitClient.Track.Source.Microphone
+            );
+            if (localMicPub?.track?.mediaStreamTrack) {
+              this._addTrackToSessionAudioMix(localMicPub.track.mediaStreamTrack);
+            }
+            this._livekitRoom.remoteParticipants?.forEach((p) => {
+              p.audioTrackPublications?.forEach((pub) => {
+                if (pub.track?.mediaStreamTrack) {
+                  this._addTrackToSessionAudioMix(pub.track.mediaStreamTrack);
+                }
+              });
+            });
+            return this._sessionAudioMix;
+          } catch (e) {
+            console.warn('[Session] Audio mix unavailable:', e.message);
+            this._sessionAudioMix = null;
+            return null;
+          }
+        },
+
+        _addTrackToSessionAudioMix(mediaStreamTrack) {
+          const mix = this._sessionAudioMix;
+          if (!mix || !mediaStreamTrack || mix.sources.has(mediaStreamTrack.id)) return;
+          try {
+            const source = mix.ctx.createMediaStreamSource(new MediaStream([mediaStreamTrack]));
+            source.connect(mix.destination);
+            mix.sources.set(mediaStreamTrack.id, source);
+          } catch (e) {
+            console.warn('[Session] Could not add track to audio mix:', e.message);
+          }
+        },
+
+        _closeSessionAudioMix() {
+          if (!this._sessionAudioMix) return;
+          try {
+            this._sessionAudioMix.ctx.close();
+          } catch {}
+          this._sessionAudioMix = null;
         },
 
         handleTranscriptionEvent(data) {
@@ -7897,6 +8069,7 @@
         },
 
         stopLiveTranscription() {
+          this._lastAudioRMS = 0;
           if (this.transcriptionProcessor) {
             this.transcriptionProcessor.disconnect();
             this.transcriptionProcessor = null;
@@ -7956,8 +8129,10 @@
             paused: this.isPaused,
             videoActive: !!(this.stream && this.stream.getVideoTracks().some((t) => t.readyState === 'live')),
             audioTracks: {
+              // Camera-mode mic lives in this.stream; screen modes use screenMicStream
               mic: !!(
-                this.screenMicStream && this.screenMicStream.getAudioTracks().some((t) => t.readyState === 'live')
+                (this.screenMicStream && this.screenMicStream.getAudioTracks().some((t) => t.readyState === 'live')) ||
+                (this.stream && this.stream.getAudioTracks().some((t) => t.readyState === 'live'))
               ),
               desktop: this.systemAudioActive || false,
               externalMic: !!(
@@ -8390,6 +8565,14 @@
             const updateMeter = () => {
               analyser.getByteFrequencyData(dataArray);
 
+              // Keep the HUD meter + health metrics fed even when live
+              // transcription (the other _lastAudioRMS source) is off.
+              let sum = 0;
+              for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+              if (!this.transcriptionProcessor) {
+                this._lastAudioRMS = sum / dataArray.length / 255;
+              }
+
               const numBars = bars.length;
               for (let i = 0; i < numBars; i++) {
                 const dataIndex = Math.floor((i * dataArray.length) / numBars);
@@ -8470,6 +8653,8 @@
           this.isPaused = false;
           this.totalPausedMs = 0;
           this.pauseStartTime = null;
+          this._previewHadNoFrames = false;
+          this._capturedAnyData = false;
 
           const options = { mimeType: 'video/webm;codecs=vp9,opus' };
           try {
@@ -8481,6 +8666,7 @@
           this.mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
               this.recordedChunks.push(event.data);
+              this._capturedAnyData = true;
             }
           };
 
@@ -8517,14 +8703,49 @@
             }
           }, 100);
 
+          // Restore the caption overlay if captions are enabled (stopRecording hides it)
+          if (this.captionsEnabled && this.elements.captionOverlay) {
+            this.elements.captionOverlay.classList.add('visible');
+          }
+
           // Start live transcription (async, non-blocking)
           this.startLiveTranscription();
+
+          // Empty-capture watchdog: MediaRecorder.start(1000) emits a chunk
+          // every second. If nothing has arrived after ~2.8s, the source is
+          // producing no data (camera sending no frames, screen capture
+          // blank, mic disconnected) and the recording will be empty. Warn
+          // loudly while there's still time to fix it, rather than failing
+          // silently at save.
+          clearTimeout(this._captureWatchdog);
+          this._captureWatchdog = setTimeout(() => {
+            if (!this.isRecording) return;
+            const videoTrack = this.stream && this.stream.getVideoTracks()[0];
+            const previewEl = this.elements.previewVideo;
+            if (videoTrack && previewEl && previewEl.videoWidth === 0) {
+              this._previewHadNoFrames = true;
+            }
+            if (!this._capturedAnyData) {
+              this.showStatus(
+                'No data is being captured — the camera/screen may not be sending frames or another app is using it. Stop and check permissions if your recording looks blank.',
+                'warning',
+                8000
+              );
+            }
+          }, 2800);
 
           // Check transcription availability after giving WebSocket time to connect
           setTimeout(() => {
             const wsConnected = this.transcriptionWs && this.transcriptionWs.readyState === WebSocket.OPEN;
             if (!wsConnected) {
-              this.showStatus('Live transcription unavailable -- add OpenAI API key in Settings', 'warning');
+              const reason = this._transcriptionUnavailableReason;
+              if (reason === 'no-key') {
+                this.showStatus('Live transcription unavailable -- add OpenAI API key in Settings', 'warning');
+              } else if (reason === 'no-audio') {
+                this.showStatus('Live transcription off -- no microphone audio in this mode', 'warning');
+              } else if (reason) {
+                this.showStatus('Live transcription could not start -- recording continues without captions', 'warning');
+              }
             }
           }, 2500);
 
@@ -8621,6 +8842,14 @@
           this.isRecording = false;
           this.isPaused = false;
           clearInterval(this.durationInterval);
+          clearTimeout(this._captureWatchdog);
+
+          // Record whether the camera/screen ever delivered a frame so the
+          // save path can explain an empty capture accurately.
+          const videoTrack = this.stream && this.stream.getVideoTracks()[0];
+          if (videoTrack && this.elements.previewVideo && this.elements.previewVideo.videoWidth === 0) {
+            this._previewHadNoFrames = true;
+          }
 
           // Update UI
           this.elements.recordBtn.classList.remove('recording');
@@ -8648,6 +8877,10 @@
 
         // Review mode
         showReview() {
+          // HUD mode hides the bottom panel; the review bar lives there and
+          // is the don't-lose-the-recording fallback, so force it visible.
+          document.querySelector('.main-layout')?.classList.add('review-on');
+
           this.lastRecordingDuration = (Date.now() - this.recordingStartTime - (this.totalPausedMs || 0)) / 1000;
 
           if (this.reviewBlobUrl) {
@@ -8670,6 +8903,12 @@
         },
 
         recordAgain() {
+          // A delayed post-save reset must not clobber a recording the user
+          // already restarted (the chunk array would lose its first seconds)
+          if (this.isRecording || this.countdownActive) return;
+
+          document.querySelector('.main-layout')?.classList.remove('review-on');
+
           if (this.reviewBlobUrl) {
             URL.revokeObjectURL(this.reviewBlobUrl);
             this.reviewBlobUrl = null;
@@ -8723,6 +8962,19 @@
             this.showStatus('No recording to save', 'error');
             return;
           }
+          // A second click while the first save is in flight would index
+          // the same recording twice
+          if (this._isSaving) {
+            this.showStatus('Saving...', 'info');
+            return;
+          }
+
+          // Reject an empty capture before the doomed save loses the take
+          const emptyReason = this._emptyRecordingReason();
+          if (emptyReason) {
+            this.showStatus('Recording failed: ' + emptyReason, 'error', 9000);
+            return;
+          }
 
           const filename = this.elements.saveFilename.value || 'recording.webm';
           const spaceId = this.elements.saveSpace.value;
@@ -8734,26 +8986,18 @@
             return;
           }
 
+          this._isSaving = true;
           try {
             // Show saving state
             this.showStatus('Saving recording...', 'info');
 
-            // Convert blob to base64
-            const reader = new FileReader();
-            const base64Promise = new Promise((resolve, reject) => {
-              reader.onload = () => {
-                const base64 = reader.result.split(',')[1];
-                resolve(base64);
-              };
-              reader.onerror = reject;
-            });
-            reader.readAsDataURL(this.recordedBlob);
-            const base64Data = await base64Promise;
+            // Binary IPC payload (no base64 inflation / string-length cap)
+            const arrayBuffer = await this.recordedBlob.arrayBuffer();
 
             // Save via IPC (goes through clipboard storage for proper Spaces indexing)
             if (window.recorder) {
               const result = await window.recorder.saveToSpace({
-                blob: base64Data,
+                blob: new Uint8Array(arrayBuffer),
                 filename,
                 spaceId,
                 metadata: {
@@ -8803,6 +9047,8 @@
           } catch (error) {
             console.error('[Recorder] Save error:', error);
             this.showStatus('Failed to save: ' + error.message, 'error');
+          } finally {
+            this._isSaving = false;
           }
         },
 
@@ -8810,12 +9056,50 @@
         // AUTO-SAVE (recording + transcript saved automatically on stop)
         // ==========================================
 
-        async autoSaveRecording() {
+        autoSaveRecording() {
+          // Track the in-flight save so close() can wait for it
+          this._autoSavePromise = this._autoSaveRecordingInner().finally(() => {
+            this._autoSavePromise = null;
+            this._isSaving = false;
+          });
+          return this._autoSavePromise;
+        },
+
+        // A webm with no encoded media is just a container header (~a few
+        // hundred bytes). Anything below this is an empty capture, not a
+        // real recording — saving it throws a cryptic "0 bytes" error and
+        // loses the take. 8KB is comfortably below ~1s of audio-only.
+        EMPTY_RECORDING_BYTES: 8192,
+
+        // Returns a user-facing reason string if the recording is empty, else null.
+        _emptyRecordingReason() {
+          const size = this.recordedBlob ? this.recordedBlob.size : 0;
+          if (size >= this.EMPTY_RECORDING_BYTES) return null;
+          const wantedVideo = this.currentMode !== 'audio';
+          const videoTrack = this.stream && this.stream.getVideoTracks()[0];
+          const noFrames = wantedVideo && videoTrack && this._previewHadNoFrames;
+          if (noFrames) {
+            return 'No video was captured — the camera or screen never sent any frames. Close other apps that may be using the camera (Zoom, Webex, Riverside, ManyCam), check camera/screen-recording permission in System Settings, then try again.';
+          }
+          return 'The recording came out empty — no audio or video was captured. Check that your camera and microphone are connected and permitted, and that no other app is using them, then try again.';
+        },
+
+        async _autoSaveRecordingInner() {
           if (!this.recordedBlob) {
             console.warn('[Recorder] Auto-save: no recorded blob');
             this.showReview(); // fall back to manual review
             return;
           }
+
+          // Don't ship an empty capture to a doomed save that loses the take
+          const emptyReason = this._emptyRecordingReason();
+          if (emptyReason) {
+            console.warn('[Recorder] Auto-save: empty recording', this.recordedBlob.size, 'bytes');
+            this.showEmptyRecordingError(emptyReason);
+            return;
+          }
+
+          this._isSaving = true;
 
           this.lastRecordingDuration = (Date.now() - this.recordingStartTime - (this.totalPausedMs || 0)) / 1000;
 
@@ -8827,20 +9111,15 @@
           try {
             this.showStatus('Saving recording...', 'info');
 
-            // Convert blob to base64
-            const reader = new FileReader();
-            const base64Data = await new Promise((resolve, reject) => {
-              reader.onload = () => resolve(reader.result.split(',')[1]);
-              reader.onerror = reject;
-              reader.readAsDataURL(this.recordedBlob);
-            });
+            // Binary IPC payload (no base64 inflation / string-length cap)
+            const arrayBuffer = await this.recordedBlob.arrayBuffer();
 
             if (!window.recorder?.saveToSpace) {
               throw new Error('Save API not available');
             }
 
             const result = await window.recorder.saveToSpace({
-              blob: base64Data,
+              blob: new Uint8Array(arrayBuffer),
               filename,
               spaceId,
               metadata: {
@@ -8950,13 +9229,30 @@
           return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         },
 
-        showStatus(message, type = 'info') {
+        showStatus(message, type = 'info', durationMs = 3000) {
           this.elements.statusText.textContent = message;
           this.elements.statusMessage.className = 'status-message active ' + type;
 
-          setTimeout(() => {
-            this.elements.statusMessage.classList.remove('active');
-          }, 3000);
+          // A previous status's timer must not hide this newer message early
+          clearTimeout(this._statusTimer);
+          if (durationMs > 0) {
+            this._statusTimer = setTimeout(() => {
+              this.elements.statusMessage.classList.remove('active');
+            }, durationMs);
+          }
+        },
+
+        // Empty capture (no frames / no data): tell the user clearly what's
+        // wrong and how to fix it, and reset to a ready state so they can
+        // retry immediately. The empty blob is discarded (it's unusable).
+        showEmptyRecordingError(reason) {
+          this.showStatus('Recording failed: ' + reason, 'error', 9000);
+          this.elements.captionOverlay?.classList.remove('visible');
+          // Reset for a clean retry without attempting the doomed save
+          this.recordedBlob = null;
+          this.recordedChunks = [];
+          this.accumulatedTranscript = [];
+          this.interimText = '';
         },
 
         // Window controls
@@ -8994,7 +9290,7 @@
         _sessionScreenShareTrack: null,
         _sessionScreenShareStream: null,
         _sessionScreenSharePending: false,
-        _remoteScreenShareEl: null,
+        _screenShares: new Map(), // track sid -> share container (simultaneous shares supported)
 
         // Meeting Object state
         _activeMeeting: null,
@@ -9043,7 +9339,7 @@
           this.renderTemplateGrid();
         },
 
-        hubValidate() {
+        hubValidate({ requireSpace = true } = {}) {
           const hubName = document.getElementById('hubNameInput');
           const hubSpace = document.getElementById('hubSpaceSelect');
           const name = (hubName?.value || '').trim();
@@ -9059,6 +9355,7 @@
             else this.showStatus('Please enter your name', 'error');
             return false;
           }
+          if (!requireSpace) return true;
           if (!hubSpace?.value) {
             hubSpace?.classList.add('unset');
             hubSpace?.focus();
@@ -9268,6 +9565,7 @@
 
         _roomSpaces: [],
         _guestPageUrl: '',
+        _meetingLinkKey: '',
         _selectedRoomId: null,
 
         async loadRoomList() {
@@ -9287,8 +9585,27 @@
           }
         },
 
-        _deriveRoomName(spaceName) {
-          return (spaceName || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'wiser-meeting';
+        // Room names must be stable per space (perpetual links) but not
+        // guessable from the space name alone, and must not collide across
+        // accounts that share the LiveKit project. A short hash of the
+        // space id (a uuid that never leaves the app) provides both.
+        _deriveRoomName(space) {
+          const name = typeof space === 'string' ? space : (space?.name || space?.id || '');
+          const slug = (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'wiser-meeting';
+          const id = typeof space === 'object' && space?.id ? String(space.id) : '';
+          if (!id) return slug;
+          return slug + '-' + this._shortHash(id);
+        },
+
+        // FNV-1a 32-bit, hex — stable, sync, good enough to make room slugs
+        // non-guessable without the space's internal uuid.
+        _shortHash(str) {
+          let h = 0x811c9dc5;
+          for (let i = 0; i < str.length; i++) {
+            h ^= str.charCodeAt(i);
+            h = (h * 0x01000193) >>> 0;
+          }
+          return ('0000000' + h.toString(16)).slice(-8).slice(0, 6);
         },
 
         _renderRoomList(spaces) {
@@ -9302,7 +9619,7 @@
           }
 
           spaces.forEach(space => {
-            const roomName = this._deriveRoomName(space.name || space.id);
+            const roomName = this._deriveRoomName(space);
             const row = document.createElement('div');
             row.className = 'hub-room-row' + (this._selectedRoomId === space.id ? ' active' : '');
             row.dataset.spaceId = space.id;
@@ -9351,9 +9668,33 @@
           }
         },
 
-        copyRoomLink(roomName) {
+        async copyRoomLink(roomName) {
+          // The shareable link needs the published guest page; publish it on
+          // demand instead of silently copying a bare room name.
+          if (!this._guestPageUrl) {
+            this._showRoomToast('Creating link...');
+            try {
+              const pub = await window.recorder.publishGuestPage();
+              if (pub.success && pub.url) this._guestPageUrl = pub.url;
+            } catch (err) {
+              console.warn('[Hub] Guest page publish failed:', err);
+            }
+          }
+
+          // Links must carry the payload verify key (#k=): the guest page
+          // refuses KV data it can't authenticate against it.
+          if (!this._meetingLinkKey) {
+            try {
+              const keyRes = await window.recorder.getMeetingLinkKey();
+              if (keyRes.success && keyRes.joinKey) this._meetingLinkKey = keyRes.joinKey;
+            } catch (err) {
+              console.warn('[Hub] Meeting link key unavailable:', err);
+            }
+          }
+
           const url = this._guestPageUrl
-            ? this._guestPageUrl + '?room=' + encodeURIComponent(roomName)
+            ? this._guestPageUrl + '?room=' + encodeURIComponent(roomName) +
+              (this._meetingLinkKey ? '#k=' + this._meetingLinkKey : '')
             : roomName;
 
           const write = window.electronClipboard?.writeText
@@ -9361,13 +9702,18 @@
             : () => navigator.clipboard.writeText(url);
           write();
 
+          this._showRoomToast(
+            this._guestPageUrl ? 'Link copied' : 'Room name copied (sign in to GSX to create shareable links)'
+          );
+        },
+
+        _showRoomToast(message) {
           const toast = document.getElementById('hubRoomToast');
-          if (toast) {
-            toast.textContent = 'Link copied';
-            toast.classList.add('show');
-            clearTimeout(this._toastTimer);
-            this._toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
-          }
+          if (!toast) return;
+          toast.textContent = message;
+          toast.classList.add('show');
+          clearTimeout(this._toastTimer);
+          this._toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
         },
 
         hostRoom(spaceId, spaceName) {
@@ -9380,8 +9726,6 @@
           if (hubName && !hubName.value.trim()) {
             hubName.focus();
             this.hubShowStatus('hubNewMeetingStatus', 'Enter your name first', 'error');
-            document.getElementById('hubMainActions').style.display = 'none';
-            document.getElementById('hubNewMeetingPanel').classList.add('visible');
             return;
           }
           this.hubSyncToSelectors();
@@ -9398,7 +9742,7 @@
           }
           const filtered = this._roomSpaces.filter(s => {
             const name = (s.name || s.id || '').toLowerCase();
-            const slug = this._deriveRoomName(s.name || s.id);
+            const slug = this._deriveRoomName(s);
             return name.includes(q) || slug.includes(q);
           });
           this._renderRoomList(filtered);
@@ -9430,17 +9774,19 @@
             const hubSpaceId = document.getElementById('hubSpaceSelect')?.value || '';
             const spaceSel = document.getElementById('hubSpaceSelect');
             const spaceName = spaceSel?.options[spaceSel.selectedIndex]?.textContent || '';
-            const roomName = spaceName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'wiser-meeting';
+            const roomName = this._deriveRoomName({ id: hubSpaceId, name: spaceName });
 
             const result = await window.recorder.createRoom(roomName);
             if (!result.success) throw new Error(result.error || 'Failed to create room');
 
-            // Store tokens in GSX KV for future guests
-            await window.recorder.storeMeetingTokens({
+            // Store tokens in GSX KV for future guests. The signed write
+            // returns the public verify key guests need in the link (#k=).
+            const kv = await window.recorder.storeMeetingTokens({
               roomName,
               guestTokens: result.guestTokens,
               livekitUrl: result.livekitUrl,
             });
+            if (!kv.success) throw new Error(kv.error || 'Failed to store meeting tokens');
 
             // Get or publish guest page URL
             let guestPageUrl = '';
@@ -9452,7 +9798,9 @@
               if (pubResult.success) guestPageUrl = pubResult.url;
             }
 
-            const joinLink = guestPageUrl ? `${guestPageUrl}?room=${encodeURIComponent(roomName)}` : roomName;
+            const joinLink = guestPageUrl
+              ? `${guestPageUrl}?room=${encodeURIComponent(roomName)}${kv.joinKey ? '#k=' + kv.joinKey : ''}`
+              : roomName;
 
             // Show the result
             const linkEl = document.getElementById('hubScheduleLink');
@@ -9483,27 +9831,19 @@
         },
 
         async hubJoinByRoomName() {
-          if (!this.hubValidate()) return;
+          // Joining someone else's meeting saves nothing locally, so only a
+          // display name is required (no space).
+          if (!this.hubValidate({ requireSpace: false })) return;
 
           const input = document.getElementById('hubJoinInput');
           const rawValue = (input?.value || '').trim();
           if (!rawValue) {
             input?.focus();
-            this.hubShowStatus('hubJoinStatus', 'Please enter a meeting ID or room name', 'error');
+            this.hubShowStatus('hubJoinStatus', 'Please enter a meeting link or room name', 'error');
             return;
           }
 
-          // Extract room name from full URL or plain text
-          let roomName = rawValue;
-          try {
-            const url = new URL(rawValue);
-            const roomParam = url.searchParams.get('room');
-            if (roomParam) roomName = roomParam;
-          } catch {
-            // Not a URL, use as-is
-          }
-          roomName = roomName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
-
+          const roomName = this._parseRoomName(rawValue);
           if (!roomName) {
             this.hubShowStatus('hubJoinStatus', 'Invalid meeting ID', 'error');
             return;
@@ -9515,91 +9855,446 @@
 
           try {
             this.hubSyncToSelectors();
-
-            // Fetch tokens from GSX KV
-            const settings = {};
-            const FALLBACK_ACCOUNT = '35254342-4a2e-475b-aec1-18547e517e29';
-            const FALLBACK_REFRESH = `https://em.edison.api.onereach.ai/http/${FALLBACK_ACCOUNT}/refresh_token`;
-            const kvUrl = FALLBACK_REFRESH.replace('/refresh_token', '/keyvalue');
-            const KV_COLLECTION = 'wiser:meeting:tokens';
-            const kvKey = `wiser-room:${roomName}`;
-
-            const kvResp = await fetch(
-              `${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(kvKey)}`
-            );
-
-            if (!kvResp.ok) throw new Error('No active meeting found for "' + roomName + '"');
-
-            const kvData = await kvResp.json();
-            const meetingData = typeof kvData.value === 'string' ? JSON.parse(kvData.value) : kvData.value;
-
-            if (!meetingData?.tokens || !meetingData?.livekitUrl) {
-              throw new Error('No active meeting found for "' + roomName + '"');
-            }
-
-            // Take a guest token from the pool
-            const guestToken = meetingData.tokens.shift();
-            if (!guestToken) throw new Error('Meeting is full -- no available slots');
-
-            this.hubShowStatus('hubJoinStatus', 'Joining...', 'info');
-
-            // Dismiss hub and enter session mode
-            this.hubDismiss();
-            this.switchMode('session');
-
-            // Connect to LiveKit as guest
-            this.sessionRole = 'guest';
-            this._meetingRoomName = roomName;
-
-            const { Room, RoomEvent, Track } = LivekitClient;
-
-            this._livekitRoom = new Room();
-            await this._livekitRoom.connect(meetingData.livekitUrl, guestToken);
-
-            this.sessionConnected = true;
-            console.log('[Hub] Joined meeting as guest:', roomName);
-
-            // Request camera/mic and publish
-            try {
-              await this._livekitRoom.localParticipant.enableCameraAndMicrophone();
-            } catch (mediaErr) {
-              console.warn('[Hub] Media publish failed:', mediaErr.message);
-            }
-
-            // Set up remote track handling (same as host flow)
-            this._livekitRoom.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
-              const pName = participant.name || participant.identity;
-              const isScreenShare = pub.source === Track.Source.ScreenShare;
-              if (track.kind === Track.Kind.Video && isScreenShare) {
-                const el = track.attach();
-                this._showRemoteScreenShare(el, track.sid, pName);
-              } else if (track.kind === Track.Kind.Video) {
-                const el = track.attach();
-                el.style.width = '100%';
-                el.style.height = '100%';
-                el.style.objectFit = 'cover';
-                const container = document.getElementById('previewContainer');
-                if (container) container.appendChild(el);
-              }
-              if (track.kind === Track.Kind.Audio) {
-                const el = track.attach();
-                document.body.appendChild(el);
-              }
-            });
-            this._livekitRoom.on(RoomEvent.TrackUnsubscribed, (track, pub) => {
-              const isScreenShare = pub.source === Track.Source.ScreenShare;
-              track.detach().forEach((el) => el.remove());
-              if (isScreenShare) {
-                this._hideRemoteScreenShare();
-              }
-            });
-
+            await this._joinMeetingByName(roomName, rawValue);
             this.showStatus('Connected to meeting: ' + roomName, 'success');
           } catch (error) {
             console.error('[Hub] Join error:', error);
             this.hubShowStatus('hubJoinStatus', error.message || 'Failed to join', 'error');
+            if (this.hubActive === false && !this.sessionConnected) this.hubShow();
           } finally {
             if (joinBtn) joinBtn.disabled = false;
+          }
+        },
+
+        // Extract a room name from a pasted join link or raw text
+        _parseRoomName(rawValue) {
+          let roomName = rawValue;
+          try {
+            const url = new URL(rawValue);
+            const roomParam = url.searchParams.get('room');
+            if (roomParam) roomName = roomParam;
+          } catch {
+            // Not a URL, use as-is
+          }
+          return roomName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+        },
+
+        // Extract the payload verify key (#k=...) from a pasted join link
+        _parseJoinKey(rawValue) {
+          try {
+            const url = new URL(rawValue);
+            const m = /(?:^|[#&])k=([A-Za-z0-9_-]+)/.exec(url.hash || '');
+            return m ? m[1] : '';
+          } catch {
+            return '';
+          }
+        },
+
+        // Authenticate a KV meeting payload against the link's verify key.
+        // KV writes are unauthenticated, so only a correctly signed v2
+        // payload is trusted -- anything else is treated as "no meeting".
+        async _verifyMeetingPayload(kvValue, joinKeyB64u, roomName) {
+          const raw = typeof kvValue === 'string' ? JSON.parse(kvValue) : kvValue;
+          if (!raw) throw new Error('No active meeting found for "' + roomName + '"');
+          if (raw.v !== 2 || typeof raw.payload !== 'string' || typeof raw.sig !== 'string') {
+            throw new Error('This meeting was started by an older app version -- ask the host to update and restart it');
+          }
+          if (!joinKeyB64u) {
+            throw new Error('Paste the full meeting link -- the part after # carries its security key');
+          }
+          const fromB64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+          let ok = false;
+          try {
+            const pub = await crypto.subtle.importKey(
+              'raw', fromB64u(joinKeyB64u), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']
+            );
+            ok = await crypto.subtle.verify(
+              { name: 'ECDSA', hash: 'SHA-256' }, pub, fromB64u(raw.sig), new TextEncoder().encode(raw.payload)
+            );
+          } catch {
+            ok = false;
+          }
+          if (!ok) throw new Error('Meeting data failed verification -- ask the host for a fresh link');
+          const meetingData = JSON.parse(raw.payload);
+          if (meetingData.roomName !== roomName) {
+            throw new Error('Meeting data failed verification -- ask the host for a fresh link');
+          }
+          if (
+            !Array.isArray(meetingData.tokens) || meetingData.tokens.length === 0 ||
+            typeof meetingData.livekitUrl !== 'string' || !/^wss:\/\//.test(meetingData.livekitUrl)
+          ) {
+            throw new Error('No active meeting found for "' + roomName + '"');
+          }
+          if (typeof meetingData.expiresAt === 'number' && Date.now() > meetingData.expiresAt) {
+            throw new Error('This meeting link has expired -- ask the host to start the meeting again');
+          }
+          return meetingData;
+        },
+
+        // Resolve which account's KV holds the meeting tokens. Prefer the
+        // account embedded in a pasted join link, then our own published
+        // guest page, then the legacy shared account (pre-multi-account).
+        async _kvUrlForJoin(rawInput) {
+          const fromUrl = (value) => {
+            const m = /\/public\/([0-9a-f][0-9a-f-]{30,40})\//i.exec(value || '');
+            return m ? `https://em.edison.api.onereach.ai/http/${m[1]}/keyvalue` : null;
+          };
+          const pasted = fromUrl(rawInput);
+          if (pasted) return pasted;
+          try {
+            const urlResult = await window.recorder.getGuestPageUrl();
+            const own = fromUrl(urlResult?.url);
+            if (own) return own;
+          } catch {}
+          const cached = fromUrl(this._guestPageUrl);
+          if (cached) return cached;
+          return 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue';
+        },
+
+        // Join a LiveKit meeting as a guest with full session UI (tiles,
+        // controls, screen shares) — shared by the hub join field and the
+        // session-mode Join panel.
+        async _joinMeetingByName(roomName, rawInput) {
+          const kvUrl = await this._kvUrlForJoin(rawInput);
+          const KV_COLLECTION = 'wiser:meeting:tokens';
+          const kvKey = `wiser-room:${roomName}`;
+
+          const kvResp = await fetch(
+            `${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(kvKey)}`
+          );
+          if (!kvResp.ok) throw new Error('No active meeting found for "' + roomName + '"');
+
+          const kvData = await kvResp.json();
+          const meetingData = await this._verifyMeetingPayload(kvData.value, this._parseJoinKey(rawInput), roomName);
+
+          const tokens = meetingData.tokens.slice();
+          if (tokens.length === 0) throw new Error('Meeting is full -- no available slots');
+
+          // Dismiss hub and enter session mode
+          this.hubDismiss();
+          this.switchMode('session');
+          this.sessionRole = 'guest';
+          // Kept for UI labels only — guests never clear the host's KV tokens
+          this._meetingRoomName = roomName;
+
+          const { Room } = LivekitClient;
+
+          // Random token index + retry: a fixed index would reuse identity
+          // guest-0 for every in-app guest, and LiveKit evicts the previous
+          // holder of a duplicate identity.
+          let connected = false;
+          let lastErr = null;
+          const maxAttempts = Math.min(5, tokens.length);
+          for (let attempt = 0; attempt < maxAttempts && !connected; attempt++) {
+            const idx = Math.floor(Math.random() * tokens.length);
+            const guestToken = tokens.splice(idx, 1)[0];
+            this._livekitRoom = new Room({ adaptiveStream: true, dynacast: true });
+            this._registerRoomEvents(this._livekitRoom);
+            try {
+              await this._livekitRoom.connect(meetingData.livekitUrl, guestToken);
+              this._livekitRoom._orEverConnected = true;
+              connected = true;
+            } catch (connErr) {
+              lastErr = connErr;
+              try {
+                this._livekitRoom.disconnect();
+              } catch {}
+              this._livekitRoom = null;
+            }
+          }
+          if (!connected) {
+            this.sessionRole = null;
+            this._meetingRoomName = null;
+            this.switchMode('camera');
+            throw lastErr || new Error('Could not connect to the meeting');
+          }
+
+          console.log('[Hub] Joined meeting as guest:', roomName);
+
+          // Send our display name so the host's tile shows it (not guest-N)
+          const guestName = (document.getElementById('hubNameInput')?.value || '').trim();
+          if (guestName) {
+            this._hostDisplayName = guestName;
+            try {
+              this._livekitRoom.localParticipant.setName(guestName);
+            } catch (e) {
+              console.warn('[LiveKit] setName failed:', (e && e.message) || e);
+            }
+            try {
+              this._livekitRoom.localParticipant.setMetadata(JSON.stringify({ displayName: guestName }));
+            } catch (e) {
+              console.warn('[LiveKit] setMetadata failed:', (e && e.message) || e);
+            }
+          }
+
+          // Request camera/mic and publish
+          try {
+            await this._livekitRoom.localParticipant.enableCameraAndMicrophone();
+          } catch (mediaErr) {
+            console.warn('[Hub] Media publish failed:', mediaErr.message);
+          }
+
+          // Local preview + recording stream (camera + session audio mix)
+          this._attachLocalSessionMedia();
+
+          // Full session UI: own tile, controls, layouts — same as the host
+          this._enterSessionMode();
+          this._livekitRoom.remoteParticipants?.forEach((p) => {
+            this._ensureParticipantContainer(p.sid, p.name || p.identity);
+          });
+          this._updateLayout();
+          this._startAudioGlow();
+        },
+
+        // Wire all LiveKit room events. Shared by the host flow and the
+        // guest join flow so both render tiles, screen shares, badges,
+        // overlays, and reconnect states identically.
+        _registerRoomEvents(room) {
+          const { RoomEvent } = LivekitClient;
+
+          // Track subscriptions — per-participant container management
+          room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+            const pName = participant.name || participant.identity;
+            const isScreenShare = publication.source === LivekitClient.Track.Source.ScreenShare;
+            console.log('[LiveKit] Track subscribed:', track.kind, isScreenShare ? '(screen share)' : '', 'from', pName);
+            const element = track.attach();
+
+            if (track.kind === 'video' && isScreenShare) {
+              this._showRemoteScreenShare(element, track.sid, pName);
+            } else if (track.kind === 'video') {
+              const container = this._ensureParticipantContainer(participant.sid, pName);
+              element.style.width = '100%';
+              element.style.height = '100%';
+              element.style.objectFit = 'cover';
+              element.dataset.trackSid = track.sid;
+              container.appendChild(element);
+              this._updateParticipantState(participant.sid, { hasVideo: true, camMuted: !!publication.isMuted });
+            } else if (track.kind === 'audio') {
+              const container = this._ensureParticipantContainer(participant.sid, pName);
+              element.dataset.trackSid = track.sid;
+              element.setAttribute('data-audio-only', '1');
+              element.style.display = 'none';
+              container.appendChild(element);
+              const playPromise = element.play();
+              if (playPromise) {
+                playPromise
+                  .then(() => {})
+                  .catch(() => {});
+              }
+              // Feed the session mix so recordings + transcription hear them
+              if (track.mediaStreamTrack) {
+                this._ensureSessionAudioMix();
+                this._addTrackToSessionAudioMix(track.mediaStreamTrack);
+              }
+              this._updateParticipantState(participant.sid, { hasAudio: true, micMuted: !!publication.isMuted });
+            }
+            this._updateLayout();
+          });
+
+          room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+            const isScreenShare = publication.source === LivekitClient.Track.Source.ScreenShare;
+            track.detach().forEach((el) => el.remove());
+            if (isScreenShare) {
+              // Remove only this share — others keep playing
+              this._hideRemoteScreenShare(track.sid);
+              return;
+            }
+            if (track.kind === 'video') {
+              this._updateParticipantState(participant.sid, { hasVideo: false });
+            } else if (track.kind === 'audio') {
+              this._updateParticipantState(participant.sid, { hasAudio: false });
+            }
+          });
+
+          // Mute / unmute events reflect the participant toggling their
+          // camera or mic mid-session without leaving the room. We flip
+          // the per-tile state badges + show/hide the camera-off placeholder.
+          // The local participants-map entry is keyed by this._localParticipantSid
+          // (not the LiveKit sid), so we remap locals before dispatching.
+          const sidKey = (participant) => {
+            const lpSid = this._livekitRoom?.localParticipant?.sid;
+            return participant?.sid === lpSid ? this._localParticipantSid : participant?.sid;
+          };
+          room.on(RoomEvent.TrackMuted, (publication, participant) => {
+            const sid = sidKey(participant);
+            if (!sid) return;
+            if (publication.kind === 'video' && publication.source !== LivekitClient.Track.Source.ScreenShare) {
+              this._updateParticipantState(sid, { camMuted: true });
+            } else if (publication.kind === 'audio') {
+              this._updateParticipantState(sid, { micMuted: true });
+            }
+          });
+          room.on(RoomEvent.TrackUnmuted, (publication, participant) => {
+            const sid = sidKey(participant);
+            if (!sid) return;
+            if (publication.kind === 'video' && publication.source !== LivekitClient.Track.Source.ScreenShare) {
+              this._updateParticipantState(sid, { camMuted: false });
+            } else if (publication.kind === 'audio') {
+              this._updateParticipantState(sid, { micMuted: false });
+            }
+          });
+          // Expose the same helper on `this` so toggle buttons can call it directly.
+          this._sidKey = sidKey;
+
+          // Participant presence awareness
+          room.on(RoomEvent.ParticipantConnected, (participant) => {
+            const pName = participant.name || participant.identity;
+            console.log('[LiveKit] Participant connected:', pName);
+            const activity = document.getElementById('guestActivity');
+            const waitingText = document.getElementById('waitingText');
+            if (activity) {
+              activity.classList.remove('visible');
+              if (waitingText) waitingText.style.display = 'none';
+            }
+            // Enter session mode on first remote participant
+            if (!this.sessionConnected) {
+              this._enterSessionMode();
+            }
+            this._ensureParticipantContainer(participant.sid, pName);
+            this._updateLayout();
+            this.showStatus(pName + ' joined the meeting', 'success');
+
+            // Late-joiner sync: if the host is recording, tell the new guest to record too
+            if (this.sessionRole === 'host' && this.isRecording) {
+              console.log('[LiveKit] Syncing recording state to late-joiner:', participant.identity);
+              this.sendSessionData(
+                {
+                  type: 'recording-start',
+                  timestamp: this.recordingStartTime,
+                },
+                [participant.identity]
+              );
+            }
+          });
+
+          // Update display name when a participant sets their name after connecting
+          room.on(RoomEvent.ParticipantNameChanged, (name, participant) => {
+            const entry = this._participants.get(participant.sid);
+            if (entry) {
+              entry.identity = name || participant.identity;
+              const label = entry.container.querySelector('.participant-label');
+              if (label) label.textContent = entry.identity;
+              console.log('[LiveKit] Participant renamed:', entry.identity);
+            }
+          });
+
+          room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+            const pName = participant.name || participant.identity;
+            console.log('[LiveKit] Participant disconnected:', pName);
+            this._removeParticipantContainer(participant.sid);
+            this._updateLayout();
+            const remoteCount = this._participants.size - 1; // exclude local
+            if (this.sessionRole === 'host' && remoteCount <= 0) {
+              this.showStatus('All guests disconnected. Click End Session when ready.', 'error');
+            } else {
+              this.showStatus(`${pName} left the meeting.`, 'info');
+            }
+          });
+
+          // Active speaker detection with debounce
+          room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+            this._handleActiveSpeakersChanged(speakers);
+          });
+
+          // Data messages (recording sync + track transfer + overlays)
+          room.on(RoomEvent.DataReceived, (data, participant) => {
+            try {
+              const senderId = participant?.identity || 'unknown';
+              // Binary data = track transfer chunk from a sender mid-transfer
+              if (data instanceof Uint8Array && this._transfers && this._transfers.has(senderId)) {
+                this.handleTrackTransferChunk(data.buffer, senderId);
+                return;
+              }
+              // Text data = JSON message
+              const msg = JSON.parse(new TextDecoder().decode(data));
+              if (msg.type === 'recording-start') {
+                // Only the host may drive everyone's recorders
+                if (this.sessionRole === 'guest' && senderId === 'host' && !this.isRecording) {
+                  console.log('[Session] Host started recording -- starting local recording');
+                  this.startRecording();
+                } else {
+                  console.log('[Session] Guest started recording:', senderId);
+                }
+              } else if (msg.type === 'recording-stop') {
+                if (this.sessionRole === 'guest' && senderId === 'host' && this.isRecording) {
+                  console.log('[Session] Host stopped recording -- stopping local recording');
+                  this.stopRecording();
+                } else {
+                  console.log('[Session] Guest stopped recording:', senderId);
+                }
+              } else if (msg.type === 'track-transfer-start') {
+                this.handleTrackTransferStart(msg, senderId);
+              } else if (msg.type === 'track-transfer-complete') {
+                this.handleTrackTransferComplete(senderId);
+              } else if (msg.type === 'meeting-overlay') {
+                // Overlays originate from the host's agents only
+                if (senderId === 'host' && this.sessionRole !== 'host') {
+                  this.pushOverlay(msg.overlay);
+                }
+              } else if (msg.type === 'ai-assist-active') {
+                if (senderId === 'host' && this.sessionRole !== 'host') {
+                  this.setAiAssistVisible(msg.active);
+                }
+              }
+            } catch {}
+          });
+
+          // Connection lifecycle
+          room.on(RoomEvent.Reconnecting, () => {
+            console.log('[LiveKit] Reconnecting...');
+            this.showStatus('Connection lost -- reconnecting...', 'warning');
+          });
+          room.on(RoomEvent.Reconnected, () => {
+            console.log('[LiveKit] Reconnected');
+            this.showStatus('Reconnected to the meeting', 'success');
+          });
+          room.on(RoomEvent.Disconnected, () => {
+            console.log('[LiveKit] Disconnected from room');
+            if (this._sessionEnding) return; // expected during End Session / close
+            if (!room._orEverConnected) return; // failed connect attempt, not a live-session drop
+            this.showStatus('Disconnected from the meeting', 'error');
+            if (this.isRecording) {
+              this.stopRecording();
+            }
+            // Tear down the dead session UI instead of leaving zombie tiles
+            this.sessionEnd().catch(() => {});
+          });
+        },
+
+        // Attach the local LiveKit camera to the preview and build the local
+        // recording stream (camera + session audio mix). Shared by host + guest.
+        _attachLocalSessionMedia() {
+          const localCamPub = this._livekitRoom.localParticipant.getTrackPublication(
+            LivekitClient.Track.Source.Camera
+          );
+          if (localCamPub && localCamPub.track) {
+            const el = localCamPub.track.attach();
+            el.style.width = '100%';
+            el.style.height = '100%';
+            el.style.objectFit = 'cover';
+            el.muted = true; // Don't play own audio
+            this.elements.previewVideo.style.display = 'none';
+            this.elements.previewVideo.parentElement?.insertBefore(el, this.elements.previewVideo);
+            el.id = 'lk-local-video';
+            this.elements.previewPlaceholder.style.display = 'none';
+          }
+
+          const localMicPub = this._livekitRoom.localParticipant.getTrackPublication(
+            LivekitClient.Track.Source.Microphone
+          );
+          if (localMicPub && localMicPub.track) {
+            const mediaTrack = localMicPub.track.mediaStreamTrack;
+            if (mediaTrack) {
+              // Record through the session mix so every participant is
+              // audible in the saved file, not just the local mic.
+              const mix = this._ensureSessionAudioMix();
+              const audioTrack = (mix && mix.destination.stream.getAudioTracks()[0]) || mediaTrack;
+              this.stream = new MediaStream([audioTrack]);
+              if (localCamPub && localCamPub.track && localCamPub.track.mediaStreamTrack) {
+                this.stream.addTrack(localCamPub.track.mediaStreamTrack);
+              }
+              this.startAudioMeter(this.stream);
+            }
           }
         },
 
@@ -9676,13 +10371,9 @@
           this.sessionRole = 'host';
 
           try {
-            // 1. Derive room name from space name
+            // 1. Derive room name from the space (stable slug + id hash)
             const spaceName = spaceSelect.options[spaceSelect.selectedIndex]?.textContent || '';
-            const roomName =
-              spaceName
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, '-')
-                .replace(/^-+|-+$/g, '') || 'wiser-meeting';
+            const roomName = this._deriveRoomName({ id: spaceSelect.value, name: spaceName });
 
             // 2. Create Meeting Object
             els.hostStatus.textContent = 'Creating meeting...';
@@ -9725,175 +10416,8 @@
               dynacast: true,
             });
 
-            // Track subscriptions — per-participant container management
-            this._livekitRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-              const pName = participant.name || participant.identity;
-              const isScreenShare = publication.source === LivekitClient.Track.Source.ScreenShare;
-              console.log('[LiveKit] Track subscribed:', track.kind, isScreenShare ? '(screen share)' : '', 'from', pName);
-              const element = track.attach();
-
-              if (track.kind === 'video' && isScreenShare) {
-                this._showRemoteScreenShare(element, track.sid, pName);
-              } else if (track.kind === 'video') {
-                const container = this._ensureParticipantContainer(participant.sid, pName);
-                element.style.width = '100%';
-                element.style.height = '100%';
-                element.style.objectFit = 'cover';
-                element.dataset.trackSid = track.sid;
-                container.appendChild(element);
-                this._updateParticipantState(participant.sid, { hasVideo: true, camMuted: !!publication.isMuted });
-              } else if (track.kind === 'audio') {
-                const container = this._ensureParticipantContainer(participant.sid, pName);
-                element.dataset.trackSid = track.sid;
-                element.setAttribute('data-audio-only', '1');
-                element.style.display = 'none';
-                container.appendChild(element);
-                const playPromise = element.play();
-                if (playPromise) {
-                  playPromise
-                    .then(() => {})
-                    .catch(() => {});
-                }
-                this._updateParticipantState(participant.sid, { hasAudio: true, micMuted: !!publication.isMuted });
-              }
-              this._updateLayout();
-            });
-
-            this._livekitRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
-              const isScreenShare = publication.source === LivekitClient.Track.Source.ScreenShare;
-              track.detach().forEach((el) => el.remove());
-              if (isScreenShare) {
-                this._hideRemoteScreenShare();
-                return;
-              }
-              if (track.kind === 'video') {
-                this._updateParticipantState(participant.sid, { hasVideo: false });
-              } else if (track.kind === 'audio') {
-                this._updateParticipantState(participant.sid, { hasAudio: false });
-              }
-            });
-
-            // Mute / unmute events reflect the participant toggling their
-            // camera or mic mid-session without leaving the room. We flip
-            // the per-tile state badges + show/hide the camera-off placeholder.
-            // The host's participants-map entry is keyed by this._localParticipantSid
-            // (not the LiveKit sid), so we remap locals before dispatching.
-            const sidKey = (participant) => {
-              const lpSid = this._livekitRoom?.localParticipant?.sid;
-              return participant?.sid === lpSid ? this._localParticipantSid : participant?.sid;
-            };
-            this._livekitRoom.on(RoomEvent.TrackMuted, (publication, participant) => {
-              const sid = sidKey(participant);
-              if (!sid) return;
-              if (publication.kind === 'video' && publication.source !== LivekitClient.Track.Source.ScreenShare) {
-                this._updateParticipantState(sid, { camMuted: true });
-              } else if (publication.kind === 'audio') {
-                this._updateParticipantState(sid, { micMuted: true });
-              }
-            });
-            this._livekitRoom.on(RoomEvent.TrackUnmuted, (publication, participant) => {
-              const sid = sidKey(participant);
-              if (!sid) return;
-              if (publication.kind === 'video' && publication.source !== LivekitClient.Track.Source.ScreenShare) {
-                this._updateParticipantState(sid, { camMuted: false });
-              } else if (publication.kind === 'audio') {
-                this._updateParticipantState(sid, { micMuted: false });
-              }
-            });
-            // Expose the same helper on `this` so host toggle buttons can call it directly.
-            this._sidKey = sidKey;
-
-            // Guest presence awareness
-            this._livekitRoom.on(RoomEvent.ParticipantConnected, (participant) => {
-              const pName = participant.name || participant.identity;
-              console.log('[LiveKit] Participant connected:', pName);
-              const activity = document.getElementById('guestActivity');
-              const waitingText = document.getElementById('waitingText');
-              if (activity) {
-                activity.classList.remove('visible');
-                if (waitingText) waitingText.style.display = 'none';
-              }
-              // Enter session mode on first remote participant
-              if (!this.sessionConnected) {
-                this._enterSessionMode();
-              }
-              this._ensureParticipantContainer(participant.sid, pName);
-              this._updateLayout();
-              this.showStatus(pName + ' joined the meeting', 'success');
-
-              // Late-joiner sync: if recording is active, tell the new guest to start recording
-              if (this.isRecording) {
-                console.log('[LiveKit] Syncing recording state to late-joiner:', participant.identity);
-                this.sendSessionData(
-                  {
-                    type: 'recording-start',
-                    timestamp: this.recordingStartTime,
-                  },
-                  [participant.identity]
-                );
-              }
-            });
-
-            // Update display name when a participant sets their name after connecting
-            this._livekitRoom.on(RoomEvent.ParticipantNameChanged, (name, participant) => {
-              const entry = this._participants.get(participant.sid);
-              if (entry) {
-                entry.identity = name || participant.identity;
-                const label = entry.container.querySelector('.participant-label');
-                if (label) label.textContent = entry.identity;
-                console.log('[LiveKit] Participant renamed:', entry.identity);
-              }
-            });
-
-            this._livekitRoom.on(RoomEvent.ParticipantDisconnected, (participant) => {
-              const pName = participant.name || participant.identity;
-              console.log('[LiveKit] Participant disconnected:', pName);
-              this._removeParticipantContainer(participant.sid);
-              this._updateLayout();
-              const remoteCount = this._participants.size - 1; // exclude local
-              if (remoteCount <= 0) {
-                this.showStatus('All guests disconnected. Click End Session when ready.', 'error');
-              } else {
-                this.showStatus(`${participant.identity} left the meeting.`, 'info');
-              }
-            });
-
-            // Active speaker detection with debounce
-            this._livekitRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
-              this._handleActiveSpeakersChanged(speakers);
-            });
-
-            // Data messages (recording sync + track transfer)
-            this._livekitRoom.on(RoomEvent.DataReceived, (data, participant) => {
-              try {
-                const senderId = participant?.identity || 'unknown';
-                // Binary data = track transfer chunk from the active sender
-                if (data instanceof Uint8Array && this.transferInProgress && this._transferSenderId === senderId) {
-                  this.handleTrackTransferChunk(data.buffer);
-                  return;
-                }
-                // Text data = JSON message
-                const msg = JSON.parse(new TextDecoder().decode(data));
-                if (msg.type === 'recording-start') {
-                  console.log('[Session] Guest started recording:', senderId);
-                } else if (msg.type === 'recording-stop') {
-                  console.log('[Session] Guest stopped recording:', senderId);
-                } else if (msg.type === 'track-transfer-start') {
-                  this.handleTrackTransferStart(msg, senderId);
-                } else if (msg.type === 'track-transfer-complete') {
-                  this.handleTrackTransferComplete(senderId);
-                } else if (msg.type === 'meeting-overlay') {
-                  this.pushOverlay(msg.overlay);
-                } else if (msg.type === 'ai-assist-active') {
-                  this.setAiAssistVisible(msg.active);
-                }
-              } catch {}
-            });
-
-            this._livekitRoom.on(RoomEvent.Disconnected, () => {
-              console.log('[LiveKit] Disconnected from room');
-              this.showStatus('Disconnected from meeting server.', 'error');
-            });
+            // Room event handlers (shared with the guest join path)
+            this._registerRoomEvents(this._livekitRoom);
 
             // Connect
             await this._livekitRoom.connect(result.livekitUrl, result.hostToken);
@@ -9922,38 +10446,8 @@
             await this._livekitRoom.localParticipant.enableCameraAndMicrophone();
             els.hostStatus.textContent = '';
 
-            // Attach local video to preview element
-            const localCamPub = this._livekitRoom.localParticipant.getTrackPublication(
-              LivekitClient.Track.Source.Camera
-            );
-            if (localCamPub && localCamPub.track) {
-              const el = localCamPub.track.attach();
-              el.style.width = '100%';
-              el.style.height = '100%';
-              el.style.objectFit = 'cover';
-              el.muted = true; // Don't play own audio
-              this.elements.previewVideo.style.display = 'none';
-              this.elements.previewVideo.parentElement?.insertBefore(el, this.elements.previewVideo);
-              el.id = 'lk-local-video';
-              this.elements.previewPlaceholder.style.display = 'none';
-            }
-
-            // Attach local mic for audio metering
-            const localMicPub = this._livekitRoom.localParticipant.getTrackPublication(
-              LivekitClient.Track.Source.Microphone
-            );
-            if (localMicPub && localMicPub.track) {
-              // Create a MediaStream from the LiveKit mic track for the audio meter
-              const mediaTrack = localMicPub.track.mediaStreamTrack;
-              if (mediaTrack) {
-                this.stream = new MediaStream([mediaTrack]);
-                // Also add video track for recording
-                if (localCamPub && localCamPub.track && localCamPub.track.mediaStreamTrack) {
-                  this.stream.addTrack(localCamPub.track.mediaStreamTrack);
-                }
-                this.startAudioMeter(this.stream);
-              }
-            }
+            // Local preview + recording stream (camera + session audio mix)
+            this._attachLocalSessionMedia();
 
             // 5. Publish guest page and build join link
             els.publicJoinSection.style.display = 'block';
@@ -10017,8 +10511,10 @@
 
           if (!guestPageUrl) throw new Error('No guest page URL available');
 
-          // 3. Build the join link with ?room= param so guests land directly in this room
-          const joinUrl = guestPageUrl + '?room=' + encodeURIComponent(roomName);
+          // 3. Build the join link: ?room= lands guests in this room, #k= is
+          // the public key they verify the KV token payload against
+          const joinUrl = guestPageUrl + '?room=' + encodeURIComponent(roomName) +
+            (kvResult.joinKey ? '#k=' + kvResult.joinKey : '');
           this.publicJoinUrl = joinUrl;
           this._meetingRoomName = roomName; // Save for cleanup on session end
 
@@ -10030,7 +10526,30 @@
         // GUEST: Join is no longer done from the Electron app UI (guests use the web page).
         // Keeping a stub for the join panel in case of future in-app guest support.
         async sessionJoin() {
-          this.showStatus('Guests join via the shared link on any device', 'info');
+          const els = this.getSessionElements();
+          const rawValue = (els.joinInput?.value || '').trim();
+          if (!rawValue) {
+            els.joinInput?.focus();
+            if (els.joinStatus) els.joinStatus.textContent = 'Paste a meeting link or room name';
+            return;
+          }
+          const roomName = this._parseRoomName(rawValue);
+          if (!roomName) {
+            if (els.joinStatus) els.joinStatus.textContent = 'Invalid meeting link';
+            return;
+          }
+          if (els.joinBtn) els.joinBtn.disabled = true;
+          if (els.joinStatus) els.joinStatus.textContent = 'Connecting to ' + roomName + '...';
+          try {
+            await this._joinMeetingByName(roomName, rawValue);
+            this.showStatus('Connected to meeting: ' + roomName, 'success');
+          } catch (error) {
+            console.error('[Session] Join error:', error);
+            if (els.joinStatus) els.joinStatus.textContent = error.message || 'Failed to join';
+            this.sessionShowJoin();
+          } finally {
+            if (els.joinBtn) els.joinBtn.disabled = false;
+          }
         },
 
         // Ensure we have a local camera stream
@@ -10052,8 +10571,17 @@
 
         // Enter session mode — creates host tile, shows controls
         _enterSessionMode() {
+          // Guard against double entry (host's ParticipantConnected can race
+          // the guest path's explicit call)
+          if (this._participants.has(this._localParticipantSid)) {
+            this.sessionConnected = true;
+            return;
+          }
           console.log('[Session] Entering multi-participant session mode');
           this.sessionConnected = true;
+          // Re-show the session controls row (mute / camera / share / end),
+          // which HUD mode otherwise hides
+          document.querySelector('.main-layout')?.classList.add('session-on');
           const els = this.getSessionElements();
 
           // Hide setup panels
@@ -10272,8 +10800,8 @@
 
           container.classList.remove('layout-side-by-side', 'layout-speaker-view', 'layout-presentation');
 
-          // Presentation mode: screen share occupies top area, participants fill bottom strip
-          if (this._remoteScreenShareEl || this._sessionScreenShareActive) {
+          // Presentation mode: screen share(s) occupy top area, participants fill bottom strip
+          if (this._screenShares.size > 0 || this._sessionScreenShareActive) {
             container.classList.add('layout-presentation');
             const thumbWidth = Math.min(160, Math.floor(container.clientWidth / Math.max(count, 1)) - 8);
             const thumbGap = 6;
@@ -10344,9 +10872,12 @@
         // Apply spotlight + thumbnail positioning via inline styles
         _applySpotlightLayout() {
           let thumbIndex = 0;
-          const thumbWidth = 160;
           const thumbHeight = 130;
           const thumbGap = 8;
+          // Shrink thumbnails when they'd overflow the container width
+          const thumbCount = Math.max(1, this._participants.size - 1);
+          const containerWidth = this.elements.previewContainer.clientWidth || 800;
+          const thumbWidth = Math.min(160, Math.max(80, Math.floor(containerWidth / thumbCount) - thumbGap));
 
           this._participants.forEach((entry, sid) => {
             if (sid === this._currentSpotlightSid) {
@@ -10383,30 +10914,54 @@
           this._applySpotlightLayout();
         },
 
-        // Show a remote participant's screen share in a dedicated container
+        // Show a participant's screen share in its own container. Multiple
+        // participants can share simultaneously — shares tile side by side.
         _showRemoteScreenShare(videoElement, trackSid, participantName) {
-          this._hideRemoteScreenShare();
+          const key = trackSid || 'share-' + Math.random().toString(36).slice(2);
+          this._hideRemoteScreenShare(key); // replace a stale entry for the same track only
           const wrapper = document.createElement('div');
           wrapper.className = 'screen-share-container';
-          wrapper.id = 'remoteScreenShareContainer';
-          videoElement.dataset.trackSid = trackSid;
+          wrapper.dataset.shareSid = key;
+          videoElement.dataset.trackSid = trackSid || '';
           wrapper.appendChild(videoElement);
           const label = document.createElement('div');
           label.className = 'screen-share-label';
-          label.textContent = (participantName || 'Participant') + ' is sharing';
+          label.textContent =
+            participantName === 'You' ? 'You are sharing' : (participantName || 'Participant') + ' is sharing';
           wrapper.appendChild(label);
           this.elements.previewContainer.appendChild(wrapper);
-          this._remoteScreenShareEl = wrapper;
+          this._screenShares.set(key, wrapper);
+          this._layoutScreenShares();
           this._updateLayout();
         },
 
-        // Remove the remote screen share container
-        _hideRemoteScreenShare() {
-          if (this._remoteScreenShareEl) {
-            this._remoteScreenShareEl.remove();
-            this._remoteScreenShareEl = null;
-            this._updateLayout();
+        // Remove one share by track sid, or every share when called bare
+        _hideRemoteScreenShare(trackSid) {
+          if (trackSid === undefined) {
+            if (this._screenShares.size === 0) return;
+            this._screenShares.forEach((wrapper) => wrapper.remove());
+            this._screenShares.clear();
+          } else {
+            const wrapper = this._screenShares.get(trackSid);
+            if (!wrapper) return;
+            wrapper.remove();
+            this._screenShares.delete(trackSid);
           }
+          this._layoutScreenShares();
+          this._updateLayout();
+        },
+
+        // Tile active shares evenly across the presentation area
+        _layoutScreenShares() {
+          const count = this._screenShares.size;
+          if (count === 0) return;
+          const width = 100 / count;
+          let idx = 0;
+          this._screenShares.forEach((wrapper) => {
+            wrapper.style.width = 'calc(' + width + '% - 2px)';
+            wrapper.style.left = 'calc(' + width * idx + '% + 1px)';
+            idx++;
+          });
         },
 
         // Toggle screen share button and banner state
@@ -10452,12 +11007,23 @@
             'system': 'System',
           }[overlay.source] || overlay.source || 'AI';
 
-          el.innerHTML =
-            '<div class="meeting-overlay-content">' +
-              '<div class="meeting-overlay-source">' + sourceLabel + '</div>' +
-              '<div>' + (overlay.content || '') + '</div>' +
-            '</div>' +
-            '<button class="meeting-overlay-dismiss" onclick="app.dismissOverlay(\'' + id + '\')">&times;</button>';
+          // Build via textContent — overlay content can arrive from remote
+          // participants and must never execute as HTML
+          const content = document.createElement('div');
+          content.className = 'meeting-overlay-content';
+          const sourceEl = document.createElement('div');
+          sourceEl.className = 'meeting-overlay-source';
+          sourceEl.textContent = sourceLabel;
+          const bodyEl = document.createElement('div');
+          bodyEl.textContent = overlay.content || '';
+          content.appendChild(sourceEl);
+          content.appendChild(bodyEl);
+          const dismissBtn = document.createElement('button');
+          dismissBtn.className = 'meeting-overlay-dismiss';
+          dismissBtn.innerHTML = '&times;';
+          dismissBtn.onclick = () => this.dismissOverlay(id);
+          el.appendChild(content);
+          el.appendChild(dismissBtn);
 
           stack.appendChild(el);
 
@@ -10497,13 +11063,10 @@
 
         // Handle ActiveSpeakersChanged with debounce
         _handleActiveSpeakersChanged(speakers) {
-          // Update speaking state for all participants
-          this._participants.forEach((entry, sid) => {
-            const wasSpeaking = entry.isSpeaking;
+          // Reset speaking state; current speakers are re-marked below
+          this._participants.forEach((entry) => {
             entry.isSpeaking = false;
-            if (!wasSpeaking) {
-              entry.container.classList.remove('speaking');
-            }
+            entry.container.classList.remove('speaking');
           });
 
           // Track current speaker name for transcription attribution
@@ -10568,19 +11131,17 @@
 
             this._participants.forEach((entry, sid) => {
               if (entry.isSpeaking) {
-                // Use LiveKit's audio level if available
-                let level = 0;
+                // Use LiveKit's live audioLevel (0..1). remoteParticipants is
+                // keyed by identity, so match remote entries by sid.
+                let level = 0.3;
                 if (sid === this._localParticipantSid) {
-                  const micPub = this._livekitRoom.localParticipant?.getTrackPublication(
-                    LivekitClient.Track.Source.Microphone
-                  );
-                  level = micPub?.track?.currentBitrate ? 0.5 : 0.3;
+                  level = this._livekitRoom.localParticipant?.audioLevel || 0.3;
                 } else {
-                  const participant = this._livekitRoom.remoteParticipants?.get(sid);
-                  if (participant) {
-                    const audioPub = participant.getTrackPublication(LivekitClient.Track.Source.Microphone);
-                    level = audioPub?.track?.currentBitrate ? 0.5 : 0.3;
-                  }
+                  let participant = null;
+                  this._livekitRoom.remoteParticipants?.forEach((p) => {
+                    if (p.sid === sid) participant = p;
+                  });
+                  level = (participant && participant.audioLevel) || 0.3;
                 }
                 entry.container.style.setProperty('--audio-level', Math.min(level + 0.2, 1).toString());
               } else {
@@ -10638,6 +11199,15 @@
               this.sessionStopScreenShare();
             };
 
+            // Render our own share locally so the presenter sees what the
+            // room sees (otherwise the presentation area is a black void).
+            const localEl = document.createElement('video');
+            localEl.autoplay = true;
+            localEl.muted = true;
+            localEl.playsInline = true;
+            localEl.srcObject = new MediaStream([screenTrack]);
+            this._showRemoteScreenShare(localEl, 'local-share', 'You');
+
             this._updateScreenShareUI(true);
             this._updateLayout();
             this.showStatus('Screen sharing started', 'info');
@@ -10665,6 +11235,7 @@
           }
           this._sessionScreenShareActive = false;
           this._sessionScreenSharePending = false;
+          this._hideRemoteScreenShare('local-share');
 
           this._updateScreenShareUI(false);
           this._updateLayout();
@@ -10913,8 +11484,8 @@
           channel.onmessage = (event) => {
             // Binary data = track transfer chunk
             if (event.data instanceof ArrayBuffer) {
-              if (this.sessionRole === 'host' && this.transferTotalChunks > 0) {
-                this.handleTrackTransferChunk(event.data);
+              if (this.sessionRole === 'host' && this._transfers.has('guest-p2p')) {
+                this.handleTrackTransferChunk(event.data, 'guest-p2p');
               }
               return;
             }
@@ -10960,17 +11531,13 @@
         // PHASE 2: GUEST TRACK TRANSFER VIA DATA CHANNEL
         // ==========================================
 
-        // Track transfer state
+        // Track transfer state (per-sender state lives in this._transfers)
         transferInProgress: false,
-        _transferSenderId: null, // Identity of guest currently sending transfer
-        transferChunks: [], // Received chunks (host side)
-        transferTotalChunks: 0,
-        transferMetadata: null, // Metadata sent by guest before transfer
         hostTrackItemId: null, // Saved host track item ID
         guestTrackItemId: null, // Saved guest track item ID
 
-        // Chunk size: 16KB is safe for all WebRTC data channel implementations
-        TRANSFER_CHUNK_SIZE: 16384,
+        // Stay under LiveKit's ~15KiB reliable data-packet ceiling
+        TRANSFER_CHUNK_SIZE: 15000,
 
         /**
          * Guest sends their recording to the host via the data channel.
@@ -11039,70 +11606,71 @@
         },
 
         /**
-         * Host handles incoming track transfer from guest.
-         * Receives chunks, reassembles, and saves to Space.
+         * Host handles incoming track transfers from guests.
+         * State is keyed per sender so several guests can upload at once
+         * (they all auto-send when the host stops a recording).
          */
+        _transfers: new Map(), // senderId -> { chunks, totalChunks, metadata }
+
         handleTrackTransferStart(meta, senderId) {
           console.log('[Transfer] Receiving guest track from:', senderId, meta);
+          this._transfers.set(senderId || 'unknown', {
+            chunks: [],
+            totalChunks: meta.totalChunks,
+            metadata: { ...meta, guestIdentity: senderId },
+          });
           this.transferInProgress = true;
-          this._transferSenderId = senderId || 'unknown';
-          this.transferChunks = [];
-          this.transferTotalChunks = meta.totalChunks;
-          this.transferMetadata = { ...meta, guestIdentity: senderId };
           this.showTransferOverlay('Receiving recording from ' + (senderId || 'guest') + '...');
         },
 
-        handleTrackTransferChunk(data) {
+        handleTrackTransferChunk(data, senderId) {
           // data is an ArrayBuffer (binary chunk)
-          this.transferChunks.push(data);
-          const percent = Math.round((this.transferChunks.length / this.transferTotalChunks) * 100);
-          const receivedBytes = this.transferChunks.reduce((sum, c) => sum + c.byteLength, 0);
+          const transfer = this._transfers.get(senderId || 'unknown');
+          if (!transfer) return;
+          transfer.chunks.push(data);
+          const percent = Math.round((transfer.chunks.length / transfer.totalChunks) * 100);
+          const receivedBytes = transfer.chunks.reduce((sum, c) => sum + c.byteLength, 0);
           this.updateTransferProgress(
             percent,
-            `Receiving: ${this.formatBytes(receivedBytes)} / ${this.formatBytes(this.transferMetadata.totalBytes)}`
+            `Receiving: ${this.formatBytes(receivedBytes)} / ${this.formatBytes(transfer.metadata.totalBytes)}`
           );
         },
 
         async handleTrackTransferComplete(senderId) {
-          const guestId = senderId || this._transferSenderId || 'guest';
+          const guestId = senderId || 'guest';
+          const transfer = this._transfers.get(senderId || 'unknown');
+          if (!transfer) return;
           console.log('[Transfer] All chunks received from', guestId, '- reassembling...');
           this.updateTransferProgress(100, 'Saving recording from ' + guestId + '...');
 
           try {
             // Reassemble into a Blob
-            const guestBlob = new Blob(this.transferChunks, {
-              type: this.transferMetadata?.mimeType || 'video/webm',
+            const guestBlob = new Blob(transfer.chunks, {
+              type: transfer.metadata?.mimeType || 'video/webm',
             });
 
-            // Convert to base64 for IPC
-            const reader = new FileReader();
-            const base64Promise = new Promise((resolve, reject) => {
-              reader.onload = () => resolve(reader.result.split(',')[1]);
-              reader.onerror = reject;
-            });
-            reader.readAsDataURL(guestBlob);
-            const base64Data = await base64Promise;
+            // Binary IPC payload (no base64 inflation / string-length cap)
+            const arrayBuffer = await guestBlob.arrayBuffer();
 
             // Save via IPC — include guest identity in filename
-            const spaceId = this.elements.topSpaceSelect?.value || this.elements.saveSpace?.value;
+            const spaceId = this.elements.targetSpace?.value || this.elements.saveSpace?.value;
             const safeName = guestId.replace(/[^a-z0-9_-]/gi, '_');
             const guestFilename = `guest_${safeName}_${this.sessionCode || 'meeting'}_${Date.now()}.webm`;
 
             const result = await window.recorder.saveGuestTrack({
-              blob: base64Data,
+              blob: new Uint8Array(arrayBuffer),
               filename: guestFilename,
               spaceId: spaceId,
               metadata: {
                 guestIdentity: guestId,
-                duration: this.transferMetadata?.duration || 0,
-                sessionCode: this.transferMetadata?.sessionCode || this.sessionCode,
-                recordedAt: this.transferMetadata?.recordedAt || new Date().toISOString(),
+                duration: transfer.metadata?.duration || 0,
+                sessionCode: transfer.metadata?.sessionCode || this.sessionCode,
+                recordedAt: transfer.metadata?.recordedAt || new Date().toISOString(),
               },
             });
 
             if (result.success) {
               this.guestTrackItemId = result.itemId;
-              this.hideTransferOverlay();
               this.showStatus('Recording from ' + guestId + ' saved', 'success');
 
               // If host's track was also saved, offer merge
@@ -11114,16 +11682,15 @@
             }
           } catch (err) {
             console.error('[Transfer] Save guest track failed:', err);
-            this.hideTransferOverlay();
             this.showStatus('Failed to save guest track: ' + err.message, 'error');
           }
 
-          // Clean up — ready for next guest's transfer
-          this.transferChunks = [];
-          this.transferTotalChunks = 0;
-          this.transferMetadata = null;
-          this.transferInProgress = false;
-          this._transferSenderId = null;
+          // Clean up this sender; keep the overlay while others still upload
+          this._transfers.delete(senderId || 'unknown');
+          if (this._transfers.size === 0) {
+            this.transferInProgress = false;
+            this.hideTransferOverlay();
+          }
         },
 
         // Transfer overlay helpers
@@ -11186,7 +11753,7 @@
           }
 
           const layout = document.querySelector('input[name="mergeLayout"]:checked')?.value || 'side-by-side';
-          const spaceId = this.elements.topSpaceSelect?.value || this.elements.saveSpace?.value;
+          const spaceId = this.elements.targetSpace?.value || this.elements.saveSpace?.value;
 
           if (!spaceId) {
             this.showStatus('Please select a space first', 'error');
@@ -11282,6 +11849,14 @@
 
         // End an active session
         async sessionEnd() {
+          if (this._sessionEnding) return;
+          this._sessionEnding = true;
+
+          // A recording in flight would silently capture dead tracks
+          if (this.isRecording) {
+            this.stopRecording();
+          }
+
           const els = this.getSessionElements();
 
           // Stop audio glow animation and clean up background processor
@@ -11296,13 +11871,14 @@
             if (this.elements.audioMeter && hostEntry.container.contains(this.elements.audioMeter)) {
               this.elements.previewContainer.appendChild(this.elements.audioMeter);
             }
-            // Move preview video back
-            const lkVideo = document.getElementById('lk-local-video');
-            if (lkVideo) {
-              this.elements.previewContainer.prepend(lkVideo);
-            } else {
+            // Restore the camera preview. The LiveKit-attached element's
+            // track dies with the room, so drop it instead of leaving a
+            // frozen-frame video squeezed next to previewVideo.
+            document.getElementById('lk-local-video')?.remove();
+            if (this.elements.previewVideo.parentElement !== this.elements.previewContainer) {
               this.elements.previewContainer.prepend(this.elements.previewVideo);
             }
+            this.elements.previewVideo.style.display = 'block';
           }
 
           // Remove ALL participant containers
@@ -11350,16 +11926,18 @@
             });
           }
 
-          // Clear meeting tokens from KV so guests can't join after session ends
-          if (this._meetingRoomName) {
+          // Clear meeting tokens from KV so guests can't join after the
+          // session ends. Hosts only — a guest leaving must not kill the
+          // host's still-running meeting.
+          if (this._meetingRoomName && this.sessionRole === 'host') {
             try {
-              const clearResult = await window.recorder.clearMeetingTokens(this._meetingRoomName);
+              await window.recorder.clearMeetingTokens(this._meetingRoomName);
               console.log('[Session] Meeting tokens cleared for room:', this._meetingRoomName);
             } catch (err) {
               console.warn('[Session] Failed to clear meeting tokens:', err);
             }
-            this._meetingRoomName = null;
           }
+          this._meetingRoomName = null;
 
           // Clean up WebRTC and signaling
           await this.sessionCleanup();
@@ -11370,8 +11948,10 @@
           }
 
           // Switch back to camera mode
+          document.querySelector('.main-layout')?.classList.remove('session-on');
           this.switchMode('camera');
           this.showStatus('Session ended', 'info');
+          this._sessionEnding = false;
         },
 
         async _offerSaveAsTemplate(meeting) {
@@ -11434,6 +12014,8 @@
           this.sessionConnected = false;
           this.sessionRole = null;
           this._currentSpeakerName = null;
+          this._closeSessionAudioMix();
+          document.querySelector('.main-layout')?.classList.remove('session-on');
 
           // Stop screen share if active
           if (this._sessionScreenShareTrack) {
@@ -11453,10 +12035,7 @@
 
           // Reset track transfer state
           this.transferInProgress = false;
-          this._transferSenderId = null;
-          this.transferChunks = [];
-          this.transferTotalChunks = 0;
-          this.transferMetadata = null;
+          this._transfers.clear();
           this.hostTrackItemId = null;
           this.guestTrackItemId = null;
 
@@ -11514,7 +12093,18 @@
           if (pubSection) pubSection.style.display = 'none';
         },
 
-        close() {
+        async close() {
+          // Flush an active recording before tearing anything down
+          if (this.isRecording) {
+            this.showStatus('Finishing recording before closing...', 'warning');
+            this.stopRecording();
+          }
+          if (this._autoSavePromise) {
+            try {
+              await this._autoSavePromise;
+            } catch {}
+          }
+          this._stopTranscriptSync?.();
           this.stopAudioMeter();
           this.sessionCleanup().catch(() => {});
           if (this.stream) {

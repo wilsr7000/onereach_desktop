@@ -9,7 +9,7 @@
  * - Direct save to Space/Project
  */
 
-const { BrowserWindow, ipcMain, systemPreferences, app, desktopCapturer } = require('electron');
+const { BrowserWindow, ipcMain, systemPreferences, app, desktopCapturer, webContents } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const getLogger = require('./event-logger');
@@ -101,6 +101,45 @@ function reconcileGsxAccount({ settings, fileSync, warn } = {}) {
   return { ok: true, accountId: urlAccountId, reconciled, refreshUrl };
 }
 
+// GSX KeyValue collection that holds joinable meeting-token payloads.
+const KV_COLLECTION = 'wiser:meeting:tokens';
+
+// Room names are derived from space names and embedded in KV keys; keep
+// them to a strict slug so they can't smuggle query/path syntax into the
+// KV endpoint.
+const ROOM_NAME_RE = /^[a-z0-9][a-z0-9-]{0,99}$/;
+
+// Sanitize a renderer-supplied filename: strip any directory components,
+// then restrict to a safe charset (dots survive, so extensions stay
+// intact). Returns '' when nothing usable remains so callers can apply
+// their own fallback name.
+function sanitizeFilename(name) {
+  const base = path.basename(String(name || ''));
+  const safe = base.replace(/[^a-zA-Z0-9._-]/g, '_');
+  if (!safe || /^\.+$/.test(safe)) return '';
+  return safe;
+}
+
+// Normalize a renderer-supplied recording payload to a Buffer. Binary
+// payloads (ArrayBuffer/TypedArray) arrive intact over structured-clone
+// IPC and avoid base64's 33% inflation; legacy callers still send base64
+// strings.
+function payloadToBuffer(blob) {
+  if (Buffer.isBuffer(blob)) return blob;
+  if (blob instanceof ArrayBuffer) return Buffer.from(blob);
+  if (ArrayBuffer.isView(blob)) return Buffer.from(blob.buffer, blob.byteOffset, blob.byteLength);
+  return Buffer.from(blob, 'base64');
+}
+
+// Format a seconds offset as hh:mm:ss for transcript timecodes.
+function formatTimecode(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hh = String(Math.floor(total / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+  const ss = String(total % 60).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
 class Recorder {
   constructor() {
     this.window = null;
@@ -108,6 +147,10 @@ class Recorder {
     this.targetSpace = null;
     this.targetProject = null;
     this.ipcHandlersRegistered = false;
+    this._pendingScreenSourceId = null;
+    // Room names whose tokens are currently stored in GSX KV; cleaned up
+    // on clear-meeting-tokens and (best-effort) on app quit.
+    this._activeKvRooms = new Set();
   }
 
   /**
@@ -123,11 +166,22 @@ class Recorder {
 
     if (this.window) {
       this.window.focus();
+      // A relaunch can re-target the existing window to a new space/project
+      if (options.spaceId) this.targetSpace = options.spaceId;
+      if (options.projectId) this.targetProject = options.projectId;
       if (options.instructions) {
         this.instructions = options;
+      }
+      if (options.instructions || options.spaceId || options.projectId) {
+        // Same channel/shape as the did-finish-load delivery below, so the
+        // renderer can update its target space without a reload.
         this.window.webContents.send('recorder:instructions', options);
       }
-      logger.logFeatureUsed('recorder', { action: 'focus-existing' });
+      logger.logFeatureUsed('recorder', {
+        action: 'focus-existing',
+        targetSpace: options.spaceId || null,
+        targetProject: options.projectId || null,
+      });
       return this.window;
     }
 
@@ -184,10 +238,20 @@ class Recorder {
     this.window.webContents.session.setDisplayMediaRequestHandler(async (request, callback) => {
       try {
         const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
-        const video = this._pendingScreenSourceId
-          ? (sources.find((s) => s.id === this._pendingScreenSourceId) || sources[0])
-          : sources[0];
-        this._pendingScreenSourceId = null;
+        let video;
+        if (this._pendingScreenSourceId) {
+          video = sources.find((s) => s.id === this._pendingScreenSourceId) || sources[0];
+          this._pendingScreenSourceId = null;
+        } else if (this._isRecorderRequest(request)) {
+          // No source was picked: only the recorder window itself may fall
+          // back to the primary screen (its own share flows rely on it).
+          // The handler lives on the shared default session, so any other
+          // window's request without an explicit source is denied.
+          video = sources[0];
+        } else {
+          callback({});
+          return;
+        }
         if (!video) {
           callback({});
           return;
@@ -229,8 +293,23 @@ class Recorder {
    * Close the recorder window
    */
   close() {
-    if (this.window) {
+    if (this.window && !this.window.isDestroyed()) {
       this.window.close();
+    }
+  }
+
+  /**
+   * True when a display-media request originates from the recorder window
+   * itself. The request handler is registered on the shared default
+   * session, so other windows' getDisplayMedia() calls can land in it too.
+   */
+  _isRecorderRequest(request) {
+    if (!this.window || this.window.isDestroyed()) return false;
+    try {
+      const requester = request && request.frame ? webContents.fromFrame(request.frame) : null;
+      return !!requester && requester.id === this.window.webContents.id;
+    } catch {
+      return false;
     }
   }
 
@@ -293,8 +372,14 @@ class Recorder {
           return { success: false, error: 'Clipboard manager not available. Try again in a moment.' };
         }
 
-        const buffer = Buffer.from(blob, 'base64');
-        const finalFilename = filename || `recording_${Date.now()}.webm`;
+        const buffer = payloadToBuffer(blob);
+        if (!buffer || buffer.length < 256) {
+          return {
+            success: false,
+            error: 'Recording was empty (no audio or video captured). Check camera/mic permissions and that no other app is using them.',
+          };
+        }
+        const finalFilename = sanitizeFilename(filename) || `recording_${Date.now()}.webm`;
 
         // Write to a temp file first (storage.addItem copies from filePath)
         const tempDir = path.join(app.getPath('temp'), 'gsx-recordings');
@@ -625,7 +710,10 @@ class Recorder {
         });
 
         const meetings = (items || [])
-          .map(item => ({ ...fromSpaceItem(item), _itemId: item.id }))
+          .map(item => {
+            const meeting = fromSpaceItem(item);
+            return meeting ? { ...meeting, _itemId: item.id } : null;
+          })
           .filter(Boolean);
 
         return { success: true, meetings };
@@ -702,11 +790,15 @@ class Recorder {
                 if (m?.templateId) pastTemplateIds.push(m.templateId);
                 if (m?.contacts) {
                   for (const c of m.contacts) {
-                    if (c.email && !pastAttendees.some(a => a.email === c.email)) {
+                    if (!c.email) continue;
+                    const existing = pastAttendees.find(a => a.email === c.email);
+                    if (existing) {
+                      existing.meetingCount += 1;
+                    } else {
                       pastAttendees.push({
                         email: c.email,
                         displayName: c.displayName || c.email,
-                        meetingCount: (pastAttendees.find(a => a.email === c.email)?.meetingCount || 0) + 1,
+                        meetingCount: 1,
                       });
                     }
                   }
@@ -905,32 +997,21 @@ Respond with JSON:
     // Get OpenAI API key for live transcription
     ipcMain.handle('recorder:get-openai-key', async () => {
       try {
-        // #region agent log
-        const _dbgHasSettings = !!global.settingsManager;
-        const _dbgAllKeys = _dbgHasSettings ? Object.keys(global.settingsManager.settings || {}).filter(k => k.toLowerCase().includes('key') || k.toLowerCase().includes('provider')) : [];
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:IPC-handler-entry',message:'recorder:get-openai-key handler called',data:{hasSettingsManager:_dbgHasSettings,settingsKeyNames:_dbgAllKeys},timestamp:Date.now(),hypothesisId:'A,D'})}).catch(()=>{});
-        // #endregion
         if (global.settingsManager) {
           const openaiKey = global.settingsManager.get('openaiApiKey');
           if (openaiKey) return { success: true, key: openaiKey };
 
           const llmKey = global.settingsManager.get('llmApiKey');
           const provider = global.settingsManager.get('llmProvider');
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:llmKey-fallback',message:'llmApiKey fallback check',data:{hasLlmKey:!!llmKey,llmKeyLength:llmKey?llmKey.length:0,llmKeyPrefix:llmKey?llmKey.substring(0,7):'(empty)',provider:provider,providerCheck:llmKey?{noProvider:!provider,isOpenai:provider==='openai',startsSk:llmKey.startsWith('sk-')}:null},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
-          // #endregion
-          if (llmKey && (!provider || provider === 'openai' || llmKey.startsWith('sk-'))) {
+          // Only fall back to the generic LLM key when it plausibly belongs
+          // to OpenAI: provider unset or 'openai', and not an Anthropic
+          // 'sk-ant-' key (which also starts with 'sk-').
+          if (llmKey && (!provider || provider === 'openai') && !llmKey.startsWith('sk-ant-')) {
             return { success: true, key: llmKey };
           }
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:no-key-found',message:'No OpenAI key found - returning failure',data:{hadSettingsManager:!!global.settingsManager},timestamp:Date.now(),hypothesisId:'A,B,C'})}).catch(()=>{});
-        // #endregion
         return { success: false, error: 'No OpenAI API key configured' };
       } catch (error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/54746cc5-c924-4bb5-9e76-3f6b729e6870',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d1d0a7'},body:JSON.stringify({sessionId:'d1d0a7',location:'recorder.js:catch-error',message:'Exception in get-openai-key handler',data:{error:error.message,stack:error.stack?.substring(0,300)},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         return { success: false, error: error.message };
       }
     });
@@ -938,6 +1019,7 @@ Respond with JSON:
     // Trigger diarized transcription on a saved recording item
     // Uses the same ElevenLabs Scribe service as the clipboard manager
     ipcMain.handle('recorder:transcribe-item', async (event, itemId) => {
+      let tempAudioPath = null;
       try {
         const clipboardManager = getClipboardManager();
         if (!clipboardManager) {
@@ -971,7 +1053,6 @@ Respond with JSON:
         const isVideo = videoFormats.includes(fileExt);
 
         let transcribePath = audioPath;
-        let tempAudioPath = null;
 
         if (isVideo) {
           try {
@@ -1011,7 +1092,6 @@ Respond with JSON:
 
         const isAvailable = await service.isAvailable();
         if (!isAvailable) {
-          if (tempAudioPath && fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
           return { success: false, error: 'ElevenLabs API key not configured' };
         }
 
@@ -1019,15 +1099,6 @@ Respond with JSON:
           language: null,
           diarize: true,
         });
-
-        // Cleanup temp
-        if (tempAudioPath && fs.existsSync(tempAudioPath)) {
-          try {
-            fs.unlinkSync(tempAudioPath);
-          } catch (_ignored) {
-            /* cleanup temp, already closed ok */
-          }
-        }
 
         if (!result || !result.text) {
           return { success: false, error: 'Transcription returned no text' };
@@ -1047,7 +1118,8 @@ Respond with JSON:
           result.words.forEach((w) => {
             if (w.speaker && w.speaker !== currentSpeaker) {
               currentSpeaker = w.speaker;
-              formattedText += `\n[${currentSpeaker}] `;
+              // Timecode each speaker turn from its first word's start (seconds)
+              formattedText += `\n[${formatTimecode(w.start)}] [${currentSpeaker}] `;
             }
             formattedText += w.text + ' ';
           });
@@ -1070,6 +1142,15 @@ Respond with JSON:
       } catch (error) {
         log.error('recorder', 'Transcription failed', { error: error.message || error });
         return { success: false, error: error.message };
+      } finally {
+        // Extracted-audio temp file must be removed on every exit path
+        if (tempAudioPath && fs.existsSync(tempAudioPath)) {
+          try {
+            fs.unlinkSync(tempAudioPath);
+          } catch (_ignored) {
+            /* best-effort temp cleanup */
+          }
+        }
       }
     });
 
@@ -1081,7 +1162,7 @@ Respond with JSON:
 
     // Minimize recorder
     ipcMain.handle('recorder:minimize', () => {
-      if (this.window) {
+      if (this.window && !this.window.isDestroyed()) {
         this.window.minimize();
       }
       return { success: true };
@@ -1130,14 +1211,29 @@ Respond with JSON:
     // GUEST PAGE (one-time publish to GSX Files)
     // ==========================================
 
-    // Get the stored guest page URL (if already published AND version matches)
+    // Get the stored guest page URL (if already published AND version matches
+    // AND it was published to the currently signed-in GSX account)
     ipcMain.handle('recorder:get-guest-page-url', async () => {
       try {
         const { GUEST_PAGE_VERSION } = require('./lib/capture-guest-page');
         const url = global.settingsManager?.get('captureGuestPageUrl') || '';
         const storedVersion = global.settingsManager?.get('captureGuestPageVersion') || 0;
         if (url && storedVersion >= GUEST_PAGE_VERSION) {
-          return { success: true, url };
+          // The published URL embeds the owning account id
+          // (.../public/{accountId}/capture/join.html). If the signed-in
+          // GSX account changed since publish, force a re-publish instead
+          // of handing out another account's page.
+          const currentAccountId = accountIdFromRefreshUrl(global.settingsManager?.get('gsxRefreshUrl'));
+          const urlMatch = url.match(/\/public\/([^/]+)\//);
+          const urlAccountId = urlMatch ? urlMatch[1] : '';
+          if (currentAccountId && urlAccountId === currentAccountId) {
+            return { success: true, url };
+          }
+          log.warn('recorder', 'Cached guest page URL belongs to a different account; forcing re-publish', {
+            urlAccountId,
+            currentAccountId,
+          });
+          return { success: false, url: '' };
         }
         // Version mismatch or no URL — force re-publish
         return { success: false, url: '' };
@@ -1231,21 +1327,54 @@ Respond with JSON:
     });
 
     // Store meeting tokens in GSX KeyValue so the guest page can fetch them by room name.
-    // Key: wiser-room:{roomName}  Value: { tokens: [...], livekitUrl: "wss://..." }
+    // Key: wiser-room:{roomName}  Value: { v: 2, payload: "<json>", sig: "<b64url>" }
     // Writes to the authenticated user's own KV store -- no hardcoded fallback account.
-    ipcMain.handle('recorder:store-meeting-tokens', async (event, { roomName, guestTokens, livekitUrl }) => {
-      const KV_COLLECTION = 'wiser:meeting:tokens';
-
+    //
+    // The KV endpoint accepts unauthenticated writes, so the stored value is
+    // signed with the install's ECDSA keypair; the guest page only trusts
+    // payloads that verify against the public key carried in the join link
+    // (#k=...). An attacker overwriting the KV entry can deny a join, but
+    // can no longer redirect guests' camera/mic streams to their own SFU.
+    ipcMain.handle('recorder:store-meeting-tokens', async (event, { roomName, guestTokens, livekitUrl } = {}) => {
       try {
-        const settings = global.settingsManager;
-        const refreshUrl = settings?.get('gsxRefreshUrl');
-        if (!refreshUrl) {
-          const msg = 'GSX account not configured. Sign in to GSX in Settings to host a WISER Meeting.';
-          log.warn('recorder', 'Store meeting tokens aborted: GSX not configured');
-          return { success: false, error: msg };
+        if (typeof roomName !== 'string' || !ROOM_NAME_RE.test(roomName)) {
+          return { success: false, error: 'Invalid room name.' };
         }
-        const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
+        if (
+          !Array.isArray(guestTokens) ||
+          guestTokens.length === 0 ||
+          !guestTokens.every((t) => typeof t === 'string' && t.length > 0)
+        ) {
+          return { success: false, error: 'Guest tokens must be a non-empty array of strings.' };
+        }
+        if (typeof livekitUrl !== 'string' || !/^wss:\/\//.test(livekitUrl)) {
+          return { success: false, error: 'livekitUrl must be a wss:// URL.' };
+        }
+
+        const reconcile = reconcileGsxAccount({
+          settings: global.settingsManager,
+          fileSync: global.gsxFileSync,
+          warn: (msg, meta) => log.warn('recorder', msg, meta),
+        });
+        if (!reconcile.ok) {
+          log.warn('recorder', 'Store meeting tokens aborted', { reason: reconcile.reason });
+          return { success: false, error: reconcile.error };
+        }
+        const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue');
         const key = `wiser-room:${roomName}`;
+
+        const linkKeys = require('./lib/meeting-link-keys');
+        const payload = JSON.stringify({
+          v: 2,
+          roomName,
+          tokens: guestTokens,
+          livekitUrl,
+          issuedAt: Date.now(),
+          // Guest page must refuse rooms whose host is long gone
+          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        });
+        const sig = await linkKeys.signPayload(payload);
+        const joinKey = await linkKeys.getPublicKeyB64u();
 
         const resp = await fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
           method: 'PUT',
@@ -1253,14 +1382,28 @@ Respond with JSON:
           body: JSON.stringify({
             id: KV_COLLECTION,
             key,
-            itemValue: JSON.stringify({ tokens: guestTokens, livekitUrl }),
+            itemValue: JSON.stringify({ v: 2, payload, sig }),
           }),
         });
         if (!resp.ok) throw new Error(`KV PUT failed: ${resp.status}`);
-        log.info('recorder', 'Meeting tokens stored in KV', { roomName, tokenCount: guestTokens.length });
-        return { success: true };
+        this._activeKvRooms.add(roomName);
+        log.info('recorder', 'Meeting tokens stored in KV (signed)', { roomName, tokenCount: guestTokens.length });
+        return { success: true, joinKey };
       } catch (error) {
         log.error('recorder', 'Failed to store meeting tokens', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+
+    // Public half of the install's payload-signing keypair, appended to
+    // join links as #k=... so the guest page can verify KV payloads.
+    // Safe to hand out: holders can verify payloads, never forge them.
+    ipcMain.handle('recorder:get-meeting-link-key', async () => {
+      try {
+        const joinKey = await require('./lib/meeting-link-keys').getPublicKeyB64u();
+        return { success: true, joinKey };
+      } catch (error) {
+        log.error('recorder', 'Failed to get meeting link key', { error: error.message });
         return { success: false, error: error.message };
       }
     });
@@ -1268,21 +1411,27 @@ Respond with JSON:
     // Clear meeting tokens from KV when host ends meeting.
     // Uses the authenticated user's own KV store -- no hardcoded fallback account.
     ipcMain.handle('recorder:clear-meeting-tokens', async (event, roomName) => {
-      const KV_COLLECTION = 'wiser:meeting:tokens';
-
       try {
-        const settings = global.settingsManager;
-        const refreshUrl = settings?.get('gsxRefreshUrl');
-        if (!refreshUrl) {
-          log.warn('recorder', 'Clear meeting tokens aborted: GSX not configured', { roomName });
-          return { success: false, error: 'GSX account not configured.' };
+        if (typeof roomName !== 'string' || !ROOM_NAME_RE.test(roomName)) {
+          return { success: false, error: 'Invalid room name.' };
         }
-        const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
+
+        const reconcile = reconcileGsxAccount({
+          settings: global.settingsManager,
+          fileSync: global.gsxFileSync,
+          warn: (msg, meta) => log.warn('recorder', msg, meta),
+        });
+        if (!reconcile.ok) {
+          log.warn('recorder', 'Clear meeting tokens aborted', { roomName, reason: reconcile.reason });
+          return { success: false, error: reconcile.error };
+        }
+        const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue');
         const key = `wiser-room:${roomName}`;
 
         const resp = await fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
           method: 'DELETE',
         });
+        this._activeKvRooms.delete(roomName);
         const respStatus = resp.status;
         let _respBody = '';
         try {
@@ -1297,6 +1446,23 @@ Respond with JSON:
         log.error('recorder', 'Failed to clear meeting tokens', { error: error.message });
         return { success: false, error: error.message };
       }
+    });
+
+    // Best-effort KV cleanup on quit so meetings ended by quitting the app
+    // don't linger as joinable zombies. Fire-and-forget: quit is not
+    // blocked on the DELETE round-trips.
+    app.on('before-quit', () => {
+      if (!this._activeKvRooms || this._activeKvRooms.size === 0) return;
+      const refreshUrl = global.settingsManager?.get('gsxRefreshUrl');
+      if (!refreshUrl) return;
+      const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
+      for (const roomName of this._activeKvRooms) {
+        const key = `wiser-room:${roomName}`;
+        fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
+          method: 'DELETE',
+        }).catch(() => {});
+      }
+      this._activeKvRooms.clear();
     });
 
     // ==========================================
@@ -1317,8 +1483,8 @@ Respond with JSON:
           return { success: false, error: 'Clipboard manager not available.' };
         }
 
-        const buffer = Buffer.from(blob, 'base64');
-        const finalFilename = filename || `guest_recording_${Date.now()}.webm`;
+        const buffer = payloadToBuffer(blob);
+        const finalFilename = sanitizeFilename(filename) || `guest_recording_${Date.now()}.webm`;
 
         // Write to a temp file first
         const tempDir = path.join(app.getPath('temp'), 'gsx-recordings');
@@ -1396,6 +1562,7 @@ Respond with JSON:
 
     // Merge two tracks into one video with layout options
     ipcMain.handle('recorder:merge-tracks', async (event, data) => {
+      let outputPath = null;
       try {
         const { hostItemId, guestItemId, spaceId, layout, outputFilename } = data;
         // layout: 'side-by-side' | 'pip-host' | 'pip-guest' | 'speaker-view'
@@ -1458,8 +1625,22 @@ Respond with JSON:
         const guestW = guestVideo.width || 1280;
         const guestH = guestVideo.height || 720;
 
+        // amix requires every mapped input to actually carry audio; tracks
+        // recorded without a mic (or screen-only captures) often have none.
+        // both -> amix, one -> pass that stream through, none -> video only.
+        const hostHasAudio = hostInfo.streams.some((s) => s.codec_type === 'audio');
+        const guestHasAudio = guestInfo.streams.some((s) => s.codec_type === 'audio');
+        let audioFilter = null;
+        if (hostHasAudio && guestHasAudio) {
+          audioFilter = '[0:a][1:a]amix=inputs=2:duration=longest[outa]';
+        } else if (hostHasAudio) {
+          audioFilter = '[0:a]anull[outa]';
+        } else if (guestHasAudio) {
+          audioFilter = '[1:a]anull[outa]';
+        }
+
         // Build FFmpeg filter based on layout
-        let filterComplex = '';
+        let filterParts = [];
         let outputW, outputH;
 
         switch (layout) {
@@ -1470,12 +1651,11 @@ Respond with JSON:
             const scaledGuestW = Math.round((guestW * targetH) / guestH);
             outputW = scaledHostW + scaledGuestW;
             outputH = targetH;
-            filterComplex = [
+            filterParts = [
               `[0:v]scale=${scaledHostW}:${targetH}[host]`,
               `[1:v]scale=${scaledGuestW}:${targetH}[guest]`,
               `[host][guest]hstack=inputs=2[outv]`,
-              `[0:a][1:a]amix=inputs=2:duration=longest[outa]`,
-            ].join(';');
+            ];
             break;
           }
 
@@ -1487,12 +1667,11 @@ Respond with JSON:
             const pipH = 240;
             const pipX = outputW - pipW - 20;
             const pipY = outputH - pipH - 20;
-            filterComplex = [
+            filterParts = [
               `[1:v]scale=${outputW}:${outputH}[bg]`,
               `[0:v]scale=${pipW}:${pipH}[pip]`,
               `[bg][pip]overlay=${pipX}:${pipY}[outv]`,
-              `[0:a][1:a]amix=inputs=2:duration=longest[outa]`,
-            ].join(';');
+            ];
             break;
           }
 
@@ -1504,12 +1683,11 @@ Respond with JSON:
             const pipH = 240;
             const pipX = outputW - pipW - 20;
             const pipY = outputH - pipH - 20;
-            filterComplex = [
+            filterParts = [
               `[0:v]scale=${outputW}:${outputH}[bg]`,
               `[1:v]scale=${pipW}:${pipH}[pip]`,
               `[bg][pip]overlay=${pipX}:${pipY}[outv]`,
-              `[0:a][1:a]amix=inputs=2:duration=longest[outa]`,
-            ].join(';');
+            ];
             break;
           }
 
@@ -1521,21 +1699,25 @@ Respond with JSON:
             const scaledGuestW = Math.round((guestW * targetH) / guestH);
             outputW = scaledHostW + scaledGuestW;
             outputH = targetH;
-            filterComplex = [
+            filterParts = [
               `[0:v]scale=${scaledHostW}:${targetH}[host]`,
               `[1:v]scale=${scaledGuestW}:${targetH}[guest]`,
               `[host][guest]hstack=inputs=2[outv]`,
-              `[0:a][1:a]amix=inputs=2:duration=longest[outa]`,
-            ].join(';');
+            ];
             break;
           }
         }
 
+        if (audioFilter) filterParts.push(audioFilter);
+        const filterComplex = filterParts.join(';');
+        const outputLabels = audioFilter ? ['outv', 'outa'] : ['outv'];
+
         // Output to temp file
         const tempDir = path.join(app.getPath('temp'), 'gsx-recordings');
         if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-        const mergeFilename = outputFilename || `merged_${layout}_${Date.now()}.mp4`;
-        const outputPath = path.join(tempDir, mergeFilename);
+        const mergeFilename =
+          sanitizeFilename(outputFilename || `merged_${layout}_${Date.now()}.mp4`) || `merged_${Date.now()}.mp4`;
+        outputPath = path.join(tempDir, mergeFilename);
 
         sendProgress(20, 'Merging tracks...');
 
@@ -1544,7 +1726,7 @@ Respond with JSON:
           const cmd = ffmpeg()
             .input(hostPath)
             .input(guestPath)
-            .complexFilter(filterComplex, ['outv', 'outa'])
+            .complexFilter(filterComplex, outputLabels)
             .outputOptions([
               '-c:v',
               'libx264',
@@ -1620,6 +1802,12 @@ Respond with JSON:
         };
       } catch (error) {
         log.error('recorder', 'Track merge failed', { error: error.message });
+        // Don't leave a partial output file behind on FFmpeg failure
+        try {
+          if (outputPath && fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        } catch {
+          /* no-op */
+        }
         if (this.window && !this.window.isDestroyed()) {
           this.window.webContents.send('recorder:merge-progress', {
             percent: 0,

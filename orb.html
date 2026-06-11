@@ -4362,7 +4362,9 @@
           if (event.type !== 'ambient_attention') return;
           const items = S.get('ambientItems') || [];
           items.push({ label: event.label || '', detail: event.detail || '', ts: Date.now() });
-          S.set('ambientItems', items);
+          // Cap the queue so an always-on orb doesn't accumulate unbounded
+          // attention items across a long-running session.
+          S.set('ambientItems', items.slice(-50));
           if (S.phase === 'idle') {
             S.transition('ambient', 'attention-' + (event.source || 'system'));
           } else if (S.isAmbient) {
@@ -4431,7 +4433,10 @@
 
         interactiveRoots.forEach((el) => {
           el.addEventListener('mouseenter', () => { hoveredCount++; syncClickThrough(); });
-          el.addEventListener('mouseleave', () => { hoveredCount--; syncClickThrough(); });
+          // Clamp at 0: a mouseleave can fire without a matching mouseenter
+          // (element hidden/removed under the cursor), and a negative count
+          // would swallow the next mouseenter and leave the orb click-through.
+          el.addEventListener('mouseleave', () => { hoveredCount = Math.max(0, hoveredCount - 1); syncClickThrough(); });
         });
 
         console.log(`[Orb] Click-through enabled for ${interactiveRoots.length} interactive regions`);

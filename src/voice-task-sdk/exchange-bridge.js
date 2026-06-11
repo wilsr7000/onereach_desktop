@@ -494,7 +494,7 @@ Return JSON:
  * @param {Object}  result  - The agent execution result (must have .needsInput)
  * @param {string}  agentId - The agent that produced the result
  * @param {string}  taskId  - The task ID that was being executed
- * @param {Object}  [opts]  - Extra fields to forward to HUD (html, data)
+ * @param {Object}  [opts]  - Extra fields to forward to HUD (html, data, ui)
  */
 async function handleNeedsInput(result, agentId, taskId, opts = {}) {
   const ts = getTranscriptService();
@@ -523,6 +523,7 @@ async function handleNeedsInput(result, agentId, taskId, opts = {}) {
       needsInput: true,
       html: opts.html || result.html,
       data: opts.data || result.data,
+      ui: opts.ui || result.ui,
       agentId: pendingAgentId,
       agentName: pendingAgentId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
       pendingContext: { agents: [pendingAgentId] },
@@ -918,6 +919,11 @@ const DEFAULT_EXCHANGE_CONFIG = {
     executionTimeoutMs: 120000, // Generous base (agents manage their own via ack/heartbeat)
     ackTimeoutMs: 10000, // Agent must ack in 10s or it's dead
     heartbeatExtensionMs: 30000, // Each heartbeat grants 30s more
+    // Below this, no agent wins: the auction halts ('no_confident_bids') and
+    // the halt handler offers alternatives (rephrase or build a new agent)
+    // instead of executing a low-confidence guess. Matches the 0.5 winner
+    // bar unified-bidder.selectWinner uses on the non-exchange path.
+    minWinnerConfidence: 0.5,
   },
 
   marketMaker: {
@@ -2959,14 +2965,32 @@ function setupExchangeEvents() {
   });
 
   // No bids received - task halted - try LLM-based disambiguation
-  exchangeInstance.on('exchange:halt', async ({ task, reason }) => {
+  exchangeInstance.on('exchange:halt', async ({ task, reason, bids }) => {
     log.warn('voice', 'Exchange halted', { data: reason });
+
+    // Near-miss bids ride along on 'no_confident_bids' halts (confidence
+    // floor). Surface them in logs and feed them to the gap classification
+    // so it knows what *almost* matched.
+    const nearMisses = Array.isArray(bids)
+      ? bids.slice(0, 3).map((b) => ({ agentId: b.agentId, confidence: b.confidence }))
+      : [];
+    if (nearMisses.length > 0) {
+      log.info('voice', 'Halt near-miss bids', {
+        bids: nearMisses.map((b) => `${b.agentId}:${(b.confidence ?? 0).toFixed(2)}`).join(', '),
+      });
+    }
 
     // Always emit halt lifecycle so tools know the auction failed
     hudApi.emitLifecycle({ type: 'exchange:halt', taskId: task.id, reason });
 
-    // Safety net: ensure a result is ALWAYS emitted even if disambiguation crashes
+    // Safety net: ensure a result is ALWAYS emitted even if disambiguation
+    // crashes. The `responded` flag defuses it the moment a real response is
+    // delivered -- the full halt flow (filter + classification + builder +
+    // TTS) can legitimately exceed the timer, and firing after a successful
+    // offer would speak a contradictory failure message over it.
+    let responded = false;
     const safetyTimer = setTimeout(() => {
+      if (responded) return;
       log.warn('voice', 'Exchange:halt safety timer fired - emitting fallback result');
       hudApi.emitResult({
         taskId: task.id,
@@ -3015,6 +3039,7 @@ function setupExchangeEvents() {
         }
 
         // Emit result so tools know the task resolved (as garbled)
+        responded = true;
         hudApi.emitResult({
           taskId: task.id,
           success: false,
@@ -3047,6 +3072,7 @@ function setupExchangeEvents() {
             "I built a new agent but it still couldn't match your request. " +
             "Try rephrasing what you want, or open the Agent Manager to review the new agent.";
           addToHistory('assistant', loopMsg, 'system');
+          responded = true;
           hudApi.emitResult({
             taskId: task.id,
             success: false,
@@ -3071,12 +3097,21 @@ function setupExchangeEvents() {
         let classification = 'capability_gap';
         let gapSummary = content;
         try {
+          // When the halt came from the confidence floor (not zero bids),
+          // tell the classifier what almost matched: a near-miss on a
+          // related agent usually means "rephrase", while uniformly cold
+          // bids mean a genuine capability gap.
+          const nearMissNote = nearMisses.length > 0
+            ? `\nClosest bids (all below the confidence floor): ${nearMisses
+                .map((b) => `${b.agentId} (${(b.confidence ?? 0).toFixed(2)})`)
+                .join(', ')}`
+            : '';
           const classResult = await Promise.race([
             ai.json(
               `The user said: "${content}"
 No agent was confident enough to handle this. Available agents:
 ${agentDescriptions.map((a) => `- ${a.name}: ${a.description}`).join('\n')}
-
+${nearMissNote}
 Classify: "rephrase" (ambiguous, rephrasing would help) or "capability_gap" (no agent covers this).
 Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "one-sentence description of what's missing" }`,
               { profile: 'fast', temperature: 0, maxTokens: 100, feature: 'exchange-bridge' },
@@ -3105,6 +3140,7 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
           const clarificationMessage = rephraseResponse.question || "Could you rephrase that?";
           addToHistory('assistant', clarificationMessage, 'system');
 
+          responded = true;
           hudApi.emitResult({
             taskId: task.id,
             success: false,
@@ -3174,27 +3210,43 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
               ]);
 
               const message = result.message || "I can look into building an agent for that. Want me to open WISER Playbooks and draft a plan?";
-              addToHistory('assistant', message, 'agent-builder-agent');
 
-              hudApi.emitResult({
-                taskId: task.id,
-                success: true,
-                message,
-                agentId: 'agent-builder-agent',
-                needsClarification: !!result.needsInput,
-                needsInput: result.needsInput || null,
-              });
-
-              // Speak the response
-              try {
-                const { getVoiceSpeaker } = require('../../voice-speaker');
-                const speaker = getVoiceSpeaker();
-                if (speaker) await speaker.speak(message, { voice: 'sage' });
-              } catch (_e) { /* non-fatal */ }
+              responded = true;
+              if (result.needsInput) {
+                // Consent flow: register the pending follow-up so the user's
+                // "yes" / "playbook" / "no" routes straight back to the
+                // builder. handleNeedsInput stores the pending state, adds
+                // history, notifies the HUD/orb, and speaks the offer --
+                // without setPending the reply would re-enter the auction
+                // and the offer would lead nowhere.
+                await handleNeedsInput(result, 'agent-builder-agent', task.id, {
+                  html: result.html,
+                  data: result.data,
+                  ui: result.ui,
+                });
+              } else {
+                // No follow-up needed (e.g. not_feasible with an alternative
+                // suggestion) -- deliver as a normal terminal result.
+                addToHistory('assistant', message, 'agent-builder-agent');
+                hudApi.emitResult({
+                  taskId: task.id,
+                  success: true,
+                  message,
+                  agentId: 'agent-builder-agent',
+                  needsClarification: false,
+                  needsInput: null,
+                });
+                try {
+                  const { getVoiceSpeaker } = require('../../voice-speaker');
+                  const speaker = getVoiceSpeaker();
+                  if (speaker) await speaker.speak(message, { voice: 'sage' });
+                } catch (_e) { /* non-fatal */ }
+              }
             } else {
               // agent-builder-agent not loaded -- fall back to generic message
               const fallbackMsg = `I don't have an agent for that yet, but I could build one. Say "build an agent" to get started.`;
               addToHistory('assistant', fallbackMsg, 'system');
+              responded = true;
               hudApi.emitResult({
                 taskId: task.id,
                 success: false,
@@ -3212,6 +3264,7 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
             log.warn('voice', 'Agent-builder-agent failed, using fallback', { error: builderErr.message });
             const fallbackMsg = `I can't handle that yet, but it might be buildable. Say "build an agent" and I'll assess what's needed.`;
             addToHistory('assistant', fallbackMsg, 'system');
+            responded = true;
             hudApi.emitResult({
               taskId: task.id,
               success: false,
@@ -3233,6 +3286,7 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
       clearTimeout(safetyTimer);
       log.error('voice', 'Exchange:halt handler crashed', { error: haltError.message });
       // Ensure user always gets a response
+      responded = true;
       hudApi.emitResult({
         taskId: task.id,
         success: false,

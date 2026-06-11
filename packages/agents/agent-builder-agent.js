@@ -77,7 +77,7 @@ const SYSTEM_CONTEXT = {
   aiProfiles: [
     'fast (Haiku ~$0.0002/call) -- classification, routing, quick answers',
     'standard (Sonnet ~$0.003/call) -- general reasoning, composition',
-    'powerful (Opus ~$0.02/call) -- deep multi-step reasoning',
+    'powerful (Fable 5 ~$0.04/call) -- deep multi-step reasoning',
     'vision (Sonnet) -- image/screenshot analysis',
     'embedding (~$0.00002/call) -- semantic search',
     'transcription (whisper-1 ~$0.006/min) -- audio-to-text',

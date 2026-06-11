@@ -16,14 +16,17 @@
 const PRICING = {
   // =========== ANTHROPIC CLAUDE MODELS ===========
 
-  // Claude 4.7 (Latest - 2026)
-  'claude-opus-4-7': { input: 15.0, output: 75.0, provider: 'anthropic' },
+  // Claude Fable 5 (Latest - 2026, new tier above Opus)
+  'claude-fable-5': { input: 10.0, output: 50.0, provider: 'anthropic' },
+
+  // Claude 4.7 (2026) -- Opus dropped to $5/$25 from 4.5 onward
+  'claude-opus-4-7': { input: 5.0, output: 25.0, provider: 'anthropic' },
 
   // Claude 4.6 (2025)
-  'claude-opus-4-6': { input: 15.0, output: 75.0, provider: 'anthropic' },
+  'claude-opus-4-6': { input: 5.0, output: 25.0, provider: 'anthropic' },
 
   // Claude 4.5 (2025)
-  'claude-opus-4-5-20251101': { input: 15.0, output: 75.0, provider: 'anthropic' },
+  'claude-opus-4-5-20251101': { input: 5.0, output: 25.0, provider: 'anthropic' },
   'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0, provider: 'anthropic' },
   'claude-haiku-4-5-20251001': { input: 1.0, output: 5.0, provider: 'anthropic' },
 
@@ -120,6 +123,8 @@ const PRICING = {
 
 const MODEL_ALIASES = {
   // Claude shortcuts
+  fable: 'claude-fable-5',
+  'claude-fable': 'claude-fable-5',
   'claude-opus': 'claude-opus-4-7',
   'claude-sonnet': 'claude-sonnet-4-5-20250929',
   'claude-4-opus': 'claude-opus-4-7',

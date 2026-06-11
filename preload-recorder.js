@@ -56,11 +56,13 @@ contextBridge.exposeInMainWorld('recorder', {
 
   // Events from main process
   onInstructionsReceived: (callback) => {
+    ipcRenderer.removeAllListeners('recorder:instructions');
     ipcRenderer.on('recorder:instructions', (event, instructions) => callback(instructions));
   },
 
   // Meeting monitor alerts
   onMonitorAlert: (callback) => {
+    ipcRenderer.removeAllListeners('recorder:monitor-alert');
     ipcRenderer.on('recorder:monitor-alert', (event, alert) => callback(alert));
   },
 
@@ -100,6 +102,8 @@ contextBridge.exposeInMainWorld('recorder', {
   // Meeting token management via GSX KeyValue
   storeMeetingTokens: (data) => ipcRenderer.invoke('recorder:store-meeting-tokens', data),
   clearMeetingTokens: (roomName) => ipcRenderer.invoke('recorder:clear-meeting-tokens', roomName),
+  // Public verify key for join links (#k=...); guests use it to authenticate KV payloads
+  getMeetingLinkKey: () => ipcRenderer.invoke('recorder:get-meeting-link-key'),
 
   // ==========================================
   // PHASE 2: GUEST TRACK TRANSFER

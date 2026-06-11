@@ -6465,7 +6465,7 @@ function setupAiderIPC() {
 
       // Determine profile from model name
       let profile = 'fast';
-      if (model?.startsWith('claude-') && model.includes('opus')) profile = 'powerful';
+      if (model?.startsWith('claude-') && (model.includes('opus') || model.includes('fable'))) profile = 'powerful';
       else if (model?.startsWith('claude-')) profile = 'standard';
       else if (model?.includes('gpt-5')) profile = 'large';
 

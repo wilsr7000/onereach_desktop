@@ -93,18 +93,23 @@ export function estimateCost(
   usage: { inputTokens: number; outputTokens: number }
 ): number {
   const m = model.toLowerCase();
-  // Per-million-token prices (USD). Conservative, family-level.
+  // Per-million-token prices (USD). Family-level; current-generation rates
+  // (Opus 4.5+ is $5/$25 -- pre-4.5 Opus was $15/$75 but those models are
+  // legacy/retiring and not configurable here).
   let inPerM = 0;
   let outPerM = 0;
-  if (m.includes('opus')) {
-    inPerM = 15;
-    outPerM = 75;
+  if (m.includes('fable')) {
+    inPerM = 10;
+    outPerM = 50;
+  } else if (m.includes('opus')) {
+    inPerM = 5;
+    outPerM = 25;
   } else if (m.includes('sonnet')) {
     inPerM = 3;
     outPerM = 15;
   } else if (m.includes('haiku')) {
-    inPerM = 0.8;
-    outPerM = 4;
+    inPerM = 1;
+    outPerM = 5;
   } else {
     return 0;
   }

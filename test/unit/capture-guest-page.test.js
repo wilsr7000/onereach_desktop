@@ -64,7 +64,8 @@ function assertParses(body, label) {
 describe('buildGuestPageHTML', () => {
   it('exports a monotonically bumped version token', () => {
     expect(typeof GUEST_PAGE_VERSION).toBe('number');
-    expect(GUEST_PAGE_VERSION).toBeGreaterThanOrEqual(8);
+    // v10 introduced signed-payload verification (#k link key); never regress
+    expect(GUEST_PAGE_VERSION).toBeGreaterThanOrEqual(10);
   });
 
   it('returns a full HTML document', () => {
@@ -151,5 +152,104 @@ describe('buildGuestPageHTML', () => {
         new RegExp(`(^|\\n)\\s*${name}\\s*:`, 'm').test(mainBody);
       expect(defined, `onclick refers to guest.${name}() but it is not defined`).toBe(true);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// SIGNED PAYLOAD VERIFICATION (v10): KV writes are unauthenticated, so
+// the page must only trust payloads that verify against the link's #k
+// key. These tests evaluate the real page script with a stubbed DOM and
+// run guest._verifySignedPayload against genuine ECDSA P-256 signatures.
+// ═══════════════════════════════════════════════════════════════════
+
+describe('guest page signed-payload verification', () => {
+  const { webcrypto } = require('node:crypto');
+
+  // Evaluate the page's main script with a stubbed document and hand back
+  // the `guest` object. Top-level code only touches document.addEventListener.
+  function loadGuestObject() {
+    const html = buildGuestPageHTML({ kvUrl: 'https://example.com/kv' });
+    const main = extractInlineScripts(html).find((s) => /const KV_URL =/.test(s.body));
+    expect(main).toBeDefined();
+    const documentStub = { addEventListener: () => {} };
+    // eslint-disable-next-line no-new-func
+    return new Function('document', 'window', `${main.body}; return guest;`)(documentStub, { location: { hash: '' } });
+  }
+
+  async function makeKeysAndPayload(overrides = {}) {
+    const pair = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    const payload = JSON.stringify({
+      v: 2,
+      roomName: 'team-sync',
+      tokens: ['tok-a', 'tok-b'],
+      livekitUrl: 'wss://example.livekit.cloud',
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+      ...overrides,
+    });
+    const sig = Buffer.from(
+      await webcrypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, Buffer.from(payload, 'utf8'))
+    ).toString('base64url');
+    return { verifyKey: pair.publicKey, payload, sig };
+  }
+
+  it('accepts a correctly signed payload for the requested room', async () => {
+    const guest = loadGuestObject();
+    const { verifyKey, payload, sig } = await makeKeysAndPayload();
+    const data = await guest._verifySignedPayload({ v: 2, payload, sig }, 'team-sync', verifyKey);
+    expect(data).toBeTruthy();
+    expect(data.tokens).toEqual(['tok-a', 'tok-b']);
+    expect(data.livekitUrl).toBe('wss://example.livekit.cloud');
+  });
+
+  it('rejects a payload signed by a different key (forged write)', async () => {
+    const guest = loadGuestObject();
+    const { payload, sig } = await makeKeysAndPayload();
+    const otherPair = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    const data = await guest._verifySignedPayload({ v: 2, payload, sig }, 'team-sync', otherPair.publicKey);
+    expect(data).toBeNull();
+  });
+
+  it('rejects a tampered payload (signature mismatch)', async () => {
+    const guest = loadGuestObject();
+    const { verifyKey, payload, sig } = await makeKeysAndPayload();
+    const tampered = payload.replace('wss://example.livekit.cloud', 'wss://attacker.example');
+    const data = await guest._verifySignedPayload({ v: 2, payload: tampered, sig }, 'team-sync', verifyKey);
+    expect(data).toBeNull();
+  });
+
+  it('rejects unsigned/legacy (v1) payloads outright', async () => {
+    const guest = loadGuestObject();
+    const { verifyKey } = await makeKeysAndPayload();
+    const legacy = { tokens: ['tok-a'], livekitUrl: 'wss://example.livekit.cloud', expiresAt: Date.now() + 60_000 };
+    const data = await guest._verifySignedPayload(legacy, 'team-sync', verifyKey);
+    expect(data).toBeNull();
+  });
+
+  it('rejects a validly signed payload replayed for a different room', async () => {
+    const guest = loadGuestObject();
+    const { verifyKey, payload, sig } = await makeKeysAndPayload({ roomName: 'other-room' });
+    const data = await guest._verifySignedPayload({ v: 2, payload, sig }, 'team-sync', verifyKey);
+    expect(data).toBeNull();
+  });
+
+  it('rejects an expired signed payload', async () => {
+    const guest = loadGuestObject();
+    const { verifyKey, payload, sig } = await makeKeysAndPayload({ expiresAt: Date.now() - 1 });
+    const data = await guest._verifySignedPayload({ v: 2, payload, sig }, 'team-sync', verifyKey);
+    expect(data).toBeNull();
+  });
+
+  it('rejects non-wss livekitUrl even when correctly signed', async () => {
+    const guest = loadGuestObject();
+    const { verifyKey, payload, sig } = await makeKeysAndPayload({ livekitUrl: 'https://attacker.example' });
+    const data = await guest._verifySignedPayload({ v: 2, payload, sig }, 'team-sync', verifyKey);
+    expect(data).toBeNull();
+  });
+
+  it('page refuses to operate without a #k link key', () => {
+    const html = buildGuestPageHTML({ kvUrl: 'https://example.com/kv' });
+    expect(html).toContain('_parseJoinKeyFromHash');
+    expect(html).toContain('incomplete or from an older version');
   });
 });

@@ -41,19 +41,19 @@
   PER-CONVERSATION RESULTS
 ----------------------------------------------------------------------
   [PASS] Time: basic queries (time-agent)
-    + "What time is it?" -> "It's 7:33 AM"
-    + "And what day is it today?" -> "It's Tuesday, May 19, 2026"
-    + "What is the date?" -> "It's Tuesday, May 19, 2026"
+    + "What time is it?" -> "It's 4:39 PM"
+    + "And what day is it today?" -> "It's Wednesday, June 10, 2026"
+    + "What is the date?" -> "It's Wednesday, June 10, 2026"
   [PASS] Time: timezone awareness (time-agent)
     + "What time is it in Tokyo?" -> "Which timezone would you like? Your saved timezones are"
-    + "And in London?" -> "It's 7:33 AM"
+    + "And in London?" -> "It's 4:39 PM"
   [PASS] Weather: city provided (weather-agent)
-    + "What is the weather in Denver?" -> "It's 35°F and partly cloudy in Denver. Humidity is 88%"
+    + "What is the weather in Denver?" -> "It's 85°F and sunny in Denver"
   [FAIL] Weather: no city triggers follow-up (weather-agent)
-    - "What's the weather?" -> "It's 53°F and sunny in San Francisco"
-    + "San Francisco" -> "It's 53°F and sunny in San Francisco"
+    - "What's the weather?" -> "It's 78°F and sunny in San Francisco"
+    + "San Francisco" -> "It's 78°F and sunny in San Francisco"
   [PASS] Weather: forecast request (weather-agent)
-    + "Will it rain tomorrow in Seattle?" -> "It's 53°F and sunny in San Francisco"
+    + "Will it rain tomorrow in Seattle?" -> "It's 78°F and sunny in San Francisco"
   [PARTIAL] Spelling: common words (spelling-agent)
     ~ "How do you spell necessary?" -> "NECESSARY: N - E - C - E - S - S - A - R - Y"
     ~ "And accommodation?" -> "ACCOMMODATION: A - C - C - O - M - M - O - D - A - T - "
@@ -62,10 +62,10 @@
     + "Is recieve spelled correctly?" -> ""recieve" is misspelled. The correct spelling is "recei"
     + "How about definately?" -> "Note: "definately" is commonly misspelled. The correct "
   [PASS] Smalltalk: greeting flow (smalltalk-agent)
-    + "Hello there" -> "What can I do for you?"
+    + "Hello there" -> "I'm here to help! Just let me know what you need."
     + "How are you doing?" -> "I'm doing well, Robb! How can I help you?"
-    + "Thanks for your help" -> "Anytime!"
-    + "Goodbye" -> "Take care, Robb!"
+    + "Thanks for your help" -> "No problem!"
+    + "Goodbye" -> "Goodbye, Robb! Have a great afternoon!"
   [PASS] Smalltalk: casual greetings (smalltalk-agent)
     + "Hey" -> "Hello Robb! What can I do for you?"
     + "Good morning" -> "Good morning, Robb! How can I help you today?"
@@ -133,7 +133,7 @@
   [PARTIAL] Orchestrator: composite request (orchestrator-agent)
     ~ "Check the weather and my calendar for today" -> "I'm not sure how to help with that."
   [PASS] Edge: garbled input (smalltalk-agent)
-    + "asdfghjkl" -> "Sorry, I didn't catch that."
+    + "asdfghjkl" -> "What was that?"
   [PASS] Edge: single word (help-agent)
     + "help" -> "What would you like help with? I can tell you about sch"
   [PASS] Edge: very long input (help-agent)

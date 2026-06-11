@@ -331,6 +331,9 @@ export interface AuctionConfig {
   executionTimeoutMs: number;
   ackTimeoutMs: number;            // Time for agent to send task_ack (fast, agent is dead if missed)
   heartbeatExtensionMs: number;    // How much time each heartbeat adds
+  minWinnerConfidence?: number;    // Bids below this never win; if no bid reaches it the
+                                   // auction halts ('no_confident_bids') instead of assigning.
+                                   // 0 (default) disables the floor.
 }
 
 export interface RateLimitConfig {
@@ -370,7 +373,7 @@ export interface ExchangeEvents {
   'exchange:started': { port: number };
   'exchange:shutdown_started': {};
   'exchange:shutdown_complete': {};
-  'exchange:halt': { task: Task; reason: string };
+  'exchange:halt': { task: Task; reason: string; bids?: EvaluatedBid[] };
   
   'agent:connected': { agent: ConnectedAgent };
   'agent:disconnected': { agentId: string; reason: string };

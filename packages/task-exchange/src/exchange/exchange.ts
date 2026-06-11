@@ -39,6 +39,7 @@ const DEFAULT_AUCTION_CONFIG: AuctionConfig = {
   executionTimeoutMs: 120000,     // Generous base timeout (agents manage their own via ack/heartbeat)
   ackTimeoutMs: 10000,            // Agent must ack within 10s or it's considered dead
   heartbeatExtensionMs: 30000,    // Each heartbeat grants 30s more
+  minWinnerConfidence: 0,         // 0 = any bid can win (legacy behavior)
 };
 
 /**
@@ -475,6 +476,23 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
       console.error(`[Exchange] No bids received for task ${task.id}`);
       task.status = Status.HALTED;
       this.emit('exchange:halt', { task, reason: 'No bids received' });
+      return;
+    }
+
+    // Confidence floor: when even the best bid is below minWinnerConfidence,
+    // halt instead of assigning. Executing a low-confidence guess misroutes
+    // the task; halting lets the host offer alternatives (rephrase, or build
+    // a new agent for a genuine capability gap). The ranked bids ride along
+    // so the halt handler can explain what almost matched.
+    const minWinnerConfidence = this.auctionConfig.minWinnerConfidence ?? 0;
+    const topConfidence = rankedBids[0]?.confidence ?? 0;
+    if (minWinnerConfidence > 0 && topConfidence < minWinnerConfidence) {
+      console.warn(
+        `[Exchange] No bid reached the confidence floor ${minWinnerConfidence} for task ${task.id} ` +
+        `(top: ${rankedBids[0].agentId} at ${topConfidence.toFixed(2)})`
+      );
+      task.status = Status.HALTED;
+      this.emit('exchange:halt', { task, reason: 'no_confident_bids', bids: rankedBids });
       return;
     }
 

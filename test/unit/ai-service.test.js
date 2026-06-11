@@ -129,11 +129,11 @@ describe('AI Service', () => {
       expect(std.fallback.provider).toBe('openai');
     });
 
-    it('powerful profile maps to Claude Opus', () => {
+    it('powerful profile maps to Claude Fable 5 (top execution tier)', () => {
       const { DEFAULT_MODEL_PROFILES } = require('../../lib/ai-service');
       const powerful = DEFAULT_MODEL_PROFILES.powerful;
       expect(powerful.provider).toBe('anthropic');
-      expect(powerful.model).toContain('opus');
+      expect(powerful.model).toBe('claude-fable-5');
     });
 
     it('realtime profile has no fallback (single provider)', () => {
