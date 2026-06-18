@@ -19,7 +19,14 @@ runApiConformanceContract<AiApi>({
   getInstance: getAiApi,
   resetForTesting: _resetAiApiForTesting,
   setForTesting: _setAiApiForTesting,
-  expectedMethods: ['getStatus', 'spaceAssist', 'extractAssetMetadata', 'chat', 'chatStream'],
+  expectedMethods: [
+    'getStatus',
+    'spaceAssist',
+    'extractAssetMetadata',
+    'convertToOkf',
+    'chat',
+    'chatStream',
+  ],
 });
 
 // 2. Error class conformance.
@@ -52,6 +59,7 @@ describe('AiApi override', () => {
         language: '',
         keyPoints: [],
       }),
+      convertToOkf: async () => ({ okf: 'name: X', agentType: 'conversational', name: 'X' }),
       chat: async () => ({
         content: 'hi',
         usage: { inputTokens: 1, outputTokens: 1 },

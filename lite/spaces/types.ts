@@ -106,7 +106,35 @@ export type ItemKind =
   | 'video'
   | 'playbook'
   | 'ticket'
+  | 'agent'
   | 'other';
+
+/**
+ * Agent kinds. An agent asset (`Item.kind === 'agent'`) carries an
+ * `agentType` discriminator that drives the per-type child node in the
+ * graph (`(:Agent)-[:HAS_TYPE]->(:AgentType:<TypeLabel>)`) and the
+ * renderer's type label. Open-ended on purpose — the AI classifier may
+ * return a value outside this starter set, so treat unknown values as
+ * `'other'` for display but persist the raw string. Confirm the real
+ * OneReach taxonomy before locking this down.
+ */
+export type AgentType =
+  | 'conversational'
+  | 'workflow'
+  | 'autonomous'
+  | 'tool'
+  | 'orchestrator'
+  | 'other';
+
+/** Ordered list for stable iteration in renderer + tests. */
+export const AGENT_TYPES: ReadonlyArray<AgentType> = [
+  'conversational',
+  'workflow',
+  'autonomous',
+  'tool',
+  'orchestrator',
+  'other',
+] as const;
 
 /**
  * Ticket lifecycle. Open → in_progress → done, with `'blocked'` as an
@@ -267,6 +295,14 @@ export interface Item extends ItemSummary {
    * for presence (`item.ticket !== undefined`).
    */
   ticket?: TicketDetails;
+  /**
+   * Agent type discriminator. Populated when `kind === 'agent'` (read
+   * from the linked `(:Agent)-[:HAS_TYPE]->(:AgentType)` subgraph, or
+   * `a.agentType` on the asset). Raw string — may fall outside
+   * {@link AGENT_TYPES} if the AI classifier returns a novel value; the
+   * renderer maps unknowns to an "other" visual. Absent for non-agents.
+   */
+  agentType?: string;
 }
 
 // ─── Query options ───────────────────────────────────────────────────────
@@ -698,6 +734,34 @@ export interface CreateAssetInput {
    * auto-extract pass when files are uploaded.
    */
   metadata?: ItemMetadata;
+}
+
+/**
+ * Input for `agents.create(...)` — adds an agent to a Space. The OKF
+ * text (already converted by the AI; see `window.lite.ai.convertToOkf`)
+ * is stored as the asset's inline `content`. The SDK writes the
+ * Space-facing `:Asset {type:'agent'}` AND the parent `:Agent` node +
+ * typed child (`:AgentType:<TypeLabel>`) subgraph in one transaction,
+ * stamping `id` / `createdAt` / `updatedAt` and the `[:CREATED]` edge.
+ */
+export interface CreateAgentInput {
+  /** Target Space id. Required. */
+  spaceId: string;
+  /** Display name/title for the agent. 1..MAX_ITEM_TITLE_LENGTH after trim. */
+  name: string;
+  /** The OKF definition text (structured YAML/MD). Stored as `a.content`. */
+  okf: string;
+  /**
+   * Agent type discriminator — drives the typed child node's label.
+   * Raw string (AI-classified); may fall outside {@link AGENT_TYPES}.
+   */
+  agentType: string;
+  /** Optional source URL the OKF was derived from (sets `a.sourceUrl`). */
+  sourceUrl?: string;
+  /** Optional free-form description. */
+  description?: string;
+  /** Optional :Person.id of the creator — MERGEs [:CREATED] edge. */
+  creatorId?: string;
 }
 
 /** Options for `items.delete(id, opts?)`. */

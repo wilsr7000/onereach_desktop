@@ -186,8 +186,20 @@ export class TabStore {
         }
       }
 
-      // New tab path. Generate id + partition; assert partition is unique.
-      const { id, partition } = this.genIdsFn();
+      // New tab path. The tab id is per-instance (random), but for an
+      // IDW the PARTITION is stable + keyed by idwId (`persist:idw-<id>`)
+      // so reopening the same IDW reuses its cookie jar -- the saved
+      // OneReach login persists across close / reopen / relaunch.
+      // `clearTabPartitionStorage` only wipes `persist:tab-` partitions,
+      // so these survive. Different IDWs get different partitions, so
+      // they stay fully isolated (ADR-038). Tabs without an idwId
+      // (ad-hoc URLs) keep an ephemeral per-tab partition.
+      const generated = this.genIdsFn();
+      const id = generated.id;
+      const partition =
+        typeof input.idwId === 'string' && input.idwId.length > 0
+          ? idwPartitionFor(input.idwId)
+          : generated.partition;
       if (blob.tabs.some((t) => t.id === id)) {
         throw new MainWindowError({
           code: MAIN_WINDOW_ERROR_CODES.PERSISTENCE_FAILED,
@@ -567,6 +579,31 @@ export class TabStore {
 function defaultGenerateIds(): { id: string; partition: string } {
   const suffix = randomUUID().replace(/-/g, '').slice(0, 8);
   return { id: `tab-${suffix}`, partition: `${PARTITION_PREFIX}${suffix}` };
+}
+
+/**
+ * Stable Electron partition for an IDW tab, keyed by `idwId` so the same
+ * IDW always reuses the same cookie jar across close / reopen / relaunch.
+ * That is what makes the saved OneReach login persist (the previous
+ * behavior the user relied on): the prior random `persist:tab-<uuid>`
+ * partition was both regenerated on every open AND wiped on close, so
+ * every reopen started signed-out.
+ *
+ * Uses the `persist:idw-` prefix (NOT `persist:tab-`) so
+ * `clearTabPartitionStorage` refuses to wipe it. Different idwIds yield
+ * different partitions -> IDWs stay isolated from each other (ADR-038).
+ * The id is sanitized to partition-safe characters; an empty result
+ * (pathological idwId) falls back to a random suffix.
+ */
+function idwPartitionFor(idwId: string): string {
+  const safe = idwId
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48);
+  const suffix = safe.length > 0 ? safe : randomUUID().replace(/-/g, '').slice(0, 8);
+  return `persist:idw-${suffix}`;
 }
 
 /** Loose runtime check used during blob recovery. Not full validation. */

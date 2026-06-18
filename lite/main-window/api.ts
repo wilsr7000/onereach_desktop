@@ -58,6 +58,7 @@ export type {
   MainWindowTabLoadStartEvent,
   MainWindowTabLoadFinishEvent,
   MainWindowTabLoadFailEvent,
+  MainWindowReloadActiveEvent,
   MainWindowIpcOpenTabEvent,
   MainWindowIpcCloseTabEvent,
   MainWindowIpcActivateTabEvent,

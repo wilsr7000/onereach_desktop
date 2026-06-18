@@ -23,6 +23,8 @@ import type {
   SpaceAssistResult,
   AssetMetadataInput,
   AssetMetadataResult,
+  OkfConversionInput,
+  OkfConversionResult,
 } from './types.js';
 import type { AiChatInput, AiChatResult } from './chat.js';
 
@@ -34,6 +36,8 @@ export type {
   SpaceAssistResult,
   AssetMetadataInput,
   AssetMetadataResult,
+  OkfConversionInput,
+  OkfConversionResult,
 } from './types.js';
 export type { AiChatInput, AiChatResult, AiChatMessage, AiChatProfile } from './chat.js';
 export { AI_MODULE_VERSION } from './types.js';
@@ -69,6 +73,20 @@ export interface AiApi {
    * `AI_PROVIDER_ERROR`, `AI_BAD_RESPONSE`).
    */
   extractAssetMetadata(input: AssetMetadataInput): Promise<AssetMetadataResult>;
+
+  /**
+   * Convert an agent definition (pasted text, or the contents of a
+   * pasted URL) into OKF (structured YAML/MD text) via Claude, and
+   * classify its `agentType` + suggest a `name`. Powers "add an agent"
+   * in Spaces. **Claude-only** — throws `AI_NOT_CONFIGURED` when the
+   * active provider isn't Claude. When `isUrl`, the URL is fetched first
+   * (https only + basic SSRF guard).
+   *
+   * Throws `AiError` (`AI_NOT_CONFIGURED`, `AI_INVALID_INPUT`,
+   * `AI_NETWORK`, `AI_AUTH_REJECTED`, `AI_RATE_LIMITED`,
+   * `AI_PROVIDER_ERROR`, `AI_BAD_RESPONSE`).
+   */
+  convertToOkf(input: OkfConversionInput): Promise<OkfConversionResult>;
 
   /**
    * Generic single-shot Claude chat. Powers the embedded WISER Playbooks

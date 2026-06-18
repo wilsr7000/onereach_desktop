@@ -83,6 +83,7 @@ const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
 const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
 
 const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
+const SPACES_ITEMS_CREATE_AGENT = 'lite:spaces:items:createAgent';
 const SPACES_ITEMS_DELETE = 'lite:spaces:items:delete';
 const SPACES_ITEMS_RESTORE = 'lite:spaces:items:restore';
 const SPACES_ITEMS_MOVE_TO_SPACE = 'lite:spaces:items:moveToSpace';
@@ -129,6 +130,7 @@ const MAIN_WINDOW_ACTIVATE_TAB = 'lite:main-window:activate-tab';
 const MAIN_WINDOW_LIST_TABS = 'lite:main-window:list-tabs';
 const MAIN_WINDOW_GET_ACTIVE = 'lite:main-window:get-active';
 const MAIN_WINDOW_GO_HOME = 'lite:main-window:go-home';
+const MAIN_WINDOW_RELOAD_ACTIVE = 'lite:main-window:reload-active';
 const MAIN_WINDOW_CHANGED = 'lite:main-window:changed';
 
 const IDW_LIST = 'lite:idw:list';
@@ -174,6 +176,7 @@ const ONBOARDING_DISMISS = 'lite:onboarding:dismiss';
 const AI_STATUS = 'lite:ai:status';
 const AI_SPACE_ASSIST = 'lite:ai:space-assist';
 const AI_ENRICH_ASSET = 'lite:ai:enrich-asset';
+const AI_CONVERT_OKF = 'lite:ai:convert-okf';
 const AI_KEY_SAVE = 'lite:ai:key-save';
 const AI_KEY_HAS = 'lite:ai:key-has';
 const AI_KEY_DELETE = 'lite:ai:key-delete';
@@ -545,6 +548,16 @@ interface SpacesItemsBridge {
     size?: number;
     description?: string;
     sourceUrl?: string;
+    creatorId?: string;
+  }): Promise<SpacesIpcResultView<unknown>>;
+  /** Add an agent asset (OKF text stored as content; per-type graph node). */
+  createAgent(input: {
+    spaceId: string;
+    name: string;
+    okf: string;
+    agentType: string;
+    sourceUrl?: string;
+    description?: string;
     creatorId?: string;
   }): Promise<SpacesIpcResultView<unknown>>;
   delete(
@@ -1414,6 +1427,10 @@ const spaces: SpacesBridge = {
       ipcRenderer.invoke(SPACES_ITEMS_CREATE, { input }) as Promise<
         SpacesIpcResultView<unknown>
       >,
+    createAgent: (input) =>
+      ipcRenderer.invoke(SPACES_ITEMS_CREATE_AGENT, { input }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
     delete: (id, opts) =>
       ipcRenderer.invoke(SPACES_ITEMS_DELETE, {
         id,
@@ -1741,6 +1758,7 @@ interface MainWindowBridge {
   closeTab(id: string): Promise<{ ok: true }>;
   activateTab(id: string): Promise<{ ok: true }>;
   goHome(): Promise<{ ok: true }>;
+  reloadActive(): Promise<{ ok: boolean }>;
   onTabsChanged(
     handler: (payload: { tabs: MainWindowTabView[]; activeId: string | null }) => void
   ): () => void;
@@ -1758,6 +1776,8 @@ const mainWindow: MainWindowBridge = {
   activateTab: (id) =>
     ipcRenderer.invoke(MAIN_WINDOW_ACTIVATE_TAB, { id }) as Promise<{ ok: true }>,
   goHome: () => ipcRenderer.invoke(MAIN_WINDOW_GO_HOME) as Promise<{ ok: true }>,
+  reloadActive: () =>
+    ipcRenderer.invoke(MAIN_WINDOW_RELOAD_ACTIVE) as Promise<{ ok: boolean }>,
   onTabsChanged: (handler) => {
     const listener = (
       _event: Electron.IpcRendererEvent,
@@ -2046,6 +2066,13 @@ interface AiEnrichResultView {
   modality: 'text' | 'image' | 'pdf' | 'hints';
 }
 
+/** Result of an OKF conversion (agent definition -> structured text). */
+interface AiOkfResultView {
+  okf: string;
+  agentType: string;
+  name: string;
+}
+
 interface AiBridge {
   getStatus(): Promise<AiIpcResultView<AiStatusView>>;
   /** Provider-flexible Space-creation assist (purpose -> description + objectives). */
@@ -2055,6 +2082,15 @@ interface AiBridge {
   ): Promise<AiIpcResultView<AiSpaceAssistResultView>>;
   /** Claude 4.8 metadata extraction for one asset, persisted under `ai_*` keys. */
   enrichAsset(assetId: string): Promise<AiIpcResultView<AiEnrichResultView>>;
+  /**
+   * Convert an agent definition into OKF via Claude. `source` is a URL
+   * (when `isUrl`) or pasted text. Returns the OKF text + classified
+   * agentType + suggested name. Powers "add an agent" in Spaces.
+   */
+  convertToOkf(
+    source: string,
+    isUrl: boolean
+  ): Promise<AiIpcResultView<AiOkfResultView>>;
   /** Persist the Anthropic key to the OS keychain (write-only). */
   saveKey(key: string): Promise<AiIpcResultView<{ ok: true }>>;
   /** Whether a key is configured (never returns the value). */
@@ -2073,6 +2109,10 @@ const ai: AiBridge = {
   enrichAsset: (assetId) =>
     ipcRenderer.invoke(AI_ENRICH_ASSET, { assetId }) as Promise<
       AiIpcResultView<AiEnrichResultView>
+    >,
+  convertToOkf: (source, isUrl) =>
+    ipcRenderer.invoke(AI_CONVERT_OKF, { source, isUrl }) as Promise<
+      AiIpcResultView<AiOkfResultView>
     >,
   saveKey: (key) =>
     ipcRenderer.invoke(AI_KEY_SAVE, { key }) as Promise<AiIpcResultView<{ ok: true }>>,

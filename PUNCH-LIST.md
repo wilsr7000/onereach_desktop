@@ -50,6 +50,18 @@
 
 ## 🟠 High Priority
 
+### Voice orb dispatched tasks into a dead pipe -- requests heard but never executed (June 2026)
+- [x] **Voice orb spoke a reply but never performed the action (e.g. "play some Monday afternoon music")** - The orb's voice front-end was healthy end-to-end (connect -> listen -> transcribe -> speak), and `handle_user_request` correctly broadcast the transcript, but the task never reached the agent auction. Logs proved it: the `ipc` log category was empty, `submit-task called` had never fired, and there were zero `auction`/`bid`/`halt` logs -- while the exchange WebSocket *was* listening on :3456.
+  - **Root cause**: `window.agentHUD.submitTask()` invokes IPC `hud-api:submit-task`, whose handler is only registered by `hudApi.initialize()` (-> `_registerIPC`). That call lived *only* inside `initializeExchangeBridge()` (`src/voice-task-sdk/exchange-bridge.js`), AFTER the WebSocket transport already started listening. Any throw between transport start and that call left the transport up but the HUD IPC handler unregistered, so every orb submit silently rejected. The orb window runs with `devTools: false` and renderer-side errors weren't reliably captured, so it looked like "nothing happened."
+  - **Fix (5 files)**:
+    1. `main.js` -- call `require('./lib/hud-api').initialize()` at boot, BEFORE `initializeExchangeBridge()` (idempotent via the `_ipcRegistered` guard), so the `hud-api:submit-task` handler always exists even if exchange init throws.
+    2. `src/voice-task-sdk/exchange-bridge.js` -- wrap `connectBuiltInAgents`/`connectCustomAgents` in their own try/catch so an agent-connect failure can't abort init; the outer catch now logs loudly with stack + `transportListening` state.
+    3. `orb.html` -- `handleFunctionCallTranscript` now generates a `traceId`, logs the dispatch/result/error via `console.error` (forwarded to the log server by the `console-message` hook despite devTools off), and surfaces a clear spoken+visible error when the agentHUD bridge is missing/stubbed or `submitTask` rejects. `handleOrbError` classifies "not initialized"/"failed to load"/"No handler registered" as startup states.
+    4. `lib/hud-api.js` -- the `hud-api:submit-task` handler and `submitTask` now log the caller's `traceId` (cleaning up a malformed log line) and thread it into the auction (`processSubmit`) metadata, so a dispatch is traceable end-to-end across the `voice` (orb console) and `ipc` (main) categories.
+    5. `preload-orb.js` -- the agentHUD reject-stub now logs (forwarded) on both load failure and any runtime invocation, so a failed bridge load is visible.
+  - **Also fixed (minor)**: `lib/agent-memory-store.js` "Loaded memory for  from Spaces" had a broken interpolation + confusing `this` data key -- now `Loaded memory for <agentId> from Spaces`.
+  - **Tests**: `test/unit/hud-api-ipc-registration.test.js` (8 tests) -- behavioral (submitTask never hangs, always returns a structured result) + source-level invariants (main.js registers HUD IPC before the exchange bridge; agent-connect is wrapped; traceId is threaded through the handler, submitTask, and into auction metadata; orb surfaces a clear bridge-unavailable error). Existing `test/unit/hud-api.test.js` (17 tests) still green.
+
 ### Self-learning + temporal awareness + memory grooming (v4.8.2)
 - **Problem**: Even with reflection in place, the learning signals were disappearing. Low-quality judgments didn't change anything. Agent memory grew unbounded with duplicates. Every conversation felt like turn 1 -- no awareness of "yesterday you were working on X" or "at this time you usually do Y". User asked for a "remarkable self-learning" system that feels smart, not narrow.
 

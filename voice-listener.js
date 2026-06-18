@@ -393,6 +393,9 @@ class VoiceListener {
         // Phase 4.5: reset the barge partial -- a new speech burst
         // means a fresh interrupt candidate.
         this._bargePartial = '';
+        // A new utterance starts with a clean running transcript so the
+        // accumulated caption doesn't carry over from the previous turn.
+        this._inputTranscriptPartial = '';
         break;
 
       case 'input_audio_buffer.speech_stopped':
@@ -432,7 +435,18 @@ class VoiceListener {
           } catch (_err) {
             // Barge layer must never block transcription delivery.
           }
-          this.broadcast({ type: 'transcript_delta', text: event.delta, isFinal: false });
+          // Accumulate the running transcript and broadcast the FULL text so
+          // far, not the bare delta. The realtime API streams one word/token
+          // per `.delta`; the orb's showTranscript() replaces its content on
+          // each event, so broadcasting the raw delta makes the caption flash
+          // a single word at a time. Sending the accumulated text lets the
+          // sentence build up in place. Reset on speech_started + completed.
+          this._inputTranscriptPartial = (this._inputTranscriptPartial || '') + event.delta;
+          this.broadcast({
+            type: 'transcript_delta',
+            text: this._inputTranscriptPartial,
+            isFinal: false,
+          });
         }
         break;
 
@@ -468,6 +482,9 @@ class VoiceListener {
         // Phase 4.5: reset the barge partial so the next TTS session
         // starts with a clean buffer.
         this._bargePartial = '';
+        // The turn is complete; the final `transcript` event above carries
+        // the full text. Clear the running partial for the next utterance.
+        this._inputTranscriptPartial = '';
         break;
 
       case 'error':

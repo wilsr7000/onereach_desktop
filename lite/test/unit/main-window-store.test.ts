@@ -289,3 +289,50 @@ describe('TabStore self-heals corrupted blobs', () => {
 async function getKVUnderlying(store: TabStore): Promise<FakeKV> {
   return (store as unknown as { kv: FakeKV }).kv;
 }
+
+describe('TabStore IDW partition stability (saved-login persistence)', () => {
+  it('keys an IDW tab partition by idwId (persist:idw-<id>), not the random per-tab one', async () => {
+    const { store } = makeStore();
+    const { tab } = await store.openTab({
+      label: 'Marvin 2',
+      url: 'https://idw.edison.onereach.ai/login?idwId=marvin-2',
+      idwId: 'marvin-2',
+    });
+    expect(tab.partition).toBe('persist:idw-marvin-2');
+  });
+
+  it('reuses the SAME partition when an IDW is reopened after close (saved login persists)', async () => {
+    const { store } = makeStore();
+    const first = await store.openTab({ label: 'Marvin 2', url: 'https://a', idwId: 'marvin-2' });
+    await store.closeTab(first.tab.id);
+    const second = await store.openTab({ label: 'Marvin 2', url: 'https://a', idwId: 'marvin-2' });
+    // A genuinely new tab instance (the old one was closed)...
+    expect(second.wasFocus).toBe(false);
+    expect(second.tab.id).not.toBe(first.tab.id);
+    // ...but the SAME stable partition, so the cookie jar / saved login
+    // survives. (clearTabPartitionStorage only wipes `persist:tab-`.)
+    expect(second.tab.partition).toBe('persist:idw-marvin-2');
+    expect(second.tab.partition).toBe(first.tab.partition);
+  });
+
+  it('gives different IDWs different partitions (isolation preserved, ADR-038)', async () => {
+    const { store } = makeStore();
+    const a = await store.openTab({ label: 'A', url: 'https://a', idwId: 'idw-alpha' });
+    const b = await store.openTab({ label: 'B', url: 'https://b', idwId: 'idw-beta' });
+    expect(a.tab.partition).toBe('persist:idw-idw-alpha');
+    expect(b.tab.partition).toBe('persist:idw-idw-beta');
+    expect(a.tab.partition).not.toBe(b.tab.partition);
+  });
+
+  it('ad-hoc (non-IDW) tabs keep an ephemeral persist:tab- partition', async () => {
+    const { store } = makeStore();
+    const { tab } = await store.openTab({ label: 'Ad-hoc', url: 'https://example.com' });
+    expect(tab.partition).toMatch(/^persist:tab-/);
+  });
+
+  it('sanitizes an unsafe idwId into a valid partition string', async () => {
+    const { store } = makeStore();
+    const { tab } = await store.openTab({ label: 'X', url: 'https://x', idwId: 'Weird ID/../x!' });
+    expect(tab.partition).toMatch(/^persist:idw-[a-z0-9_-]+$/);
+  });
+});

@@ -40,6 +40,9 @@ export const MAIN_WINDOW_EVENTS = {
   DEVTOOLS_OPEN_ACTIVE_TAB: 'main-window.devtools.open-active-tab',
   TAB_TWO_FACTOR_DETECTED: 'main-window.tab.two-factor-detected',
   TAB_ACCOUNT_PICKER_DETECTED: 'main-window.tab.account-picker-detected',
+  // Manual refresh of the active view (tab-bar ↻ button / Cmd+R). Target
+  // is 'tab' (the active WebContentsView) or 'home' (the IDW home feed).
+  RELOAD_ACTIVE: 'main-window.reload-active',
   // Multi-env auto-sign-in (ADR-042 amendment). Fires when an IDW tab
   // loads a OneReach URL whose env has no captured session, triggering
   // signIn(env) + a token re-injection.
@@ -187,6 +190,12 @@ export interface MainWindowTabLoadFailEvent extends MainWindowEventBase {
   level: 'warn';
   data: { id: string; errorCode: number; errorDescription: string };
 }
+export interface MainWindowReloadActiveEvent extends MainWindowEventBase {
+  name: typeof MAIN_WINDOW_EVENTS.RELOAD_ACTIVE;
+  level: 'info';
+  /** `target: 'tab'` carries the reloaded tab id; `'home'` reloads the feed. */
+  data: { target: 'tab' | 'home'; id?: string };
+}
 
 // ─── IPC entry events ─────────────────────────────────────────────────────
 
@@ -223,6 +232,7 @@ export type MainWindowEvent =
   | MainWindowTabLoadStartEvent
   | MainWindowTabLoadFinishEvent
   | MainWindowTabLoadFailEvent
+  | MainWindowReloadActiveEvent
   | MainWindowIpcOpenTabEvent
   | MainWindowIpcCloseTabEvent
   | MainWindowIpcActivateTabEvent

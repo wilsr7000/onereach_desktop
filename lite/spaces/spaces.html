@@ -132,6 +132,16 @@
             <span class="spaces-new-asset-tab-icon" aria-hidden="true">↑</span>
             <span>Upload file</span>
           </button>
+          <button
+            type="button"
+            role="tab"
+            class="spaces-new-asset-tab"
+            data-asset-tab="agent"
+            aria-selected="false"
+          >
+            <span class="spaces-new-asset-tab-icon" aria-hidden="true">◈</span>
+            <span>Add agent</span>
+          </button>
         </div>
 
         <form id="spaces-new-asset-form" class="spaces-new-asset-form">
@@ -143,7 +153,6 @@
               class="spaces-new-asset-input"
               placeholder="Give your asset a name"
               maxlength="200"
-              required
               autocomplete="off"
             />
           </div>
@@ -185,6 +194,21 @@
               id="spaces-new-asset-file-hint"
               hidden
             ></div>
+          </div>
+
+          <div class="spaces-new-asset-field" data-asset-pane="agent" hidden>
+            <div class="spaces-new-asset-label-row">
+              <label for="spaces-new-asset-agent-input" class="spaces-new-asset-label">Agent source</label>
+              <span class="spaces-new-asset-label-hint">Paste a URL or text — Lite converts it to OKF with AI</span>
+            </div>
+            <textarea
+              id="spaces-new-asset-agent-input"
+              class="spaces-new-asset-textarea"
+              rows="10"
+              placeholder="Paste an OKF URL, or the agent's definition text…"
+              spellcheck="false"
+            ></textarea>
+            <p class="spaces-new-asset-label-hint">Title is optional for agents — AI will suggest a name.</p>
           </div>
 
           <div id="spaces-new-asset-error" class="spaces-modal-error" hidden></div>

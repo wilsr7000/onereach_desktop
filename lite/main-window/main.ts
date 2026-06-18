@@ -30,6 +30,7 @@ import {
   closeMainWindow,
   getMainWindow,
   openActiveTabDevTools,
+  reloadActive,
   _resetMainWindowForTesting,
 } from './window.js';
 import { getLoggingApi } from '../logging/api.js';
@@ -45,6 +46,7 @@ export const MAIN_WINDOW_IPC = {
   LIST_TABS: 'lite:main-window:list-tabs',
   GET_ACTIVE: 'lite:main-window:get-active',
   GO_HOME: 'lite:main-window:go-home',
+  RELOAD_ACTIVE: 'lite:main-window:reload-active',
   CHANGED: 'lite:main-window:changed',
 } as const;
 
@@ -70,6 +72,8 @@ export interface MainWindowHandle {
   window: BrowserWindow;
   /** Open DevTools for the active tab WebContentsView, if one is visible. */
   openActiveTabDevTools(): boolean;
+  /** Reload the active tab's view (or the Home feed). False if nothing to reload. */
+  reloadActive(): boolean;
   /** Tear down IPC handlers, close the window, drop subscriptions. Idempotent. */
   teardown(): void;
 }
@@ -98,6 +102,7 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
     return {
       window: win,
       openActiveTabDevTools,
+      reloadActive,
       teardown: teardownInternal,
     };
   }
@@ -187,6 +192,15 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
     }
   });
 
+  // Reload the active tab / Home feed. Pure view op (window.ts handles
+  // the WebContentsView + emits `main-window.reload-active`); never
+  // rejects — returns { ok: false } when there's nothing to reload.
+  ipcMain.handle(MAIN_WINDOW_IPC.RELOAD_ACTIVE, async (): Promise<{ ok: boolean }> => {
+    const ok = reloadActive();
+    log.info('reload-active', { ok });
+    return { ok };
+  });
+
   // ── Live cross-window updates ──────────────────────────────────────────
   //
   // When the store changes, broadcast `lite:main-window:changed` to
@@ -212,6 +226,7 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
   return {
     window: win,
     openActiveTabDevTools,
+    reloadActive,
     teardown: teardownInternal,
   };
 }
@@ -225,6 +240,7 @@ function teardownInternal(): void {
     ipcMain.removeHandler(MAIN_WINDOW_IPC.CLOSE_TAB);
     ipcMain.removeHandler(MAIN_WINDOW_IPC.ACTIVATE_TAB);
     ipcMain.removeHandler(MAIN_WINDOW_IPC.GO_HOME);
+    ipcMain.removeHandler(MAIN_WINDOW_IPC.RELOAD_ACTIVE);
   } catch {
     // best-effort
   }

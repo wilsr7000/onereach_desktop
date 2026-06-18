@@ -1976,6 +1976,17 @@ describe('CYPHER source strings — Phase 4 (shared spaces)', () => {
     expect(CYPHER.CREATE_TICKET).toMatch(/MERGE \(a\)-\[:ASSIGNED_TO\]->\(x\)/);
   });
 
+  it('CREATE_AGENT writes the asset + parent :Agent + typed child with edges', () => {
+    expect(CYPHER.CREATE_AGENT).toMatch(/CREATE \(a:Asset \{/);
+    expect(CYPHER.CREATE_AGENT).toMatch(/type: 'agent'/);
+    expect(CYPHER.CREATE_AGENT).toMatch(/content: \$okf/);
+    expect(CYPHER.CREATE_AGENT).toMatch(/MERGE \(a\)-\[:BELONGS_TO\]->\(s\)/);
+    expect(CYPHER.CREATE_AGENT).toMatch(/CREATE \(ag:Agent \{/);
+    expect(CYPHER.CREATE_AGENT).toMatch(/CREATE \(a\)-\[:REPRESENTS\]->\(ag\)/);
+    expect(CYPHER.CREATE_AGENT).toMatch(/CREATE \(t:AgentType:__TYPE_LABEL__ \{/);
+    expect(CYPHER.CREATE_AGENT).toMatch(/CREATE \(ag\)-\[:HAS_TYPE\]->\(t\)/);
+  });
+
   it('UPDATE_TICKET only updates :Asset rows where type === ticket', () => {
     expect(CYPHER.UPDATE_TICKET).toMatch(/coalesce\(a\.type, a\.assetType\) = 'ticket'/);
     expect(CYPHER.UPDATE_TICKET).toMatch(/SET a\.name = coalesce\(\$title, a\.name\)/);
@@ -2206,6 +2217,111 @@ describe('SdkSpacesClient.createTicket', () => {
     const client = makeClient(stub);
     await expect(
       client.createTicket('sp-gone', { title: 'x' })
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
+  });
+});
+
+describe('SdkSpacesClient.createAgent', () => {
+  // GET_ITEM is uniquely identified by its BELONGS_TO OPTIONAL MATCH
+  // (CREATE_AGENT uses MERGE, never OPTIONAL MATCH ...->(s:Space)).
+  const GET_ITEM_NEEDLE = 'OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)';
+  function agentRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: 'agent-stub',
+      title: 'My Agent',
+      kind: 'agent',
+      createdAt: '',
+      updatedAt: '',
+      otherSpaces: [],
+      producedBy: null,
+      tags: [],
+      content: 'name: My Agent',
+      agentType: 'conversational',
+      ...overrides,
+    };
+  }
+
+  it('rejects empty OKF', async () => {
+    const client = makeClient(buildStubQuery());
+    await expect(
+      client.createAgent({ spaceId: 'sp-1', name: 'A', okf: '   ', agentType: 'tool' })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('rejects a missing spaceId (agents must live in a Space)', async () => {
+    const client = makeClient(buildStubQuery());
+    await expect(
+      client.createAgent({ spaceId: '', name: 'A', okf: 'x: 1', agentType: 'tool' })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('writes asset + parent :Agent + typed child, returns kind=agent + agentType', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'agent-stub' }]);
+    stub.setResponse(GET_ITEM_NEEDLE, [agentRow()]);
+    const client = makeClient(stub);
+    const created = await client.createAgent({
+      spaceId: 'sp-1',
+      name: 'My Agent',
+      okf: 'name: My Agent',
+      agentType: 'conversational',
+    });
+    expect(created.kind).toBe('agent');
+    expect(created.agentType).toBe('conversational');
+
+    const createCall = stub.calls.find(
+      (c) => c.cypher.includes('CREATE (a:Asset') && c.cypher.includes('REPRESENTS')
+    );
+    expect(createCall).toBeDefined();
+    // OKF stored as content; type carried as a param + interpolated label.
+    expect(createCall?.parameters).toMatchObject({
+      spaceId: 'sp-1',
+      name: 'My Agent',
+      okf: 'name: My Agent',
+      agentType: 'conversational',
+    });
+    // The full subgraph is written in one statement.
+    expect(createCall?.cypher).toContain("type: 'agent'");
+    expect(createCall?.cypher).toContain('MERGE (a)-[:BELONGS_TO]->(s)');
+    expect(createCall?.cypher).toContain('CREATE (ag:Agent {');
+    expect(createCall?.cypher).toContain('(a)-[:REPRESENTS]->(ag)');
+    expect(createCall?.cypher).toContain('(ag)-[:HAS_TYPE]->(t)');
+    // Placeholder replaced with the sanitized per-type label.
+    expect(createCall?.cypher).not.toContain('__TYPE_LABEL__');
+    expect(createCall?.cypher).toContain(':AgentType:Conversational');
+  });
+
+  it('sanitizes the agent type into a safe PascalCase Cypher label', async () => {
+    const cases: Array<[string, string]> = [
+      ['workflow', ':AgentType:Workflow'],
+      ['multi step', ':AgentType:MultiStep'],
+      ['weird id/../x!', ':AgentType:WeirdIdX'],
+      ['', ':AgentType:Other'],
+      ['123', ':AgentType:Other'], // must start with a letter
+    ];
+    for (const [agentType, expectedLabel] of cases) {
+      const stub = buildStubQuery();
+      stub.setResponse('CREATE (a:Asset', [{ id: 'a' }]);
+      stub.setResponse(GET_ITEM_NEEDLE, [agentRow({ agentType })]);
+      const client = makeClient(stub);
+      await client.createAgent({ spaceId: 'sp-1', name: 'A', okf: 'x: 1', agentType });
+      const createCall = stub.calls.find((c) => c.cypher.includes('REPRESENTS'));
+      expect(createCall?.cypher, `agentType=${JSON.stringify(agentType)}`).toContain(
+        expectedLabel
+      );
+      // The injection-y input never breaks out of the label position.
+      expect(createCall?.cypher).not.toContain('__TYPE_LABEL__');
+      expect(createCall?.cypher).not.toContain('/../');
+      expect(createCall?.cypher).not.toContain('!');
+    }
+  });
+
+  it('throws SPACES_NOT_FOUND when the Space is missing', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', []);
+    const client = makeClient(stub);
+    await expect(
+      client.createAgent({ spaceId: 'sp-gone', name: 'A', okf: 'x: 1', agentType: 'tool' })
     ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
   });
 });

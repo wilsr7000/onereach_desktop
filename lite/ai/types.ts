@@ -98,6 +98,30 @@ export interface AssetMetadataResult {
 }
 
 /**
+ * Input for converting an agent definition to OKF. `source` is either a
+ * URL (when `isUrl` is true — Lite fetches its contents first) or the
+ * raw agent-definition text the user pasted.
+ */
+export interface OkfConversionInput {
+  /** A URL (fetched) or the agent-definition text to convert. */
+  source: string;
+  /** When true, `source` is a URL whose contents Lite fetches first. */
+  isUrl: boolean;
+}
+
+/**
+ * Result of an OKF conversion. `okf` is the structured-text (YAML/MD)
+ * agent definition; `agentType` is the classified type (see
+ * `AGENT_TYPES` in spaces/types — may be a novel string); `name` is a
+ * short suggested agent name.
+ */
+export interface OkfConversionResult {
+  okf: string;
+  agentType: string;
+  name: string;
+}
+
+/**
  * Non-sensitive provider status for the renderer. NEVER carries a key,
  * token, URL, or any other secret -- only whether AI is usable and, if
  * so, which provider is wired.

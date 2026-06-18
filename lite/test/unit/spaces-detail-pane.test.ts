@@ -50,6 +50,7 @@ interface RendererItem {
   tags?: string[];
   lastEditedBy?: RendererItemProvenance | null;
   ticket?: RendererTicketDetails;
+  agentType?: string;
 }
 
 interface DetailTicketCallbacks {
@@ -412,6 +413,22 @@ describe('buildDetailPane', () => {
     expect(el.querySelector('.spaces-markdown h2')?.textContent).toBe('Notes');
   });
 
+  it('renders an agent OKF block with the agent type', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({
+        kind: 'agent',
+        agentType: 'conversational',
+        content: 'name: Support Bot\ntype: conversational',
+      }),
+      () => undefined
+    );
+    const block = el.querySelector('.spaces-detail-agent');
+    expect(block).not.toBeNull();
+    expect(el.querySelector('.spaces-detail-agent-type')?.textContent).toContain('Conversational');
+    // OKF text is rendered (in the reused code-preview block).
+    expect(el.textContent).toContain('Support Bot');
+  });
+
   it('omits the content block when content is missing', () => {
     // baseItem() omits content by default; assert the empty path.
     const el = renderer.buildDetailPane(baseItem(), () => undefined);
@@ -621,12 +638,21 @@ describe('buildKindReclassify', () => {
     expect(el.getAttribute('data-current-kind')).toBe('document');
   });
 
-  it('includes the editable kind options (doc, image, url, text, audio, video, other)', () => {
+  it('includes the editable kind options (doc, image, url, text, audio, video, agent, other)', () => {
     const el = renderer.buildKindReclassify(baseItem({ kind: 'text' }), async () => undefined);
     const values = Array.from(el.querySelectorAll<HTMLOptionElement>('option')).map(
       (o) => o.value
     );
-    expect(values).toEqual(['document', 'image', 'url', 'text', 'audio', 'video', 'other']);
+    expect(values).toEqual([
+      'document',
+      'image',
+      'url',
+      'text',
+      'audio',
+      'video',
+      'agent',
+      'other',
+    ]);
   });
 
   it('calls onTypeChange with the new kind on change', async () => {

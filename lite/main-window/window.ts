@@ -9,7 +9,10 @@
  * reload on switch).
  *
  * Per ADR-038:
- *  - Each tab gets a unique `persist:tab-<short-uuid>` partition.
+ *  - IDW tabs get a STABLE `persist:idw-<idwId>` partition (keyed by
+ *    the IDW so the saved login persists across close/reopen); ad-hoc
+ *    non-IDW tabs get an ephemeral `persist:tab-<short-uuid>` partition.
+ *    Both keep IDWs isolated from each other (ADR-038).
  *  - Tab views have NO preload -- third-party agents cannot reach
  *    `window.lite.*`. The chrome (separate webContents) DOES use the
  *    standard kernel preload.
@@ -356,6 +359,48 @@ export function openActiveTabDevTools(): boolean {
   }
 }
 
+/**
+ * Reload the currently-visible content: the active tab's
+ * `WebContentsView`, or — when Home is active (no tab foregrounded) —
+ * the IDW home feed. Returns `false` when there is nothing to reload.
+ *
+ * Wired to the tab-bar ↻ button (`chrome.ts`) and the `CmdOrCtrl+R`
+ * menu accelerator. A plain `reload()` (not `reloadIgnoringCache()`)
+ * matches the full app's tab-refresh behavior. Pure view op — does not
+ * touch the tab store, so no persistence side effects.
+ */
+export function reloadActive(): boolean {
+  const active = getActiveAttachedTab();
+  if (active !== null) {
+    try {
+      active.view.webContents.reload();
+      getLoggingApi().event(MAIN_WINDOW_EVENTS.RELOAD_ACTIVE, { target: 'tab', id: active.id });
+      return true;
+    } catch (err) {
+      getLoggingApi().warn('main-window', 'failed to reload active tab', {
+        id: active.id,
+        error: (err as Error).message,
+      });
+      return false;
+    }
+  }
+  // Home is active (activeAttachedTabId === null): reload the IDW home feed.
+  if (homeFeedView !== null && !homeFeedView.webContents.isDestroyed()) {
+    try {
+      homeFeedView.webContents.reload();
+      getLoggingApi().event(MAIN_WINDOW_EVENTS.RELOAD_ACTIVE, { target: 'home' });
+      return true;
+    } catch (err) {
+      getLoggingApi().warn('main-window', 'failed to reload home feed', {
+        error: (err as Error).message,
+      });
+      return false;
+    }
+  }
+  getLoggingApi().warn('main-window', 'no active tab or home feed to reload');
+  return false;
+}
+
 function getActiveAttachedTab(): AttachedTab | null {
   if (activeAttachedTabId === null) return null;
   return attachedTabs.get(activeAttachedTabId) ?? null;
@@ -375,15 +420,29 @@ function stopAllAttachedTabWatchers(): void {
 
 async function rehydrateFromStore(win: BrowserWindow): Promise<void> {
   try {
-    // `listTabs()` / `getActiveTabId()` await auth hydration internally
-    // (see `lite/main-window/api.ts`) — the TabStore reads the
-    // signed-in accountId synchronously, so without that await a
-    // freshly-launched window would see "no session yet" and drop
-    // the user's persisted tabs.
+    // `listTabs()` awaits auth hydration internally (see
+    // `lite/main-window/api.ts`) — the TabStore reads the signed-in
+    // accountId synchronously, so without that await a freshly-launched
+    // window would see "no session yet" and drop the user's persisted
+    // tabs.
     const api = getMainWindowApi();
     const tabs = await api.listTabs();
-    const activeId = await api.getActiveTabId();
-    reconcileViews(win, tabs, activeId);
+    // Boot ALWAYS lands on Home (the IDW feed), never a restored tab: a
+    // persisted active tab can be stale (e.g. it targets a different
+    // OneReach account) and would auto-foreground over the feed, leaving
+    // the user stuck on a login / account-picker page ("the app is hung").
+    // We still restore the tabs so they sit in the bar; the user
+    // foregrounds one by clicking it.
+    //
+    // Commit Home FIRST — before attaching any tab view. Attaching a tab
+    // starts its load, whose page-title-updated / did-navigate events call
+    // setLabel / setUrl; those read-modify-write the blob preserving its
+    // current activeId. If Home isn't committed yet, that races and
+    // re-persists the tab as active (re-foregrounding the stuck tab ~17ms
+    // later — the symptom we just saw). goHome() first means those later
+    // writes read activeId=null and keep it null.
+    await api.goHome();
+    reconcileViews(win, tabs, null);
   } catch (err) {
     getLoggingApi().warn('main-window', 'rehydrate failed', {
       error: (err as Error).message,

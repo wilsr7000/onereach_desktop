@@ -30,6 +30,7 @@ import {
   _resetAiApiForTesting,
   type AiStatus,
   type SpaceAssistResult,
+  type OkfConversionResult,
   type AiChatInput,
   type AiChatResult,
   type AiChatMessage,
@@ -46,6 +47,7 @@ export const AI_IPC = {
   STATUS: 'lite:ai:status',
   SPACE_ASSIST: 'lite:ai:space-assist',
   ENRICH_ASSET: 'lite:ai:enrich-asset',
+  CONVERT_OKF: 'lite:ai:convert-okf',
   KEY_SAVE: 'lite:ai:key-save',
   KEY_HAS: 'lite:ai:key-has',
   KEY_DELETE: 'lite:ai:key-delete',
@@ -180,6 +182,29 @@ export function initAi(opts: InitAiOptions = {}): AiHandle {
       } catch (err) {
         const code = err instanceof AiError ? err.code : 'AI_PROVIDER_ERROR';
         log.warn('space-assist rejected', { code });
+        return { ok: false, error: serializeAiError(err) };
+      }
+    }
+  );
+
+  // Convert an agent definition (URL contents or pasted text) into OKF.
+  // Powers the Spaces "add an agent" flow; the renderer then calls
+  // spaces.items.createAgent with the returned OKF + agentType.
+  ipcMain.handle(
+    AI_IPC.CONVERT_OKF,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { source?: unknown; isUrl?: unknown }
+    ): Promise<AiIpcResult<OkfConversionResult>> => {
+      try {
+        const source = typeof payload?.source === 'string' ? payload.source : '';
+        const isUrl = payload?.isUrl === true;
+        const value = await api.convertToOkf({ source, isUrl });
+        log.info('convert-okf ok', { agentType: value.agentType, okfLen: value.okf.length });
+        return { ok: true, value };
+      } catch (err) {
+        const code = err instanceof AiError ? err.code : 'AI_PROVIDER_ERROR';
+        log.warn('convert-okf rejected', { code });
         return { ok: false, error: serializeAiError(err) };
       }
     }

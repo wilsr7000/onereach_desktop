@@ -921,6 +921,37 @@ body {
   overflow: hidden;
 }
 
+/* ── Agent tile: distinct violet surface so agents don't read as docs ── */
+
+.spaces-card-preview-agent {
+  background:
+    radial-gradient(circle at 50% 30%, rgba(150, 120, 255, 0.22), transparent 62%),
+    linear-gradient(165deg, #1B1630, #120E20);
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 16px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spaces-card-glyph-agent {
+  font-size: 26px;
+  line-height: 1;
+  color: rgba(184, 152, 255, 0.92);
+}
+
+.spaces-card-preview-agent .spaces-card-agent-okf {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(214, 204, 255, 0.7);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* ── Meta strip (bottom of the tile) ───────────────────────────────── */
 
 .spaces-card-meta {
@@ -993,6 +1024,7 @@ body {
 .spaces-card-kind-video { color: #ffb37a; }
 .spaces-card-kind-playbook { color: #d6c2ff; }
 .spaces-card-kind-ticket { color: #ffd07a; }
+.spaces-card-kind-agent { color: #b898ff; }
 
 .spaces-card-meta-sep {
   color: rgba(244, 246, 251, 0.24);
@@ -1604,6 +1636,35 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
+}
+
+/* ── Agent detail block: type chip + OKF definition heading ─────────── */
+
+.spaces-detail-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spaces-detail-agent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.spaces-detail-agent-type {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b898ff;
+  letter-spacing: 0.01em;
+}
+
+.spaces-detail-agent-okf-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(184, 152, 255, 0.55);
 }
 
 /* Markdown-rendered body. Use the project's existing dark palette so

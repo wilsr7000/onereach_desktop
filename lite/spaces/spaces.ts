@@ -2855,6 +2855,9 @@ function buildAssetTilePreview(item: RendererItemSummary): HTMLElement {
     case 'ticket':
       buildTicketTilePreview(item, preview);
       break;
+    case 'agent':
+      buildAgentTilePreview(item, preview);
+      break;
     case 'document':
     case 'text':
     case 'other':
@@ -3086,6 +3089,55 @@ function buildTextTilePreview(
   glyph.setAttribute('aria-hidden', 'true');
   glyph.textContent = '¶';
   preview.appendChild(glyph);
+}
+
+/**
+ * Agent tile: a distinct violet surface (via `.spaces-card-preview-agent`)
+ * with an agent glyph + a snippet of the OKF definition, so an agent
+ * reads as something other than a document at a glance.
+ */
+function buildAgentTilePreview(item: RendererItemSummary, preview: HTMLElement): void {
+  const glyph = document.createElement('span');
+  glyph.className = 'spaces-card-glyph spaces-card-glyph-agent';
+  glyph.setAttribute('aria-hidden', 'true');
+  glyph.textContent = '◈';
+  preview.appendChild(glyph);
+  if (typeof item.excerpt === 'string' && item.excerpt.length > 0) {
+    const body = document.createElement('p');
+    body.className = 'spaces-card-excerpt spaces-card-agent-okf';
+    body.textContent = item.excerpt;
+    preview.appendChild(body);
+  }
+}
+
+/**
+ * Detail-pane block for an agent: a header showing the agent type +
+ * "OKF definition" label, then the OKF text rendered as a monospace
+ * structured-text block (reusing the code-preview renderer).
+ */
+function buildAgentOkfBlock(item: RendererItem, okf: string): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'spaces-detail-agent';
+
+  const head = document.createElement('div');
+  head.className = 'spaces-detail-agent-head';
+  const typeBadge = document.createElement('span');
+  typeBadge.className = 'spaces-detail-agent-type';
+  const t =
+    typeof item.agentType === 'string' && item.agentType.length > 0
+      ? item.agentType
+      : 'agent';
+  typeBadge.textContent = `◈ ${t.charAt(0).toUpperCase()}${t.slice(1)} agent`;
+  head.appendChild(typeBadge);
+  const okfLabel = document.createElement('span');
+  okfLabel.className = 'spaces-detail-agent-okf-label';
+  okfLabel.textContent = 'OKF definition';
+  head.appendChild(okfLabel);
+  section.appendChild(head);
+
+  // OKF is structured YAML/MD text — render in the monospace code block.
+  section.appendChild(buildCodePreview(okf, 'yaml'));
+  return section;
 }
 
 export function buildSpaceChip(chip: RendererSpaceChipRef): HTMLElement {
@@ -3711,6 +3763,7 @@ const EDITABLE_ITEM_KINDS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'text', label: 'Text' },
   { id: 'audio', label: 'Audio' },
   { id: 'video', label: 'Video' },
+  { id: 'agent', label: 'Agent' },
   { id: 'other', label: 'Other' },
 ];
 
@@ -3803,13 +3856,16 @@ export function buildDetailPane(
     typeof item.content === 'string' && item.content.length > 0;
   if (hasContent) {
     const content = item.content as string;
+    // Agents lead with their OKF definition rendered as structured text.
+    if (item.kind === 'agent') {
+      wrap.appendChild(buildAgentOkfBlock(item, content));
+    } else if (isBase64DataUrl(content)) {
     // Inline uploads stash the file's bytes as a base64 data URL in
     // `content` (no Files-API upload yet — that's a future
     // enhancement). Route those straight to the binary preview so
     // PDFs / images / audio / video render via <embed> / <img> /
     // <audio> / <video> instead of dumping the base64 blob into the
     // Markdown renderer.
-    if (isBase64DataUrl(content)) {
       wrap.appendChild(buildBinaryPreview(item, content));
     } else {
       const language = detectTextPreviewLanguage(item.mimeType, item.title);
@@ -7078,6 +7134,7 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   video: 'Video',
   playbook: 'Playbook',
   ticket: 'Ticket',
+  agent: 'Agent',
   other: 'Other',
 };
 
@@ -8372,7 +8429,7 @@ async function runItemsSearch(): Promise<void> {
 
 // ─── Sprint 1: new-asset modal + drag-drop upload + delete action ───────
 
-let newAssetMode: 'text' | 'upload' = 'text';
+let newAssetMode: 'text' | 'upload' | 'agent' = 'text';
 let newAssetFile: File | null = null;
 
 function wireNewAssetDialog(): void {
@@ -8404,7 +8461,7 @@ function wireNewAssetDialog(): void {
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
       const mode = tab.getAttribute('data-asset-tab');
-      if (mode !== 'text' && mode !== 'upload') return;
+      if (mode !== 'text' && mode !== 'upload' && mode !== 'agent') return;
       switchNewAssetMode(mode);
     });
   });
@@ -8472,7 +8529,7 @@ function handleNewAssetFileSelection(file: File | null): void {
   }
 }
 
-function switchNewAssetMode(mode: 'text' | 'upload'): void {
+function switchNewAssetMode(mode: 'text' | 'upload' | 'agent'): void {
   newAssetMode = mode;
   document.querySelectorAll<HTMLElement>('[data-asset-tab]').forEach((tab) => {
     const isActive = tab.getAttribute('data-asset-tab') === mode;
@@ -8497,6 +8554,8 @@ function openNewAssetDialog(presetFile: File | null = null): void {
   titleInput.value = '';
   if (contentInput instanceof HTMLTextAreaElement) contentInput.value = '';
   if (fileInput instanceof HTMLInputElement) fileInput.value = '';
+  const agentInput = document.getElementById('spaces-new-asset-agent-input');
+  if (agentInput instanceof HTMLTextAreaElement) agentInput.value = '';
   // Reset the file chip (and clear stashed file).
   handleNewAssetFileSelection(null);
   if (error !== null) {
@@ -8529,7 +8588,8 @@ async function submitNewAsset(): Promise<void> {
   const submit = document.getElementById('spaces-new-asset-submit');
   if (!(titleInput instanceof HTMLInputElement) || error === null) return;
   const title = titleInput.value.trim();
-  if (title.length === 0) {
+  // Agents may omit the title — the AI suggests a name during conversion.
+  if (title.length === 0 && newAssetMode !== 'agent') {
     showDialogError(error, 'Please enter a title.');
     return;
   }
@@ -8556,6 +8616,61 @@ async function submitNewAsset(): Promise<void> {
 
   try {
     const creatorId = readCurrentEditorId();
+    if (newAssetMode === 'agent') {
+      // Agents must live in a real Space (not Home / Uncategorized).
+      if (spaceId === '') {
+        showDialogError(error, 'Open a Space first, then add the agent.');
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+      const agentInput = document.getElementById('spaces-new-asset-agent-input');
+      const source =
+        agentInput instanceof HTMLTextAreaElement ? agentInput.value.trim() : '';
+      if (source.length === 0) {
+        showDialogError(error, 'Paste an OKF URL or the agent definition text.');
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+      const ai = window.lite?.ai;
+      if (ai === undefined || typeof ai.convertToOkf !== 'function') {
+        showDialogError(error, 'AI is not available. Add an Anthropic key in Settings → AI.');
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+      const isUrl = /^https?:\/\//i.test(source);
+      const originalLabel =
+        submit instanceof HTMLButtonElement ? submit.textContent : null;
+      if (submit instanceof HTMLButtonElement) submit.textContent = 'Converting…';
+      const converted = await ai.convertToOkf(source, isUrl);
+      if (submit instanceof HTMLButtonElement && originalLabel !== null) {
+        submit.textContent = originalLabel;
+      }
+      if (converted.ok === false) {
+        showDialogError(error, converted.error.message);
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+      const okf = converted.value;
+      const agentName =
+        title.length > 0 ? title : okf.name.length > 0 ? okf.name : 'Agent';
+      const envelope = await bridge.items.createAgent({
+        spaceId,
+        name: agentName,
+        okf: okf.okf,
+        agentType: okf.agentType,
+        ...(isUrl ? { sourceUrl: source } : {}),
+        ...(creatorId !== null ? { creatorId } : {}),
+      });
+      if (envelope.ok === false) {
+        showDialogError(error, envelope.error.message);
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+      closeNewAssetDialog();
+      showToast(`Added agent "${agentName}"`);
+      await loadItems();
+      return;
+    }
     if (newAssetMode === 'upload' && newAssetFile !== null) {
       const file = newAssetFile;
       // Auto-extract metadata before upload — image dimensions, audio/

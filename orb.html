@@ -3117,7 +3117,12 @@
       function handleOrbError(source, error, context = {}) {
         const msg = typeof error === 'string' ? error : (error?.message || error?.error || '');
 
-        const isStartup = msg.includes('Exchange not running') || msg.includes('not available');
+        const isStartup =
+          msg.includes('Exchange not running') ||
+          msg.includes('not available') ||
+          msg.includes('not initialized') ||
+          msg.includes('failed to load') ||
+          msg.includes('No handler registered');
         const isRateLimit = msg.includes('rate limit') || msg.includes('429');
 
         const userMessage = isStartup
@@ -3125,6 +3130,15 @@
           : isRateLimit
             ? 'Too many requests. Wait a moment and try again.'
             : msg || 'Something went wrong. Try again.';
+
+        // Reliable capture: this console.error is forwarded to the log server
+        // by the webContents 'console-message' hook (browserWindow.js), so the
+        // failure is recorded even though the orb window has devTools disabled.
+        try {
+          console.error(`[Orb] handleOrbError source=${source} msg=${JSON.stringify(msg)}`);
+        } catch (_) {
+          /* logging must never block error handling */
+        }
 
         if (window.OrbAudio) window.OrbAudio.playErrorTone();
 
@@ -3706,11 +3720,23 @@
 
         showTranscript(transcript, false);
 
+        // Correlate this dispatch across the renderer and main-process logs.
+        // The same traceId is logged here (forwarded via console-message) and
+        // by the hud-api:submit-task IPC handler (ipc category) and the
+        // exchange auction, so a future "nothing happened" is a single query.
+        const traceId =
+          'orb-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+
         try {
           if (!window.agentHUD || !window.agentHUD.submitTask) {
-            handleOrbError('function_call', 'HUD API not available', { callId });
+            // The HUD bridge never loaded (see preload-orb.js stub) -- the orb
+            // can hear but can't dispatch. Surface it instead of dying silent.
+            console.error(`[Orb] traceId=${traceId} agentHUD bridge unavailable; cannot dispatch task`);
+            handleOrbError('function_call', 'Agent system not available (HUD bridge failed to load)', { callId });
             return;
           }
+
+          console.log(`[Orb] traceId=${traceId} dispatching to agentHUD.submitTask: ${JSON.stringify((transcript || '').slice(0, 80))}`);
 
           // Function-call handler: realtime model classified the user's
           // voice utterance as a handle_user_request tool call, so this
@@ -3720,11 +3746,13 @@
             toolId: 'orb',
             skipFilter: false,
             inputModality: 'voice',
+            traceId,
           });
-          console.log('[Orb] HUD API result:', JSON.stringify(result));
+          console.log(`[Orb] traceId=${traceId} HUD API result:`, JSON.stringify(result));
 
           // Handle error returns
           if (!result || result.error) {
+            console.error(`[Orb] traceId=${traceId} submitTask returned error: ${result?.error || 'Unknown error'}`);
             handleOrbError('function_call', result?.error || 'Unknown error', { callId });
             return;
           }
@@ -3803,6 +3831,7 @@
             S.set('pendingFunctionCallId', null);
           }
         } catch (err) {
+          console.error(`[Orb] traceId=${traceId} submitTask threw: ${(err && err.message) || err}`);
           handleOrbError('function_call', err, { callId });
         } finally {
           const count = (S.get('pendingSubmitCount') || 1) - 1;

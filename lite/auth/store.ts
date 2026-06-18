@@ -622,10 +622,15 @@ export class AuthStore {
         return { injected: false, reason: 'unsupported-env' };
       }
 
-      // Read every cookie from the auth partition that matches the env's
-      // cookie domain suffixes. This catches mult + or + any ancillary
-      // cookies (CSRF, session markers) the SSO interstitial checks.
-      const sourceCookies = await this.collectAuthPartitionCookies(env);
+      // Read EVERY cookie in the auth partition (not just the ones whose
+      // domain matches the env suffixes). The OneReach login only treats
+      // the cloned session as valid when ancillary cookies come along too
+      // -- e.g. session / CSRF markers set on the apex `onereach.ai` or on
+      // hosts outside the env-suffix list. Cloning only the suffix-matched
+      // subset left the IDW tab on the full email/password page. The auth
+      // partition is per-env (`persist:lite-auth-<env>`), so every cookie
+      // in it legitimately belongs to this env's session.
+      const sourceCookies = await this.collectAllPartitionCookies(env);
       if (sourceCookies.length === 0) {
         span?.finish({ injected: false, reason: 'no-cookies' });
         return { injected: false, reason: 'no-cookies' };
@@ -762,6 +767,24 @@ export class AuthStore {
       }
     }
     return collected;
+  }
+
+  /**
+   * Collect EVERY cookie in the env's auth partition, unfiltered by
+   * domain. The partition is per-env (`persist:lite-auth-<env>`), so all
+   * cookies belong to this env's captured session; cloning the full set
+   * (vs. only the env-suffix subset {@link collectAuthPartitionCookies}
+   * returns) is what makes the OneReach login recognize the session in a
+   * fresh tab partition. Best-effort: returns [] on any failure.
+   */
+  private async collectAllPartitionCookies(env: Environment): Promise<Cookie[]> {
+    if (ENVIRONMENT_CONFIGS[env] === undefined) return [];
+    try {
+      const ses = this.sessionFromPartition(`persist:lite-auth-${env}`);
+      return await ses.cookies.get({});
+    } catch {
+      return [];
+    }
   }
 
   hasValidSession(env: Environment): boolean {

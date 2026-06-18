@@ -63,6 +63,7 @@ import type {
   PersonUpsertInput,
   SpaceMember,
   CreateAssetInput,
+  CreateAgentInput,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -357,7 +358,8 @@ export const CYPHER = {
                 ELSE { kind: head(labels(assigneeNode)),
                        name: coalesce(assigneeNode.name, assigneeNode.title, ''),
                        id: assigneeNode.id }
-           END AS ticketAssignee
+           END AS ticketAssignee,
+           a.agentType AS agentType
     LIMIT 1
   `,
 
@@ -971,6 +973,60 @@ export const CYPHER = {
       createdAt: $now,
       updatedAt: $now
     })
+    WITH a
+    OPTIONAL MATCH (p:Person {id: $creatorId})
+    FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
+      MERGE (x)-[:CREATED]->(a))
+    RETURN a.id AS id
+  `,
+
+  /**
+   * Create an agent in a Space. Writes THREE nodes in one transaction:
+   *   1. a Space-facing `:Asset {type:'agent'}` (so it lists/renders/
+   *      soft-deletes like any asset; OKF text lives in `a.content`),
+   *   2. a parent `:Agent` node (queryable as an agent),
+   *   3. a typed child `:AgentType:<TypeLabel>` node,
+   * linked `(:Asset)-[:REPRESENTS]->(:Agent)-[:HAS_TYPE]->(:AgentType)`.
+   *
+   * `__TYPE_LABEL__` is a placeholder the caller (`createAgent`) replaces
+   * with a STRICTLY-SANITIZED PascalCase label (see
+   * `sanitizeAgentTypeLabel`) — Cypher can't parameterize labels, and we
+   * deliberately don't depend on APOC (its availability isn't
+   * guaranteed; see the discovery fallback). The raw `agentType` is also
+   * stored as a property on all three nodes for property-based queries.
+   */
+  CREATE_AGENT: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+    CREATE (a:Asset {
+      id: $id,
+      type: 'agent',
+      name: $name,
+      title: $name,
+      content: $okf,
+      description: $description,
+      sourceUrl: $sourceUrl,
+      agentType: $agentType,
+      metadata: $metadata,
+      createdAt: $now,
+      updatedAt: $now
+    })
+    MERGE (a)-[:BELONGS_TO]->(s)
+    CREATE (ag:Agent {
+      id: $agentId,
+      name: $name,
+      description: $description,
+      agentType: $agentType,
+      createdAt: $now,
+      updatedAt: $now
+    })
+    CREATE (a)-[:REPRESENTS]->(ag)
+    CREATE (t:AgentType:__TYPE_LABEL__ {
+      id: $typeId,
+      agentType: $agentType,
+      createdAt: $now
+    })
+    CREATE (ag)-[:HAS_TYPE]->(t)
     WITH a
     OPTIONAL MATCH (p:Person {id: $creatorId})
     FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
@@ -2011,6 +2067,91 @@ export class SdkSpacesClient {
   }
 
   /**
+   * Create an agent in a Space (see CYPHER.CREATE_AGENT). The OKF text
+   * is stored as the asset's inline `content`. Writes the Space-facing
+   * `:Asset {type:'agent'}` + parent `:Agent` + typed child node in one
+   * transaction, then returns the freshly-fetched Item (kind 'agent').
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for empty name/okf or
+   *   missing spaceId; `SPACES_NOT_FOUND` if the target Space is missing.
+   */
+  async createAgent(input: CreateAgentInput): Promise<Item> {
+    const name = validateTitle(input.name);
+    const okf = typeof input.okf === 'string' ? input.okf : '';
+    if (okf.trim().length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'An agent requires OKF definition text.',
+        remediation: 'Paste a URL or text so Lite can convert it to OKF.',
+        context: { op: 'createAgent' },
+      });
+    }
+    const spaceId = typeof input.spaceId === 'string' ? input.spaceId.trim() : '';
+    if (spaceId.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'An agent must be added to a Space.',
+        remediation: 'Open a Space first, then add the agent.',
+        context: { op: 'createAgent' },
+      });
+    }
+    const description = validateOptionalDescription(input.description ?? '');
+    const agentType =
+      typeof input.agentType === 'string' && input.agentType.trim().length > 0
+        ? input.agentType.trim()
+        : 'other';
+    const sourceUrl =
+      typeof input.sourceUrl === 'string' && input.sourceUrl.length > 0
+        ? input.sourceUrl
+        : null;
+    const creatorId =
+      typeof input.creatorId === 'string' && input.creatorId.length > 0
+        ? input.creatorId
+        : null;
+    const id = generateAssetId();
+    const agentId = generateAssetId();
+    const typeId = generateAssetId();
+    const now = nowIso();
+    // Dynamic per-type label, strictly sanitized (Cypher can't
+    // parameterize labels; see sanitizeAgentTypeLabel).
+    const cypher = CYPHER.CREATE_AGENT.replace(
+      '__TYPE_LABEL__',
+      sanitizeAgentTypeLabel(agentType)
+    );
+    const rows = await this.run(cypher, {
+      id,
+      agentId,
+      typeId,
+      spaceId,
+      name,
+      okf,
+      description,
+      sourceUrl,
+      agentType,
+      metadata: stringifyMetadata(undefined),
+      creatorId,
+      now,
+    });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Space ${spaceId} not found`,
+        remediation: 'Refresh the list and try again.',
+        context: { spaceId },
+      });
+    }
+    const created = await this.getItem(id);
+    if (created === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Agent ${id} disappeared after creation`,
+        context: { id },
+      });
+    }
+    return created;
+  }
+
+  /**
    * Soft delete an asset (default) or hard delete (when
    * `opts.soft === false`). Soft is the boring default — reversible
    * via `restoreAsset`, and the asset disappears from every listing
@@ -2757,6 +2898,13 @@ function toItem(row: Record<string, unknown>): Item {
     }
     item.ticket = ticket;
   }
+  // Agent projection: surface the type discriminator for the renderer.
+  if (item.kind === 'agent') {
+    const agentType = optString(row, 'agentType');
+    if (agentType !== undefined && agentType.length > 0) {
+      item.agentType = agentType;
+    }
+  }
   return item;
 }
 
@@ -2895,8 +3043,30 @@ const ITEM_KINDS: ReadonlySet<ItemKind> = new Set([
   'video',
   'playbook',
   'ticket',
+  'agent',
   'other',
 ]);
+
+/**
+ * Turn a raw `agentType` string into a safe Cypher label
+ * (PascalCase, ASCII alphanumerics only, leading letter guaranteed).
+ * This is interpolated into CREATE_AGENT's `__TYPE_LABEL__` slot, so it
+ * MUST NOT allow anything that could break out of the label position —
+ * we strip everything except [A-Za-z0-9] and fall back to `Other`.
+ */
+function sanitizeAgentTypeLabel(agentType: unknown): string {
+  const raw = typeof agentType === 'string' ? agentType : '';
+  const pascal = raw
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('');
+  // Must start with a letter to be a valid label; default to 'Other'.
+  const safe = /^[A-Za-z]/.test(pascal) ? pascal : '';
+  return safe.length > 0 ? safe : 'Other';
+}
 
 function toItemKind(v: unknown): ItemKind {
   return typeof v === 'string' && (ITEM_KINDS as Set<string>).has(v) ? (v as ItemKind) : 'other';

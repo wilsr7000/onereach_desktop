@@ -519,12 +519,22 @@ try {
   contextBridge.exposeInMainWorld('agentHUD', methods);
   console.log('[Orb Preload] agentHUD exposed with', Object.keys(methods).length, 'methods');
 } catch (hudErr) {
+  // These console.error lines are forwarded to the log server by the
+  // webContents 'console-message' hook (browserWindow.js), so the load
+  // failure is captured even though the orb window runs with devTools off.
+  // Without the bridge, the orb can hear and transcribe but cannot dispatch
+  // any task to the agent exchange -- the "dispatches into a dead pipe" bug.
   console.error('[Orb Preload] FAILED to load agentHUD:', hudErr.message);
   console.error('[Orb Preload] Stack:', hudErr.stack?.split('\n').slice(0, 3).join(' | '));
-  // Expose a stub so the orb doesn't crash when checking window.agentHUD
+  // Expose a stub so the orb doesn't crash when checking window.agentHUD.
+  // Every invocation logs (forwarded) and rejects with a message the orb's
+  // handleOrbError classifies as a load failure -> spoken + visible feedback.
   try {
     contextBridge.exposeInMainWorld('agentHUD', {
-      submitTask: () => Promise.reject(new Error('HUD API failed to load: ' + hudErr.message)),
+      submitTask: () => {
+        console.error('[Orb Preload] agentHUD.submitTask invoked on FAILED-to-load stub; task dropped:', hudErr.message);
+        return Promise.reject(new Error('HUD API failed to load: ' + hudErr.message));
+      },
     });
   } catch (_) {
     /* already exposed or sandbox issue */

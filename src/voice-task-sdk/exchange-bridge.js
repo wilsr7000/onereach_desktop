@@ -2829,13 +2829,26 @@ async function initializeExchangeBridge(config = {}) {
     hudApi.initialize();
 
     // ==================== CONNECT ALL AGENTS TO EXCHANGE ====================
-    // 1. Connect built-in agents (time, weather, media, etc.)
-    await connectBuiltInAgents(mergedConfig.port);
+    // Agent connection runs AFTER hudApi.initialize() above, so a failure here
+    // can't unregister the HUD IPC handler. We still wrap it in its own
+    // try/catch so a single bad agent (or a transient connect error) can't
+    // abort the whole init and leave the exchange half-wired -- the exchange
+    // is already running and the IPC is registered, so partial agent
+    // connectivity is recoverable by the periodic health check below.
+    try {
+      // 1. Connect built-in agents (time, weather, media, etc.)
+      await connectBuiltInAgents(mergedConfig.port);
 
-    // 2. Connect custom agents from agent-store
-    await connectCustomAgents(mergedConfig.port);
+      // 2. Connect custom agents from agent-store
+      await connectCustomAgents(mergedConfig.port);
 
-    log.info('voice', 'All agents connected. Total:', { v0: localAgentConnections.size });
+      log.info('voice', 'All agents connected. Total:', { v0: localAgentConnections.size });
+    } catch (agentConnectError) {
+      log.error('voice', 'Agent connection failed during init; exchange is up, health check will retry', {
+        error: agentConnectError.message,
+        connected: localAgentConnections.size,
+      });
+    }
 
     // ==================== PERIODIC AGENT HEALTH CHECK ====================
     // Detect and reconnect agents that silently dropped off
@@ -2901,7 +2914,18 @@ async function initializeExchangeBridge(config = {}) {
 
     return true;
   } catch (error) {
-    log.error('voice', 'Failed to start exchange', { error: error });
+    // A throw here can leave the exchange transport already listening (it
+    // starts earlier in this try block) while later wiring -- including the
+    // HUD API IPC registration -- never ran. That is exactly the failure mode
+    // that makes the voice orb dispatch tasks into a dead pipe. Log loudly
+    // with the stack so a partial init is never silent. (main.js also calls
+    // hudApi.initialize() before this function, so the orb's submit handler
+    // still exists even when this path is hit.)
+    log.error('voice', 'Failed to start exchange bridge -- voice orb task dispatch may be degraded', {
+      error: error && error.message ? error.message : String(error),
+      stack: error && error.stack ? error.stack.split('\n').slice(0, 5).join(' | ') : undefined,
+      transportListening: isExchangeRunning,
+    });
     return false;
   }
 }

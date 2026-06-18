@@ -39,6 +39,7 @@ import type {
   PersonUpsertInput,
   SpaceMember,
   CreateAssetInput,
+  CreateAgentInput,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -88,6 +89,7 @@ export const SPACES_IPC = {
   MEMBERS_REMOVE: 'lite:spaces:members:remove',
   /** Sprint 1 — asset CRUD. */
   ITEMS_CREATE: 'lite:spaces:items:create',
+  ITEMS_CREATE_AGENT: 'lite:spaces:items:createAgent',
   ITEMS_DELETE: 'lite:spaces:items:delete',
   ITEMS_RESTORE: 'lite:spaces:items:restore',
   /** Sprint 3 — move / copy / search. */
@@ -769,6 +771,25 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
             ? (payload?.input as CreateAssetInput)
             : ({ spaceId: '', title: '' } as CreateAssetInput);
         const value = await getSpacesApi().items.create(input);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_CREATE_AGENT,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { input?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const input =
+          payload?.input !== null && typeof payload?.input === 'object'
+            ? (payload?.input as CreateAgentInput)
+            : ({ spaceId: '', name: '', okf: '', agentType: '' } as CreateAgentInput);
+        const value = await getSpacesApi().items.createAgent(input);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

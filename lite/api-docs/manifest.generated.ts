@@ -37,6 +37,13 @@ export const MANIFEST: Manifest = {
             "examples": []
           },
           {
+            "name": "convertToOkf",
+            "signature": "convertToOkf(input: OkfConversionInput): Promise<OkfConversionResult>",
+            "description": "Convert an agent definition (pasted text, or the contents of a\npasted URL) into OKF (structured YAML/MD text) via Claude, and\nclassify its `agentType` + suggest a `name`. Powers \"add an agent\"\nin Spaces. **Claude-only** — throws `AI_NOT_CONFIGURED` when the\nactive provider isn't Claude. When `isUrl`, the URL is fetched first\n(https only + basic SSRF guard).\n\nThrows `AiError` (`AI_NOT_CONFIGURED`, `AI_INVALID_INPUT`,\n`AI_NETWORK`, `AI_AUTH_REJECTED`, `AI_RATE_LIMITED`,\n`AI_PROVIDER_ERROR`, `AI_BAD_RESPONSE`).",
+            "tags": [],
+            "examples": []
+          },
+          {
             "name": "chat",
             "signature": "chat(input: AiChatInput): Promise<AiChatResult>",
             "description": "Generic single-shot Claude chat. Powers the embedded WISER Playbooks\n`window.ai.chat` bridge so the hosted app runs on the Onereach Claude\nkey without the key ever leaving the main process. **Claude-only** —\nthrows `AI_NOT_CONFIGURED` when the active provider isn't Claude.\n\nThrows `AiError` (`AI_NOT_CONFIGURED`, `AI_INVALID_INPUT`,\n`AI_NETWORK`, `AI_AUTH_REJECTED`, `AI_RATE_LIMITED`,\n`AI_PROVIDER_ERROR`).",
@@ -2192,7 +2199,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "MAIN_WINDOW_EVENTS",
-        "count": 28,
+        "count": 29,
         "entries": [
           {
             "constantKey": "OPEN_TAB_START",
@@ -2277,6 +2284,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "TAB_ACCOUNT_PICKER_DETECTED",
             "name": "main-window.tab.account-picker-detected",
+            "description": ""
+          },
+          {
+            "constantKey": "RELOAD_ACTIVE",
+            "name": "main-window.reload-active",
             "description": ""
           },
           {
@@ -2687,6 +2699,18 @@ export const MANIFEST: Manifest = {
               {
                 "tag": "throws",
                 "value": "{SpacesError} `SPACES_INVALID_INPUT` for empty title;\n  `SPACES_NOT_FOUND` if the target space is missing/soft-deleted."
+              }
+            ],
+            "examples": []
+          },
+          {
+            "name": "createAgent",
+            "signature": "createAgent(input: CreateAgentInput): Promise<Item>",
+            "description": "Create an agent asset in a Space. The OKF definition text (already\nAI-converted; see `getAiApi().convertToOkf`) is stored as the\nasset's `content`. In the graph this also writes a parent `:Agent`\nnode + a per-type `:AgentType:<TypeLabel>` child linked via\n`[:REPRESENTS]`/`[:HAS_TYPE]`. Returns the freshly re-fetched Item\n(`kind === 'agent'`, with `agentType` populated).",
+            "tags": [
+              {
+                "tag": "throws",
+                "value": "{SpacesError} `SPACES_INVALID_INPUT` for empty name/okf or\n  missing spaceId; `SPACES_NOT_FOUND` if the target Space is missing."
               }
             ],
             "examples": []
@@ -3383,5 +3407,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-06-10T23:11:09.703Z"
+  "generatedAt": "2026-06-18T22:23:41.737Z"
 } as const;

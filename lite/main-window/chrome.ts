@@ -348,6 +348,18 @@ async function bootstrap(): Promise<void> {
     });
   }
 
+  // Refresh button — reloads the active tab's view, or the Home feed
+  // when Home is active. Brief spin for feedback; the actual reload
+  // runs in the main process (window.ts reloadActive()).
+  const refreshBtn = document.getElementById('refresh-active-btn');
+  if (refreshBtn !== null) {
+    refreshBtn.addEventListener('click', () => {
+      refreshBtn.classList.add('spinning');
+      window.setTimeout(() => refreshBtn.classList.remove('spinning'), 600);
+      void mainWindow().reloadActive().catch(() => undefined);
+    });
+  }
+
   // 3. Wire the Home pill click.
   wireHomePill();
 

@@ -86,6 +86,7 @@ import type {
   PersonUpsertInput,
   SpaceMember,
   CreateAssetInput,
+  CreateAgentInput,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -411,6 +412,11 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
     async create(input: CreateAssetInput): Promise<Item> {
       const result = await client.createAsset(input);
+      nukeReadCache();
+      return result;
+    },
+    async createAgent(input: CreateAgentInput): Promise<Item> {
+      const result = await client.createAgent(input);
       nukeReadCache();
       return result;
     },

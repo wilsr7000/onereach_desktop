@@ -166,6 +166,70 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * Refresh button — reloads the active tab's WebContentsView, or the
+ * Home feed when Home is active. Muted by default, matching the tab
+ * pills; spins once on click for feedback. Sits between the Home pill
+ * and the tab list as a peer navigation control.
+ */
+.tab-bar-refresh-btn {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  align-self: center;
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--or-radius-sm);
+  background: transparent;
+  color: var(--or-text-muted);
+  cursor: pointer;
+  transition:
+    background var(--or-transition-fast),
+    color var(--or-transition-fast),
+    border-color var(--or-transition-fast);
+}
+
+.tab-bar-refresh-btn:hover {
+  background: var(--or-bg-hover);
+  color: var(--or-text-secondary);
+}
+
+.tab-bar-refresh-btn:active {
+  background: var(--or-bg-active);
+}
+
+.tab-bar-refresh-btn:focus-visible {
+  outline: 2px solid rgba(123, 219, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.tab-bar-refresh-btn svg {
+  display: block;
+}
+
+/* Brief spin on click — purely cosmetic feedback (the real reload
+ * happens in the active WebContentsView, whose load state the chrome
+ * doesn't observe). Removed after one rotation by chrome.ts. */
+.tab-bar-refresh-btn.spinning svg {
+  animation: tab-bar-refresh-spin 600ms linear;
+}
+
+@keyframes tab-bar-refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-bar-refresh-btn.spinning svg {
+    animation: none;
+  }
+}
+
 .tab-list {
   display: flex;
   align-items: stretch;

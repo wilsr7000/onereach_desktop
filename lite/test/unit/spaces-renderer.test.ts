@@ -244,6 +244,18 @@ describe('buildItemCard (content-forward asset tile)', () => {
     expect(card.querySelector('.spaces-card-play')).not.toBeNull();
   });
 
+  it('renders a distinct agent tile (violet surface + glyph + OKF snippet)', () => {
+    const card = handle().buildItemCard(
+      baseItem({ kind: 'agent', excerpt: 'name: Support Bot' }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-preview-agent')).not.toBeNull();
+    expect(card.classList.contains('spaces-card-agent')).toBe(true);
+    expect(card.querySelector('.spaces-card-glyph-agent')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-agent-okf')?.textContent).toBe('name: Support Bot');
+    expect(card.querySelector('.spaces-card-kind')?.textContent).toBe('Agent');
+  });
+
   it('renders a large play glyph for video assets', () => {
     const card = handle().buildItemCard(baseItem({ kind: 'video' }), false);
     expect(card.querySelector('.spaces-card-preview-video')).not.toBeNull();

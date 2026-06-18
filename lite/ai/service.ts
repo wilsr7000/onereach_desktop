@@ -29,6 +29,7 @@ import {
   type ClaudeMessageCreator,
 } from './client.js';
 import { callClaudeMetadata } from './metadata.js';
+import { callClaudeOkf } from './okf.js';
 import {
   runClaudeChat,
   runClaudeChatStream,
@@ -44,6 +45,8 @@ import type {
   SpaceAssistResult,
   AssetMetadataInput,
   AssetMetadataResult,
+  OkfConversionInput,
+  OkfConversionResult,
 } from './types.js';
 
 export interface AiServiceDeps {
@@ -227,6 +230,118 @@ export class AiService {
     }
   }
 
+  /**
+   * Convert an agent definition (pasted text, or the contents of a
+   * pasted URL) into OKF via Claude. Claude-only. When `isUrl`, the URL
+   * contents are fetched first (https only + basic SSRF guard).
+   */
+  async convertToOkf(input: OkfConversionInput): Promise<OkfConversionResult> {
+    const source = typeof input?.source === 'string' ? input.source.trim() : '';
+    if (source.length === 0) {
+      throw new AiError({
+        code: AI_ERROR_CODES.INVALID_INPUT,
+        message: 'A URL or agent definition text is required to convert to OKF.',
+        context: { op: 'convert-okf' },
+        remediation: 'Paste a URL or the agent definition text, then try again.',
+      });
+    }
+    const cfg = this.requireClaudeConfig('convert-okf');
+    const isUrl = input.isUrl === true;
+    const text = isUrl ? await this.fetchUrlForOkf(source) : source;
+    this.log('info', 'convert-okf start', {
+      provider: 'claude',
+      model: cfg.model,
+      isUrl,
+      sourceLen: text.length,
+    });
+    try {
+      const result = await callClaudeOkf(text, {
+        model: cfg.model,
+        createMessage: this.makeCreator(cfg),
+      });
+      this.log('info', 'convert-okf ok', {
+        provider: 'claude',
+        agentType: result.agentType,
+        okfLen: result.okf.length,
+      });
+      return result;
+    } catch (err) {
+      if (err instanceof AiError) {
+        this.log('warn', 'convert-okf rejected', { provider: 'claude', code: err.code });
+        throw err;
+      }
+      this.log('error', 'convert-okf unexpected', {
+        provider: 'claude',
+        error: (err as Error).message,
+      });
+      throw new AiError({
+        code: AI_ERROR_CODES.PROVIDER_ERROR,
+        message: `AI provider error: ${(err as Error).message}`,
+        context: { provider: 'claude', op: 'convert-okf' },
+        remediation: 'Try again, or paste the OKF definition manually.',
+        cause: err,
+      });
+    }
+  }
+
+  /**
+   * Fetch a URL's contents for OKF conversion. https only + a basic
+   * SSRF guard (block localhost / private / link-local hosts). NOTE:
+   * this is a host-string check, not a DNS-resolution check, so it does
+   * not defend against DNS rebinding — adequate for a user pasting their
+   * own agent URL, not for untrusted input.
+   */
+  private async fetchUrlForOkf(rawUrl: string): Promise<string> {
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      throw new AiError({
+        code: AI_ERROR_CODES.INVALID_INPUT,
+        message: 'That does not look like a valid URL.',
+        context: { op: 'convert-okf' },
+        remediation: 'Paste a full https:// URL, or paste the definition text instead.',
+      });
+    }
+    if (parsed.protocol !== 'https:') {
+      throw new AiError({
+        code: AI_ERROR_CODES.INVALID_INPUT,
+        message: 'Only https URLs are supported for agent sources.',
+        context: { op: 'convert-okf' },
+        remediation: 'Use an https:// URL, or paste the definition text.',
+      });
+    }
+    if (isBlockedOkfHost(parsed.hostname)) {
+      throw new AiError({
+        code: AI_ERROR_CODES.INVALID_INPUT,
+        message: 'That URL host is not allowed.',
+        context: { op: 'convert-okf' },
+        remediation: 'Paste a public https URL, or paste the definition text.',
+      });
+    }
+    let res: Awaited<ReturnType<typeof fetch>>;
+    try {
+      res = await this.fetchImpl(parsed.toString(), { redirect: 'follow' });
+    } catch (err) {
+      throw new AiError({
+        code: AI_ERROR_CODES.NETWORK,
+        message: `Could not fetch the URL: ${(err as Error).message}`,
+        context: { op: 'convert-okf' },
+        remediation: 'Check the URL / your network, or paste the definition text.',
+        cause: err,
+      });
+    }
+    if (!res.ok) {
+      throw new AiError({
+        code: AI_ERROR_CODES.PROVIDER_ERROR,
+        message: `The URL returned HTTP ${res.status}.`,
+        context: { op: 'convert-okf' },
+        remediation: 'Check the URL, or paste the definition text.',
+      });
+    }
+    return res.text();
+  }
+
   async chat(input: AiChatInput): Promise<AiChatResult> {
     assertValidChatInput(input);
     const cfg = this.requireClaudeConfig('chat');
@@ -337,4 +452,23 @@ export class AiService {
     }
     return mintFlowAuthHeader(accountId, this.fetchImpl, tokenBaseUrl);
   }
+}
+
+/**
+ * Basic SSRF guard for the OKF URL fetch: block localhost, loopback,
+ * private, and link-local hosts (incl. the 169.254.169.254 cloud
+ * metadata endpoint). Host-string check only — not DNS-resolution
+ * aware.
+ */
+function isBlockedOkfHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h.length === 0) return true;
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
+  if (h === '0.0.0.0' || h === '127.0.0.1' || h === '::1' || h.startsWith('127.')) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true; // link-local + cloud metadata
+  if (h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80:')) return true; // IPv6 ULA/link-local
+  return false;
 }

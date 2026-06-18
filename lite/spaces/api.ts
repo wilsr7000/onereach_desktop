@@ -53,6 +53,7 @@ import type {
   PersonUpsertInput,
   SpaceMember,
   CreateAssetInput,
+  CreateAgentInput,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -96,6 +97,7 @@ export type {
   PersonUpsertInput,
   SpaceMember,
   CreateAssetInput,
+  CreateAgentInput,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -252,6 +254,19 @@ export interface SpacesItemsApi {
    *   `SPACES_NOT_FOUND` if the target space is missing/soft-deleted.
    */
   create(input: CreateAssetInput): Promise<Item>;
+
+  /**
+   * Create an agent asset in a Space. The OKF definition text (already
+   * AI-converted; see `getAiApi().convertToOkf`) is stored as the
+   * asset's `content`. In the graph this also writes a parent `:Agent`
+   * node + a per-type `:AgentType:<TypeLabel>` child linked via
+   * `[:REPRESENTS]`/`[:HAS_TYPE]`. Returns the freshly re-fetched Item
+   * (`kind === 'agent'`, with `agentType` populated).
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for empty name/okf or
+   *   missing spaceId; `SPACES_NOT_FOUND` if the target Space is missing.
+   */
+  createAgent(input: CreateAgentInput): Promise<Item>;
 
   /**
    * Delete an asset. Soft by default (sets `a.deletedAt`; reversible
@@ -634,6 +649,9 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async create(_input: CreateAssetInput): Promise<Item> {
       throw notInitialized('items.create');
+    },
+    async createAgent(_input: CreateAgentInput): Promise<Item> {
+      throw notInitialized('items.createAgent');
     },
     async delete(_id: string, _opts?: DeleteAssetOpts): Promise<void> {
       throw notInitialized('items.delete');

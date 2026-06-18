@@ -18673,6 +18673,23 @@ async function initializeVoiceOrb() {
       }
     }
 
+    // Register the HUD API IPC handlers (hud-api:submit-task, etc.) BEFORE the
+    // exchange bridge initializes. The bridge also calls hudApi.initialize()
+    // internally, but it does so only AFTER the WebSocket transport is already
+    // listening -- so if anything in the bridge init throws between transport
+    // start and that call, the orb is left with a window.agentHUD whose
+    // submitTask IPC has no handler, and voice requests die silently. Calling
+    // initialize() here (idempotent via the _ipcRegistered guard) guarantees
+    // the handler always exists. If a task is submitted before the exchange
+    // bridge registers its processSubmit, submitTask returns a clean
+    // "Exchange bridge not initialized" error instead of hanging.
+    try {
+      require('./lib/hud-api').initialize();
+      console.log('[VoiceOrb] HUD API IPC registered (pre-exchange)');
+    } catch (hudInitErr) {
+      console.error('[VoiceOrb] HUD API init failed:', hudInitErr.message);
+    }
+
     // Initialize Exchange Bridge for auction-based task routing
     try {
       const { initializeExchangeBridge, getExchangeUrl } = require('./src/voice-task-sdk/exchange-bridge');

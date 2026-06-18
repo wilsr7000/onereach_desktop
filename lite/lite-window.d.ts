@@ -563,6 +563,7 @@ type LiteSpaceItemKind =
   | 'video'
   | 'playbook'
   | 'ticket'
+  | 'agent'
   | 'other';
 
 type LiteSpaceKind = 'user' | 'shared';
@@ -632,6 +633,8 @@ interface LiteSpaceItem extends LiteSpaceItemSummary {
   lastEditedBy?: LiteSpaceItemProvenance | null;
   /** Ticket-specific details (only populated when kind === 'ticket'). */
   ticket?: LiteTicketDetails;
+  /** Agent type discriminator (only populated when kind === 'agent'). */
+  agentType?: string;
 }
 
 interface LiteSpacesItemsBridge {
@@ -694,6 +697,16 @@ interface LiteSpacesItemsBridge {
     sourceUrl?: string;
     creatorId?: string;
     metadata?: Record<string, unknown>;
+  }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Add an agent asset (OKF text stored as content; per-type graph node). */
+  createAgent(input: {
+    spaceId: string;
+    name: string;
+    okf: string;
+    agentType: string;
+    sourceUrl?: string;
+    description?: string;
+    creatorId?: string;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
   /** Sprint 1 — soft delete (default) or hard delete an asset. */
   delete(
@@ -1076,6 +1089,13 @@ interface LiteMainWindowBridge {
   activateTab(id: string): Promise<{ ok: true }>;
   goHome(): Promise<{ ok: true }>;
   /**
+   * Reload the currently-visible content — the active tab, or the Home
+   * feed when no tab is foregrounded. Returns `{ ok: true }` on success,
+   * `{ ok: false }` if there was nothing to reload. One-shot view
+   * refresh; does not mutate or persist tab state.
+   */
+  reloadActive(): Promise<{ ok: boolean }>;
+  /**
    * Subscribe to tab-list mutations broadcast from the main process.
    * Returns an unsubscribe. Receives the full latest tab list +
    * activeId on each change.
@@ -1169,6 +1189,11 @@ interface LiteAiEnrichResult {
   written: Record<string, string | string[]>;
   modality: 'text' | 'image' | 'pdf' | 'hints';
 }
+interface LiteAiOkfResult {
+  okf: string;
+  agentType: string;
+  name: string;
+}
 interface LiteAiBridge {
   /** Whether an AI provider is configured (+ which). Carries no secrets. */
   getStatus(): Promise<LiteAiIpcResult<LiteAiStatus>>;
@@ -1177,6 +1202,15 @@ interface LiteAiBridge {
     purpose: string,
     name?: string
   ): Promise<LiteAiIpcResult<LiteAiSpaceAssistResult>>;
+  /**
+   * Convert an agent definition into OKF (structured text) via Claude.
+   * `source` is a URL (when `isUrl`) or pasted text; returns OKF +
+   * classified agentType + suggested name. Powers "add an agent".
+   */
+  convertToOkf(
+    source: string,
+    isUrl: boolean
+  ): Promise<LiteAiIpcResult<LiteAiOkfResult>>;
   /**
    * Extract structured metadata for one asset via Claude 4.8 and persist
    * it under `ai_*` metadata keys. Used by the Spaces "Auto-fill
