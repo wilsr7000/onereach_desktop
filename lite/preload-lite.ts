@@ -556,6 +556,8 @@ interface SpacesItemsBridge {
     name: string;
     okf: string;
     agentType: string;
+    /** Reachability endpoints (MCP/API/Skill) + the channels each serves. */
+    endpoints?: Array<{ kind: 'mcp' | 'api' | 'skill'; url: string; channels: string[] }>;
     sourceUrl?: string;
     description?: string;
     creatorId?: string;

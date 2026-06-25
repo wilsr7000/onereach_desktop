@@ -3135,6 +3135,44 @@ function buildAgentOkfBlock(item: RendererItem, okf: string): HTMLElement {
   head.appendChild(okfLabel);
   section.appendChild(head);
 
+  // Reachability: where the agent runs (MCP/API/Skill) + its channels.
+  const endpoints = Array.isArray(item.agentEndpoints) ? item.agentEndpoints : [];
+  if (endpoints.length > 0) {
+    const reach = document.createElement('div');
+    reach.className = 'spaces-detail-agent-reach';
+    const reachLabel = document.createElement('div');
+    reachLabel.className = 'spaces-detail-agent-reach-label';
+    reachLabel.textContent = 'Reachable via';
+    reach.appendChild(reachLabel);
+    for (const ep of endpoints) {
+      const row = document.createElement('div');
+      row.className = 'spaces-detail-endpoint';
+      const kind = document.createElement('span');
+      kind.className = 'spaces-detail-endpoint-kind';
+      kind.textContent = String(ep.kind).toUpperCase();
+      row.appendChild(kind);
+      const url = document.createElement('span');
+      url.className = 'spaces-detail-endpoint-url';
+      url.textContent = ep.url;
+      url.title = ep.url;
+      row.appendChild(url);
+      const channels = Array.isArray(ep.channels) ? ep.channels : [];
+      if (channels.length > 0) {
+        const chWrap = document.createElement('span');
+        chWrap.className = 'spaces-detail-endpoint-channels';
+        for (const ch of channels) {
+          const chip = document.createElement('span');
+          chip.className = 'spaces-detail-endpoint-channel';
+          chip.textContent = ch;
+          chWrap.appendChild(chip);
+        }
+        row.appendChild(chWrap);
+      }
+      reach.appendChild(row);
+    }
+    section.appendChild(reach);
+  }
+
   // OKF is structured YAML/MD text — render in the monospace code block.
   section.appendChild(buildCodePreview(okf, 'yaml'));
   return section;
@@ -8432,6 +8470,54 @@ async function runItemsSearch(): Promise<void> {
 let newAssetMode: 'text' | 'upload' | 'agent' = 'text';
 let newAssetFile: File | null = null;
 
+/** The reachability endpoint kinds shown in the add-agent dialog. */
+const AGENT_ENDPOINT_KINDS = ['mcp', 'api', 'skill'] as const;
+type AgentEndpointKindUi = (typeof AGENT_ENDPOINT_KINDS)[number];
+
+interface AgentEndpointDraft {
+  kind: AgentEndpointKindUi;
+  url: string;
+  channels: string[];
+}
+
+/**
+ * Read the MCP/API/Skill URL + channels fields from the add-agent dialog.
+ * A row contributes an endpoint only when its URL is non-empty; channels
+ * are a trimmed, comma-split, de-duplicated list.
+ */
+function collectAgentEndpoints(): AgentEndpointDraft[] {
+  const out: AgentEndpointDraft[] = [];
+  for (const kind of AGENT_ENDPOINT_KINDS) {
+    const urlEl = document.getElementById(`spaces-new-asset-agent-${kind}-url`);
+    const chEl = document.getElementById(`spaces-new-asset-agent-${kind}-channels`);
+    const url = urlEl instanceof HTMLInputElement ? urlEl.value.trim() : '';
+    if (url.length === 0) continue;
+    const raw = chEl instanceof HTMLInputElement ? chEl.value : '';
+    const channels: string[] = [];
+    const seen = new Set<string>();
+    for (const piece of raw.split(',')) {
+      const c = piece.trim();
+      if (c.length === 0) continue;
+      const key = c.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      channels.push(c);
+    }
+    out.push({ kind, url, channels });
+  }
+  return out;
+}
+
+/** Blank the six add-agent reachability inputs (called on dialog reset). */
+function clearAgentEndpointFields(): void {
+  for (const kind of AGENT_ENDPOINT_KINDS) {
+    for (const suffix of ['url', 'channels'] as const) {
+      const el = document.getElementById(`spaces-new-asset-agent-${kind}-${suffix}`);
+      if (el instanceof HTMLInputElement) el.value = '';
+    }
+  }
+}
+
 function wireNewAssetDialog(): void {
   const form = document.getElementById('spaces-new-asset-form');
   const cancel = document.getElementById('spaces-new-asset-cancel');
@@ -8556,6 +8642,7 @@ function openNewAssetDialog(presetFile: File | null = null): void {
   if (fileInput instanceof HTMLInputElement) fileInput.value = '';
   const agentInput = document.getElementById('spaces-new-asset-agent-input');
   if (agentInput instanceof HTMLTextAreaElement) agentInput.value = '';
+  clearAgentEndpointFields();
   // Reset the file chip (and clear stashed file).
   handleNewAssetFileSelection(null);
   if (error !== null) {
@@ -8653,11 +8740,13 @@ async function submitNewAsset(): Promise<void> {
       const okf = converted.value;
       const agentName =
         title.length > 0 ? title : okf.name.length > 0 ? okf.name : 'Agent';
+      const endpoints = collectAgentEndpoints();
       const envelope = await bridge.items.createAgent({
         spaceId,
         name: agentName,
         okf: okf.okf,
         agentType: okf.agentType,
+        ...(endpoints.length > 0 ? { endpoints } : {}),
         ...(isUrl ? { sourceUrl: source } : {}),
         ...(creatorId !== null ? { creatorId } : {}),
       });

@@ -172,7 +172,9 @@ describe('buildTrayMenuTemplate', () => {
     const labels = template
       .map((t) => t.label)
       .filter((l): l is string => typeof l === 'string');
-    expect(labels).toEqual([
+    // First labeled item is the version header caption (dynamic version).
+    expect(labels[0]).toMatch(/^Onereach\.ai Lite( v\S+)?$/);
+    expect(labels.slice(1)).toEqual([
       'Show Onereach.ai Lite',
       'Hide Onereach.ai Lite',
       'Spaces…',
@@ -187,12 +189,16 @@ describe('buildTrayMenuTemplate', () => {
       getMainWindow: (() => null) as GetMain as () => never,
       onOpenSettings: vi.fn(),
     });
-    // Structure: [Show, Hide, sep, Settings…, sep, Quit]
-    expect(template).toHaveLength(6);
-    expect(template[2]?.type).toBe('separator');
-    expect(template[3]?.label).toBe('Settings…');
+    // Structure: [Header, sep, Show, Hide, sep, Settings…, sep, Quit]
+    expect(template).toHaveLength(8);
+    expect(template[0]?.enabled).toBe(false);
+    expect(template[0]?.label).toMatch(/^Onereach\.ai Lite/);
+    expect(template[1]?.type).toBe('separator');
+    expect(template[2]?.label).toBe('Show Onereach.ai Lite');
     expect(template[4]?.type).toBe('separator');
-    expect(template[5]?.label).toBe('Quit Onereach.ai Lite');
+    expect(template[5]?.label).toBe('Settings…');
+    expect(template[6]?.type).toBe('separator');
+    expect(template[7]?.label).toBe('Quit Onereach.ai Lite');
   });
 
   it('still emits both separators even when no optional entries are wired', () => {
@@ -202,9 +208,10 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => null) as GetMain as () => never,
     });
-    expect(template).toHaveLength(5);
-    expect(template[2]?.type).toBe('separator');
-    expect(template[3]?.type).toBe('separator');
+    // Structure: [Header, sep, Show, Hide, sep, sep, Quit]
+    expect(template).toHaveLength(7);
+    expect(template[4]?.type).toBe('separator');
+    expect(template[5]?.type).toBe('separator');
   });
 
   it('Show handler restores + shows + focuses the main window', () => {
@@ -414,16 +421,24 @@ describe('trayIconCandidates', () => {
     expect(fromAssets.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('on macOS, prefers the color tray-icon.png so the resize is not clamped by macOS template auto-fit', () => {
-    if (process.platform !== 'darwin') return; // platform-specific assertion
-    const candidates = trayIconCandidates();
-    expect(candidates[0]).toMatch(/tray-icon\.png$/);
-    expect(candidates[0]).not.toMatch(/Template/);
-  });
-
-  it('on non-macOS, prefers the template-named variant first (no template auto-fit concern)', () => {
-    if (process.platform === 'darwin') return; // platform-specific assertion
+  it('prefers the monochrome template first (every platform) so it never washes out', () => {
+    // The template is tinted to the menu-bar theme on macOS (dark-on-light,
+    // light-on-dark), so it stays legible on any bar -- the fix for the
+    // washed-out color mark on a light menu bar.
     const candidates = trayIconCandidates();
     expect(candidates[0]).toMatch(/tray-iconTemplate\.png$/);
+  });
+
+  it('LITE_TRAY_COLOR=1 forces the full-color tray-icon.png to the front', () => {
+    const prev = process.env['LITE_TRAY_COLOR'];
+    process.env['LITE_TRAY_COLOR'] = '1';
+    try {
+      const candidates = trayIconCandidates();
+      expect(candidates[0]).toMatch(/tray-icon\.png$/);
+      expect(candidates[0]).not.toMatch(/Template/);
+    } finally {
+      if (prev === undefined) delete process.env['LITE_TRAY_COLOR'];
+      else process.env['LITE_TRAY_COLOR'] = prev;
+    }
   });
 });

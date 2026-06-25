@@ -1849,9 +1849,11 @@
         right: 0;
         z-index: 6;
         padding: 12px 20px 16px;
+        /* Gradient scrim only -- NO backdrop blur. The blur frosted the
+           bottom of the speakers' camera frames ("blur over the cameras").
+           The gradient (transparent -> dark) plus the caption-text's own
+           translucent pill keep captions legible without blurring video. */
         background: linear-gradient(0deg, rgba(10, 10, 18, 0.7) 0%, rgba(10, 10, 18, 0.35) 60%, transparent 100%);
-        backdrop-filter: blur(16px) saturate(1.2);
-        -webkit-backdrop-filter: blur(16px) saturate(1.2);
         display: none;
         flex-direction: column;
         align-items: center;
@@ -4212,6 +4214,23 @@
 
       .hud-bottom-right {
         align-items: flex-end;
+      }
+
+      /* Bottom HUD readouts (PARTICIPANTS / SPEAKING / SPACE) overlay the
+         participant video strip in session view -- which is pinned to the
+         bottom edge in the speaker-view and presentation layouts. The filled
+         .hud-item background + backdrop blur painted a frosted box over the
+         bottom row of speakers' camera frames ("blur over the cameras"), so
+         drop the background/blur/border here and rely on the text-shadow
+         (already on .hud-label / .hud-value) for legibility over video. */
+      .hud-bottom .hud-item {
+        background: transparent;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        border-color: transparent;
+        box-shadow: none;
+        padding-left: 0;
+        padding-right: 0;
       }
 
       /* Left Edge */

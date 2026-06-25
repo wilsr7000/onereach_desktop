@@ -1667,6 +1667,68 @@ body {
   color: rgba(184, 152, 255, 0.55);
 }
 
+/* Reachability ("Reachable via") — endpoints + channels in the agent pane. */
+.spaces-detail-agent-reach {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(150, 120, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(150, 120, 255, 0.05);
+}
+
+.spaces-detail-agent-reach-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(184, 152, 255, 0.7);
+}
+
+.spaces-detail-endpoint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.spaces-detail-endpoint-kind {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #b898ff;
+  background: rgba(150, 120, 255, 0.14);
+  border: 1px solid rgba(150, 120, 255, 0.3);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+.spaces-detail-endpoint-url {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: #c8ccd6;
+}
+
+.spaces-detail-endpoint-channels {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.spaces-detail-endpoint-channel {
+  font-size: 10.5px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.55));
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
 /* Markdown-rendered body. Use the project's existing dark palette so
  * it doesn't read as a separate visual world from the rest of the
  * detail pane. */
@@ -4963,6 +5025,15 @@ body {
   margin-bottom: 16px;
 }
 
+/* The `hidden` attribute MUST win over the `display: flex` above. The UA
+   rule `[hidden] { display: none }` has the same specificity as the class
+   rule, so the (later) author class rule would otherwise keep a
+   switched-away pane visible. This is why selecting one new-asset tab
+   (text / upload / agent) left the other panes stacked + visible. */
+.spaces-new-asset-field[hidden] {
+  display: none;
+}
+
 .spaces-new-asset-field:last-of-type {
   margin-bottom: 0;
 }
@@ -5028,6 +5099,50 @@ body {
   min-height: 240px;
   resize: vertical;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ── Add-agent: reachability endpoints (MCP / API / Skill) ───────────── */
+.spaces-new-asset-endpoints {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spaces-endpoint-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spaces-endpoint-kind {
+  flex: 0 0 52px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #b898ff;
+  background: rgba(150, 120, 255, 0.12);
+  border: 1px solid rgba(150, 120, 255, 0.28);
+  border-radius: 6px;
+  padding: 7px 0;
+}
+
+.spaces-endpoint-url,
+.spaces-endpoint-channels {
+  width: auto;
+  min-width: 0;
+}
+
+.spaces-endpoint-url {
+  flex: 1.5 1 0;
+}
+
+.spaces-endpoint-channels {
+  flex: 1 1 0;
 }
 
 /* Drop zone — replaces the native file picker chrome. */

@@ -64,6 +64,8 @@ import type {
   SpaceMember,
   CreateAssetInput,
   CreateAgentInput,
+  AgentEndpoint,
+  AgentEndpointKind,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -359,7 +361,8 @@ export const CYPHER = {
                        name: coalesce(assigneeNode.name, assigneeNode.title, ''),
                        id: assigneeNode.id }
            END AS ticketAssignee,
-           a.agentType AS agentType
+           a.agentType AS agentType,
+           a.agentEndpoints AS agentEndpoints
     LIMIT 1
   `,
 
@@ -1007,6 +1010,7 @@ export const CYPHER = {
       description: $description,
       sourceUrl: $sourceUrl,
       agentType: $agentType,
+      agentEndpoints: $agentEndpointsJson,
       metadata: $metadata,
       createdAt: $now,
       updatedAt: $now
@@ -1032,6 +1036,26 @@ export const CYPHER = {
     FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
       MERGE (x)-[:CREATED]->(a))
     RETURN a.id AS id
+  `,
+
+  /**
+   * Attach one reachability endpoint (MCP / API / Skill) to an agent as
+   * a child node `(:Agent)-[:REACHABLE_VIA]->(:AgentEndpoint:<Kind>)`.
+   * Run once per endpoint (variable count + dynamic per-kind label, which
+   * Cypher can't parameterize). `__KIND_LABEL__` is a strictly-sanitized
+   * PascalCase label (`Mcp`/`Api`/`Skill`); `kind`/`url`/`channels` are
+   * parameters. `channels` is a comma-joined string.
+   */
+  CREATE_AGENT_ENDPOINT: `
+    MATCH (ag:Agent {id: $agentId})
+    CREATE (ag)-[:REACHABLE_VIA]->(e:AgentEndpoint:__KIND_LABEL__ {
+      id: $endpointId,
+      kind: $kind,
+      url: $url,
+      channels: $channels,
+      createdAt: $now
+    })
+    RETURN e.id AS id
   `,
 
   /**
@@ -2108,6 +2132,10 @@ export class SdkSpacesClient {
       typeof input.creatorId === 'string' && input.creatorId.length > 0
         ? input.creatorId
         : null;
+    // Reachability endpoints (MCP / API / Skill). Stored as a JSON
+    // property on the asset (cheap read) AND as per-kind child nodes.
+    const endpoints = normalizeAgentEndpoints(input.endpoints);
+    const agentEndpointsJson = endpoints.length > 0 ? JSON.stringify(endpoints) : '';
     const id = generateAssetId();
     const agentId = generateAssetId();
     const typeId = generateAssetId();
@@ -2128,6 +2156,7 @@ export class SdkSpacesClient {
       description,
       sourceUrl,
       agentType,
+      agentEndpointsJson,
       metadata: stringifyMetadata(undefined),
       creatorId,
       now,
@@ -2138,6 +2167,22 @@ export class SdkSpacesClient {
         message: `Space ${spaceId} not found`,
         remediation: 'Refresh the list and try again.',
         context: { spaceId },
+      });
+    }
+    // Write each reachability endpoint as a per-kind child node
+    // (separate writes: variable count + dynamic per-kind label).
+    for (const ep of endpoints) {
+      const epCypher = CYPHER.CREATE_AGENT_ENDPOINT.replace(
+        '__KIND_LABEL__',
+        sanitizeAgentTypeLabel(ep.kind)
+      );
+      await this.run(epCypher, {
+        agentId,
+        endpointId: generateAssetId(),
+        kind: ep.kind,
+        url: ep.url,
+        channels: ep.channels.join(','),
+        now,
       });
     }
     const created = await this.getItem(id);
@@ -2898,11 +2943,16 @@ function toItem(row: Record<string, unknown>): Item {
     }
     item.ticket = ticket;
   }
-  // Agent projection: surface the type discriminator for the renderer.
+  // Agent projection: surface the type discriminator + reachability
+  // endpoints for the renderer.
   if (item.kind === 'agent') {
     const agentType = optString(row, 'agentType');
     if (agentType !== undefined && agentType.length > 0) {
       item.agentType = agentType;
+    }
+    const endpoints = parseAgentEndpoints(row['agentEndpoints']);
+    if (endpoints.length > 0) {
+      item.agentEndpoints = endpoints;
     }
   }
   return item;
@@ -3066,6 +3116,56 @@ function sanitizeAgentTypeLabel(agentType: unknown): string {
   // Must start with a letter to be a valid label; default to 'Other'.
   const safe = /^[A-Za-z]/.test(pascal) ? pascal : '';
   return safe.length > 0 ? safe : 'Other';
+}
+
+const AGENT_ENDPOINT_KIND_SET: ReadonlySet<AgentEndpointKind> = new Set<AgentEndpointKind>([
+  'mcp',
+  'api',
+  'skill',
+]);
+
+/** Defensive bound on channels kept per endpoint. */
+const MAX_ENDPOINT_CHANNELS = 24;
+
+/**
+ * Normalize/validate the reachability endpoints from a CreateAgentInput:
+ * drop entries with an unknown kind or empty url; trim + dedupe channels.
+ */
+function normalizeAgentEndpoints(raw: unknown): AgentEndpoint[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AgentEndpoint[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== 'object') continue;
+    const e = item as Record<string, unknown>;
+    const kind =
+      typeof e['kind'] === 'string' ? (e['kind'] as string).trim().toLowerCase() : '';
+    const url = typeof e['url'] === 'string' ? (e['url'] as string).trim() : '';
+    if (!AGENT_ENDPOINT_KIND_SET.has(kind as AgentEndpointKind) || url.length === 0) continue;
+    const channels: string[] = [];
+    const seen = new Set<string>();
+    const rawCh = Array.isArray(e['channels']) ? (e['channels'] as unknown[]) : [];
+    for (const c of rawCh) {
+      const s = typeof c === 'string' ? c.trim() : '';
+      if (s.length === 0) continue;
+      const key = s.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      channels.push(s);
+      if (channels.length >= MAX_ENDPOINT_CHANNELS) break;
+    }
+    out.push({ kind: kind as AgentEndpointKind, url, channels });
+  }
+  return out;
+}
+
+/** Parse the asset's `agentEndpoints` JSON property back into objects. */
+function parseAgentEndpoints(raw: unknown): AgentEndpoint[] {
+  if (typeof raw !== 'string' || raw.trim().length === 0) return [];
+  try {
+    return normalizeAgentEndpoints(JSON.parse(raw));
+  } catch {
+    return [];
+  }
 }
 
 function toItemKind(v: unknown): ItemKind {

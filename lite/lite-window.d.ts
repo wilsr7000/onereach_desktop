@@ -616,6 +616,13 @@ interface LiteSpaceItemSummary {
   producedBy: LiteSpaceItemProvenance | null;
 }
 
+/** One reachability endpoint for an agent (MCP/API/Skill) + its channels. */
+interface LiteAgentEndpoint {
+  kind: 'mcp' | 'api' | 'skill';
+  url: string;
+  channels: string[];
+}
+
 interface LiteSpaceItem extends LiteSpaceItemSummary {
   content?: string;
   /** User-authored description / caption / abstract / notes. Distinct
@@ -635,6 +642,8 @@ interface LiteSpaceItem extends LiteSpaceItemSummary {
   ticket?: LiteTicketDetails;
   /** Agent type discriminator (only populated when kind === 'agent'). */
   agentType?: string;
+  /** Reachability endpoints (only populated when kind === 'agent'). */
+  agentEndpoints?: LiteAgentEndpoint[];
 }
 
 interface LiteSpacesItemsBridge {
@@ -704,6 +713,8 @@ interface LiteSpacesItemsBridge {
     name: string;
     okf: string;
     agentType: string;
+    /** Reachability endpoints (MCP/API/Skill) + the channels each serves. */
+    endpoints?: LiteAgentEndpoint[];
     sourceUrl?: string;
     description?: string;
     creatorId?: string;

@@ -209,6 +209,28 @@
               spellcheck="false"
             ></textarea>
             <p class="spaces-new-asset-label-hint">Title is optional for agents — AI will suggest a name.</p>
+
+            <div class="spaces-new-asset-endpoints">
+              <div class="spaces-new-asset-label-row">
+                <span class="spaces-new-asset-label">Reachability</span>
+                <span class="spaces-new-asset-label-hint">Optional — where the agent runs and the channels it serves</span>
+              </div>
+              <div class="spaces-endpoint-row">
+                <span class="spaces-endpoint-kind" data-kind="mcp">MCP</span>
+                <input type="url" id="spaces-new-asset-agent-mcp-url" class="spaces-new-asset-input spaces-endpoint-url" placeholder="https://…/mcp" autocomplete="off" />
+                <input type="text" id="spaces-new-asset-agent-mcp-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. web, slack)" autocomplete="off" />
+              </div>
+              <div class="spaces-endpoint-row">
+                <span class="spaces-endpoint-kind" data-kind="api">API</span>
+                <input type="url" id="spaces-new-asset-agent-api-url" class="spaces-new-asset-input spaces-endpoint-url" placeholder="https://…/api" autocomplete="off" />
+                <input type="text" id="spaces-new-asset-agent-api-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. rest, webhook)" autocomplete="off" />
+              </div>
+              <div class="spaces-endpoint-row">
+                <span class="spaces-endpoint-kind" data-kind="skill">Skill</span>
+                <input type="url" id="spaces-new-asset-agent-skill-url" class="spaces-new-asset-input spaces-endpoint-url" placeholder="https://…/skill" autocomplete="off" />
+                <input type="text" id="spaces-new-asset-agent-skill-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. voice, sms)" autocomplete="off" />
+              </div>
+            </div>
           </div>
 
           <div id="spaces-new-asset-error" class="spaces-modal-error" hidden></div>

@@ -2324,6 +2324,108 @@ describe('SdkSpacesClient.createAgent', () => {
       client.createAgent({ spaceId: 'sp-gone', name: 'A', okf: 'x: 1', agentType: 'tool' })
     ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
   });
+
+  it('writes each reachability endpoint as a per-kind :REACHABLE_VIA child node', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'agent-stub' }]);
+    stub.setResponse(GET_ITEM_NEEDLE, [agentRow()]);
+    const client = makeClient(stub);
+    await client.createAgent({
+      spaceId: 'sp-1',
+      name: 'My Agent',
+      okf: 'name: My Agent',
+      agentType: 'conversational',
+      endpoints: [
+        { kind: 'mcp', url: 'https://x/mcp', channels: ['web', 'slack'] },
+        { kind: 'skill', url: 'https://x/skill', channels: [] },
+      ],
+    });
+
+    // Endpoints are also denormalized onto the asset as a JSON property.
+    const createCall = stub.calls.find((c) => c.cypher.includes('REPRESENTS'));
+    const json = createCall?.parameters?.['agentEndpointsJson'];
+    expect(typeof json).toBe('string');
+    expect(JSON.parse(json as string)).toEqual([
+      { kind: 'mcp', url: 'https://x/mcp', channels: ['web', 'slack'] },
+      { kind: 'skill', url: 'https://x/skill', channels: [] },
+    ]);
+
+    // One :REACHABLE_VIA write per endpoint, each with its sanitized label.
+    const epCalls = stub.calls.filter((c) => c.cypher.includes('REACHABLE_VIA'));
+    expect(epCalls).toHaveLength(2);
+    expect(epCalls[0]?.cypher).toContain(':AgentEndpoint:Mcp');
+    expect(epCalls[0]?.cypher).not.toContain('__KIND_LABEL__');
+    expect(epCalls[0]?.parameters).toMatchObject({
+      agentId: expect.any(String),
+      endpointId: expect.any(String),
+      kind: 'mcp',
+      url: 'https://x/mcp',
+      channels: 'web,slack', // joined for storage
+    });
+    expect(epCalls[1]?.cypher).toContain(':AgentEndpoint:Skill');
+    expect(epCalls[1]?.parameters).toMatchObject({
+      kind: 'skill',
+      url: 'https://x/skill',
+      channels: '',
+    });
+  });
+
+  it('writes no :REACHABLE_VIA nodes + an empty endpoints prop when none are given', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'agent-stub' }]);
+    stub.setResponse(GET_ITEM_NEEDLE, [agentRow()]);
+    const client = makeClient(stub);
+    await client.createAgent({ spaceId: 'sp-1', name: 'A', okf: 'x: 1', agentType: 'tool' });
+    expect(stub.calls.some((c) => c.cypher.includes('REACHABLE_VIA'))).toBe(false);
+    const createCall = stub.calls.find((c) => c.cypher.includes('REPRESENTS'));
+    expect(createCall?.parameters?.['agentEndpointsJson']).toBe('');
+  });
+
+  it('drops endpoints with an empty url and trims + dedupes channels', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'agent-stub' }]);
+    stub.setResponse(GET_ITEM_NEEDLE, [agentRow()]);
+    const client = makeClient(stub);
+    await client.createAgent({
+      spaceId: 'sp-1',
+      name: 'A',
+      okf: 'x: 1',
+      agentType: 'tool',
+      endpoints: [
+        { kind: 'mcp', url: '   ', channels: [] }, // empty url -> dropped
+        { kind: 'api', url: 'https://y/api', channels: [' rest ', 'rest', '', 'Webhook'] },
+      ],
+    });
+    const epCalls = stub.calls.filter((c) => c.cypher.includes('REACHABLE_VIA'));
+    expect(epCalls).toHaveLength(1);
+    expect(epCalls[0]?.parameters).toMatchObject({
+      kind: 'api',
+      url: 'https://y/api',
+      channels: 'rest,Webhook', // trimmed, case-preserving, de-duplicated
+    });
+  });
+
+  it('projects the asset agentEndpoints JSON back onto the returned Item', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('CREATE (a:Asset', [{ id: 'agent-stub' }]);
+    stub.setResponse(GET_ITEM_NEEDLE, [
+      agentRow({
+        agentEndpoints: JSON.stringify([
+          { kind: 'api', url: 'https://y/api', channels: ['rest'] },
+        ]),
+      }),
+    ]);
+    const client = makeClient(stub);
+    const created = await client.createAgent({
+      spaceId: 'sp-1',
+      name: 'A',
+      okf: 'x: 1',
+      agentType: 'tool',
+    });
+    expect(created.agentEndpoints).toEqual([
+      { kind: 'api', url: 'https://y/api', channels: ['rest'] },
+    ]);
+  });
 });
 
 describe('SdkSpacesClient.updateTicket', () => {

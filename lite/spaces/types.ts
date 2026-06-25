@@ -137,6 +137,34 @@ export const AGENT_TYPES: ReadonlyArray<AgentType> = [
 ] as const;
 
 /**
+ * How an agent is reachable. An agent can expose one or more of these —
+ * pasting a URL registers how the system reaches the agent and on which
+ * channels (making it available as a web app). Distinct from the
+ * behavioral {@link AgentType}: an agent has a type AND its endpoints.
+ */
+export type AgentEndpointKind = 'mcp' | 'api' | 'skill';
+
+/** Ordered list for stable iteration in renderer + tests. */
+export const AGENT_ENDPOINT_KINDS: ReadonlyArray<AgentEndpointKind> = [
+  'mcp',
+  'api',
+  'skill',
+] as const;
+
+/**
+ * A single reachability endpoint on an agent. Stored in the graph as a
+ * per-kind child node `(:Agent)-[:REACHABLE_VIA]->(:AgentEndpoint:<Kind>)`.
+ */
+export interface AgentEndpoint {
+  /** Reachability method. */
+  kind: AgentEndpointKind;
+  /** The endpoint URL (MCP server, API base, or OneReach skill URL). */
+  url: string;
+  /** Channels this endpoint serves (e.g. 'web', 'sms', 'voice', 'slack'). */
+  channels: string[];
+}
+
+/**
  * Ticket lifecycle. Open → in_progress → done, with `'blocked'` as an
  * orthogonal "waiting on something" state the user / agent flags
  * manually. v1 is a flat enum; v2 could add `'cancelled'` /
@@ -303,6 +331,13 @@ export interface Item extends ItemSummary {
    * renderer maps unknowns to an "other" visual. Absent for non-agents.
    */
   agentType?: string;
+  /**
+   * Reachability endpoints (only for `kind === 'agent'`): how the system
+   * reaches the agent + on which channels. Collected from the
+   * `(:Agent)-[:REACHABLE_VIA]->(:AgentEndpoint)` subgraph. Empty/absent
+   * when the agent has no registered endpoints.
+   */
+  agentEndpoints?: AgentEndpoint[];
 }
 
 // ─── Query options ───────────────────────────────────────────────────────
@@ -762,6 +797,12 @@ export interface CreateAgentInput {
   description?: string;
   /** Optional :Person.id of the creator — MERGEs [:CREATED] edge. */
   creatorId?: string;
+  /**
+   * Reachability endpoints (MCP / API / Skill) the agent exposes — one
+   * or more. Each becomes a `(:Agent)-[:REACHABLE_VIA]->(:AgentEndpoint)`
+   * child node. Optional: an agent can be defined by OKF alone.
+   */
+  endpoints?: AgentEndpoint[];
 }
 
 /** Options for `items.delete(id, opts?)`. */

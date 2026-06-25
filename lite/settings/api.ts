@@ -58,10 +58,16 @@ export interface SettingsApi {
 class UninitializedSettingsApi implements SettingsApi {
   open(_sectionId?: string): void {
     // Lazy import to avoid pulling logging into modules that just
-    // typecheck against `SettingsApi`.
-    void import('../logging/api.js').then((m) => {
-      m.getLoggingApi().warn('settings', 'open() called before initSettings()');
-    });
+    // typecheck against `SettingsApi`. The `.catch()` keeps this
+    // fire-and-forget from ever surfacing as an unhandledRejection --
+    // notably the Vite module-runner teardown race in unit tests
+    // ("Closing rpc while fetch was pending"), where a worker can tear
+    // down before this cold import resolves.
+    void import('../logging/api.js')
+      .then((m) => {
+        m.getLoggingApi().warn('settings', 'open() called before initSettings()');
+      })
+      .catch(() => undefined);
   }
 }
 

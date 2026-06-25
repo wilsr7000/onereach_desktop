@@ -51,6 +51,7 @@ interface RendererItem {
   lastEditedBy?: RendererItemProvenance | null;
   ticket?: RendererTicketDetails;
   agentType?: string;
+  agentEndpoints?: Array<{ kind: string; url: string; channels: string[] }>;
 }
 
 interface DetailTicketCallbacks {
@@ -427,6 +428,46 @@ describe('buildDetailPane', () => {
     expect(el.querySelector('.spaces-detail-agent-type')?.textContent).toContain('Conversational');
     // OKF text is rendered (in the reused code-preview block).
     expect(el.textContent).toContain('Support Bot');
+  });
+
+  it('renders a "Reachable via" section with each endpoint + its channels', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({
+        kind: 'agent',
+        agentType: 'tool',
+        content: 'name: Support Bot',
+        agentEndpoints: [
+          { kind: 'mcp', url: 'https://x/mcp', channels: ['web', 'slack'] },
+          { kind: 'api', url: 'https://x/api', channels: [] },
+        ],
+      }),
+      () => undefined
+    );
+    const reach = el.querySelector('.spaces-detail-agent-reach');
+    expect(reach).not.toBeNull();
+    expect(reach?.textContent).toContain('Reachable via');
+    const rows = el.querySelectorAll('.spaces-detail-endpoint');
+    expect(rows).toHaveLength(2);
+    // Kind badges are upper-cased; the URL shows verbatim.
+    const kinds = Array.from(el.querySelectorAll('.spaces-detail-endpoint-kind')).map(
+      (n) => n.textContent
+    );
+    expect(kinds).toEqual(['MCP', 'API']);
+    expect(reach?.textContent).toContain('https://x/mcp');
+    // Channels render as chips.
+    const chips = Array.from(el.querySelectorAll('.spaces-detail-endpoint-channel')).map(
+      (n) => n.textContent
+    );
+    expect(chips).toEqual(['web', 'slack']);
+  });
+
+  it('omits the "Reachable via" section when an agent has no endpoints', () => {
+    const el = renderer.buildDetailPane(
+      baseItem({ kind: 'agent', agentType: 'tool', content: 'name: Bot' }),
+      () => undefined
+    );
+    expect(el.querySelector('.spaces-detail-agent')).not.toBeNull();
+    expect(el.querySelector('.spaces-detail-agent-reach')).toBeNull();
   });
 
   it('omits the content block when content is missing', () => {

@@ -112,20 +112,19 @@ export function initTray(opts: InitTrayOptions): TrayHandle | null {
     return null;
   }
 
-  // macOS template-image handling: if the loaded file is the dedicated
-  // template variant (filename ends in `Template.png`), macOS will
-  // auto-resize it back to the standard ~22pt menu-bar height
-  // regardless of any `.resize()` call we make -- that's how template
-  // images work in NSStatusItem. So a "make it bigger" bump only
-  // actually takes effect when we load the COLOR source
-  // (tray-icon.png) and skip the template flag. Trade-off: the icon
-  // doesn't auto-adapt to dark vs light menu bars, but the OneReach
-  // mark itself is identifiable in both. We pick the color path on
-  // macOS for visible-size; renderers that prefer theme-adapt can
-  // override via `LITE_TRAY_TEMPLATE=1` to force the old behavior.
+  // macOS template-image handling. A template image is pure black + alpha;
+  // macOS tints it per the menu-bar theme (dark-on-light, light-on-dark) so
+  // it is ALWAYS legible and never washes out. We default to the template
+  // on every platform (it's the correct menu-bar treatment) -- the earlier
+  // "prefer the full-color source so it renders bigger" choice made the
+  // light-colored mark disappear on a light menu bar, which is the bug this
+  // fixes. The trade-off (template auto-fits to ~22pt, so it can't be made
+  // arbitrarily larger) is the right one for a status item. Set
+  // `LITE_TRAY_COLOR=1` to force the old full-color path.
   const isTemplateAsset = /tray-iconTemplate\.png$/i.test(iconPath);
-  const forceTemplate = process.env['LITE_TRAY_TEMPLATE'] === '1';
-  const useTemplate = isTemplateAsset && (forceTemplate || process.platform !== 'darwin');
+  // The template flag is meaningful only on macOS; on Windows/Linux it's a
+  // harmless no-op. Apply it whenever we actually loaded the template asset.
+  const useTemplate = isTemplateAsset;
 
   // Resize to the configured size BEFORE setting the template flag.
   // resize() returns a fresh NativeImage with the template flag
@@ -360,14 +359,11 @@ export function buildTooltip(): string {
  * Source-image edge length we pass to NativeImage.resize() before
  * handing the icon to Tray, in points.
  *
- * On macOS, NSStatusItem auto-fits the icon to the menu bar's visible
- * content area (~22pt on Sequoia / Sonoma) regardless of the source
- * size, so this primarily sets the aspect ratio. The user-visible
- * "bigger" effect comes from preferring the full-color 1024x1024
- * `tray-icon.png` over the dedicated 22x22 template silhouette: the
- * color source has the OneReach mark filling more of its canvas, so
- * after macOS auto-fits to ~22pt the rendered glyph feels denser and
- * more present in the menu bar.
+ * On macOS, NSStatusItem auto-fits a template image to the menu bar's
+ * visible content area (~22pt on Sequoia / Sonoma) regardless of the
+ * source size, so this primarily sets the aspect ratio and keeps the
+ * mark crisp before the OS tints it. On Windows / Linux the tray slot
+ * is larger and the icon renders close to this size literally.
  *
  * On Windows / Linux the tray slot is larger and the icon renders
  * close to this size literally, so the value also serves as a sane
@@ -381,11 +377,13 @@ export const TRAY_ICON_SIZE = 30 as const;
  * running Electron.
  *
  * Order is fixed:
- *   1. Show / Hide (toggle main window)
+ *   1. Header caption: "Onereach.ai Lite v<version>" (disabled)
  *   2. ─── separator ───
- *   3. Spaces / Settings / Help (when provided)
+ *   3. Show / Hide (toggle main window)
  *   4. ─── separator ───
- *   5. Quit
+ *   5. Spaces / Settings / Help (when provided)
+ *   6. ─── separator ───
+ *   7. Quit
  *
  * Entries whose handlers aren't provided are omitted; the surrounding
  * separators stay so the structure reads consistently regardless of
@@ -395,6 +393,11 @@ export function buildTrayMenuTemplate(
   opts: InitTrayOptions
 ): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
+  // Header caption so the tray menu itself identifies the app + version
+  // ("Onereach.ai Lite v0.0.19") -- the version is otherwise only on the
+  // hover tooltip. Disabled so it reads as a label, not a clickable item.
+  template.push({ label: buildTooltip(), enabled: false });
+  template.push({ type: 'separator' });
   template.push({
     label: 'Show Onereach.ai Lite',
     click: () => {
@@ -435,21 +438,16 @@ export function buildTrayMenuTemplate(
  * Candidate paths the tray icon loader probes, in priority order.
  * Exposed so the no-icon-found warning can list what was searched.
  *
- * Priority depends on platform + the `LITE_TRAY_TEMPLATE` env var:
- *   - macOS (default): prefer the FULL-COLOR `tray-icon.png`. macOS
- *     auto-resizes template images back to ~22pt regardless of any
- *     `.resize()` call, so the color source is the only path that
- *     respects the configured `TRAY_ICON_SIZE`.
- *   - macOS (`LITE_TRAY_TEMPLATE=1`): prefer the template variant.
- *     Restores theme-adaptive rendering at the menu bar's default
- *     22pt height (smaller, but adapts to dark / light bars).
- *   - Windows / Linux: prefer the template-named asset (smaller
- *     pixel footprint, no theme constraint) and fall back to color.
+ * Default (all platforms): prefer the monochrome `tray-iconTemplate.png`.
+ * On macOS it's tinted to the menu-bar theme so it never washes out; on
+ * Windows / Linux it's a clean small-footprint mark. The full-color
+ * `tray-icon.png` is the fallback, or can be forced with
+ * `LITE_TRAY_COLOR=1` (trades theme-adaptation for a larger glyph -- only
+ * advisable on a menu bar whose theme you control).
  */
 export function trayIconCandidates(): string[] {
-  const isMac = process.platform === 'darwin';
-  const forceTemplate = process.env['LITE_TRAY_TEMPLATE'] === '1';
-  const preferColor = isMac && !forceTemplate;
+  const forceColor = process.env['LITE_TRAY_COLOR'] === '1';
+  const preferColor = forceColor;
   const candidates: string[] = [];
   // esbuild-copied siblings in dist-lite/build/ first.
   if (preferColor) {

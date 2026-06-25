@@ -66,10 +66,16 @@ export interface ApiDocsApi {
 class UninitializedApiDocsApi implements ApiDocsApi {
   open(): void {
     // Lazy import to avoid pulling logging into modules that just
-    // typecheck against `ApiDocsApi`.
-    void import('../logging/api.js').then((m) => {
-      m.getLoggingApi().warn('api-docs', 'open() called before initApiDocs()');
-    });
+    // typecheck against `ApiDocsApi`. The `.catch()` keeps this
+    // fire-and-forget from ever surfacing as an unhandledRejection --
+    // notably the Vite module-runner teardown race in unit tests
+    // ("Closing rpc while fetch was pending"), where a worker can tear
+    // down before this cold import resolves.
+    void import('../logging/api.js')
+      .then((m) => {
+        m.getLoggingApi().warn('api-docs', 'open() called before initApiDocs()');
+      })
+      .catch(() => undefined);
   }
 }
 

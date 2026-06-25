@@ -89,23 +89,37 @@ describe('saveStateBeforeUpdate', () => {
   });
 
   it('enforces total budget by skipping later hooks once exhausted', async () => {
-    registerSaveHook({
-      id: 'first',
-      budgetMs: 200,
-      run: async () => {
-        await new Promise((r) => setTimeout(r, 200));
-      },
-    });
-    registerSaveHook({
-      id: 'second',
-      run: async () => {
-        // Should never be called -- total budget exhausted by first.
-      },
-    });
-    const result = await saveStateBeforeUpdate({ totalBudgetMs: 100 });
-    expect(result.hooks[0]!.outcome).toBe('timed-out');
-    expect(result.hooks[1]!.outcome).toBe('timed-out');
-    expect(result.hooks[1]!.error).toBe('total budget exhausted');
+    // Fake timers make the total-budget boundary deterministic. With real
+    // timers the first hook's internal setTimeout(100) can fire a sub-ms
+    // early; combined with Date.now() flooring, the post-hook elapsed
+    // reads 99 instead of 100, leaving remaining=1 so the second hook
+    // runs to 'completed' instead of being skipped (intermittent flake).
+    vi.useFakeTimers();
+    try {
+      registerSaveHook({
+        id: 'first',
+        budgetMs: 200,
+        run: async () => {
+          await new Promise((r) => setTimeout(r, 200));
+        },
+      });
+      registerSaveHook({
+        id: 'second',
+        run: async () => {
+          // Should never be called -- total budget exhausted by first.
+        },
+      });
+      const pending = saveStateBeforeUpdate({ totalBudgetMs: 100 });
+      // Advance past both the 100ms total budget and the first hook's
+      // 200ms sleep so the whole run settles under fake time.
+      await vi.advanceTimersByTimeAsync(250);
+      const result = await pending;
+      expect(result.hooks[0]!.outcome).toBe('timed-out');
+      expect(result.hooks[1]!.outcome).toBe('timed-out');
+      expect(result.hooks[1]!.error).toBe('total budget exhausted');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('returns elapsedMs reflecting wall-clock', async () => {

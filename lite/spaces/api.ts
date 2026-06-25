@@ -98,6 +98,8 @@ export type {
   SpaceMember,
   CreateAssetInput,
   CreateAgentInput,
+  AgentEndpoint,
+  AgentEndpointKind,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -115,11 +117,7 @@ export {
 } from './types.js';
 
 export type { SpaceScope } from './scope.js';
-export {
-  UNCATEGORIZED_SPACE_ID,
-  resolveSpaceScope,
-  isUncategorized,
-} from './scope.js';
+export { UNCATEGORIZED_SPACE_ID, resolveSpaceScope, isUncategorized } from './scope.js';
 
 // ── Structured error class + code catalog ──────────────────────────────
 
@@ -641,10 +639,7 @@ class UninitializedSpacesApi implements SpacesApi {
     async removeTag(_id: string, _tag: string): Promise<string[]> {
       throw notInitialized('items.removeTag');
     },
-    async recentCommits(
-      _id: string,
-      _opts?: RecentCommitsOpts
-    ): Promise<Event[]> {
+    async recentCommits(_id: string, _opts?: RecentCommitsOpts): Promise<Event[]> {
       throw notInitialized('items.recentCommits');
     },
     async create(_input: CreateAssetInput): Promise<Item> {
@@ -659,11 +654,7 @@ class UninitializedSpacesApi implements SpacesApi {
     async restore(_id: string): Promise<Item> {
       throw notInitialized('items.restore');
     },
-    async moveToSpace(
-      _id: string,
-      _fromSpaceId: string | null,
-      _toSpaceId: string
-    ): Promise<Item> {
+    async moveToSpace(_id: string, _fromSpaceId: string | null, _toSpaceId: string): Promise<Item> {
       throw notInitialized('items.moveToSpace');
     },
     async addToSpace(_id: string, _toSpaceId: string): Promise<Item> {
@@ -730,9 +721,15 @@ class UninitializedSpacesApi implements SpacesApi {
   }
 
   open(): void {
-    void import('../logging/api.js').then((m) => {
-      m.getLoggingApi().warn('spaces', 'open() called before initSpaces()');
-    });
+    // The `.catch()` keeps this fire-and-forget from ever surfacing as
+    // an unhandledRejection -- notably the Vite module-runner teardown
+    // race in unit tests ("Closing rpc while fetch was pending"), where
+    // a worker can tear down before this cold import resolves.
+    void import('../logging/api.js')
+      .then((m) => {
+        m.getLoggingApi().warn('spaces', 'open() called before initSpaces()');
+      })
+      .catch(() => undefined);
   }
 
   async listSpaces(): Promise<Space[]> {
