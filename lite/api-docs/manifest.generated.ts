@@ -536,7 +536,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "AUTH_EVENTS",
-        "count": 50,
+        "count": 56,
         "entries": [
           {
             "constantKey": "SIGN_IN_START",
@@ -761,6 +761,36 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "RE_SIGNIN_SUSPENDED_CHANGED",
             "name": "auth.re-signin.suspended-changed",
+            "description": ""
+          },
+          {
+            "constantKey": "IDW_LOGIN_START",
+            "name": "auth.idw-login.start",
+            "description": ""
+          },
+          {
+            "constantKey": "IDW_LOGIN_PROBE",
+            "name": "auth.idw-login.probe",
+            "description": ""
+          },
+          {
+            "constantKey": "IDW_LOGIN_SUCCESS",
+            "name": "auth.idw-login.success",
+            "description": ""
+          },
+          {
+            "constantKey": "IDW_LOGIN_RETRY",
+            "name": "auth.idw-login.retry",
+            "description": ""
+          },
+          {
+            "constantKey": "IDW_LOGIN_STUCK",
+            "name": "auth.idw-login.stuck",
+            "description": ""
+          },
+          {
+            "constantKey": "IDW_LOGIN_NEEDS_USER_ACTION",
+            "name": "auth.idw-login.needs-user-action",
             "description": ""
           },
           {
@@ -2199,7 +2229,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "MAIN_WINDOW_EVENTS",
-        "count": 29,
+        "count": 30,
         "entries": [
           {
             "constantKey": "OPEN_TAB_START",
@@ -2304,6 +2334,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "AUTO_SIGNIN_REJECTED",
             "name": "main-window.auto-signin.rejected",
+            "description": ""
+          },
+          {
+            "constantKey": "LOGIN_RECOVERY",
+            "name": "main-window.tab.login-recovery",
             "description": ""
           },
           {
@@ -3407,5 +3442,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-06-23T19:40:02.055Z"
+  "generatedAt": "2026-07-01T19:40:21.770Z"
 } as const;

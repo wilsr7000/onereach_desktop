@@ -78,6 +78,20 @@ export const AUTH_EVENTS = {
   RE_SIGNIN_KV_REJECTED_FRESH_TOKEN: 'auth.re-signin.kv-rejected-fresh-token',
   RE_SIGNIN_DISMISSED: 'auth.re-signin.dismissed',
   RE_SIGNIN_SUSPENDED_CHANGED: 'auth.re-signin.suspended-changed',
+  // IDW tab auto-login orchestration + verdict (login-verifier.ts).
+  // The fire-and-forget auto-login steps (inject → sso-skip → 2FA →
+  // account-picker) never reported an OUTCOME, so a tab that spun on a
+  // login page did so silently. These events tie a tab's whole
+  // auto-login attempt together and record whether it actually reached
+  // a logged-in state, so "it just spins on login" is diagnosable and
+  // the user can be given actionable instruction. NO secrets logged —
+  // only URL origins, DOM signal names, timing, and the verdict.
+  IDW_LOGIN_START: 'auth.idw-login.start',
+  IDW_LOGIN_PROBE: 'auth.idw-login.probe',
+  IDW_LOGIN_SUCCESS: 'auth.idw-login.success',
+  IDW_LOGIN_RETRY: 'auth.idw-login.retry',
+  IDW_LOGIN_STUCK: 'auth.idw-login.stuck',
+  IDW_LOGIN_NEEDS_USER_ACTION: 'auth.idw-login.needs-user-action',
   // IPC entries (5)
   IPC_SIGN_IN: 'auth.ipc.sign-in',
   IPC_SIGN_OUT: 'auth.ipc.sign-out',
@@ -362,6 +376,86 @@ export interface AuthAccountPickerSelectedEvent extends AuthEventBase {
   };
 }
 
+// ─── IDW tab auto-login orchestration + verdict ───────────────────────────
+
+/** Best-guess cause when a tab is stuck on a login page. */
+export type IdwLoginCause =
+  | 'twofa-required'
+  | 'account-picker'
+  | 'sso-skip-missed'
+  | 'manual-login-required'
+  | 'no-session'
+  | 'unknown';
+
+/** Per-probe classification of a tab's login state. */
+export type IdwLoginVerdict = 'logged-in' | 'stuck-on-login' | 'unknown';
+
+export interface AuthIdwLoginStartEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.IDW_LOGIN_START;
+  level: 'info';
+  data: { tabId: string; env?: Environment; urlOrigin: string };
+}
+export interface AuthIdwLoginProbeEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.IDW_LOGIN_PROBE;
+  level: 'info';
+  data: {
+    tabId: string;
+    attempt: number;
+    verdict: IdwLoginVerdict;
+    onAuthUrl: boolean;
+    /** DOM login markers seen, e.g. ['password-field','sso-skip-button']. */
+    signals: string[];
+    urlOrigin: string;
+  };
+}
+export interface AuthIdwLoginSuccessEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.IDW_LOGIN_SUCCESS;
+  level: 'info';
+  data: {
+    tabId: string;
+    env?: Environment;
+    attempts: number;
+    durationMs: number;
+    urlOrigin: string;
+  };
+}
+export interface AuthIdwLoginRetryEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.IDW_LOGIN_RETRY;
+  level: 'info';
+  data: {
+    tabId: string;
+    env?: Environment;
+    /** Which recovery attempt this is (1-based). */
+    attempt: number;
+    likelyCause: IdwLoginCause;
+  };
+}
+export interface AuthIdwLoginStuckEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.IDW_LOGIN_STUCK;
+  level: 'warn';
+  data: {
+    tabId: string;
+    env?: Environment;
+    attempts: number;
+    durationMs: number;
+    urlOrigin: string;
+    signals: string[];
+    likelyCause: IdwLoginCause;
+  };
+}
+export interface AuthIdwLoginNeedsUserActionEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.IDW_LOGIN_NEEDS_USER_ACTION;
+  level: 'warn';
+  data: {
+    tabId: string;
+    env?: Environment;
+    label?: string;
+    likelyCause: IdwLoginCause;
+    /** Human-readable, actionable guidance for the user. */
+    instruction: string;
+  };
+}
+
 // ─── IPC entries ──────────────────────────────────────────────────────────
 
 export interface AuthIpcSignInEvent extends AuthEventBase {
@@ -429,7 +523,13 @@ export type AuthEvent =
   | AuthTotpFillFailedEvent
   | AuthTotpNoSecretEvent
   | AuthAccountPickerDetectedEvent
-  | AuthAccountPickerSelectedEvent;
+  | AuthAccountPickerSelectedEvent
+  | AuthIdwLoginStartEvent
+  | AuthIdwLoginProbeEvent
+  | AuthIdwLoginSuccessEvent
+  | AuthIdwLoginRetryEvent
+  | AuthIdwLoginStuckEvent
+  | AuthIdwLoginNeedsUserActionEvent;
 
 export function isAuthEvent(ev: EventRecord): ev is EventRecord & AuthEvent {
   return Object.values(AUTH_EVENTS).includes(ev.name as AuthEventName);

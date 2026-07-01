@@ -43,6 +43,7 @@ const AUTH_GET_TOKEN_BUNDLE = 'lite:auth:get-token-bundle';
 const AUTH_HAS_VALID_SESSION = 'lite:auth:has-valid-session';
 const AUTH_SESSION_CHANGED = 'lite:auth:session-changed';
 const AUTH_TWO_FACTOR_NEEDS_SETUP = 'lite:auth:2fa-needs-setup';
+const AUTH_IDW_LOGIN_STUCK = 'lite:auth:idw-login-stuck';
 
 const TOTP_HAS_SECRET = 'lite:totp:has-secret';
 const TOTP_GET_METADATA = 'lite:totp:get-metadata';
@@ -397,6 +398,12 @@ interface AuthBridge {
     listener: (payload: AuthTwoFactorNeedsSetupPayload) => void
   ): () => void;
   /**
+   * Subscribe to "an IDW tab's auto-login gave up" broadcasts. The
+   * chrome uses this to flag the stuck tab's pill with a ⚠ + the
+   * instruction as its tooltip. Returns an unsubscribe fn.
+   */
+  onIdwLoginStuck(listener: (payload: AuthIdwLoginStuckPayload) => void): () => void;
+  /**
    * Convenience: parse a thrown signIn error to get the structured
    * code + remediation. Returns null if the message wasn't an AuthError.
    */
@@ -412,6 +419,17 @@ interface AuthTwoFactorNeedsSetupPayload {
   reason?: string;
   inputCount?: number;
   timestamp: string;
+}
+
+/**
+ * Payload of the `lite:auth:idw-login-stuck` broadcast.
+ */
+interface AuthIdwLoginStuckPayload {
+  tabId: string;
+  label: string;
+  env?: string;
+  likelyCause: string;
+  instruction: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1351,6 +1369,16 @@ const auth: AuthBridge = {
     ipcRenderer.on(AUTH_TWO_FACTOR_NEEDS_SETUP, handler);
     return (): void => {
       ipcRenderer.removeListener(AUTH_TWO_FACTOR_NEEDS_SETUP, handler);
+    };
+  },
+  onIdwLoginStuck: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: AuthIdwLoginStuckPayload
+    ): void => listener(payload);
+    ipcRenderer.on(AUTH_IDW_LOGIN_STUCK, handler);
+    return (): void => {
+      ipcRenderer.removeListener(AUTH_IDW_LOGIN_STUCK, handler);
     };
   },
   parseError: (err) => {

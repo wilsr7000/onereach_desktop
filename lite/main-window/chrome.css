@@ -275,6 +275,17 @@ body {
   border-color: var(--or-border-signal);
 }
 
+/* Auto-login gave up on this tab -- amber ⚠, tooltip carries the fix. */
+.tab-pill.login-stuck {
+  color: var(--or-warning, #e6b450);
+  border-color: rgba(230, 180, 80, 0.4);
+}
+.tab-pill-warn {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--or-warning, #e6b450);
+}
+
 .tab-pill-label {
   white-space: nowrap;
   overflow: hidden;

@@ -124,6 +124,20 @@ export interface BuildPopupHandlerOptions {
    */
   extraAllowPredicate?: (url: string) => boolean;
   /**
+   * Optional accessor for the OPENER's current URL. When provided, a
+   * `window.open` / `target="_blank"` whose target is the SAME
+   * registrable domain as the opener is allowed as an in-app child
+   * window (in the opener's `partition`) instead of being routed to the
+   * OS browser.
+   *
+   * This is what makes third-party chatbots usable inside a tab. Apps
+   * like Grok / ChatGPT / Perplexity open their own same-site links and
+   * buttons as new windows; with the old deny+`openExternal` behavior
+   * those silently bounced to Safari, so in-app links "did nothing."
+   * Cross-site targets (external citations, etc.) still externalize.
+   */
+  sameSiteOpenerUrl?: () => string | null | undefined;
+  /**
    * Override `shell.openExternal` for tests. Defaults to the real one.
    */
   shellOpenExternal?: (url: string) => void | Promise<void>;
@@ -170,6 +184,7 @@ export function buildPopupHandler(
     partition,
     logger,
     extraAllowPredicate,
+    sameSiteOpenerUrl,
     shellOpenExternal = (url: string): Promise<void> => shell.openExternal(url),
     source,
   } = options;
@@ -178,9 +193,18 @@ export function buildPopupHandler(
     const url = details.url;
     const extraAllow = extraAllowPredicate?.(url) === true;
     const oauthAllow = isOAuthPopupUrl(url);
+    const openerUrl = sameSiteOpenerUrl?.();
+    const sameSiteAllow =
+      typeof openerUrl === 'string' &&
+      openerUrl.length > 0 &&
+      isSameRegistrableDomain(url, openerUrl);
 
-    if (extraAllow || oauthAllow) {
-      const reason = extraAllow ? 'extra-predicate' : 'oauth-allowlist';
+    if (extraAllow || oauthAllow || sameSiteAllow) {
+      const reason = extraAllow
+        ? 'extra-predicate'
+        : oauthAllow
+          ? 'oauth-allowlist'
+          : 'same-site';
       const origin = safeOriginOf(url);
       logger?.('info', 'oauth-popup: allowed in-app child window', {
         url: origin,
@@ -442,6 +466,43 @@ export function attachPopupLifecycle(
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * The registrable domain ("eTLD+1") of a hostname, by a deliberately
+ * simple last-two-labels heuristic. Correct for the single-label TLDs
+ * the bot presets use (grok.com, x.com, openai.com, claude.ai,
+ * perplexity.ai, google.com). NOT PSL-accurate for multi-part TLDs
+ * (e.g. `co.uk`) -- an intentional tradeoff: the worst case there is a
+ * genuinely same-site popup still externalizing, NEVER a cross-site
+ * popup being let into the partition.
+ */
+function registrableDomain(hostname: string): string {
+  const labels = hostname
+    .toLowerCase()
+    .split('.')
+    .filter((l) => l.length > 0);
+  return labels.length <= 2 ? labels.join('.') : labels.slice(-2).join('.');
+}
+
+/**
+ * True when both URLs are http(s) and share a registrable domain.
+ * Keeps a chatbot's own same-site `window.open` navigation in-app
+ * instead of routing it to the OS browser.
+ */
+export function isSameRegistrableDomain(a: string, b: string): boolean {
+  let ua: URL;
+  let ub: URL;
+  try {
+    ua = new URL(a);
+    ub = new URL(b);
+  } catch {
+    return false;
+  }
+  const httpish = (u: URL): boolean => u.protocol === 'http:' || u.protocol === 'https:';
+  if (!httpish(ua) || !httpish(ub)) return false;
+  const da = registrableDomain(ua.hostname);
+  return da.length > 0 && da === registrableDomain(ub.hostname);
+}
 
 function safeOriginOf(url: string): string {
   try {

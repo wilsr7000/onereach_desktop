@@ -49,6 +49,9 @@ export const MAIN_WINDOW_EVENTS = {
   AUTO_SIGNIN_TRIGGERED: 'main-window.auto-signin.triggered',
   AUTO_SIGNIN_SUCCEEDED: 'main-window.auto-signin.succeeded',
   AUTO_SIGNIN_REJECTED: 'main-window.auto-signin.rejected',
+  // Login-verifier self-heal: re-inject cookies + reload a tab that
+  // timed out on a recoverable login state before instructing the user.
+  LOGIN_RECOVERY: 'main-window.tab.login-recovery',
   // Session-changed tab reload: re-inject cookies + reload tabs stuck
   // on a OneReach login interstitial after sign-in completes.
   SESSION_RELOAD_FIRING: 'main-window.session-reload.firing',

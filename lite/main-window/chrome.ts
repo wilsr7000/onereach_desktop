@@ -36,6 +36,12 @@ const ENV: LiteAuthEnvironment = 'edison';
 
 let tabs: LiteMainWindowTab[] = [];
 let activeId: string | null = null;
+/**
+ * Tab ids whose auto-login gave up, mapped to the user instruction.
+ * Drives the ⚠ badge + tooltip on the pill. Cleared when the user
+ * activates the tab (they're now dealing with it) or it closes.
+ */
+const stuckTabs = new Map<string, string>();
 
 /** Re-run guard so duplicate runChat() calls during sign-in races don't double-render. */
 let chatRunning = false;
@@ -56,6 +62,14 @@ function renderTabBar(): void {
   const list = document.getElementById('tab-list');
   const homePill = document.getElementById('home-pill');
   if (list === null || homePill === null) return;
+
+  // Drop stuck flags for tabs that have since closed.
+  if (stuckTabs.size > 0) {
+    const live = new Set(tabs.map((t) => t.id));
+    for (const id of Array.from(stuckTabs.keys())) {
+      if (!live.has(id)) stuckTabs.delete(id);
+    }
+  }
 
   // Toggle active state on the Home pill.
   homePill.classList.toggle('active', activeId === null);
@@ -83,7 +97,19 @@ function buildPill(tab: LiteMainWindowTab): HTMLElement {
   pill.setAttribute('role', 'tab');
   pill.setAttribute('aria-selected', String(tab.id === activeId));
   pill.dataset['id'] = tab.id;
-  pill.title = tab.label;
+  const stuckInstruction = stuckTabs.get(tab.id);
+  pill.title = stuckInstruction ?? tab.label;
+
+  // Auto-login gave up: prepend a ⚠ so the pill flags itself; the
+  // instruction is the tooltip. Clears when the user activates the tab.
+  if (stuckInstruction !== undefined) {
+    pill.classList.add('login-stuck');
+    const warn = document.createElement('span');
+    warn.className = 'tab-pill-warn';
+    warn.textContent = '⚠';
+    warn.setAttribute('aria-hidden', 'true');
+    pill.appendChild(warn);
+  }
 
   const labelSpan = document.createElement('span');
   labelSpan.className = 'tab-pill-label';
@@ -102,6 +128,8 @@ function buildPill(tab: LiteMainWindowTab): HTMLElement {
   pill.appendChild(closeBtn);
 
   pill.addEventListener('click', () => {
+    // Activating clears the stuck flag -- the user is now looking at it.
+    if (stuckTabs.delete(tab.id)) renderTabBar();
     void mainWindow().activateTab(tab.id).catch(() => undefined);
   });
 
@@ -385,6 +413,13 @@ async function bootstrap(): Promise<void> {
     // copy is enough; the user can hit Manage Agents → Two-Factor).
     auth.on2FANeedsSetup(() => {
       /* future: route to Settings → Two-Factor */
+    });
+    // An IDW tab's auto-login gave up -- flag its pill with a ⚠ + the
+    // instruction as the tooltip so the user knows what to do.
+    auth.onIdwLoginStuck((payload) => {
+      if (typeof payload?.tabId !== 'string' || typeof payload?.instruction !== 'string') return;
+      stuckTabs.set(payload.tabId, payload.instruction);
+      renderTabBar();
     });
     try {
       const result = await auth.getSession(ENV);

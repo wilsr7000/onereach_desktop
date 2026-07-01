@@ -86,8 +86,14 @@ const MODULES: ModuleSpec[] = [
       'auth/sso-skip.ts',
       'auth/re-signin-prompt.ts',
       'auth/window.ts',
+      'auth/login-verifier.ts',
     ],
     events: AUTH_EVENTS,
+    // The login-verifier emits its `auth.idw-login.*` events through an
+    // injected `emit` seam (so the watcher is unit-testable with fake
+    // timers), so they never appear as a literal `getLoggingApi().event(...)`
+    // call the static scan can match. They ARE emitted at runtime.
+    dynamicPrefixAllowlist: ['auth.idw-login.'],
   },
   {
     name: 'updater',

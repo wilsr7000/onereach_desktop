@@ -50,6 +50,14 @@ interface LiteAuthTwoFactorNeedsSetupPayload {
   timestamp: string;
 }
 
+interface LiteAuthIdwLoginStuckPayload {
+  tabId: string;
+  label: string;
+  env?: string;
+  likelyCause: string;
+  instruction: string;
+}
+
 interface LiteAuthBridge {
   signIn(
     env: LiteAuthEnvironment,
@@ -79,6 +87,12 @@ interface LiteAuthBridge {
   on2FANeedsSetup(
     listener: (payload: LiteAuthTwoFactorNeedsSetupPayload) => void
   ): () => void;
+  /**
+   * Subscribe to "an IDW tab's auto-login gave up" broadcasts. The
+   * chrome flags the stuck tab's pill with a ⚠ + the instruction as
+   * its tooltip. Returns an unsubscribe fn.
+   */
+  onIdwLoginStuck(listener: (payload: LiteAuthIdwLoginStuckPayload) => void): () => void;
   parseError(err: unknown): LiteAuthErrorJSON | null;
 }
 

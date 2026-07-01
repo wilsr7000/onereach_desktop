@@ -24,7 +24,12 @@
  *  during boot.
  */
 
-import { BrowserWindow, WebContentsView, session as electronSession } from 'electron';
+import {
+  BrowserWindow,
+  WebContentsView,
+  session as electronSession,
+  Notification,
+} from 'electron';
 import type { Rectangle } from 'electron';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
@@ -32,6 +37,20 @@ import { getAuthApi, getEnvironmentForUrl } from '../auth/api.js';
 import { isOneReachSsoSkipUrl, tryAutoSkipSso } from '../auth/sso-skip.js';
 import { startTotpAutofillForWebContents } from '../auth/totp-autofill.js';
 import { buildPopupHandler } from '../auth/oauth-popup.js';
+import {
+  startLoginVerifier,
+  makeWebContentsProbe,
+  isOneReachAuthOrLoginUrl,
+} from '../auth/login-verifier.js';
+
+/**
+ * Renderer channel the chrome listens on to show a "couldn't finish
+ * signing in" banner. Literal (not a MAIN_WINDOW_IPC import) to keep
+ * window.ts free of a main.ts↔window.ts cycle; the preload references
+ * the same string. Lives in the auth namespace alongside
+ * `lite:auth:2fa-needs-setup`.
+ */
+const IDW_LOGIN_STUCK_CHANNEL = 'lite:auth:idw-login-stuck';
 import type { Tab } from './types.js';
 import { CHROME_HEIGHT_PX } from './types.js';
 import { MAIN_WINDOW_EVENTS } from './events.js';
@@ -59,6 +78,8 @@ interface AttachedTab {
   initialLoadStarted: boolean;
   /** Detaches the main-process 2FA detector from this tab's webContents. */
   stopTotpAutofill: () => void;
+  /** Stops the per-tab login-outcome verifier (no-op for non-OneReach tabs). */
+  stopLoginVerifier: () => void;
 }
 
 const DEFAULT_WIDTH = 1280;
@@ -413,6 +434,11 @@ function stopAllAttachedTabWatchers(): void {
     } catch {
       /* best-effort */
     }
+    try {
+      attached.stopLoginVerifier();
+    } catch {
+      /* best-effort */
+    }
   }
 }
 
@@ -463,6 +489,11 @@ function reconcileViews(win: BrowserWindow, tabs: Tab[], activeId: string | null
     if (!tabIds.has(id)) {
       try {
         attached.stopTotpAutofill();
+      } catch {
+        /* best-effort */
+      }
+      try {
+        attached.stopLoginVerifier();
       } catch {
         /* best-effort */
       }
@@ -576,6 +607,81 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     },
   });
 
+  // Login-outcome verifier -- the "did auto-login actually work?" check.
+  // The inject → SSO-skip → 2FA → account-picker steps are fire-and-
+  // forget; this watches whether THIS tab reaches a logged-in state or
+  // spins on a login page, emits auth.idw-login.* to the central log,
+  // and hands the user actionable instruction when it's stuck. Only
+  // meaningful for OneReach env tabs (where our auto-login applies);
+  // other tabs get a no-op disposer.
+  const verifierEnv = getEnvironmentForUrl(tab.url);
+  let verifierActive = false;
+  let stopCurrentVerifier: () => void = (): void => {};
+  // (Re)start the login verifier for this tab -- on attach, and again if
+  // a settled tab bounces back to a OneReach login page (session dropped
+  // mid-use). Guarded so a throw here can never break tab attach.
+  const startVerifier = (): void => {
+    if (verifierEnv === null) return;
+    try {
+      stopCurrentVerifier();
+      verifierActive = true;
+      stopCurrentVerifier = startLoginVerifier(
+        { tabId: tab.id, env: verifierEnv, label: tab.label },
+        {
+          ...makeWebContentsProbe(view.webContents),
+          emit: (name, data, level) => getLoggingApi().event(name, data, level),
+          now: () => Date.now(),
+          schedule: (fn, ms) => {
+            const timer = setTimeout(fn, ms);
+            return () => clearTimeout(timer);
+          },
+          // Self-heal: re-inject fresh cookies + reload once. The reload
+          // re-runs the did-finish-load SSO-skip too, so a missed Skip
+          // click gets a second shot. Only worth it if we actually have a
+          // session to inject (or the SSO-skip case, where cookies are
+          // already present and the reload is the fix).
+          attemptRecovery: async (cause) => {
+            try {
+              if (view.webContents.isDestroyed()) return false;
+              const inj = await getAuthApi().injectTokenIntoPartition(verifierEnv, tab.partition);
+              getLoggingApi().event(MAIN_WINDOW_EVENTS.LOGIN_RECOVERY, {
+                id: tab.id,
+                env: verifierEnv,
+                cause,
+                injected: inj.injected,
+                ...(inj.reason !== undefined ? { reason: inj.reason } : {}),
+              });
+              const worthReloading = inj.injected || cause === 'sso-skip-missed';
+              if (!worthReloading || view.webContents.isDestroyed()) return false;
+              view.webContents.reload();
+              return true;
+            } catch (err) {
+              getLoggingApi().warn('main-window', 'login recovery threw', {
+                id: tab.id,
+                error: (err as Error).message,
+              });
+              return false;
+            }
+          },
+          onOutcome: () => {
+            verifierActive = false;
+          },
+          onNeedsUserAction: (info) => notifyLoginStuck(win, tab, verifierEnv, info),
+        }
+      );
+    } catch (err) {
+      verifierActive = false;
+      getLoggingApi().warn('main-window', 'failed to start login verifier', {
+        id: tab.id,
+        error: (err as Error).message,
+      });
+    }
+  };
+  startVerifier();
+  const stopLoginVerifier = (): void => {
+    stopCurrentVerifier();
+  };
+
   const attached: AttachedTab = {
     id: tab.id,
     view,
@@ -583,6 +689,7 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     partition: tab.partition,
     initialLoadStarted: false,
     stopTotpAutofill,
+    stopLoginVerifier,
   };
   attachedTabs.set(tab.id, attached);
 
@@ -605,6 +712,11 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
       partition: tab.partition,
       source: `main-window-tab:${tab.id}`,
       logger: (level, message, data) => getLoggingApi()[level]('auth', message, data),
+      // Keep a third-party chatbot's OWN same-site links/buttons in-app
+      // (Grok / ChatGPT / etc. open these as new windows). Cross-site
+      // targets still route to the OS browser. Read live so it tracks
+      // the tab's current page, not just its initial URL.
+      sameSiteOpenerUrl: () => safeWebContentsUrl(view.webContents),
     })
   );
 
@@ -618,6 +730,12 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     const ssoMatch = isOneReachSsoSkipUrl(url);
     if (ssoMatch.match && ssoMatch.env !== null) {
       void tryAutoSkipSso(view.webContents, ssoMatch.env, url);
+    }
+    // Re-verify if a SETTLED tab bounces back to a OneReach login page
+    // (session dropped mid-use). Guarded by `verifierActive` so the
+    // normal login redirects during the FIRST attempt don't restart it.
+    if (verifierEnv !== null && !verifierActive && isOneReachAuthOrLoginUrl(url)) {
+      startVerifier();
     }
   });
   view.webContents.on('did-navigate-in-page', (_e, url) => {
@@ -824,6 +942,64 @@ function safeWebContentsUrl(webContents: Electron.WebContents): string {
     return webContents.getURL();
   } catch {
     return '';
+  }
+}
+
+/**
+ * Tell the chrome to show a "couldn't finish signing in to <label>"
+ * banner with actionable instruction. Best-effort: if the window is
+ * gone we just drop it -- the `auth.idw-login.*` events already recorded
+ * the outcome in the central log for troubleshooting.
+ */
+function notifyLoginStuck(
+  win: BrowserWindow,
+  tab: Tab,
+  env: ReturnType<typeof getEnvironmentForUrl>,
+  info: { likelyCause: string; instruction: string }
+): void {
+  const label = tab.label.length > 0 ? tab.label : 'your agent';
+  // 1. A system notification is the reliable, layering-proof surface:
+  // the chrome shell renders BEHIND the tab's WebContentsView, so an
+  // in-chrome banner would be hidden by the very page that's stuck.
+  try {
+    if (Notification.isSupported()) {
+      const note = new Notification({
+        title: `Couldn’t finish signing in to ${label}`,
+        body: info.instruction,
+      });
+      note.on('click', () => {
+        try {
+          if (!win.isDestroyed()) {
+            win.show();
+            win.focus();
+          }
+        } catch {
+          /* best-effort */
+        }
+      });
+      note.show();
+    }
+  } catch (err) {
+    getLoggingApi().warn('main-window', 'failed to show login-stuck notification', {
+      id: tab.id,
+      error: (err as Error).message,
+    });
+  }
+  // 2. Also broadcast to the chrome so a future in-app indicator (e.g.
+  // a ⚠ badge on the stuck tab's pill) can consume it. Harmless no-op
+  // until a listener exists.
+  try {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send(IDW_LOGIN_STUCK_CHANNEL, {
+        tabId: tab.id,
+        label: tab.label,
+        ...(env !== null ? { env } : {}),
+        likelyCause: info.likelyCause,
+        instruction: info.instruction,
+      });
+    }
+  } catch {
+    /* best-effort; the notification already delivered the instruction */
   }
 }
 

@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   isOAuthPopupUrl,
+  isSameRegistrableDomain,
   buildPopupHandler,
   OAUTH_POPUP_ALLOWLIST,
   attachPopupLifecycle,
@@ -70,6 +71,31 @@ describe('isOAuthPopupUrl', () => {
   });
 });
 
+describe('isSameRegistrableDomain', () => {
+  it('matches identical hosts', () => {
+    expect(isSameRegistrableDomain('https://grok.com/a', 'https://grok.com/b')).toBe(true);
+  });
+  it('matches a subdomain against the bare domain (both directions)', () => {
+    expect(isSameRegistrableDomain('https://accounts.grok.com', 'https://grok.com')).toBe(true);
+    expect(isSameRegistrableDomain('https://grok.com', 'https://cdn.grok.com')).toBe(true);
+  });
+  it('matches two subdomains of the same registrable domain', () => {
+    expect(isSameRegistrableDomain('https://a.openai.com', 'https://b.openai.com')).toBe(true);
+  });
+  it('rejects different registrable domains', () => {
+    expect(isSameRegistrableDomain('https://grok.com', 'https://example.com')).toBe(false);
+    expect(isSameRegistrableDomain('https://grok.com', 'https://x.com')).toBe(false);
+  });
+  it('rejects non-http(s) schemes', () => {
+    expect(isSameRegistrableDomain('javascript:alert(1)', 'https://grok.com')).toBe(false);
+    expect(isSameRegistrableDomain('https://grok.com', 'file:///etc/passwd')).toBe(false);
+  });
+  it('rejects malformed URLs', () => {
+    expect(isSameRegistrableDomain('not a url', 'https://grok.com')).toBe(false);
+    expect(isSameRegistrableDomain('https://grok.com', '')).toBe(false);
+  });
+});
+
 describe('buildPopupHandler', () => {
   it('returns allow with overrideBrowserWindowOptions inheriting the partition for OAuth URLs', () => {
     const shellOpenExternal = vi.fn();
@@ -120,6 +146,87 @@ describe('buildPopupHandler', () => {
       'oauth-popup: routed to OS default browser',
       expect.objectContaining({ url: 'https://example.com' })
     );
+  });
+
+  it('allows a SAME-registrable-domain popup in-app when sameSiteOpenerUrl is set (chatbot links)', () => {
+    // Grok (grok.com) opening its own grok.com / subdomain links as new
+    // windows must stay in-app, not bounce to the OS browser.
+    const shellOpenExternal = vi.fn();
+    const logger = vi.fn();
+    const handler = buildPopupHandler({
+      partition: 'persist:idw-grok',
+      shellOpenExternal,
+      logger,
+      source: 'main-window-tab:t-grok',
+      sameSiteOpenerUrl: () => 'https://grok.com/chat',
+    });
+    const result = handler({
+      url: 'https://grok.com/share/abc',
+    } as unknown as Electron.HandlerDetails);
+    expect(result.action).toBe('allow');
+    if (result.action === 'allow') {
+      expect(result.overrideBrowserWindowOptions?.webPreferences?.partition).toBe('persist:idw-grok');
+    }
+    expect(shellOpenExternal).not.toHaveBeenCalled();
+    expect(logger).toHaveBeenCalledWith(
+      'info',
+      'oauth-popup: allowed in-app child window',
+      expect.objectContaining({ reason: 'same-site' })
+    );
+  });
+
+  it('treats a subdomain of the opener as same-site', () => {
+    const handler = buildPopupHandler({
+      partition: 'persist:idw-grok',
+      shellOpenExternal: vi.fn(),
+      sameSiteOpenerUrl: () => 'https://grok.com',
+    });
+    const result = handler({
+      url: 'https://accounts.grok.com/login',
+    } as unknown as Electron.HandlerDetails);
+    expect(result.action).toBe('allow');
+  });
+
+  it('still externalizes a CROSS-site popup even when sameSiteOpenerUrl is set', () => {
+    // External citations / unrelated links from inside the chatbot keep
+    // going to the OS browser.
+    const shellOpenExternal = vi.fn();
+    const handler = buildPopupHandler({
+      partition: 'persist:idw-grok',
+      shellOpenExternal,
+      sameSiteOpenerUrl: () => 'https://grok.com/chat',
+    });
+    const result = handler({
+      url: 'https://example.com/cited-article',
+    } as unknown as Electron.HandlerDetails);
+    expect(result.action).toBe('deny');
+    expect(shellOpenExternal).toHaveBeenCalledWith('https://example.com/cited-article');
+  });
+
+  it('without sameSiteOpenerUrl, same-site behaves as before (externalized)', () => {
+    const shellOpenExternal = vi.fn();
+    const handler = buildPopupHandler({
+      partition: 'persist:idw-grok',
+      shellOpenExternal,
+    });
+    const result = handler({
+      url: 'https://grok.com/share/abc',
+    } as unknown as Electron.HandlerDetails);
+    expect(result.action).toBe('deny');
+    expect(shellOpenExternal).toHaveBeenCalledWith('https://grok.com/share/abc');
+  });
+
+  it('an empty opener URL does not enable same-site allow', () => {
+    const shellOpenExternal = vi.fn();
+    const handler = buildPopupHandler({
+      partition: 'persist:idw-grok',
+      shellOpenExternal,
+      sameSiteOpenerUrl: () => '',
+    });
+    const result = handler({
+      url: 'https://grok.com/x',
+    } as unknown as Electron.HandlerDetails);
+    expect(result.action).toBe('deny');
   });
 
   it('extraAllowPredicate short-circuits to allow', () => {
