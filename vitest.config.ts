@@ -15,7 +15,13 @@ export default defineConfig({
     exclude: [
       'node_modules/**',
       'dist/**',
-      'build/**'
+      'build/**',
+      // Standalone integration harnesses named *.test.js but NOT vitest suites
+      // (no describe/it; own main()+process.exit; require live Edison/LLM creds).
+      // They remain runnable via their documented `node`/`electron` commands.
+      'test/unit/evaluate-flow-logs.test.js',
+      'test/unit/flow-library-suggestions.test.js',
+      'test/unit/tickets-intent-corpus.test.js'
     ],
     
     // Setup files run before each test file

@@ -83,6 +83,17 @@ describe('SpacesSyncManager', () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
 
+    // Isolate the constructor from disk. SpacesSyncManager's constructor calls
+    // _loadSyncState() and _loadOrCreateDeviceId(), which read (and can WRITE)
+    // real files under userData -- so on a machine with prior sync history a
+    // "fresh" instance is pre-populated and getAllStatus() is non-empty (and a
+    // real device-id file could be overwritten). Stub fs so every instance
+    // starts genuinely empty. Auto-restored by the global afterEach.
+    const fs = require('fs');
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {});
+    vi.spyOn(fs, 'mkdirSync').mockImplementation(() => {});
+
     // Reset the module to get a fresh singleton
     vi.resetModules();
     ({ SpacesSyncManager } = require('../../lib/spaces-sync-manager'));

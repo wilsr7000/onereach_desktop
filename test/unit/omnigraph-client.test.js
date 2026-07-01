@@ -25,9 +25,10 @@ describe('OmniGraph Client - Configuration Lifecycle', () => {
   it('Step 1: Create client with defaults', () => {
     expect(client).toBeDefined();
     expect(client.endpoint).toBeNull();
-    expect(client.graphName).toBe('idw');
+    expect(client.database).toBe('neo4j');
+    expect(client.neo4jUser).toBe('neo4j');
     expect(client.currentUser).toBe('system');
-    expect(client.timeout).toBe(30000);
+    expect(client.timeout).toBe(60000);
   });
 
   it('Step 2: Set endpoint', () => {
@@ -35,10 +36,12 @@ describe('OmniGraph Client - Configuration Lifecycle', () => {
     expect(client.endpoint).toBe('https://graph.example.com/omnigraph');
   });
 
-  it('Step 3: Read - isReady reflects endpoint', () => {
+  it('Step 3: Read - isReady requires endpoint AND neo4j password', () => {
     expect(client.isReady()).toBe(false);
     client.setEndpoint('https://graph.example.com/omnigraph');
-    expect(client.isReady()).toBe(true);
+    expect(client.isReady()).toBe(false); // endpoint alone is not enough
+    client.setNeo4jPassword('secret');
+    expect(client.isReady()).toBe(true); // proxy path ready: endpoint + password
   });
 
   it('Step 4: Set current user', () => {
@@ -61,13 +64,14 @@ describe('OmniGraph Client - Configuration Lifecycle', () => {
   it('Step 7: Create with options', () => {
     const c = new OmniGraphClient({
       endpoint: 'https://test.com',
+      neo4jPassword: 'secret',
       timeout: 5000,
       currentUser: 'tester@test.com',
     });
     expect(c.endpoint).toBe('https://test.com');
     expect(c.timeout).toBe(5000);
     expect(c.currentUser).toBe('tester@test.com');
-    expect(c.isReady()).toBe(true);
+    expect(c.isReady()).toBe(true); // endpoint + password supplied at construction
   });
 });
 
