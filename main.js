@@ -19204,6 +19204,24 @@ function createOrbWindow() {
     }
   });
 
+  // Forward the orb renderer's console into the main structured log. The orb
+  // runs in its own renderer, so its console.* output (dispatch traceIds,
+  // dead-end warnings, reconnect cues) otherwise never reaches onereach-*.log
+  // -- which is exactly why a "smooth but did nothing" report was previously
+  // undiagnosable from the logs alone.
+  orbWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    try {
+      const q = getLogQueue();
+      const fn = level >= 3 ? 'error' : level === 2 ? 'warn' : 'info';
+      const short = (sourceId || '').split('/').pop();
+      q[fn]('orb-renderer', `[${short}:${line}] ${String(message).substring(0, 500)}`, {
+        source: 'orb-renderer',
+      });
+    } catch (_) {
+      /* logging must never break the orb */
+    }
+  });
+
   // Save position before closing
   orbWindow.on('close', () => {
     saveOrbPosition();

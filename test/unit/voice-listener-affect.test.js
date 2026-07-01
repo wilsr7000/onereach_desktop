@@ -17,7 +17,7 @@
  *   - Tone vocabulary uses the documented model-friendly phrases.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('electron', () => ({
   ipcMain: { handle: vi.fn(), on: vi.fn() },
@@ -47,10 +47,12 @@ const { VoiceListener } = require('../../voice-listener.js');
 
 function makeListener({ affect = null } = {}) {
   const listener = new VoiceListener();
+  const speak = vi.fn(() => Promise.resolve());
   listener.__setDeps({
     hudApi: { isSpeaking: () => false, speechStarted: vi.fn(), speechEnded: vi.fn() },
     getBargeDetector: () => null,
     getAffect: () => affect,
+    getVoiceSpeaker: () => ({ speak }),
   });
   listener.isConnected = true;
   const sent = [];
@@ -58,7 +60,7 @@ function makeListener({ affect = null } = {}) {
     sent.push(event);
     return true;
   });
-  return { listener, sent };
+  return { listener, sent, speak };
 }
 
 describe('voice-listener.respondToFunctionCall() -- function_call_output + response.create', () => {
@@ -146,13 +148,60 @@ describe('voice-listener.respondToFunctionCall() -- affect tone steering', () =>
   });
 });
 
-describe('voice-listener.respondToFunctionCall() -- not connected', () => {
-  it('returns false and does not send when ws not connected', () => {
+describe('voice-listener.respondToFunctionCall() -- not connected (resilience fallback)', () => {
+  it('does not write to the dead socket when disconnected', () => {
     const { listener, sent } = makeListener();
     listener.isConnected = false;
-    const result = listener.respondToFunctionCall('c1', 'OK');
-    expect(result).toBe(false);
+    listener.respondToFunctionCall('c1', 'OK');
     expect(sent).toHaveLength(0);
+  });
+
+  it('delivers a non-empty result through the voice-speaker fallback and returns true', () => {
+    const { listener, speak } = makeListener();
+    listener.isConnected = false;
+    const result = listener.respondToFunctionCall('c1', 'Here is your daily brief.');
+    expect(speak).toHaveBeenCalledWith('Here is your daily brief.');
+    expect(result).toBe(true);
+  });
+
+  it('returns false for an empty result when disconnected (nothing to speak)', () => {
+    const { listener, speak } = makeListener();
+    listener.isConnected = false;
+    const result = listener.respondToFunctionCall('c1', '');
+    expect(speak).not.toHaveBeenCalled();
+    expect(result).toBe(false);
+  });
+
+  it('routes to fallback when the session reconnected under a new generation (stale call_id)', () => {
+    const { listener, sent, speak } = makeListener();
+    // Simulate: a request came in on generation 1, then the socket dropped
+    // and reconnected (generation bumped) before the answer returned.
+    listener._generation = 1;
+    listener.pendingFunctionCallId = 'call_stale';
+    listener.pendingFunctionCallGeneration = 1;
+    listener._generation = 2; // reconnected into a fresh session
+    listener.isConnected = true; // new socket is live...
+
+    const result = listener.respondToFunctionCall('call_stale', 'The answer.');
+    // ...but the OLD call_id is dead, so we must not write function_call_output
+    expect(sent).toHaveLength(0);
+    expect(speak).toHaveBeenCalledWith('The answer.');
+    expect(result).toBe(true);
+    // pending state cleared
+    expect(listener.pendingFunctionCallId).toBeNull();
+  });
+
+  it('still uses the live socket when the pending call matches the current generation', () => {
+    const { listener, sent, speak } = makeListener();
+    listener._generation = 3;
+    listener.pendingFunctionCallId = 'call_live';
+    listener.pendingFunctionCallGeneration = 3;
+    listener.isConnected = true;
+
+    listener.respondToFunctionCall('call_live', 'Fresh answer.');
+    // normal realtime path: function_call_output + response.create, no fallback
+    expect(sent.map((e) => e.type)).toEqual(['conversation.item.create', 'response.create']);
+    expect(speak).not.toHaveBeenCalled();
   });
 });
 

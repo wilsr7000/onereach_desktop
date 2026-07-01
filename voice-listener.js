@@ -63,6 +63,21 @@ const _defaultListenerDeps = {
       return null;
     }
   },
+  /**
+   * Lazily resolve the voice-speaker singleton. Used as a resilience
+   * fallback: when the realtime WebSocket has dropped (or reconnected
+   * into a fresh session) we can no longer voice an agent result through
+   * the realtime function-call slot, so we speak it through voice-speaker's
+   * independent TTS channel instead. Wrapped so tests can stub without
+   * pulling the whole speaker module graph.
+   */
+  getVoiceSpeaker: () => {
+    try {
+      return require('./voice-speaker').getVoiceSpeaker();
+    } catch (_err) {
+      return null;
+    }
+  },
 };
 
 class VoiceListener {
@@ -74,9 +89,25 @@ class VoiceListener {
     this.subscribers = new Map();
     this.audioBuffer = [];
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 3;
+    this.maxReconnectAttempts = 5;
     this._reconnectTimer = null;
     this._isConnecting = false;
+
+    // Resilience: each successful WebSocket open bumps the session
+    // generation. A pending function call captures the generation it was
+    // issued under; if we reconnect (new generation) before the agent's
+    // answer comes back, the old realtime call_id no longer exists and
+    // writing function_call_output to it is a silent no-op that eats the
+    // answer. respondToFunctionCall() compares generations to detect this
+    // and reroutes the result through the voice-speaker TTS fallback.
+    this._generation = 0;
+    this.pendingFunctionCallGeneration = null;
+
+    // Deferred-teardown timer. When the last subscriber leaves while a
+    // function call is still awaiting its answer, we hold the session open
+    // for a grace window instead of orphaning the in-flight request.
+    this._idleDisconnectTimer = null;
+    this._idleDisconnectMs = 15000;
 
     // Track responses to prevent unwanted AI speech
     this.sanctionedResponseIds = new Set();
@@ -166,17 +197,36 @@ class VoiceListener {
           onClose: (code, _reason) => {
             log.info('voice', 'Connection closed: ...', { code });
             this.isConnected = false;
+            // Reset the connect guard here too. A close can race an
+            // in-flight connect(); if we only cleared _isConnecting in the
+            // open handler, a socket that opened-then-immediately-closed
+            // (the 1005 pattern) could strand the guard at true and block
+            // every future reconnect. Clearing it on close makes the next
+            // connect() attempt always able to proceed.
+            this._isConnecting = false;
             this.ws = null;
             this.session = null;
 
-            // Attempt reconnection for unexpected closures (not user-initiated)
-            // Code 1000 = normal close, 1005 = no status (server timeout)
+            // Attempt reconnection for unexpected closures (not user-initiated).
+            // Code 1000 = normal close, 1005 = no status (server timeout /
+            // abrupt drop). We reconnect when there is still a subscriber
+            // OR a function call awaiting its answer -- the in-flight case
+            // matters because an end-of-turn 1005 must not silently abort a
+            // request the user already spoke.
             const isUserInitiated = code === 1000;
             const hasSubscribers = this.subscribers.size > 0;
+            const hasPendingRequest = !!this.pendingFunctionCallId;
 
-            if (!isUserInitiated && hasSubscribers && this.reconnectAttempts < this.maxReconnectAttempts) {
+            if (
+              !isUserInitiated &&
+              (hasSubscribers || hasPendingRequest) &&
+              this.reconnectAttempts < this.maxReconnectAttempts
+            ) {
               this.reconnectAttempts++;
-              const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 8000); // 1s, 2s, 4s
+              // Exponential backoff with jitter so a fleet of orbs doesn't
+              // stampede the API in lockstep after a shared outage.
+              const base = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 8000);
+              const delay = base + Math.floor(Math.random() * 250);
               log.info(
                 'voice',
                 `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`
@@ -186,8 +236,8 @@ class VoiceListener {
               if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
               this._reconnectTimer = setTimeout(async () => {
                 this._reconnectTimer = null;
-                if (this.subscribers.size === 0) {
-                  log.info('voice', 'Reconnect cancelled - no subscribers');
+                if (this.subscribers.size === 0 && !this.pendingFunctionCallId) {
+                  log.info('voice', 'Reconnect cancelled - no subscribers or pending request');
                   return;
                 }
                 try {
@@ -218,6 +268,16 @@ class VoiceListener {
           this.isConnected = true;
           this._isConnecting = false;
           this.reconnectAttempts = 0;
+          // New live session -> new generation. Any function call still
+          // pending from a previous generation is now stale (its call_id
+          // died with the old socket); respondToFunctionCall() will detect
+          // the mismatch and fall back to voice-speaker for the answer.
+          this._generation++;
+          // A fresh connection cancels any scheduled idle teardown.
+          if (this._idleDisconnectTimer) {
+            clearTimeout(this._idleDisconnectTimer);
+            this._idleDisconnectTimer = null;
+          }
 
           this.sendEvent(this.buildSessionUpdate());
 
@@ -659,6 +719,10 @@ class VoiceListener {
 
             this.pendingFunctionCallId = event.call_id;
             this.pendingFunctionItemId = event.item_id;
+            // Stamp the generation so we can tell later whether the realtime
+            // slot this call_id belongs to is still alive when the answer
+            // comes back (see respondToFunctionCall).
+            this.pendingFunctionCallGeneration = this._generation;
 
             // Broadcast for agent processing
             this.broadcast({
@@ -850,12 +914,33 @@ class VoiceListener {
    * fly, so we steer via instructions instead.
    */
   respondToFunctionCall(callId, result = '') {
-    if (!this.isConnected) {
-      log.error('voice', 'Cannot respond - not connected');
-      return false;
+    const speakResult = typeof result === 'string' && result.trim().length > 0;
+
+    // Resilience: the realtime slot this call_id belongs to may be gone by
+    // the time the agent's answer comes back -- either the socket dropped
+    // (the end-of-turn 1005 pattern) or we reconnected into a fresh session
+    // where the old call_id no longer exists. Writing function_call_output
+    // to a dead/stale slot is a silent no-op that eats the answer (the
+    // reported "daily brief did nothing"). Detect both cases and deliver
+    // the result through voice-speaker's independent TTS channel instead so
+    // the user still hears it, rather than dropping it on the floor.
+    const staleSession =
+      this.pendingFunctionCallId === callId &&
+      this.pendingFunctionCallGeneration != null &&
+      this.pendingFunctionCallGeneration !== this._generation;
+
+    if (!this.isConnected || staleSession) {
+      log.warn('voice', 'Realtime slot unavailable for function result -- using TTS fallback', {
+        callId,
+        connected: this.isConnected,
+        staleSession,
+        speakResult,
+      });
+      const delivered = speakResult ? this._speakFallback(result) : false;
+      this._clearPendingCall(callId);
+      return delivered;
     }
 
-    const speakResult = typeof result === 'string' && result.trim().length > 0;
     log.info('voice', 'Responding to function call', { callId, speakResult });
 
     this.sendEvent({
@@ -871,6 +956,7 @@ class VoiceListener {
       // Silent acknowledgement: caller is handling TTS through another
       // path (voice-speaker, panel-only response, etc.). Don't make the
       // model speak from empty output -- it collides with the real audio.
+      this._clearPendingCall(callId);
       return true;
     }
 
@@ -884,8 +970,48 @@ class VoiceListener {
     }
     this.sendEvent(responseCreate);
     this.pendingResponseCreate = true;
+    this._clearPendingCall(callId);
 
     return true;
+  }
+
+  /**
+   * Speak text through the voice-speaker TTS channel, which is independent
+   * of the realtime WebSocket. Used as a resilience fallback so an agent
+   * answer is never silently lost when the realtime slot has died. Lazily
+   * resolves the speaker via an injectable dep (test seam) and is fully
+   * non-fatal: any failure is logged and swallowed.
+   *
+   * Returns true if the answer was handed to the speaker, false otherwise.
+   */
+  _speakFallback(text) {
+    if (typeof text !== 'string' || !text.trim()) return false;
+    try {
+      const speaker = this._deps.getVoiceSpeaker && this._deps.getVoiceSpeaker();
+      if (speaker && typeof speaker.speak === 'function') {
+        Promise.resolve(speaker.speak(text)).catch((err) =>
+          log.warn('voice', 'Fallback TTS failed', { error: err && err.message })
+        );
+        return true;
+      }
+      log.warn('voice', 'Fallback TTS unavailable -- no voice-speaker');
+    } catch (err) {
+      log.warn('voice', 'Fallback TTS threw', { error: err && err.message });
+    }
+    return false;
+  }
+
+  /**
+   * Clear the tracked pending function call once its answer has been
+   * delivered (or rerouted to fallback). Only clears when the id matches
+   * so a late/duplicate response for an old call can't wipe a newer one.
+   */
+  _clearPendingCall(callId) {
+    if (this.pendingFunctionCallId === callId) {
+      this.pendingFunctionCallId = null;
+      this.pendingFunctionItemId = null;
+      this.pendingFunctionCallGeneration = null;
+    }
   }
 
   /**
@@ -927,6 +1053,11 @@ class VoiceListener {
   subscribe(webContentsId, callback) {
     this.subscribers.set(webContentsId, callback);
     log.info('voice', 'Subscriber added: ...', { webContentsId });
+    // A new subscriber cancels any scheduled idle teardown.
+    if (this._idleDisconnectTimer) {
+      clearTimeout(this._idleDisconnectTimer);
+      this._idleDisconnectTimer = null;
+    }
   }
 
   /**
@@ -937,8 +1068,36 @@ class VoiceListener {
     log.info('voice', 'Subscriber removed: ...', { webContentsId });
 
     if (this.subscribers.size === 0) {
-      this.disconnect();
+      // Resilience: don't tear the realtime session down while a user
+      // request is still awaiting its answer -- doing so orphans the
+      // function call and the reply is never spoken. Hold the session open
+      // for a grace window and re-check; if the answer lands first,
+      // respondToFunctionCall clears the pending id and the deferred
+      // teardown proceeds cleanly. The timer is bounded so we never leak
+      // the session forever.
+      if (this.pendingFunctionCallId) {
+        this._scheduleIdleDisconnect();
+      } else {
+        this.disconnect();
+      }
     }
+  }
+
+  /**
+   * Schedule a one-shot deferred teardown. Fires once after the grace
+   * window: if a subscriber returned in the meantime we leave the session
+   * up; otherwise we disconnect regardless of pending state so the session
+   * can't leak. subscribe()/connect() cancel a scheduled teardown.
+   */
+  _scheduleIdleDisconnect() {
+    if (this._idleDisconnectTimer) return; // already scheduled
+    this._idleDisconnectTimer = setTimeout(() => {
+      this._idleDisconnectTimer = null;
+      if (this.subscribers.size === 0) {
+        log.info('voice', 'Idle grace elapsed -- tearing down realtime session');
+        this.disconnect();
+      }
+    }, this._idleDisconnectMs);
   }
 
   /**
@@ -990,6 +1149,10 @@ class VoiceListener {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
+    if (this._idleDisconnectTimer) {
+      clearTimeout(this._idleDisconnectTimer);
+      this._idleDisconnectTimer = null;
+    }
 
     // Reset barge-detector partial so the next session starts clean.
     this._bargePartial = '';
@@ -997,6 +1160,7 @@ class VoiceListener {
     // Clear pending function call state
     this.pendingFunctionCallId = null;
     this.pendingFunctionItemId = null;
+    this.pendingFunctionCallGeneration = null;
     this.hasActiveResponse = false;
     this.activeResponseId = null;
     this.pendingResponseCreate = false;

@@ -1392,6 +1392,8 @@
     <script src="./lib/orb/orb-ambient.js"></script>
     <script src="./lib/orb/orb-sound-library.js"></script>
     <script src="./lib/orb/orb-event-router.js"></script>
+    <script src="./lib/orb/orb-lifecycle.js"></script>
+    <script src="./lib/orb/orb-resilience.js"></script>
     <script src="./lib/orb/orb-response-router.js"></script>
     <script src="./lib/orb/orb-speech-compressor.js"></script>
 
@@ -3635,6 +3637,23 @@
 
         // --- Entering idle: full cleanup ---
         if (to === 'idle') {
+          // NEVER leave the user in silence. If the turn dead-ended -- we
+          // dispatched a request but nothing came back before a watchdog
+          // force-idled us -- speak a short apology through the independent
+          // voice-speaker channel (works even though we disconnect the
+          // realtime socket just below) plus a visible cue. This is the fix
+          // for "the interaction was smooth but it just didn't do anything".
+          if (window.OrbResilience && window.OrbResilience.isDeadEndReason(reason)) {
+            const deadEndMsg = window.OrbResilience.deadEndMessage(reason);
+            console.warn('[Orb] Turn dead-ended (' + reason + ') -- speaking fallback');
+            try { window.orbAPI?.speak?.(deadEndMsg)?.catch?.(() => {}); } catch (_) { /* best effort */ }
+            try {
+              showTranscript(deadEndMsg, false);
+              setTimeout(hideTranscript, 4000);
+            } catch (_) { /* best effort */ }
+            if (window.OrbAudio) { try { window.OrbAudio.playErrorTone(); } catch (_) { /* best effort */ } }
+          }
+
           _sessionGeneration++;
           _earlyAudioBuffer = [];
           _micCaptureReady = false;
@@ -3844,6 +3863,30 @@
       // Track if a _needsInput result was received (for audio_done to know)
       let _pendingNeedsInput = false;
       let _activeTaskId = null; // Track whether a task is still executing (queued but not yet settled)
+
+      // Reconnect safety net. When the realtime socket drops recoverably, the
+      // main process reconnects and we keep the current turn alive rather than
+      // tearing it down. This bounded timer guarantees the orb can never wedge
+      // in a half-connected state if `reconnected` (or a terminal
+      // `disconnected`) never arrives -- it force-ends the session after the
+      // grace window. Armed on reconnecting / recoverable-disconnect, cleared
+      // on reconnected or any terminal teardown.
+      let _disconnectSafetyTimer = null;
+      const DISCONNECT_SAFETY_MS = 30000;
+      function _armDisconnectSafetyTimer() {
+        if (_disconnectSafetyTimer) return; // already armed
+        _disconnectSafetyTimer = setTimeout(() => {
+          _disconnectSafetyTimer = null;
+          console.warn('[Orb] Reconnect did not complete in time -- ending session');
+          try { S.endSession('ws-reconnect-timeout'); } catch (_) { /* best effort */ }
+        }, DISCONNECT_SAFETY_MS);
+      }
+      function _clearDisconnectSafetyTimer() {
+        if (_disconnectSafetyTimer) {
+          clearTimeout(_disconnectSafetyTimer);
+          _disconnectSafetyTimer = null;
+        }
+      }
 
       // Dynamic dwell: how long to keep listening after a response before going idle.
       // Set by routeResult() when an agent result arrives, consumed by TTS end handlers.
@@ -4139,31 +4182,53 @@
             reconnecting: (e) => {
               console.log('[Orb] Reconnecting, attempt:', e.attempt);
               showTranscript('Reconnecting...', false);
+              // Keep the in-flight turn alive while the main process reconnects,
+              // but arm the safety net so we can't hang if it never completes.
+              _armDisconnectSafetyTimer();
             },
             reconnected: (e) => {
               console.log('[Orb] Reconnected');
+              _clearDisconnectSafetyTimer();
               S.set('isSessionReady', true);
               hideTranscript();
-              if (S.phase !== 'listening' && S.phase !== 'idle') {
+              // Only resume listening from states that were waiting on the
+              // socket. Never yank a mid-turn orb (processing/speaking) back to
+              // listening -- the turn's own completion path owns that.
+              const resume = window.OrbLifecycle
+                ? window.OrbLifecycle.shouldResumeListening(S.phase)
+                : (S.phase !== 'listening' && S.phase !== 'idle');
+              if (resume) {
                 S.transition('listening', 'reconnected');
               }
               S.set('hasSpokenThisSession', false);
               startNoSpeechTimeout();
             },
             disconnected: (e) => {
-              console.warn('[Orb] Disconnected, code:', e.code);
+              console.warn('[Orb] Disconnected, code:', e.code, 'permanent:', !!(e && e.permanent));
               stopAudioCapture();
-              // Only show the error flash if the disconnect looks abnormal.
-              // A normal user-stop has code 1000; anything else is a
-              // server-side drop and deserves a visible cue.
-              const isNormalClose = e && (e.code === 1000 || e.code === 1005);
-              if (!isNormalClose) {
-                try {
-                  handleOrbError('ws-disconnected',
-                    'Voice connection dropped. Click the orb to reconnect.');
-                } catch (_) { /* best effort */ }
+              // The main process auto-reconnects recoverable drops (they arrive
+              // as reconnecting/reconnected, not here); a `disconnected` event
+              // means the session is over OR is an ambiguous stray. Classify it:
+              // only tear the turn down when it is genuinely terminal.
+              const kind = window.OrbLifecycle
+                ? window.OrbLifecycle.classifyDisconnect(e)
+                : 'terminal';
+              if (kind === 'terminal') {
+                _clearDisconnectSafetyTimer();
+                // Show the error flash only when we've truly given up.
+                if (e && e.permanent) {
+                  try {
+                    handleOrbError('ws-disconnected',
+                      'Voice connection lost. Click the orb to reconnect.');
+                  } catch (_) { /* best effort */ }
+                }
+                S.endSession('ws-disconnected');
+              } else {
+                // Recoverable/ambiguous: don't kill the turn. Show a cue and let
+                // the bounded safety timer end the session if recovery stalls.
+                showTranscript('Reconnecting...', false);
+                _armDisconnectSafetyTimer();
               }
-              S.endSession('ws-disconnected');
             },
             error: (e) => {
               console.error('[Orb] Speech error:', e.message || e);
