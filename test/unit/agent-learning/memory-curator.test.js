@@ -21,13 +21,20 @@ describe('MemoryCurator -- append grooming', () => {
   const curator = new MemoryCurator();
   const rule = { style: 'append', maxLines: 30, maxAgeDays: 90 };
 
+  // Pin the grooming "now" next to the April-2026 fixtures. maxAgeDays prunes
+  // dated lines relative to this reference (memory-curator.js: cutoff = now -
+  // maxAgeDays). Passing Date.now() let the fixtures age out of the 90-day
+  // window as real time advanced -- silently confounding the dedup/cap tests
+  // (the newest fixture line got aged out before the cap was even applied).
+  const NOW = new Date('2026-04-29T00:00:00Z').getTime();
+
   it('deduplicates near-identical lines (case + whitespace insensitive)', () => {
     const content = [
       '- 2026-04-15: Busted on coffee shops nearby query',
       '- 2026-04-15: busted on coffee shops nearby query',
       '- 2026-04-14: Completely different note about file handling',
     ].join('\n');
-    const out = curator._groomAppendSection(content, rule, Date.now());
+    const out = curator._groomAppendSection(content, rule, NOW);
     expect(out.changed).toBe(true);
     expect(out.deduped).toBeGreaterThanOrEqual(1);
     expect(out.content.split('\n').filter((l) => l.trim()).length).toBe(2);
@@ -50,7 +57,7 @@ describe('MemoryCurator -- append grooming', () => {
     for (let i = 0; i < 50; i++) {
       lines.push(`- 2026-04-${String((i % 28) + 1).padStart(2, '0')}: unique note number ${i} with distinct content about topic ${i}`);
     }
-    const out = curator._groomAppendSection(lines.join('\n'), rule, Date.now());
+    const out = curator._groomAppendSection(lines.join('\n'), rule, NOW);
     const outLines = out.content.split('\n').filter((l) => l.trim());
     expect(outLines.length).toBeLessThanOrEqual(rule.maxLines);
     // Newest-first = top -- line 0 should survive
