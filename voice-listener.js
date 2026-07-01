@@ -724,13 +724,40 @@ class VoiceListener {
             // comes back (see respondToFunctionCall).
             this.pendingFunctionCallGeneration = this._generation;
 
-            // Broadcast for agent processing
+            // Broadcast for agent processing. The orb renderer normally
+            // receives this and dispatches to the exchange via
+            // agentHUD.submitTask.
             this.broadcast({
               type: 'function_call_transcript',
               transcript: transcript,
               callId: event.call_id,
               itemId: event.item_id,
             });
+
+            // Resilience: if NO renderer is subscribed at this instant, the
+            // broadcast above reaches nobody and the request is silently
+            // orphaned. This is the real "daily brief did nothing" repro: the
+            // orb plays a short trailing audio, hits audio-done -> idle ->
+            // disconnect (unsubscribe) microseconds BEFORE this tool call
+            // lands, so function_call_transcript has zero subscribers. Dispatch
+            // to the exchange directly from main so the request still runs; its
+            // result is spoken via voice-speaker, independent of the orb.
+            if (this.subscribers.size === 0 && transcript && transcript.trim()) {
+              log.warn('voice', 'No subscribers for user request — dispatching to exchange directly', {
+                event: 'voice:orphan-dispatch',
+                transcript: transcript.slice(0, 80),
+              });
+              const submitter = this._deps.hudApi && this._deps.hudApi.submitTask;
+              if (typeof submitter === 'function') {
+                Promise.resolve(
+                  submitter(transcript, { toolId: 'orb', inputModality: 'voice' })
+                ).catch((err) =>
+                  log.error('voice', 'Direct exchange dispatch failed', { error: err && err.message })
+                );
+              } else {
+                log.error('voice', 'Cannot dispatch orphaned request — hud-api submitTask unavailable', {});
+              }
+            }
           } catch (err) {
             log.error('voice', 'Error parsing function arguments', { error: err.message || err });
           }

@@ -45,8 +45,9 @@ function extractFunctionCallSwitch() {
   const start = LISTENER_SOURCE.indexOf("case 'response.function_call_arguments.done':");
   expect(start, 'function call switch case must exist').toBeGreaterThan(-1);
   // The case extends until the next `case ` at the same indent OR the end of switch.
-  // Cap at 5000 chars which is more than enough for the three branches.
-  return LISTENER_SOURCE.slice(start, start + 6000);
+  // Cap generously so all three branches (incl. the handle_user_request
+  // orphan-dispatch fallback) fit inside the extracted window.
+  return LISTENER_SOURCE.slice(start, start + 8000);
 }
 
 describe('voice-listener -- session.update registers cancel + stop tools (Phase 5)', () => {
