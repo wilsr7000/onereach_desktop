@@ -724,6 +724,13 @@ function shouldAttemptAutoLogin(tabId, url = '') {
     return false;
   }
 
+  // Terminal: we've handed the tab to the user for manual sign-in. Stop
+  // auto-retrying (cleared when the tab reaches a signed-in, non-auth page).
+  if (state.manualRequired) {
+    console.log(`[AutoLogin] Skipping ${tabId} - manual login required`);
+    return false;
+  }
+
   // If form was already filled, don't start over - wait for 2FA
   if (state.formFilled && Date.now() - state.formFilledAt < 30000) {
     console.log(`[AutoLogin] Skipping ${tabId} - form already filled, waiting for 2FA`);
@@ -751,12 +758,16 @@ function shouldAttemptAutoLogin(tabId, url = '') {
  * Mark auto-login as in progress for a tab
  */
 function markAutoLoginInProgress(tabId, url = '') {
+  const prev = autoLoginState.get(tabId) || {};
   autoLoginState.set(tabId, {
-    ...(autoLoginState.get(tabId) || {}),
+    ...prev,
     inProgress: true,
     lastAttempt: Date.now(),
     lastUrl: url,
     gaveUp: false,
+    // Stamp when this tab's auth flow first began so the stuck-budget can
+    // measure total elapsed time across retry/give-up cycles.
+    firstAuthAt: prev.firstAuthAt || Date.now(),
   });
 }
 
@@ -787,6 +798,10 @@ function markAutoLoginComplete(tabId, success) {
     completedAt: Date.now(),
     formFilled: false,
     gaveUp: false,
+    // Reset the escalation counters so a future re-auth starts fresh.
+    giveUpCount: 0,
+    manualRequired: false,
+    firstAuthAt: null,
   });
   // Clear from active login tracking so queue can process
   clearActiveLogin(tabId);
@@ -795,15 +810,112 @@ function markAutoLoginComplete(tabId, success) {
 /**
  * Mark auto-login as gave up (no form found after retries)
  */
-function markAutoLoginGaveUp(tabId) {
+// After this many give-up cycles OR this long stuck on an auth flow, stop
+// auto-retrying and hand the tab to the user with clear instructions. Without
+// this bound the 10s gaveUp cooldown just re-fires forever -- the reported
+// "it just spins on login".
+const MAX_GIVEUP_CYCLES = 3;
+const AUTH_STUCK_BUDGET_MS = 180000; // 3 minutes
+
+/**
+ * Terminal state: automatic sign-in cannot complete. Stop retrying and show
+ * the user actionable instructions in the tab. Logs a single, detailed
+ * terminal event to the central event manager for troubleshooting.
+ */
+function markManualLoginRequired(tabId, webview, reason) {
+  const prev = autoLoginState.get(tabId) || {};
   autoLoginState.set(tabId, {
-    ...(autoLoginState.get(tabId) || {}),
+    ...prev,
+    inProgress: false,
+    manualRequired: true,
+    manualRequiredAt: Date.now(),
+  });
+  clearActiveLogin(tabId);
+  logAuthEvent('error', 'Automatic sign-in could not complete — manual login required', {
+    event: 'auth:manual-required',
+    tabId,
+    reason,
+    giveUpCount: prev.giveUpCount || 0,
+    elapsedMs: prev.firstAuthAt ? Date.now() - prev.firstAuthAt : null,
+    idwName: prev.idwName || null,
+    url: prev.lastUrl || '',
+  });
+  if (webview) showManualLoginOverlay(webview, reason, prev.idwName);
+}
+
+/**
+ * Full-tab overlay telling the user auto-login stopped and how to proceed.
+ * "Sign in manually" dismisses the overlay so the real login form underneath
+ * is usable; on a successful manual sign-in the did-navigate handler clears
+ * the manual-required state.
+ */
+function showManualLoginOverlay(webview, reason, idwName) {
+  const who = idwName ? `${idwName}` : 'this workspace';
+  const reasonText =
+    reason === 'timeout'
+      ? 'It took too long to reach a working sign-in page.'
+      : reason === 'no-credentials'
+        ? 'No saved sign-in credentials were found.'
+        : 'Automatic sign-in was interrupted or the page did not respond.';
+  const script = `
+    (function() {
+      var existing = document.getElementById('onereach-manual-login-overlay');
+      if (existing) existing.remove();
+      var o = document.createElement('div');
+      o.id = 'onereach-manual-login-overlay';
+      o.innerHTML = \`
+        <style>
+          #onereach-manual-login-overlay { position:fixed; inset:0; background:rgba(10,12,20,0.92);
+            display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:999999;
+            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; color:#fff; text-align:center; padding:24px; }
+          #onereach-manual-login-overlay .card { max-width:420px; }
+          #onereach-manual-login-overlay .title { font-size:19px; font-weight:600; margin-bottom:10px; }
+          #onereach-manual-login-overlay .reason { font-size:14px; color:rgba(255,255,255,0.7); margin-bottom:18px; line-height:1.45; }
+          #onereach-manual-login-overlay .who { color:#8ab4ff; }
+          #onereach-manual-login-overlay button { font:inherit; font-size:14px; font-weight:600; padding:10px 18px; border-radius:8px;
+            border:0; cursor:pointer; margin:4px; }
+          #onereach-manual-login-overlay .primary { background:#3b82f6; color:#fff; }
+          #onereach-manual-login-overlay .secondary { background:transparent; color:rgba(255,255,255,0.75); border:1px solid rgba(255,255,255,0.25); }
+        </style>
+        <div class="card">
+          <div class="title">Sign in to <span class="who">\${${JSON.stringify(who)}}</span></div>
+          <div class="reason">\${${JSON.stringify(reasonText)}} You can sign in manually below.</div>
+          <button class="primary" onclick="document.getElementById('onereach-manual-login-overlay').remove()">Sign in manually</button>
+          <button class="secondary" onclick="location.reload()">Try again</button>
+        </div>\`;
+      document.body.appendChild(o);
+    })();
+  `;
+  webview
+    .executeJavaScript(script)
+    .catch((err) => console.warn('[browser-renderer] inject manual-login overlay:', err.message));
+}
+
+function markAutoLoginGaveUp(tabId, webview) {
+  const prev = autoLoginState.get(tabId) || {};
+  const giveUpCount = (prev.giveUpCount || 0) + 1;
+  autoLoginState.set(tabId, {
+    ...prev,
     inProgress: false,
     gaveUp: true,
     gaveUpAt: Date.now(),
+    giveUpCount,
   });
   // Clear from active login tracking so queue can process
   clearActiveLogin(tabId);
+
+  const elapsedMs = prev.firstAuthAt ? Date.now() - prev.firstAuthAt : 0;
+  logAuthEvent('warn', `Auto-login gave up (cycle ${giveUpCount}/${MAX_GIVEUP_CYCLES})`, {
+    event: 'auth:gave-up',
+    tabId,
+    giveUpCount,
+    elapsedMs,
+  });
+
+  // Escalate to a terminal state instead of looping the 10s cooldown forever.
+  if (giveUpCount >= MAX_GIVEUP_CYCLES || elapsedMs > AUTH_STUCK_BUDGET_MS) {
+    markManualLoginRequired(tabId, webview, giveUpCount >= MAX_GIVEUP_CYCLES ? 'exhausted-retries' : 'timeout');
+  }
 }
 
 /**
@@ -823,7 +935,7 @@ async function attemptAutoLoginWithRetry(webview, url, tabId, attempt) {
     currentUrl = await webview.executeJavaScript('window.location.href');
   } catch (_e) {
     logAuthEvent('warn', 'Webview not accessible', { event: 'auth:webview-error', tabId });
-    markAutoLoginGaveUp(tabId);
+    markAutoLoginGaveUp(tabId, webview);
     return;
   }
 
@@ -894,8 +1006,8 @@ async function attemptAutoLoginWithRetry(webview, url, tabId, attempt) {
       attemptAutoLoginWithRetry(webview, url, tabId, attempt + 1);
     }, retryDelay);
   } else {
-    logAuthEvent('warn', 'No form found, giving up', { event: 'auth:gave-up', tabId, attempts: attempt + 1 });
-    markAutoLoginGaveUp(tabId);
+    logAuthEvent('warn', 'No form found, giving up', { event: 'auth:no-form', tabId, attempts: attempt + 1 });
+    markAutoLoginGaveUp(tabId, webview);
   }
 }
 
@@ -1241,6 +1353,94 @@ async function monitorPostAuth(webview, tabId, originalUrl, credentials, targetA
   }
 }
 
+// ── Independent login-health watchdog ──────────────────────────────────────
+// Separate from the per-attempt auto-login flow (monitorPostAuth only watches
+// the ~18s window right after one login attempt). This is a periodic sweep
+// over EVERY IDW tab that answers "did login actually happen?" -- it records a
+// structured health snapshot to the central event manager for troubleshooting
+// and escalates any tab left stuck on an auth page with no active login to the
+// manual-login instruction. Catches silent session reverts and tabs that never
+// triggered auto-login, not just failures of a specific attempt.
+const HEALTH_CHECK_INTERVAL_MS = 45000;
+const HEALTH_STUCK_GRACE_MS = 90000;
+const loginHealth = new Map(); // tabId -> { firstOnAuthAt }
+
+function classifyTabLoginStatus(tab) {
+  let url = '';
+  try {
+    url = (tab.webview && tab.webview.getURL && tab.webview.getURL()) || tab.currentUrl || '';
+  } catch (_e) {
+    return { tabId: tab.id, status: 'unknown', url: '' };
+  }
+  const state = autoLoginState.get(tab.id) || {};
+  const onAuth = !!url && isAuthPage(url);
+  let status;
+  if (!onAuth) status = 'signed-in';
+  else if (state.manualRequired) status = 'manual-required';
+  else if (state.inProgress || tabsWithActiveLogin.has(tab.id)) status = 'logging-in';
+  else status = 'on-auth';
+  return { tabId: tab.id, idwId: tab.idwId || null, idwName: tab.label || null, status, url };
+}
+
+async function runLoginHealthCheck() {
+  try {
+    const idwTabs = tabs.filter((t) => t && t.idwId && t.webview);
+    if (idwTabs.length === 0) return;
+
+    const results = idwTabs.map(classifyTabLoginStatus);
+
+    // Escalate tabs sitting on an auth page, unattended, past the grace window.
+    for (const r of results) {
+      if (r.status === 'on-auth') {
+        const h = loginHealth.get(r.tabId) || { firstOnAuthAt: Date.now() };
+        loginHealth.set(r.tabId, h);
+        const stuckMs = Date.now() - h.firstOnAuthAt;
+        if (stuckMs > HEALTH_STUCK_GRACE_MS) {
+          const tab = idwTabs.find((t) => t.id === r.tabId);
+          logAuthEvent('warn', 'Login health: tab stuck on auth page — surfacing manual login', {
+            event: 'auth:health-stuck',
+            tabId: r.tabId,
+            idwId: r.idwId,
+            idwName: r.idwName,
+            url: r.url,
+            stuckMs,
+          });
+          if (tab) markManualLoginRequired(r.tabId, tab.webview, 'timeout');
+          loginHealth.delete(r.tabId);
+        }
+      } else {
+        loginHealth.delete(r.tabId);
+      }
+    }
+
+    const signedIn = results.filter((r) => r.status === 'signed-in').length;
+    const onAuth = results.filter((r) => r.status === 'on-auth').length;
+    const manual = results.filter((r) => r.status === 'manual-required').length;
+    logAuthEvent(onAuth > 0 || manual > 0 ? 'warn' : 'info', `Login health: ${signedIn}/${idwTabs.length} IDW tabs signed in`, {
+      event: 'auth:health-summary',
+      total: idwTabs.length,
+      signedIn,
+      onAuth,
+      manual,
+      loggingIn: results.filter((r) => r.status === 'logging-in').length,
+      tabs: results.map((r) => ({ tabId: r.tabId, idwId: r.idwId, status: r.status })),
+    });
+  } catch (e) {
+    logAuthEvent('error', 'Login health check failed', { event: 'auth:health-error', error: e.message });
+  }
+}
+
+let _loginHealthTimer = null;
+function startLoginHealthChecks() {
+  if (_loginHealthTimer) return;
+  _loginHealthTimer = setInterval(runLoginHealthCheck, HEALTH_CHECK_INTERVAL_MS);
+  logAuthEvent('info', 'Login health watchdog started', {
+    event: 'auth:health-init',
+    intervalMs: HEALTH_CHECK_INTERVAL_MS,
+    stuckGraceMs: HEALTH_STUCK_GRACE_MS,
+  });
+}
+
 /**
  * Attempt auto-login for OneReach pages
  * Detects login and 2FA pages and fills them automatically
@@ -1429,6 +1629,10 @@ function showLLMBadge(data) {
 
 // Initialize when the document is loaded
 document.addEventListener('DOMContentLoaded', () => {
+  // Independent login-health watchdog: periodically verifies every IDW tab is
+  // actually signed in and logs a health snapshot to the central event manager.
+  startLoginHealthChecks();
+
   // Load preferences
   const savedPreference = localStorage.getItem('openChatLinksInNewTab');
   if (savedPreference !== null) {
@@ -2651,10 +2855,15 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
       try {
         const hasToken = await window.api.invoke('multi-tenant:has-token', environment);
         authStatus.hasToken = hasToken;
-        console.log(`[Tab] Token check for ${environment}: hasToken=${hasToken}`);
+        logAuthEvent('info', `Token check for ${environment}: hasToken=${hasToken}`, {
+          event: 'auth:token-check',
+          tabId,
+          environment,
+          partition: partitionName,
+          hasToken,
+        });
 
         if (hasToken) {
-          console.log(`[Tab] Injecting ${environment} multi-tenant token into ${partitionName}`);
           const result = await window.api.invoke('multi-tenant:inject-token', {
             environment,
             partition: partitionName,
@@ -2667,17 +2876,39 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
               environment,
               partition: partitionName,
             });
-            console.log(`[Tab] Successfully injected and registered ${environment} token`);
+            logAuthEvent('info', `Injected ${environment} token into ${partitionName}`, {
+              event: 'auth:token-injected',
+              tabId,
+              environment,
+              partition: partitionName,
+            });
           } else {
             authStatus.error = result.error;
-            console.warn(`[Tab] Token injection failed: ${result.error}`);
+            logAuthEvent('warn', `Token injection failed for ${environment}`, {
+              event: 'auth:token-inject-failed',
+              tabId,
+              environment,
+              partition: partitionName,
+              error: result.error,
+            });
           }
         } else {
-          console.log(`[Tab] No ${environment} token available, user will need to login`);
+          logAuthEvent('info', `No ${environment} token available — manual login expected`, {
+            event: 'auth:token-absent',
+            tabId,
+            environment,
+            partition: partitionName,
+          });
         }
       } catch (err) {
         authStatus.error = err.message;
-        console.error('[Tab] Error during token injection:', err);
+        logAuthEvent('error', 'Token injection error', {
+          event: 'auth:token-inject-error',
+          tabId,
+          environment,
+          partition: partitionName,
+          error: err.message,
+        });
         // Continue anyway - user can still login manually
       } finally {
         // Always mark injection as complete and load URL
@@ -3300,6 +3531,23 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
     // Auto-login for OneReach auth pages only (with retry for async-loaded forms)
     const currentUrl = webview.getURL();
     console.log(`[AutoLogin] Webview loaded: ${currentUrl} (tab: ${tabId})`);
+
+    // Reaching a signed-in (non-auth) page while we were mid-auth or had handed
+    // off to manual login means sign-in succeeded (auto OR manual). Clear the
+    // state (incl. the terminal manual-required flag) and record it centrally.
+    if (currentUrl && !isAuthPage(currentUrl)) {
+      const st = autoLoginState.get(tabId);
+      if (st && (st.manualRequired || st.inProgress || st.gaveUp)) {
+        logAuthEvent('info', 'Signed-in page reached — auth resolved', {
+          event: 'auth:signed-in',
+          tabId,
+          url: currentUrl,
+          viaManual: !!st.manualRequired,
+        });
+        markAutoLoginComplete(tabId, true);
+      }
+    }
+
     if (currentUrl && isAuthPage(currentUrl)) {
       // Fallback: For server-side redirects (HTTP 302), the did-navigate handler
       // may not have captured the original URL because tab.currentUrl was already
