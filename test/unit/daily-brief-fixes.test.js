@@ -357,47 +357,62 @@ describe('Fix 5: Daily brief uses standard profile (not powerful)', () => {
 // FIX 6: Calendar getBriefing() fetches real events
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('Fix 6: Calendar agent getBriefing() uses calendar store', () => {
-  const fs = require('fs');
-  const path = require('path');
-  const source = fs.readFileSync(path.join(__dirname, '../../packages/agents/calendar-query-agent.js'), 'utf8');
+// Behavioral tests: exercise getBriefing() through its documented test seams
+// (_getStore / _fetchLiveEventsForBrief) and assert the contribution it
+// returns -- NOT by scraping the source for method names. Source-text matching
+// silently rots: the previous version of this block searched for the obsolete
+// zero-arg `async getBriefing()`, missed the current `getBriefing(context = {})`,
+// and passed a header comment off as the function body. Behaviour decides;
+// source strings can add weight but must never be the decider.
+describe('Fix 6: Calendar agent getBriefing() uses the calendar store', () => {
+  const calendarQueryAgent = require('../../packages/agents/calendar-query-agent');
 
-  it('should call generateMorningBrief in getBriefing()', () => {
-    const getBriefingStart = source.indexOf('async getBriefing()');
-    const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
-    const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).toContain('generateMorningBrief');
+  let mockStore, fetchSpy, storeSpy, initSpy, diffSpy;
+
+  beforeEach(() => {
+    mockStore = {
+      generateMorningBrief: vi.fn().mockResolvedValue({
+        timeline: [{ title: 'Standup', start: '9:00 AM', status: 'upcoming' }],
+        conflicts: [],
+        backToBack: [],
+        longestFree: { durationMinutes: 0 },
+      }),
+    };
+    fetchSpy = vi.spyOn(calendarQueryAgent, '_fetchLiveEventsForBrief').mockResolvedValue([]);
+    storeSpy = vi.spyOn(calendarQueryAgent, '_getStore').mockReturnValue(mockStore);
+    initSpy = vi.spyOn(calendarQueryAgent, 'initialize').mockResolvedValue(undefined);
+    diffSpy = vi.spyOn(calendarQueryAgent, '_buildSnapshotDiff').mockResolvedValue(null);
   });
 
-  it('should use the calendar store for data', () => {
-    const getBriefingStart = source.indexOf('async getBriefing()');
-    const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
-    const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).toContain('getCalendarStore');
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    storeSpy.mockRestore();
+    initSpy.mockRestore();
+    diffSpy.mockRestore();
   });
 
-  it('should return section Calendar with priority 3', () => {
-    const getBriefingStart = source.indexOf('async getBriefing()');
-    const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
-    const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).toContain("section: 'Calendar'");
-    expect(getBriefingBody).toContain('priority: 3');
+  it('builds the Calendar contribution from the store via generateMorningBrief', async () => {
+    const result = await calendarQueryAgent.getBriefing();
+    expect(storeSpy).toHaveBeenCalled();
+    expect(mockStore.generateMorningBrief).toHaveBeenCalledTimes(1);
+    expect(result.section).toBe('Calendar');
+    expect(result.priority).toBe(3);
+    expect(result.content).toContain('Standup');
+    expect(result.briefData).toBeTruthy();
   });
 
-  it('should handle no meetings gracefully', () => {
-    const getBriefingStart = source.indexOf('async getBriefing(');
-    const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
-    const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).toContain('No meetings scheduled');
+  it('handles no meetings gracefully', async () => {
+    mockStore.generateMorningBrief.mockResolvedValue({ timeline: [], conflicts: [], backToBack: [] });
+    const result = await calendarQueryAgent.getBriefing({ dateLabel: 'today' });
+    expect(result.section).toBe('Calendar');
+    expect(result.priority).toBe(3);
+    expect(result.content).toContain('No meetings scheduled');
   });
 
-  it('should catch errors gracefully with try/catch', () => {
-    const getBriefingStart = source.indexOf('async getBriefing(');
-    const getBriefingEnd = source.indexOf('},', getBriefingStart + 100);
-    const getBriefingBody = source.substring(getBriefingStart, getBriefingEnd);
-    expect(getBriefingBody).toMatch(/try\s*\{/);
-    expect(getBriefingBody).toContain('catch');
-    expect(getBriefingBody).toContain('Calendar unavailable');
+  it('degrades to "Calendar unavailable" when the store throws', async () => {
+    mockStore.generateMorningBrief.mockRejectedValue(new Error('omnical down'));
+    const result = await calendarQueryAgent.getBriefing();
+    expect(result).toEqual({ section: 'Calendar', priority: 3, content: 'Calendar unavailable.' });
   });
 });
 

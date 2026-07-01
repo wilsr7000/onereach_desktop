@@ -16,7 +16,7 @@
  *   - retention: snapshots older than retentionDays are pruned on write
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -264,9 +264,22 @@ describe('Phase 2e: diffSnapshots', () => {
 describe('Phase 2e: Brief Snapshots persistence', () => {
   let mem;
   beforeEach(async () => {
+    // Snapshot retention prunes rows older than `retentionDays` relative to the
+    // WALL CLOCK (calendar-memory.js: cutoff = Date.now() - retentionDays). These
+    // tests use fixed April-2026 dates, so pin the clock next to them -- otherwise
+    // the whole fixture ages out of the retention window and every write prunes
+    // everything (the test rots as real time advances). Fake only Date so async
+    // file-lock timers keep running normally.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-04-29T12:00:00Z'));
+
     mem = new calendarMemory.CalendarMemory();
     mem._setStoreForTests(makeFakeStore(''));
     await mem.load();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   function evt(id, dateTime, title = id) {
