@@ -21129,8 +21129,8 @@ function registerClaudeTerminalHandlers() {
 
       console.log('[ClaudeTerminal] Starting PTY with claude at:', claudePath);
 
-      // Spawn claude in PTY
-      claudePty = pty.spawn(claudePath, [], {
+      // Spawn claude in PTY — pin to Opus 4.8 at max effort.
+      claudePty = pty.spawn(claudePath, ['--model', 'claude-opus-4-8', '--effort', 'max'], {
         name: 'xterm-256color',
         cols: cols || 80,
         rows: rows || 24,
