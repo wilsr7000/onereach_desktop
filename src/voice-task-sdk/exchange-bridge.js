@@ -2777,6 +2777,20 @@ async function initializeExchangeBridge(config = {}) {
         })
       );
       exchangeManager.start();
+
+      // Publish the relay-participant roster for operational visibility and mark
+      // the moderator active. These are the first-class I/O relay agents
+      // (voice-relay, chat, modal, exchange-manager) — enumerable, bid-excluded.
+      try {
+        const relayParticipants = require('../../lib/exchange/relay-participants');
+        relayParticipants.registerParticipant({ id: 'exchange-manager', status: 'active' });
+        log.info('voice', 'Relay participants registered', {
+          participants: relayParticipants.listParticipants().map((p) => p.id),
+          bidExcluded: relayParticipants.getBidExcludedIds(),
+        });
+      } catch (rpErr) {
+        log.warn('voice', 'Relay participant roster unavailable (non-fatal)', { error: rpErr.message });
+      }
     } catch (mgrErr) {
       log.warn('voice', 'ExchangeManager failed to start (non-fatal)', { error: mgrErr.message });
     }
