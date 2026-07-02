@@ -149,6 +149,17 @@ describe('OrbState v2', () => {
       expect(S.phase).toBe('speaking');
     });
 
+    // Async agent results (e.g. the daily brief) settle seconds after the
+    // turn -- after the orb has returned to idle -- and speak via voice-speaker
+    // (audio_wav, taskResult:true). Pre-fix this idle -> speaking edge was
+    // rejected and the spoken result was silently dropped ("asked for the
+    // daily brief and nothing happened" even though the task succeeded).
+    it('idle -> speaking (async task result / proactive alert)', () => {
+      expect(S.phase).toBe('idle');
+      expect(S.transition('speaking', 'audio_wav:taskResult:daily-brief-agent')).toBe(true);
+      expect(S.phase).toBe('speaking');
+    });
+
     it('processing -> idle (error)', () => {
       S.transition('connecting');
       S.transition('listening');
@@ -209,8 +220,8 @@ describe('OrbState v2', () => {
   });
 
   describe('invalid transitions', () => {
-    it('idle -> speaking', () => {
-      expect(S.transition('speaking')).toBe(false);
+    it('idle -> awaitingInput', () => {
+      expect(S.transition('awaitingInput')).toBe(false);
       expect(S.phase).toBe('idle');
     });
 
@@ -526,7 +537,7 @@ describe('OrbState v2', () => {
     it('does not emit transition for invalid transition', () => {
       const handler = vi.fn();
       S.on('transition', handler);
-      S.transition('speaking'); // invalid from idle
+      S.transition('processing'); // invalid from idle
       expect(handler).not.toHaveBeenCalled();
     });
   });
