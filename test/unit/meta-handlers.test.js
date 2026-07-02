@@ -10,28 +10,65 @@ import { describe, it, expect, vi } from 'vitest';
 
 const {
   makeClassifyIntentHandler,
+  makeDisambiguateHandler,
   makeEvaluateBuildabilityHandler,
   makeEvaluateResponseHandler,
 } = require('../../lib/exchange/meta-handlers');
 
-describe('classify-intent handler', () => {
+describe('classify-intent handler (upfront NormalizeIntent)', () => {
+  it('returns the cleaned intent + normalized shape from a valid result', async () => {
+    const ai = { json: vi.fn(async () => ({ intent: 'check my calendar', needsClarification: false, confidence: 0.9 })) };
+    const h = makeClassifyIntentHandler({ ai });
+    const out = await h({ trimmed: 'check muh calender', conversationText: '' });
+    expect(out).toEqual({
+      intent: 'check my calendar',
+      rawTranscript: 'check muh calender',
+      needsClarification: false,
+      clarificationQuestion: null,
+      confidence: 0.9,
+    });
+  });
+
+  it('throws on an unusable result so the caller fails open to the raw transcript', async () => {
+    const ai = { json: vi.fn(async () => ({})) }; // no intent string
+    const h = makeClassifyIntentHandler({ ai });
+    await expect(h({ trimmed: 'whatever' })).rejects.toThrow(/unusable/);
+  });
+
+  it('feeds recent conversation into the prompt for pronoun resolution', async () => {
+    const ai = { json: vi.fn(async () => ({ intent: 'cancel it', confidence: 0.8 })) };
+    const h = makeClassifyIntentHandler({ ai });
+    await h({ trimmed: 'cancel it', conversationText: 'User: book the 3pm meeting' });
+    const prompt = ai.json.mock.calls[0][0];
+    expect(prompt).toMatch(/RECENT CONVERSATION/);
+    expect(prompt).toMatch(/book the 3pm meeting/);
+  });
+
+  it('coerces a missing confidence to the 0.5 default', async () => {
+    const ai = { json: vi.fn(async () => ({ intent: 'play music' })) };
+    const out = await makeClassifyIntentHandler({ ai })({ trimmed: 'play music' });
+    expect(out.confidence).toBe(0.5);
+  });
+});
+
+describe('disambiguate handler (capability-gap triage)', () => {
   it('returns the model classification + gap summary', async () => {
     const ai = { json: vi.fn(async () => ({ classification: 'rephrase', gapSummary: 'ambiguous time' })) };
-    const h = makeClassifyIntentHandler({ ai });
+    const h = makeDisambiguateHandler({ ai });
     const out = await h({ content: 'do the thing', agentDescriptions: [{ name: 'time-agent', description: 'clock' }] });
     expect(out).toEqual({ classification: 'rephrase', gapSummary: 'ambiguous time' });
   });
 
   it('defaults to capability_gap + the raw content when the model omits fields', async () => {
     const ai = { json: vi.fn(async () => ({})) };
-    const h = makeClassifyIntentHandler({ ai });
+    const h = makeDisambiguateHandler({ ai });
     const out = await h({ content: 'control my toaster' });
     expect(out).toEqual({ classification: 'capability_gap', gapSummary: 'control my toaster' });
   });
 
   it('includes near-miss bids in the prompt when present', async () => {
     const ai = { json: vi.fn(async () => ({ classification: 'rephrase', gapSummary: 'x' })) };
-    const h = makeClassifyIntentHandler({ ai });
+    const h = makeDisambiguateHandler({ ai });
     await h({ content: 'x', nearMisses: [{ agentId: 'calendar-query-agent', confidence: 0.42 }] });
     const prompt = ai.json.mock.calls[0][0];
     expect(prompt).toMatch(/calendar-query-agent \(0\.42\)/);

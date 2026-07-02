@@ -45,6 +45,7 @@ const { normalizeAgentResult } = require('../../lib/agent-result-normalize');
 const { registerMetaHandler, runMetaTask, META_TASK_KINDS } = require('../../lib/exchange/meta-tasks');
 const {
   makeClassifyIntentHandler,
+  makeDisambiguateHandler,
   makeEvaluateBuildabilityHandler,
   makeEvaluateResponseHandler,
 } = require('../../lib/exchange/meta-handlers');
@@ -434,54 +435,22 @@ async function normalizeIntent(rawTranscript, conversationText, userProfileConte
     }
   }
 
-  try {
-    // DESIGN NOTE: We deliberately do NOT pass userProfileContext to this
-    // prompt. Previous versions did, and the LLM would "helpfully" inject
-    // profile facts (Home City, preferences) into the user's query --
-    // rewriting "coffee shops in the area" to "coffee shops in the
-    // Las Vegas area" based on a Home City field the user never mentioned.
-    //
-    // Location enrichment is the SEARCH AGENT's job (via the live
-    // location service + hasLocation check), not NormalizeIntent's. The
-    // normalizer should only fix speech-to-text errors and resolve
-    // pronouns -- nothing more. Keeping its scope narrow prevents a
-    // whole class of "system thinks I live somewhere I don't" bugs.
-    const result = await ai.json(
-      `You are a voice-command interpreter cleaning up speech-to-text output. Your ONLY jobs:
-1. Fix obvious speech-to-text errors (homophones, missing words, run-on phrases).
-2. Resolve pronouns ("it", "that", "this", "they") using the conversation history.
-3. Output a clean, actionable version of what the user meant.
-
-STRICT RULES:
-- DO NOT add any information the user did not say. Do not insert city names, times, dates, preferences, or any context not present in the raw transcript.
-- DO NOT expand "here", "nearby", "around here", "my area" into a specific place. Leave those words unchanged. Downstream agents have live location data and will handle geo-resolution themselves.
-- Almost NEVER set needsClarification=true. The system has specialized agents that handle ambiguity through competitive bidding. Commands like "start a meeting", "check my calendar", "play some music" are perfectly clear -- pass them through.
-- Only set needsClarification=true if the transcript is genuinely unintelligible gibberish (e.g., "the uh thing with the um").
-
-${conversationText ? `RECENT CONVERSATION (for pronoun resolution only):\n${conversationText.slice(-800)}\n` : ''}
-RAW TRANSCRIPT: "${trimmed}"
-
-Return JSON:
-{
-  "intent": "clean version of what the user said, with NOTHING added",
-  "needsClarification": false,
-  "clarificationQuestion": null,
-  "confidence": 0.0-1.0
-}`,
-      { profile: 'fast', temperature: 0, maxTokens: 200, feature: 'intent-normalize' }
-    );
-
-    if (result && typeof result.intent === 'string') {
-      return {
-        intent: result.intent || trimmed,
-        rawTranscript: trimmed,
-        needsClarification: !!result.needsClarification,
-        clarificationQuestion: result.clarificationQuestion || null,
-        confidence: parseFloat(result.confidence) || 0.5,
-      };
-    }
-  } catch (e) {
-    log.info('voice', '[NormalizeIntent] LLM failed, using raw transcript', { error: e.message });
+  // Meta-task (ADR-EX-007): the intent interpretation runs as a recorded,
+  // direct-assigned classify-intent task (the prompt + STT-cleanup rules live in
+  // the classify-intent meta-handler). runMetaTask never throws; on ANY
+  // non-settle (handler unregistered, LLM error, or unusable shape) we fail open
+  // to the raw transcript — exactly normalizeIntent's long-standing contract.
+  //
+  // DESIGN NOTE: userProfileContext is deliberately NOT forwarded to the prompt.
+  // Passing it caused the normalizer to inject profile facts (Home City,
+  // preferences) the user never said; geo/enrichment is the search agent's job.
+  const out = await runMetaTask(
+    META_TASK_KINDS.CLASSIFY_INTENT,
+    { trimmed, conversationText },
+    _metaTaskDeps()
+  );
+  if (out.status === 'settled' && out.result) {
+    return out.result;
   }
 
   // Fail-open: use raw transcript as-is
@@ -2852,6 +2821,7 @@ async function initializeExchangeBridge(config = {}) {
       // prefer the meta-task and fall back to the inline path when unregistered.
       try {
         registerMetaHandler(META_TASK_KINDS.CLASSIFY_INTENT, makeClassifyIntentHandler({ ai }));
+        registerMetaHandler(META_TASK_KINDS.DISAMBIGUATE, makeDisambiguateHandler({ ai }));
         registerMetaHandler(
           META_TASK_KINDS.EVALUATE_BUILDABILITY,
           makeEvaluateBuildabilityHandler({ getBuilderAgent: () => allBuiltInAgentMap['agent-builder-agent'] })
@@ -3236,14 +3206,15 @@ function setupExchangeEvents() {
           // tell the classifier what almost matched: a near-miss on a
           // related agent usually means "rephrase", while uniformly cold
           // bids mean a genuine capability gap. The near-miss note is built
-          // inside the classify-intent meta-handler from `nearMisses`.
+          // inside the disambiguate meta-handler from `nearMisses`.
           //
-          // Meta-task (ADR-EX-007): classify the halted request as a recorded,
-          // direct-assigned task. On non-settle the pre-set defaults hold
-          // (classification='capability_gap', gapSummary=content) — the same
-          // outcome the previous inline try/catch produced on error/timeout.
+          // Meta-task (ADR-EX-007): triage the halted request (rephrase vs
+          // capability-gap) as a recorded, direct-assigned task. On non-settle
+          // the pre-set defaults hold (classification='capability_gap',
+          // gapSummary=content) — the same outcome the previous inline
+          // try/catch produced on error/timeout.
           const classOut = await Promise.race([
-            runMetaTask(META_TASK_KINDS.CLASSIFY_INTENT, { content, agentDescriptions, nearMisses }, _metaTaskDeps()),
+            runMetaTask(META_TASK_KINDS.DISAMBIGUATE, { content, agentDescriptions, nearMisses }, _metaTaskDeps()),
             new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
           ]);
           if (classOut && classOut.status === 'settled' && classOut.result) {

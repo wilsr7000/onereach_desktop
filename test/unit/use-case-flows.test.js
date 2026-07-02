@@ -97,15 +97,19 @@ describe('UC-A: no agent exists -> build-agent evaluates and offers or declines'
 // UC-B — daily brief: classify intent (as a task) then compose the answer
 // ===========================================================================
 describe('UC-B: daily brief -> classify intent, winner composes multi-channel answer', () => {
-  it('intent classification runs as a direct-assigned meta-task', async () => {
-    // Stub the classifier (the LLM is non-deterministic; the ROUTING contract is
-    // what we lock): "daily brief" classifies to the daily-brief-agent.
-    registerMetaHandler(META_TASK_KINDS.CLASSIFY_INTENT, async ({ text }) => ({
-      intent: text,
-      winner: /brief/i.test(text) ? 'daily-brief-agent' : 'unknown',
+  it('intent interpretation runs as a direct-assigned meta-task', async () => {
+    // classify-intent = NormalizeIntent: clean up the raw transcript before the
+    // auction sees it (the LLM is non-deterministic; here we stub the shape).
+    // The winner is chosen later by the auction, not by this meta-task.
+    registerMetaHandler(META_TASK_KINDS.CLASSIFY_INTENT, async ({ trimmed }) => ({
+      intent: trimmed.replace(/^gimme/i, 'give me'),
+      rawTranscript: trimmed,
+      needsClarification: false,
+      confidence: 0.9,
     }));
-    const out = await runMetaTask(META_TASK_KINDS.CLASSIFY_INTENT, { text: 'give me my daily brief' }, { now: () => NOW });
-    expect(out.result.winner).toBe('daily-brief-agent');
+    const out = await runMetaTask(META_TASK_KINDS.CLASSIFY_INTENT, { trimmed: 'gimme my daily brief' }, { now: () => NOW });
+    expect(out.result.intent).toBe('give me my daily brief');
+    expect(out.status).toBe('settled');
   });
 
   it('the winner\'s composed result fans out to speak + chat + modal (planOutbound)', () => {

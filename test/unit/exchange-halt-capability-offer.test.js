@@ -49,14 +49,14 @@ describe('exchange-bridge exchange:halt -- capability-gap offer wiring', () => {
     expect(block).toMatch(/on\('exchange:halt',\s*async\s*\(\{\s*task,\s*reason,\s*bids\s*\}\)/);
   });
 
-  it('classifies the halted request via the classify-intent meta-task, passing near-miss bids', () => {
-    // The rephrase-vs-capability-gap classification now runs as a recorded,
+  it('triages the halted request via the disambiguate meta-task, passing near-miss bids', () => {
+    // The rephrase-vs-capability-gap triage now runs as a recorded,
     // direct-assigned meta-task (ADR-EX-007). The near-miss note itself is built
     // and asserted behaviourally in meta-handlers.test.js ("includes near-miss
     // bids in the prompt when present") -- this pins only that the halt handler
-    // delegates classification to the meta-task and forwards the near-miss bids.
+    // delegates the triage to the meta-task and forwards the near-miss bids.
     expect(block).toMatch(
-      /runMetaTask\(\s*META_TASK_KINDS\.CLASSIFY_INTENT,\s*\{\s*content,\s*agentDescriptions,\s*nearMisses\s*\}/
+      /runMetaTask\(\s*META_TASK_KINDS\.DISAMBIGUATE,\s*\{\s*content,\s*agentDescriptions,\s*nearMisses\s*\}/
     );
   });
 
