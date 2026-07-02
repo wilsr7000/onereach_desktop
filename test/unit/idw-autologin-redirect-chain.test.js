@@ -116,13 +116,15 @@ describe('browser-renderer -- "page navigated away" branch releases queue withou
     // didn't accidentally rip out the right call along with the wrong one.
     const giveUpBranch = RENDERER_SOURCE.match(/No form found, giving up[\s\S]{0,300}/);
     expect(giveUpBranch, 'the form-not-found branch must still exist').toBeTruthy();
-    expect(giveUpBranch[0]).toMatch(/markAutoLoginGaveUp\(tabId\)/);
+    // Now passes `webview` too, so a terminal give-up can show the
+    // manual-login overlay (see markManualLoginRequired).
+    expect(giveUpBranch[0]).toMatch(/markAutoLoginGaveUp\(tabId, webview\)/);
   });
 
   it('the "webview not accessible" branch still calls markAutoLoginGaveUp -- intentional cooldown', () => {
     const wvBranch = RENDERER_SOURCE.match(/Webview not accessible[\s\S]{0,300}/);
     expect(wvBranch, 'the webview-error branch must still exist').toBeTruthy();
-    expect(wvBranch[0]).toMatch(/markAutoLoginGaveUp\(tabId\)/);
+    expect(wvBranch[0]).toMatch(/markAutoLoginGaveUp\(tabId, webview\)/);
   });
 });
 
