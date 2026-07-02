@@ -274,12 +274,77 @@ describe('OrbEventRouter', () => {
       expect(handler).toHaveBeenCalledTimes(1);
     });
 
-    it('rejects noise via isLikelyNoise callback', () => {
+    it('delivers function_call_transcript DURING TTS cooldown (committed request is not echo)', () => {
+      // Repro: the orb speaks a short reply, then the model's tool call lands
+      // within the echo cooldown. A raw transcript would be dropped as echo, but
+      // a committed request must never be — it's the model's structured request.
+      const fcHandler = vi.fn();
+      const tHandler = vi.fn();
+      const emit = startRouter(
+        { function_call_transcript: fcHandler, transcript: tHandler },
+        {},
+        {
+          phase: 'idle',
+          canAcceptInput: () => false, // orb already went idle after speaking
+          get: (key) => {
+            if (key === 'ttsEndTime') return Date.now() - 200; // just spoke, in cooldown
+            if (key === 'lastProcessedTranscript') return '';
+            if (key === 'lastProcessedTime') return 0;
+            return null;
+          },
+        }
+      );
+
+      // Committed request: delivered despite cooldown + non-accepting phase.
+      emit({ type: 'function_call_transcript', transcript: 'give me the daily brief', callId: 'c1' });
+      expect(fcHandler).toHaveBeenCalledTimes(1);
+
+      // A raw transcript in the same cooldown is still dropped (echo guard intact).
+      emit({ type: 'transcript', text: 'the orb hearing itself' });
+      expect(tHandler).not.toHaveBeenCalled();
+    });
+
+    it('rejects raw transcript noise via isLikelyNoise callback', () => {
+      const handler = vi.fn();
+      const emit = startRouter(
+        { transcript: handler },
+        {
+          isLikelyNoise: (text) => text === 'um',
+        },
+        {
+          canAcceptInput: () => true,
+        }
+      );
+
+      emit({ type: 'transcript', text: 'um' });
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('passes non-noise raw transcript through isLikelyNoise callback', () => {
+      const handler = vi.fn();
+      const emit = startRouter(
+        { transcript: handler },
+        {
+          isLikelyNoise: (text) => text === 'um',
+        },
+        {
+          canAcceptInput: () => true,
+        }
+      );
+
+      emit({ type: 'transcript', text: 'what time is it' });
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it('committed request bypasses the noise gate (never filtered as noise)', () => {
+      // The noise gate is for raw mic transcripts. A function_call_transcript is
+      // the model's structured tool call -- it is never noise, and must be
+      // delivered even if the (mic-oriented) noise heuristic would flag its text.
       const handler = vi.fn();
       const emit = startRouter(
         { function_call_transcript: handler },
         {
-          isLikelyNoise: (text) => text === 'um',
+          isLikelyNoise: () => true, // heuristic flags everything
         },
         {
           canAcceptInput: () => true,
@@ -287,22 +352,6 @@ describe('OrbEventRouter', () => {
       );
 
       emit({ type: 'function_call_transcript', transcript: 'um', callId: '1' });
-      expect(handler).not.toHaveBeenCalled();
-    });
-
-    it('passes non-noise through isLikelyNoise callback', () => {
-      const handler = vi.fn();
-      const emit = startRouter(
-        { function_call_transcript: handler },
-        {
-          isLikelyNoise: (text) => text === 'um',
-        },
-        {
-          canAcceptInput: () => true,
-        }
-      );
-
-      emit({ type: 'function_call_transcript', transcript: 'what time is it', callId: '1' });
       expect(handler).toHaveBeenCalledTimes(1);
     });
 
