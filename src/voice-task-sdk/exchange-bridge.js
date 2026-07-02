@@ -536,6 +536,37 @@ async function handleNeedsInput(result, agentId, taskId, opts = {}) {
     });
   }
 
+  // Multi-turn modal (ADR-EX-003 follow-up): when a follow-up question carries
+  // rich UI (a form/choices), render it as a modal keyed to the PENDING agent so
+  // the user can answer by clicking. The modal's clicks route back to that same
+  // agent via the Piece-2 input path (agent-ui:submit-input -> routePendingInput),
+  // whose pending state we just set above. Without this, an agent could present
+  // a modal form on its first turn but only speak on every follow-up. Guarded and
+  // scoped: nothing renders for a plain spoken follow-up (no modal-sized html).
+  try {
+    const niHtml = opts.html || result.html;
+    const niUi = opts.ui || result.ui;
+    if (niHtml || (niUi && niUi.type)) {
+      const normalizedNI = normalizeAgentResult({ ...result, message: prompt, html: niHtml, ui: niUi });
+      if (!normalizedNI.html && normalizedNI.ui && normalizedNI.ui.type) {
+        const { renderAgentUI } = require('../../lib/agent-ui-renderer');
+        normalizedNI.html = renderAgentUI(normalizedNI.ui);
+      }
+      if (normalizedNI.displayMode === 'modal' && normalizedNI.html) {
+        const { showAgentUIModal } = require('../../lib/agent-ui-modal-manager');
+        showAgentUIModal({
+          agentId: pendingAgentId,
+          agentName: pendingAgentId.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          html: normalizedNI.html,
+          panelWidth: normalizedNI.panelWidth,
+          panelHeight: normalizedNI.panelHeight,
+        });
+      }
+    }
+  } catch (modalErr) {
+    log.warn('voice', 'handleNeedsInput modal render failed', { error: modalErr.message, agentId: pendingAgentId });
+  }
+
   // Speak the prompt (best-effort)
   try {
     const { getVoiceSpeaker } = require('../../voice-speaker');

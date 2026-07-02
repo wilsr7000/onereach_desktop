@@ -90,8 +90,10 @@ collide. Companion design doc: [ORB-EXCHANGE-AGENTS.md](ORB-EXCHANGE-AGENTS.md).
 
 ---
 
-## Follow-ups (not yet decided)
+## Follow-ups
 
-- Emit `proactive: true` on background `needsInput` so the flag path in `shouldSurfaceNeedsInput` is exercised end-to-end (today the `!selfHandling` branch already surfaces them).
-- Consider routing disambiguation/halt handling as first-class exchange tasks (today it is inline in the halt handler).
-- Master-evaluator remains an external callback rather than an exchange-elected judge; revisit only if agent-autonomy in selection becomes a goal.
+- [x] **Proactive `needsInput` end-to-end** (commit `aa884fb`) — `hud-api.emitNeedsInput` forwards `proactive`; `handleNeedsInput` derives it from `task.metadata.origin === 'proactive'`. The voice relay now surfaces a background agent's request even from a self-prompting tool.
+- [x] **Multi-turn modal** (ADR-EX-003 follow-up) — `handleNeedsInput` renders a follow-up question's UI as a modal keyed to the pending agent, so an agent can present a modal form on every turn (not just the first); clicks route back via the Piece-2 path. Guarded + scoped to modal-sized UI.
+- [ ] Route disambiguation/halt handling as first-class exchange tasks (today inline in the halt handler). *Deferred — larger, higher risk.*
+- [ ] Master-evaluator remains an external callback rather than an exchange-elected judge; revisit only if agent-autonomy in selection becomes a goal.
+- [ ] Inline-card-on-follow-up: a small (non-modal) UI on a `needsInput` isn't rendered into the orb chat today (only modal-sized UI surfaces). Lower priority.
