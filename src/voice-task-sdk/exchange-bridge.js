@@ -854,6 +854,7 @@ let WebSocketTransport = null;
 let MemoryStorage = null;
 let exchangeInstance = null;
 let transportInstance = null;
+let exchangeManager = null; // moderator: prunes settled tasks + health watchdog (UC6)
 let isExchangeRunning = false;
 let isShuttingDown = false; // Prevent reconnection during shutdown
 let currentExchangePort = 3456; // Track port for reconnection
@@ -2753,6 +2754,32 @@ async function initializeExchangeBridge(config = {}) {
 
     isExchangeRunning = true;
     log.info('voice', 'Exchange running on port', { v0: mergedConfig.port });
+
+    // Exchange Manager (moderator): keep the exchange healthy and CLEAR by
+    // pruning terminal tasks past a TTL and flagging stuck ones (UC6). Without
+    // it the exchange task map grows unbounded (settled tasks were never
+    // removed). Guarded so a moderator failure never affects task flow.
+    try {
+      const { createExchangeManager, exchangeAdapter } = require('../../lib/exchange/exchange-manager');
+      exchangeManager = createExchangeManager(
+        exchangeAdapter(exchangeInstance, {
+          now: () => Date.now(),
+          log: (level, msg, data) => {
+            const fn = log[level] || log.info;
+            fn('voice', msg, data);
+          },
+          onPrune: (ids) => log.info('voice', 'ExchangeManager pruned settled tasks', { count: ids.length }),
+          onStuck: (stuck) =>
+            log.warn('voice', 'ExchangeManager: stuck tasks detected', {
+              count: stuck.length,
+              ids: stuck.slice(0, 5).map((s) => s.id),
+            }),
+        })
+      );
+      exchangeManager.start();
+    } catch (mgrErr) {
+      log.warn('voice', 'ExchangeManager failed to start (non-fatal)', { error: mgrErr.message });
+    }
 
     // Setup notification manager
     setupNotificationListener();
@@ -5048,6 +5075,11 @@ async function shutdown() {
     }
   }
   localAgentConnections.clear();
+
+  if (exchangeManager) {
+    try { exchangeManager.stop(); } catch (_e) { /* OK */ }
+    exchangeManager = null;
+  }
 
   if (exchangeInstance) {
     await exchangeInstance.shutdown(5000);

@@ -271,6 +271,25 @@ export class Exchange extends TypedEventEmitter<ExchangeEvents> {
   }
 
   /**
+   * Snapshot of every task the exchange currently holds. Used by the Exchange
+   * Manager (moderator) to prune terminal tasks and detect stuck ones so the
+   * exchange self-clears rather than growing into a permanent ledger.
+   */
+  listTasks(): Task[] {
+    return Array.from(this.tasks.values());
+  }
+
+  /**
+   * Remove a task from the store. Returns true if it existed. The moderator
+   * only calls this for terminal tasks past a TTL, so live work is never
+   * affected; getTask() returns null afterwards, which is correct for a task
+   * that has left the exchange.
+   */
+  removeTask(taskId: string): boolean {
+    return this.tasks.delete(taskId);
+  }
+
+  /**
    * Get queue stats
    */
   getQueueStats(): { depth: ReturnType<PriorityQueue['getDepth']>; activeAuctions: number } {
