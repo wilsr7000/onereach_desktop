@@ -76,6 +76,20 @@ collide. Companion design doc: [ORB-EXCHANGE-AGENTS.md](ORB-EXCHANGE-AGENTS.md).
 
 ---
 
+## ADR-EX-007: Meta-work is a first-class task, but direct-assigned (two-tier model)
+
+- **Date**: 2026-07-02
+- **Status**: Accepted
+- **Context**: The intended model is "almost everything is a task on the exchange, including meta-work like classify-this-request." Today user-facing work is an auctioned task, but the meta-work that decides HOW to handle a request — classify intent, disambiguate, evaluate buildability (the capability-gap → agent-builder path), evaluate a response — is inline privileged code in the halt/submit handlers. Auctioning meta-work would add latency/cost on the hot path and hit a circularity (you'd need to classify a request to route a "classify" auction).
+- **Decision**: Introduce a two-tier task model (`lib/exchange/meta-tasks.js`). Meta-work becomes a real, recorded, prunable TASK (observable by the moderator + traces, clears when done), but is **direct-assigned to a registered meta-agent** rather than competitively auctioned. `runMetaTask(kind, payload, deps)` records → dispatches → settles, never throwing (unhandled/failed settle as results so callers can fall back to the inline path). Kinds: classify-intent, disambiguate, evaluate-buildability, evaluate-response.
+- **Consequences**:
+  - Realizes "everything is a task" for meta-work without auction latency or classify-the-classifier circularity.
+  - The build-agent's buildability judgment (already offers-or-declines; ADR unchanged) becomes a routable `evaluate-buildability` meta-task.
+  - Migration is phased: the foundation + tests land first; wiring the live halt/classify paths onto `runMetaTask` follows, each behind a fallback to the current inline path.
+  - Text-only use-case tests (`test/unit/use-case-flows.test.js`) exercise UC-A/B/C through the real decision modules, so the text path is regression-locked before voice (voice only relays onto it).
+
+---
+
 ## ADR-EX-006: Relay agents stay on privileged IPC; WebSocket-peer transport deferred
 
 - **Date**: 2026-07-02
