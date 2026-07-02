@@ -178,6 +178,21 @@ class SpeechRecognitionBridge {
       }
     });
 
+    // Open the macOS Microphone privacy pane. Once access is 'denied',
+    // askForMediaAccess can no longer prompt, so the user must toggle it in
+    // System Settings — this takes them straight there. No-op off darwin.
+    ipcMain.handle('speech:open-mic-settings', async () => {
+      if (process.platform !== 'darwin') return { opened: false, reason: 'not-darwin' };
+      try {
+        const { shell } = require('electron');
+        await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+        return { opened: true };
+      } catch (err) {
+        console.error('[SpeechBridge] Failed to open mic settings:', err);
+        return { opened: false, error: err.message };
+      }
+    });
+
     // Get transcription service info
     ipcMain.handle('speech:get-service-info', async () => {
       try {

@@ -1417,6 +1417,9 @@
       // Early audio buffer -- stores PCM chunks captured before WebSocket is ready
       let _earlyAudioBuffer = [];
       let _micCaptureReady = false;
+      // Set when getUserMedia is denied. macOS can't re-prompt once denied, so
+      // the next engage click takes the user to the Microphone settings pane.
+      let _micDenied = false;
 
       // Generation counter for stale-event detection (kept for debug logging)
       let _listenerGeneration = 0;
@@ -3511,8 +3514,14 @@
                 console.error('[Orb] Audio capture failed:', e);
                 const isDenied = e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError';
                 if (isDenied) {
-                  showTranscript('Microphone access denied. Check System Settings > Privacy & Security > Microphone.', false);
-                  setTimeout(hideTranscript, 5000);
+                  // Flag it so the next engage click opens the Microphone
+                  // settings pane (macOS won't re-prompt once denied). Don't
+                  // auto-open here -- this path can fire on launch/restore, not
+                  // just a user click.
+                  _micDenied = true;
+                  console.warn('[Orb] Microphone access denied — enable Onereach.ai under System Settings > Microphone');
+                  showTranscript('Microphone is off — click the orb to open Settings and enable it.', false);
+                  setTimeout(hideTranscript, 8000);
                 }
                 S.endSession('mic-failed');
               }
@@ -4261,6 +4270,19 @@
           S.transition('idle', 'ambient-engage');
         }
         if (S.phase !== 'idle') return;
+        // If a prior attempt found the mic blocked, this engage click takes the
+        // user straight to the Microphone settings pane (macOS can't re-prompt
+        // once denied). Clear the flag and still try the session in case they
+        // granted access in the meantime; if it's still denied the catch above
+        // re-arms this path.
+        if (_micDenied) {
+          _micDenied = false;
+          try {
+            window.orbAPI?.openMicSettings?.();
+            showTranscript('Enable Onereach.ai under Microphone, then click the orb again.', false);
+            setTimeout(hideTranscript, 8000);
+          } catch (_e) { /* best effort */ }
+        }
         _listenerGeneration++;
         S.startSession();
       }

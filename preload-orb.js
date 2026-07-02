@@ -86,6 +86,12 @@ contextBridge.exposeInMainWorld('orbAPI', {
    */
   requestMicPermission: () => ipcWithTimeout('speech:request-mic-permission', [], 10000),
 
+  /**
+   * Open the macOS Microphone privacy settings (used when mic access is denied
+   * and can no longer be re-prompted).
+   */
+  openMicSettings: () => ipcRenderer.invoke('speech:open-mic-settings'),
+
   // ==========================================================================
   // VOICE TASK SDK (classification, queuing, task management)
   // ==========================================================================
