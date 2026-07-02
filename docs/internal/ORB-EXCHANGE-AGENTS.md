@@ -101,9 +101,9 @@ never unified). Both are pure → unit-tested without Electron.
 ## Build plan (ordered; each item is independently testable)
 
 - [x] **0. Design** — this document.
-- [ ] **1. `lib/exchange/relay-core.js`** — pure `classifyInbound` + `planOutbound` + tests. ← *this iteration*
-- [ ] **2. Modal Agent bidirectional input** — wire `relay-core.classifyInbound` into `agent-ui-modal.html` + `preload-agent-ui-modal.js` (`submitInput`) + IPC → `routePendingInput`. Closes UC4. Boundary tests.
-- [ ] **3. Global needs-input feed** — Voice/Chat relay subscribe to *all* `needsInput`, not just own tasks. Closes UC5 (behavioral). Tests.
+- [x] **1. `lib/exchange/relay-core.js`** — pure `classifyInbound` + `planOutbound` (+ `buildModalSubmit`) + 21 tests. Commit `3bbe835`.
+- [x] **2. Modal Agent bidirectional input** — `agent-ui-modal.html` delegated click/submit handler → `preload` `submitInput` → `agent-ui:submit-input` IPC → `relay-core.buildModalSubmit` → `submitTask(metadata.targetAgentId)` → `routePendingInput`. Closes UC4. Same correlation path as the inline HUD panel. `buildModalSubmit` unit-tested.
+- [ ] **3. Global needs-input feed** — Voice/Chat relay subscribe to *all* `needsInput`, not just own tasks. Closes UC5 (behavioral). Tests. ← *next iteration*
 - [ ] **4. Exchange Manager Agent** — settled-task pruning + health watchdog (UC6). Tests.
 - [ ] **5. Register I/O surfaces as `bidExcluded` participants** — orb/chat/modal become true exchange peers (Option A). Tests.
 - [ ] **6. ADRs** — formalize the RelayParticipant contract + moderator + lifecycle once shape is proven.

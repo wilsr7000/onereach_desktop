@@ -165,6 +165,48 @@
         window.modalAPI.onUpdate(render);
       }
 
+      // Bidirectional input (UC4). The agent's rendered UI carries interactive
+      // elements with a data-value (buttons) or a data-field (inputs). A click
+      // or form-submit is sent back to main, which converts it to a correlated
+      // text utterance for THIS agent (relay-core.classifyInbound). Mirrors the
+      // inline command-hud panel's delegated handler.
+      const modalAgentId = params.get('agentId') || '';
+
+      function relayInput({ value, label, field }) {
+        if (!window.modalAPI?.submitInput) return;
+        window.modalAPI.submitInput({ agentId: modalAgentId, value, label, field });
+        // One-shot: the choice has been routed. Close so the agent's next turn
+        // (done, or a fresh follow-up modal) starts clean, matching the inline
+        // panel which removes itself after routing.
+        if (window.modalAPI?.close) window.modalAPI.close();
+      }
+
+      root.addEventListener('click', (e) => {
+        const el = e.target.closest('[data-value]');
+        if (!el || !root.contains(el)) return;
+        e.preventDefault();
+        relayInput({
+          value: el.dataset.value,
+          label: (el.textContent || '').trim(),
+          field: el.dataset.field || undefined,
+        });
+      });
+
+      root.addEventListener('submit', (e) => {
+        const form = e.target.closest('form');
+        if (!form || !root.contains(form)) return;
+        e.preventDefault();
+        // Prefer a named single field; otherwise serialize the whole form.
+        const data = new FormData(form);
+        const entries = Array.from(data.entries());
+        if (entries.length === 1) {
+          relayInput({ value: String(entries[0][1]), field: entries[0][0] });
+        } else if (entries.length > 1) {
+          const text = entries.map(([k, v]) => `${k}: ${v}`).join(', ');
+          relayInput({ value: text, field: form.dataset.field || undefined });
+        }
+      });
+
       const closeBtn = document.getElementById('closeBtn');
       closeBtn.addEventListener('click', () => {
         if (window.modalAPI?.close) {

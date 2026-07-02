@@ -45,4 +45,13 @@ contextBridge.exposeInMainWorld('modalAPI', {
    * Close the modal window programmatically (used by the X button).
    */
   close: () => ipcRenderer.send('agent-ui:close-self'),
+
+  /**
+   * Send a user interaction (button click / form submit) back to the main
+   * process, which converts it to a text utterance correlated to the agent
+   * that rendered this modal (relay-core.classifyInbound) and routes it to
+   * that agent. This makes the modal a bidirectional channel (UC4).
+   * Payload: { agentId, value, label, field }.
+   */
+  submitInput: (payload) => ipcRenderer.send('agent-ui:submit-input', payload),
 });

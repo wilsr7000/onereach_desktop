@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-const { classifyInbound, planOutbound } = require('../../lib/exchange/relay-core');
+const { classifyInbound, planOutbound, buildModalSubmit } = require('../../lib/exchange/relay-core');
 
 describe('relay-core classifyInbound', () => {
   describe('voice / text utterances', () => {
@@ -179,5 +179,38 @@ describe('relay-core planOutbound', () => {
     });
     expect(plan.modal.agentId).toBe('email-agent');
     expect(plan.listenAfter).toBe(true);
+  });
+});
+
+describe('relay-core buildModalSubmit (UC4 wiring — modal click -> submitTask)', () => {
+  it('produces the exact submitTask args that route back to the originating agent', () => {
+    const s = buildModalSubmit({ value: 'confirm', label: 'Yes', agentId: 'calendar-mutate-agent' });
+    expect(s.submit).toBe(true);
+    expect(s.text).toBe('confirm');
+    expect(s.options).toEqual({
+      toolId: 'agent-ui-modal',
+      skipFilter: true,
+      metadata: {
+        targetAgentId: 'calendar-mutate-agent',
+        field: undefined,
+        inputModality: 'modal',
+      },
+    });
+  });
+
+  it('carries a form field name into the routing metadata', () => {
+    const s = buildModalSubmit({ value: 'robb@onereach.com', field: 'email', agentId: 'email-agent' });
+    expect(s.options.metadata.field).toBe('email');
+    expect(s.options.metadata.targetAgentId).toBe('email-agent');
+  });
+
+  it('an empty interaction does not submit (no options)', () => {
+    const s = buildModalSubmit({ agentId: 'a1' });
+    expect(s.submit).toBe(false);
+    expect(s.options).toBeNull();
+  });
+
+  it('is null-safe against a missing payload', () => {
+    expect(buildModalSubmit(undefined).submit).toBe(false);
   });
 });

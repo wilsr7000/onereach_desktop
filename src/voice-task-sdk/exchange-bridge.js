@@ -4830,6 +4830,33 @@ function setupExchangeIPC() {
     } catch (_e) { /* OK */ }
   });
 
+  // Agent-UI modal input (UC4): a click/submit inside an agent's modal. Convert
+  // the interaction to a correlated text utterance via relay-core and route it
+  // back to the agent that rendered the modal -- the SAME path the inline
+  // command-hud panel uses (submitTask metadata.targetAgentId -> routePendingInput).
+  ipcMain.on('agent-ui:submit-input', (_event, payload) => {
+    try {
+      const { buildModalSubmit } = require('../../lib/exchange/relay-core');
+      const submission = buildModalSubmit(payload);
+      if (!submission.submit) {
+        log.info('voice', 'agent-ui:submit-input ignored (empty interaction)', {
+          agentId: (payload && payload.agentId) || '-',
+        });
+        return;
+      }
+      log.info('voice', 'agent-ui:submit-input routing to agent', {
+        agentId: submission.options.metadata.targetAgentId || '-',
+        field: submission.options.metadata.field || '-',
+        text: (submission.text || '').slice(0, 60),
+      });
+      Promise.resolve(hudApi.submitTask(submission.text, submission.options)).catch((err) => {
+        log.warn('voice', 'agent-ui:submit-input submitTask failed', { error: err.message });
+      });
+    } catch (err) {
+      log.warn('voice', 'agent-ui:submit-input handler error', { error: err.message });
+    }
+  });
+
   log.info('voice', 'IPC handlers registered');
 }
 
