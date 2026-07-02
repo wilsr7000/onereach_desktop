@@ -42,6 +42,12 @@ const hudApi = require('../../lib/hud-api');
 // different content. Backward-compatible: legacy { message } agents get
 // spokenSummary == visualText == message. See lib/agent-result-normalize.js.
 const { normalizeAgentResult } = require('../../lib/agent-result-normalize');
+const { registerMetaHandler, runMetaTask, META_TASK_KINDS } = require('../../lib/exchange/meta-tasks');
+const {
+  makeClassifyIntentHandler,
+  makeEvaluateBuildabilityHandler,
+  makeEvaluateResponseHandler,
+} = require('../../lib/exchange/meta-handlers');
 
 // Proactive alert pipeline (Phase 6). Agents push alerts via
 // pushProactiveAlert; we subscribe here and run them through the same
@@ -496,6 +502,18 @@ Return JSON:
  * @param {string}  taskId  - The task ID that was being executed
  * @param {Object}  [opts]  - Extra fields to forward to HUD (html, data, ui)
  */
+// Observability deps for meta-tasks: stamp with the real clock and log each
+// meta-task through the central event manager (ADR-EX-007).
+function _metaTaskDeps() {
+  return {
+    now: () => Date.now(),
+    log: (level, msg, data) => {
+      const fn = typeof log[level] === 'function' ? log[level] : log.info;
+      fn('voice', msg, data);
+    },
+  };
+}
+
 async function handleNeedsInput(result, agentId, taskId, opts = {}) {
   const ts = getTranscriptService();
   const ni = result.needsInput;
@@ -2828,6 +2846,21 @@ async function initializeExchangeBridge(config = {}) {
       } catch (rpErr) {
         log.warn('voice', 'Relay participant roster unavailable (non-fatal)', { error: rpErr.message });
       }
+
+      // Register the meta-task handlers (ADR-EX-007): meta-work runs as a
+      // recorded, direct-assigned task. Registration is additive — call sites
+      // prefer the meta-task and fall back to the inline path when unregistered.
+      try {
+        registerMetaHandler(META_TASK_KINDS.CLASSIFY_INTENT, makeClassifyIntentHandler({ ai }));
+        registerMetaHandler(
+          META_TASK_KINDS.EVALUATE_BUILDABILITY,
+          makeEvaluateBuildabilityHandler({ getBuilderAgent: () => allBuiltInAgentMap['agent-builder-agent'] })
+        );
+        registerMetaHandler(META_TASK_KINDS.EVALUATE_RESPONSE, makeEvaluateResponseHandler({ checkResponseSanity }));
+        log.info('voice', 'Meta-task handlers registered', { kinds: Object.values(META_TASK_KINDS) });
+      } catch (metaErr) {
+        log.warn('voice', 'Meta-task handler registration failed (non-fatal)', { error: metaErr.message });
+      }
     } catch (mgrErr) {
       log.warn('voice', 'ExchangeManager failed to start (non-fatal)', { error: mgrErr.message });
     }
@@ -3202,26 +3235,21 @@ function setupExchangeEvents() {
           // When the halt came from the confidence floor (not zero bids),
           // tell the classifier what almost matched: a near-miss on a
           // related agent usually means "rephrase", while uniformly cold
-          // bids mean a genuine capability gap.
-          const nearMissNote = nearMisses.length > 0
-            ? `\nClosest bids (all below the confidence floor): ${nearMisses
-                .map((b) => `${b.agentId} (${(b.confidence ?? 0).toFixed(2)})`)
-                .join(', ')}`
-            : '';
-          const classResult = await Promise.race([
-            ai.json(
-              `The user said: "${content}"
-No agent was confident enough to handle this. Available agents:
-${agentDescriptions.map((a) => `- ${a.name}: ${a.description}`).join('\n')}
-${nearMissNote}
-Classify: "rephrase" (ambiguous, rephrasing would help) or "capability_gap" (no agent covers this).
-Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "one-sentence description of what's missing" }`,
-              { profile: 'fast', temperature: 0, maxTokens: 100, feature: 'exchange-bridge' },
-            ),
+          // bids mean a genuine capability gap. The near-miss note is built
+          // inside the classify-intent meta-handler from `nearMisses`.
+          //
+          // Meta-task (ADR-EX-007): classify the halted request as a recorded,
+          // direct-assigned task. On non-settle the pre-set defaults hold
+          // (classification='capability_gap', gapSummary=content) — the same
+          // outcome the previous inline try/catch produced on error/timeout.
+          const classOut = await Promise.race([
+            runMetaTask(META_TASK_KINDS.CLASSIFY_INTENT, { content, agentDescriptions, nearMisses }, _metaTaskDeps()),
             new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
           ]);
-          classification = classResult.classification || 'capability_gap';
-          gapSummary = classResult.gapSummary || content;
+          if (classOut && classOut.status === 'settled' && classOut.result) {
+            classification = classOut.result.classification || 'capability_gap';
+            gapSummary = classOut.result.gapSummary || content;
+          }
         } catch (_e) {
           // Default to capability_gap -- agent-builder-agent handles both well
         }
@@ -3298,18 +3326,31 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
           try {
             const builderAgent = agents.find((a) => a.id === 'agent-builder-agent');
             if (builderAgent) {
-              if (builderAgent.initialize) await builderAgent.initialize();
-              const result = await Promise.race([
-                builderAgent.execute({
-                  content,
-                  metadata: {
-                    capabilityGap: gapSummary,
-                    originalRequest: content,
-                    source: 'exchange-halt',
-                  },
-                }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Builder agent timeout')), 10000)),
-              ]);
+              // Meta-task (ADR-EX-007): run the buildability assessment as a
+              // recorded, direct-assigned task. settled -> use it; unhandled ->
+              // run inline (handler not registered); failed -> rethrow so the
+              // existing catch (builderErr) produces its graceful fallback,
+              // exactly as a direct execute rejection did before.
+              const buildOut = await runMetaTask(
+                META_TASK_KINDS.EVALUATE_BUILDABILITY,
+                { content, gapSummary },
+                _metaTaskDeps()
+              );
+              let result;
+              if (buildOut.status === 'settled' && buildOut.result) {
+                result = buildOut.result;
+              } else if (buildOut.status === 'unhandled') {
+                if (builderAgent.initialize) await builderAgent.initialize();
+                result = await Promise.race([
+                  builderAgent.execute({
+                    content,
+                    metadata: { capabilityGap: gapSummary, originalRequest: content, source: 'exchange-halt' },
+                  }),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Builder agent timeout')), 10000)),
+                ]);
+              } else {
+                throw new Error(buildOut.error || 'Builder agent failed');
+              }
 
               const message = result.message || "I can look into building an agent for that. Want me to open WISER Playbooks and draft a plan?";
 
