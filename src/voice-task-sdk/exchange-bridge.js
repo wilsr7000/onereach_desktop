@@ -514,7 +514,13 @@ async function handleNeedsInput(result, agentId, taskId, opts = {}) {
     options: ni.options,
   });
 
-  hudApi.emitNeedsInput({ taskId, prompt, agentId: pendingAgentId, field: ni.field });
+  hudApi.emitNeedsInput({
+    taskId,
+    prompt,
+    agentId: pendingAgentId,
+    field: ni.field,
+    proactive: !!opts.proactive,
+  });
 
   if (global.sendCommandHUDResult) {
     global.sendCommandHUDResult({
@@ -4053,7 +4059,13 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
 
     // Check for multi-turn conversation (needsInput)
     if (result.needsInput) {
-      await handleNeedsInput(result, agentId, task.id, { html: result.html, data: result.data });
+      await handleNeedsInput(result, agentId, task.id, {
+        html: result.html,
+        data: result.data,
+        // A background/scheduled task asking for input is proactive — the orb
+        // must surface it even from a self-prompting tool (UC5).
+        proactive: task.metadata?.origin === 'proactive',
+      });
       return; // Don't mark as completed yet
     }
 
