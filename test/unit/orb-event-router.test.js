@@ -158,7 +158,12 @@ describe('OrbEventRouter', () => {
       expect(handler).toHaveBeenCalledTimes(1);
     });
 
-    it('blocks function_call_transcript during speaking', () => {
+    it('delivers function_call_transcript even during speaking (committed request, never phase-gated)', () => {
+      // function_call_transcript is the model's structured tool call from the
+      // user's speech -- authoritative, not raw mic input. It must NOT be
+      // dropped on orb phase (the "daily brief did nothing" race, where the
+      // tool call lands while the orb is briefly speaking/idle). The handler's
+      // own same-turn dedup prevents double-dispatch.
       const handler = vi.fn();
       const emit = startRouter(
         { function_call_transcript: handler },
@@ -169,8 +174,8 @@ describe('OrbEventRouter', () => {
         }
       );
 
-      emit({ type: 'function_call_transcript', transcript: 'test', callId: '123' });
-      expect(handler).not.toHaveBeenCalled();
+      emit({ type: 'function_call_transcript', transcript: 'give me the daily brief', callId: '123' });
+      expect(handler).toHaveBeenCalledTimes(1);
     });
 
     it('delivers session_updated during connecting (canAcceptInput true)', () => {
