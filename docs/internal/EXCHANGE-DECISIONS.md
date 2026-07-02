@@ -108,6 +108,7 @@ collide. Companion design doc: [ORB-EXCHANGE-AGENTS.md](ORB-EXCHANGE-AGENTS.md).
 
 - [x] **Proactive `needsInput` end-to-end** (commit `aa884fb`) — `hud-api.emitNeedsInput` forwards `proactive`; `handleNeedsInput` derives it from `task.metadata.origin === 'proactive'`. The voice relay now surfaces a background agent's request even from a self-prompting tool.
 - [x] **Multi-turn modal** (ADR-EX-003 follow-up) — `handleNeedsInput` renders a follow-up question's UI as a modal keyed to the pending agent, so an agent can present a modal form on every turn (not just the first); clicks route back via the Piece-2 path. Guarded + scoped to modal-sized UI.
-- [ ] Route disambiguation/halt handling as first-class exchange tasks (today inline in the halt handler). *Deferred — larger, higher risk.*
+- [x] **Meta-task model live on the capability-gap path** (commit `3bc3a11`) — the halt handler's classify + evaluate-buildability now run as recorded, direct-assigned meta-tasks (`lib/exchange/meta-handlers.js`), each behaviour-preserving with an inline fallback. Full suite green.
+- [ ] Extend meta-tasks to the *upfront* classify (`normalizeIntent` on every submit) and the rephrase/disambiguate response builder. *Next — same pattern, wider blast radius, so gated behind fallback + a live smoke test.*
 - [ ] Master-evaluator remains an external callback rather than an exchange-elected judge; revisit only if agent-autonomy in selection becomes a goal.
 - [ ] Inline-card-on-follow-up: a small (non-modal) UI on a `needsInput` isn't rendered into the orb chat today (only modal-sized UI surfaces). Lower priority.
