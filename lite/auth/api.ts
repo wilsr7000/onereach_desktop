@@ -236,6 +236,16 @@ export interface AuthApi {
   onSessionChanged(cb: (env: Environment, session: AuthSession | null) => void): () => void;
 
   /**
+   * Subscribe to proactive session-expired notifications. The store
+   * arms a timer at capture/hydrate and fires ONCE when a session's
+   * `expiresAt` passes (or on the first tick after the machine wakes
+   * from sleeping through it) — so recovery can be offered BEFORE the
+   * user trips over a dead KV op or a login-bounced tab. Not fired for
+   * sessions with no known expiry. Returns an unsubscribe function.
+   */
+  onSessionExpired(cb: (env: Environment, session: AuthSession) => void): () => void;
+
+  /**
    * Subscribe to 2FA-needs-setup notifications. Fires when the
    * autofill watcher detects a OneReach 2FA prompt during sign-in
    * AND Lite has no TOTP secret saved in the keychain (i.e. the user

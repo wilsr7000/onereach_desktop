@@ -1298,3 +1298,163 @@ describe('AuthStore token expiry', () => {
 beforeEach(() => {
   // No global setup needed -- each test owns its own store + fakes.
 });
+
+// ─── proactive session-expiry watch ─────────────────────────────────────────
+
+describe('AuthStore session-expiry watch (proactive)', () => {
+  /**
+   * Deterministic timer harness: `scheduleTimer` records pending
+   * timers against a virtual clock; `advanceTo` fires everything due
+   * (in order), including timers re-armed by a firing callback.
+   */
+  function makeTimerHarness(startMs: number): {
+    now: () => number;
+    scheduleTimer: (fn: () => void, ms: number) => () => void;
+    advanceTo: (ms: number) => void;
+    pendingCount: () => number;
+  } {
+    let clock = startMs;
+    const pending: Array<{ fn: () => void; at: number } | null> = [];
+    return {
+      now: () => clock,
+      scheduleTimer: (fn, ms) => {
+        const entry = { fn, at: clock + ms };
+        pending.push(entry);
+        return (): void => {
+          const i = pending.indexOf(entry);
+          if (i >= 0) pending[i] = null;
+        };
+      },
+      advanceTo: (ms) => {
+        // Fire due timers until none remain (a firing callback may
+        // re-arm within the window).
+        for (;;) {
+          const due = pending
+            .map((e, i) => ({ e, i }))
+            .filter((x) => x.e !== null && x.e.at <= ms)
+            .sort((a, b) => (a.e as { at: number }).at - (b.e as { at: number }).at)[0];
+          if (due === undefined) break;
+          const entry = due.e as { fn: () => void; at: number };
+          pending[due.i] = null;
+          clock = entry.at;
+          entry.fn();
+        }
+        clock = ms;
+      },
+      pendingCount: () => pending.filter((e) => e !== null).length,
+    };
+  }
+
+  interface ExpirySetup {
+    store: AuthStore;
+    harness: ReturnType<typeof makeTimerHarness>;
+    events: Array<{ name: string; data: Record<string, unknown>; level?: string }>;
+    expired: Array<{ env: string; accountId: string }>;
+  }
+
+  /** Hydrate a session whose mult cookie expires at `expiresAtMs`. */
+  async function setupWithExpiry(expiresAtMs: number | undefined): Promise<ExpirySetup> {
+    const startMs = Date.now();
+    const harness = makeTimerHarness(startMs);
+    const kv = new FakeKV();
+    const session = new FakeSession();
+    if (expiresAtMs === undefined) {
+      const { expirationDate: _drop, ...noExpiry } = multCookie();
+      session.cookies.seed(noExpiry as FakeCookie);
+    } else {
+      session.cookies.seed(multCookie({ expirationDate: Math.floor(expiresAtMs / 1000) }));
+    }
+    session.cookies.seed(orCookie());
+    const events: ExpirySetup['events'] = [];
+    const expired: ExpirySetup['expired'] = [];
+    const store = new AuthStore({
+      kvApi: kv,
+      sessionFromPartition: () => session as unknown as Electron.Session,
+      now: harness.now,
+      scheduleTimer: harness.scheduleTimer,
+      eventEmitter: (name, data, level) =>
+        events.push(
+          level === undefined
+            ? { name, data: data as Record<string, unknown> }
+            : { name, data: data as Record<string, unknown>, level }
+        ),
+    });
+    store.onSessionExpired((env, s) => expired.push({ env, accountId: s.accountId }));
+    await store.hydrate();
+    return { store, harness, events, expired };
+  }
+
+  const expiredEvents = (s: ExpirySetup): ExpirySetup['events'] =>
+    s.events.filter((e) => e.name === 'auth.session.expired');
+
+  it('fires ONCE when expiresAt passes: event + subscriber, then disarms', async () => {
+    const expiresAt = Date.now() + 3600_000; // 1h
+    const s = await setupWithExpiry(expiresAt);
+    expect(s.store.hasValidSession('edison')).toBe(true);
+    expect(s.harness.pendingCount()).toBe(1); // watch armed on hydrate
+
+    s.harness.advanceTo(expiresAt + 1000);
+    expect(expiredEvents(s)).toHaveLength(1);
+    expect(expiredEvents(s)[0]?.level).toBe('warn');
+    expect(expiredEvents(s)[0]?.data['accountId']).toBe(SAMPLE_ACCOUNT_ID);
+    expect(Number(expiredEvents(s)[0]?.data['msLate'])).toBeGreaterThanOrEqual(0);
+    expect(s.expired).toEqual([{ env: 'edison', accountId: SAMPLE_ACCOUNT_ID }]);
+    // The gate agrees the session is now dead.
+    expect(s.store.hasValidSession('edison')).toBe(false);
+    // Single-shot: nothing pending, no re-fire later.
+    expect(s.harness.pendingCount()).toBe(0);
+    s.harness.advanceTo(expiresAt + 7200_000);
+    expect(expiredEvents(s)).toHaveLength(1);
+  });
+
+  it('signOut cancels the watch (no fire after sign-out)', async () => {
+    const expiresAt = Date.now() + 3600_000;
+    const s = await setupWithExpiry(expiresAt);
+    await s.store.signOut('edison');
+    s.harness.advanceTo(expiresAt + 10_000);
+    expect(expiredEvents(s)).toHaveLength(0);
+    expect(s.expired).toHaveLength(0);
+  });
+
+  it('chunks long waits: re-arms every tick without firing until the real expiry', async () => {
+    const expiresAt = Date.now() + 48 * 3600_000; // 48h (> 6h chunk)
+    const s = await setupWithExpiry(expiresAt);
+    // Just past the first 6h chunk: re-armed, NOT fired.
+    s.harness.advanceTo(Date.now() + 7 * 3600_000);
+    expect(expiredEvents(s)).toHaveLength(0);
+    expect(s.harness.pendingCount()).toBe(1);
+    // Past the real expiry: fired exactly once.
+    s.harness.advanceTo(expiresAt + 1000);
+    expect(expiredEvents(s)).toHaveLength(1);
+  });
+
+  it('arms NO watch for sessions without a known expiry (session cookies)', async () => {
+    const s = await setupWithExpiry(undefined);
+    // Session hydrated (or-cookie has no expiry either) but no timer.
+    expect(s.harness.pendingCount()).toBe(0);
+    s.harness.advanceTo(Date.now() + 100 * 3600_000);
+    expect(expiredEvents(s)).toHaveLength(0);
+  });
+
+  it('a throwing subscriber does not break the fire (event still emitted)', async () => {
+    const expiresAt = Date.now() + 1800_000;
+    const s = await setupWithExpiry(expiresAt);
+    s.store.onSessionExpired(() => {
+      throw new Error('subscriber boom');
+    });
+    s.harness.advanceTo(expiresAt + 500);
+    expect(expiredEvents(s)).toHaveLength(1);
+    expect(s.expired).toHaveLength(1); // the well-behaved subscriber still ran
+  });
+
+  it('unsubscribe stops notifications (but the event still logs)', async () => {
+    const expiresAt = Date.now() + 1800_000;
+    const s = await setupWithExpiry(expiresAt);
+    const calls: string[] = [];
+    const un = s.store.onSessionExpired((env) => calls.push(env));
+    un();
+    s.harness.advanceTo(expiresAt + 500);
+    expect(calls).toHaveLength(0);
+    expect(expiredEvents(s)).toHaveLength(1);
+  });
+});

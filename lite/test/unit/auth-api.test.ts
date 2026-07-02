@@ -40,6 +40,7 @@ runApiConformanceContract<AuthApi>({
     'injectTokenIntoPartition',
     'hasValidSession',
     'onSessionChanged',
+    'onSessionExpired',
     'onTwoFactorNeedsSetup',
     'onEvent',
   ],
@@ -136,6 +137,12 @@ function makeStubApi(): AuthApi & {
       return (): void => {
         const i = subscribers.indexOf(cb);
         if (i >= 0) subscribers.splice(i, 1);
+      };
+    },
+    onSessionExpired: () => {
+      calls.push({ method: 'onSessionExpired', args: [] });
+      return (): void => {
+        /* stub unsubscribe */
       };
     },
     onTwoFactorNeedsSetup: () => {

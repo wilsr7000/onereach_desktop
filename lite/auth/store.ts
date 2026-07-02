@@ -240,6 +240,13 @@ export interface AuthStoreConfig {
     data?: unknown,
     level?: 'debug' | 'info' | 'warn' | 'error'
   ) => void;
+  /**
+   * Injectable clock + timer seams for the proactive session-expiry
+   * watch (tests drive time deterministically). Defaults: `Date.now`
+   * and `setTimeout`/`clearTimeout`.
+   */
+  now?: () => number;
+  scheduleTimer?: (fn: () => void, ms: number) => () => void;
 }
 
 /**
@@ -359,6 +366,20 @@ export class AuthStore {
    * hydrate can both call `kv.list` in parallel during boot.
    */
   private hydratePromise: Promise<void> | null = null;
+  /**
+   * Subscribers to proactive session-expired notifications (the expiry
+   * watch fired: a session's `expiresAt` passed while the app is
+   * running). main-lite wires this to the re-sign-in prompter so the
+   * user is offered recovery BEFORE they trip over a dead KV op or a
+   * login-bounced tab.
+   */
+  private readonly sessionExpiredSubscribers = new Set<
+    (env: Environment, session: AuthSession) => void
+  >();
+  /** Active expiry-watch timer cancellers, per env. */
+  private readonly expiryTimers = new Map<Environment, () => void>();
+  private readonly now: () => number;
+  private readonly scheduleTimer: (fn: () => void, ms: number) => () => void;
 
   constructor(config: AuthStoreConfig = {}) {
     this.kv = config.kvApi ?? getKVApi();
@@ -371,6 +392,13 @@ export class AuthStore {
       });
     this.spanEmitter = config.spanEmitter ?? null;
     this.eventEmitter = config.eventEmitter ?? null;
+    this.now = config.now ?? ((): number => Date.now());
+    this.scheduleTimer =
+      config.scheduleTimer ??
+      ((fn: () => void, ms: number): (() => void) => {
+        const t = setTimeout(fn, ms);
+        return (): void => clearTimeout(t);
+      });
   }
 
   /**
@@ -461,6 +489,7 @@ export class AuthStore {
     // Clear in-memory state first so callers see consistent answers
     // even if the cookie/KV cleanup fails.
     this.sessions.delete(env);
+    this.cancelSessionExpiryWatch(env);
     this.tokens.delete(env);
     this.tokenBundles.delete(env);
 
@@ -574,10 +603,10 @@ export class AuthStore {
    */
   private warnIfTokenExpired(env: Environment, via: string): void {
     const expiredAtMs = this.tokenBundles.get(env)?.multExpiresAt;
-    if (expiredAtMs === undefined || expiredAtMs >= Date.now()) return;
+    if (expiredAtMs === undefined || expiredAtMs >= this.now()) return;
     const last = this.expiredTokenWarnAt.get(env) ?? 0;
-    if (Date.now() - last < 60_000) return;
-    this.expiredTokenWarnAt.set(env, Date.now());
+    if (this.now() - last < 60_000) return;
+    this.expiredTokenWarnAt.set(env, this.now());
     this.log('warn', 'auth: returning a known-EXPIRED mult token -- downstream 401s expected', {
       env,
       via,
@@ -674,7 +703,7 @@ export class AuthStore {
       }
       if (
         typeof mult.expirationDate === 'number' &&
-        mult.expirationDate * 1000 < Date.now()
+        mult.expirationDate * 1000 < this.now()
       ) {
         this.log('warn', 'auth: refusing to clone cookies; mult is expired', {
           env,
@@ -688,7 +717,7 @@ export class AuthStore {
       const successes: Array<{ name: string; domain: string }> = [];
       const failures: Array<{ name: string; domain: string; error: string }> = [];
       const skippedExpired: Array<{ name: string; domain: string }> = [];
-      const now = Date.now() / 1000;
+      const now = this.now() / 1000;
       for (const cookie of sourceCookies) {
         const cookieDomain = cookie.domain ?? '';
         // Drop individually-expired cookies (don't poison the new
@@ -819,7 +848,7 @@ export class AuthStore {
   hasValidSession(env: Environment): boolean {
     const s = this.sessions.get(env);
     if (s === undefined) return false;
-    if (s.expiresAt !== undefined && s.expiresAt < Date.now()) return false;
+    if (s.expiresAt !== undefined && s.expiresAt < this.now()) return false;
     return true;
   }
 
@@ -828,6 +857,89 @@ export class AuthStore {
     return (): void => {
       this.subscribers.delete(cb);
     };
+  }
+
+  /**
+   * Subscribe to proactive session-expired notifications. Fires ONCE
+   * per armed session, the moment its `expiresAt` passes (or on the
+   * first timer tick after wake when the machine slept through it).
+   * NOT fired for sessions with no known expiry, and not re-fired
+   * until a fresh sign-in / hydrate arms a new watch.
+   */
+  onSessionExpired(cb: (env: Environment, session: AuthSession) => void): () => void {
+    this.sessionExpiredSubscribers.add(cb);
+    return (): void => {
+      this.sessionExpiredSubscribers.delete(cb);
+    };
+  }
+
+  /**
+   * Timer chunk for the expiry watch. Re-arming in bounded chunks (vs
+   * one setTimeout straight to expiresAt) keeps the delay far below
+   * the 2^31-1 ms setTimeout ceiling and re-evaluates against the LIVE
+   * session each tick — so a refreshed session (new later expiresAt)
+   * or a signOut simply re-arms / stops without a stale fire.
+   */
+  private static readonly EXPIRY_WATCH_CHUNK_MS = 6 * 60 * 60 * 1000;
+
+  /**
+   * (Re)arm the proactive expiry watch for an env. Called wherever a
+   * session lands in `this.sessions` (signIn capture, hydrate, restore
+   * after a failed persist). No-op when the session has no known
+   * expiry (session cookies). Single-shot: after firing, the watch is
+   * disarmed until a new session arms it again.
+   */
+  private armSessionExpiryWatch(env: Environment): void {
+    this.cancelSessionExpiryWatch(env);
+    const session = this.sessions.get(env);
+    if (session === undefined || session.expiresAt === undefined) return;
+    const remaining = session.expiresAt - this.now();
+    const delay = Math.min(Math.max(remaining, 0), AuthStore.EXPIRY_WATCH_CHUNK_MS);
+    const cancel = this.scheduleTimer((): void => {
+      this.expiryTimers.delete(env);
+      const current = this.sessions.get(env);
+      if (current === undefined || current.expiresAt === undefined) return;
+      const nowMs = this.now();
+      if (current.expiresAt > nowMs) {
+        // Not expired yet (chunked wait, or the session was refreshed
+        // with a later expiry while we slept) — keep watching.
+        this.armSessionExpiryWatch(env);
+        return;
+      }
+      const msLate = nowMs - current.expiresAt;
+      this.log('warn', 'auth: session expired (proactive watch)', {
+        env,
+        accountId: current.accountId,
+        expiredAt: new Date(current.expiresAt).toISOString(),
+        msLate,
+      });
+      this.eventEmitter?.(
+        'auth.session.expired',
+        { env, accountId: current.accountId, expiredAtMs: current.expiresAt, msLate },
+        'warn'
+      );
+      for (const cb of this.sessionExpiredSubscribers) {
+        try {
+          cb(env, current);
+        } catch {
+          /* subscriber errors must not break the store */
+        }
+      }
+    }, delay);
+    this.expiryTimers.set(env, cancel);
+  }
+
+  /** Cancel the expiry watch for an env (sign-out, re-arm, teardown). */
+  private cancelSessionExpiryWatch(env: Environment): void {
+    const cancel = this.expiryTimers.get(env);
+    if (cancel !== undefined) {
+      try {
+        cancel();
+      } catch {
+        /* best-effort */
+      }
+      this.expiryTimers.delete(env);
+    }
   }
 
   /**
@@ -907,6 +1019,7 @@ export class AuthStore {
         tokensRehydrated += 1;
         const isNew = !this.sessions.has(env);
         this.sessions.set(env, recovered);
+        this.armSessionExpiryWatch(env);
         if (isNew) rehydrated.push([env, recovered]);
       }
       this.log('info', 'auth: hydrated from partition cookies', {
@@ -955,7 +1068,7 @@ export class AuthStore {
     if (mult === null) return null;
     // Defense-in-depth: even if a stale `or` survives a botched
     // signOut, an expired `mult` should never re-activate a session.
-    if (typeof mult.expirationDate === 'number' && mult.expirationDate * 1000 < Date.now()) {
+    if (typeof mult.expirationDate === 'number' && mult.expirationDate * 1000 < this.now()) {
       this.log('info', 'auth: hydrate skipping env -- mult cookie expired', {
         env,
         expiresAt: new Date(mult.expirationDate * 1000).toISOString(),
@@ -1323,6 +1436,7 @@ export class AuthStore {
     const previousToken = this.tokens.get(buffer.env);
     const previousBundle = this.tokenBundles.get(buffer.env);
     this.sessions.set(buffer.env, session);
+    this.armSessionExpiryWatch(buffer.env);
     this.tokens.set(buffer.env, mult.value);
     this.tokenBundles.set(buffer.env, {
       multToken: mult.value,
@@ -1370,8 +1484,13 @@ export class AuthStore {
             friendly.toLowerCase().includes('invalid token') ||
             friendly.toLowerCase().includes('token expired')));
       if (isAuthRejection) {
-        if (previousSession === undefined) this.sessions.delete(buffer.env);
-        else this.sessions.set(buffer.env, previousSession);
+        if (previousSession === undefined) {
+          this.sessions.delete(buffer.env);
+          this.cancelSessionExpiryWatch(buffer.env);
+        } else {
+          this.sessions.set(buffer.env, previousSession);
+          this.armSessionExpiryWatch(buffer.env);
+        }
         if (previousToken === undefined) this.tokens.delete(buffer.env);
         else this.tokens.set(buffer.env, previousToken);
         if (previousBundle === undefined) this.tokenBundles.delete(buffer.env);

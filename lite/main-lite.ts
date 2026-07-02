@@ -498,6 +498,16 @@ app
       initiallySuspended: true,
     });
 
+    // Proactive expiry → the same coalesced/cool-down'd re-sign-in
+    // dialog the KV-401 and tab-expiry paths use. The store's expiry
+    // watch fires the moment `expiresAt` passes (or on wake after
+    // sleeping through it), so the user gets a recovery offer BEFORE
+    // tripping over a dead KV op or a login-bounced tab. The prompter
+    // itself drops prompts while suspended and during cool-down.
+    getAuthApi().onSessionExpired((env) => {
+      reSignInHandle.promptReSignIn(`Your OneReach ${env} session expired`);
+    });
+
     // Wire KV's default config to live auth. Per ADR-044, lite/kv/api.ts
     // intentionally does NOT import lite/auth/ to avoid the
     // auth -> kv -> auth cycle. Instead, main-lite.ts (which sits

@@ -32,6 +32,10 @@ export const AUTH_EVENTS = {
   // "why is every KV call 401ing?" a one-line answer in the event log.
   // Throttled to once/minute per env (getToken runs per KV request).
   TOKEN_EXPIRED_READ: 'auth.token.expired-read',
+  // Proactive expiry watch: fires the moment a session's expiresAt
+  // passes (timer armed at capture/hydrate), instead of waiting for the
+  // user to trip over a dead KV op or login-bounced tab.
+  SESSION_EXPIRED: 'auth.session.expired',
   // Sign-in window lifecycle -- granular trace events so the event
   // stream tells the whole story of an auth attempt: which URL is
   // opened, every redirect/navigation the user goes through, the
@@ -303,6 +307,19 @@ export interface AuthTokenExpiredReadEvent extends AuthEventBase {
   };
 }
 
+export interface AuthSessionExpiredEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.SESSION_EXPIRED;
+  level: 'warn';
+  data: {
+    env: Environment;
+    accountId: string;
+    /** The session's expiresAt (ms epoch) that just passed. */
+    expiredAtMs: number;
+    /** How late the watch fired relative to expiresAt (ms, >= 0). */
+    msLate: number;
+  };
+}
+
 // ─── OAuth popup lifecycle ────────────────────────────────────────────────
 
 export interface AuthOauthPopupAllowedEvent extends AuthEventBase {
@@ -527,6 +544,7 @@ export type AuthEvent =
   | AuthSsoSkipFailedEvent
   | AuthSessionReadEvent
   | AuthTokenExpiredReadEvent
+  | AuthSessionExpiredEvent
   | AuthIpcSignInEvent
   | AuthIpcSignOutEvent
   | AuthIpcGetSessionEvent

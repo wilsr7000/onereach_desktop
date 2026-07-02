@@ -527,7 +527,7 @@ export const MANIFEST: Manifest = {
           },
           {
             "name": "onSessionChanged",
-            "signature": "onSessionChanged(cb: (env: Environment, session: AuthSession | null) => void): () => void;\n\n  /**\n   * Subscribe to 2FA-needs-setup notifications. Fires when the\n   * autofill watcher detects a OneReach 2FA prompt during sign-in\n   * AND Lite has no TOTP secret saved in the keychain (i.e. the user\n   * needs to open Settings -> Two-Factor and paste their authenticator\n   * setup secret). The renderer wires a contextual banner +\n   * \"Open Settings -> Two-Factor\" button. Returns an unsubscribe.\n   */\n  onTwoFactorNeedsSetup(\n    cb: (payload: import('./store.js').TwoFactorNeedsSetupPayload) => void\n  ): () => void;\n\n  /**\n   * Subscribe to typed auth events (ADR-032). Branch on `ev.name` for\n   * type-narrowed access to span data, IPC payloads, the\n   * `auth.signIn.coalesced` event, and serialized errors.\n   *\n   * @example\n   * ```typescript\n   * import { getAuthApi, AUTH_EVENTS } from '../auth/api.js';\n   * getAuthApi().onEvent((ev) => {\n   *   if (ev.name === AUTH_EVENTS.SIGN_IN_FINISH) {\n   *     metrics.timing('auth.signIn', ev.durationMs);\n   *     metrics.tag({ accountId: ev.data.accountId });\n   *   }\n   * });\n   * ```\n   */\n  onEvent(handler: (event: import('./events.js').AuthEvent) => void): () => void;",
+            "signature": "onSessionChanged(cb: (env: Environment, session: AuthSession | null) => void): () => void;\n\n  /**\n   * Subscribe to proactive session-expired notifications. The store\n   * arms a timer at capture/hydrate and fires ONCE when a session's\n   * `expiresAt` passes (or on the first tick after the machine wakes\n   * from sleeping through it) — so recovery can be offered BEFORE the\n   * user trips over a dead KV op or a login-bounced tab. Not fired for\n   * sessions with no known expiry. Returns an unsubscribe function.\n   */\n  onSessionExpired(cb: (env: Environment, session: AuthSession) => void): () => void;\n\n  /**\n   * Subscribe to 2FA-needs-setup notifications. Fires when the\n   * autofill watcher detects a OneReach 2FA prompt during sign-in\n   * AND Lite has no TOTP secret saved in the keychain (i.e. the user\n   * needs to open Settings -> Two-Factor and paste their authenticator\n   * setup secret). The renderer wires a contextual banner +\n   * \"Open Settings -> Two-Factor\" button. Returns an unsubscribe.\n   */\n  onTwoFactorNeedsSetup(\n    cb: (payload: import('./store.js').TwoFactorNeedsSetupPayload) => void\n  ): () => void;\n\n  /**\n   * Subscribe to typed auth events (ADR-032). Branch on `ev.name` for\n   * type-narrowed access to span data, IPC payloads, the\n   * `auth.signIn.coalesced` event, and serialized errors.\n   *\n   * @example\n   * ```typescript\n   * import { getAuthApi, AUTH_EVENTS } from '../auth/api.js';\n   * getAuthApi().onEvent((ev) => {\n   *   if (ev.name === AUTH_EVENTS.SIGN_IN_FINISH) {\n   *     metrics.timing('auth.signIn', ev.durationMs);\n   *     metrics.tag({ accountId: ev.data.accountId });\n   *   }\n   * });\n   * ```\n   */\n  onEvent(handler: (event: import('./events.js').AuthEvent) => void): () => void;",
             "description": "Subscribe to session changes. Fires whenever a sign-in completes\nor a sign-out happens. Returns an unsubscribe function.\n\nThe callback receives `(env, session)` where `session` is the new\nsession or `null` if the env was just signed out.",
             "tags": [],
             "examples": []
@@ -536,7 +536,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "AUTH_EVENTS",
-        "count": 57,
+        "count": 58,
         "entries": [
           {
             "constantKey": "SIGN_IN_START",
@@ -606,6 +606,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "TOKEN_EXPIRED_READ",
             "name": "auth.token.expired-read",
+            "description": ""
+          },
+          {
+            "constantKey": "SESSION_EXPIRED",
+            "name": "auth.session.expired",
             "description": ""
           },
           {
@@ -3447,5 +3452,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-07-02T02:46:19.290Z"
+  "generatedAt": "2026-07-02T13:47:54.897Z"
 } as const;
