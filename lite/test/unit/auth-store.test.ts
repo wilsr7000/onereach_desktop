@@ -1219,6 +1219,82 @@ describe('AuthStore.injectTokenIntoPartition', () => {
   });
 });
 
+describe('AuthStore token expiry', () => {
+  it('signIn: session.expiresAt tracks the EARLIEST cookie expiry (or sooner than mult)', async () => {
+    const handle = makeFakeWindow({
+      initialUrl: 'https://studio.edison.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID,
+    });
+    const { store, session } = buildStore({ windowHandle: handle });
+
+    const promise = store.signIn('edison');
+    const multExp = Math.floor(Date.now() / 1000) + 3600; // 1h
+    const orExp = Math.floor(Date.now() / 1000) + 600; // 10min -- sooner
+    session.cookies.emit(multCookie({ expirationDate: multExp }));
+    session.cookies.emit(orCookie(undefined, { expirationDate: orExp }));
+    const result = await promise;
+
+    // The session dies when its SHORTEST-lived cookie does.
+    expect(result.expiresAt).toBe(orExp * 1000);
+  });
+
+  it('hydrate: session.expiresAt tracks the EARLIEST cookie expiry -- relaunch parity', async () => {
+    // Regression: hydrate used the OR cookie's expiry while signIn used
+    // MULT's, so the same session reported a DIFFERENT lifetime after a
+    // relaunch -- hasValidSession then trusted a dead mult token until
+    // the or cookie (typically much longer-lived) expired too.
+    const handle = makeFakeWindow({
+      initialUrl: 'https://studio.edison.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID,
+    });
+    const kv = new FakeKV();
+    const session = new FakeSession();
+    const multExp = Math.floor(Date.now() / 1000) + 600; // 10min -- sooner
+    const orExp = Math.floor(Date.now() / 1000) + 86400; // 1d
+    session.cookies.seed(multCookie({ expirationDate: multExp }));
+    session.cookies.seed(orCookie(undefined, { expirationDate: orExp }));
+    await kv.set('lite-auth-sessions', `edison:${SAMPLE_ACCOUNT_ID}`, {
+      environment: 'edison',
+      accountId: SAMPLE_ACCOUNT_ID,
+      capturedAt: Date.now(),
+    });
+    const { store } = buildStore({ kv, session, windowHandle: handle });
+    await store.hydrate();
+
+    const s = store.getSession('edison');
+    expect(s).not.toBeNull();
+    // Pre-fix this was orExp * 1000 (the wrong, longer lifetime).
+    expect(s?.expiresAt).toBe(multExp * 1000);
+  });
+
+  it('getToken warns once (throttled) when returning a known-expired mult token', async () => {
+    const handle = makeFakeWindow({
+      initialUrl: 'https://studio.edison.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID,
+    });
+    const recorder = makeRecordingLogger();
+    const { store, session } = buildStore({ windowHandle: handle, logger: recorder.logger });
+
+    const promise = store.signIn('edison');
+    // Already expired at capture (mirrors the hasValidSession test):
+    // the bundle records multExpiresAt in the past.
+    session.cookies.emit(multCookie({ expirationDate: Math.floor(Date.now() / 1000) - 1 }));
+    session.cookies.emit(orCookie());
+    await promise;
+
+    // Behavior unchanged: the token is still returned (the KV 401 →
+    // re-sign-in path owns recovery)...
+    expect(store.getToken('edison')).not.toBeNull();
+    // ...but the read leaves a breadcrumb.
+    const expiredWarns = (): number =>
+      recorder.calls.filter(
+        (c) => c.level === 'warn' && c.message.includes('EXPIRED mult token')
+      ).length;
+    expect(expiredWarns()).toBe(1);
+    // Throttled: an immediate second read does not double-log.
+    store.getToken('edison');
+    store.getTokenBundle('edison');
+    expect(expiredWarns()).toBe(1);
+  });
+});
+
 beforeEach(() => {
   // No global setup needed -- each test owns its own store + fakes.
 });

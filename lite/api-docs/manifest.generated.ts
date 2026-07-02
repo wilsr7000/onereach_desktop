@@ -536,7 +536,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "AUTH_EVENTS",
-        "count": 56,
+        "count": 57,
         "entries": [
           {
             "constantKey": "SIGN_IN_START",
@@ -601,6 +601,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "SESSION_READ",
             "name": "auth.session.read",
+            "description": ""
+          },
+          {
+            "constantKey": "TOKEN_EXPIRED_READ",
+            "name": "auth.token.expired-read",
             "description": ""
           },
           {
@@ -3442,5 +3447,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-07-01T19:40:21.770Z"
+  "generatedAt": "2026-07-02T02:46:19.290Z"
 } as const;

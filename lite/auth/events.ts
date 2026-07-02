@@ -26,6 +26,12 @@ export const AUTH_EVENTS = {
   INJECT_TOKEN_FAIL: 'auth.inject-token.fail',
   // sync ops
   SESSION_READ: 'auth.session.read',
+  // A consumer read a mult token the store KNOWS is expired (bundle's
+  // multExpiresAt is in the past). The read still returns the token —
+  // downstream 401 handling owns recovery — but this breadcrumb makes
+  // "why is every KV call 401ing?" a one-line answer in the event log.
+  // Throttled to once/minute per env (getToken runs per KV request).
+  TOKEN_EXPIRED_READ: 'auth.token.expired-read',
   // Sign-in window lifecycle -- granular trace events so the event
   // stream tells the whole story of an auth attempt: which URL is
   // opened, every redirect/navigation the user goes through, the
@@ -285,6 +291,18 @@ export interface AuthSessionReadEvent extends AuthEventBase {
   data: { env: Environment; hasSession: boolean };
 }
 
+export interface AuthTokenExpiredReadEvent extends AuthEventBase {
+  name: typeof AUTH_EVENTS.TOKEN_EXPIRED_READ;
+  level: 'warn';
+  data: {
+    env: Environment;
+    /** Which accessor returned it: 'getToken' | 'getTokenBundle'. */
+    via: string;
+    /** When the mult token expired (ms epoch). */
+    expiredAtMs: number;
+  };
+}
+
 // ─── OAuth popup lifecycle ────────────────────────────────────────────────
 
 export interface AuthOauthPopupAllowedEvent extends AuthEventBase {
@@ -508,6 +526,7 @@ export type AuthEvent =
   | AuthSsoSkipNotFoundEvent
   | AuthSsoSkipFailedEvent
   | AuthSessionReadEvent
+  | AuthTokenExpiredReadEvent
   | AuthIpcSignInEvent
   | AuthIpcSignOutEvent
   | AuthIpcGetSessionEvent

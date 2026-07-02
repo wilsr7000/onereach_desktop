@@ -42,6 +42,7 @@ import {
   makeWebContentsProbe,
   isOneReachAuthOrLoginUrl,
 } from '../auth/login-verifier.js';
+import { getReSignInPrompter } from '../auth/re-signin-prompt.js';
 
 /**
  * Renderer channel the chrome listens on to show a "couldn't finish
@@ -651,10 +652,30 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
                 injected: inj.injected,
                 ...(inj.reason !== undefined ? { reason: inj.reason } : {}),
               });
-              const worthReloading = inj.injected || cause === 'sso-skip-missed';
-              if (!worthReloading || view.webContents.isDestroyed()) return false;
-              view.webContents.reload();
-              return true;
+              if (view.webContents.isDestroyed()) return false;
+              if (inj.injected || cause === 'sso-skip-missed') {
+                view.webContents.reload();
+                return true;
+              }
+              // Injection failed for want of a LIVE session (the token
+              // expired mid-use, or there are no cookies at all). Route
+              // to the shared re-sign-in prompter — the same coalesced,
+              // cool-down'd "session expired, sign in again?" dialog the
+              // KV 401 path uses. On accept, signIn() completes and the
+              // session-changed reload re-injects + reloads every stuck
+              // tab; returning true here opens a fresh probe window so
+              // the verifier observes that recovery (or times out into
+              // the notification if the user ignores the dialog).
+              if (inj.reason === 'expired' || inj.reason === 'no-mult' || inj.reason === 'no-cookies') {
+                const prompter = getReSignInPrompter();
+                if (prompter !== null && !prompter.isSuspended() && !prompter.isInCooldown()) {
+                  prompter.promptReSignIn(
+                    `IDW tab "${tab.label}" lost its OneReach session (${inj.reason})`
+                  );
+                  return true;
+                }
+              }
+              return false;
             } catch (err) {
               getLoggingApi().warn('main-window', 'login recovery threw', {
                 id: tab.id,

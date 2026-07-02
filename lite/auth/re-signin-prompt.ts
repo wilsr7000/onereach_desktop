@@ -256,6 +256,17 @@ export function installReSignInPrompter(
   return handle;
 }
 
+/**
+ * Read the installed prompter handle, or null before boot wiring runs.
+ * Lets other recovery paths (e.g. the IDW-tab login verifier hitting an
+ * EXPIRED token mid-session) surface the same coalesced "session
+ * expired — sign in again?" dialog the KV 401 path uses, instead of
+ * inventing a parallel prompt.
+ */
+export function getReSignInPrompter(): ReSignInPrompterHandle | null {
+  return handle;
+}
+
 /** Read the singleton handle, or null when `install...` has not run. For tests. */
 export function _getReSignInPrompterForTesting(): ReSignInPrompterHandle | null {
   return handle;

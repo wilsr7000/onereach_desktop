@@ -561,8 +561,35 @@ export class AuthStore {
     return session;
   }
 
+  /** Per-env throttle for the expired-token-read breadcrumb (ms epoch). */
+  private readonly expiredTokenWarnAt = new Map<Environment, number>();
+
+  /**
+   * Emit a throttled breadcrumb when a consumer reads a mult token the
+   * store KNOWS is expired. The read still returns the token (the KV
+   * 401 → re-sign-in path owns recovery); this exists so the event log
+   * answers "why is every request 401ing?" in one line instead of the
+   * reader correlating timestamps against cookie TTLs. Throttled to
+   * once/minute per env — getToken runs on every KV request.
+   */
+  private warnIfTokenExpired(env: Environment, via: string): void {
+    const expiredAtMs = this.tokenBundles.get(env)?.multExpiresAt;
+    if (expiredAtMs === undefined || expiredAtMs >= Date.now()) return;
+    const last = this.expiredTokenWarnAt.get(env) ?? 0;
+    if (Date.now() - last < 60_000) return;
+    this.expiredTokenWarnAt.set(env, Date.now());
+    this.log('warn', 'auth: returning a known-EXPIRED mult token -- downstream 401s expected', {
+      env,
+      via,
+      expiredAt: new Date(expiredAtMs).toISOString(),
+    });
+    this.eventEmitter?.('auth.token.expired-read', { env, via, expiredAtMs }, 'warn');
+  }
+
   getToken(env: Environment): string | null {
-    return this.tokens.get(env) ?? null;
+    const token = this.tokens.get(env) ?? null;
+    if (token !== null) this.warnIfTokenExpired(env, 'getToken');
+    return token;
   }
 
   /**
@@ -582,7 +609,9 @@ export class AuthStore {
    * here.
    */
   getTokenBundle(env: Environment): AuthTokenBundle | null {
-    return this.tokenBundles.get(env) ?? null;
+    const bundle = this.tokenBundles.get(env) ?? null;
+    if (bundle !== null) this.warnIfTokenExpired(env, 'getTokenBundle');
+    return bundle;
   }
 
   /**
@@ -945,14 +974,13 @@ export class AuthStore {
       this.log('warn', 'auth: hydrate or cookie missing accountId; skipping env', { env });
       return null;
     }
+    const hydratedExpiresAt = earliestCookieExpiryMs(mult, or);
     const session: AuthSession = {
       environment: env,
       accountId,
       capturedAt: Date.now(),
       ...(typeof decoded.email === 'string' ? { email: decoded.email } : {}),
-      ...(typeof or.expirationDate === 'number'
-        ? { expiresAt: Math.floor(or.expirationDate * 1000) }
-        : {}),
+      ...(hydratedExpiresAt !== undefined ? { expiresAt: hydratedExpiresAt } : {}),
     };
     this.tokens.set(env, mult.value);
     this.tokenBundles.set(env, {
@@ -1261,14 +1289,13 @@ export class AuthStore {
       return;
     }
 
+    const capturedExpiresAt = earliestCookieExpiryMs(mult, or);
     const session: AuthSession = {
       environment: buffer.env,
       accountId,
       ...(decoded.email !== undefined ? { email: decoded.email } : {}),
       capturedAt: Date.now(),
-      ...(typeof mult.expirationDate === 'number'
-        ? { expiresAt: Math.floor(mult.expirationDate * 1000) }
-        : {}),
+      ...(capturedExpiresAt !== undefined ? { expiresAt: capturedExpiresAt } : {}),
     };
 
     // CRITICAL: install the new session + token + bundle in memory BEFORE
@@ -1521,6 +1548,32 @@ function pickFreshest(cookies: Cookie[]): Cookie | null {
   if (cookies.length === 0) return null;
   const sorted = [...cookies].sort((a, b) => (b.expirationDate ?? 0) - (a.expirationDate ?? 0));
   return sorted[0] ?? null;
+}
+
+/**
+ * Earliest known expiry (ms epoch) across the mult + or cookies, or
+ * undefined when neither carries an expirationDate (session cookies).
+ *
+ * A OneReach session is only as alive as its SHORTEST-lived cookie:
+ * `mult` is the API bearer, `or` the account context — either one
+ * expiring breaks the pair. `AuthSession.expiresAt` (which
+ * `hasValidSession` gates on) must track the earliest, not whichever
+ * cookie a code path happened to read: before this helper the signIn
+ * path used mult's expiry while the hydrate path used or's, so the
+ * SAME session reported a different lifetime after a relaunch.
+ */
+function earliestCookieExpiryMs(
+  mult: { expirationDate?: number },
+  or: { expirationDate?: number }
+): number | undefined {
+  const times: number[] = [];
+  if (typeof mult.expirationDate === 'number') {
+    times.push(Math.floor(mult.expirationDate * 1000));
+  }
+  if (typeof or.expirationDate === 'number') {
+    times.push(Math.floor(or.expirationDate * 1000));
+  }
+  return times.length === 0 ? undefined : Math.min(...times);
 }
 
 /**
