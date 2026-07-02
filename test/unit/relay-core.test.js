@@ -7,7 +7,12 @@
 
 import { describe, it, expect } from 'vitest';
 
-const { classifyInbound, planOutbound, buildModalSubmit } = require('../../lib/exchange/relay-core');
+const {
+  classifyInbound,
+  planOutbound,
+  buildModalSubmit,
+  shouldSurfaceNeedsInput,
+} = require('../../lib/exchange/relay-core');
 
 describe('relay-core classifyInbound', () => {
   describe('voice / text utterances', () => {
@@ -212,5 +217,40 @@ describe('relay-core buildModalSubmit (UC4 wiring — modal click -> submitTask)
 
   it('is null-safe against a missing payload', () => {
     expect(buildModalSubmit(undefined).submit).toBe(false);
+  });
+});
+
+describe('relay-core shouldSurfaceNeedsInput (UC5 — proactive prompts)', () => {
+  it('surfaces an orb-owned followup', () => {
+    expect(shouldSurfaceNeedsInput({ toolId: 'orb', agentId: 'a1' })).toBe(true);
+  });
+
+  it('surfaces a request with no toolId', () => {
+    expect(shouldSurfaceNeedsInput({ agentId: 'a1', prompt: 'Which one?' })).toBe(true);
+  });
+
+  it('surfaces a proactive/background agent needing a decision (the UC5 win)', () => {
+    // A meeting-monitor agent the user never invoked asks a question.
+    expect(shouldSurfaceNeedsInput({ toolId: 'meeting-monitor', proactive: true })).toBe(true);
+    // Even without the explicit flag, a non-self-handling tool is surfaced.
+    expect(shouldSurfaceNeedsInput({ toolId: 'meeting-monitor-agent' })).toBe(true);
+  });
+
+  it('defers to a self-prompting interactive surface (no double-prompt)', () => {
+    expect(shouldSurfaceNeedsInput({ toolId: 'command-hud' })).toBe(false);
+  });
+
+  it('a proactive request from a self-handling tool is still surfaced (proactive wins)', () => {
+    expect(shouldSurfaceNeedsInput({ toolId: 'command-hud', proactive: true })).toBe(true);
+  });
+
+  it('honors a custom self-handling set', () => {
+    expect(
+      shouldSurfaceNeedsInput({ toolId: 'agent-ui-modal' }, { selfHandlingTools: ['agent-ui-modal'] })
+    ).toBe(false);
+  });
+
+  it('is null-safe', () => {
+    expect(shouldSurfaceNeedsInput(null)).toBe(false);
   });
 });

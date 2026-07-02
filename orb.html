@@ -1397,6 +1397,7 @@
     <script src="./lib/orb/orb-turn-response.js"></script>
     <script src="./lib/orb/orb-response-router.js"></script>
     <script src="./lib/orb/orb-speech-compressor.js"></script>
+    <script src="./lib/exchange/relay-core.js"></script>
 
     <script>
       // ==================== PREFLIGHT CHECK ====================
@@ -2132,12 +2133,23 @@
           }
         });
 
-        // Needs-input events (agent follow-up questions)
+        // Needs-input events (agent follow-up questions AND proactive prompts).
+        // The orb is the primary user-relay: it surfaces followups from its own
+        // turns AND background/proactive agents needing a decision, so any agent
+        // can reach the user at any time (UC5). RelayCore.shouldSurfaceNeedsInput
+        // decides; it defers only to other self-prompting interactive surfaces.
         window.agentHUD.onNeedsInput((request) => {
           console.log('[Orb] HUD API needs-input:', request);
-          if (!request.toolId || request.toolId === 'orb') {
+          const surface = window.RelayCore
+            ? window.RelayCore.shouldSurfaceNeedsInput(request)
+            : !request.toolId || request.toolId === 'orb';
+          if (surface) {
             _pendingNeedsInput = true;
-            console.log('[Orb] Multi-turn: flagging for follow-up listen');
+            console.log('[Orb] Surfacing needs-input for follow-up listen', {
+              toolId: request.toolId || '-',
+              agentId: request.agentId || '-',
+              proactive: !!request.proactive,
+            });
           }
         });
 
