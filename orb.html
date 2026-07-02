@@ -1394,6 +1394,7 @@
     <script src="./lib/orb/orb-event-router.js"></script>
     <script src="./lib/orb/orb-lifecycle.js"></script>
     <script src="./lib/orb/orb-resilience.js"></script>
+    <script src="./lib/orb/orb-turn-response.js"></script>
     <script src="./lib/orb/orb-response-router.js"></script>
     <script src="./lib/orb/orb-speech-compressor.js"></script>
 
@@ -3785,9 +3786,14 @@
             return;
           }
 
-          // Backend already handled TTS (exchange, cached route, media command, etc.)
-          // Acknowledge function call with empty string to avoid double audio.
-          if (result.suppressAIResponse) {
+          // Decide the response via the pure classifier (lib/orb/orb-turn-response.js);
+          // the side effects (respondToFunction / transitions / route dispatch) stay here.
+          const TR = window.OrbTurnResponse;
+          const desc = TR.classifyTurnResponse(result);
+
+          // Backend already handled TTS (exchange async result, cached route,
+          // media command). Silent-ack to avoid double audio.
+          if (desc.action === 'silent-ack') {
             console.log('[Orb] Backend handled TTS, acknowledging function call silently');
             await window.orbAPI.respondToFunction(callId, '');
             S.set('pendingFunctionCallId', null);
@@ -3796,24 +3802,23 @@
           }
 
           // Transcript was filtered
-          if (result.needsClarification && result.filterReason) {
+          if (desc.action === 'clarify') {
             console.log('[Orb] Transcript filtered:', result.filterReason);
-            await window.orbAPI.respondToFunction(callId, result.message || '');
+            await window.orbAPI.respondToFunction(callId, desc.ackText);
             S.set('pendingFunctionCallId', null);
             return;
           }
 
-          // Check for HTML panel result
-          if (result.html) {
+          // HTML panel result
+          if (desc.hasPanel) {
             S.set('hasActivePanel', true);
           }
 
           // Multi-turn: agent needs input (includes NormalizeIntent clarification)
-          if (result.needsInput || (result.needsClarification && !result.filterReason)) {
+          if (desc.action === 'needs-input') {
             console.log('[Orb] Agent needs input, entering awaitingInput');
             _pendingNeedsInput = true;
-            const prompt = result.message || result.needsInput?.prompt || 'What would you like?';
-            await window.orbAPI.respondToFunction(callId, prompt);
+            await window.orbAPI.respondToFunction(callId, desc.ackText);
             S.set('pendingFunctionCallId', null);
             // Transition to awaitingInput - TTS will play the prompt,
             // then audio_done will transition to listening
@@ -3823,22 +3828,22 @@
             // Note: We don't transition to awaitingInput here because TTS
             // hasn't started yet. The audio_done handler checks _pendingNeedsInput.
           } else {
-            // Standard response -- route through response router
-            let responseText = result.message || "I'm not sure how to help with that.";
+            // Standard response -- route through the (side-effectful) response router
             const route = routeResult(result);
+            const routed = TR.classifyRoutedResponse(result, route);
 
             // Implicit question: agent's message is phrased as a question but
             // didn't set needsInput. Flag for follow-up listen so the orb
             // actually waits for the user's answer instead of going idle.
-            if (route && route.awaitAnswer) {
+            if (routed.awaitAnswer) {
               _pendingNeedsInput = true;
               console.log('[Orb] Implicit question in function-call path, flagging for follow-up');
             }
 
             // Capture dwell duration for post-response listening
-            _pendingDwellMs = (route && typeof route.dwellMs === 'number') ? route.dwellMs : 0;
+            _pendingDwellMs = routed.dwellMs;
 
-            if (route && (route.mode === 'tone' || route.mode === 'tone+visual')) {
+            if (routed.action === 'tone') {
               // Tone-only: play tone (already done in routeResult), suppress TTS
               const Audio = window.OrbAudio;
               if (Audio) window.OrbResponseRouter.dispatch(route, Audio, {
@@ -3852,10 +3857,7 @@
               }
               return;
             }
-            if (route && route.speech) {
-              responseText = route.speech;
-            }
-            await window.orbAPI.respondToFunction(callId, responseText);
+            await window.orbAPI.respondToFunction(callId, routed.ackText);
             S.set('pendingFunctionCallId', null);
           }
         } catch (err) {
