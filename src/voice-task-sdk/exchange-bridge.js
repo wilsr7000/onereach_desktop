@@ -4193,6 +4193,39 @@ Return JSON: { "classification": "rephrase" | "capability_gap", "gapSummary": "o
     // spokenSummary == visualText == message, so behavior is unchanged.
     // See lib/agent-result-normalize.js for the contract + tests.
     const normalized = normalizeAgentResult({ ...result, message });
+
+    // Agents that return a `ui` spec (e.g. daily-brief dayView) carry NO `html`,
+    // but every visual surface — the agent-ui modal (guard below needs
+    // normalized.html) and the command-hud panel (needs result.html) — renders
+    // from html. Render the spec to html once, here, so the panel actually
+    // shows. Without this the modal guard silently skips and the brief speaks
+    // ("...brief on screen") with no visual modal — the reported bug.
+    if (!normalized.html && normalized.ui && normalized.ui.type) {
+      try {
+        const { renderAgentUI } = require('../../lib/agent-ui-renderer');
+        const renderedHtml = renderAgentUI(normalized.ui);
+        if (renderedHtml) {
+          normalized.html = renderedHtml;
+          result.html = renderedHtml; // command-hud push + hasPanel read result.html
+        }
+      } catch (uiErr) {
+        log.warn('voice', 'ui→html render failed', {
+          error: uiErr.message,
+          agentId,
+          uiType: normalized.ui.type,
+        });
+      }
+    }
+    log.info('voice', 'task:settled surface decision', {
+      agentId,
+      displayMode: normalized.displayMode,
+      hasHtml: !!normalized.html,
+      hasUi: !!normalized.ui,
+      uiType: normalized.ui && normalized.ui.type,
+      panelWidth: normalized.panelWidth,
+      panelHeight: normalized.panelHeight,
+    });
+
     const inputModality =
       task.inputModality ||
       task.metadata?.inputModality ||
