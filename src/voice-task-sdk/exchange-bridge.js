@@ -43,6 +43,7 @@ const hudApi = require('../../lib/hud-api');
 // spokenSummary == visualText == message. See lib/agent-result-normalize.js.
 const { normalizeAgentResult } = require('../../lib/agent-result-normalize');
 const { registerMetaHandler, runMetaTask, META_TASK_KINDS } = require('../../lib/exchange/meta-tasks');
+const { marshalTaskResult } = require('../../lib/exchange/marshal-task-result');
 const {
   makeClassifyIntentHandler,
   makeDisambiguateHandler,
@@ -1313,14 +1314,7 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
               JSON.stringify({
                 type: 'task_result',
                 taskId: msg.taskId,
-                result: {
-                  success: result.success,
-                  output: finalOutput,
-                  data: result.data,
-                  html: result.html,
-                  error: result.success ? undefined : result.error,
-                  needsInput: result.needsInput,
-                },
+                result: marshalTaskResult(result, finalOutput),
               })
             );
           } catch (execError) {
@@ -1627,13 +1621,7 @@ async function connectLocalAgent(agent, port) {
             JSON.stringify({
               type: 'task_result',
               taskId: msg.taskId,
-              result: {
-                success: result.success,
-                output: localOutput,
-                html: result.html,
-                error: result.success ? undefined : result.error,
-                needsInput: result.needsInput,
-              },
+              result: marshalTaskResult(result, localOutput),
             })
           );
         }
