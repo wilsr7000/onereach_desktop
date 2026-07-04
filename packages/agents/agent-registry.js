@@ -52,6 +52,7 @@ const BUILT_IN_AGENT_IDS = [
   'spelling-agent',
   'dj-agent',
   'email-agent', // Email assistant - data-aware bidding for email communications
+  'email-setup-agent', // Guided IMAP connect wizard (email -> provider -> app-password -> live test)
   'recorder-agent', // Video recorder - launches WISER Meeting to record video to Spaces
   'meeting-monitor-agent', // Meeting monitor - watches live transcript + health, alerts on issues (bidExcluded)
   'critical-meeting-alarm-agent', // Critical meeting alarms - watches calendar + user rules, fires alarms (bidExcluded, auto-start)
