@@ -98,6 +98,9 @@ const exchangeBus = require('../../lib/exchange/event-bus');
 // instead of memory-only.
 const deliveryEval = require('../../lib/delivery-eval');
 deliveryEval.subscribeQualityFlags(exchangeBus);
+// Surface guarantee: derived-inline html on a voice turn escalates to a modal
+// window (rich results must land on a surface the user can actually see).
+const { resolveSurface } = require('../../lib/surface-policy');
 
 const { safeExecuteAgent, validateAgentContract } = require('../../packages/agents/agent-middleware');
 
@@ -4324,6 +4327,36 @@ function setupExchangeEvents() {
       'voice'; // legacy default: voice-in (matches today's behavior)
     const isProactive = task.metadata?.origin === 'proactive';
 
+    // Surface guarantee: a voice-in task whose rich html DERIVED to 'inline'
+    // would render only into the (usually closed) orb chat -- invisible. The
+    // 2026-08 daily-brief failure: dayView spec degraded, no explicit mode or
+    // sizes, heuristic said inline, no window ever opened while TTS claimed
+    // "brief on screen". Escalate derived-inline+html+voice to a modal with
+    // default sizing BEFORE any surface consumes displayMode, so command-hud,
+    // hud-api, voice-task:reply and the modal branch all agree.
+    {
+      const surface = resolveSurface({
+        explicitDisplayMode: result.displayMode,
+        displayMode: normalized.displayMode,
+        hasHtml: !!normalized.html,
+        inputModality,
+        panelWidth: normalized.panelWidth,
+        panelHeight: normalized.panelHeight,
+      });
+      if (surface.escalated) {
+        log.warn('voice', 'Surface escalated inline -> modal (voice-in html would be invisible)', {
+          event: 'surface:escalated',
+          agentId,
+          taskId: task.id,
+          panelWidth: surface.panelWidth,
+          panelHeight: surface.panelHeight,
+        });
+        normalized.displayMode = surface.mode;
+        normalized.panelWidth = surface.panelWidth;
+        normalized.panelHeight = surface.panelHeight;
+      }
+    }
+
     // Add assistant response to conversation history. Use visualText so
     // dual-channel agents log their richer text rather than the spoken
     // summary; legacy agents keep getting `message` via the fallback.
@@ -4441,18 +4474,26 @@ function setupExchangeEvents() {
     // One window per agentId; re-firing same agent updates in place.
     // The modal is NOT alwaysOnTop -- it's there for the user to read
     // alongside other work.
+    // Panel delivery is graded: a modal that fails to spawn is a delivery
+    // failure the eval must see, not a warn line nobody reads.
+    const panelPromised = normalized.displayMode === 'modal' && !!normalized.html;
+    let panelShown = !panelPromised; // non-modal surfaces are shown by design
     if (normalized.displayMode === 'modal' && normalized.html) {
       try {
         const { showAgentUIModal } = require('../../lib/agent-ui-modal-manager');
-        showAgentUIModal({
+        const modalWin = showAgentUIModal({
           agentId,
           agentName: replyAgentName,
           html: normalized.html,
           panelWidth: normalized.panelWidth,
           panelHeight: normalized.panelHeight,
         });
+        panelShown = !!modalWin;
+        if (!panelShown) {
+          log.error('voice', 'agent-ui modal did not spawn (null return)', { agentId, taskId: task.id });
+        }
       } catch (modalErr) {
-        log.warn('voice', 'agent-ui modal spawn failed', { error: modalErr.message, agentId });
+        log.error('voice', 'agent-ui modal spawn failed', { error: modalErr.message, agentId, taskId: task.id });
       }
     }
 
@@ -4508,6 +4549,8 @@ function setupExchangeEvents() {
             inputModality,
             spokenSummary: normalized.spokenSummary,
             hasPanel,
+            panelPromised,
+            panelShown,
             speakAttempted: true,
             speakResult,
             speakMs: Date.now() - speakStartedAt,
@@ -4520,6 +4563,8 @@ function setupExchangeEvents() {
             inputModality,
             spokenSummary: normalized.spokenSummary,
             hasPanel,
+            panelPromised,
+            panelShown,
             speakAttempted: false,
           });
         }
@@ -4531,6 +4576,8 @@ function setupExchangeEvents() {
           inputModality,
           spokenSummary: normalized.spokenSummary,
           hasPanel,
+            panelPromised,
+            panelShown,
           speakAttempted: true,
           error: e.message,
         });

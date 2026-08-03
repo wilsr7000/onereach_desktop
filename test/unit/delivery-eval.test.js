@@ -63,6 +63,50 @@ describe('computeVerdict (pure)', () => {
     expect(computeVerdict({ inputModality: 'text', spokenSummary: 'hi', speakAttempted: false }))
       .toBe('skipped-text');
   });
+
+  it('partial-no-panel when speech played but the promised modal never spawned', () => {
+    expect(computeVerdict({
+      inputModality: 'voice', spokenSummary: 'brief on screen', speakAttempted: true, speakResult: true,
+      panelPromised: true, panelShown: false,
+    })).toBe('partial-no-panel');
+  });
+
+  it('delivered when the promised panel actually spawned', () => {
+    expect(computeVerdict({
+      inputModality: 'voice', spokenSummary: 'hi', speakAttempted: true, speakResult: true,
+      panelPromised: true, panelShown: true,
+    })).toBe('delivered');
+  });
+
+  it('does not grade panels when the caller supplied no panel facts (backward compat)', () => {
+    expect(computeVerdict({ inputModality: 'voice', spokenSummary: 'hi', speakAttempted: true, speakResult: true }))
+      .toBe('delivered');
+  });
+
+  it('silent-failure outranks the panel grade when speech itself failed', () => {
+    expect(computeVerdict({
+      inputModality: 'voice', spokenSummary: 'hi', speakAttempted: true, speakResult: false,
+      panelPromised: true, panelShown: false,
+    })).toBe('silent-failure');
+  });
+});
+
+describe('evaluateDelivery — partial-no-panel gets LOUD with a panel-specific fallback', () => {
+  it('logs error, broadcasts, and speaks the results-window apology', async () => {
+    evaluateDelivery({
+      taskId: 't9', inputModality: 'voice', spokenSummary: 'brief on screen',
+      speakAttempted: true, speakResult: true, panelPromised: true, panelShown: false,
+    });
+    const entry = logged.find((l) => l.data?.event === 'delivery:verdict');
+    expect(entry.level).toBe('error');
+    expect(entry.data.verdict).toBe('partial-no-panel');
+    expect(broadcast).toHaveBeenCalledWith(
+      'voice-task:delivery-failed',
+      expect.objectContaining({ verdict: 'partial-no-panel' })
+    );
+    expect(speak).toHaveBeenCalledTimes(1);
+    expect(speak.mock.calls[0][0]).toMatch(/results window/i);
+  });
 });
 
 describe('evaluateDelivery — success paths stay quiet', () => {

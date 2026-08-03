@@ -353,11 +353,16 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
       visualText,
       // Explicit displayMode pin so the size heuristic doesn't have to
       // re-derive it (and so a future panelHeight change can't flip it
-      // to inline accidentally).
-      displayMode: isDayView ? 'modal' : null,
+      // to inline accidentally). Pinned for ANY ui spec -- including the
+      // eventList fallback when the dayView build degrades. The 2026-08
+      // "no visual window opened" failure: dayView failed, the fallback
+      // ui carried no mode/sizes, the heuristic derived 'inline', and the
+      // brief rendered only into the closed orb chat while TTS claimed
+      // "brief on screen".
+      displayMode: ui ? 'modal' : null,
       ui,
-      panelWidth: isDayView ? 480 : undefined,
-      panelHeight,
+      panelWidth: ui ? 480 : undefined,
+      panelHeight: panelHeight ?? (ui ? 600 : undefined),
       soundCue: { type: 'one-shot', name: 'morning-motif', volume: 0.4 },
       data: {
         type: 'morning_brief',

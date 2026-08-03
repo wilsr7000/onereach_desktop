@@ -66,12 +66,17 @@ describe('daily-brief result contract (dayView path includes panelWidth + panelH
       path.join(__dirname, '../../packages/agents/daily-brief-agent.js'),
       'utf8'
     );
-    // The relevant block:
+    // The relevant block (strengthened after the 2026-08 "no visual window"
+    // failure: sizes + modal pin now apply to ANY ui spec, including the
+    // eventList fallback when the dayView build degrades):
     //   const isDayView = ui?.type === 'dayView';
     //   const panelHeight = isDayView ? this.computePanelHeight(ui) : undefined;
-    //   return { ..., panelWidth: isDayView ? 480 : undefined, panelHeight, ... }
-    expect(src).toMatch(/panelWidth:\s*isDayView\s*\?\s*480\s*:\s*undefined/);
-    expect(src).toMatch(/panelHeight,/);
+    //   return { ..., displayMode: ui ? 'modal' : null,
+    //            panelWidth: ui ? 480 : undefined,
+    //            panelHeight: panelHeight ?? (ui ? 600 : undefined), ... }
+    expect(src).toMatch(/panelWidth:\s*ui\s*\?\s*480\s*:\s*undefined/);
+    expect(src).toMatch(/panelHeight:\s*panelHeight\s*\?\?\s*\(ui\s*\?\s*600\s*:\s*undefined\)/);
+    expect(src).toMatch(/displayMode:\s*ui\s*\?\s*'modal'\s*:\s*null/);
     expect(src).toMatch(/this\.computePanelHeight\(ui\)/);
   });
 });
