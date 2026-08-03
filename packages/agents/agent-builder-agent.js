@@ -500,6 +500,15 @@ Effort guide:
     const agentName = (build.agent && (build.agent.name || build.agent.displayName)) || 'new agent';
     const elapsedSec = Math.max(1, Math.round((build.elapsedMs || 0) / 1000));
 
+    // Post-build verification outcome (claude-code-agent-builder stage 4):
+    // 'live-tested' means the artifact executed the original request NOW;
+    // 'config-pending-restart' means a valid config that the dynamic runtime
+    // will serve after the next app start — retrying immediately would just
+    // re-fail (the 2026-08 live E2E showed the fresh config can't bid yet),
+    // so we tell the truth instead of "Running your request now...".
+    const verifiedMode = (build.verified && build.verified.mode) || 'live-tested';
+    const pendingRestart = verifiedMode === 'config-pending-restart';
+
     // Auto-retry the original request. The new agent is already registered
     // with the exchange (via agent-store's `agent:hot-connect` event) so it
     // can bid on the re-submitted task. The `retriedAfterBuild` flag
@@ -508,7 +517,7 @@ Effort guide:
     let retryScheduled = false;
     try {
       const bus = _getExchangeBus();
-      if (bus && typeof bus.processSubmit === 'function') {
+      if (!pendingRestart && bus && typeof bus.processSubmit === 'function') {
         // Fire-and-forget -- don't block the "Done" message on the re-run
         Promise.resolve(
           bus.processSubmit(originalRequest, {
@@ -528,14 +537,23 @@ Effort guide:
       log.warn('agent-builder', 'Could not schedule auto-retry', { error: err.message });
     }
 
+    if (pendingRestart) {
+      return {
+        success: true,
+        message:
+          `I built "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'} and verified its configuration. ` +
+          `It comes online after the next app restart — then your original request will be handled.`,
+      };
+    }
+
     const followUp = retryScheduled
-      ? 'Running your original request now...'
-      : 'Try your original request again and it should pick up.';
+      ? 'I tested it against your request and it worked — running it for real now...'
+      : 'It tested clean. Try your original request again and it should pick up.';
 
     return {
       success: true,
       message:
-        `Done. I built "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'}. ` +
+        `Done. I built and tested "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'}. ` +
         followUp,
     };
   },

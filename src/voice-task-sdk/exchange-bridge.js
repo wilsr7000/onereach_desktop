@@ -4173,23 +4173,69 @@ function setupExchangeEvents() {
             bustCount: task.metadata?.bustCount || 0,
             content: (task.content || '').slice(0, 80),
           });
+          const gapSummary = `Post-settle re-check (${gap.reason}): ${task.metadata?.bustCount || 0} agents busted, then ${agentId} dead-ended with a clarifying question.`;
           try {
             exchangeBus.emit('learning:capability-gap', {
               userInput: task.content,
-              gapSummary: `Post-settle re-check (${gap.reason}): ${task.metadata?.bustCount || 0} agents busted, then ${agentId} dead-ended with a clarifying question.`,
+              gapSummary,
               timestamp: Date.now(),
             });
           } catch (_e) { /* non-critical */ }
+
+          // Register the BUILDER as the pending consent agent — same flow as
+          // the pre-auction halt path. A bare spoken instruction ("say 'build
+          // an agent for this'") is uncatchable here: the dead-end settle
+          // just registered ITS OWN pending-input state, so the user's reply
+          // would be hijacked by routePendingInput and never reach the
+          // auction (verified live 2026-08-03: the phrase was swallowed by a
+          // pending tour prompt). Clearing the dead-end pending and running
+          // the builder's consent via handleNeedsInput makes "yes" route
+          // straight to the builder.
+          let builderResult = null;
           try {
-            const { getVoiceSpeaker } = require('../../voice-speaker');
-            const speaker = getVoiceSpeaker();
-            if (speaker) {
-              await speaker.speak(
-                "None of my current agents could fully handle that. Say 'build an agent for this' and I'll create one.",
-                { taskResult: true, skipAffectMatching: true }
-              );
+            const buildOut = await runMetaTask(
+              META_TASK_KINDS.EVALUATE_BUILDABILITY,
+              { content: task.content, gapSummary },
+              _metaTaskDeps()
+            );
+            if (buildOut.status === 'settled' && buildOut.result) builderResult = buildOut.result;
+          } catch (_e) { /* fall through to direct execute */ }
+          if (!builderResult) {
+            try {
+              const builderAgent = require('../../packages/agents/agent-builder-agent');
+              if (builderAgent.initialize) await builderAgent.initialize();
+              builderResult = await Promise.race([
+                builderAgent.execute({
+                  content: task.content,
+                  metadata: { capabilityGap: gapSummary, originalRequest: task.content, source: 'settle-gap-recheck' },
+                }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Builder agent timeout')), 10000)),
+              ]);
+            } catch (builderErr) {
+              log.warn('voice', 'Post-settle builder consent failed', { error: builderErr.message });
             }
-          } catch (_e) { /* best effort */ }
+          }
+
+          if (builderResult && builderResult.needsInput) {
+            try { getTranscriptService().clearPending(agentId); } catch (_e) { /* best effort */ }
+            await handleNeedsInput(builderResult, 'agent-builder-agent', task.id, {
+              html: builderResult.html,
+              data: builderResult.data,
+              ui: builderResult.ui,
+            });
+          } else {
+            // Builder declined or failed: at least tell the user plainly.
+            try {
+              const { getVoiceSpeaker } = require('../../voice-speaker');
+              const speaker = getVoiceSpeaker();
+              if (speaker) {
+                await speaker.speak(
+                  "None of my current agents could fully handle that, and I couldn't line up a build offer. You can say 'build an agent' to try again.",
+                  { taskResult: true, skipAffectMatching: true }
+                );
+              }
+            } catch (_e) { /* best effort */ }
+          }
         }
       } catch (gapErr) {
         log.warn('voice', 'Post-settle gap re-check failed', { error: gapErr.message });
@@ -5356,6 +5402,20 @@ async function hotConnectAgent(agent) {
 
   if (!agent.enabled) {
     log.info('voice', 'Agent is disabled, skipping hot-connect', { agentName: agent.name });
+    return false;
+  }
+
+  // Never connect a zombie: a config-only artifact (no runtime execute) that
+  // joins the exchange registers, bids nothing or busts everything, and rots
+  // silently — the April "Alarm Manager" corpse. Refuse loudly; the dynamic
+  // runtime serves valid configs after the next app start.
+  if (typeof agent.execute !== 'function') {
+    log.error('voice', 'Hot-connect refused — agent has no runtime executor (config-only)', {
+      event: 'agent:hot-connect-refused',
+      agentId: agent.id,
+      agentName: agent.name,
+      hint: 'Valid configs activate via the dynamic runtime on next app start.',
+    });
     return false;
   }
 

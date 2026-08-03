@@ -180,7 +180,7 @@ describe('agent-builder-agent: Claude Code integration', () => {
       expect(result.message).toMatch(/Joke Bot/);
       expect(result.message).toMatch(/15 seconds/);
       // Auto-retry schedules the original request; success message reflects that
-      expect(result.message).toMatch(/Running your original request/i);
+      expect(result.message).toMatch(/running it for real now|built and tested/i);
     });
 
     it('produces a reasonable message for sub-second builds', async () => {
@@ -196,7 +196,7 @@ describe('agent-builder-agent: Claude Code integration', () => {
         buildMethod: 'claude-code',
       });
       expect(result.message).toMatch(/Test Bot/);
-      expect(result.message).toMatch(/Running your original request/i);
+      expect(result.message).toMatch(/running it for real now|built and tested/i);
     });
 
     it('falls back to Playbooks (via needsInput) if Claude Code build fails', async () => {
@@ -295,7 +295,7 @@ describe('agent-builder-agent: Claude Code integration', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.message).toMatch(/Running your original request now/);
+      expect(result.message).toMatch(/running it for real now/i);
       expect(mockExchangeBus.processSubmit).toHaveBeenCalledTimes(1);
       const [retryText, retryOpts] = mockExchangeBus.processSubmit.mock.calls[0];
       expect(retryText).toBe('summarize this PDF');

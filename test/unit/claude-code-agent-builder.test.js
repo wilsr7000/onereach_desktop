@@ -83,6 +83,8 @@ describe('buildAgentWithClaudeCode', () => {
     generator.generateAgentFromDescription.mockResolvedValue({
       id: 'agent-stock-quote',
       name: 'Stock Quote Agent',
+      executionType: 'llm',
+      prompt: 'You fetch stock prices.',
     });
     store.createAgent.mockResolvedValue(SAMPLE_AGENT);
 
@@ -110,7 +112,7 @@ describe('buildAgentWithClaudeCode', () => {
 
   it('continues to generate when planAgent throws (degraded mode)', async () => {
     runner.planAgent.mockRejectedValue(new Error('claude code not available'));
-    generator.generateAgentFromDescription.mockResolvedValue({ id: 'x', name: 'X' });
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'test prompt', id: 'x', name: 'X' });
     store.createAgent.mockResolvedValue(SAMPLE_AGENT);
 
     const result = await buildAgentWithClaudeCode('do something');
@@ -122,7 +124,7 @@ describe('buildAgentWithClaudeCode', () => {
 
   it('continues when planAgent returns success: false', async () => {
     runner.planAgent.mockResolvedValue({ success: false, error: 'CLI error' });
-    generator.generateAgentFromDescription.mockResolvedValue({ id: 'x', name: 'X' });
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'test prompt', id: 'x', name: 'X' });
     store.createAgent.mockResolvedValue(SAMPLE_AGENT);
 
     const result = await buildAgentWithClaudeCode('do something');
@@ -131,7 +133,7 @@ describe('buildAgentWithClaudeCode', () => {
   });
 
   it('skips planning when skipPlanning: true', async () => {
-    generator.generateAgentFromDescription.mockResolvedValue({ id: 'x', name: 'X' });
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'test prompt', id: 'x', name: 'X' });
     store.createAgent.mockResolvedValue(SAMPLE_AGENT);
 
     const result = await buildAgentWithClaudeCode('do something', { skipPlanning: true });
@@ -161,7 +163,7 @@ describe('buildAgentWithClaudeCode', () => {
 
   it('fails cleanly when store.createAgent throws', async () => {
     runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
-    generator.generateAgentFromDescription.mockResolvedValue({ id: 'x', name: 'X' });
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'test prompt', id: 'x', name: 'X' });
     store.createAgent.mockRejectedValue(new Error('disk full'));
 
     const result = await buildAgentWithClaudeCode('do something');
@@ -172,7 +174,7 @@ describe('buildAgentWithClaudeCode', () => {
 
   it('emits progress events at each stage on the happy path', async () => {
     runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
-    generator.generateAgentFromDescription.mockResolvedValue({ id: 'x', name: 'X' });
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'test prompt', id: 'x', name: 'X' });
     store.createAgent.mockResolvedValue(SAMPLE_AGENT);
 
     const events = [];
@@ -228,7 +230,7 @@ describe('buildAgentWithClaudeCode', () => {
       warnings: [{ reason: 'Daily cap reached' }],
     });
     runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
-    generator.generateAgentFromDescription.mockResolvedValue({ id: 'x', name: 'X' });
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'test prompt', id: 'x', name: 'X' });
     store.createAgent.mockResolvedValue(SAMPLE_AGENT);
 
     const result = await buildAgentWithClaudeCode('do X', { skipBudgetCheck: true });
@@ -237,7 +239,7 @@ describe('buildAgentWithClaudeCode', () => {
 
   it('never crashes if a progress callback throws', async () => {
     runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
-    generator.generateAgentFromDescription.mockResolvedValue({ id: 'x', name: 'X' });
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'test prompt', id: 'x', name: 'X' });
     store.createAgent.mockResolvedValue(SAMPLE_AGENT);
 
     const onProgress = () => {
@@ -269,7 +271,7 @@ describe('buildAgentWithClaudeCode', () => {
     });
 
     runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
-    generator.generateAgentFromDescription.mockResolvedValue({ id: 'x', name: 'X' });
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'test prompt', id: 'x', name: 'X' });
 
     const result = await buildAgentWithClaudeCode('do something');
     expect(result.success).toBe(true);
@@ -346,5 +348,54 @@ describe('_describeAgentFromPlan', () => {
     const description = _describeAgentFromPlan('do X', { understanding: 'just X' });
     expect(description).toContain('do X');
     expect(description).toContain('just X');
+  });
+});
+
+// ─── Post-build verification (stage 4: test before announcing) ─────────────
+// Regression for the 2026-08 live E2E: the builder said "Done. I built Alarm
+// Manager" while the artifact failed contract validation at creation. A build
+// is only a success if it was live-tested or is a valid config that the
+// dynamic runtime can serve after restart.
+describe('buildAgentWithClaudeCode -- post-build verification', () => {
+  beforeEach(() => {
+    runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
+  });
+
+  it('live-tests an agent that has execute() and reports live-tested', async () => {
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'p' });
+    store.createAgent.mockResolvedValue({
+      id: 'a1', name: 'A1',
+      execute: async () => ({ success: true, message: 'alarm set' }),
+    });
+    const result = await buildAgentWithClaudeCode('set an alarm');
+    expect(result.success).toBe(true);
+    expect(result.verified.mode).toBe('live-tested');
+  });
+
+  it('marks a valid config without an executor as config-pending-restart (still success, honest message upstream)', async () => {
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'applescript', code: 'display notification' });
+    store.createAgent.mockResolvedValue({ id: 'a2', name: 'A2' });
+    const result = await buildAgentWithClaudeCode('set an alarm');
+    expect(result.success).toBe(true);
+    expect(result.verified.mode).toBe('config-pending-restart');
+  });
+
+  it('FAILS the build when the artifact can neither execute nor be served (the broken Alarm Manager case)', async () => {
+    generator.generateAgentFromDescription.mockResolvedValue({ name: 'no exec, no config' });
+    store.createAgent.mockResolvedValue({ id: 'a3', name: 'A3' });
+    const result = await buildAgentWithClaudeCode('set an alarm');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/failed verification/i);
+  });
+
+  it('FAILS the build when the live self-test fails', async () => {
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'p' });
+    store.createAgent.mockResolvedValue({
+      id: 'a4', name: 'A4',
+      execute: async () => ({ success: false, error: 'cannot actually set alarms' }),
+    });
+    const result = await buildAgentWithClaudeCode('set an alarm');
+    expect(result.success).toBe(false);
+    expect(result.verified.mode).toBe('failed');
   });
 });

@@ -69,7 +69,7 @@ describe('needsInput settle branch', () => {
     const handler = settleHandler();
     const niIdx = handler.indexOf('Check for multi-turn conversation (needsInput)');
     expect(niIdx).toBeGreaterThan(-1);
-    const branch = handler.slice(niIdx, niIdx + 3500);
+    const branch = handler.slice(niIdx, niIdx + 7000);
     expect(branch).toMatch(/deliveryEval\.evaluateDelivery\(\{/);
     expect(branch).toMatch(/spokenSummary:\s*result\.needsInput\.prompt/);
     expect(branch).toMatch(/speakResult:\s*niOutcome\?\.spoke === true/);
@@ -78,11 +78,16 @@ describe('needsInput settle branch', () => {
   it('runs the capability-gap re-check and offers the builder on a revealed gap', () => {
     const handler = settleHandler();
     const niIdx = handler.indexOf('Check for multi-turn conversation (needsInput)');
-    const branch = handler.slice(niIdx, niIdx + 3500);
+    const branch = handler.slice(niIdx, niIdx + 7000);
     expect(branch).toMatch(/shouldOfferGapAfterSettle\(\{/);
     expect(branch).toMatch(/capability-gap:post-settle/);
     expect(branch).toMatch(/learning:capability-gap/);
-    expect(branch).toMatch(/build an agent for this/);
+    // Consent must be REGISTERED (pending -> builder), not just spoken: a
+    // bare spoken instruction gets hijacked by the dead-end's own pending
+    // state (verified live 2026-08-03).
+    expect(branch).toMatch(/EVALUATE_BUILDABILITY/);
+    expect(branch).toMatch(/clearPending\(agentId\)/);
+    expect(branch).toMatch(/handleNeedsInput\(builderResult,\s*'agent-builder-agent'/);
   });
 });
 
