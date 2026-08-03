@@ -356,6 +356,25 @@ describe('Agent Middleware', () => {
       const { warnings } = validateAgentContract(agent);
       expect(warnings.some((w) => w.includes('categories'))).toBe(true);
     });
+
+    it('flags a broken agent (missing execute) as invalid — the dead "Alarm Manager" case', () => {
+      // Regression: a user-built agent shipped without execute() and sat
+      // registered-but-unusable for months, logged only at warn. It must be
+      // invalid AND escalated at error level with a structured event.
+      const agent = { id: 'alarm-manager', name: 'Alarm Manager', categories: ['productivity'] };
+      const { valid, warnings } = validateAgentContract(agent);
+      expect(valid).toBe(false);
+      expect(warnings.some((w) => w.includes('execute'))).toBe(true);
+    });
+
+    it('escalates required-contract violations at ERROR level with agent:contract-violation event (source pin)', () => {
+      const fs = require('fs');
+      const path = require('path');
+      const src = fs.readFileSync(path.join(__dirname, '../../packages/agents/agent-middleware.js'), 'utf8');
+      expect(src).toMatch(/log\.error\('agent',[\s\S]{0,200}BROKEN/);
+      expect(src).toMatch(/event:\s*'agent:contract-violation'/);
+      expect(src).toMatch(/Rebuild or remove it/);
+    });
   });
 });
 

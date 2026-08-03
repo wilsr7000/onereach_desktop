@@ -268,14 +268,29 @@ function validateAgentContract(agent) {
     warnings.push('categories should be an array');
   }
 
-  if (warnings.length > 0) {
+  const requiredViolations = warnings.filter((w) => w.startsWith('Missing required'));
+
+  if (requiredViolations.length > 0) {
+    // A required-contract violation means this agent CANNOT function (e.g.
+    // the user's built "Alarm Manager" shipped without execute() and could
+    // never bid on alarm requests — silently, for months). Error-level with
+    // a structured event so it is alarm-visible in the central event log,
+    // and names the agent so the user knows which asset to rebuild.
+    log.error('agent', `[Middleware] Agent "${agentLabel}" is BROKEN — required contract violations`, {
+      event: 'agent:contract-violation',
+      agentId: agent?.id || null,
+      agentName: agentLabel,
+      violations: requiredViolations.join('; '),
+      hint: 'This agent cannot execute and will never win tasks. Rebuild or remove it in the agent manager.',
+    });
+  } else if (warnings.length > 0) {
     log.warn('agent', `[Middleware] Agent "${agentLabel}" contract warnings`, {
       warnings: warnings.join('; '),
     });
   }
 
   return {
-    valid: warnings.filter((w) => w.startsWith('Missing required')).length === 0,
+    valid: requiredViolations.length === 0,
     warnings,
   };
 }

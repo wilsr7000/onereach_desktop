@@ -45,6 +45,10 @@ function createDynamicAgent(exchangeUrl, agentDefinitions, _llmClient) {
   let createAgent;
 
   try {
+    // Packaging shim: materialize @onereach/task-exchange resolution when the
+    // workspace symlink is absent (always absent inside app.asar) — without
+    // this the task-agent SDK fails to load and this agent is disabled.
+    require('../../lib/resolve-task-exchange').ensure();
     const agentPkg = require('../task-agent/dist/index.js');
     createAgent = agentPkg.createAgent;
   } catch (error) {

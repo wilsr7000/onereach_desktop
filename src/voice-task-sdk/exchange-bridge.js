@@ -101,6 +101,14 @@ deliveryEval.subscribeQualityFlags(exchangeBus);
 // Surface guarantee: derived-inline html on a voice turn escalates to a modal
 // window (rich results must land on a surface the user can actually see).
 const { resolveSurface } = require('../../lib/surface-policy');
+// A needsInput/clarification settle is NOT a completed success: it must never
+// feed the routing cache, reputation, or success stats (the alarm-request
+// cache-poisoning bug).
+const { isResolvedSuccess } = require('../../lib/exchange/result-quality');
+// Post-settle capability-gap re-check: busts + an unresolved outcome reveal
+// that the auction's confidence was fiction (hallucinated bid) -- offer the
+// agent-builder path that the pre-auction floor missed.
+const { shouldOfferGapAfterSettle } = require('../../lib/exchange/gap-recheck');
 
 const { safeExecuteAgent, validateAgentContract } = require('../../packages/agents/agent-middleware');
 
@@ -565,13 +573,18 @@ async function handleNeedsInput(result, agentId, taskId, opts = {}) {
     log.warn('voice', 'handleNeedsInput modal render failed', { error: modalErr.message, agentId: pendingAgentId });
   }
 
-  // Speak the prompt (best-effort)
+  // Speak the prompt. taskResult: true so the orb's idle-audio guard admits
+  // the WAV even when the orb has already dropped to idle (same class as the
+  // v5.0.13 daily-brief fix — a needs-input prompt after busts arrives late).
+  // The resolved value is a real delivery signal: true only when playback
+  // completion was confirmed. Returned so the settle path can grade it.
+  let spoke = false;
   try {
     const { getVoiceSpeaker } = require('../../voice-speaker');
     const speaker = getVoiceSpeaker();
     if (speaker && prompt) {
       const agentVoice = getAgentVoice(agentId);
-      await speaker.speak(prompt, { voice: agentVoice });
+      spoke = (await speaker.speak(prompt, { voice: agentVoice, taskResult: true })) === true;
     }
   } catch (e) {
     log.error('voice', 'handleNeedsInput TTS failed', { error: e.message });
@@ -584,6 +597,8 @@ async function handleNeedsInput(result, agentId, taskId, opts = {}) {
     options: ni.options,
     context: ni.context,
   });
+
+  return { spoke, prompt };
 }
 
 /**
@@ -3732,7 +3747,11 @@ function setupExchangeEvents() {
     }
 
     // ── ROUTING INTELLIGENCE: learn from this successful route ──
-    if (agentId && task.content && result?.success !== false) {
+    // Gate on RESOLVED success: a needsInput/clarification settle must never
+    // be cached. (Cache-poisoning bug: "set an alarm" -> app-agent's "what
+    // app should I open?" dead-end got cached at conf=0.85, routing every
+    // future alarm request straight to the wrong agent.)
+    if (agentId && task.content && isResolvedSuccess(result)) {
       const agentName = allBuiltInAgentMap[agentId]?.name || agentId;
       // Use the bid confidence if available, otherwise default to 0.85
       const confidence = task.metadata?.winningConfidence || 0.85;
@@ -3779,11 +3798,14 @@ function setupExchangeEvents() {
       const { getAgentStats } = require('./agent-stats');
       const stats = getAgentStats();
       stats.init().then(() => {
-        if (result?.success !== false) {
+        if (isResolvedSuccess(result)) {
           stats.recordSuccess(agentId, executionDurationMs);
-        } else {
+        } else if (result?.success === false) {
           stats.recordFailure(agentId, result?.error || 'Execution failed', executionDurationMs);
         }
+        // needsInput/clarification settles are NEUTRAL: neither a win nor a
+        // loss. Recording them as successes minted 1.0 reputation for
+        // dead-end questions.
       });
     } catch (e) {
       log.warn('voice', 'Stats tracking error', { data: e.message });
@@ -3926,15 +3948,23 @@ function setupExchangeEvents() {
     } catch (_) { /* learning event is non-critical */ }
 
     // ==================== MASTER ORCHESTRATOR FEEDBACK ====================
-    // Provide feedback to help agents learn
+    // Provide feedback to help agents learn. Skipped for needsInput settles:
+    // an unresolved clarifying question is neutral -- rewarding it as a
+    // success taught the exchange that dead-ends are wins.
     try {
       const masterOrchestrator = require('../../packages/agents/master-orchestrator');
-      const winner = { agentId, agentVersion: '1.0.0' };
       // Get the master evaluation from the task metadata if available
       const masterEvaluation = task.metadata?.masterEvaluation || null;
-      await masterOrchestrator.provideFeedback(task, result, winner, masterEvaluation);
 
-      // Process any rejected bids (apply reputation penalties)
+      if (isResolvedSuccess(result) || result?.success === false) {
+        const winner = { agentId, agentVersion: '1.0.0' };
+        await masterOrchestrator.provideFeedback(task, result, winner, masterEvaluation);
+      } else {
+        log.info('voice', 'Feedback skipped (needsInput settle is neutral)', { agentId, taskId: task.id });
+      }
+
+      // Process any rejected bids (apply reputation penalties) — independent
+      // of settle quality; hallucinated bids still deserve their penalty.
       if (masterEvaluation?.rejectedBids?.length > 0) {
         await masterOrchestrator.processRejectedBids(masterEvaluation.rejectedBids);
       }
@@ -4100,13 +4130,71 @@ function setupExchangeEvents() {
 
     // Check for multi-turn conversation (needsInput)
     if (result.needsInput) {
-      await handleNeedsInput(result, agentId, task.id, {
+      const niOutcome = await handleNeedsInput(result, agentId, task.id, {
         html: result.html,
         data: result.data,
         // A background/scheduled task asking for input is proactive — the orb
         // must surface it even from a self-prompting tool (UC5).
         proactive: task.metadata?.origin === 'proactive',
       });
+
+      // Delivery eval: needsInput settles were previously ungraded — the
+      // alarm-request dead-end produced ZERO delivery events. Every settle
+      // gets a verdict, no exceptions.
+      const niModality =
+        task.inputModality || task.metadata?.inputModality || task.context?.inputModality || 'voice';
+      deliveryEval.evaluateDelivery({
+        taskId: task.id,
+        agentId,
+        inputModality: niModality,
+        spokenSummary: result.needsInput.prompt || '',
+        hasPanel: !!result.html,
+        speakAttempted: true,
+        speakResult: niOutcome?.spoke === true,
+      });
+
+      // Capability-gap re-check: busts + an unresolved (needsInput) outcome
+      // reveal the auction's confidence was fiction — the exact case where a
+      // hallucinated 0.95 bid suppressed the pre-auction gap offer. Offer
+      // the builder path now instead of quietly accepting the dead end.
+      try {
+        const gap = shouldOfferGapAfterSettle({
+          bustCount: task.metadata?.bustCount || 0,
+          settledConfidence:
+            typeof task.metadata?.settledConfidence === 'number' ? task.metadata.settledConfidence : null,
+          resultResolved: false,
+        });
+        if (gap.offer) {
+          log.error('voice', 'Capability gap revealed post-settle — offering agent builder', {
+            event: 'capability-gap:post-settle',
+            taskId: task.id,
+            agentId,
+            reason: gap.reason,
+            bustCount: task.metadata?.bustCount || 0,
+            content: (task.content || '').slice(0, 80),
+          });
+          try {
+            exchangeBus.emit('learning:capability-gap', {
+              userInput: task.content,
+              gapSummary: `Post-settle re-check (${gap.reason}): ${task.metadata?.bustCount || 0} agents busted, then ${agentId} dead-ended with a clarifying question.`,
+              timestamp: Date.now(),
+            });
+          } catch (_e) { /* non-critical */ }
+          try {
+            const { getVoiceSpeaker } = require('../../voice-speaker');
+            const speaker = getVoiceSpeaker();
+            if (speaker) {
+              await speaker.speak(
+                "None of my current agents could fully handle that. Say 'build an agent for this' and I'll create one.",
+                { taskResult: true, skipAffectMatching: true }
+              );
+            }
+          } catch (_e) { /* best effort */ }
+        }
+      } catch (gapErr) {
+        log.warn('voice', 'Post-settle gap re-check failed', { error: gapErr.message });
+      }
+
       return; // Don't mark as completed yet
     }
 
