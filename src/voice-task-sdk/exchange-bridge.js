@@ -3032,6 +3032,13 @@ async function initializeExchangeBridge(config = {}) {
       } catch (evErr) {
         log.warn('voice', 'Event Manager agent ensure failed (non-fatal)', { error: evErr.message });
       }
+      try {
+        const { ensureMeetingStarterAgent } = require('../../lib/meetings/ensure-meeting-agent');
+        const seededMeet = await ensureMeetingStarterAgent();
+        log.info('voice', 'Meeting Starter agent ensure', { status: seededMeet.status, agentId: seededMeet.agentId || null });
+      } catch (msErr) {
+        log.warn('voice', 'Meeting Starter agent ensure failed (non-fatal)', { error: msErr.message });
+      }
 
       log.info('voice', 'All agents connected. Total:', { v0: localAgentConnections.size });
     } catch (agentConnectError) {
