@@ -1510,9 +1510,41 @@ async function connectCustomAgents(port) {
 }
 
 /**
+ * Wrap a config-only store agent (no runtime execute()) with the local
+ * executor so it satisfies the middleware's execute() contract and can be
+ * live-served immediately -- at boot AND at hot-connect. Without this, every
+ * stored JSON artifact was a zombie: it registered, bid, won, and then
+ * safeExecuteAgent refused it ("not properly configured"). Returns null when
+ * the config has nothing to serve from (no prompt/description), which is the
+ * truly-broken case the self-heal offer handles.
+ */
+function wrapLocalConfigAgent(agentDef) {
+  if (!agentDef || typeof agentDef !== 'object') return null;
+  if (typeof agentDef.execute === 'function') return agentDef;
+  const promptSource = agentDef.prompt || agentDef.systemPrompt || agentDef.description || '';
+  if (!agentDef.name || !String(promptSource).trim()) return null;
+  const wrapped = { ...agentDef };
+  wrapped.execute = (task, ctx = {}) => executeLocalAgent(wrapped, task, ctx);
+  log.info('voice', 'Hot-wrapped config-only agent with local executor', {
+    event: 'agent:hot-wrapped',
+    agentId: agentDef.id || null,
+    agentName: agentDef.name,
+  });
+  return wrapped;
+}
+
+/**
  * Connect a single local agent to the exchange
  */
 async function connectLocalAgent(agent, port) {
+  // Config-only artifacts get a runtime executor BEFORE contract validation
+  // so a servable config never registers as a zombie (and never false-alarms
+  // an agent:contract-violation).
+  if (typeof agent.execute !== 'function') {
+    const wrapped = wrapLocalConfigAgent(agent);
+    if (wrapped) agent = wrapped;
+  }
+
   // Validate agent contract at registration time
   validateAgentContract(agent);
 
@@ -2880,6 +2912,58 @@ async function initializeExchangeBridge(config = {}) {
         log.warn('voice', 'Disconnect via event bus failed', { agentId, error: e.message });
       }
     });
+
+    // ---------------------------------------------------------------------
+    // Self-healing loop: broken-agent events (agent:contract-violation from
+    // the middleware, agent:hot-connect-refused from hotConnectAgent) become
+    // a proactive spoken rebuild offer through the SAME builder-consent flow
+    // as the capability-gap path -- handleNeedsInput registers the builder as
+    // the pending agent, so the user's "yes" routes straight to the rebuild.
+    // Throttled once per agent per session inside the notifier.
+    // ---------------------------------------------------------------------
+    try {
+      const { createSelfHealNotifier } = require('../../lib/exchange/self-heal');
+      createSelfHealNotifier({
+        subscribe: (handler) => log.subscribe({ level: 'error' }, handler),
+        getAgentDef: (agentId, agentName) => {
+          try {
+            const { getAgentStore } = require('./agent-store');
+            const store = getAgentStore();
+            if (!store) return null;
+            if (agentId) {
+              const byId = store.getAgent(agentId);
+              if (byId) return byId;
+            }
+            const wanted = String(agentName || '').toLowerCase().trim();
+            if (!wanted) return null;
+            return (
+              store.getLocalAgents().find((a) => String(a.name || '').toLowerCase().trim() === wanted) || null
+            );
+          } catch {
+            return null;
+          }
+        },
+        isBusy: () => {
+          try {
+            return getTranscriptService().hasPending();
+          } catch {
+            return false;
+          }
+        },
+        offerRebuild: async ({ prompt, pendingBuild }) => {
+          const offerResult = {
+            needsInput: { prompt, agentId: 'agent-builder-agent', context: { pendingBuild } },
+          };
+          await handleNeedsInput(offerResult, 'agent-builder-agent', `selfheal_${Date.now()}`, {
+            proactive: true,
+          });
+        },
+        log,
+      });
+      log.info('voice', 'Self-heal notifier wired (broken agents get rebuild offers)');
+    } catch (shErr) {
+      log.warn('voice', 'Self-heal notifier unavailable (non-fatal)', { error: shErr.message });
+    }
 
     // ---------------------------------------------------------------------
     // Agent-builder progress: surface "Designing the agent..." / "Writing..."
@@ -5405,18 +5489,23 @@ async function hotConnectAgent(agent) {
     return false;
   }
 
-  // Never connect a zombie: a config-only artifact (no runtime execute) that
-  // joins the exchange registers, bids nothing or busts everything, and rots
-  // silently — the April "Alarm Manager" corpse. Refuse loudly; the dynamic
-  // runtime serves valid configs after the next app start.
+  // A config-only artifact (no runtime execute) gets hot-wrapped with the
+  // local executor so a freshly built agent serves IMMEDIATELY instead of
+  // waiting for a restart. Only a config with nothing to serve from (no
+  // prompt/description — the April "Alarm Manager" corpse) is refused
+  // loudly; that refusal is what triggers the self-heal rebuild offer.
   if (typeof agent.execute !== 'function') {
-    log.error('voice', 'Hot-connect refused — agent has no runtime executor (config-only)', {
-      event: 'agent:hot-connect-refused',
-      agentId: agent.id,
-      agentName: agent.name,
-      hint: 'Valid configs activate via the dynamic runtime on next app start.',
-    });
-    return false;
+    const wrapped = wrapLocalConfigAgent(agent);
+    if (!wrapped) {
+      log.error('voice', 'Hot-connect refused — agent has no runtime executor and no servable config', {
+        event: 'agent:hot-connect-refused',
+        agentId: agent.id,
+        agentName: agent.name,
+        hint: 'This agent cannot serve requests. Rebuild it (the orb will offer) or remove it.',
+      });
+      return false;
+    }
+    agent = wrapped;
   }
 
   // Check if already connected

@@ -34,9 +34,22 @@ const generator = {
 const store = {
   init: vi.fn().mockResolvedValue(undefined),
   createAgent: vi.fn(),
+  updateAgent: vi.fn(),
 };
 const budget = {
   checkBudget: vi.fn().mockReturnValue({ blocked: false, warnings: [] }),
+};
+// Fake dynamic-agent wrapper mirroring the real wrapConfigAgent contract:
+// llm/chat configs with a prompt get an executable wrap; everything else null.
+// The wrap's execute() behavior is overridable per test via wrapExecute.
+let wrapExecute = async () => ({ success: true, message: 'wrapped ok' });
+const wrapper = {
+  wrapConfigAgent: vi.fn((cfg) => {
+    const et = String(cfg.executionType || 'llm').toLowerCase();
+    if (!['llm', 'chat'].includes(et)) return null;
+    if (!(cfg.prompt || cfg.systemPrompt || cfg.description)) return null;
+    return { ...cfg, execute: (task) => wrapExecute(task) };
+  }),
 };
 
 _setTestDeps({
@@ -44,6 +57,7 @@ _setTestDeps({
   generator: () => generator,
   store: () => store,
   budget: () => ({ getBudgetManager: () => budget }),
+  wrapper: () => wrapper,
 });
 
 const SAMPLE_PLAN = {
@@ -67,7 +81,9 @@ describe('buildAgentWithClaudeCode', () => {
     generator.generateAgentFromDescription.mockReset();
     store.init.mockReset().mockResolvedValue(undefined);
     store.createAgent.mockReset();
+    store.updateAgent.mockReset();
     budget.checkBudget.mockReset().mockReturnValue({ blocked: false, warnings: [] });
+    wrapExecute = async () => ({ success: true, message: 'wrapped ok' });
   });
 
   it('rejects empty requests without calling any downstream service', async () => {
@@ -268,6 +284,7 @@ describe('buildAgentWithClaudeCode', () => {
       runner: () => runner,
       generator: () => generator,
       store: () => factory,
+      wrapper: () => wrapper,
     });
 
     runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
@@ -282,6 +299,51 @@ describe('buildAgentWithClaudeCode', () => {
       runner: () => runner,
       generator: () => generator,
       store: () => store,
+      wrapper: () => wrapper,
+    });
+  });
+
+  it('updates the existing agent in place when updateAgentId is set (rebuild/feature-add)', async () => {
+    runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
+    const config = { executionType: 'llm', prompt: 'You set alarms.', name: 'Alarm Manager' };
+    generator.generateAgentFromDescription.mockResolvedValue(config);
+    store.updateAgent.mockResolvedValue({ id: 'agent-123', name: 'Alarm Manager', version: 2 });
+
+    const result = await buildAgentWithClaudeCode('Rebuild the existing agent "Alarm Manager"', {
+      updateAgentId: 'agent-123',
+    });
+
+    expect(result.success).toBe(true);
+    expect(store.updateAgent).toHaveBeenCalledTimes(1);
+    expect(store.createAgent).not.toHaveBeenCalled();
+    const [idArg, configArg] = store.updateAgent.mock.calls[0];
+    expect(idArg).toBe('agent-123');
+    expect(configArg).toEqual(config);
+    expect(result.agent.id).toBe('agent-123');
+  });
+
+  it('fails cleanly when updateAgentId is set but the store cannot update', async () => {
+    runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'p' });
+    const noUpdateStore = { init: vi.fn(), createAgent: vi.fn() };
+    _setTestDeps({
+      runner: () => runner,
+      generator: () => generator,
+      store: () => noUpdateStore,
+      wrapper: () => wrapper,
+    });
+
+    const result = await buildAgentWithClaudeCode('rebuild it', { updateAgentId: 'agent-123' });
+    expect(result.success).toBe(false);
+    expect(result.stage).toBe('save');
+    expect(noUpdateStore.createAgent).not.toHaveBeenCalled();
+
+    _setTestDeps({
+      runner: () => runner,
+      generator: () => generator,
+      store: () => store,
+      budget: () => ({ getBudgetManager: () => budget }),
+      wrapper: () => wrapper,
     });
   });
 });
@@ -297,6 +359,7 @@ describe('_preflightBudgetCheck', () => {
       generator: () => generator,
       store: () => store,
       budget: () => null,
+      wrapper: () => wrapper,
     });
     const r = _preflightBudgetCheck();
     expect(r.blocked).toBe(false);
@@ -306,6 +369,7 @@ describe('_preflightBudgetCheck', () => {
       generator: () => generator,
       store: () => store,
       budget: () => ({ getBudgetManager: () => budget }),
+      wrapper: () => wrapper,
     });
   });
 
@@ -359,6 +423,8 @@ describe('_describeAgentFromPlan', () => {
 describe('buildAgentWithClaudeCode -- post-build verification', () => {
   beforeEach(() => {
     runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
+    wrapper.wrapConfigAgent.mockClear();
+    wrapExecute = async () => ({ success: true, message: 'wrapped ok' });
   });
 
   it('live-tests an agent that has execute() and reports live-tested', async () => {
@@ -397,5 +463,39 @@ describe('buildAgentWithClaudeCode -- post-build verification', () => {
     const result = await buildAgentWithClaudeCode('set an alarm');
     expect(result.success).toBe(false);
     expect(result.verified.mode).toBe('failed');
+  });
+
+  // ── Hot-wrap: a config-only LLM artifact is live-tested NOW instead of
+  //    settling for config-pending-restart (self-heal loop step 4) ─────────
+  it('hot-wraps a config-only LLM artifact and reports live-tested when the wrapped test passes', async () => {
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'You joke.' });
+    store.createAgent.mockResolvedValue({ id: 'a5', name: 'A5' }); // no execute()
+    const result = await buildAgentWithClaudeCode('tell me a joke');
+    expect(result.success).toBe(true);
+    expect(result.verified.mode).toBe('live-tested');
+    expect(wrapper.wrapConfigAgent).toHaveBeenCalled();
+    // The wrap receives the persisted identity, not just the raw config
+    const wrappedCfg = wrapper.wrapConfigAgent.mock.calls.at(-1)[0];
+    expect(wrappedCfg.id).toBe('a5');
+  });
+
+  it('FAILS the build when the hot-wrapped self-test returns failure', async () => {
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'You joke.' });
+    store.createAgent.mockResolvedValue({ id: 'a6', name: 'A6' });
+    wrapExecute = async () => ({ success: false, error: 'LLM refused' });
+    const result = await buildAgentWithClaudeCode('tell me a joke');
+    expect(result.success).toBe(false);
+    expect(result.verified.mode).toBe('failed');
+  });
+
+  it('falls back to config-pending-restart when the hot-wrapped self-test THROWS (transient, config still servable)', async () => {
+    generator.generateAgentFromDescription.mockResolvedValue({ executionType: 'llm', prompt: 'You joke.' });
+    store.createAgent.mockResolvedValue({ id: 'a7', name: 'A7' });
+    wrapExecute = async () => {
+      throw new Error('network blip');
+    };
+    const result = await buildAgentWithClaudeCode('tell me a joke');
+    expect(result.success).toBe(true);
+    expect(result.verified.mode).toBe('config-pending-restart');
   });
 });

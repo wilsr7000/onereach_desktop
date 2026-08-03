@@ -37,6 +37,42 @@ async function executeWithAppLLM(prompt, systemPrompt, _task) {
   }
 }
 
+// Execution types executeWithAppLLM can serve directly. applescript/shell/
+// script/api configs need the bridge's richer executor (or are unimplemented)
+// and must NOT be wrapped here -- a wrap that silently no-ops would recreate
+// the zombie-agent class this exists to kill.
+const LLM_WRAPPABLE_EXECUTION_TYPES = new Set(['llm', 'chat']);
+
+/**
+ * Wrap a config-only agent definition (a stored JSON artifact with no runtime
+ * execute()) into an executable agent using the same app-LLM executor the
+ * dynamic runtime uses at boot. Lets a freshly built agent be live-tested and
+ * hot-connected immediately instead of waiting for the next app start.
+ *
+ * @param {Object} def - stored agent definition (name, prompt/systemPrompt, executionType, ...)
+ * @param {Object} [opts]
+ * @param {Function} [opts.executeLLM] - test seam; defaults to executeWithAppLLM
+ * @returns {Object|null} `{ ...def, execute }`, or null when the config is not LLM-servable
+ */
+function wrapConfigAgent(def, opts = {}) {
+  if (!def || typeof def !== 'object') return null;
+  if (typeof def.execute === 'function') return def; // already executable
+
+  const executionType = String(def.executionType || 'llm').toLowerCase();
+  if (!LLM_WRAPPABLE_EXECUTION_TYPES.has(executionType)) return null;
+
+  const promptSource = def.systemPrompt || def.prompt || def.description || '';
+  if (!String(promptSource).trim()) return null;
+
+  const executor = typeof opts.executeLLM === 'function' ? opts.executeLLM : executeWithAppLLM;
+  const systemPrompt =
+    def.systemPrompt || def.prompt || `You are ${def.name || 'a helpful assistant'}. ${def.description || ''}`;
+
+  const wrapped = { ...def };
+  wrapped.execute = async (task = {}) => executor(task.content || '', systemPrompt, task);
+  return wrapped;
+}
+
 /**
  * Create a dynamic agent that handles user-defined agent definitions
  */
@@ -219,4 +255,5 @@ module.exports = {
   createDynamicAgent,
   startDynamicAgent,
   executeWithAppLLM,
+  wrapConfigAgent,
 };
