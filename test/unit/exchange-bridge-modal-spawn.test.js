@@ -56,10 +56,16 @@ describe('exchange-bridge task:settled -- modal spawn (Phase 2)', () => {
     expect(after).toMatch(/\}\s*catch\s*\(/);
   });
 
-  it('logs at warn (not error) when spawn fails (benign UX failure)', () => {
+  it('logs at ERROR when spawn fails (graded delivery failure, not benign)', () => {
+    // Contract strengthened after the 2026-08 "no visual window opened"
+    // failure: a modal that fails to spawn means the user was promised a
+    // window and got nothing. It is captured as panelShown=false, graded by
+    // the delivery eval (partial-no-panel), and logged at error level so it
+    // is alarm-visible — the old warn treated exactly this as "benign".
     const spawnIdx = block.indexOf('showAgentUIModal');
-    const after = block.slice(spawnIdx, spawnIdx + 800);
-    expect(after).toMatch(/log\.warn\(['"]voice['"],\s*['"]agent-ui modal spawn failed['"]/);
+    const after = block.slice(spawnIdx, spawnIdx + 900);
+    expect(after).toMatch(/log\.error\(['"]voice['"],\s*['"]agent-ui modal spawn failed['"]/);
+    expect(after).toMatch(/panelShown/);
   });
 });
 

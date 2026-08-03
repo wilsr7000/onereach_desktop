@@ -78,7 +78,10 @@ describe('MemoryCurator -- append grooming', () => {
 
   it('returns changed=false when section is already clean', () => {
     const content = '- 2026-04-15: single fresh line';
-    const out = curator._groomAppendSection(content, rule, Date.now());
+    // NOW, not Date.now(): with the real clock this April fixture crosses the
+    // 90-day age-out window and gets pruned (changed=true) — the same rot the
+    // sibling tests were pinned against.
+    const out = curator._groomAppendSection(content, rule, NOW);
     expect(out.changed).toBe(false);
   });
 });
