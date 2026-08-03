@@ -92,6 +92,13 @@ const {
 
 const exchangeBus = require('../../lib/exchange/event-bus');
 
+// Delivery eval: end-of-turn verdict on whether the user actually received
+// the answer (speak confirmed / silent failure), logged to the central event
+// manager. Also surfaces the answer-reflector's low-quality flag there
+// instead of memory-only.
+const deliveryEval = require('../../lib/delivery-eval');
+deliveryEval.subscribeQualityFlags(exchangeBus);
+
 const { safeExecuteAgent, validateAgentContract } = require('../../packages/agents/agent-middleware');
 
 const { getTranscriptService } = require('../../lib/transcript-service');
@@ -4475,6 +4482,7 @@ function setupExchangeEvents() {
             inputModality,
             isProactive,
           });
+          const speakStartedAt = Date.now();
           const speakResult = await speaker.speak(normalized.spokenSummary, {
             voice: agentVoice,
             // Flag so downstream listeners know this is panel-backed speech
@@ -4491,9 +4499,41 @@ function setupExchangeEvents() {
             agentId,
           });
           log.info('voice', 'Speak result for task completion', { speakResult: speakResult });
+          // Delivery eval: speak() resolves true ONLY when playback completion
+          // was confirmed. Anything else means the user heard nothing -- grade
+          // it, alarm it, and fire the audible fallback.
+          deliveryEval.evaluateDelivery({
+            taskId: task.id,
+            agentId,
+            inputModality,
+            spokenSummary: normalized.spokenSummary,
+            hasPanel,
+            speakAttempted: true,
+            speakResult,
+            speakMs: Date.now() - speakStartedAt,
+          });
+        } else {
+          // No speaker available at all -- previously fell through in silence.
+          deliveryEval.evaluateDelivery({
+            taskId: task.id,
+            agentId,
+            inputModality,
+            spokenSummary: normalized.spokenSummary,
+            hasPanel,
+            speakAttempted: false,
+          });
         }
       } catch (e) {
         log.error('voice', 'Direct TTS for result failed', { arg0: e.message, arg1: e.stack });
+        deliveryEval.evaluateDelivery({
+          taskId: task.id,
+          agentId,
+          inputModality,
+          spokenSummary: normalized.spokenSummary,
+          hasPanel,
+          speakAttempted: true,
+          error: e.message,
+        });
       }
     } else if (normalized.spokenSummary && !shouldSpeak) {
       log.info('voice', 'TTS skipped (text-in)', {
