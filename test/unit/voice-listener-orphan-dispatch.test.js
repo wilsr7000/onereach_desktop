@@ -1,19 +1,21 @@
 /**
- * voice-listener -- orphaned user request → direct exchange dispatch
+ * voice-listener -- SINGLE-PATH dispatch (main process owns voice dispatch)
  *
- * Regression for the recurring "daily brief did nothing": the orb can play a
- * short trailing audio, hit audio-done → idle → disconnect (unsubscribe)
- * microseconds BEFORE the handle_user_request tool call lands. The
- * function_call_transcript then broadcasts to ZERO subscribers and the request
- * is silently orphaned -- it never reaches the exchange.
+ * History: this file originally pinned an "orphan dispatch" fallback (main
+ * dispatched only when zero renderers were subscribed) layered on top of the
+ * renderer's own submitTask path. The dual paths raced each other -- the orb
+ * unsubscribing microseconds before the tool call landed produced the
+ * "daily brief did nothing" failures, and reciprocal same-turn dedup was
+ * needed to stop double-dispatch. That architecture is gone.
  *
- * The fix: when there are no subscribers at that instant, voice-listener
- * dispatches the request to the exchange directly from the main process (the
- * same hudApi.submitTask → processSubmit path the renderer uses), so the brief
- * still runs. These tests pin that behaviour and guard against double-dispatch.
+ * Contract now: the main process ALWAYS dispatches on handle_user_request
+ * (renderers receive function_call_transcript for UI only), the realtime tool
+ * call is ALWAYS silent-acked immediately (the realtime session is an ear,
+ * never an answer channel), and synchronous (non-queued) replies are spoken
+ * through voice-speaker from main.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('electron', () => ({
   ipcMain: { handle: vi.fn(), on: vi.fn() },
@@ -39,18 +41,23 @@ vi.mock('../../lib/ai-service', () => ({
 
 const { VoiceListener } = require('../../voice-listener.js');
 
-// hud-api is exercised through the injectable _deps seam (avoids the flaky
-// vitest+CJS module-mock interception for voice-listener's require chain).
-let submitTask;
+// hud-api + speaker via the injectable _deps seam (vitest module mocks don't
+// reliably intercept this CJS require chain).
+let submitTask, speak;
 function makeListener() {
   const listener = new VoiceListener();
-  submitTask = vi.fn(() => Promise.resolve({ taskId: 't1', queued: true }));
+  submitTask = vi.fn(() => Promise.resolve({ taskId: 't1', queued: true, suppressAIResponse: true }));
+  speak = vi.fn(() => Promise.resolve(true));
   listener.__setDeps({
     hudApi: { submitTask, isSpeaking: () => false, speechStarted: () => {}, speechEnded: () => {} },
     getBargeDetector: () => null,
     getAffect: () => null,
-    getVoiceSpeaker: () => ({ speak: () => Promise.resolve() }),
+    getVoiceSpeaker: () => ({ speak }),
   });
+  // Capture realtime sends so we can assert the silent ack.
+  listener.isConnected = true;
+  listener.sent = [];
+  listener.sendEvent = vi.fn((e) => { listener.sent.push(e); return true; });
   return listener;
 }
 
@@ -64,16 +71,13 @@ function userRequestEvent(transcript, callId = 'call_1') {
   };
 }
 
-describe('voice-listener -- orphaned user request → direct exchange dispatch', () => {
-  beforeEach(() => { submitTask = undefined; });
+const flush = () => new Promise((r) => { setTimeout(r, 0); });
 
-  it('dispatches to the exchange directly when there are NO subscribers (the orphan case)', () => {
+describe('voice-listener -- single-path dispatch (main always dispatches)', () => {
+  it('dispatches to the exchange with NO subscribers (the old orphan race is structurally gone)', () => {
     const listener = makeListener();
-    // No subscribers -- the orb disconnected right before the tool call landed.
     expect(listener.subscribers.size).toBe(0);
-
     listener.handleEvent(userRequestEvent('Give me the daily brief'));
-
     expect(submitTask).toHaveBeenCalledTimes(1);
     expect(submitTask).toHaveBeenCalledWith(
       'Give me the daily brief',
@@ -81,26 +85,33 @@ describe('voice-listener -- orphaned user request → direct exchange dispatch',
     );
   });
 
-  it('does NOT dispatch from main when a subscriber is present (renderer handles it — no double-dispatch)', () => {
+  it('ALSO dispatches when a renderer is subscribed — main is the only dispatcher, no dedup needed', () => {
     const listener = makeListener();
-    listener.subscribe(1, () => {}); // orb is subscribed and will dispatch itself
-
+    listener.subscribe(1, () => {});
     listener.handleEvent(userRequestEvent('Give me the daily brief'));
-
-    expect(submitTask).not.toHaveBeenCalled();
+    expect(submitTask).toHaveBeenCalledTimes(1);
   });
 
-  it('still broadcasts function_call_transcript to a present subscriber', () => {
+  it('silent-acks the realtime tool call immediately (ear, not answer channel)', () => {
+    const listener = makeListener();
+    listener.handleEvent(userRequestEvent('hello', 'call_42'));
+    const ack = listener.sent.find((e) => e.type === 'conversation.item.create');
+    expect(ack).toBeTruthy();
+    expect(ack.item.call_id).toBe('call_42');
+    expect(JSON.parse(ack.item.output).response).toBe('');
+    // Silent ack must NOT trigger a model response.create (no realtime voicing).
+    expect(listener.sent.find((e) => e.type === 'response.create')).toBeUndefined();
+  });
+
+  it('still broadcasts function_call_transcript to subscribers, marked uiOnly', () => {
     const listener = makeListener();
     const received = [];
     listener.subscribe(1, (e) => received.push(e));
-
     listener.handleEvent(userRequestEvent('hello'));
-
     const fc = received.find((e) => e.type === 'function_call_transcript');
     expect(fc).toBeTruthy();
     expect(fc.transcript).toBe('hello');
-    expect(fc.callId).toBe('call_1');
+    expect(fc.uiOnly).toBe(true);
   });
 
   it('does not dispatch for an empty/whitespace transcript', () => {
@@ -114,5 +125,35 @@ describe('voice-listener -- orphaned user request → direct exchange dispatch',
     submitTask.mockReturnValueOnce(Promise.reject(new Error('exchange down')));
     expect(() => listener.handleEvent(userRequestEvent('brief please'))).not.toThrow();
     expect(submitTask).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('voice-listener -- immediate (non-queued) replies speak via voice-speaker', () => {
+  it('speaks a synchronous message (clarification / filter) through the speaker', async () => {
+    const listener = makeListener();
+    submitTask.mockReturnValueOnce(
+      Promise.resolve({ queued: false, message: 'Did you mean the morning brief?' })
+    );
+    listener.handleEvent(userRequestEvent('the thing'));
+    await flush();
+    expect(speak).toHaveBeenCalledTimes(1);
+    expect(speak.mock.calls[0][0]).toContain('morning brief');
+  });
+
+  it('prefers the needsInput prompt over message', async () => {
+    const listener = makeListener();
+    submitTask.mockReturnValueOnce(
+      Promise.resolve({ queued: false, message: 'x', needsInput: { prompt: 'Which alarm time?' } })
+    );
+    listener.handleEvent(userRequestEvent('set an alarm'));
+    await flush();
+    expect(speak.mock.calls[0][0]).toBe('Which alarm time?');
+  });
+
+  it('stays silent for queued results — the task:settled path owns those answers', async () => {
+    const listener = makeListener();
+    listener.handleEvent(userRequestEvent('daily brief'));
+    await flush();
+    expect(speak).not.toHaveBeenCalled();
   });
 });

@@ -717,45 +717,42 @@ class VoiceListener {
 
             log.info('voice', 'User request', { transcript });
 
-            this.pendingFunctionCallId = event.call_id;
-            this.pendingFunctionItemId = event.item_id;
-            // Stamp the generation so we can tell later whether the realtime
-            // slot this call_id belongs to is still alive when the answer
-            // comes back (see respondToFunctionCall).
-            this.pendingFunctionCallGeneration = this._generation;
+            // ============== SINGLE-PATH DISPATCH (main process) ==============
+            // There is exactly ONE dispatch path for voice requests: this one.
+            // The realtime session is an EAR (STT + turn detection), never an
+            // answer channel -- so the tool call is silent-acked immediately,
+            // and ALL answers flow through task:settled -> voice-speaker +
+            // surface-policy. The orb renderer receives the broadcast below
+            // for UI ONLY (captions, processing state); it must never submit.
+            // This replaces the old renderer-dispatch + orphan-fallback pair,
+            // whose races (orb unsubscribing microseconds before the tool
+            // call; dedup between transcript and function-call handlers)
+            // produced every "did nothing" failure in this pipeline.
+            this.respondToFunctionCall(event.call_id, '');
 
-            // Broadcast for agent processing. The orb renderer normally
-            // receives this and dispatches to the exchange via
-            // agentHUD.submitTask.
             this.broadcast({
               type: 'function_call_transcript',
               transcript: transcript,
               callId: event.call_id,
               itemId: event.item_id,
+              uiOnly: true, // renderers display; main has already dispatched
             });
 
-            // Resilience: if NO renderer is subscribed at this instant, the
-            // broadcast above reaches nobody and the request is silently
-            // orphaned. This is the real "daily brief did nothing" repro: the
-            // orb plays a short trailing audio, hits audio-done -> idle ->
-            // disconnect (unsubscribe) microseconds BEFORE this tool call
-            // lands, so function_call_transcript has zero subscribers. Dispatch
-            // to the exchange directly from main so the request still runs; its
-            // result is spoken via voice-speaker, independent of the orb.
-            if (this.subscribers.size === 0 && transcript && transcript.trim()) {
-              log.warn('voice', 'No subscribers for user request — dispatching to exchange directly', {
-                event: 'voice:orphan-dispatch',
-                transcript: transcript.slice(0, 80),
-              });
+            if (transcript && transcript.trim()) {
               const submitter = this._deps.hudApi && this._deps.hudApi.submitTask;
               if (typeof submitter === 'function') {
-                Promise.resolve(
-                  submitter(transcript, { toolId: 'orb', inputModality: 'voice' })
-                ).catch((err) =>
-                  log.error('voice', 'Direct exchange dispatch failed', { error: err && err.message })
-                );
+                Promise.resolve(submitter(transcript, { toolId: 'orb', inputModality: 'voice' }))
+                  .then((res) => this._handleImmediateResult(res))
+                  .catch((err) =>
+                    log.error('voice', 'Dispatch to exchange failed', {
+                      event: 'voice:dispatch-failed',
+                      error: err && err.message,
+                    })
+                  );
               } else {
-                log.error('voice', 'Cannot dispatch orphaned request — hud-api submitTask unavailable', {});
+                log.error('voice', 'Cannot dispatch — hud-api submitTask unavailable', {
+                  event: 'voice:dispatch-failed',
+                });
               }
             }
           } catch (err) {
@@ -1000,6 +997,30 @@ class VoiceListener {
     this._clearPendingCall(callId);
 
     return true;
+  }
+
+  /**
+   * Single-path continuation for the main-process dispatch: queued tasks
+   * answer later via task:settled -> voice-speaker (graded by the delivery
+   * eval there). Synchronous replies (clarifications, filter messages,
+   * cached routes) resolve immediately from submitTask and are spoken HERE,
+   * through the same voice-speaker channel -- the realtime session never
+   * voices answers.
+   */
+  _handleImmediateResult(res) {
+    try {
+      if (!res || res.queued || res.suppressAIResponse) return; // settle path owns it
+      const text = (res.needsInput && res.needsInput.prompt) || res.message || res.error;
+      if (typeof text === 'string' && text.trim()) {
+        log.info('voice', 'Speaking immediate (non-queued) reply', {
+          event: 'voice:immediate-reply',
+          preview: text.slice(0, 60),
+        });
+        this._speakFallback(text);
+      }
+    } catch (err) {
+      log.warn('voice', 'Immediate-reply handling failed', { error: err && err.message });
+    }
   }
 
   /**

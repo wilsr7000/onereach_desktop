@@ -131,9 +131,14 @@ describe('Orb task pipeline wiring (source invariants)', () => {
     expect(hudSrc).toMatch(/metadata:\s*\{\s*\.\.\.metadata,\s*traceId\s*\}/);
   });
 
-  it('orb.html surfaces a clear error when the agentHUD bridge is unavailable', () => {
+  it('orb.html does NOT dispatch voice tasks (single-path: main process owns dispatch)', () => {
+    // The old renderer dispatch branch (with its "agentHUD bridge
+    // unavailable" error) is deleted: voice-listener.js dispatches every
+    // voice request in main. The renderer keeps agentHUD.submitTask ONLY for
+    // text-in (processVoiceCommand from the chat box).
     const orbSrc = readFileSync(resolve(REPO_ROOT, 'orb.html'), 'utf8');
-    expect(orbSrc).toMatch(/agentHUD bridge unavailable/);
-    expect(orbSrc).toMatch(/HUD bridge failed to load/);
+    const fnIdx = orbSrc.indexOf('function handleFunctionCallTranscript');
+    expect(fnIdx).toBeGreaterThan(-1);
+    expect(orbSrc.slice(fnIdx, fnIdx + 2500)).not.toMatch(/agentHUD\.submitTask/);
   });
 });

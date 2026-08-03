@@ -1651,7 +1651,6 @@
       }
 
       // Constants
-      const FUNCTION_CALL_DEDUP_MS = 5000;
       // Time-only dedup window for the SAME user turn. The realtime API
       // fires both a Whisper transcript event AND a handle_user_request
       // function call for each user utterance; with gpt-realtime-2 the
@@ -1663,7 +1662,6 @@
       // safe ceiling because Whisper transcription and model function
       // calls for the same turn are emitted within a few hundred ms of
       // each other.
-      const SAME_TURN_DEDUP_MS = 1500;
       const TTS_COOLDOWN_MS = 2500;
       const SILENCE_AFTER_SPEECH_MS = 5000;
       const NO_SPEECH_TIMEOUT_MS = 60000;
@@ -3715,173 +3713,32 @@
       // ==================== EVENT ROUTER HANDLER FUNCTIONS ====================
 
       // Extract the most complex handler as a named function
-      async function handleFunctionCallTranscript(event) {
+      // ==================== SINGLE-PATH: UI-ONLY HANDLER ====================
+      // Dispatch happens in EXACTLY ONE place: the main process
+      // (voice-listener.js dispatches to the exchange and silent-acks the
+      // realtime tool call before this event even reaches us). This handler
+      // is pure UI: show the transcript, enter processing state. The old
+      // renderer dispatch (submitTask + respondToFunction branching + the
+      // reciprocal same-turn dedup against the transcript handler) is GONE --
+      // those dual paths raced each other and produced every "did nothing"
+      // failure. Answers arrive via task:settled -> voice-speaker audio +
+      // surface-policy window + onResult/onChatReply events, all of which
+      // this renderer already handles independently of this function.
+      function handleFunctionCallTranscript(event) {
         const transcript = event.transcript;
-        const callId = event.callId;
-
-        // Always stamp the dedup fields FIRST so the reciprocal check in
-        // the transcript handler can see them. (We do this even if we
-        // dedup below -- that way a delayed transcript event that fires
-        // a few hundred ms later still gets blocked.)
-        S.set('lastFunctionCallTranscript', transcript?.toLowerCase() || '');
-        S.set('lastFunctionCallTime', Date.now());
-
-        // ── SAME-TURN DEDUP (time-only, reciprocal) ──
-        // If a regular transcript event already submitted this turn
-        // within SAME_TURN_DEDUP_MS, the task is already in flight and
-        // we should NOT submit again -- but we MUST still acknowledge
-        // the function call to OpenAI or the realtime session hangs on
-        // a pending tool call. Silently ack with empty result; the
-        // listener path already treats empty as a silent ack (won't
-        // trigger a model response.create -- see voice-listener.js).
-        const lastTTime = S.get('lastTranscriptTime') || 0;
-        if (lastTTime > 0 && Date.now() - lastTTime < SAME_TURN_DEDUP_MS) {
-          console.log('[Orb] Skipping function call - transcript already handling this turn:', transcript);
-          showTranscript(transcript, false);
-          try {
-            if (callId && window.orbAPI?.respondToFunction) {
-              await window.orbAPI.respondToFunction(callId, '');
-            }
-          } catch (ackErr) {
-            console.warn('[Orb] Failed to ack deduped function call:', ackErr);
-          }
-          S.set('pendingFunctionCallId', null);
-          return;
-        }
 
         S.transition('processing', 'function-call');
-        S.update({
-          lastProcessedTranscript: transcript,
-          lastProcessedTime: Date.now(),
-          pendingFunctionCallId: callId,
-          pendingSubmitCount: (S.get('pendingSubmitCount') || 0) + 1,
-        });
+        S.set('lastProcessedTranscript', transcript || '');
+        S.set('lastProcessedTime', Date.now());
 
         // Mark that speech ended
         onSpeechEnded();
 
         showTranscript(transcript, false);
-
-        // Correlate this dispatch across the renderer and main-process logs.
-        // The same traceId is logged here (forwarded via console-message) and
-        // by the hud-api:submit-task IPC handler (ipc category) and the
-        // exchange auction, so a future "nothing happened" is a single query.
-        const traceId =
-          'orb-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
-
-        try {
-          if (!window.agentHUD || !window.agentHUD.submitTask) {
-            // The HUD bridge never loaded (see preload-orb.js stub) -- the orb
-            // can hear but can't dispatch. Surface it instead of dying silent.
-            console.error(`[Orb] traceId=${traceId} agentHUD bridge unavailable; cannot dispatch task`);
-            handleOrbError('function_call', 'Agent system not available (HUD bridge failed to load)', { callId });
-            return;
-          }
-
-          console.log(`[Orb] traceId=${traceId} dispatching to agentHUD.submitTask: ${JSON.stringify((transcript || '').slice(0, 80))}`);
-
-          // Function-call handler: realtime model classified the user's
-          // voice utterance as a handle_user_request tool call, so this
-          // is voice-in by definition. inputModality threads through to
-          // the bridge for TTS gating + chat-history tagging.
-          const result = await window.agentHUD.submitTask(transcript, {
-            toolId: 'orb',
-            skipFilter: false,
-            inputModality: 'voice',
-            traceId,
-          });
-          console.log(`[Orb] traceId=${traceId} HUD API result:`, JSON.stringify(result));
-
-          // Handle error returns
-          if (!result || result.error) {
-            console.error(`[Orb] traceId=${traceId} submitTask returned error: ${result?.error || 'Unknown error'}`);
-            handleOrbError('function_call', result?.error || 'Unknown error', { callId });
-            return;
-          }
-
-          // Decide the response via the pure classifier (lib/orb/orb-turn-response.js);
-          // the side effects (respondToFunction / transitions / route dispatch) stay here.
-          const TR = window.OrbTurnResponse;
-          const desc = TR.classifyTurnResponse(result);
-
-          // Backend already handled TTS (exchange async result, cached route,
-          // media command). Silent-ack to avoid double audio.
-          if (desc.action === 'silent-ack') {
-            console.log('[Orb] Backend handled TTS, acknowledging function call silently');
-            await window.orbAPI.respondToFunction(callId, '');
-            S.set('pendingFunctionCallId', null);
-            // needsInput state is set via onResult handler (HUD API event)
-            return;
-          }
-
-          // Transcript was filtered
-          if (desc.action === 'clarify') {
-            console.log('[Orb] Transcript filtered:', result.filterReason);
-            await window.orbAPI.respondToFunction(callId, desc.ackText);
-            S.set('pendingFunctionCallId', null);
-            return;
-          }
-
-          // HTML panel result
-          if (desc.hasPanel) {
-            S.set('hasActivePanel', true);
-          }
-
-          // Multi-turn: agent needs input (includes NormalizeIntent clarification)
-          if (desc.action === 'needs-input') {
-            console.log('[Orb] Agent needs input, entering awaitingInput');
-            _pendingNeedsInput = true;
-            await window.orbAPI.respondToFunction(callId, desc.ackText);
-            S.set('pendingFunctionCallId', null);
-            // Transition to awaitingInput - TTS will play the prompt,
-            // then audio_done will transition to listening
-            if (S.phase === 'processing') {
-              S.transition('speaking', 'tts-followup');
-            }
-            // Note: We don't transition to awaitingInput here because TTS
-            // hasn't started yet. The audio_done handler checks _pendingNeedsInput.
-          } else {
-            // Standard response -- route through the (side-effectful) response router
-            const route = routeResult(result);
-            const routed = TR.classifyRoutedResponse(result, route);
-
-            // Implicit question: agent's message is phrased as a question but
-            // didn't set needsInput. Flag for follow-up listen so the orb
-            // actually waits for the user's answer instead of going idle.
-            if (routed.awaitAnswer) {
-              _pendingNeedsInput = true;
-              console.log('[Orb] Implicit question in function-call path, flagging for follow-up');
-            }
-
-            // Capture dwell duration for post-response listening
-            _pendingDwellMs = routed.dwellMs;
-
-            if (routed.action === 'tone') {
-              // Tone-only: play tone (already done in routeResult), suppress TTS
-              const Audio = window.OrbAudio;
-              if (Audio) window.OrbResponseRouter.dispatch(route, Audio, {
-                showTooltip: (text) => { showTranscript(text, false); setTimeout(hideTranscript, 3000); },
-              });
-              await window.orbAPI.respondToFunction(callId, '');
-              S.set('pendingFunctionCallId', null);
-              if (!_activeTaskId && !(S.get('pendingSubmitCount') || 0)) {
-                // Dwell-listen: stay listening briefly for follow-ups instead of going idle
-                _startDwellListen(_pendingDwellMs, 'tone-only-complete');
-              }
-              return;
-            }
-            await window.orbAPI.respondToFunction(callId, routed.ackText);
-            S.set('pendingFunctionCallId', null);
-          }
-        } catch (err) {
-          console.error(`[Orb] traceId=${traceId} submitTask threw: ${(err && err.message) || err}`);
-          handleOrbError('function_call', err, { callId });
-        } finally {
-          const count = (S.get('pendingSubmitCount') || 1) - 1;
-          S.set('pendingSubmitCount', count);
-        }
-
         setTimeout(hideTranscript, 3000);
+        // The 30s processing watchdog + the dead-end spoken fallback
+        // (orb-resilience) are this path's error handling: if no settle,
+        // reply, or immediate-answer audio arrives, the user hears about it.
       }
 
       // Track if a _needsInput result was received (for audio_done to know)
@@ -4155,50 +4012,20 @@
               const text = e.text?.trim();
               if (!text) return;
 
-              // ── SAME-TURN DEDUP (time-only) ──
-              // If a function_call_transcript event fired for the same
-              // user turn within SAME_TURN_DEDUP_MS, skip this transcript
-              // unconditionally -- the function call handler is already
-              // submitting a task and ack'ing OpenAI. Without this, the
-              // realtime model's tendency to paraphrase the Whisper
-              // transcript (e.g. "brief" -> "debrief") gets both events
-              // past the text-equality check and both submit tasks for
-              // the SAME utterance -- the user then hears the agent
-              // response twice.
-              const lastFCTime = S.get('lastFunctionCallTime') || 0;
-              if (lastFCTime > 0 && Date.now() - lastFCTime < SAME_TURN_DEDUP_MS) {
-                console.log('[Orb] Skipping transcript - function call already handling this turn:', text);
-                // Still mark speech ended so the UI advances out of listening.
-                onSpeechEnded();
-                showTranscript(text, false);
-                setTimeout(hideTranscript, 3000);
-                return;
-              }
-
-              // ── TEXT-EQUALITY DEDUP (longer window) ──
-              // Belt-and-suspenders for the case where the function call
-              // fired earlier and verbatim transcripts match.
-              const stripPunctuation = (s) => s.replace(/[.,!?;:'"]/g, '').trim();
-              const lastFCT = S.get('lastFunctionCallTranscript') || '';
-              const normalizedText = stripPunctuation(text.toLowerCase());
-              const normalizedFuncCall = stripPunctuation(lastFCT);
-              if (normalizedText === normalizedFuncCall && Date.now() - lastFCTime < FUNCTION_CALL_DEDUP_MS) {
-                console.log('[Orb] Skipping transcript - already handled via function call (text match):', text);
-                return;
-              }
-
-              // Update dedup tracking (used by handleFunctionCallTranscript
-              // for the reciprocal check when transcript fires first).
+              // SINGLE-PATH: voice finals are CAPTIONS ONLY. Dispatch happens
+              // exclusively in the main process on the handle_user_request
+              // tool call (voice-listener.js). The old dual dispatch
+              // (transcript -> processVoiceCommand racing the function-call
+              // handler, held together by reciprocal same-turn dedup) is
+              // deleted. processVoiceCommand remains for TEXT input from the
+              // chat box -- that is text-in's one path, owned by this UI.
               S.set('lastTranscriptText', text);
               S.set('lastTranscriptTime', Date.now());
-              S.set('lastProcessedTranscript', text);
-              S.set('lastProcessedTime', Date.now());
 
               // Mark speech ended
               onSpeechEnded();
 
               showTranscript(text, false);
-              processVoiceCommand(text);
               setTimeout(hideTranscript, 3000);
             },
 
