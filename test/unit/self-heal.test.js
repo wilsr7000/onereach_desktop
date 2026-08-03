@@ -127,6 +127,15 @@ describe('composeRebuildRequest / buildRebuildPendingBuild', () => {
     expect(req).toContain('llm');
   });
 
+  it('a playbook-backed agent rebuilds from its playbook (the authoritative spec)', () => {
+    const req = composeRebuildRequest({
+      ...STORED_DEF,
+      playbook: { markdown: '# Local Agent Playbook: Alarm Manager\n## Goal\nManage alarms.' },
+    });
+    expect(req).toContain('authoritative spec');
+    expect(req).toContain('# Local Agent Playbook: Alarm Manager');
+  });
+
   it('produces a builder-consent pendingBuild routed to claude-code with a rebuild tag', () => {
     const pb = buildRebuildPendingBuild(STORED_DEF, 'agent:contract-violation');
     expect(pb.buildMethod).toBe('claude-code');

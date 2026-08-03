@@ -52,12 +52,25 @@ const wrapper = {
   }),
 };
 
+// Playbook lib mock: compose deterministic markdown, pretend the Spaces
+// save succeeded. Injected everywhere so the real module's Spaces require
+// never runs in tests.
+const playbookLib = {
+  composeLocalAgentPlaybook: vi.fn(({ request, plan }) => ({
+    markdown: `# Local Agent Playbook: ${(plan && plan.suggestedName) || 'New Local Agent'}\nREQ: ${request}`,
+    title: `Local Agent Playbook: ${(plan && plan.suggestedName) || 'New Local Agent'}`,
+    agentName: (plan && plan.suggestedName) || 'New Local Agent',
+  })),
+  saveAgentPlaybook: vi.fn(() => ({ saved: true, ref: { itemId: 'pb-9', spaceId: 'agent-playbooks' } })),
+};
+
 _setTestDeps({
   runner: () => runner,
   generator: () => generator,
   store: () => store,
   budget: () => ({ getBudgetManager: () => budget }),
   wrapper: () => wrapper,
+  playbook: () => playbookLib,
 });
 
 const SAMPLE_PLAN = {
@@ -84,6 +97,8 @@ describe('buildAgentWithClaudeCode', () => {
     store.updateAgent.mockReset();
     budget.checkBudget.mockReset().mockReturnValue({ blocked: false, warnings: [] });
     wrapExecute = async () => ({ success: true, message: 'wrapped ok' });
+    playbookLib.composeLocalAgentPlaybook.mockClear();
+    playbookLib.saveAgentPlaybook.mockClear().mockReturnValue({ saved: true, ref: { itemId: 'pb-9', spaceId: 'agent-playbooks' } });
   });
 
   it('rejects empty requests without calling any downstream service', async () => {
@@ -285,6 +300,7 @@ describe('buildAgentWithClaudeCode', () => {
       generator: () => generator,
       store: () => factory,
       wrapper: () => wrapper,
+      playbook: () => playbookLib,
     });
 
     runner.planAgent.mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
@@ -300,6 +316,7 @@ describe('buildAgentWithClaudeCode', () => {
       generator: () => generator,
       store: () => store,
       wrapper: () => wrapper,
+      playbook: () => playbookLib,
     });
   });
 
@@ -331,6 +348,7 @@ describe('buildAgentWithClaudeCode', () => {
       generator: () => generator,
       store: () => noUpdateStore,
       wrapper: () => wrapper,
+      playbook: () => playbookLib,
     });
 
     const result = await buildAgentWithClaudeCode('rebuild it', { updateAgentId: 'agent-123' });
@@ -344,6 +362,7 @@ describe('buildAgentWithClaudeCode', () => {
       store: () => store,
       budget: () => ({ getBudgetManager: () => budget }),
       wrapper: () => wrapper,
+      playbook: () => playbookLib,
     });
   });
 });
@@ -360,6 +379,7 @@ describe('_preflightBudgetCheck', () => {
       store: () => store,
       budget: () => null,
       wrapper: () => wrapper,
+      playbook: () => playbookLib,
     });
     const r = _preflightBudgetCheck();
     expect(r.blocked).toBe(false);
@@ -370,6 +390,7 @@ describe('_preflightBudgetCheck', () => {
       store: () => store,
       budget: () => ({ getBudgetManager: () => budget }),
       wrapper: () => wrapper,
+      playbook: () => playbookLib,
     });
   });
 
@@ -497,5 +518,78 @@ describe('buildAgentWithClaudeCode -- post-build verification', () => {
     const result = await buildAgentWithClaudeCode('tell me a joke');
     expect(result.success).toBe(true);
     expect(result.verified.mode).toBe('config-pending-restart');
+  });
+});
+
+// ─── Playbook stage (local-agent template; the agent builds off the playbook) ─
+describe('buildAgentWithClaudeCode -- playbook-backed pipeline', () => {
+  beforeEach(() => {
+    runner.planAgent.mockReset().mockResolvedValue({ success: true, plan: SAMPLE_PLAN });
+    generator.generateAgentFromDescription.mockReset().mockResolvedValue({ executionType: 'llm', prompt: 'p' });
+    store.createAgent.mockReset().mockResolvedValue({
+      id: 'a-pb', name: 'Stock Quote Agent',
+      execute: async () => ({ success: true, message: 'ok' }),
+    });
+    playbookLib.composeLocalAgentPlaybook.mockClear();
+    playbookLib.saveAgentPlaybook.mockClear().mockReturnValue({ saved: true, ref: { itemId: 'pb-9', spaceId: 'agent-playbooks' } });
+  });
+
+  it('composes and saves a playbook from the plan, and generates the agent FROM it', async () => {
+    const result = await buildAgentWithClaudeCode('I want stock prices');
+
+    expect(playbookLib.composeLocalAgentPlaybook).toHaveBeenCalledTimes(1);
+    const composeArgs = playbookLib.composeLocalAgentPlaybook.mock.calls[0][0];
+    expect(composeArgs.request).toBe('I want stock prices');
+    expect(composeArgs.plan).toEqual(SAMPLE_PLAN);
+    expect(playbookLib.saveAgentPlaybook).toHaveBeenCalledTimes(1);
+
+    // The generator spec embeds the full playbook markdown
+    const genDescription = generator.generateAgentFromDescription.mock.calls[0][0];
+    expect(genDescription).toContain('Build the agent to satisfy this playbook');
+    expect(genDescription).toContain('# Local Agent Playbook: Stock Quote Agent');
+
+    // The playbook rides on the build result for the builder agent to open
+    expect(result.playbook.markdown).toContain('# Local Agent Playbook');
+    expect(result.playbook.saved).toBe(true);
+    expect(result.playbook.ref).toEqual({ itemId: 'pb-9', spaceId: 'agent-playbooks' });
+  });
+
+  it('persists the playbook ON the agent config (rebuild spec travels with the agent)', async () => {
+    await buildAgentWithClaudeCode('I want stock prices');
+    const savedConfig = store.createAgent.mock.calls[0][0];
+    expect(savedConfig.playbook.markdown).toContain('# Local Agent Playbook');
+    expect(savedConfig.playbook.ref).toEqual({ itemId: 'pb-9', spaceId: 'agent-playbooks' });
+  });
+
+  it('a failed Spaces save is non-fatal: markdown still rides on the config', async () => {
+    playbookLib.saveAgentPlaybook.mockReturnValue({ saved: false, ref: null, error: 'spaces down' });
+    const result = await buildAgentWithClaudeCode('I want stock prices');
+    expect(result.success).toBe(true);
+    expect(result.playbook.saved).toBe(false);
+    const savedConfig = store.createAgent.mock.calls[0][0];
+    expect(savedConfig.playbook.markdown).toContain('# Local Agent Playbook');
+  });
+
+  it('a playbook-lib crash does not kill the build (falls back to plan-only description)', async () => {
+    playbookLib.composeLocalAgentPlaybook.mockImplementation(() => {
+      throw new Error('template exploded');
+    });
+    const result = await buildAgentWithClaudeCode('I want stock prices');
+    expect(result.success).toBe(true);
+    expect(result.playbook).toBeNull();
+    const genDescription = generator.generateAgentFromDescription.mock.calls[0][0];
+    expect(genDescription).not.toContain('satisfy this playbook');
+    const savedConfig = store.createAgent.mock.calls[0][0];
+    expect(savedConfig.playbook).toBeUndefined();
+  });
+
+  it('emits a playbook progress stage between plan and generate', async () => {
+    const stages = [];
+    await buildAgentWithClaudeCode('I want stock prices', { onProgress: (e) => stages.push(e.stage) });
+    const planIdx = stages.indexOf('plan');
+    const pbIdx = stages.indexOf('playbook');
+    const genIdx = stages.indexOf('generate');
+    expect(pbIdx).toBeGreaterThan(planIdx);
+    expect(genIdx).toBeGreaterThan(pbIdx);
   });
 });

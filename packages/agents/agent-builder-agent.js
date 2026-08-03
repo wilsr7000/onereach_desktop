@@ -638,6 +638,26 @@ Effort guide:
     const agentName = (build.agent && (build.agent.name || build.agent.displayName)) || 'new agent';
     const elapsedSec = Math.max(1, Math.round((build.elapsedMs || 0) / 1000));
 
+    // Every build (system-offered or ad-hoc) opens WISER Playbooks with the
+    // new playbook composed from the local-agent template -- the playbook is
+    // the durable spec the agent was generated from. Fire-and-forget: the
+    // spoken outcome must not block on a web tool.
+    let playbookNote = '';
+    if (build.playbook && build.playbook.markdown) {
+      let opened = false;
+      try {
+        const { openPlaybookInWiser } = require('../../lib/agent-playbook');
+        opened = openPlaybookInWiser(build.playbook.markdown) === true;
+      } catch (_e) {
+        opened = false;
+      }
+      playbookNote = opened
+        ? ' Its playbook just opened in WISER Playbooks.'
+        : build.playbook.saved
+          ? ' Its playbook is saved in Spaces under Agent Playbooks.'
+          : '';
+    }
+
     // Post-build verification outcome (claude-code-agent-builder stage 4):
     // 'live-tested' means the artifact executed the original request NOW;
     // 'config-pending-restart' means a valid config that the dynamic runtime
@@ -687,7 +707,8 @@ Effort guide:
         success: true,
         message:
           `I ${builtVerb} "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'} and verified its configuration. ` +
-          `It comes online after the next app restart — then your original request will be handled.`,
+          `It comes online after the next app restart — then your original request will be handled.` +
+          playbookNote,
       };
     }
 
@@ -701,7 +722,8 @@ Effort guide:
       success: true,
       message:
         `Done. I ${builtVerb} and tested "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'}. ` +
-        followUp,
+        followUp +
+        playbookNote,
     };
   },
 

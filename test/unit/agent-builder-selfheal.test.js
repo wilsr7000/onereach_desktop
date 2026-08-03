@@ -129,6 +129,20 @@ describe('rebuild consent -> update-in-place build', () => {
     expect(result.message).toMatch(/restart/i);
   });
 
+  it('mentions the playbook when the build produced one (saved to Spaces; WISER not available in tests)', async () => {
+    mockBuildAgent.mockResolvedValue({
+      success: true,
+      agent: { id: 'agent-123', name: 'Alarm Manager' },
+      elapsedMs: 3000,
+      verified: { mode: 'live-tested', detail: 'ok' },
+      playbook: { markdown: '# Local Agent Playbook: Alarm Manager', saved: true, ref: { itemId: 'pb-1' } },
+    });
+
+    const result = await agentBuilder.execute(rebuildTask());
+    // No moduleManager in tests -> WISER cannot open -> honest fallback wording
+    expect(result.message).toMatch(/playbook is saved in Spaces/i);
+  });
+
   it('never auto-resubmits the rebuild instruction to the exchange', async () => {
     mockBuildAgent.mockResolvedValue({
       success: true,

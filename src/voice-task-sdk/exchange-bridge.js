@@ -3020,6 +3020,19 @@ async function initializeExchangeBridge(config = {}) {
       // 2. Connect custom agents from agent-store
       await connectCustomAgents(mergedConfig.port);
 
+      // 2.5 Seed the Event Manager local agent (playbook-backed) so the
+      // manage-events voice flow works out of the box. Runs AFTER
+      // connectCustomAgents on purpose: creation fires agent:hot-connect,
+      // which connects the agent exactly once (seeding before would connect
+      // it here AND again in the custom-agent sweep). Idempotent, non-fatal.
+      try {
+        const { ensureEventManagerAgent } = require('../../lib/events/ensure-event-agent');
+        const seeded = await ensureEventManagerAgent();
+        log.info('voice', 'Event Manager agent ensure', { status: seeded.status, agentId: seeded.agentId || null });
+      } catch (evErr) {
+        log.warn('voice', 'Event Manager agent ensure failed (non-fatal)', { error: evErr.message });
+      }
+
       log.info('voice', 'All agents connected. Total:', { v0: localAgentConnections.size });
     } catch (agentConnectError) {
       log.error('voice', 'Agent connection failed during init; exchange is up, health check will retry', {
