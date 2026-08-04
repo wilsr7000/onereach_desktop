@@ -81,6 +81,27 @@ function _setAgentStore(store) {
   _agentStore = store || null;
 }
 
+let _spacesStorage = null;
+
+function _getSpacesStorageSafe() {
+  if (_spacesStorage) return _spacesStorage;
+  try {
+    const { getSpacesAPI } = require('../../spaces-api');
+    const api = getSpacesAPI();
+    return api.storage || api._storage || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Test-only: inject fake Spaces storage. Pass null to reset.
+ * @param {Object|null} storage
+ */
+function _setSpacesStorage(storage) {
+  _spacesStorage = storage || null;
+}
+
 // System context passed to the feasibility LLM call so it can make
 // realistic assessments about what's easy/hard to build.
 const SYSTEM_CONTEXT = {
@@ -207,6 +228,16 @@ LOW confidence when: the user is asking an existing agent to do its job (play mu
       }
       // Ambiguous follow-up -- fall through to a fresh feasibility pass on the
       // new content (user probably moved on to a different request).
+    }
+
+    // USER-AUTHORED playbook build: the user drafted the local-agent
+    // playbook in WISER Playbooks (saved to Spaces) and now wants the agent
+    // built FROM it. "build the agent from my playbook [name]".
+    const fromPlaybook = content.match(
+      /\bbuild (?:the |an? )?agent from (?:my |the )?playbook\b\s*(?:called |named )?"?([^"]*)"?/i
+    );
+    if (fromPlaybook) {
+      return this._buildFromUserPlaybook((fromPlaybook[1] || '').trim());
     }
 
     // Feature-add / repair on an EXISTING custom agent: "add X to my Y
@@ -582,6 +613,8 @@ Effort guide:
     try {
       const builder = _getClaudeCodeBuilder();
       build = await builder(originalRequest, {
+        // User-authored WISER playbook: verbatim spec for the build.
+        playbookMarkdown: pendingBuild.authoredPlaybook || undefined,
         onProgress: (evt) => this._emitBuildProgress({ ...evt, originalRequest }),
         updateAgentId: (existingTarget && existingTarget.agentId) || undefined,
         generatorOptions: {
@@ -643,7 +676,10 @@ Effort guide:
     // the durable spec the agent was generated from. Fire-and-forget: the
     // spoken outcome must not block on a web tool.
     let playbookNote = '';
-    if (build.playbook && build.playbook.markdown) {
+    if (build.playbook && build.playbook.authored) {
+      // User-authored WISER playbook: it stays where they wrote it.
+      playbookNote = ' Built from your playbook.';
+    } else if (build.playbook && build.playbook.markdown) {
       let opened = false;
       try {
         const { openPlaybookInWiser } = require('../../lib/agent-playbook');
@@ -728,13 +764,24 @@ Effort guide:
   },
 
   /**
-   * Open WISER Playbooks with the build context (original flow).
+   * User-authors-the-playbook flow: open WISER Playbooks prefilled with the
+   * LOCAL AGENT TEMPLATE for this request. The user drafts/refines the
+   * playbook there, and when done says "build the agent from my playbook"
+   * — _buildFromUserPlaybook finds it in Spaces and builds FROM it.
    */
   async _buildWithPlaybooks(pendingBuild) {
     const { originalRequest, assessment } = pendingBuild;
 
-    // Build a rich prompt for WISER Playbooks
-    const playbookPrompt = this._buildPlaybookPrompt(originalRequest, assessment);
+    // Prefill WISER with the local-agent template (same skeleton every
+    // automatic build uses) so the authored playbook lands in the shape the
+    // builder consumes. Fall back to the legacy build-plan prompt.
+    let playbookPrompt;
+    try {
+      const { composeLocalAgentPlaybook } = require('../../lib/agent-playbook');
+      playbookPrompt = composeLocalAgentPlaybook({ request: originalRequest, assessment }).markdown;
+    } catch (_e) {
+      playbookPrompt = this._buildPlaybookPrompt(originalRequest, assessment);
+    }
 
     // Try to open WISER Playbooks with the prompt
     const opened = await this._openPlaybooks(playbookPrompt);
@@ -742,7 +789,9 @@ Effort guide:
     if (opened) {
       return {
         success: true,
-        message: "Opening WISER Playbooks with the build plan. I've included the feasibility notes, required integrations, and a first draft outline. You can refine it from there.",
+        message:
+          "Opening WISER Playbooks with the local agent template prefilled — refine it there. " +
+          'When your playbook is ready, just say "build the agent from my playbook" and I\'ll build it from exactly what you wrote.',
       };
     }
 
@@ -770,6 +819,67 @@ Effort guide:
       success: true,
       message: `I couldn't open WISER Playbooks right now. Here's what you'd need to build it: ${assessment.reasoning}. The required integrations are: ${assessment.requiredIntegrations.join(', ') || 'standard tools only'}.`,
     };
+  },
+
+  /**
+   * Find the user's authored playbook in Spaces and build the agent FROM it
+   * ("build the agent from my playbook [name]"). Newest playbook wins when
+   * no name is given. The playbook markdown is passed verbatim to the
+   * builder as the authoritative spec.
+   */
+  async _buildFromUserPlaybook(nameFilter) {
+    const storage = _getSpacesStorageSafe();
+    const items = (storage && storage.index && storage.index.items) || [];
+
+    const isPlaybookItem = (i) => {
+      const itemType = String(i.metadata?.itemType || '').toLowerCase();
+      if (itemType.includes('playbook')) return true;
+      return /^#\s*(local agent playbook|build playbook)/im.test(String(i.content || '').slice(0, 200));
+    };
+
+    let candidates = items.filter((i) => i.type === 'text' && isPlaybookItem(i) && i.content);
+    if (nameFilter) {
+      const wanted = nameFilter.toLowerCase();
+      candidates = candidates.filter((i) =>
+        `${i.metadata?.title || ''} ${String(i.content).slice(0, 120)}`.toLowerCase().includes(wanted)
+      );
+    }
+    candidates.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    const found = candidates[0];
+    if (!found) {
+      const recent = items
+        .filter((i) => i.type === 'text' && isPlaybookItem(i))
+        .slice(-3)
+        .map((i) => i.metadata?.title)
+        .filter(Boolean);
+      return {
+        success: true,
+        message: nameFilter
+          ? `I couldn't find a playbook matching "${nameFilter}" in Spaces.` +
+            (recent.length ? ` Recent playbooks: ${recent.join('; ')}.` : '')
+          : "I couldn't find a playbook in Spaces yet. Say \"playbook\" when I offer a build and I'll open WISER Playbooks with the template.",
+      };
+    }
+
+    const title = found.metadata?.title || 'your playbook';
+    log.info('agent-builder', 'Building from user-authored playbook', {
+      title,
+      itemId: found.id || null,
+    });
+
+    return this._buildWithClaudeCode({
+      originalRequest: `Build the agent specified by the playbook "${title}".`,
+      assessment: {
+        effort: 'easy',
+        reasoning: 'User-authored playbook is the authoritative spec.',
+        requiredIntegrations: [],
+        missingAccess: [],
+        estimatedCostPerUse: '~$0.05',
+      },
+      buildMethod: 'claude-code',
+      authoredPlaybook: String(found.content),
+    });
   },
 
   /**
@@ -889,3 +999,4 @@ Return JSON: { "spaceId": "<id or null>", "confidence": <0-1> }`,
 module.exports._setClaudeCodeBuilder = _setClaudeCodeBuilder;
 module.exports._setExchangeBus = _setExchangeBus;
 module.exports._setAgentStore = _setAgentStore;
+module.exports._setSpacesStorage = _setSpacesStorage;
