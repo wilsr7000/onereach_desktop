@@ -362,7 +362,7 @@ async function preScreenAgents(text, conversationText, allAgents) {
   try {
     const agentSummaries = allAgents
       .filter((a) => !a.bidExcluded)
-      .map((a) => `- ${a.id}: ${a.description || a.name}`)
+      .map((a) => `- ${a.id} (${a.name}): ${a.description || a.name}`)
       .join('\n');
 
     const result = await ai.json(
@@ -1216,6 +1216,25 @@ async function connectBuiltInAgentToExchange(wrappedAgent, port) {
               }
               return; // skip duplicate send below
             }
+          }
+
+          // Capability honesty: an agent whose backend is unavailable must not
+          // carry an auction-winning bid it cannot execute. 2026-08-04 live:
+          // task-queue bid 0.95 on "set an alarm" with OmniGraph down, won by
+          // dominance (skipping the LLM sanity check), and busted instantly.
+          if (evaluation.confidence > 0.2 && typeof originalAgent.bidReadiness === 'function') {
+            try {
+              const ready = await originalAgent.bidReadiness();
+              if (ready === false) {
+                log.warn('voice', `[BuiltIn:${wrappedAgent.name}] Bid capped — backend not ready`, {
+                  event: 'bid:readiness-capped',
+                  agentId: wrappedAgent.id,
+                  originalConfidence: evaluation.confidence,
+                });
+                evaluation.confidence = 0.1;
+                evaluation.plan = 'Backend unavailable — bid capped by readiness check';
+              }
+            } catch (_e) { /* readiness probe must never break bidding */ }
           }
 
           // Send bid_response
@@ -3877,6 +3896,9 @@ function setupExchangeEvents() {
       if (result?.needsInput) {
         const earlyGap = shouldOfferGapAfterSettle({
           bustCount: task.metadata?.bustCount || 0,
+          winnerBusted: Array.isArray(task.metadata?.bustedAgents) && task.metadata.bustedAgents.length > 0,
+          winningConfidence:
+            typeof task.metadata?.winningConfidence === 'number' ? task.metadata.winningConfidence : null,
           settledConfidence:
             typeof task.metadata?.settledConfidence === 'number' ? task.metadata.settledConfidence : null,
           resultResolved: false,
@@ -4298,6 +4320,9 @@ function setupExchangeEvents() {
       try {
         const gap = shouldOfferGapAfterSettle({
           bustCount: task.metadata?.bustCount || 0,
+          winnerBusted: Array.isArray(task.metadata?.bustedAgents) && task.metadata.bustedAgents.length > 0,
+          winningConfidence:
+            typeof task.metadata?.winningConfidence === 'number' ? task.metadata.winningConfidence : null,
           settledConfidence:
             typeof task.metadata?.settledConfidence === 'number' ? task.metadata.settledConfidence : null,
           resultResolved: false,

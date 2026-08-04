@@ -151,6 +151,23 @@ const taskQueueAgent = {
   estimatedExecutionMs: 3000,
   dataSources: ['omnigraph'],
 
+  /**
+   * Capability honesty for the auction (exchange-bridge bid gate): this agent
+   * writes to the OmniGraph — with the graph unreachable every execution
+   * busts, so a winning-confidence bid would be fiction. 2026-08-04 live:
+   * bid 0.95 on "set an alarm" with OmniGraph down, won by dominance, busted
+   * instantly, and the request dead-ended.
+   */
+  bidReadiness() {
+    try {
+      const { getOmniGraphClient } = require('../../omnigraph-client');
+      const client = getOmniGraphClient();
+      return !!(client && typeof client.isReady === 'function' && client.isReady());
+    } catch (_e) {
+      return false;
+    }
+  },
+
   prompt: `Task Queue Agent adds a new item (a task or a time-bound alarm)
 to the user's TaskQueue in the graph. It is a pure "write" agent -- it does
 not read, list, complete, or delete. Other agents handle those.

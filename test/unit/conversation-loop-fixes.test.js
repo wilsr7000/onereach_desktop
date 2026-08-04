@@ -98,6 +98,26 @@ describe('orb.html: followup-listen re-acquires a dead mic', () => {
   });
 });
 
+// ── F: routing honesty (2026-08-04 second alarm run) ────────────────────────
+describe('routing honesty: readiness-capped bids + named PreScreen', () => {
+  const SRC = readFileSync(resolve(REPO, 'src/voice-task-sdk/exchange-bridge.js'), 'utf8');
+
+  it('built-in bid handler caps bids when the agent reports backend-not-ready', () => {
+    expect(SRC).toMatch(/bidReadiness/);
+    expect(SRC).toMatch(/bid:readiness-capped/);
+  });
+
+  it('task-queue-agent implements bidReadiness via OmniGraph isReady', () => {
+    const tq = readFileSync(resolve(REPO, 'packages/agents/task-queue-agent.js'), 'utf8');
+    expect(tq).toMatch(/bidReadiness\(\)/);
+    expect(tq).toMatch(/client\.isReady\(\)/);
+  });
+
+  it('PreScreen shows agent NAMES to the router (so "Alarm Manager" is visible for alarm queries)', () => {
+    expect(SRC).toMatch(/\$\{a\.id\} \(\$\{a\.name\}\): \$\{a\.description/);
+  });
+});
+
 // ── E: a delivered result must COMPLETE the turn (no false apology) ─────────
 describe('orb.html: back-to-back speech completion ends the turn', () => {
   const ORB = readFileSync(resolve(REPO, 'orb.html'), 'utf8');

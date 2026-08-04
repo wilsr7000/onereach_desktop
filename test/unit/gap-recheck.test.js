@@ -24,6 +24,27 @@ describe('shouldOfferGapAfterSettle', () => {
     expect(out.reason).toBe('cascade-revealed-gap');
   });
 
+  it('offers on a SINGLE bust when the auction WINNER busted above the floor (2026-08-04 alarm)', () => {
+    const out = shouldOfferGapAfterSettle({
+      bustCount: 1,
+      winnerBusted: true,
+      winningConfidence: 0.95,
+      resultResolved: false,
+    });
+    expect(out.offer).toBe(true);
+    expect(out.reason).toBe('winner-bust-revealed-gap');
+  });
+
+  it('does NOT fire the winner-bust signal for a sub-floor winner', () => {
+    const out = shouldOfferGapAfterSettle({
+      bustCount: 1,
+      winnerBusted: true,
+      winningConfidence: 0.3,
+      resultResolved: false,
+    });
+    expect(out.reason).not.toBe('winner-bust-revealed-gap');
+  });
+
   it('offers at exactly 2 busts + unresolved', () => {
     expect(shouldOfferGapAfterSettle({ bustCount: 2, resultResolved: false }).offer).toBe(true);
   });
