@@ -445,12 +445,19 @@ function createTray() {
   // Use properly sized template icon for macOS (22x22 with @2x variant for retina)
   // Template naming convention allows macOS to automatically adapt icon color for light/dark mode
   const { nativeImage } = require('electron');
+  // Prefer the 22pt-native pair (macOS menu-bar standard). The legacy
+  // tray-iconTemplate pair is 44px @1x, which the full app renders at file
+  // size — double the platform convention (lite resizes in code; we don't).
+  const sizedTemplateIconPath = path.join(__dirname, 'assets/tray-icon-22Template.png');
   const templateIconPath = path.join(__dirname, 'assets/tray-iconTemplate.png');
   const fallbackIconPath = path.join(__dirname, 'assets/tray-icon.png');
 
   // Use template icon if it exists, otherwise fall back to regular icon
   let trayIconPath;
-  if (fs.existsSync(templateIconPath)) {
+  if (fs.existsSync(sizedTemplateIconPath)) {
+    trayIconPath = sizedTemplateIconPath;
+    console.log('Using 22pt template tray icon:', sizedTemplateIconPath);
+  } else if (fs.existsSync(templateIconPath)) {
     trayIconPath = templateIconPath;
     console.log('Using template tray icon:', templateIconPath);
   } else {
