@@ -1,2 +1,2 @@
 #!/bin/sh
-exec "$(dirname "$0")/node_modules/@anthropic-ai/claude-code/bin/claude.exe" "$@"
+exec node "$(dirname "$0")/node_modules/@anthropic-ai/claude-code/cli.js" "$@"

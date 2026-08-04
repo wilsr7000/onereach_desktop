@@ -34,9 +34,16 @@ export interface InitTrayOptions {
   /** Optional: quit handler. Defaults to `app.quit()`. */
   onQuit?: () => void;
   /**
-   * Optional: disable the idle pulse animation. Defaults to enabled
-   * (the icon breathes gently in the menu bar). Set to `false`, or
-   * set the `LITE_TRAY_ANIMATION=0` env var, to keep the icon static.
+   * Optional: enable the idle pulse animation. Defaults to DISABLED.
+   *
+   * The pulse works by swapping size-stepped frames, and a menu-bar
+   * item's width tracks its image width -- so a breathing icon visibly
+   * jitters AND shoves every neighbouring status item (Claude, Wi-Fi,
+   * clock) sideways on each frame. That's the bug this default fixes.
+   * It also runs against macOS convention: a status item should be
+   * static unless it's conveying a state change.
+   *
+   * Set to `true`, or set `LITE_TRAY_ANIMATION=1`, to opt back in.
    */
   pulse?: boolean;
   /** Optional logger (defaults to silent). */
@@ -152,13 +159,12 @@ export function initTray(opts: InitTrayOptions): TrayHandle | null {
   tray.setToolTip(buildTooltip());
   tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate(opts)));
 
-  // Subtle idle pulse. Pre-computes 4 size-stepped frames and cycles
-  // through them every PULSE_FRAME_MS so the icon "breathes" in the
-  // menu bar without drawing attention. Pre-computed (not regenerated
-  // each tick) so the per-frame cost is just a setImage() call.
-  const pulseEnv = process.env['LITE_TRAY_ANIMATION'];
-  const pulseEnabled =
-    pulseEnv === '0' || pulseEnv === 'false' ? false : opts.pulse !== false;
+  // Idle pulse -- OFF by default, opt-in only. The frames are
+  // size-stepped, and a menu-bar item's width follows its image width,
+  // so the animation made our icon jitter and pushed neighbouring
+  // status items (Claude, Wi-Fi, clock) around ~1.7x/second. A status
+  // item should sit still unless it's signalling a state change.
+  const pulseEnabled = isPulseEnabled(process.env['LITE_TRAY_ANIMATION'], opts.pulse);
   if (pulseEnabled) {
     try {
       attachPulse(tray, icon, useTemplate);
@@ -243,6 +249,22 @@ function teardownActive(): void {
  */
 const PULSE_FRAME_MS = 600;
 const PULSE_DELTAS = [-1, -2, -1, 1] as const;
+
+/**
+ * Should the idle pulse run? **Default: NO.**
+ *
+ * Pulse frames are size-stepped, and a macOS menu-bar item's width
+ * tracks its image width — so an animating icon jitters in place AND
+ * shoves every neighbouring status item sideways on each frame (the
+ * user-reported "flashing and moving with Claude beside it"). It is
+ * opt-in only: `LITE_TRAY_ANIMATION=1` (or `pulse: true`).
+ *
+ * Exported so the default is pinned by a test rather than by comment.
+ */
+export function isPulseEnabled(envValue: string | undefined, optsPulse?: boolean): boolean {
+  if (envValue === '1' || envValue === 'true') return true;
+  return optsPulse === true;
+}
 
 /**
  * Pre-compute resized pulse frames once and start the swap timer.

@@ -22,6 +22,7 @@ import {
   TRAY_TOOLTIP_BASE,
   TRAY_ICON_SIZE,
   buildPulseFrames,
+  isPulseEnabled,
   buildTooltip,
 } from '../../tray/main.js';
 
@@ -440,5 +441,34 @@ describe('trayIconCandidates', () => {
       if (prev === undefined) delete process.env['LITE_TRAY_COLOR'];
       else process.env['LITE_TRAY_COLOR'] = prev;
     }
+  });
+});
+
+describe('isPulseEnabled -- idle animation defaults OFF', () => {
+  // Regression guard: the pulse swaps SIZE-STEPPED frames, and a
+  // macOS menu-bar item's width follows its image width -- so an
+  // animating tray icon jitters and pushes neighbouring status items
+  // (Claude, Wi-Fi, clock) sideways on every frame. It must stay
+  // opt-in; this test is what keeps the default honest.
+  it('is OFF with no env var and no explicit option', () => {
+    expect(isPulseEnabled(undefined, undefined)).toBe(false);
+  });
+
+  it('is OFF for an unset / empty / unrelated env value', () => {
+    expect(isPulseEnabled('', undefined)).toBe(false);
+    expect(isPulseEnabled('0', undefined)).toBe(false);
+    expect(isPulseEnabled('false', undefined)).toBe(false);
+    expect(isPulseEnabled('yes-please', undefined)).toBe(false);
+  });
+
+  it('turns ON only via explicit opt-in (env=1/true or pulse:true)', () => {
+    expect(isPulseEnabled('1', undefined)).toBe(true);
+    expect(isPulseEnabled('true', undefined)).toBe(true);
+    expect(isPulseEnabled(undefined, true)).toBe(true);
+  });
+
+  it('an explicit pulse:false is never overridden into ON by absence of env', () => {
+    expect(isPulseEnabled(undefined, false)).toBe(false);
+    expect(isPulseEnabled('0', false)).toBe(false);
   });
 });
