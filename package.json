@@ -126,6 +126,8 @@
       "!**/node_modules/*.d.ts",
       "!**/node_modules/.bin",
       "!**/.{idea,git,github,vscode,cursor}/**",
+      "!.claude/**",
+      "!**/.claude/**",
       "!**/{.DS_Store,.git,.gitignore,.npmignore}",
       "!test/**/*",
       "!test-black-hole*.js",
