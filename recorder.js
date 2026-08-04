@@ -845,7 +845,7 @@ class Recorder {
       }
     });
 
-    ipcMain.handle('recorder:complete-meeting', async (event, { spaceId, itemId, meetingId, participants }) => {
+    ipcMain.handle('recorder:complete-meeting', async (event, { spaceId, itemId, meetingId, participants, transcriptItemId, recordingItemIds }) => {
       try {
         const { getSpacesAPI } = require('./spaces-api');
         const api = getSpacesAPI();
@@ -861,7 +861,14 @@ class Recorder {
           return { success: false, error: 'Meeting ID mismatch' };
         }
 
-        meeting = completeMeeting(meeting, { participants });
+        // Record the artifacts the agent captured so the meeting object links
+        // to its transcript + recordings (drives post-meeting analysis and the
+        // meeting->transcript / meeting->recording graph edges applied on sync).
+        meeting = completeMeeting(meeting, {
+          participants,
+          transcriptItemId: transcriptItemId || undefined,
+          recordingItemIds: Array.isArray(recordingItemIds) && recordingItemIds.length ? recordingItemIds : undefined,
+        });
 
         await api.items.update(spaceId, itemId, {
           content: JSON.stringify(meeting, null, 2),

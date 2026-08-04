@@ -165,6 +165,12 @@ const APP_IDENTITY = {
   id: 'gsx-desktop-app',
 };
 
+// WISER meeting graph vocabulary. Labels + relationship types are interpolated
+// into Cypher structure (not parameterisable), so callers are validated against
+// these fixed allow-lists. Exported so the sync layer + tests share one source.
+const WISER_NODE_KINDS = ['Meeting', 'Transcript', 'Recording'];
+const MEETING_ARTIFACT_RELS = ['HAS_TRANSCRIPT', 'HAS_RECORDING'];
+
 /**
  * Build provenance fields for node creation
  * @param {string} user - User email who triggered the action
@@ -2067,6 +2073,69 @@ class OmniGraphClient {
   }
 
   // ============================================
+  // WISER MEETING: MEETING / TRANSCRIPT / RECORDING NODES
+  // ============================================
+  //
+  // A WISER meeting, its transcript, and its recording are saved as Space
+  // assets (they BELONG_TO a space and appear in item lists like any asset).
+  // These helpers give those assets a second, queryable label
+  // (:Meeting / :Transcript / :Recording) and wire the relationships between
+  // them, so an agent can traverse a meeting to its transcript + recording in
+  // the graph instead of parsing IDs out of the meeting's JSON.
+  //
+  // Node labels and relationship types are part of the query STRUCTURE and
+  // cannot be parameterised, so both are validated against fixed allow-lists
+  // and interpolated only after that check -- never trust a caller-supplied
+  // label/relType (same guard as addToLibrary()/enableItem()).
+
+  /**
+   * Add a WISER kind label to an existing :Asset node (keeps :Asset, adds the
+   * kind as a second label so it stays a first-class space asset).
+   * @param {string} assetId
+   * @param {'Meeting'|'Transcript'|'Recording'} kind
+   * @returns {Promise<Object>} Result
+   */
+  async setAssetKind(assetId, kind) {
+    if (!WISER_NODE_KINDS.includes(kind)) {
+      throw new Error(`Invalid asset kind: ${kind}. Must be one of ${WISER_NODE_KINDS.join(', ')}.`);
+    }
+    const now = Date.now();
+    const cypher = `
+      MATCH (a:Asset {id: '${escapeCypher(assetId)}'})
+      SET a:${kind},
+          a.nodeKind = '${escapeCypher(kind)}',
+          a.kind_set_at = ${now}
+      RETURN a
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  /**
+   * Link a meeting to one of its artifacts. The artifact node is MERGEd by id
+   * so the edge survives regardless of sync order -- if the transcript/recording
+   * asset syncs later, upsertAsset() fills in its properties on the same node.
+   * @param {string} meetingId  - the :Meeting (also :Asset) node id
+   * @param {string} artifactId - the transcript or recording :Asset node id
+   * @param {'HAS_TRANSCRIPT'|'HAS_RECORDING'} relType
+   * @returns {Promise<Object|null>} Result, or null when ids are missing
+   */
+  async linkMeetingArtifact(meetingId, artifactId, relType) {
+    if (!MEETING_ARTIFACT_RELS.includes(relType)) {
+      throw new Error(`Invalid meeting relationship: ${relType}. Must be one of ${MEETING_ARTIFACT_RELS.join(', ')}.`);
+    }
+    if (!meetingId || !artifactId) return null;
+    const now = Date.now();
+    const cypher = `
+      MATCH (m:Meeting {id: '${escapeCypher(meetingId)}'})
+      MERGE (a:Asset {id: '${escapeCypher(artifactId)}'})
+      MERGE (m)-[r:${relType}]->(a)
+      SET r.at = coalesce(r.at, ${now})
+      RETURN m
+    `;
+    return this.executeQuery(cypher);
+  }
+
+  // ============================================
   // LIBRARY: ENABLE / DISABLE / QUERY
   // ============================================
 
@@ -2560,4 +2629,7 @@ module.exports = {
   buildCreateProvenance,
   buildUpdateProvenance,
   buildHistoryEntry,
+  // WISER meeting graph vocabulary (allow-lists)
+  WISER_NODE_KINDS,
+  MEETING_ARTIFACT_RELS,
 };

@@ -3409,6 +3409,59 @@
         background: rgba(0, 200, 120, 0.25);
       }
 
+      /* Screen-share is a primary action in a meeting, so it carries a visible
+         label instead of being an icon-only square like the other controls. */
+      .session-media-btn.share-screen-btn {
+        width: auto;
+        padding: 0 12px;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .session-media-btn.share-screen-btn .share-screen-label {
+        line-height: 1;
+      }
+
+      /* "Pause AI" — the single control over the meeting agent. Hidden until
+         recording is live (the AI only runs while recording); labelled like
+         the share button so it reads as a primary action, not decoration. */
+      .session-media-btn.pause-ai-btn {
+        width: auto;
+        padding: 0 12px;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+        display: none;
+      }
+
+      .session-media-btn.pause-ai-btn.visible {
+        display: inline-flex;
+      }
+
+      .session-media-btn.pause-ai-btn .pause-ai-label {
+        line-height: 1;
+      }
+
+      /* Paused = amber, so "the AI is not listening" is unmistakable. */
+      .session-media-btn.pause-ai-btn.paused {
+        background: rgba(240, 170, 40, 0.16);
+        border-color: rgba(240, 170, 40, 0.4);
+        color: #f0aa28;
+      }
+
+      .session-media-btn.pause-ai-btn.paused:hover {
+        background: rgba(240, 170, 40, 0.26);
+      }
+
+      /* Transcription pill reflects the paused state too. */
+      .transcription-status.paused .status-dot {
+        background: #f0aa28;
+        animation: none;
+      }
+
       /* Dedicated screen share container (presentation mode) */
       .screen-share-container {
         position: absolute;
@@ -4117,7 +4170,13 @@
       .hud-active .shortcuts-bar,
       .hud-active .bottom-panel,
       .hud-active .audio-meter,
-      .hud-active .hud-toggle-btn {
+      .hud-active .hud-toggle-btn,
+      /* The pilot HUD already renders REC + elapsed time + clock, so the
+         legacy corner indicators would just duplicate that data on top of
+         it. Hide them while the pilot HUD owns the readout; they return
+         automatically if .hud-active is ever removed. */
+      .hud-active .recording-indicator,
+      .hud-active .duration-display {
         display: none !important;
       }
 
@@ -5873,12 +5932,22 @@
                 </div>
               </div>
             </button>
-            <button class="session-media-btn" id="screenShareBtn" onclick="app.sessionToggleScreenShare()" title="Share screen">
+            <button class="session-media-btn share-screen-btn" id="screenShareBtn" onclick="app.sessionToggleScreenShare()" title="Share your screen with the meeting">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <rect x="2" y="3" width="20" height="14" rx="2" />
                 <polyline points="8 21 16 21" />
                 <line x1="12" y1="17" x2="12" y2="21" />
               </svg>
+              <span class="share-screen-label" id="screenShareLabel">Share</span>
+            </button>
+            <button class="session-media-btn pause-ai-btn" id="pauseAiBtn" onclick="app.toggleAgentPause()" title="Pause the meeting AI (live transcription & notes). Recording keeps running.">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 3l1.6 4.1L18 8.6l-4.4 1.5L12 15l-1.6-4.9L6 8.6l4.4-1.5L12 3z" />
+                <circle cx="18.5" cy="17.5" r="3" opacity="0.9" />
+                <line x1="17.5" y1="16.4" x2="17.5" y2="18.6" />
+                <line x1="19.5" y1="16.4" x2="19.5" y2="18.6" />
+              </svg>
+              <span class="pause-ai-label" id="pauseAiLabel">Pause AI</span>
             </button>
           </div>
 
@@ -7959,7 +8028,10 @@
             this._lastAudioRMS = Math.sqrt(sumSquares / samples.length);
 
             if (!this.transcriptionWs || this.transcriptionWs.readyState !== WebSocket.OPEN) return;
-            if (this.isPaused) return;
+            // isPaused = whole recording paused; _agentPaused = "Pause AI" (the
+            // recording keeps rolling but we stop feeding audio to the realtime
+            // transcription, which starves the caption + note agents too).
+            if (this.isPaused || this._agentPaused) return;
 
             // Float32 [-1,1] -> PCM16 little-endian -> base64
             const pcm = new Int16Array(samples.length);
@@ -8262,10 +8334,24 @@
           }, 300);
         },
 
+        // The space a meeting's artifacts (live transcript, recording, saved
+        // transcript, notes) belong to. A WISER meeting is scoped to a
+        // collaborative space, so THAT space wins; otherwise fall back to the
+        // user's selected target space, then a per-caller catch-all. This keeps
+        // a meeting's recording + transcript + notes in the meeting's own space
+        // (where its agents live) instead of a generic default.
+        _captureSpaceId(fallback = 'unclassified') {
+          return (
+            (this._activeMeeting && this._activeMeeting.spaceId) ||
+            (this.elements.targetSpace && this.elements.targetSpace.value) ||
+            fallback
+          );
+        },
+
         async flushTranscriptToFile(isFinal = false) {
           if (!window.recorder?.writeLiveTranscript) return;
 
-          const spaceId = this.elements.targetSpace?.value || 'gsx-agent';
+          const spaceId = this._captureSpaceId('gsx-agent');
           const filename = 'live-transcript.md';
 
           // Collect health metrics (async for system diagnostics)
@@ -8698,12 +8784,21 @@
           this.isRecording = true;
           this.recordingStartTime = Date.now();
 
-          // In session mode, notify the other side to start recording too
+          // In session mode, notify the other side to start recording too,
+          // and reveal the "Pause AI" control (the AI only runs in meetings).
           if (this.sessionConnected) {
             this.sendSessionData({
               type: 'recording-start',
               timestamp: this.recordingStartTime,
             });
+            this._agentPaused = false;
+            const pauseAiBtn = document.getElementById('pauseAiBtn');
+            if (pauseAiBtn) {
+              pauseAiBtn.classList.add('visible');
+              pauseAiBtn.classList.remove('paused');
+            }
+            const pauseAiLabel = document.getElementById('pauseAiLabel');
+            if (pauseAiLabel) pauseAiLabel.textContent = 'Pause AI';
           }
 
           // Update UI
@@ -8769,7 +8864,7 @@
           }, 2500);
 
           // Start meeting monitor agent
-          const monitorSpaceId = this.elements.targetSpace?.value || 'gsx-agent';
+          const monitorSpaceId = this._captureSpaceId('gsx-agent');
           if (window.recorder?.startMonitor) {
             window.recorder.startMonitor(monitorSpaceId).catch(() => {});
           }
@@ -8878,6 +8973,14 @@
           this.elements.recordLabel.textContent = 'REC';
           this.elements.pauseBtn.classList.remove('visible', 'paused');
           this.elements.pausedOverlay.classList.remove('active');
+
+          // Tear down the "Pause AI" control + clear its paused state.
+          this._agentPaused = false;
+          const pauseAiBtn = document.getElementById('pauseAiBtn');
+          if (pauseAiBtn) pauseAiBtn.classList.remove('visible', 'paused');
+          if (this.elements.transcriptionStatus) {
+            this.elements.transcriptionStatus.classList.remove('paused');
+          }
           // Reset pause icon
           this.elements.pauseIcon.innerHTML =
             '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>';
@@ -9122,8 +9225,9 @@
 
           this.lastRecordingDuration = (Date.now() - this.recordingStartTime - (this.totalPausedMs || 0)) / 1000;
 
-          // Use the selected space, fall back to 'unclassified' so nothing is ever lost
-          const spaceId = this.elements.targetSpace?.value || 'unclassified';
+          // Meeting's space wins; else the selected target space; else
+          // 'unclassified' so nothing is ever lost.
+          const spaceId = this._captureSpaceId('unclassified');
           const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
           const filename = `recording_${timestamp}.webm`;
 
@@ -9153,6 +9257,12 @@
             }
 
             const spaceName = result.spaceName || 'space';
+
+            // Remember the recording's item id for the meeting->recording graph
+            // edge (recorded on the meeting object at completion).
+            if (result.itemId) {
+              this._lastRecordingItemIds = [...(this._lastRecordingItemIds || []), result.itemId];
+            }
 
             // Save accumulated transcript as a separate indexed item
             if (this.accumulatedTranscript && this.accumulatedTranscript.length > 0) {
@@ -9235,6 +9345,11 @@
 
             if (result?.success) {
               console.log('[Recorder] Transcript saved as indexed item:', result.itemId);
+              // Remember the transcript's item id so the meeting object can
+              // record it (meeting.post.transcriptItemId) on completion, which
+              // in turn drives the meeting->transcript graph edge + lets
+              // post-meeting analysis find the transcript.
+              this._lastTranscriptItemId = result.itemId || null;
             }
           } catch (err) {
             console.warn('[Recorder] Failed to save transcript item:', err.message);
@@ -9310,6 +9425,18 @@
         _sessionScreenShareStream: null,
         _sessionScreenSharePending: false,
         _screenShares: new Map(), // track sid -> share container (simultaneous shares supported)
+
+        // Auto-capture + AI pause. A meeting auto-starts recording +
+        // transcription + note agents on connect (once per session), and the
+        // "Pause AI" button pauses ONLY the AI layer (transcription + agents)
+        // while the raw recording keeps rolling — see toggleAgentPause().
+        _agentPaused: false,
+        _autoCaptureAttempted: false,
+        // Item ids of the artifacts the agent saved this meeting, linked onto
+        // the meeting object at completion (drives the meeting->transcript /
+        // meeting->recording graph edges).
+        _lastTranscriptItemId: null,
+        _lastRecordingItemIds: [],
 
         // Meeting Object state
         _activeMeeting: null,
@@ -10410,6 +10537,9 @@
               if (meetingResult.success) {
                 this._activeMeeting = meetingResult.meeting;
                 this._activeMeetingItemId = meetingResult.itemId;
+                // Fresh meeting -> clear any artifact ids from a prior one.
+                this._lastTranscriptItemId = null;
+                this._lastRecordingItemIds = [];
                 console.log('[Meeting] Object created:', meetingResult.meeting.id);
               }
             } catch (e) {
@@ -10682,6 +10812,11 @@
           document.getElementById('sessionMediaControls').classList.add('visible');
 
           this.showStatus('Session connected - ready to record', 'success');
+
+          // The meeting agent starts recording + transcribing + taking notes on
+          // its own -- no REC click. Runs once per session; the stream was set
+          // by _attachLocalSessionMedia() just before we got here.
+          this._maybeAutoStartCapture();
         },
 
         // Create or get a participant container
@@ -10986,9 +11121,73 @@
         // Toggle screen share button and banner state
         _updateScreenShareUI(active) {
           const btn = document.getElementById('screenShareBtn');
-          if (btn) btn.classList.toggle('sharing', active);
+          if (btn) {
+            btn.classList.toggle('sharing', active);
+            btn.title = active ? 'Stop sharing your screen' : 'Share your screen with the meeting';
+          }
+          const label = document.getElementById('screenShareLabel');
+          if (label) label.textContent = active ? 'Stop' : 'Share';
           const banner = document.getElementById('sharingBanner');
           if (banner) banner.classList.toggle('visible', active);
+        },
+
+        // Auto-start the capture pipeline (recording + live transcription +
+        // note agents) once per session, as soon as the meeting connects and a
+        // recordable stream exists. This is what lets a meeting "just work"
+        // with no REC click -- the agent records the transcript and takes notes
+        // on its own; the only control the user needs is "Pause AI".
+        _maybeAutoStartCapture() {
+          if (this._autoCaptureAttempted || this.isRecording) return;
+          if (!this.sessionConnected) return;
+          if (!this.stream || this.stream.getTracks().length === 0) return;
+          this._autoCaptureAttempted = true;
+          this.startRecording();
+          this.showStatus('Recording & live notes on — Pause AI anytime', 'info');
+        },
+
+        // Pause / resume ONLY the AI layer: live transcription and the note
+        // agents that read the transcript. The MediaRecorder keeps running, so
+        // the raw video/audio is still captured -- this is the "hold on, don't
+        // transcribe this part" control, not a recording pause. Implemented at
+        // the single audio choke point (startAudioStreaming gates on
+        // _agentPaused), so no websocket teardown is needed: audio simply
+        // stops flowing to the realtime API and resumes on the next toggle,
+        // which in turn starves the caption + note agents of new transcript.
+        toggleAgentPause() {
+          this._agentPaused = !this._agentPaused;
+          const paused = this._agentPaused;
+
+          const btn = document.getElementById('pauseAiBtn');
+          if (btn) {
+            btn.classList.toggle('paused', paused);
+            btn.title = paused
+              ? 'Resume the meeting AI (live transcription & notes)'
+              : 'Pause the meeting AI (live transcription & notes). Recording keeps running.';
+          }
+          const label = document.getElementById('pauseAiLabel');
+          if (label) label.textContent = paused ? 'Resume AI' : 'Pause AI';
+
+          // Freeze captions and drop any half-formed utterance so nothing from
+          // the paused window leaks into the transcript when the AI resumes.
+          if (paused) {
+            this.interimText = '';
+            this.showCaption('', false);
+            if (this.transcriptionWs && this.transcriptionWs.readyState === WebSocket.OPEN) {
+              try {
+                this.transcriptionWs.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
+              } catch (_) {}
+            }
+          }
+
+          // Reflect the state on the transcription pill.
+          if (this.elements.transcriptionStatus) {
+            this.elements.transcriptionStatus.classList.toggle('paused', paused);
+            if (this.elements.transcriptionStatusText) {
+              this.elements.transcriptionStatusText.textContent = paused ? 'AI paused' : 'Live captions';
+            }
+          }
+
+          this.showStatus(paused ? 'AI paused — recording continues' : 'AI resumed', 'info');
         },
 
         // ── Meeting Overlay System ──────────────────────────────
@@ -11922,6 +12121,10 @@
           els.remoteVideo.style.display = 'none';
           els.remoteVideo.srcObject = null;
 
+          // Reset auto-capture + AI-pause so the next meeting starts fresh.
+          this._autoCaptureAttempted = false;
+          this._agentPaused = false;
+
           // Reset mute/camera state (re-enable tracks)
           if (this.micMuted) {
             this.micMuted = false;
@@ -12006,6 +12209,11 @@
                 itemId: this._activeMeetingItemId,
                 meetingId: this._activeMeeting.id,
                 participants,
+                // Link the artifacts the agent captured so the meeting object
+                // records them (and the graph can draw meeting->transcript /
+                // meeting->recording). Best-effort: whatever finished saving.
+                transcriptItemId: this._lastTranscriptItemId || null,
+                recordingItemIds: this._lastRecordingItemIds || [],
               });
               console.log('[Meeting] Object completed:', this._activeMeeting.id);
 

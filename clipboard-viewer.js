@@ -2192,6 +2192,14 @@ async function updateItemCounts() {
 
 // Get icon for content type
 function getTypeIcon(type, source, fileType, fileCategory, metadata, jsonSubtype, tags, preview) {
+  // WISER meeting + transcript items store as plain text/file, so give them a
+  // recognizable icon up front (matches the detail-view Meeting/Transcript types).
+  const _wiserTags = Array.isArray(tags) ? tags : [];
+  if (source === 'wiser-meeting' || _wiserTags.includes('wiser-meeting'))
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+  if (source === 'recorder-transcript' || source === 'wiser-transcript' || _wiserTags.includes('wiser-transcript'))
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h5"/></svg>';
+
   // Check JSON subtypes first (works for both file and text items)
   if (jsonSubtype === 'style-guide')
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:14px;height:14px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>';
@@ -4345,9 +4353,28 @@ async function showMetadataModal(itemId) {
   modal.dataset.itemId = itemId;
   modal.dataset.schema = JSON.stringify(schema);
 
-  // Update header with asset info
-  const assetType = item.fileCategory || item.fileType || item.type;
+  // Update header with asset info. WISER meeting + transcript items are plain
+  // 'text'/'file' at the storage layer, so resolve a recognizable effective
+  // type from their source/tags before falling back to the raw type.
+  const _itemTags = Array.isArray(item.tags) ? item.tags : [];
+  const _itemSource = item.source || (item.metadata && item.metadata.source) || '';
+  const assetType =
+    _itemSource === 'wiser-meeting' || _itemTags.includes('wiser-meeting')
+      ? 'meeting'
+      : _itemSource === 'recorder-transcript' || _itemSource === 'wiser-transcript' || _itemTags.includes('wiser-transcript')
+        ? 'transcript'
+        : item.fileCategory || item.fileType || item.type;
   const typeConfig = {
+    meeting: {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+      name: 'Meeting',
+      color: '#a78bfa',
+    },
+    transcript: {
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h5"/></svg>',
+      name: 'Transcript',
+      color: '#22d3ee',
+    },
     video: {
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="20" height="14" rx="2"/><polygon points="10 8 16 12 10 16"/></svg>',
       name: 'Video',

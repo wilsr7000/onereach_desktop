@@ -52,6 +52,8 @@
     "test:orb": "playwright test test/e2e/voice-orb.spec.js",
     "test:orb:corpus": "playwright test test/e2e/voice-orb-corpus.spec.js",
     "test:orb:all": "playwright test test/e2e/voice-orb.spec.js test/e2e/voice-orb-corpus.spec.js",
+    "test:meeting": "vitest run test/unit/capture-guest-page.test.js test/unit/capture-guest-page-screenshare.test.js && playwright test test/e2e/meeting-screenshare-render.spec.js",
+    "test:meeting:transport": "playwright test test/e2e/meeting-screenshare-transport.spec.js",
     "test:agents": "vitest run --reporter verbose test/unit/master-orchestrator.test.js test/unit/unified-bidder.test.js test/unit/hud-api.test.js test/unit/agent-registry-crud.test.js test/unit/agent-execute-contract.test.js test/unit/exchange-protocol.test.js",
     "test:orb:text": "vitest run --reporter verbose test/unit/orb-text-input.test.js test/unit/orb-state.test.js test/unit/orb-event-router.test.js",
     "test:agents:all": "vitest run --reporter verbose test/unit/master-orchestrator.test.js test/unit/unified-bidder.test.js test/unit/hud-api.test.js test/unit/agent-registry-crud.test.js test/unit/agent-execute-contract.test.js test/unit/exchange-protocol.test.js test/unit/orb-text-input.test.js test/unit/orb-state.test.js test/unit/orb-event-router.test.js",

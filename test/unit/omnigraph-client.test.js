@@ -9,7 +9,14 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 
-const { OmniGraphClient, getOmniGraphClient, escapeCypher, _computeContentHash } = require('../../omnigraph-client');
+const {
+  OmniGraphClient,
+  getOmniGraphClient,
+  escapeCypher,
+  _computeContentHash,
+  WISER_NODE_KINDS,
+  MEETING_ARTIFACT_RELS,
+} = require('../../omnigraph-client');
 
 // ═══════════════════════════════════════════════════════════════════
 // CLIENT CONFIGURATION LIFECYCLE: Create -> Set -> Read -> Update -> Verify
@@ -187,5 +194,88 @@ describe('OmniGraph Client - API Shape', () => {
 
   it('has executeQuery method', () => {
     expect(typeof client.executeQuery).toBe('function');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// WISER MEETING NODES: :Meeting / :Transcript / :Recording + edges
+// A meeting stays an :Asset but gets a second, queryable kind label, and is
+// linked to its transcript/recording. Labels + rel types are query STRUCTURE
+// (not parameterisable), so both go through fixed allow-lists. We stub
+// executeQuery to capture the Cypher and assert its shape + escaping + guards.
+// ═══════════════════════════════════════════════════════════════════
+
+describe('OmniGraph Client - WISER meeting nodes + edges', () => {
+  let client;
+  let queries;
+
+  beforeEach(() => {
+    client = new OmniGraphClient();
+    queries = [];
+    client.executeQuery = async (cypher) => {
+      queries.push(cypher);
+      return [];
+    };
+  });
+
+  it('exposes the WISER allow-lists as the single source of truth', () => {
+    expect(WISER_NODE_KINDS).toEqual(['Meeting', 'Transcript', 'Recording']);
+    expect(MEETING_ARTIFACT_RELS).toEqual(['HAS_TRANSCRIPT', 'HAS_RECORDING']);
+  });
+
+  it('setAssetKind adds the kind as a second label on the existing Asset', async () => {
+    await client.setAssetKind('item-123', 'Meeting');
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toMatch(/MATCH \(a:Asset \{id: 'item-123'\}\)/);
+    expect(queries[0]).toMatch(/SET a:Meeting/);
+    expect(queries[0]).toContain("a.nodeKind = 'Meeting'");
+  });
+
+  it('setAssetKind supports Transcript and Recording', async () => {
+    await client.setAssetKind('t1', 'Transcript');
+    await client.setAssetKind('r1', 'Recording');
+    expect(queries[0]).toMatch(/SET a:Transcript/);
+    expect(queries[1]).toMatch(/SET a:Recording/);
+  });
+
+  it('setAssetKind rejects any label outside the allow-list (Cypher-injection guard)', async () => {
+    await expect(client.setAssetKind('x', 'Person')).rejects.toThrow(/Invalid asset kind/);
+    // A crafted label that would inject structure must never reach the query.
+    await expect(client.setAssetKind('x', 'Meeting RETURN a; MATCH (n) DETACH DELETE n //')).rejects.toThrow(
+      /Invalid asset kind/
+    );
+    expect(queries).toHaveLength(0);
+  });
+
+  it('setAssetKind escapes the asset id', async () => {
+    await client.setAssetKind("it'--drop", 'Meeting');
+    expect(queries[0]).toContain("it\\'--drop");
+  });
+
+  it('linkMeetingArtifact creates a typed edge to a MERGEd artifact node', async () => {
+    await client.linkMeetingArtifact('m1', 't1', 'HAS_TRANSCRIPT');
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toMatch(/MATCH \(m:Meeting \{id: 'm1'\}\)/);
+    expect(queries[0]).toMatch(/MERGE \(a:Asset \{id: 't1'\}\)/);
+    expect(queries[0]).toMatch(/MERGE \(m\)-\[r:HAS_TRANSCRIPT\]->\(a\)/);
+  });
+
+  it('linkMeetingArtifact supports HAS_RECORDING', async () => {
+    await client.linkMeetingArtifact('m1', 'rec1', 'HAS_RECORDING');
+    expect(queries[0]).toMatch(/MERGE \(m\)-\[r:HAS_RECORDING\]->\(a\)/);
+  });
+
+  it('linkMeetingArtifact rejects any relationship outside the allow-list', async () => {
+    await expect(client.linkMeetingArtifact('m1', 't1', 'DELETED_BY')).rejects.toThrow(/Invalid meeting relationship/);
+    await expect(
+      client.linkMeetingArtifact('m1', 't1', 'HAS_TRANSCRIPT]->() DETACH DELETE m //')
+    ).rejects.toThrow(/Invalid meeting relationship/);
+    expect(queries).toHaveLength(0);
+  });
+
+  it('linkMeetingArtifact is a no-op (no query) when an id is missing', async () => {
+    expect(await client.linkMeetingArtifact('m1', '', 'HAS_TRANSCRIPT')).toBeNull();
+    expect(await client.linkMeetingArtifact('', 't1', 'HAS_TRANSCRIPT')).toBeNull();
+    expect(queries).toHaveLength(0);
   });
 });

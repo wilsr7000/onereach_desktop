@@ -135,6 +135,66 @@ describe('SpacesSyncManager', () => {
     const mgr = new SpacesSyncManager();
     expect(mgr.getStatus('unknown')).toEqual({ lastPushAt: null, lastPullAt: null });
   });
+
+  // ── WISER meeting graph specialization (_syncMeetingGraph) ────────────────
+  // A synced meeting item drives its own graph shape: :Meeting label + labelled
+  // transcript/recording + meeting->artifact edges. Edge is created before the
+  // kind label so the artifact node exists to label. Content is supplied inline
+  // so the method never falls back to the spaces-api fetch.
+
+  const fakeGraph = () => {
+    const calls = [];
+    return {
+      calls,
+      setAssetKind: async (id, kind) => { calls.push(['setAssetKind', id, kind]); },
+      linkMeetingArtifact: async (m, a, rel) => { calls.push(['linkMeetingArtifact', m, a, rel]); },
+    };
+  };
+
+  it('_syncMeetingGraph ignores non-meeting items (no graph calls)', async () => {
+    const mgr = new SpacesSyncManager();
+    const g = fakeGraph();
+    await mgr._syncMeetingGraph(g, 'space1', { id: 'x1', type: 'text', source: 'gsx-capture', tags: [] }, 'x1');
+    expect(g.calls).toHaveLength(0);
+  });
+
+  it('_syncMeetingGraph labels the meeting + artifacts and draws edges', async () => {
+    const mgr = new SpacesSyncManager();
+    const g = fakeGraph();
+    const content = JSON.stringify({ post: { transcriptItemId: 't1', recordingItemIds: ['r1', 'r2'] } });
+    await mgr._syncMeetingGraph(g, 'space1', { id: 'm1', source: 'wiser-meeting', tags: ['wiser-meeting'], content }, 'm1');
+    expect(g.calls).toEqual([
+      ['setAssetKind', 'm1', 'Meeting'],
+      ['linkMeetingArtifact', 'm1', 't1', 'HAS_TRANSCRIPT'],
+      ['setAssetKind', 't1', 'Transcript'],
+      ['linkMeetingArtifact', 'm1', 'r1', 'HAS_RECORDING'],
+      ['setAssetKind', 'r1', 'Recording'],
+      ['linkMeetingArtifact', 'm1', 'r2', 'HAS_RECORDING'],
+      ['setAssetKind', 'r2', 'Recording'],
+    ]);
+  });
+
+  it('_syncMeetingGraph detects a meeting by tag even without a source field', async () => {
+    const mgr = new SpacesSyncManager();
+    const g = fakeGraph();
+    const content = JSON.stringify({ post: { transcriptItemId: 't1', recordingItemIds: [] } });
+    await mgr._syncMeetingGraph(g, 'space1', { id: 'm1', tags: ['wiser-meeting'], content }, 'm1');
+    expect(g.calls[0]).toEqual(['setAssetKind', 'm1', 'Meeting']);
+    expect(g.calls).toContainEqual(['linkMeetingArtifact', 'm1', 't1', 'HAS_TRANSCRIPT']);
+  });
+
+  it('_syncMeetingGraph labels the meeting even when it has no artifacts yet', async () => {
+    const mgr = new SpacesSyncManager();
+    const g = fakeGraph();
+    await mgr._syncMeetingGraph(g, 'space1', { id: 'm1', source: 'wiser-meeting', tags: [], content: '{"post":{}}' }, 'm1');
+    expect(g.calls).toEqual([['setAssetKind', 'm1', 'Meeting']]);
+  });
+
+  it('_syncMeetingGraph is inert when the graph lacks the new methods (old client)', async () => {
+    const mgr = new SpacesSyncManager();
+    // Must not throw when setAssetKind is absent.
+    await expect(mgr._syncMeetingGraph({}, 'space1', { id: 'm1', tags: ['wiser-meeting'] }, 'm1')).resolves.toBeUndefined();
+  });
 });
 
 // ── Graph Method Contracts ─────────────────────────────────────────────────
