@@ -72,7 +72,9 @@ Capabilities:
 - Capture screen recordings
 - Record to a specific Space for organization
 
-This agent opens the recorder window and starts capture sessions. It handles "start a meeting" as a recording action. It does not schedule calendar events, play back videos, or edit recordings.`,
+This agent opens the recorder window and starts capture sessions. It handles a bare "start a meeting" as a recording action. It does not schedule calendar events, play back videos, or edit recordings.
+
+LOW confidence when: the user wants to ORGANIZE a meeting — choose/suggest participants, invite people, "meeting with Erika", "set up a meeting" — the Meeting Starter agent owns that flow.`,
 
   // Memory for tracking user patterns
   memory: null,

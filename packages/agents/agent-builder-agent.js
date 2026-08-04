@@ -31,6 +31,7 @@ const CLAUDE_CODE_FEASIBLE_EFFORTS = new Set(['easy', 'medium']);
 // Lazy requires so tests can override via setters below.
 let _claudeCodeBuilder = null;
 let _exchangeBus = null;
+let _agentStore = null;
 
 function _getClaudeCodeBuilder() {
   if (_claudeCodeBuilder) return _claudeCodeBuilder;
@@ -60,6 +61,24 @@ function _setClaudeCodeBuilder(fn) {
  */
 function _setExchangeBus(bus) {
   _exchangeBus = bus || null;
+}
+
+function _getAgentStoreSafe() {
+  if (_agentStore) return _agentStore;
+  try {
+    const { getAgentStore } = require('../../src/voice-task-sdk/agent-store');
+    return getAgentStore();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Test-only: inject a fake agent store. Pass null to reset.
+ * @param {Object|null} store
+ */
+function _setAgentStore(store) {
+  _agentStore = store || null;
 }
 
 // System context passed to the feasibility LLM call so it can make
@@ -117,6 +136,18 @@ module.exports = BaseAgent.create({
     'make a bot',
     'build a bot',
     'automate',
+    // Feature-add / repair intents on EXISTING agents route here too:
+    // "add X to my Y agent", "fix my alarm agent", "update my joke agent".
+    'add a feature',
+    'add to my agent',
+    'update my agent',
+    'modify my agent',
+    'change my agent',
+    'improve my agent',
+    'upgrade my agent',
+    'fix my agent',
+    'rebuild my agent',
+    'rebuild agent',
   ],
   executionType: 'action',
   estimatedExecutionMs: 6000,
@@ -136,6 +167,7 @@ Use this agent when:
 - The user explicitly asks to build, create, or make an agent/bot/assistant
 - The user asks "can you do X" and the answer requires building something new
 - A capability gap was detected and the user needs guidance on what's possible
+- The user wants to CHANGE one of their custom agents: add a feature, modify behavior, fix or rebuild a broken agent (e.g. "add jokes to my weather agent", "fix my alarm agent"). HIGH confidence on these -- no other agent can modify agents.
 
 This agent does NOT execute playbooks or generate agent code directly -- it assesses feasibility and launches WISER Playbooks for the actual build process.
 
@@ -175,6 +207,14 @@ LOW confidence when: the user is asking an existing agent to do its job (play mu
       }
       // Ambiguous follow-up -- fall through to a fresh feasibility pass on the
       // new content (user probably moved on to a different request).
+    }
+
+    // Feature-add / repair on an EXISTING custom agent: "add X to my Y
+    // agent", "fix my alarm agent". Route to a modify proposal that carries
+    // the current stored definition so the rebuild keeps existing behavior.
+    const modifyTarget = this._findModifyTarget(content);
+    if (modifyTarget) {
+      return this._proposeModify(content, modifyTarget);
     }
 
     // Check if this is a capability-gap fallback (injected by exchange-bridge)
@@ -233,6 +273,97 @@ LOW confidence when: the user is asking an existing agent to do its job (play mu
             originalRequest,
             assessment,
             buildMethod,
+          },
+        },
+      },
+    };
+  },
+
+  /**
+   * Detect a modify/repair intent aimed at one of the user's custom agents:
+   * the utterance must carry a change verb AND name a stored agent. Returns
+   * `{ def, isRepair }` or null. Deliberately conservative -- a false null
+   * just falls through to the normal feasibility flow.
+   */
+  _findModifyTarget(content) {
+    const text = String(content || '').toLowerCase();
+    const hasChangeVerb =
+      /\b(add|give|teach|update|upgrade|improve|extend|change|modify|fix|repair|rebuild)\b/.test(text);
+    if (!hasChangeVerb) return null;
+
+    const store = _getAgentStoreSafe();
+    if (!store || typeof store.getLocalAgents !== 'function') return null;
+
+    let agents = [];
+    try {
+      agents = store.getLocalAgents() || [];
+    } catch {
+      return null;
+    }
+
+    // Longest name match wins ("Weather Buddy Pro" over "Weather Buddy").
+    let best = null;
+    for (const def of agents) {
+      const name = String(def.name || '').toLowerCase().trim();
+      if (name.length < 3) continue;
+      if (text.includes(name) && (!best || name.length > String(best.name).toLowerCase().length)) {
+        best = def;
+      }
+    }
+    if (!best) return null;
+
+    return {
+      def: best,
+      isRepair: /\b(fix|repair|rebuild)\b/.test(text),
+    };
+  },
+
+  /**
+   * Propose updating an existing agent. Same consent shape as the build
+   * offer; `pendingBuild.modify` makes the confirmation update the agent in
+   * place (via buildAgentWithClaudeCode's updateAgentId) instead of creating
+   * a duplicate.
+   */
+  _proposeModify(content, { def, isRepair }) {
+    const parts = [
+      isRepair
+        ? `Rebuild the existing agent "${def.name}" so it works again, applying this request: ${content}`
+        : `Update the existing agent "${def.name}" with this change: ${content}`,
+      `Current definition -- description: ${def.description || 'n/a'}`,
+      `Current prompt/instructions: ${def.prompt || 'n/a'}`,
+    ];
+    if (Array.isArray(def.keywords) && def.keywords.length) {
+      parts.push(`Current trigger keywords: ${def.keywords.join(', ')}`);
+    }
+    parts.push('Keep everything that already works; produce a complete updated agent definition.');
+
+    const message = isRepair
+      ? `I can rebuild your "${def.name}" agent. I'll keep what it was meant to do, fix it, and test it before switching it on. Want me to go ahead?`
+      : `I can update your "${def.name}" agent to handle that. I'll make the change and test it before switching it on. Want me to go ahead?`;
+
+    return {
+      success: true,
+      message,
+      needsInput: {
+        prompt: message,
+        agentId: this.id,
+        context: {
+          pendingBuild: {
+            originalRequest: parts.join('\n'),
+            assessment: {
+              effort: 'easy',
+              reasoning: isRepair
+                ? 'Rebuild of an existing agent from its stored definition.'
+                : 'Update of an existing agent from its stored definition.',
+              requiredIntegrations: [],
+              missingAccess: [],
+              estimatedCostPerUse: '~$0.05',
+              similarAgent: null,
+              alternativeSuggestion: null,
+              spokenResponse: null,
+            },
+            buildMethod: 'claude-code',
+            modify: { agentId: def.id, agentName: def.name, isRepair },
           },
         },
       },
@@ -436,9 +567,15 @@ Effort guide:
   async _buildWithClaudeCode(pendingBuild) {
     const { originalRequest, assessment } = pendingBuild;
 
+    // Rebuild (self-heal) and modify (feature-add) both target an EXISTING
+    // stored agent: build the new definition, then update it in place so the
+    // id, version history, and hot-connect wiring carry over.
+    const existingTarget = pendingBuild.rebuild || pendingBuild.modify || null;
+
     log.info('agent-builder', 'Building agent with Claude Code', {
       request: originalRequest.slice(0, 120),
       effort: assessment.effort,
+      updateAgentId: (existingTarget && existingTarget.agentId) || null,
     });
 
     let build;
@@ -446,6 +583,7 @@ Effort guide:
       const builder = _getClaudeCodeBuilder();
       build = await builder(originalRequest, {
         onProgress: (evt) => this._emitBuildProgress({ ...evt, originalRequest }),
+        updateAgentId: (existingTarget && existingTarget.agentId) || undefined,
         generatorOptions: {
           // Let the generator choose an appropriate template based on capabilities
         },
@@ -500,6 +638,26 @@ Effort guide:
     const agentName = (build.agent && (build.agent.name || build.agent.displayName)) || 'new agent';
     const elapsedSec = Math.max(1, Math.round((build.elapsedMs || 0) / 1000));
 
+    // Every build (system-offered or ad-hoc) opens WISER Playbooks with the
+    // new playbook composed from the local-agent template -- the playbook is
+    // the durable spec the agent was generated from. Fire-and-forget: the
+    // spoken outcome must not block on a web tool.
+    let playbookNote = '';
+    if (build.playbook && build.playbook.markdown) {
+      let opened = false;
+      try {
+        const { openPlaybookInWiser } = require('../../lib/agent-playbook');
+        opened = openPlaybookInWiser(build.playbook.markdown) === true;
+      } catch (_e) {
+        opened = false;
+      }
+      playbookNote = opened
+        ? ' Its playbook just opened in WISER Playbooks.'
+        : build.playbook.saved
+          ? ' Its playbook is saved in Spaces under Agent Playbooks.'
+          : '';
+    }
+
     // Post-build verification outcome (claude-code-agent-builder stage 4):
     // 'live-tested' means the artifact executed the original request NOW;
     // 'config-pending-restart' means a valid config that the dynamic runtime
@@ -517,7 +675,10 @@ Effort guide:
     let retryScheduled = false;
     try {
       const bus = _getExchangeBus();
-      if (!pendingRestart && bus && typeof bus.processSubmit === 'function') {
+      // No auto-retry for rebuild/modify: their originalRequest is a
+      // maintenance instruction ("Rebuild the existing agent..."), not a
+      // user task -- re-submitting it would just re-trigger this builder.
+      if (!existingTarget && !pendingRestart && bus && typeof bus.processSubmit === 'function') {
         // Fire-and-forget -- don't block the "Done" message on the re-run
         Promise.resolve(
           bus.processSubmit(originalRequest, {
@@ -537,24 +698,32 @@ Effort guide:
       log.warn('agent-builder', 'Could not schedule auto-retry', { error: err.message });
     }
 
+    // Honest verb per flow: rebuilt (self-heal), updated (feature-add),
+    // built (fresh). The verified outcome decides the rest of the sentence.
+    const builtVerb = pendingBuild.rebuild ? 'rebuilt' : pendingBuild.modify ? 'updated' : 'built';
+
     if (pendingRestart) {
       return {
         success: true,
         message:
-          `I built "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'} and verified its configuration. ` +
-          `It comes online after the next app restart — then your original request will be handled.`,
+          `I ${builtVerb} "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'} and verified its configuration. ` +
+          `It comes online after the next app restart — then your original request will be handled.` +
+          playbookNote,
       };
     }
 
     const followUp = retryScheduled
       ? 'I tested it against your request and it worked — running it for real now...'
-      : 'It tested clean. Try your original request again and it should pick up.';
+      : existingTarget
+        ? "It tested clean and it's live now."
+        : 'It tested clean. Try your original request again and it should pick up.';
 
     return {
       success: true,
       message:
-        `Done. I built and tested "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'}. ` +
-        followUp,
+        `Done. I ${builtVerb} and tested "${agentName}" in about ${elapsedSec} second${elapsedSec === 1 ? '' : 's'}. ` +
+        followUp +
+        playbookNote,
     };
   },
 
@@ -719,3 +888,4 @@ Return JSON: { "spaceId": "<id or null>", "confidence": <0-1> }`,
 // `require('./agent-builder-agent')._setClaudeCodeBuilder(fn)` etc.
 module.exports._setClaudeCodeBuilder = _setClaudeCodeBuilder;
 module.exports._setExchangeBus = _setExchangeBus;
+module.exports._setAgentStore = _setAgentStore;
