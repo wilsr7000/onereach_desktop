@@ -40,6 +40,8 @@ const {
   spokenDaySummary,
   formatEventTime,
   formatEventTimeRange,
+  classifyBriefTimeline,
+  localDateKey,
 } = require('../../lib/calendar-format');
 
 const calendarQueryAgent = {
@@ -287,10 +289,10 @@ This agent reads calendar data. It does not create, modify, or delete events.`,
     //  - personal blocks/holds are not meetings;
     //  - when the label is "today", the headline is what's LEFT, with the
     //    finished portion mentioned, not a raw all-day tally.
-    const BLOCK_TITLE = /don[\u2019']?t book|do not book|\bhold\b|\bblocked?\b|focus time|\bfocus\b|\bbusy\b/i;
-    const meetings = brief.timeline.filter((e) => !BLOCK_TITLE.test(e.title || '') && !e.selfDeclined);
-    const upcoming = meetings.filter((e) => e.status === 'upcoming' || e.status === 'in-progress');
-    const completed = meetings.filter((e) => e.status === 'completed');
+    // The classifier is SHARED with the dayView glance card
+    // (lib/calendar-format.js) so voice and UI can never disagree again
+    // (the "said 3, showed 7" mismatch).
+    const { meetings, upcoming, completed } = classifyBriefTimeline(brief.timeline);
 
     const parts = [];
     if (label === 'today') {
@@ -399,8 +401,10 @@ This agent reads calendar data. It does not create, modify, or delete events.`,
     if (diffDays === 0) return 'today';
     if (diffDays === 1) return 'tomorrow';
     if (diffDays === -1) return 'yesterday';
-    // ISO YYYY-MM-DD form is accepted by resolveTimeframe in calendar-fetch.js
-    return target.toISOString().slice(0, 10);
+    // ISO YYYY-MM-DD form is accepted by resolveTimeframe in calendar-fetch.js.
+    // LOCAL day key: a UTC slice of a local-midnight date names the wrong
+    // day in UTC-positive timezones.
+    return localDateKey(target);
   },
 
   async execute(task) {
@@ -498,7 +502,7 @@ This agent reads calendar data. It does not create, modify, or delete events.`,
       `Parse this calendar query into a structured intent.
 
 CURRENT CONTEXT:
-- Today: ${dateStr} (${now.toISOString().slice(0, 10)})
+- Today: ${dateStr} (${localDateKey(now)})
 - Time: ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
 - Time of day: ${timeContext.timeOfDay || 'day'}
 ${aliasHint}
@@ -601,7 +605,7 @@ Rules:
    */
   async _suggestCorrectedTimeframe(intent, dateRange) {
     try {
-      const dateRangeStr = `${new Date(dateRange.start).toISOString().slice(0, 10)} to ${new Date(dateRange.end).toISOString().slice(0, 10)}`;
+      const dateRangeStr = `${localDateKey(dateRange.start)} to ${localDateKey(dateRange.end)}`;
       const result = await ai.json(
         `The user asked about timeframe "${intent.timeframe}" which I resolved to ${dateRangeStr}, but no events came back. Did I pick the wrong timeframe? If a different timeframe is more likely to have events, suggest it. If the original was probably right (calendar legitimately empty), return null.
 
@@ -743,7 +747,7 @@ Return JSON: { "timeframe": "today" | "tomorrow" | "this_week" | "next_week" | "
     // logic which missed obvious matches like "the standup" -> "Daily Standup".
     const matches = await fuzzyMatch(intent.searchText, events, {
       agentId: this.id,
-      cacheKey: dateRange.start ? new Date(dateRange.start).toISOString().slice(0, 10) : 'today',
+      cacheKey: dateRange.start ? localDateKey(dateRange.start) : 'today',
     });
     const match = matches?.[0];
 
