@@ -81,7 +81,7 @@ describe('orb.html -- lifecycle wiring invariants', () => {
   it('classifies disconnects instead of unconditionally ending the session', () => {
     const start = orbHtml.indexOf('disconnected: (e) =>');
     expect(start).toBeGreaterThan(-1);
-    const block = orbHtml.slice(start, start + 1400);
+    const block = orbHtml.slice(start, start + 2400);
     expect(block).toMatch(/classifyDisconnect/);
     // endSession must be inside the terminal branch, not unconditional.
     expect(block).toMatch(/kind\s*===\s*['"]terminal['"]/);

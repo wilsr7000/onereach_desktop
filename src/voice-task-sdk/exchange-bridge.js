@@ -617,6 +617,31 @@ async function routePendingInput(text, metadata) {
   if (!pick) return null;
 
   const { agentId, context: pendingContext } = pick;
+
+  // Relevance guard: when the pending question offered concrete OPTIONS and
+  // the user's utterance shares no meaningful words with any of them, this is
+  // a NEW command, not an answer — fall through to normal dispatch instead of
+  // hijacking it. (2026-08-04 live: "Can you set an alarm for 6:32" was
+  // consumed by a stale pending and became "Prep me for the next meeting".)
+  try {
+    const options = (pendingContext && (pendingContext.options || pendingContext.context?.options)) || [];
+    if (Array.isArray(options) && options.length > 0) {
+      const words = String(text).toLowerCase().match(/[a-z]{3,}/g) || [];
+      const STOP = new Set(['the','you','can','for','and','with','that','this','please','what','would','could']);
+      const meaningful = words.filter((w) => !STOP.has(w));
+      const optText = options.map((o) => String(o.label || o.text || o).toLowerCase()).join(' ');
+      const overlap = meaningful.some((w) => optText.includes(w));
+      const affirmative = /^(yes|yeah|yep|sure|ok|okay|no|nope|first|second|third|last|that one|build|skip|cancel)/i.test(String(text).trim());
+      if (!overlap && !affirmative) {
+        log.warn('voice', 'Pending input skipped — utterance unrelated to pending options (new command)', {
+          event: 'voice:pending-bypass',
+          agentId,
+          text: String(text).slice(0, 60),
+        });
+        return null; // caller falls through to the normal pipeline
+      }
+    }
+  } catch (_e) { /* guard must never break routing */ }
   log.info('voice', 'Routing follow-up to pending agent', {
     agentId,
     targeted: !!metadata.targetAgentId,
@@ -4846,6 +4871,27 @@ function setupExchangeEvents() {
         agentId,
         inputModality,
         spokenPreview: normalized.spokenSummary.slice(0, 50),
+      });
+      deliveryEval.evaluateDelivery({
+        taskId: task.id,
+        agentId,
+        inputModality,
+        spokenSummary: normalized.spokenSummary,
+        hasPanel,
+        speakAttempted: false,
+      });
+    } else if (!normalized.spokenSummary) {
+      // A settle with NOTHING to say. For a voice-in task this is a silent
+      // failure the user experiences as dead air (2026-08-04: "set an alarm
+      // for 6:32" settled wordlessly; the watchdog apologized 26s later).
+      // Grade it so it alarms immediately and speaks the fallback.
+      deliveryEval.evaluateDelivery({
+        taskId: task.id,
+        agentId,
+        inputModality,
+        spokenSummary: '',
+        hasPanel,
+        speakAttempted: false,
       });
     }
 
