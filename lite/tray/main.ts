@@ -391,7 +391,7 @@ export function buildTooltip(): string {
  * close to this size literally, so the value also serves as a sane
  * "looks at home" target on those platforms.
  */
-export const TRAY_ICON_SIZE = 30 as const;
+export const TRAY_ICON_SIZE = 22 as const;
 
 /**
  * Build the tray context menu template. Pure -- no Electron Tray
