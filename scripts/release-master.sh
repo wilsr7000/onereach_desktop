@@ -301,15 +301,21 @@ console.log('Updated package.json to version ${NEW_VERSION}');
 echo ""
 echo -e "${YELLOW}Step 2: Committing to private repository...${NC}"
 
-# Add all changes if user chose to commit them earlier
+# Add all changes if user chose to commit them earlier.
+# Re-releases of the SAME version (e.g. rerun after a failed build) have
+# nothing to commit here -- "nothing to commit" must not abort the whole
+# release under set -e, so only commit when something is staged.
 if [ "$COMMIT_CHANGES" = "y" ]; then
     git add -A
+else
+    git add package.json
+fi
+if git diff --cached --quiet; then
+    echo -e "${YELLOW}No version-bump changes to commit (re-release of v${NEW_VERSION}); continuing.${NC}"
+else
     git commit -m "Release v${NEW_VERSION}
 
 ${RELEASE_NOTES}"
-else
-    git add package.json
-    git commit -m "Release v${NEW_VERSION}"
 fi
 
 # Get current branch
