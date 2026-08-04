@@ -3844,6 +3844,26 @@ function setupExchangeEvents() {
     const safeResult = result || {};
     log.info('voice', 'Task settled by', { agentId: agentId });
 
+    // Decide EARLY whether this settle will trigger the capability-gap
+    // builder offer (pure + cheap), so earlier sections of this handler --
+    // notably the slow-success build suggestion -- can suppress their own
+    // competing offers. One build offer per turn.
+    try {
+      if (result?.needsInput) {
+        const earlyGap = shouldOfferGapAfterSettle({
+          bustCount: task.metadata?.bustCount || 0,
+          settledConfidence:
+            typeof task.metadata?.settledConfidence === 'number' ? task.metadata.settledConfidence : null,
+          resultResolved: false,
+        });
+        if (earlyGap.offer) {
+          global.__gapOfferTaskIds = global.__gapOfferTaskIds || new Set();
+          global.__gapOfferTaskIds.add(task.id);
+          if (global.__gapOfferTaskIds.size > 200) global.__gapOfferTaskIds.clear();
+        }
+      }
+    } catch (_e) { /* advisory only */ }
+
     // ── RELEASE PROCESSING LOCK ──
     if (activeTaskLock && activeTaskLock.taskId === task.id) {
       log.info('voice', 'Releasing processing lock (task settled)', { taskId: task.id });
@@ -4011,7 +4031,12 @@ function setupExchangeEvents() {
         // into the learning pipeline. Respects cooldowns to avoid nagging.
         try {
           const { getSlowSuccessTracker } = require('../../lib/agent-learning/slow-success-tracker');
-          const suggestion = getSlowSuccessTracker().shouldSuggestBuild(slowEvent);
+          // One build offer per turn: when the capability-gap re-check already
+          // registered a builder consent for this task, the slow-success
+          // suggestion is redundant noise (2026-08-04 live test: the user
+          // heard BOTH offers back-to-back).
+          const gapAlreadyOffered = !!(global.__gapOfferTaskIds && global.__gapOfferTaskIds.has(task.id));
+          const suggestion = gapAlreadyOffered ? null : getSlowSuccessTracker().shouldSuggestBuild(slowEvent);
           if (suggestion) {
             log.info('voice', '[SlowSuccess] Emitting proactive build suggestion', {
               classKey: suggestion.queryClass,
@@ -4234,33 +4259,17 @@ function setupExchangeEvents() {
 
     // Check for multi-turn conversation (needsInput)
     if (result.needsInput) {
-      const niOutcome = await handleNeedsInput(result, agentId, task.id, {
-        html: result.html,
-        data: result.data,
-        // A background/scheduled task asking for input is proactive — the orb
-        // must surface it even from a self-prompting tool (UC5).
-        proactive: task.metadata?.origin === 'proactive',
-      });
-
-      // Delivery eval: needsInput settles were previously ungraded — the
-      // alarm-request dead-end produced ZERO delivery events. Every settle
-      // gets a verdict, no exceptions.
       const niModality =
         task.inputModality || task.metadata?.inputModality || task.context?.inputModality || 'voice';
-      deliveryEval.evaluateDelivery({
-        taskId: task.id,
-        agentId,
-        inputModality: niModality,
-        spokenSummary: result.needsInput.prompt || '',
-        hasPanel: !!result.html,
-        speakAttempted: true,
-        speakResult: niOutcome?.spoke === true,
-      });
 
-      // Capability-gap re-check: busts + an unresolved (needsInput) outcome
-      // reveal the auction's confidence was fiction — the exact case where a
-      // hallucinated 0.95 bid suppressed the pre-auction gap offer. Offer
-      // the builder path now instead of quietly accepting the dead end.
+      // ── Capability-gap re-check FIRST (before anything speaks) ──
+      // Busts + an unresolved (needsInput) outcome reveal the auction's
+      // confidence was fiction. When the gap fires and the builder offers a
+      // consent prompt, that consent REPLACES the dead-end question entirely:
+      // the 2026-08-04 live test stacked three speeches back-to-back
+      // (dead-end prompt -> slow-success offer -> builder consent). One turn,
+      // one voice, one question.
+      let gapConsentSpoken = false;
       try {
         const gap = shouldOfferGapAfterSettle({
           bustCount: task.metadata?.bustCount || 0,
@@ -4269,6 +4278,7 @@ function setupExchangeEvents() {
           resultResolved: false,
         });
         if (gap.offer) {
+          const gapSummary = `Post-settle re-check (${gap.reason}): ${task.metadata?.bustCount || 0} agents busted, then ${agentId} dead-ended with a clarifying question.`;
           log.error('voice', 'Capability gap revealed post-settle — offering agent builder', {
             event: 'capability-gap:post-settle',
             taskId: task.id,
@@ -4277,24 +4287,13 @@ function setupExchangeEvents() {
             bustCount: task.metadata?.bustCount || 0,
             content: (task.content || '').slice(0, 80),
           });
-          const gapSummary = `Post-settle re-check (${gap.reason}): ${task.metadata?.bustCount || 0} agents busted, then ${agentId} dead-ended with a clarifying question.`;
           try {
-            exchangeBus.emit('learning:capability-gap', {
-              userInput: task.content,
-              gapSummary,
-              timestamp: Date.now(),
-            });
+            exchangeBus.emit('learning:capability-gap', { userInput: task.content, gapSummary, timestamp: Date.now() });
           } catch (_e) { /* non-critical */ }
+          // Suppress the slow-success tracker's competing build offer for
+          // this task — one build offer per turn.
+          try { global.__gapOfferTaskIds = global.__gapOfferTaskIds || new Set(); global.__gapOfferTaskIds.add(task.id); } catch (_e) { /* ok */ }
 
-          // Register the BUILDER as the pending consent agent — same flow as
-          // the pre-auction halt path. A bare spoken instruction ("say 'build
-          // an agent for this'") is uncatchable here: the dead-end settle
-          // just registered ITS OWN pending-input state, so the user's reply
-          // would be hijacked by routePendingInput and never reach the
-          // auction (verified live 2026-08-03: the phrase was swallowed by a
-          // pending tour prompt). Clearing the dead-end pending and running
-          // the builder's consent via handleNeedsInput makes "yes" route
-          // straight to the builder.
           let builderResult = null;
           try {
             const buildOut = await runMetaTask(
@@ -4321,28 +4320,50 @@ function setupExchangeEvents() {
           }
 
           if (builderResult && builderResult.needsInput) {
-            try { getTranscriptService().clearPending(agentId); } catch (_e) { /* best effort */ }
-            await handleNeedsInput(builderResult, 'agent-builder-agent', task.id, {
+            // The builder consent IS this turn's spoken output. The original
+            // dead-end prompt is never spoken (its pending state never set).
+            const consentOutcome = await handleNeedsInput(builderResult, 'agent-builder-agent', task.id, {
               html: builderResult.html,
               data: builderResult.data,
               ui: builderResult.ui,
             });
-          } else {
-            // Builder declined or failed: at least tell the user plainly.
-            try {
-              const { getVoiceSpeaker } = require('../../voice-speaker');
-              const speaker = getVoiceSpeaker();
-              if (speaker) {
-                await speaker.speak(
-                  "None of my current agents could fully handle that, and I couldn't line up a build offer. You can say 'build an agent' to try again.",
-                  { taskResult: true, skipAffectMatching: true }
-                );
-              }
-            } catch (_e) { /* best effort */ }
+            gapConsentSpoken = true;
+            deliveryEval.evaluateDelivery({
+              taskId: task.id,
+              agentId: 'agent-builder-agent',
+              inputModality: niModality,
+              spokenSummary: builderResult.needsInput.prompt || '',
+              hasPanel: !!builderResult.html,
+              speakAttempted: true,
+              speakResult: consentOutcome?.spoke === true,
+            });
           }
         }
       } catch (gapErr) {
         log.warn('voice', 'Post-settle gap re-check failed', { error: gapErr.message });
+      }
+
+      if (!gapConsentSpoken) {
+        const niOutcome = await handleNeedsInput(result, agentId, task.id, {
+          html: result.html,
+          data: result.data,
+          // A background/scheduled task asking for input is proactive — the orb
+          // must surface it even from a self-prompting tool (UC5).
+          proactive: task.metadata?.origin === 'proactive',
+        });
+
+        // Delivery eval: needsInput settles were previously ungraded — the
+        // alarm-request dead-end produced ZERO delivery events. Every settle
+        // gets a verdict, no exceptions.
+        deliveryEval.evaluateDelivery({
+          taskId: task.id,
+          agentId,
+          inputModality: niModality,
+          spokenSummary: result.needsInput.prompt || '',
+          hasPanel: !!result.html,
+          speakAttempted: true,
+          speakResult: niOutcome?.spoke === true,
+        });
       }
 
       return; // Don't mark as completed yet

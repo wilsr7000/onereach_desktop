@@ -335,9 +335,12 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
     //
     // The rich `fullSpeech` is preserved on `data` for any caller that
     // wants the full text (e.g. transcript export, analytics).
-    const spokenSummary = isDayView
-      ? this._computeShortSpokenSummary(contributions, dateLabel)
-      : fullSpeech;
+    // Speak the COMPOSED briefing, not a terse headline. Direct user feedback
+    // (2026-08-04): "did not read the AI briefing to me" — the Phase 7 short
+    // headline ("9 meetings today, brief on screen") left the actual briefing
+    // unheard, and its count was unbacked by evidence (reflector flagged it).
+    // The panel still carries the visual detail; the voice carries the brief.
+    const spokenSummary = fullSpeech;
     const visualText = isDayView
       ? `Daily brief for ${dateLabel}`
       : fullSpeech;

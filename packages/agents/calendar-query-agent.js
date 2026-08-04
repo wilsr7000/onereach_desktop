@@ -282,12 +282,35 @@ This agent reads calendar data. It does not create, modify, or delete events.`,
       return empty;
     }
 
-    const count = brief.timeline.length;
-    const parts = [`${count} meeting${count !== 1 ? 's' : ''} ${label}.`];
+    // Truthful counting (2026-08-04: "9 meetings today" at 6:30 PM counted
+    // the user's own "Don't book" blocks and a day that was already over):
+    //  - personal blocks/holds are not meetings;
+    //  - when the label is "today", the headline is what's LEFT, with the
+    //    finished portion mentioned, not a raw all-day tally.
+    const BLOCK_TITLE = /don[\u2019']?t book|do not book|\bhold\b|\bblocked?\b|focus time|\bfocus\b|\bbusy\b/i;
+    const meetings = brief.timeline.filter((e) => !BLOCK_TITLE.test(e.title || '') && !e.selfDeclined);
+    const upcoming = meetings.filter((e) => e.status === 'upcoming' || e.status === 'in-progress');
+    const completed = meetings.filter((e) => e.status === 'completed');
+
+    const parts = [];
+    if (label === 'today') {
+      if (meetings.length === 0) {
+        const none = { section: 'Calendar', priority: 3, content: `No meetings today.` };
+        if (opts.staleReason) none.content += ' (based on local cache; calendar service is offline)';
+        return none;
+      }
+      if (upcoming.length === 0) {
+        parts.push(`Today's meetings are done — you had ${completed.length}.`);
+      } else {
+        parts.push(`${upcoming.length} meeting${upcoming.length !== 1 ? 's' : ''} left today${completed.length ? ` (${completed.length} already done)` : ''}.`);
+      }
+    } else {
+      parts.push(`${meetings.length} meeting${meetings.length !== 1 ? 's' : ''} ${label}.`);
+    }
 
     // Prefer the next upcoming meeting; fall back to the first timeline entry for
     // forward-looking briefs (tomorrow / this week) where every entry is upcoming anyway.
-    const firstUpcoming = brief.timeline.find((e) => e.status === 'upcoming') || brief.timeline[0];
+    const firstUpcoming = upcoming[0] || (label !== 'today' ? meetings[0] : null);
     if (firstUpcoming) {
       parts.push(`Next: "${firstUpcoming.title}" at ${firstUpcoming.start}.`);
     }

@@ -82,12 +82,18 @@ describe('needsInput settle branch', () => {
     expect(branch).toMatch(/shouldOfferGapAfterSettle\(\{/);
     expect(branch).toMatch(/capability-gap:post-settle/);
     expect(branch).toMatch(/learning:capability-gap/);
-    // Consent must be REGISTERED (pending -> builder), not just spoken: a
-    // bare spoken instruction gets hijacked by the dead-end's own pending
-    // state (verified live 2026-08-03).
+    // Consent must be REGISTERED (pending -> builder), not just spoken --
+    // and it must REPLACE the dead-end prompt, not stack after it (the
+    // 2026-08-04 live test spoke three messages back-to-back). The gap block
+    // therefore runs BEFORE the dead-end handleNeedsInput, which is gated on
+    // gapConsentSpoken.
     expect(branch).toMatch(/EVALUATE_BUILDABILITY/);
-    expect(branch).toMatch(/clearPending\(agentId\)/);
     expect(branch).toMatch(/handleNeedsInput\(builderResult,\s*'agent-builder-agent'/);
+    const consentIdx = branch.indexOf("handleNeedsInput(builderResult, 'agent-builder-agent'");
+    const deadEndIdx = branch.indexOf('handleNeedsInput(result, agentId');
+    expect(consentIdx).toBeGreaterThan(-1);
+    expect(deadEndIdx).toBeGreaterThan(consentIdx); // consent path first
+    expect(branch).toMatch(/if \(!gapConsentSpoken\)/); // dead-end only when no consent
   });
 });
 

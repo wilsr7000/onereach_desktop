@@ -185,7 +185,7 @@ describe('Phase 1: calendar brief merges live Omnical events', () => {
 
       const result = await calendarQueryAgent.getBriefing();
 
-      expect(result.content).toContain('3 meetings');
+      expect(result.content).toMatch(/2 meetings left today \(1 already done\)/);
       expect(result.content).toContain('Sync');
       expect(result.content).not.toMatch(/Next.*Standup/);
       expect(result.content).toContain('back-to-back');
@@ -218,7 +218,7 @@ describe('Phase 1: calendar brief merges live Omnical events', () => {
       });
 
       const result = await calendarQueryAgent.getBriefing();
-      expect(result.content).toContain('1 meeting today');
+      expect(result.content).toContain('1 meeting left today');
       expect(result.content).not.toContain('1 meetings');
     });
   });
