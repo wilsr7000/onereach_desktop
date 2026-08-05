@@ -337,3 +337,55 @@ describe('startLoginVerifier -- premature-success regression', () => {
     expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
   });
 });
+
+describe('startLoginVerifier -- unreadable page must not trigger a reload', () => {
+  // Recovery RELOADS the tab. If the DOM scan threw we could not
+  // classify the page -- and reloading a page we cannot read risks
+  // wiping a login form the user is part-way through typing. So a
+  // failed scan surfaces the instruction instead of gambling a reload.
+  function makeThrowingScanHarness(recovery: () => Promise<boolean>): Harness {
+    const h = makeHarness(
+      { url: () => 'https://auth.edison.onereach.ai/?sso=true', signals: () => [] },
+      { attemptRecovery: recovery }
+    );
+    // Override probeDom to throw, as a cross-origin/destroyed page does.
+    h.deps.probeDom = async () => {
+      throw new Error('cannot access frame');
+    };
+    return h;
+  }
+
+  it('does NOT call attemptRecovery when the DOM scan threw', async () => {
+    let recoveryCalls = 0;
+    const h = makeThrowingScanHarness(async () => {
+      recoveryCalls += 1;
+      return true;
+    });
+    startLoginVerifier({ tabId: 't1', intervalMs: 1000, timeoutMs: 1500 }, h.deps);
+    await h.advance(); // t=1000, unreadable + on auth URL
+    await h.advance(); // t=2000 -> timeout
+    expect(recoveryCalls).toBe(0);
+    expect(names(h)).not.toContain(AUTH_EVENTS.IDW_LOGIN_RETRY);
+    // Still tells the user what to do.
+    expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_STUCK);
+    expect(h.userActions).toHaveLength(1);
+  });
+
+  it('DOES recover when the scan succeeded (control for the test above)', async () => {
+    let recoveryCalls = 0;
+    const h = makeHarness(
+      { url: () => 'https://auth.edison.onereach.ai/?sso=true', signals: () => [] },
+      {
+        attemptRecovery: async () => {
+          recoveryCalls += 1;
+          return true;
+        },
+      }
+    );
+    startLoginVerifier({ tabId: 't1', intervalMs: 1000, timeoutMs: 1500 }, h.deps);
+    await h.advance();
+    await h.advance();
+    expect(recoveryCalls).toBe(1);
+    expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_RETRY);
+  });
+});

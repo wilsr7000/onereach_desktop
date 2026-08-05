@@ -617,6 +617,16 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
   // other tabs get a no-op disposer.
   const verifierEnv = getEnvironmentForUrl(tab.url);
   let verifierActive = false;
+  /**
+   * True once we've told the user this tab needs their attention.
+   * Suppresses repeat notifications: a login page churns through
+   * in-page navigations (reCAPTCHA, form posts, redirects), and each
+   * one re-arms the verifier -- without this the user would get a
+   * fresh "couldn't sign in" notification every ~20s WHILE they are
+   * actively signing in. Cleared when the tab recovers or navigates
+   * off the login flow.
+   */
+  let loginStuckNotified = false;
   let stopCurrentVerifier: () => void = (): void => {};
   // (Re)start the login verifier for this tab -- on attach, and again if
   // a settled tab bounces back to a OneReach login page (session dropped
@@ -684,10 +694,16 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
               return false;
             }
           },
-          onOutcome: () => {
+          onOutcome: (outcome) => {
             verifierActive = false;
+            // Recovered -- allow a future problem to notify again.
+            if (outcome.verdict === 'logged-in') loginStuckNotified = false;
           },
-          onNeedsUserAction: (info) => notifyLoginStuck(win, tab, verifierEnv, info),
+          onNeedsUserAction: (info) => {
+            if (loginStuckNotified) return; // already told them; don't nag
+            loginStuckNotified = true;
+            notifyLoginStuck(win, tab, verifierEnv, info);
+          },
         }
       );
     } catch (err) {
@@ -755,8 +771,12 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     // Re-verify if a SETTLED tab bounces back to a OneReach login page
     // (session dropped mid-use). Guarded by `verifierActive` so the
     // normal login redirects during the FIRST attempt don't restart it.
-    if (verifierEnv !== null && !verifierActive && isOneReachAuthOrLoginUrl(url)) {
-      startVerifier();
+    if (verifierEnv !== null && isOneReachAuthOrLoginUrl(url)) {
+      if (!verifierActive) startVerifier();
+    } else if (loginStuckNotified) {
+      // Left the login flow -- treat the episode as over so a LATER
+      // bounce is allowed to notify again.
+      loginStuckNotified = false;
     }
   });
   view.webContents.on('did-navigate-in-page', (_e, url) => {
@@ -772,8 +792,10 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     // completely unnoticed (no retry, no badge, no notification), which
     // is exactly how "auto-login stopped working" looked silent in the
     // event log.
-    if (verifierEnv !== null && !verifierActive && isOneReachAuthOrLoginUrl(url)) {
-      startVerifier();
+    if (verifierEnv !== null && isOneReachAuthOrLoginUrl(url)) {
+      if (!verifierActive) startVerifier();
+    } else if (loginStuckNotified) {
+      loginStuckNotified = false;
     }
   });
 

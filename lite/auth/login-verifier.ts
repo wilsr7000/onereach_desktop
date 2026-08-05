@@ -292,13 +292,19 @@ export function startLoginVerifier(
     attempt += 1;
     const url = deps.probeUrl();
     let signals: string[] = [];
+    // Whether we actually SAW the page this tick. A thrown scan (page
+    // mid-navigation, destroyed, or a cross-origin frame we can't read)
+    // yields no signals -- which is indistinguishable from "scanned it,
+    // it's clean" unless we track it. That distinction matters: it
+    // gates the auto-reload below, and reloading a page we couldn't
+    // read risks wiping a login form the user is mid-way through.
+    let scanOk = true;
     try {
       const dom = await deps.probeDom();
       signals = Array.isArray(dom.signals) ? dom.signals : [];
     } catch {
-      // DOM scan failed (page navigating / destroyed). Treat as
-      // "no signal this tick" and let the loop retry or time out.
       signals = [];
+      scanOk = false;
     }
     if (stopped) return;
     const { verdict, onAuthUrl, loginSignals } = classifyLoginState(url, signals);
@@ -330,7 +336,7 @@ export function startLoginVerifier(
       loggedInStreak = 0;
     }
     if (deps.now() - windowStart >= timeoutMs) {
-      void handleStuck(loginSignals, deriveLoginCause(loginSignals, onAuthUrl));
+      void handleStuck(loginSignals, deriveLoginCause(loginSignals, onAuthUrl), scanOk);
       return;
     }
     cancelTimer = deps.schedule(() => {
@@ -343,11 +349,20 @@ export function startLoginVerifier(
    * retry budget, self-heal (re-inject + reload via `attemptRecovery`)
    * and open a fresh probe window. Otherwise declare stuck + instruct.
    */
-  const handleStuck = async (signals: string[], cause: IdwLoginCause): Promise<void> => {
+  const handleStuck = async (
+    signals: string[],
+    cause: IdwLoginCause,
+    scanOk = true
+  ): Promise<void> => {
     if (stopped) return;
+    // Only self-heal when we could actually READ the page. Recovery
+    // reloads the tab, and a reload throws away anything the user has
+    // typed -- so if the last scan threw we surface the instruction
+    // instead of gambling a reload on a page we couldn't classify.
     if (
       recoveries < maxRecoveries &&
       deps.attemptRecovery !== undefined &&
+      scanOk &&
       RECOVERABLE_CAUSES.has(cause)
     ) {
       recoveries += 1;
