@@ -157,3 +157,24 @@ describe('voice-listener -- immediate (non-queued) replies speak via voice-speak
     expect(speak).not.toHaveBeenCalled();
   });
 });
+
+describe('voice-listener -- transcript fidelity (Whisper over model paraphrase)', () => {
+  it('dispatches the fresh Whisper transcript, not the tool-call paraphrase', () => {
+    const listener = makeListener();
+    listener.handleEvent({
+      type: 'conversation.item.input_audio_transcription.completed',
+      transcript: 'Can you watch wiser playbooks?',
+    });
+    listener.handleEvent(userRequestEvent('any much wiser playbooks'));
+    expect(submitTask).toHaveBeenCalledWith(
+      'Can you watch wiser playbooks?',
+      expect.objectContaining({ toolId: 'orb' })
+    );
+  });
+
+  it('falls back to the tool-call transcript when no fresh Whisper text exists', () => {
+    const listener = makeListener();
+    listener.handleEvent(userRequestEvent('build a joke agent'));
+    expect(submitTask).toHaveBeenCalledWith('build a joke agent', expect.anything());
+  });
+});

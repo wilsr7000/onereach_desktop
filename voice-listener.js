@@ -533,6 +533,12 @@ class VoiceListener {
           } catch (_err) { /* repair layer must not block transcripts */ }
 
           log.info('voice', 'Transcription', { transcript: finalTranscript });
+          // Remember the last FINAL Whisper transcript: the realtime model's
+          // handle_user_request argument is a PARAPHRASE and degrades intent
+          // ("Can you watch wiser playbooks?" -> "any much wiser playbooks",
+          // 2026-08-05 live). Whisper's text is the fidelity source.
+          this._lastFinalTranscript = finalTranscript;
+          this._lastFinalTranscriptAt = Date.now();
           this.broadcast({
             type: 'transcript',
             text: finalTranscript,
@@ -713,7 +719,22 @@ class VoiceListener {
         if (event.name === 'handle_user_request') {
           try {
             const args = JSON.parse(event.arguments);
-            const transcript = args.transcript;
+            let transcript = args.transcript;
+
+            // Fidelity: prefer the fresh Whisper final transcript over the
+            // model's paraphrase — dispatch what the user actually SAID.
+            if (
+              this._lastFinalTranscript &&
+              Date.now() - (this._lastFinalTranscriptAt || 0) < 5000 &&
+              this._lastFinalTranscript.trim() !== String(transcript || '').trim()
+            ) {
+              log.info('voice', 'Using Whisper transcript over model paraphrase', {
+                event: 'voice:transcript-fidelity',
+                whisper: this._lastFinalTranscript.slice(0, 60),
+                paraphrase: String(transcript || '').slice(0, 60),
+              });
+              transcript = this._lastFinalTranscript;
+            }
 
             log.info('voice', 'User request', { transcript });
 
