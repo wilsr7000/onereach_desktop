@@ -132,10 +132,13 @@ async function _handleRun(task) {
         .slice(0, 5)
         .map((s) => s.name || s.id)
         .join(', ');
+      const prompt = `Which space should I run the playbook in? Available: ${names}`;
       return {
         success: true,
-        message: `Which space should I run the playbook in? Available: ${names}`,
-        needsInput: true,
+        message: prompt,
+        // Structured needsInput (legacy boolean has no prompt: the question
+        // never got spoken and the reply had no routing context).
+        needsInput: { prompt, agentId: 'playbook-agent', context: { awaiting: 'space' } },
       };
     }
   }
@@ -153,10 +156,11 @@ async function _handleRun(task) {
       playbookId = playbooks[0].id;
     } else {
       const names = playbooks.map((p) => p.title).join(', ');
+      const prompt = `Found ${playbooks.length} playbooks: ${names}. Which one should I run?`;
       return {
         success: true,
-        message: `Found ${playbooks.length} playbooks: ${names}. Which one should I run?`,
-        needsInput: true,
+        message: prompt,
+        needsInput: { prompt, agentId: 'playbook-agent', context: { awaiting: 'playbook', spaceId } },
       };
     }
   }
@@ -206,10 +210,11 @@ async function _handleStatus(task) {
   if (job.status === 'paused' && job.pendingQuestions?.length > 0) {
     const q = job.pendingQuestions[0];
     const optionsText = q.options ? ` Options: ${q.options.join(', ')}` : '';
+    const prompt = `The playbook is paused. It is asking: "${q.question}"${optionsText}`;
     return {
       success: true,
-      message: `The playbook is paused. It is asking: "${q.question}"${optionsText}`,
-      needsInput: true,
+      message: prompt,
+      needsInput: { prompt, agentId: 'playbook-agent', context: { awaiting: 'answer', jobId, questionId: q.id } },
       data: { jobId, questionId: q.id },
     };
   }
