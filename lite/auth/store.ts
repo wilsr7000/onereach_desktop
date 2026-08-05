@@ -756,8 +756,25 @@ export class AuthStore {
           totalSource: sourceCookies.length,
           successCount: successes.length,
           ...(failures.length > 0 ? { failureCount: failures.length } : {}),
+          // Name WHICH cookies didn't make it (name@domain + reason, no
+          // values). A partial clone is the difference between "the
+          // agent recognizes you" and "it bounces you to /login", and
+          // a bare count can't tell you whether the one that failed was
+          // load-bearing. Capped so a pathological jar can't flood.
+          ...(failures.length > 0
+            ? {
+                failed: failures
+                  .slice(0, 8)
+                  .map((f) => `${f.name}@${f.domain}: ${f.error}`),
+              }
+            : {}),
           ...(skippedExpired.length > 0
-            ? { skippedExpiredCount: skippedExpired.length }
+            ? {
+                skippedExpiredCount: skippedExpired.length,
+                skippedExpired: skippedExpired
+                  .slice(0, 8)
+                  .map((s) => `${s.name}@${s.domain}`),
+              }
             : {}),
         });
       } else if (failures.length > 0) {

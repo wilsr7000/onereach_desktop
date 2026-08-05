@@ -195,6 +195,13 @@ export interface LoginVerifierOptions {
   timeoutMs?: number;
   /** How many self-heal (re-inject + reload) attempts before instructing the user. Default 1. */
   maxRecoveries?: number;
+  /**
+   * Consecutive logged-in probes required before declaring SUCCESS.
+   * Default 3 (~4.5s at the default interval). Guards against an IDW
+   * that paints its app shell before its own session check finishes
+   * and then routes to /login -- a single good probe is not proof.
+   */
+  successConfirmations?: number;
 }
 
 /** Causes a cookie re-inject + reload can plausibly fix (vs. needing the user). */
@@ -231,6 +238,10 @@ export function startLoginVerifier(
   let attempt = 0;
   let stopped = false;
   let cancelTimer: (() => void) | null = null;
+  /** Consecutive logged-in probes seen so far (reset by any non-success). */
+  let loggedInStreak = 0;
+  /** How many consecutive logged-in probes are required to declare success. */
+  const confirmations = Math.max(1, opts.successConfirmations ?? 3);
 
   const envData = opts.env !== undefined ? { env: opts.env } : {};
 
@@ -304,8 +315,19 @@ export function startLoginVerifier(
       'info'
     );
     if (verdict === 'logged-in') {
-      finish('logged-in', loginSignals);
-      return;
+      // Require the logged-in state to HOLD before declaring success.
+      // A OneReach IDW can render its app shell while its own session
+      // check is still in flight, then route to /login moments later --
+      // so a single good probe is not proof. Observed live: probe said
+      // logged-in at 1.5s, the app bounced to /login at ~9s, and the
+      // premature success had already stopped the watch.
+      loggedInStreak += 1;
+      if (loggedInStreak >= confirmations) {
+        finish('logged-in', loginSignals);
+        return;
+      }
+    } else {
+      loggedInStreak = 0;
     }
     if (deps.now() - windowStart >= timeoutMs) {
       void handleStuck(loginSignals, deriveLoginCause(loginSignals, onAuthUrl));

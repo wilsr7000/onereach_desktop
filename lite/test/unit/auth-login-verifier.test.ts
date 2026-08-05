@@ -148,6 +148,10 @@ describe('startLoginVerifier', () => {
   it('resolves to SUCCESS when a probe sees a logged-in page', async () => {
     const h = makeHarness({ url: () => 'https://idw.edison.onereach.ai/agent/x', signals: () => [] });
     startLoginVerifier({ tabId: 't1', env: 'edison' }, h.deps);
+    // Success now requires the logged-in state to HOLD across
+    // consecutive probes (default 3) -- one good probe is not proof.
+    await h.advance();
+    await h.advance();
     await h.advance();
     expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_PROBE);
     expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
@@ -191,7 +195,9 @@ describe('startLoginVerifier', () => {
     await h.advance(); // stuck (still on auth)
     expect(names(h)).not.toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
     loggedIn = true; // SSO-skip finally landed
-    await h.advance(); // now logged-in
+    await h.advance(); // now logged-in (1/3)
+    await h.advance(); // 2/3
+    await h.advance(); // 3/3 -> confirmed
     expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
     expect(names(h)).not.toContain(AUTH_EVENTS.IDW_LOGIN_STUCK);
   });
@@ -231,7 +237,10 @@ describe('startLoginVerifier', () => {
     expect(recoveryCalls).toBe(1);
     expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_RETRY);
     expect(names(h)).not.toContain(AUTH_EVENTS.IDW_LOGIN_STUCK);
-    await h.advance(); // fresh window → now logged-in → SUCCESS
+    // Fresh window: success still needs the state to HOLD (3 probes).
+    await h.advance();
+    await h.advance();
+    await h.advance();
     expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
     expect(h.outcomes.at(-1)?.verdict).toBe('logged-in');
   });
@@ -288,5 +297,43 @@ describe('startLoginVerifier', () => {
     expect(recoveryCalls).toBe(1); // no second retry
     expect(names(h).filter((n) => n === AUTH_EVENTS.IDW_LOGIN_RETRY)).toHaveLength(1);
     expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_STUCK);
+  });
+});
+
+describe('startLoginVerifier -- premature-success regression', () => {
+  // Observed live (0.0.24): the IDW painted its chat shell, the probe
+  // said "logged-in" at 1.5s, the watcher declared SUCCESS and stopped
+  // -- then the app finished its own session check and routed to
+  // /login ~9s later. Nothing was watching by then, so there was no
+  // retry, no badge, no notification: "auto-login stopped working",
+  // silently. Success must require the state to HOLD.
+  it('does NOT declare success when a logged-in page bounces to login', async () => {
+    let bounced = false;
+    const h = makeHarness({
+      url: () =>
+        bounced
+          ? 'https://auth.edison.onereach.ai/?sso=true&showSkip=true'
+          : 'https://idw.edison.onereach.ai/chat/abc',
+      signals: () => [],
+    });
+    startLoginVerifier({ tabId: 't1', intervalMs: 1000, timeoutMs: 60000 }, h.deps);
+    await h.advance(); // logged-in 1/3
+    expect(names(h)).not.toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
+    bounced = true; // the app decided the session was no good
+    await h.advance(); // stuck -> streak resets
+    await h.advance();
+    // Still watching, never falsely succeeded.
+    expect(names(h)).not.toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
+    expect(h.hasPending()).toBe(true);
+  });
+
+  it('successConfirmations is configurable (1 restores single-probe success)', async () => {
+    const h = makeHarness({
+      url: () => 'https://idw.edison.onereach.ai/agent/x',
+      signals: () => [],
+    });
+    startLoginVerifier({ tabId: 't1', successConfirmations: 1 }, h.deps);
+    await h.advance();
+    expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
   });
 });

@@ -765,6 +765,16 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     if (ssoMatch.match && ssoMatch.env !== null) {
       void tryAutoSkipSso(view.webContents, ssoMatch.env, url);
     }
+    // Re-verify here TOO. The IDW is a SPA: when it decides its session
+    // is no good it routes to /login IN-PAGE, which fires only this
+    // event -- not `did-navigate`. Watching just `did-navigate` meant a
+    // tab that loaded fine and bounced to login seconds later went
+    // completely unnoticed (no retry, no badge, no notification), which
+    // is exactly how "auto-login stopped working" looked silent in the
+    // event log.
+    if (verifierEnv !== null && !verifierActive && isOneReachAuthOrLoginUrl(url)) {
+      startVerifier();
+    }
   });
 
   // Update the tab label when the page title resolves -- gives users
