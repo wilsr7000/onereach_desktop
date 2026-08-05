@@ -618,28 +618,24 @@ async function routePendingInput(text, metadata) {
 
   const { agentId, context: pendingContext } = pick;
 
-  // Relevance guard: when the pending question offered concrete OPTIONS and
-  // the user's utterance shares no meaningful words with any of them, this is
-  // a NEW command, not an answer — fall through to normal dispatch instead of
-  // hijacking it. (2026-08-04 live: "Can you set an alarm for 6:32" was
-  // consumed by a stale pending and became "Prep me for the next meeting".)
+  // Relevance guard: only route utterances that are ANSWERS to the pending
+  // question. Options-bearing pendings match on overlap; option-less yes/no
+  // consents accept only short replies/affirmatives -- full sentences and
+  // questions are NEW commands (2026-08-05 live: a fresh builder consent
+  // swallowed "What's the weather today?" and lectured about agents instead
+  // of answering; earlier, a stale pending morphed an alarm request).
   try {
+    const { isAnswerToPending } = require('../../lib/exchange/pending-relevance');
     const options = (pendingContext && (pendingContext.options || pendingContext.context?.options)) || [];
-    if (Array.isArray(options) && options.length > 0) {
-      const words = String(text).toLowerCase().match(/[a-z]{3,}/g) || [];
-      const STOP = new Set(['the','you','can','for','and','with','that','this','please','what','would','could']);
-      const meaningful = words.filter((w) => !STOP.has(w));
-      const optText = options.map((o) => String(o.label || o.text || o).toLowerCase()).join(' ');
-      const overlap = meaningful.some((w) => optText.includes(w));
-      const affirmative = /^(yes|yeah|yep|sure|ok|okay|no|nope|first|second|third|last|that one|build|skip|cancel)/i.test(String(text).trim());
-      if (!overlap && !affirmative) {
-        log.warn('voice', 'Pending input skipped — utterance unrelated to pending options (new command)', {
-          event: 'voice:pending-bypass',
-          agentId,
-          text: String(text).slice(0, 60),
-        });
-        return null; // caller falls through to the normal pipeline
-      }
+    const verdict = isAnswerToPending({ text, options });
+    if (!verdict.route) {
+      log.warn('voice', 'Pending input skipped — utterance is a new command, not an answer', {
+        event: 'voice:pending-bypass',
+        agentId,
+        reason: verdict.reason,
+        text: String(text).slice(0, 60),
+      });
+      return null; // caller falls through to the normal pipeline
     }
   } catch (_e) { /* guard must never break routing */ }
   log.info('voice', 'Routing follow-up to pending agent', {
