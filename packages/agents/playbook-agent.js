@@ -112,8 +112,11 @@ async function _handleRun(task) {
 
   if (!spaceId) {
     // Try to find a space from context
-    const spaces = await _fetchJSON(`${SPACES_API}/api/spaces`);
-    if (!spaces || spaces.length === 0) {
+    // /api/spaces responds { spaces: [...] } — treating the envelope as an
+    // array crashed with "spaces.find is not a function" (2026-08-05 live:
+    // the launch request busted here and fell back to a generic list).
+    const spaces = _unwrapSpaces(await _fetchJSON(`${SPACES_API}/api/spaces`));
+    if (spaces.length === 0) {
       return { success: false, message: 'No spaces found. Create a space with a playbook first.' };
     }
 
@@ -296,8 +299,8 @@ async function _handleList(task) {
 
   if (!spaceId) {
     // List playbooks across all spaces
-    const spaces = await _fetchJSON(`${SPACES_API}/api/spaces`);
-    if (!spaces || spaces.length === 0) {
+    const spaces = _unwrapSpaces(await _fetchJSON(`${SPACES_API}/api/spaces`));
+    if (spaces.length === 0) {
       return { success: true, message: 'No spaces found.' };
     }
 
@@ -337,6 +340,17 @@ const httpClient = require('../../lib/http-client');
 
 async function _fetchJSON(url, opts = {}) {
   return httpClient.fetchJSON(url, opts);
+}
+
+/**
+ * Normalize the /api/spaces response. The server returns { spaces: [...] };
+ * older call sites assumed a bare array and crashed on .find/.length.
+ * Accepts either shape and always yields an array.
+ */
+function _unwrapSpaces(res) {
+  if (Array.isArray(res)) return res;
+  if (res && Array.isArray(res.spaces)) return res.spaces;
+  return [];
 }
 
 module.exports = playbookAgent;

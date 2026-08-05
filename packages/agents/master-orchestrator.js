@@ -112,9 +112,19 @@ function buildEvaluationPrompt(task, bids) {
         const adj = bid._overlapAdjustment;
         overlapLine = `\n   Overlap-adjusted: confidence ${adj.before.toFixed(2)} -> ${adj.after.toFixed(2)} (Jaccard ${adj.jaccard.toFixed(2)} vs ${adj.against})`;
       }
+      // Label the two numbers unambiguously. 2026-08-05 live: the evaluator
+      // rejected the correct specialist with "confidence score of 0.49 is
+      // too low compared to tied leaders at 0.70" — 0.49 was its
+      // REPUTATION-WEIGHTED score while 0.70 was the leaders' RAW confidence.
+      // Same-confidence bids must not read as weaker just because past
+      // rejections dragged reputation down.
+      const repNote =
+        bid.score != null && bid.confidence
+          ? ` (= confidence ${bid.confidence.toFixed(2)} x past-reputation ${(bid.score / bid.confidence).toFixed(2)})`
+          : '';
       return `${i + 1}. ${bid.agentName || bid.agentId} (confidence: ${bid.confidence.toFixed(2)})
    Reasoning: ${bid.reasoning || 'No reasoning provided'}
-   Score: ${bid.score?.toFixed(3) || 'N/A'}${historyLine}${overlapLine}`;
+   Reputation-weighted score: ${bid.score?.toFixed(3) || 'N/A'}${repNote}${historyLine}${overlapLine}`;
     })
     .join('\n\n');
 
@@ -132,6 +142,12 @@ function buildEvaluationPrompt(task, bids) {
   return `You are the Master Orchestrator - the supervisor that evaluates all agent bids and makes intelligent routing decisions.
 
 USER REQUEST: "${task.content || task}"
+
+SCORING NOTE: "confidence" is each agent's own fit assessment for THIS request.
+"Reputation-weighted score" folds in PAST performance and is NOT a measure of
+fit. Judge capability match on confidence + reasoning + the agent's domain;
+use the weighted score only to break otherwise-equal ties. Never call a bid
+"low confidence" by quoting its weighted score.
 ${situationText}
 SUBMITTED BIDS (${bids.length} agents):
 ${bidsText}
