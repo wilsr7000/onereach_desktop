@@ -586,12 +586,36 @@ export class AuthStore {
   getSession(env: Environment): AuthSession | null {
     const session = this.sessions.get(env) ?? null;
     // Sync ops emit instant events, not spans (no duration to track).
-    this.eventEmitter?.('auth.session.read', { env, hasSession: session !== null });
+    //
+    // THROTTLED: getSession is on hot paths (KV auth bindings resolve
+    // the accountId per request; the chrome polls it) — unthrottled
+    // this event flooded the central log's ring buffer, evicting the
+    // events that actually matter within ~30 minutes (observed live
+    // while diagnosing an auto-login failure: 324 of the last 1000
+    // events were session.read). Emit only when the answer CHANGES,
+    // plus a heartbeat at most once per 10 minutes so the stream still
+    // shows liveness.
+    const hasSession = session !== null;
+    const last = this.lastSessionReadEmit.get(env);
+    const nowMs = this.now();
+    if (last === undefined || last.hasSession !== hasSession || nowMs - last.at >= 600_000) {
+      this.lastSessionReadEmit.set(env, { hasSession, at: nowMs });
+      this.eventEmitter?.('auth.session.read', {
+        env,
+        hasSession,
+        ...(last !== undefined && last.hasSession !== hasSession ? { changed: true } : {}),
+      });
+    }
     return session;
   }
 
   /** Per-env throttle for the expired-token-read breadcrumb (ms epoch). */
   private readonly expiredTokenWarnAt = new Map<Environment, number>();
+  /** Per-env dedupe/heartbeat state for the session.read event. */
+  private readonly lastSessionReadEmit = new Map<
+    Environment,
+    { hasSession: boolean; at: number }
+  >();
 
   /**
    * Emit a throttled breadcrumb when a consumer reads a mult token the

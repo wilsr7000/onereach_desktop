@@ -627,6 +627,15 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
    * off the login flow.
    */
   let loginStuckNotified = false;
+  /**
+   * True while the tab's most recent MAIN-FRAME load failed (net
+   * error / DNS / offline). Feeds the login verifier's
+   * `pageLooksBroken` seam: an error page has a normal-looking URL and
+   * no login markers, so without this bit the verifier would declare a
+   * false logged-in SUCCESS on a dead tab. Cleared when a load
+   * finishes.
+   */
+  let lastMainFrameLoadFailed = false;
   let stopCurrentVerifier: () => void = (): void => {};
   // (Re)start the login verifier for this tab -- on attach, and again if
   // a settled tab bounces back to a OneReach login page (session dropped
@@ -640,6 +649,7 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
         { tabId: tab.id, env: verifierEnv, label: tab.label },
         {
           ...makeWebContentsProbe(view.webContents),
+          pageLooksBroken: () => lastMainFrameLoadFailed,
           emit: (name, data, level) => getLoggingApi().event(name, data, level),
           now: () => Date.now(),
           schedule: (fn, ms) => {
@@ -808,8 +818,9 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
   });
 
   // Load failure surface -- log it but don't bring down the tab.
-  view.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
+  view.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (errorCode === -3) return; // ABORTED -- user navigated away
+    if (isMainFrame) lastMainFrameLoadFailed = true;
     getLoggingApi().event(MAIN_WINDOW_EVENTS.TAB_LOAD_FAIL, {
       id: tab.id,
       errorCode,
@@ -833,6 +844,7 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     if (isMainFrame) loadStart = Date.now();
   });
   view.webContents.on('did-finish-load', () => {
+    lastMainFrameLoadFailed = false;
     getLoggingApi().event(MAIN_WINDOW_EVENTS.TAB_LOAD_FINISH, {
       id: tab.id,
       durationMs: Date.now() - loadStart,

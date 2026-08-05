@@ -96,7 +96,7 @@ interface Harness {
 }
 
 function makeHarness(
-  script: { url: () => string; signals: () => string[] },
+  script: { url: () => string; signals: () => string[]; broken?: () => boolean },
   extra: { attemptRecovery?: (cause: IdwLoginCause) => Promise<boolean> } = {}
 ): Harness {
   const events: Harness['events'] = [];
@@ -119,6 +119,7 @@ function makeHarness(
     },
     onOutcome: (o) => outcomes.push(o),
     onNeedsUserAction: (i) => userActions.push(i),
+    ...(script.broken !== undefined ? { pageLooksBroken: script.broken } : {}),
     ...(extra.attemptRecovery !== undefined ? { attemptRecovery: extra.attemptRecovery } : {}),
   };
 
@@ -387,5 +388,67 @@ describe('startLoginVerifier -- unreadable page must not trigger a reload', () =
     await h.advance();
     expect(recoveryCalls).toBe(1);
     expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_RETRY);
+  });
+});
+
+describe('startLoginVerifier -- broken pages must not read as logged in', () => {
+  // An error page (net down, DNS, 500 splash) has a normal https URL
+  // and zero login markers -- exactly the shape of a logged-in page.
+  // The main process feeds `pageLooksBroken` from did-fail-load so the
+  // verifier cannot bless a dead tab.
+  it('never declares SUCCESS while the main-frame load has failed', async () => {
+    const h = makeHarness({
+      url: () => 'https://idw.edison.onereach.ai/agent/x', // looks fine
+      signals: () => [],
+      broken: () => true,
+    });
+    startLoginVerifier({ tabId: 't1', intervalMs: 1000, timeoutMs: 2500 }, h.deps);
+    await h.advance();
+    await h.advance();
+    await h.advance(); // 3 probes -- would have confirmed success if healthy
+    expect(names(h)).not.toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
+    // Timed out instead -> stuck with the connection-shaped cause.
+    const stuck = h.events.find((e) => e.name === AUTH_EVENTS.IDW_LOGIN_STUCK);
+    expect(stuck?.data['likelyCause']).toBe('page-unreachable');
+    expect(String(h.userActions[0]?.instruction)).toContain('connection');
+  });
+
+  it('page-unreachable IS auto-recovered (a reload is the right medicine)', async () => {
+    let recoveryCalls = 0;
+    let healthy = false;
+    const h = makeHarness(
+      {
+        url: () => 'https://idw.edison.onereach.ai/agent/x',
+        signals: () => [],
+        broken: () => !healthy,
+      },
+      {
+        attemptRecovery: async () => {
+          recoveryCalls += 1;
+          healthy = true; // the reload fixed it
+          return true;
+        },
+      }
+    );
+    startLoginVerifier({ tabId: 't1', intervalMs: 1000, timeoutMs: 1500 }, h.deps);
+    await h.advance(); // broken
+    await h.advance(); // timeout -> RETRY (page-unreachable is recoverable)
+    expect(recoveryCalls).toBe(1);
+    await h.advance(); // healthy 1/3
+    await h.advance(); // 2/3
+    await h.advance(); // 3/3 -> SUCCESS
+    expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_SUCCESS);
+  });
+
+  it('recovery from a broken page is dispatched at once (no stuck-first)', async () => {
+    const h = makeHarness(
+      { url: () => 'https://idw.edison.onereach.ai/x', signals: () => [], broken: () => true },
+      { attemptRecovery: async () => false } // recovery reports failure
+    );
+    startLoginVerifier({ tabId: 't1', intervalMs: 1000, timeoutMs: 1500 }, h.deps);
+    await h.advance();
+    await h.advance(); // timeout -> retry attempted, fails -> stuck
+    expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_RETRY);
+    expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_STUCK);
   });
 });

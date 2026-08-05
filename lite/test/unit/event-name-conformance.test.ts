@@ -149,7 +149,7 @@ const MODULES: ModuleSpec[] = [
     // Spans live in sdk-client.ts (via `withSpan('spaces.<op>')`); IPC
     // entry events are emitted dynamically as `spaces.ipc.<verb>` by
     // the wrapper in ipc.ts.
-    sourceFiles: ['spaces/sdk-client.ts', 'spaces/ipc.ts', 'spaces/main.ts'],
+    sourceFiles: ['spaces/sdk-client.ts', 'spaces/ipc.ts', 'spaces/main.ts', 'spaces/gsx-migration.ts'],
     events: SPACES_EVENTS,
   },
   {

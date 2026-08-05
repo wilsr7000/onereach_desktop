@@ -420,6 +420,7 @@ export type IdwLoginCause =
   | 'sso-skip-missed'
   | 'manual-login-required'
   | 'no-session'
+  | 'page-unreachable'
   | 'unknown';
 
 /** Per-probe classification of a tab's login state. */

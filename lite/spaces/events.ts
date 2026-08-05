@@ -57,6 +57,15 @@ export const SPACES_EVENTS = {
   UNDELETE_START: 'spaces.undelete.start',
   UNDELETE_FINISH: 'spaces.undelete.finish',
   UNDELETE_FAIL: 'spaces.undelete.fail',
+  // ─── GSX migration sweep (ADR-050) ───────────────────────────────────
+  GSX_MIGRATE_START: 'spaces.gsxMigrate.start',
+  GSX_MIGRATE_FINISH: 'spaces.gsxMigrate.finish',
+  GSX_MIGRATE_FAIL: 'spaces.gsxMigrate.fail',
+  /** One inline-stub asset lifted into GSX (or skipped; see data.outcome). */
+  // Per-item progress tick. Named `.item.finish` (not bare `.item`) so it
+  // conforms to the platform contract's span taxonomy — every spaces
+  // event ends .start | .finish | .fail (platform-contract.test.ts).
+  GSX_MIGRATE_ITEM: 'spaces.gsxMigrate.item.finish',
   // NOTE: IPC entry events are emitted dynamically as
   // `spaces.ipc.<verb>` by the wrapper in `ipc.ts` (the verb derived
   // from each `lite:spaces:*` channel). They are intentionally NOT
@@ -278,6 +287,31 @@ export interface SpacesUndeleteFailEvent extends SpacesEventBase {
 }
 
 /** Discriminated union -- branch on `ev.name` to narrow `ev.data`. */
+// ─── GSX migration sweep (ADR-050) ──────────────────────────────────────
+
+export interface SpacesGsxMigrateStartEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.GSX_MIGRATE_START;
+  level: 'info';
+}
+export interface SpacesGsxMigrateFinishEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.GSX_MIGRATE_FINISH;
+  level: 'info';
+  durationMs: number;
+  data?: { scanned: number; migrated: number; failed: number };
+}
+export interface SpacesGsxMigrateFailEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.GSX_MIGRATE_FAIL;
+  level: 'error';
+  durationMs: number;
+  error: SerializedEventError;
+}
+export interface SpacesGsxMigrateItemEvent
+  extends Omit<SpacesEventBase, 'spanId'> {
+  name: typeof SPACES_EVENTS.GSX_MIGRATE_ITEM;
+  level: 'info';
+  data: { assetId: string; outcome: 'migrated' | 'skipped' | 'failed'; bytes?: number };
+}
+
 export type SpacesEvent =
   | SpacesListSpacesStartEvent
   | SpacesListSpacesFinishEvent
@@ -305,7 +339,11 @@ export type SpacesEvent =
   | SpacesDeleteFailEvent
   | SpacesUndeleteStartEvent
   | SpacesUndeleteFinishEvent
-  | SpacesUndeleteFailEvent;
+  | SpacesUndeleteFailEvent
+  | SpacesGsxMigrateStartEvent
+  | SpacesGsxMigrateFinishEvent
+  | SpacesGsxMigrateFailEvent
+  | SpacesGsxMigrateItemEvent;
 
 /**
  * Type-guard. Use to narrow a generic `EventRecord` to the typed

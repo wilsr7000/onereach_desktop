@@ -328,7 +328,37 @@ async function startSignIn(): Promise<void> {
 // Bootstrap
 // ---------------------------------------------------------------------------
 
+/**
+ * Test escape hatch (mirrors `window.__spacesRendererForTesting`).
+ * Exposes the pure-ish pill builder + the stuck-tab badge state so the
+ * ⚠ login badge path is pinned by unit tests instead of eyeballs.
+ * Assigned at module load, BEFORE bootstrap, so a jsdom import can use
+ * it even though bootstrap bails without the preload bridge.
+ */
+declare global {
+  interface Window {
+    __chromeForTesting?: {
+      buildPill: typeof buildPill;
+      renderTabBar: typeof renderTabBar;
+      stuckTabs: Map<string, string>;
+      setTabsForTesting: (next: LiteMainWindowTab[], active: string | null) => void;
+    };
+  }
+}
+window.__chromeForTesting = {
+  buildPill,
+  renderTabBar,
+  stuckTabs,
+  setTabsForTesting: (next, active) => {
+    tabs = next;
+    activeId = active;
+  },
+};
+
 async function bootstrap(): Promise<void> {
+  // Test env / broken preload: without the bridge nothing below can
+  // work -- bail instead of throwing halfway through boot.
+  if (window.lite === undefined) return;
   // 1. Populate the version text.
   const versionEl = document.getElementById('version');
   const version = window.lite?.version;

@@ -137,6 +137,8 @@ export function instructionForLoginCause(cause: IdwLoginCause, label?: string): 
       return `${who} needs a manual sign-in. Sign in inside the tab and Lite will remember it next time.`;
     case 'no-session':
       return `You may not be signed in to OneReach. Open Settings → Account to sign in, then reopen ${who}.`;
+    case 'page-unreachable':
+      return `${who} couldn’t load — this looks like a connection problem, not a sign-in problem. Check your network; Lite will retry once, or reload the tab.`;
     default:
       return `${who} didn’t finish signing in automatically. Sign in inside the tab to continue.`;
   }
@@ -173,6 +175,15 @@ export interface LoginVerifierDeps {
   /** Stuck-only callback -- carries the user instruction for the chrome. */
   onNeedsUserAction?: (info: { likelyCause: IdwLoginCause; instruction: string }) => void;
   /**
+   * Reports whether the tab's last main-frame load FAILED (net error,
+   * DNS, offline). Without this signal an error page is
+   * indistinguishable from a logged-in page -- the URL is a normal
+   * https URL and the DOM has no login markers -- so the verifier
+   * would declare a false SUCCESS on a broken tab. Wired from
+   * `did-fail-load` / `did-finish-load` in window.ts.
+   */
+  pageLooksBroken?: () => boolean;
+  /**
    * Optional self-heal hook. When a probe times out on a RECOVERABLE
    * cause (no-session / sso-skip-missed / unknown -- cases a fresh
    * cookie inject + reload can fix), the watcher calls this instead of
@@ -208,6 +219,7 @@ export interface LoginVerifierOptions {
 const RECOVERABLE_CAUSES: ReadonlySet<IdwLoginCause> = new Set<IdwLoginCause>([
   'no-session',
   'sso-skip-missed',
+  'page-unreachable',
   'unknown',
 ]);
 
@@ -240,6 +252,8 @@ export function startLoginVerifier(
   let cancelTimer: (() => void) | null = null;
   /** Consecutive logged-in probes seen so far (reset by any non-success). */
   let loggedInStreak = 0;
+  /** Whether the most recent probe saw a failed main-frame load. */
+  let lastBroken = false;
   /** How many consecutive logged-in probes are required to declare success. */
   const confirmations = Math.max(1, opts.successConfirmations ?? 3);
 
@@ -307,7 +321,16 @@ export function startLoginVerifier(
       scanOk = false;
     }
     if (stopped) return;
-    const { verdict, onAuthUrl, loginSignals } = classifyLoginState(url, signals);
+    // A failed main-frame load poisons the verdict: the URL looks
+    // normal and the DOM has no login markers, but nobody is logged
+    // in to anything on a net-error page.
+    const broken = deps.pageLooksBroken?.() === true;
+    lastBroken = broken;
+    let { verdict, onAuthUrl, loginSignals } = classifyLoginState(url, signals);
+    if (broken && verdict === 'logged-in') {
+      verdict = 'unknown';
+      loginSignals = ['page-load-failed'];
+    }
     deps.emit(
       AUTH_EVENTS.IDW_LOGIN_PROBE,
       {
@@ -332,12 +355,20 @@ export function startLoginVerifier(
         finish('logged-in', loginSignals);
         return;
       }
+      // While a healthy streak is building, the stuck-timeout does NOT
+      // apply -- the page looks fine; declaring it stuck mid-
+      // confirmation would be self-contradictory. A page that flaps
+      // back to a login state resets the streak below and re-enters
+      // the timeout regime on that probe.
     } else {
       loggedInStreak = 0;
-    }
-    if (deps.now() - windowStart >= timeoutMs) {
-      void handleStuck(loginSignals, deriveLoginCause(loginSignals, onAuthUrl), scanOk);
-      return;
+      if (deps.now() - windowStart >= timeoutMs) {
+        const cause = lastBroken
+          ? 'page-unreachable'
+          : deriveLoginCause(loginSignals, onAuthUrl);
+        void handleStuck(loginSignals, cause, scanOk);
+        return;
+      }
     }
     cancelTimer = deps.schedule(() => {
       void tick();
@@ -362,7 +393,7 @@ export function startLoginVerifier(
     if (
       recoveries < maxRecoveries &&
       deps.attemptRecovery !== undefined &&
-      scanOk &&
+      (scanOk || cause === 'page-unreachable') &&
       RECOVERABLE_CAUSES.has(cause)
     ) {
       recoveries += 1;
