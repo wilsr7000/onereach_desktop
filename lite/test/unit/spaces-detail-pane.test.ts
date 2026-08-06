@@ -238,6 +238,43 @@ describe('renderMarkdown', () => {
     expect(el.querySelector('strong')?.textContent).toBe('important');
     expect(el.querySelector('a')?.getAttribute('href')).toBe('https://example.com');
   });
+
+  it('renders blockquotes as styled <blockquote>, not literal ">"', () => {
+    const el = renderer.renderMarkdown('> Quoted **wisdom** here.');
+    const quote = el.querySelector('blockquote.spaces-markdown-quote');
+    expect(quote).not.toBeNull();
+    expect(quote?.querySelector('strong')?.textContent).toBe('wisdom');
+    expect(el.textContent).not.toContain('>');
+  });
+
+  it('groups contiguous quote lines; blank ">" lines split paragraphs', () => {
+    const el = renderer.renderMarkdown('> line one\n> line two\n>\n> second para');
+    const quotes = el.querySelectorAll('blockquote');
+    expect(quotes).toHaveLength(1);
+    const paras = quotes[0]?.querySelectorAll('p') ?? [];
+    expect(paras).toHaveLength(2);
+    expect(paras[0]?.textContent).toBe('line one line two');
+    expect(paras[1]?.textContent).toBe('second para');
+  });
+
+  it('keeps blockquotes separate from surrounding paragraphs', () => {
+    const el = renderer.renderMarkdown('Before.\n\n> Quoted.\n\nAfter.');
+    expect(el.querySelectorAll('p:not(blockquote p)')).toHaveLength(2);
+    expect(el.querySelectorAll('blockquote')).toHaveLength(1);
+    expect(el.querySelector('blockquote')?.textContent).toBe('Quoted.');
+  });
+
+  it('renders task-list items as checkbox glyphs, not raw brackets', () => {
+    const el = renderer.renderMarkdown('- [ ] open item\n- [x] done item\n- plain item');
+    const items = el.querySelectorAll('ul li');
+    expect(items).toHaveLength(3);
+    expect(items[0]?.classList.contains('spaces-markdown-task')).toBe(true);
+    expect(items[0]?.textContent).toContain('☐');
+    expect(items[0]?.textContent).not.toContain('[ ]');
+    expect(items[1]?.textContent).toContain('☑');
+    expect(items[2]?.classList.contains('spaces-markdown-task')).toBe(false);
+    expect(items[2]?.textContent).toBe('plain item');
+  });
 });
 
 // ─── buildDetailMeta ────────────────────────────────────────────────────

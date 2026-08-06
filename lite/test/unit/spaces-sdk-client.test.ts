@@ -100,6 +100,30 @@ describe('CYPHER source strings', () => {
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/LIMIT toInteger\(\$limit\)/);
   });
 
+  it('summary excerpts fall back to inline content, guarded against data-URLs', () => {
+    // Tile previews read `excerpt`; text/doc assets created via upload
+    // or paste have `content` but rarely `description`/`notes`. The
+    // fallback chain must reach content (capped) or every text tile
+    // renders as a blank ¶ card — the 2026-08-05 "tile previews are
+    // not working" report. Legacy base64 stubs must stay excluded.
+    for (const q of [
+      CYPHER.LIST_ITEMS_UNCATEGORIZED,
+      CYPHER.LIST_ITEMS_IN_SPACE,
+    ]) {
+      expect(q).toMatch(/left\(a\.content, 280\)/);
+      expect(q).toMatch(/a\.content STARTS WITH 'data:'/);
+      // Empty-string guard: every tier must skip '' (created assets
+      // carry description: '' — plain coalesce would stop there and
+      // the content fallback would never fire).
+      expect(q).toMatch(
+        /CASE WHEN trim\(coalesce\(a\.description, ''\)\) = '' THEN NULL ELSE a\.description END/
+      );
+      expect(q).toMatch(
+        /CASE WHEN trim\(coalesce\(a\.excerpt, ''\)\) = '' THEN NULL ELSE a\.excerpt END/
+      );
+    }
+  });
+
   it('list-items-in-space takes a spaceId param and filters otherSpaces', () => {
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/\(a:Asset\)-\[:BELONGS_TO\]->\(s:Space \{id: \$spaceId\}\)/);
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/other\.id <> s\.id/);

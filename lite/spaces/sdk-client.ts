@@ -212,7 +212,14 @@ export const CYPHER = {
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
-           coalesce(a.excerpt, a.description, a.notes) AS excerpt,
+           coalesce(
+             CASE WHEN trim(coalesce(a.excerpt, '')) = '' THEN NULL ELSE a.excerpt END,
+             CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL ELSE a.description END,
+             CASE WHEN trim(coalesce(a.notes, '')) = '' THEN NULL ELSE a.notes END,
+             CASE WHEN a.content IS NULL OR a.content STARTS WITH 'data:'
+                       OR trim(a.content) = '' THEN NULL
+                  ELSE left(a.content, 280) END
+           ) AS excerpt,
            [] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -246,7 +253,14 @@ export const CYPHER = {
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
-           coalesce(a.excerpt, a.description, a.notes) AS excerpt,
+           coalesce(
+             CASE WHEN trim(coalesce(a.excerpt, '')) = '' THEN NULL ELSE a.excerpt END,
+             CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL ELSE a.description END,
+             CASE WHEN trim(coalesce(a.notes, '')) = '' THEN NULL ELSE a.notes END,
+             CASE WHEN a.content IS NULL OR a.content STARTS WITH 'data:'
+                       OR trim(a.content) = '' THEN NULL
+                  ELSE left(a.content, 280) END
+           ) AS excerpt,
            [x IN otherSpacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -375,7 +389,14 @@ export const CYPHER = {
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
-           coalesce(a.excerpt, a.description, a.notes) AS excerpt,
+           coalesce(
+             CASE WHEN trim(coalesce(a.excerpt, '')) = '' THEN NULL ELSE a.excerpt END,
+             CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL ELSE a.description END,
+             CASE WHEN trim(coalesce(a.notes, '')) = '' THEN NULL ELSE a.notes END,
+             CASE WHEN a.content IS NULL OR a.content STARTS WITH 'data:'
+                       OR trim(a.content) = '' THEN NULL
+                  ELSE left(a.content, 280) END
+           ) AS excerpt,
            coalesce(a.description, '') AS description,
            coalesce(a.content, '') AS content,
            coalesce(a.size, a.fileSize, a.byteCount) AS size,
@@ -454,7 +475,14 @@ export const CYPHER = {
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
-           coalesce(a.excerpt, a.description, a.notes) AS excerpt,
+           coalesce(
+             CASE WHEN trim(coalesce(a.excerpt, '')) = '' THEN NULL ELSE a.excerpt END,
+             CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL ELSE a.description END,
+             CASE WHEN trim(coalesce(a.notes, '')) = '' THEN NULL ELSE a.notes END,
+             CASE WHEN a.content IS NULL OR a.content STARTS WITH 'data:'
+                       OR trim(a.content) = '' THEN NULL
+                  ELSE left(a.content, 280) END
+           ) AS excerpt,
            CASE WHEN firstSpace IS NULL
                 THEN []
                 ELSE [{ id: firstSpace.id,
@@ -810,7 +838,14 @@ export const CYPHER = {
          head(collect(pb)) AS sourcePlaybook
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
-           coalesce(a.excerpt, a.description, a.notes) AS excerpt,
+           coalesce(
+             CASE WHEN trim(coalesce(a.excerpt, '')) = '' THEN NULL ELSE a.excerpt END,
+             CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL ELSE a.description END,
+             CASE WHEN trim(coalesce(a.notes, '')) = '' THEN NULL ELSE a.notes END,
+             CASE WHEN a.content IS NULL OR a.content STARTS WITH 'data:'
+                       OR trim(a.content) = '' THEN NULL
+                  ELSE left(a.content, 280) END
+           ) AS excerpt,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
            coalesce(a.status, 'open') AS status,
@@ -1282,7 +1317,14 @@ export const CYPHER = {
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
-           coalesce(a.excerpt, a.description, a.notes) AS excerpt,
+           coalesce(
+             CASE WHEN trim(coalesce(a.excerpt, '')) = '' THEN NULL ELSE a.excerpt END,
+             CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL ELSE a.description END,
+             CASE WHEN trim(coalesce(a.notes, '')) = '' THEN NULL ELSE a.notes END,
+             CASE WHEN a.content IS NULL OR a.content STARTS WITH 'data:'
+                       OR trim(a.content) = '' THEN NULL
+                  ELSE left(a.content, 280) END
+           ) AS excerpt,
            [x IN spacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null

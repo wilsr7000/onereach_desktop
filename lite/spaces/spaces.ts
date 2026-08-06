@@ -37,6 +37,7 @@ import {
   extractMetadataFromFile,
   extractMetadataFromText,
 } from './metadata-extractor.js';
+import { shouldInlineTextFile, decodeDataUrlText } from './text-asset.js';
 
 // ─── Home view (chunk 3o) ───────────────────────────────────────────────
 
@@ -807,6 +808,33 @@ async function resolveAndInjectFileUrl(
     }
     return;
   }
+
+  // Text-like GSX files (markdown / code / CSV / plain text) with no
+  // inline content: read the bytes through the authenticated bridge,
+  // decode, and feed the SAME renderer the inline path uses — so an
+  // uploaded .md renders as Markdown with the "✎ Edit" affordance
+  // instead of degrading to a bare download link. First save writes the
+  // text into graph `content` (text belongs in the graph; the original
+  // upload stays in GSX untouched).
+  const textLang = detectTextPreviewLanguage(item.mimeType, item.title);
+  const mimeIsText = (item.mimeType ?? '').toLowerCase().startsWith('text/');
+  const hasInline = typeof item.content === 'string' && item.content.length > 0;
+  if (!hasInline && (textLang !== null || mimeIsText)) {
+    try {
+      const env = await bridge.items.readFileData(item.fileKey);
+      if (state.activeItemId !== itemId) return;
+      const dataUrl = env.ok === true && env.value !== null ? env.value.dataUrl : null;
+      const text = dataUrl !== null ? decodeDataUrlText(dataUrl) : null;
+      if (text !== null) {
+        injectTextPreview(item, text, textLang);
+        return;
+      }
+      // Over the read cap or genuinely binary: fall through to the
+      // generic signed-URL preview below.
+    } catch {
+      /* fall through to the generic preview */
+    }
+  }
   try {
     const envelope = await bridge.items.resolveFileUrl(item.fileKey);
     // Bail if the user switched items mid-flight.
@@ -855,6 +883,39 @@ function injectPdfViewer(
   const existing = pane.querySelector('.spaces-detail-preview');
   if (existing !== null) existing.replaceWith(next);
   else pane.appendChild(next);
+}
+
+/**
+ * Swap the file-preview placeholder for a rendered TEXT preview — the
+ * same dispatch the inline-content path uses (Markdown with edit, CSV
+ * table, syntax-highlighted code). Used for text files that live in
+ * GSX (uploaded before inline routing, or over the inline size cap).
+ */
+function injectTextPreview(
+  item: RendererItem,
+  text: string,
+  language: string | null
+): void {
+  const pane = document.querySelector<HTMLElement>(
+    '#spaces-detail .spaces-detail-pane'
+  );
+  if (pane === null) return;
+  let next: HTMLElement;
+  if (language === 'csv' || language === 'tsv') {
+    next = buildCsvPreview(text);
+  } else if (language !== null && language !== 'markdown') {
+    next = buildCodePreview(text, language);
+  } else {
+    next = buildDetailContent(text, 'rendered', {
+      onSave: (nextText: string) => commitItemUpdate(item.id, { content: nextText }),
+    });
+  }
+  const existing = pane.querySelector('.spaces-detail-preview');
+  if (existing !== null) {
+    existing.replaceWith(next);
+  } else {
+    pane.appendChild(next);
+  }
 }
 
 function injectBinaryPreview(item: RendererItem, url: string): void {
@@ -3355,10 +3416,11 @@ function buildTextTilePreview(
   item: RendererItemSummary,
   preview: HTMLElement
 ): void {
-  if (typeof item.excerpt === 'string' && item.excerpt.length > 0) {
+  const excerpt = tileExcerptText(item.excerpt);
+  if (excerpt !== null) {
     const paper = document.createElement('p');
     paper.className = 'spaces-card-excerpt';
-    paper.textContent = item.excerpt;
+    paper.textContent = excerpt;
     preview.appendChild(paper);
     return;
   }
@@ -3367,6 +3429,19 @@ function buildTextTilePreview(
   glyph.setAttribute('aria-hidden', 'true');
   glyph.textContent = '¶';
   preview.appendChild(glyph);
+}
+
+/**
+ * Normalize a summary excerpt for tile display. Returns null for
+ * missing/blank excerpts and for legacy base64 data-URL stubs (inline
+ * binary content predating ADR-050) so tiles never print base64 soup.
+ */
+export function tileExcerptText(excerpt: string | undefined): string | null {
+  if (typeof excerpt !== 'string') return null;
+  const text = excerpt.trim();
+  if (text.length === 0) return null;
+  if (text.startsWith('data:')) return null;
+  return text;
 }
 
 /**
@@ -3380,10 +3455,11 @@ function buildAgentTilePreview(item: RendererItemSummary, preview: HTMLElement):
   glyph.setAttribute('aria-hidden', 'true');
   glyph.textContent = '◈';
   preview.appendChild(glyph);
-  if (typeof item.excerpt === 'string' && item.excerpt.length > 0) {
+  const excerpt = tileExcerptText(item.excerpt);
+  if (excerpt !== null) {
     const body = document.createElement('p');
     body.className = 'spaces-card-excerpt spaces-card-agent-okf';
-    body.textContent = item.excerpt;
+    body.textContent = excerpt;
     preview.appendChild(body);
   }
 }
@@ -5831,6 +5907,32 @@ export function renderMarkdown(source: string): HTMLElement {
       i++;
       continue;
     }
+    // Blockquote: contiguous `>`-prefixed lines become one <blockquote>.
+    // Blank `>` lines split paragraphs inside the quote; nested block
+    // elements are out of scope for this minimal renderer.
+    if (/^\s*>/.test(line)) {
+      flushParagraph();
+      const quote = document.createElement('blockquote');
+      quote.className = 'spaces-markdown-quote';
+      let qbuf: string[] = [];
+      const flushQuotePara = (): void => {
+        const text = qbuf.join(' ').trim();
+        qbuf = [];
+        if (text.length === 0) return;
+        const p = document.createElement('p');
+        p.innerHTML = renderInlineMarkdown(escapeHtml(text));
+        quote.appendChild(p);
+      };
+      while (i < lines.length && /^\s*>/.test(lines[i] ?? '')) {
+        const inner = (lines[i] ?? '').replace(/^\s*>\s?/, '');
+        if (inner.trim().length === 0) flushQuotePara();
+        else qbuf.push(inner);
+        i++;
+      }
+      flushQuotePara();
+      if (quote.childElementCount > 0) wrap.appendChild(quote);
+      continue;
+    }
     // List (one level): collect contiguous list lines.
     if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
       flushParagraph();
@@ -5839,7 +5941,18 @@ export function renderMarkdown(source: string): HTMLElement {
       while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i] ?? '')) {
         const li = document.createElement('li');
         const stripped = (lines[i] ?? '').replace(/^\s*([-*]|\d+\.)\s+/, '');
-        li.innerHTML = renderInlineMarkdown(escapeHtml(stripped));
+        // Task-list item: `[ ]` / `[x]` renders as a checkbox glyph, not
+        // raw brackets. Read-only — checking happens in the editor.
+        const task = /^\[( |x|X)\]\s+(.*)$/.exec(stripped);
+        if (task !== null) {
+          const checked = (task[1] ?? '').toLowerCase() === 'x';
+          li.className = 'spaces-markdown-task';
+          li.innerHTML =
+            `<span class="spaces-markdown-checkbox" aria-hidden="true">${checked ? '☑' : '☐'}</span> ` +
+            renderInlineMarkdown(escapeHtml(task[2] ?? ''));
+        } else {
+          li.innerHTML = renderInlineMarkdown(escapeHtml(stripped));
+        }
         list.appendChild(li);
         i++;
       }
@@ -9116,6 +9229,35 @@ async function submitNewAsset(): Promise<void> {
       // video duration, PDF page count, CSV row/col, etc. Best-effort
       // (returns {} on failure). See lite/spaces/metadata-extractor.ts.
       const metadata = await extractMetadataFromFile(file);
+
+      // Text-like files (markdown, code, CSV, plain text) up to 512 KB
+      // become inline graph `content` instead of GSX binaries: the
+      // platform stores text in the graph, and the detail pane's
+      // Markdown/code renderer + "✎ Edit" affordance work immediately.
+      // Larger or non-text files take the GSX path below (ADR-050).
+      if (shouldInlineTextFile(file.name, file.type, file.size)) {
+        const text = await file.text();
+        const envelope = await bridge.items.create({
+          spaceId,
+          title,
+          kind: 'document',
+          content: text,
+          ...(file.type !== '' ? { mimeType: file.type } : {}),
+          metadata: metadata as Record<string, unknown>,
+          ...(creatorId !== null ? { creatorId } : {}),
+        });
+        if (envelope.ok === false) {
+          showDialogError(error, envelope.error.message);
+          if (submit instanceof HTMLButtonElement) submit.disabled = false;
+          return;
+        }
+        createdEnrich = {
+          id: envelope.value.id,
+          kind: 'document',
+          ...(file.type !== '' ? { mimeType: file.type } : {}),
+          hasContent: text.trim().length > 0,
+        };
+      } else {
       // GSX-first (ADR-050): raw bytes cross the bridge; the main
       // process uploads them to the account's GSX bucket and stores
       // only the fileKey on the graph node. This is what makes the
@@ -9146,6 +9288,7 @@ async function submitNewAsset(): Promise<void> {
       // image/PDF enrich eligibility is driven by kind + mimeType and
       // the enricher downloads via the fileKey.
       createdEnrich = { id: envelope.value.id, kind, mimeType: file.type, hasContent: false };
+      }
     } else {
       const content =
         contentInput instanceof HTMLTextAreaElement ? contentInput.value : '';

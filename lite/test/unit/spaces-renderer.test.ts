@@ -237,6 +237,21 @@ describe('buildItemCard (content-forward asset tile)', () => {
     expect(card.querySelector('.spaces-card-glyph-doc')).not.toBeNull();
   });
 
+  it('never prints a base64 data-URL excerpt (legacy inline stubs)', () => {
+    const card = handle().buildItemCard(
+      baseItem({ excerpt: 'data:image/png;base64,iVBORw0KGgo=' }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-excerpt')).toBeNull();
+    expect(card.querySelector('.spaces-card-glyph-doc')).not.toBeNull();
+  });
+
+  it('treats whitespace-only excerpts as missing', () => {
+    const card = handle().buildItemCard(baseItem({ excerpt: '   \n  ' }), false);
+    expect(card.querySelector('.spaces-card-excerpt')).toBeNull();
+    expect(card.querySelector('.spaces-card-glyph-doc')).not.toBeNull();
+  });
+
   it('renders an audio waveform + play glyph for audio assets', () => {
     const card = handle().buildItemCard(baseItem({ kind: 'audio' }), false);
     expect(card.querySelector('.spaces-card-preview-audio')).not.toBeNull();

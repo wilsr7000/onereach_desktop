@@ -110,6 +110,9 @@
       recorded.
 - [ ] **Previews (9 kinds)** — image, video, audio, PDF, code, CSV, markdown,
       URL, text each render a sensible preview/download affordance.
+      *(markdown: driven-verified 2026-08-05 — upload .md → renders headings /
+      bold / code / fence / blockquote / ☐ tasks with ✎ Edit → Save →
+      re-render; text tiles show content excerpts.)*
 - [ ] **Edit asset** — click-to-edit title, description, content (Save/Cancel,
       ⌘↵/Esc); tag chips add/remove; metadata add/edit/remove with type
       coercion.

@@ -2690,6 +2690,13 @@ export const MANIFEST: Manifest = {
             "examples": []
           },
           {
+            "name": "readFileData",
+            "signature": "readFileData(key: string): Promise<{ dataUrl: string } | null>",
+            "description": "Read a stored file's BYTES and hand back a `data:` URL.\n\nThe detail pane needs this to render a PDF inline. It cannot fetch\nthe signed URL itself -- the Spaces window's CSP is\n`default-src 'self'`, so a cross-origin fetch is blocked -- and\neven if it could, signed URLs are frequently served\n`Content-Disposition: attachment`, which makes an embedded viewer\npaint a blank page. A data: URL sidesteps both (CSP allows\n`object-src`/`frame-src` data:).\n\nReturns null when the key is missing from storage, the download\nfails, or the file exceeds the inline-preview cap -- callers show\nan explicit message rather than a dead viewer.",
+            "tags": [],
+            "examples": []
+          },
+          {
             "name": "update",
             "signature": "update(id: string, patch: ItemUpdatePatch): Promise<Item>",
             "description": "Update mutable fields on an Item (Phase 3b). Returns the freshly\nre-fetched Item so callers can update their state with the new\n`updatedAt`, `lastEditedBy`, etc. in one shape.",
@@ -3484,5 +3491,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-08-06T02:44:33.523Z"
+  "generatedAt": "2026-08-06T04:27:37.633Z"
 } as const;

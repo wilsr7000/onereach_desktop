@@ -1793,6 +1793,20 @@ body {
   overflow-x: auto;
 }
 
+.spaces-markdown-quote {
+  margin: 0 0 12px;
+  padding: 6px 14px;
+  border-left: 3px solid rgba(138, 169, 255, 0.45);
+  background: rgba(138, 169, 255, 0.05);
+  border-radius: 0 6px 6px 0;
+  color: #c7c7cd;
+}
+.spaces-markdown-quote p { margin: 0 0 6px; }
+.spaces-markdown-quote p:last-child { margin-bottom: 0; }
+
+.spaces-markdown-task { list-style: none; margin-left: -18px; }
+.spaces-markdown-checkbox { color: #8aa9ff; margin-right: 2px; }
+
 .spaces-markdown-code code {
   background: transparent;
   padding: 0;
