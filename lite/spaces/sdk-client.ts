@@ -3006,6 +3006,59 @@ function extractNeonErrorCode(err: unknown): string | null {
   return typeof code === 'string' ? code : null;
 }
 
+/**
+ * Normalize a timestamp coming off the graph into an ISO 8601 string.
+ *
+ * The graph is written by MORE THAN ONE app and they don't agree on the
+ * format: Lite writes ISO strings (`2026-05-19T03:06:17.123Z`) while
+ * GSX / WISER Playbooks writes **epoch milliseconds**
+ * (`1785976501151`). The Cypher already coalesces the camelCase and
+ * snake_case NAMES, but the VALUE still arrives in whichever shape its
+ * writer used.
+ *
+ * Left unnormalized, the renderer's `Date.parse` returns NaN for the
+ * epoch form, which meant GSX-written Spaces displayed a raw number
+ * where a date belongs and always sank to the bottom of the
+ * "Recently updated" sort. Converting at this boundary means every
+ * consumer downstream gets one shape.
+ *
+ * Accepts: ISO strings (passed through), epoch millis, and epoch
+ * seconds (10-digit values are widened) as either number or numeric
+ * string. Returns undefined for anything it can't place, so callers
+ * keep their existing "missing timestamp" behavior.
+ */
+export function normalizeGraphTimestamp(raw: unknown): string | undefined {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return epochToIso(raw);
+  }
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  // All-digits => epoch. Anything else is treated as a date string.
+  if (/^\d+$/.test(trimmed)) {
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? epochToIso(n) : undefined;
+  }
+  // Already a date string: hand it back VERBATIM. Re-serializing would
+  // rewrite '2026-01-01T00:00:00Z' as '...00.000Z' -- same instant, but
+  // needless churn on data that was already correct, and anything
+  // comparing these strings would see a spurious change.
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed)) return undefined;
+  return trimmed;
+}
+
+/** Epoch seconds (10 digits) or millis -> ISO. */
+function epochToIso(n: number): string | undefined {
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  // Values below ~1e12 are seconds (1e12 ms == 2001-09-09).
+  const ms = n < 1e12 ? n * 1000 : n;
+  const d = new Date(ms);
+  const t = d.getTime();
+  if (!Number.isFinite(t)) return undefined;
+  return d.toISOString();
+}
+
 function toSpace(row: Record<string, unknown>): Space {
   const space: Space = {
     id: requireString(row, 'id'),
@@ -3019,9 +3072,9 @@ function toSpace(row: Record<string, unknown>): Space {
   if (iconKey !== undefined) space.iconKey = iconKey;
   const itemCount = optNumber(row, 'itemCount');
   if (itemCount !== undefined) space.itemCount = itemCount;
-  const createdAt = optString(row, 'createdAt');
+  const createdAt = normalizeGraphTimestamp(optString(row, 'createdAt'));
   if (createdAt !== undefined) space.createdAt = createdAt;
-  const updatedAt = optString(row, 'updatedAt');
+  const updatedAt = normalizeGraphTimestamp(optString(row, 'updatedAt'));
   if (updatedAt !== undefined) space.updatedAt = updatedAt;
   const kind = optString(row, 'kind');
   if (kind === 'shared' || kind === 'user') space.kind = kind;
@@ -3047,8 +3100,8 @@ function toItemSummary(row: Record<string, unknown>, opts: SummaryOpts): ItemSum
     id: requireString(row, 'id'),
     title: optString(row, 'title') ?? '',
     kind: toItemKind(row['kind']),
-    createdAt: optString(row, 'createdAt') ?? '',
-    updatedAt: optString(row, 'updatedAt') ?? '',
+    createdAt: normalizeGraphTimestamp(optString(row, 'createdAt')) ?? '',
+    updatedAt: normalizeGraphTimestamp(optString(row, 'updatedAt')) ?? '',
     otherSpaces: opts.stripOtherSpaces ? [] : toChipList(row['otherSpaces']),
     producedBy: toProducedBy(row['producedBy']),
   };
@@ -3122,8 +3175,8 @@ function toTicketItem(row: Record<string, unknown>): Item {
     id: requireString(row, 'id'),
     title: optString(row, 'title') ?? '',
     kind: 'ticket',
-    createdAt: optString(row, 'createdAt') ?? '',
-    updatedAt: optString(row, 'updatedAt') ?? '',
+    createdAt: normalizeGraphTimestamp(optString(row, 'createdAt')) ?? '',
+    updatedAt: normalizeGraphTimestamp(optString(row, 'updatedAt')) ?? '',
     otherSpaces: [],
     producedBy: null,
   };

@@ -1410,7 +1410,17 @@ export function sortSpaces(
 
 function parseTimestamp(iso: string | undefined): number | null {
   if (typeof iso !== 'string' || iso.length === 0) return null;
-  const t = Date.parse(iso);
+  // Defense in depth: the SDK normalizes graph timestamps to ISO, but
+  // other writers put epoch millis on these fields. Date.parse returns
+  // NaN for those, which used to sink GSX-written Spaces to the bottom
+  // of the "recently updated" sort no matter how fresh they were.
+  const trimmed = iso.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n < 1e12 ? n * 1000 : n;
+  }
+  const t = Date.parse(trimmed);
   return Number.isFinite(t) ? t : null;
 }
 
@@ -7343,8 +7353,11 @@ export function formatCount(n: number): string {
 
 export function formatRelativeTime(iso: string): string {
   if (typeof iso !== 'string' || iso.length === 0) return '';
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return iso;
+  // Route through parseTimestamp so epoch-millis values (written by
+  // GSX / WISER Playbooks) render as a date instead of leaking the raw
+  // number into the UI, which is what `return iso` used to do.
+  const t = parseTimestamp(iso);
+  if (t === null) return iso;
   const diff = Date.now() - t;
   if (diff < 60_000) return 'just now';
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
