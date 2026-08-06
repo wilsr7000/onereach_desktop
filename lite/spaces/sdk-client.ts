@@ -220,6 +220,12 @@ export const CYPHER = {
                        OR trim(a.content) = '' THEN NULL
                   ELSE left(a.content, 280) END
            ) AS excerpt,
+           CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
+                ELSE a.description END AS description,
+           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+                     AND a.content IS NOT NULL
+                     AND NOT a.content STARTS WITH 'data:'
+                THEN left(a.content, 280) ELSE NULL END AS contentHead,
            [] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -261,6 +267,12 @@ export const CYPHER = {
                        OR trim(a.content) = '' THEN NULL
                   ELSE left(a.content, 280) END
            ) AS excerpt,
+           CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
+                ELSE a.description END AS description,
+           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+                     AND a.content IS NOT NULL
+                     AND NOT a.content STARTS WITH 'data:'
+                THEN left(a.content, 280) ELSE NULL END AS contentHead,
            [x IN otherSpacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -397,6 +409,12 @@ export const CYPHER = {
                        OR trim(a.content) = '' THEN NULL
                   ELSE left(a.content, 280) END
            ) AS excerpt,
+           CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
+                ELSE a.description END AS description,
+           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+                     AND a.content IS NOT NULL
+                     AND NOT a.content STARTS WITH 'data:'
+                THEN left(a.content, 280) ELSE NULL END AS contentHead,
            coalesce(a.description, '') AS description,
            coalesce(a.content, '') AS content,
            coalesce(a.size, a.fileSize, a.byteCount) AS size,
@@ -483,6 +501,12 @@ export const CYPHER = {
                        OR trim(a.content) = '' THEN NULL
                   ELSE left(a.content, 280) END
            ) AS excerpt,
+           CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
+                ELSE a.description END AS description,
+           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+                     AND a.content IS NOT NULL
+                     AND NOT a.content STARTS WITH 'data:'
+                THEN left(a.content, 280) ELSE NULL END AS contentHead,
            CASE WHEN firstSpace IS NULL
                 THEN []
                 ELSE [{ id: firstSpace.id,
@@ -846,6 +870,12 @@ export const CYPHER = {
                        OR trim(a.content) = '' THEN NULL
                   ELSE left(a.content, 280) END
            ) AS excerpt,
+           CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
+                ELSE a.description END AS description,
+           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+                     AND a.content IS NOT NULL
+                     AND NOT a.content STARTS WITH 'data:'
+                THEN left(a.content, 280) ELSE NULL END AS contentHead,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
            coalesce(a.status, 'open') AS status,
@@ -1325,6 +1355,12 @@ export const CYPHER = {
                        OR trim(a.content) = '' THEN NULL
                   ELSE left(a.content, 280) END
            ) AS excerpt,
+           CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
+                ELSE a.description END AS description,
+           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+                     AND a.content IS NOT NULL
+                     AND NOT a.content STARTS WITH 'data:'
+                THEN left(a.content, 280) ELSE NULL END AS contentHead,
            [x IN spacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -3153,6 +3189,10 @@ function toItemSummary(row: Record<string, unknown>, opts: SummaryOpts): ItemSum
   if (sourceUrl !== undefined) summary.sourceUrl = sourceUrl;
   const excerpt = optString(row, 'excerpt');
   if (excerpt !== undefined) summary.excerpt = excerpt;
+  const description = optString(row, 'description');
+  if (description !== undefined) summary.description = description;
+  const contentHead = optString(row, 'contentHead');
+  if (contentHead !== undefined) summary.contentHead = contentHead;
   return summary;
 }
 

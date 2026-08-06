@@ -121,6 +121,12 @@ describe('CYPHER source strings', () => {
       expect(q).toMatch(
         /CASE WHEN trim\(coalesce\(a\.excerpt, ''\)\) = '' THEN NULL ELSE a\.excerpt END/
       );
+      // Playbook tiles need description AND plan steps: summaries
+      // carry `description` for all kinds plus a playbook-only
+      // `contentHead` (excerpt alone would collapse them).
+      expect(q).toMatch(/AS description,/);
+      expect(q).toMatch(/coalesce\(a\.type, a\.assetType\) = 'playbook'/);
+      expect(q).toMatch(/AS contentHead,/);
     }
   });
 

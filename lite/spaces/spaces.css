@@ -886,6 +886,24 @@ body {
     linear-gradient(165deg, #241913, #110F0E);
 }
 
+/* Grabbed frame paints behind the play glyph (absolute fill under the
+   flex-centered glyph); a soft scrim keeps the glyph legible on
+   bright footage. */
+.spaces-card-video-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.spaces-card-preview-video.has-video-frame .spaces-card-play-large {
+  position: relative;
+  z-index: 1;
+  background: rgba(14, 16, 20, 0.72);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+}
+
 /* URL tile — host name on a card-like surface. Glanceable bookmark. */
 .spaces-card-preview-url {
   background:
@@ -962,6 +980,33 @@ body {
   font-weight: 600;
   letter-spacing: 2px;
   color: rgba(214, 194, 255, 0.85);
+}
+
+.spaces-card-playbook-desc {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.spaces-card-playbook-desc-pen {
+  flex: 0 0 auto;
+  color: #d6b25e;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.spaces-card-playbook-desc-text {
+  font-size: 11.5px;
+  font-style: italic;
+  line-height: 1.45;
+  color: rgba(224, 216, 244, 0.78);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .spaces-card-playbook-steps {

@@ -66,6 +66,23 @@ function guessMimeFromKey(key: string): string {
   if (lower.endsWith('.gif')) return 'image/gif';
   if (lower.endsWith('.webp')) return 'image/webp';
   if (lower.endsWith('.svg')) return 'image/svg+xml';
+  // Media: <video>/<audio> refuse to decode data: URLs typed
+  // application/octet-stream (no content sniffing for media), so the
+  // tile frame-grab and any inline player need the real type.
+  if (lower.endsWith('.mp4') || lower.endsWith('.m4v')) return 'video/mp4';
+  if (lower.endsWith('.mov')) return 'video/quicktime';
+  if (lower.endsWith('.webm')) return 'video/webm';
+  if (lower.endsWith('.mp3')) return 'audio/mpeg';
+  if (lower.endsWith('.m4a')) return 'audio/mp4';
+  if (lower.endsWith('.wav')) return 'audio/wav';
+  if (lower.endsWith('.ogg') || lower.endsWith('.oga')) return 'audio/ogg';
+  // Text kinds — harmless for the decoder (which ignores mime) but
+  // keeps data URLs honest for anything else that reads them.
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'text/markdown';
+  if (lower.endsWith('.txt') || lower.endsWith('.text')) return 'text/plain';
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'text/html';
+  if (lower.endsWith('.csv')) return 'text/csv';
+  if (lower.endsWith('.json')) return 'application/json';
   return 'application/octet-stream';
 }
 

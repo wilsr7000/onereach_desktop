@@ -628,6 +628,14 @@ interface LiteSpaceItemSummary {
   createdAt: string;
   updatedAt: string;
   excerpt?: string;
+  /** User-authored description when non-blank. Distinct from `excerpt`
+   *  (which may itself be derived from description OR content) — tiles
+   *  that need both, like the playbook tile, read this directly. */
+  description?: string;
+  /** First ~280 chars of `content` for playbook rows only (null for
+   *  other kinds) — lets the playbook tile parse plan steps even when
+   *  `excerpt` carries the description. */
+  contentHead?: string;
   otherSpaces: LiteSpaceChipRef[];
   producedBy: LiteSpaceItemProvenance | null;
 }

@@ -258,6 +258,20 @@ export interface ItemSummary {
   /** Up to ~120 char preview; nullable. */
   excerpt?: string;
   /**
+   * User-authored description, when non-blank. Distinct from `excerpt`
+   * (which may be derived from description OR content): tiles that
+   * need both — the playbook tile shows description + plan steps —
+   * read this field directly.
+   */
+  description?: string;
+  /**
+   * First ~280 chars of `content` for playbook rows only (other kinds
+   * return null to keep list payloads lean). Lets the playbook tile
+   * parse plan steps even when `excerpt` was taken from the
+   * description.
+   */
+  contentHead?: string;
+  /**
    * Spaces this item participates in OTHER than the currently-viewed
    * Space. Already permission-filtered server-side (Phase 0.5 Q4/Q6).
    * Empty array for items in the Uncategorized scope.

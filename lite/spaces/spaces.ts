@@ -3185,7 +3185,7 @@ function buildAssetTilePreview(item: RendererItemSummary): HTMLElement {
       buildAudioTilePreview(preview);
       break;
     case 'video':
-      buildVideoTilePreview(preview);
+      buildVideoTilePreview(item, preview);
       break;
     case 'url':
       buildUrlTilePreview(item, preview);
@@ -3242,6 +3242,8 @@ function getTileImageObserver(): IntersectionObserver | null {
         if (pdfKey !== null && pdfKey.length > 0) loadTilePdfPreview(el, pdfKey);
         const textKey = el.getAttribute('data-text-key');
         if (textKey !== null && textKey.length > 0) loadTileTextPreview(el, textKey);
+        const videoKey = el.getAttribute('data-video-key');
+        if (videoKey !== null && videoKey.length > 0) loadTileVideoFrame(el, videoKey);
       }
     },
     { rootMargin: '300px' }
@@ -3346,12 +3348,147 @@ function buildAudioTilePreview(preview: HTMLElement): void {
  * tiles. When real frame thumbnails arrive in the summary payload
  * later this can swap in a poster `<img>`.
  */
-function buildVideoTilePreview(preview: HTMLElement): void {
+function buildVideoTilePreview(
+  item: RendererItemSummary,
+  preview: HTMLElement
+): void {
   const play = document.createElement('span');
   play.className = 'spaces-card-play spaces-card-play-large';
   play.setAttribute('aria-hidden', 'true');
   play.textContent = '▶';
   preview.appendChild(play);
+
+  // Frame grab: lazily fetch the bytes (within the inline cap), seek a
+  // muted off-screen <video>, and paint a real frame behind the play
+  // glyph. Data URLs keep the canvas untainted (signed URLs would need
+  // CORS headers GSX doesn't send). Oversized or undecodable videos
+  // keep the plain play tile.
+  if (typeof item.fileKey !== 'string' || item.fileKey.length === 0) return;
+  preview.setAttribute('data-video-key', item.fileKey);
+  const observer = getTileImageObserver();
+  if (observer === null) {
+    loadTileVideoFrame(preview, item.fileKey);
+    return;
+  }
+  observer.observe(preview);
+}
+
+/**
+ * Frame-grab cache — rendered JPEG data URLs keyed by fileKey, so grid
+ * re-renders don't re-decode the video. Entries are ~50–150KB.
+ */
+const tileVideoFrameCache = new Map<string, string>();
+const TILE_VIDEO_CACHE_MAX_ENTRIES = 60;
+
+function loadTileVideoFrame(preview: HTMLElement, key: string): void {
+  const cached = tileVideoFrameCache.get(key);
+  if (cached !== undefined) {
+    swapTilePreviewToVideoFrame(preview, cached);
+    return;
+  }
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  void bridge.items
+    .readFileData(key)
+    .then(async (env) => {
+      const dataUrl = env.ok === true && env.value !== null ? env.value.dataUrl : null;
+      if (typeof dataUrl !== 'string' || dataUrl.length === 0) return;
+      const frame = await grabVideoFrame(dataUrl);
+      if (frame === null) return;
+      if (tileVideoFrameCache.size >= TILE_VIDEO_CACHE_MAX_ENTRIES) {
+        const oldest = tileVideoFrameCache.keys().next().value;
+        if (oldest !== undefined) tileVideoFrameCache.delete(oldest);
+      }
+      tileVideoFrameCache.set(key, frame);
+      swapTilePreviewToVideoFrame(preview, frame);
+    })
+    .catch(() => undefined);
+}
+
+/**
+ * Decode a video data URL off-screen and rasterize one early frame to
+ * a JPEG data URL. Resolves null on any decode/seek/canvas failure —
+ * callers keep the plain play tile. Exported for tests (jsdom can't
+ * decode video, so tests exercise the failure path; the success path
+ * is covered by the driven live check).
+ */
+export function grabVideoFrame(
+  dataUrl: string,
+  timeoutMs = 10_000
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result: string | null): void => {
+      if (settled) return;
+      settled = true;
+      video.removeAttribute('src');
+      try {
+        video.load();
+      } catch {
+        /* detached cleanup only */
+      }
+      resolve(result);
+    };
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    const timer = window.setTimeout(() => done(null), timeoutMs);
+    video.addEventListener('error', () => {
+      window.clearTimeout(timer);
+      done(null);
+    });
+    video.addEventListener('loadeddata', () => {
+      // Seek past the first frame — openings are often black.
+      const target = Number.isFinite(video.duration)
+        ? Math.min(1, video.duration / 10)
+        : 0;
+      try {
+        video.currentTime = target;
+      } catch {
+        window.clearTimeout(timer);
+        done(null);
+      }
+    });
+    video.addEventListener('seeked', () => {
+      window.clearTimeout(timer);
+      try {
+        const w = video.videoWidth;
+        const h = video.videoHeight;
+        if (w <= 0 || h <= 0) {
+          done(null);
+          return;
+        }
+        const scale = Math.min(1, 640 / w);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(w * scale));
+        canvas.height = Math.max(1, Math.round(h * scale));
+        const ctx = canvas.getContext('2d');
+        if (ctx === null) {
+          done(null);
+          return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        done(canvas.toDataURL('image/jpeg', 0.82));
+      } catch {
+        done(null);
+      }
+    });
+    video.src = dataUrl;
+  });
+}
+
+/** Paint the grabbed frame behind the (kept) play glyph. */
+function swapTilePreviewToVideoFrame(preview: HTMLElement, frameUrl: string): void {
+  preview.removeAttribute('data-video-key');
+  const stale = preview.querySelector('.spaces-card-video-frame');
+  if (stale !== null) stale.remove();
+  const img = document.createElement('img');
+  img.className = 'spaces-card-image spaces-card-video-frame';
+  img.src = frameUrl;
+  img.alt = '';
+  preview.insertBefore(img, preview.firstChild);
+  preview.classList.add('has-video-frame');
 }
 
 /**
@@ -3405,7 +3542,26 @@ function buildPlaybookTilePreview(
   head.appendChild(label);
   preview.appendChild(head);
 
-  const steps = parsePlaybookSteps(item.excerpt);
+  // Description line — the author's one-liner about the plan, marked
+  // with the pen glyph so it reads as "written by someone."
+  const description = (item.description ?? '').trim();
+  if (description.length > 0) {
+    const desc = document.createElement('span');
+    desc.className = 'spaces-card-playbook-desc';
+    const pen = document.createElement('span');
+    pen.className = 'spaces-card-playbook-desc-pen';
+    pen.textContent = '✎';
+    desc.appendChild(pen);
+    const text = document.createElement('span');
+    text.className = 'spaces-card-playbook-desc-text';
+    text.textContent = description;
+    desc.appendChild(text);
+    preview.appendChild(desc);
+  }
+
+  // Steps come from the content head when present — `excerpt` prefers
+  // the description, and a described playbook must not lose its plan.
+  const steps = parsePlaybookSteps(item.contentHead ?? item.excerpt);
   if (steps.length > 0) {
     const list = document.createElement('span');
     list.className = 'spaces-card-playbook-steps';
@@ -3433,8 +3589,10 @@ function buildPlaybookTilePreview(
     return;
   }
 
+  // Prose fallback — skipped when it would just repeat the
+  // description line rendered above.
   const excerpt = tileExcerptText(item.excerpt);
-  if (excerpt !== null) {
+  if (excerpt !== null && excerpt !== description) {
     const paper = document.createElement('p');
     paper.className = 'spaces-card-excerpt';
     paper.textContent = excerpt;
@@ -7969,6 +8127,7 @@ function messageFrom(err: unknown): string {
   fileExtFamily,
   tileExcerptText,
   parsePlaybookSteps,
+  grabVideoFrame,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,

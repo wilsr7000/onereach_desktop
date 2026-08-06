@@ -34,6 +34,7 @@ interface RendererTestHandle {
   fileExtBadge(title: string): string;
   fileExtFamily(ext: string): string;
   parsePlaybookSteps(excerpt: string | undefined): string[];
+  grabVideoFrame(dataUrl: string, timeoutMs?: number): Promise<string | null>;
   buildSpaceChip(chip: TestChip): HTMLElement;
   buildDetailPane(item: TestItem, onClose: () => void): HTMLElement;
   buildBinaryPreview(item: TestItem, url: string): HTMLElement;
@@ -78,6 +79,8 @@ interface TestItemSummary {
   createdAt: string;
   updatedAt: string;
   excerpt?: string;
+  description?: string;
+  contentHead?: string;
   sourceUrl?: string;
   fileKey?: string;
   otherSpaces: TestChip[];
@@ -452,6 +455,95 @@ describe('playbook tile preview', () => {
     const empty = handle().buildItemCard(baseItem({ kind: 'playbook' }), false);
     expect(empty.querySelector('.spaces-card-playbook-label')?.textContent).toBe('PLAYBOOK');
     expect(empty.querySelectorAll('.spaces-card-playbook-line').length).toBeGreaterThan(0);
+  });
+
+  it('shows the description line with the pen glyph', () => {
+    const card = handle().buildItemCard(
+      baseItem({
+        kind: 'playbook',
+        description: 'Drives the InfoBip partnership launch.',
+        contentHead: '1. Kickoff.\n2. Draft the deck.',
+      }),
+      false
+    );
+    const desc = card.querySelector('.spaces-card-playbook-desc');
+    expect(desc).not.toBeNull();
+    expect(desc?.querySelector('.spaces-card-playbook-desc-pen')?.textContent).toBe('✎');
+    expect(desc?.querySelector('.spaces-card-playbook-desc-text')?.textContent).toBe(
+      'Drives the InfoBip partnership launch.'
+    );
+  });
+
+  it('a described playbook keeps its steps (parsed from contentHead)', () => {
+    // Live shape: excerpt prefers the description, so steps must come
+    // from contentHead or a described playbook loses its plan.
+    const card = handle().buildItemCard(
+      baseItem({
+        kind: 'playbook',
+        description: 'The plan of record.',
+        excerpt: 'The plan of record.',
+        contentHead: '1. First step.\n2. Second step.',
+      }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-playbook-desc-text')?.textContent).toBe(
+      'The plan of record.'
+    );
+    const steps = card.querySelectorAll('.spaces-card-playbook-step');
+    expect(steps).toHaveLength(2);
+    // The prose fallback must not duplicate the description line.
+    expect(card.querySelector('.spaces-card-excerpt')).toBeNull();
+  });
+
+  it('description-only playbook shows desc + ornament, not a duplicate excerpt', () => {
+    const card = handle().buildItemCard(
+      baseItem({
+        kind: 'playbook',
+        description: 'Just a described plan.',
+        excerpt: 'Just a described plan.',
+      }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-playbook-desc-text')?.textContent).toBe(
+      'Just a described plan.'
+    );
+    expect(card.querySelector('.spaces-card-excerpt')).toBeNull();
+    expect(card.querySelectorAll('.spaces-card-playbook-line').length).toBeGreaterThan(0);
+  });
+});
+
+// ─── Video tiles ────────────────────────────────────────────────────────
+
+describe('video tile frame grab', () => {
+  it('keeps the plain play tile when there is no fileKey', () => {
+    const card = handle().buildItemCard(baseItem({ kind: 'video' }), false);
+    expect(card.querySelector('.spaces-card-play-large')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-video-frame')).toBeNull();
+  });
+
+  it('keeps the play tile when readFileData fails', async () => {
+    (window as unknown as { lite?: unknown }).lite = {
+      spaces: {
+        items: {
+          readFileData: async () => ({ ok: false, error: { message: 'HTTP 404' } }),
+        },
+      },
+    };
+    const card = handle().buildItemCard(
+      baseItem({ kind: 'video', fileKey: 'lite-spaces/assets/k7-clip.mp4' }),
+      false
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(card.querySelector('.spaces-card-video-frame')).toBeNull();
+    expect(card.querySelector('.spaces-card-play-large')).not.toBeNull();
+    delete (window as unknown as { lite?: unknown }).lite;
+  });
+
+  it('grabVideoFrame resolves null on undecodable input (jsdom)', async () => {
+    // jsdom cannot decode video; the error path must resolve null, not
+    // hang or throw. The success path is covered by the driven check.
+    const result = await handle().grabVideoFrame('data:video/mp4;base64,AAAA', 100);
+    expect(result).toBeNull();
   });
 
   it('renders an audio waveform + play glyph for audio assets', () => {
