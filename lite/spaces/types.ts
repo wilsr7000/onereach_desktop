@@ -117,6 +117,7 @@ export type ItemKind =
   | 'playbook'
   | 'ticket'
   | 'agent'
+  | 'transcript'
   | 'other';
 
 /**

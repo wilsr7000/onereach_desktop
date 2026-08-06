@@ -38,6 +38,11 @@ import {
   extractMetadataFromText,
 } from './metadata-extractor.js';
 import { shouldInlineTextFile, decodeDataUrlText, isTextLikeFile } from './text-asset.js';
+import {
+  convertTranscript,
+  detectTranscriptFormat,
+  parseTranscriptTilePreview,
+} from './transcript.js';
 
 // ─── Home view (chunk 3o) ───────────────────────────────────────────────
 
@@ -3193,6 +3198,9 @@ function buildAssetTilePreview(item: RendererItemSummary): HTMLElement {
     case 'playbook':
       buildPlaybookTilePreview(item, preview);
       break;
+    case 'transcript':
+      buildTranscriptTilePreview(item, preview);
+      break;
     case 'ticket':
       buildTicketTilePreview(item, preview);
       break;
@@ -3605,6 +3613,92 @@ function buildPlaybookTilePreview(
     line.className = 'spaces-card-playbook-line';
     line.style.setProperty('--line-index', String(i));
     preview.appendChild(line);
+  }
+}
+
+/**
+ * Transcript tile — the conversation, at a glance. A ❝ TRANSCRIPT
+ * chip, the ✎ description when the author wrote one, then the first
+ * turns parsed from the converted-Markdown content head as
+ * speaker-labeled rows, with a participants footer. Falls back to the
+ * plain excerpt, then to the doc glyph.
+ */
+function buildTranscriptTilePreview(
+  item: RendererItemSummary,
+  preview: HTMLElement
+): void {
+  const head = document.createElement('span');
+  head.className = 'spaces-card-transcript-head';
+  head.setAttribute('aria-hidden', 'true');
+  const mark = document.createElement('span');
+  mark.className = 'spaces-card-transcript-mark';
+  mark.textContent = '❝';
+  head.appendChild(mark);
+  const label = document.createElement('span');
+  label.className = 'spaces-card-transcript-label';
+  label.textContent = 'TRANSCRIPT';
+  head.appendChild(label);
+  preview.appendChild(head);
+
+  const description = (item.description ?? '').trim();
+  if (description.length > 0) {
+    const desc = document.createElement('span');
+    desc.className = 'spaces-card-playbook-desc';
+    const pen = document.createElement('span');
+    pen.className = 'spaces-card-playbook-desc-pen';
+    pen.textContent = '✎';
+    desc.appendChild(pen);
+    const text = document.createElement('span');
+    text.className = 'spaces-card-playbook-desc-text';
+    text.textContent = description;
+    desc.appendChild(text);
+    preview.appendChild(desc);
+  }
+
+  const parsed = parseTranscriptTilePreview(item.contentHead);
+  if (parsed.turns.length > 0) {
+    const list = document.createElement('span');
+    list.className = 'spaces-card-transcript-turns';
+    for (const turn of parsed.turns.slice(0, 3)) {
+      const row = document.createElement('span');
+      row.className = 'spaces-card-transcript-turn';
+      const who = document.createElement('span');
+      who.className = 'spaces-card-transcript-speaker';
+      who.textContent = turn.speaker;
+      row.appendChild(who);
+      const said = document.createElement('span');
+      said.className = 'spaces-card-transcript-text';
+      said.textContent = turn.text;
+      row.appendChild(said);
+      list.appendChild(row);
+    }
+    if (parsed.participants.length > 0) {
+      const foot = document.createElement('span');
+      foot.className = 'spaces-card-transcript-foot';
+      foot.textContent = `${parsed.participants.length} ${
+        parsed.participants.length === 1 ? 'person' : 'people'
+      }`;
+      list.appendChild(foot);
+    }
+    preview.appendChild(list);
+    return;
+  }
+
+  const excerpt = tileExcerptText(item.excerpt);
+  if (excerpt !== null && excerpt !== description) {
+    const paper = document.createElement('p');
+    paper.className = 'spaces-card-excerpt';
+    paper.textContent = excerpt;
+    preview.appendChild(paper);
+    return;
+  }
+
+  if (description.length === 0) {
+    const glyph = document.createElement('span');
+    glyph.className = 'spaces-card-glyph spaces-card-glyph-doc';
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.textContent = '¶';
+    preview.appendChild(glyph);
   }
 }
 
@@ -4115,11 +4209,262 @@ function renderDetail(opts: RenderDetailOpts): void {
     const currentSpaceId =
       state.activeScopeId !== UNCATEGORIZED_SPACE_ID ? state.activeScopeId : null;
     aside.appendChild(buildMoveToSpaceAffordance(item, currentSpaceId));
-    aside.appendChild(buildAddToSpaceAffordance(item));
+    aside.appendChild(buildSpaceMembershipPanel(item));
   }
 
   // Sprint 1: Delete affordance at the bottom of the detail pane.
   aside.appendChild(buildAssetDeleteAffordance(item.id, item.title));
+}
+
+/**
+ * Multi-space membership panel.
+ *
+ * An item can live in many Spaces (the graph MERGEs one `[:BELONGS_TO]`
+ * edge per Space), but the UI only offered a one-at-a-time dropdown, so
+ * filing into three Spaces meant three separate trips through a select
+ * you had to already know the contents of.
+ *
+ * This is the whole picture in one place: every Space as a checkbox
+ * with current membership pre-ticked, and — at the top — Claude's
+ * shortlist of Spaces this item probably belongs in, each with a short
+ * reason drawn from the Space's own name + description. Suggestions are
+ * an accelerant: they can only ever name Spaces that are already in the
+ * list, and the full list is always there whether AI is configured or
+ * not.
+ */
+function buildSpaceMembershipPanel(item: RendererItem): HTMLElement {
+  const wrap = document.createElement('section');
+  wrap.className = 'spaces-detail-membership';
+
+  const label = document.createElement('span');
+  label.className = 'spaces-detail-label';
+  label.textContent = 'In spaces';
+  wrap.appendChild(label);
+
+  const memberIds = new Set<string>(
+    (item.otherSpaces ?? []).map((c) => c.id).filter((x): x is string => typeof x === 'string')
+  );
+  // The scope we're viewing from is a membership too when it's a real Space.
+  if (
+    state.activeScopeId !== HOME_SCOPE_ID &&
+    state.activeScopeId !== UNCATEGORIZED_SPACE_ID &&
+    typeof state.activeScopeId === 'string'
+  ) {
+    memberIds.add(state.activeScopeId);
+  }
+
+  // Suggestions slot — filled asynchronously; absent until it resolves
+  // so the panel never shows an empty "Suggested" heading.
+  const suggestions = document.createElement('div');
+  suggestions.className = 'spaces-membership-suggestions';
+  suggestions.hidden = true;
+  wrap.appendChild(suggestions);
+
+  const list = document.createElement('div');
+  list.className = 'spaces-membership-list';
+  for (const space of state.spaces) {
+    list.appendChild(buildMembershipRow(item, space, memberIds.has(space.id)));
+  }
+  wrap.appendChild(list);
+
+  void loadSpaceSuggestions(item, memberIds, suggestions);
+  return wrap;
+}
+
+/** One Space row: a checkbox that adds/removes membership on toggle. */
+function buildMembershipRow(
+  item: RendererItem,
+  space: RendererSpace,
+  isMember: boolean
+): HTMLElement {
+  const row = document.createElement('label');
+  row.className = 'spaces-membership-row';
+  row.setAttribute('data-space-id', space.id);
+
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'spaces-membership-check';
+  box.checked = isMember;
+  box.setAttribute('aria-label', `${isMember ? 'Remove from' : 'Add to'} ${space.name}`);
+  box.addEventListener('change', () => {
+    void toggleSpaceMembership(item.id, space, box);
+  });
+  row.appendChild(box);
+
+  if (typeof space.color === 'string' && space.color.length > 0) {
+    const dot = document.createElement('span');
+    dot.className = 'spaces-membership-dot';
+    dot.style.background = space.color;
+    row.appendChild(dot);
+  }
+
+  const name = document.createElement('span');
+  name.className = 'spaces-membership-name';
+  name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
+  row.appendChild(name);
+
+  if (space.kind === 'shared') {
+    const badge = document.createElement('span');
+    badge.className = 'spaces-membership-kind';
+    badge.textContent = 'shared';
+    row.appendChild(badge);
+  }
+  return row;
+}
+
+/**
+ * Add or remove one membership. Optimistic: the checkbox already shows
+ * the new state, so on failure we put it back and say why -- rather
+ * than silently diverging from the graph.
+ */
+async function toggleSpaceMembership(
+  itemId: string,
+  space: RendererSpace,
+  box: HTMLInputElement
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const wantMember = box.checked;
+  box.disabled = true;
+  try {
+    const envelope = wantMember
+      ? await bridge.items.addToSpace(itemId, space.id)
+      : await bridge.items.removeFromSpace(itemId, space.id);
+    if (envelope.ok === false) {
+      box.checked = !wantMember;
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(wantMember ? `Added to ${space.name}` : `Removed from ${space.name}`);
+    // Refresh counts + chips without collapsing the pane.
+    void loadSpaces();
+    void loadItems();
+  } catch (err) {
+    box.checked = !wantMember;
+    showToast(messageFrom(err));
+  } finally {
+    box.disabled = false;
+  }
+}
+
+/**
+ * Ask Claude which Spaces this item belongs in and render the shortlist
+ * above the full list. Entirely best-effort: no AI key, a provider
+ * error, or an empty shortlist all leave the panel exactly as it was.
+ */
+async function loadSpaceSuggestions(
+  item: RendererItem,
+  memberIds: ReadonlySet<string>,
+  host: HTMLElement
+): Promise<void> {
+  const ai = window.lite?.ai;
+  if (ai === undefined || typeof ai.suggestSpaces !== 'function') return;
+  // Only offer Spaces it is NOT already in -- suggesting a Space you
+  // are already filed under is noise.
+  const candidates = state.spaces
+    .filter((sp) => !memberIds.has(sp.id))
+    .map((sp) => ({
+      id: sp.id,
+      name: sp.name,
+      ...(typeof sp.description === 'string' && sp.description.length > 0
+        ? { description: sp.description }
+        : {}),
+    }));
+  if (candidates.length === 0) return;
+
+  try {
+    const envelope = await ai.suggestSpaces(
+      {
+        title: item.title,
+        kind: item.kind,
+        ...(typeof item.content === 'string' && item.content.length > 0
+          ? { text: item.content }
+          : typeof item.excerpt === 'string'
+            ? { text: item.excerpt }
+            : {}),
+      },
+      candidates
+    );
+    if (envelope.ok === false) return;
+    const list = envelope.value.suggestions;
+    if (list.length === 0) return;
+    // The pane may have moved on while we waited.
+    if (state.activeItemId !== item.id) return;
+
+    const heading = document.createElement('div');
+    heading.className = 'spaces-membership-suggest-heading';
+    heading.textContent = 'Suggested';
+    host.appendChild(heading);
+
+    for (const s of list) {
+      const space = state.spaces.find((sp) => sp.id === s.spaceId);
+      if (space === undefined) continue; // defensive: never render a phantom
+      host.appendChild(buildSuggestionRow(item, space, s.reason));
+    }
+    host.hidden = host.children.length === 0;
+  } catch {
+    /* suggestions are optional -- stay silent */
+  }
+}
+
+/** A suggested Space: name, why, and a one-click Add. */
+function buildSuggestionRow(
+  item: RendererItem,
+  space: RendererSpace,
+  reason: string
+): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'spaces-membership-suggestion';
+
+  const text = document.createElement('div');
+  text.className = 'spaces-membership-suggestion-text';
+
+  const name = document.createElement('span');
+  name.className = 'spaces-membership-suggestion-name';
+  name.textContent = space.name;
+  text.appendChild(name);
+
+  if (reason.length > 0) {
+    const why = document.createElement('span');
+    why.className = 'spaces-membership-suggestion-why';
+    why.textContent = reason;
+    text.appendChild(why);
+  }
+  row.appendChild(text);
+
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'spaces-membership-suggestion-add';
+  add.textContent = 'Add';
+  add.addEventListener('click', () => {
+    add.disabled = true;
+    void (async () => {
+      const bridge = window.lite?.spaces;
+      if (bridge === undefined) return;
+      try {
+        const envelope = await bridge.items.addToSpace(item.id, space.id);
+        if (envelope.ok === false) {
+          showToast(envelope.error.message);
+          add.disabled = false;
+          return;
+        }
+        showToast(`Added to ${space.name}`);
+        row.remove();
+        // Tick the matching checkbox in the full list below.
+        const box = document.querySelector<HTMLInputElement>(
+          `.spaces-membership-row[data-space-id="${cssEscape(space.id)}"] .spaces-membership-check`
+        );
+        if (box !== null) box.checked = true;
+        void loadSpaces();
+        void loadItems();
+      } catch (err) {
+        showToast(messageFrom(err));
+        add.disabled = false;
+      }
+    })();
+  });
+  row.appendChild(add);
+  return row;
 }
 
 /**
@@ -4197,71 +4542,6 @@ async function performMoveAsset(
   }
 }
 
-/**
- * Sprint 3 — "Add to another space" picker. Mirrors `moveTo` but
- * MERGEs an additional edge without dropping the existing one.
- * Multi-space membership.
- */
-function buildAddToSpaceAffordance(item: RendererItem): HTMLElement {
-  const wrap = document.createElement('div');
-  wrap.className = 'spaces-detail-add-to-space-wrap';
-  const label = document.createElement('span');
-  label.className = 'spaces-detail-label';
-  label.textContent = 'Add to space';
-  wrap.appendChild(label);
-
-  const select = document.createElement('select');
-  select.className = 'spaces-detail-add-to-space-select';
-  select.setAttribute('aria-label', 'Add to another space');
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = 'Pick another space…';
-  placeholder.selected = true;
-  select.appendChild(placeholder);
-  const alreadyIn = new Set<string>(item.otherSpaces.map((s) => s.id));
-  if (state.activeScopeId !== HOME_SCOPE_ID && state.activeScopeId !== UNCATEGORIZED_SPACE_ID) {
-    alreadyIn.add(state.activeScopeId);
-  }
-  for (const space of state.spaces) {
-    if (alreadyIn.has(space.id)) continue;
-    const opt = document.createElement('option');
-    opt.value = space.id;
-    opt.textContent = space.name.length > 0 ? space.name : '(unnamed)';
-    if (space.kind === 'shared') opt.textContent += ' (shared)';
-    select.appendChild(opt);
-  }
-  select.addEventListener('change', () => {
-    const toSpaceId = select.value;
-    if (toSpaceId.length === 0) return;
-    select.disabled = true;
-    void performAddToSpace(item.id, toSpaceId, select);
-  });
-  wrap.appendChild(select);
-  return wrap;
-}
-
-async function performAddToSpace(
-  itemId: string,
-  toSpaceId: string,
-  select: HTMLSelectElement
-): Promise<void> {
-  const bridge = window.lite?.spaces;
-  if (bridge === undefined) return;
-  try {
-    const envelope = await bridge.items.addToSpace(itemId, toSpaceId);
-    if (envelope.ok === false) {
-      showToast(envelope.error.message);
-      select.disabled = false;
-      return;
-    }
-    const space = state.spaces.find((s) => s.id === toSpaceId);
-    showToast(`Added to ${space?.name ?? toSpaceId}`);
-    await loadItemDetail(itemId);
-  } catch (err) {
-    showToast(messageFrom(err));
-    select.disabled = false;
-  }
-}
 
 /**
  * Sprint 1 — "Delete asset" button. Sits at the bottom of the detail
@@ -4621,6 +4901,7 @@ const EDITABLE_ITEM_KINDS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'audio', label: 'Audio' },
   { id: 'video', label: 'Video' },
   { id: 'agent', label: 'Agent' },
+  { id: 'transcript', label: 'Transcript' },
   { id: 'other', label: 'Other' },
 ];
 
@@ -8029,6 +8310,7 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   playbook: 'Playbook',
   ticket: 'Ticket',
   agent: 'Agent',
+  transcript: 'Transcript',
   other: 'Other',
 };
 
@@ -9452,6 +9734,27 @@ function clearAgentEndpointFields(): void {
   }
 }
 
+/**
+ * Toggle the "Transcript detected" hint under the paste textarea.
+ * Creates the hint element on first use; removes it when the text no
+ * longer detects as a transcript.
+ */
+function updateTranscriptHint(format: string | null): void {
+  const pane = document.querySelector<HTMLElement>('[data-asset-pane="text"]');
+  if (pane === null) return;
+  let hint = pane.querySelector<HTMLElement>('.spaces-new-asset-transcript-hint');
+  if (format === null) {
+    if (hint !== null) hint.remove();
+    return;
+  }
+  if (hint === null) {
+    hint = document.createElement('div');
+    hint.className = 'spaces-new-asset-transcript-hint';
+    pane.appendChild(hint);
+  }
+  hint.textContent = `❝ Transcript detected (${format}) — it will be formatted as Markdown turns on create.`;
+}
+
 function wireNewAssetDialog(): void {
   const form = document.getElementById('spaces-new-asset-form');
   const cancel = document.getElementById('spaces-new-asset-cancel');
@@ -9489,6 +9792,21 @@ function wireNewAssetDialog(): void {
     fileInput.addEventListener('change', () => {
       const file = fileInput.files?.[0] ?? null;
       handleNewAssetFileSelection(file);
+    });
+  }
+  // Live transcript hint on the paste tab: when the pasted text looks
+  // like a transcript, tell the user it will be formatted (debounced —
+  // detection scans every line).
+  const contentInput = document.getElementById('spaces-new-asset-content-input');
+  if (contentInput instanceof HTMLTextAreaElement) {
+    let hintTimer: number | null = null;
+    contentInput.addEventListener('input', () => {
+      if (hintTimer !== null) window.clearTimeout(hintTimer);
+      hintTimer = window.setTimeout(() => {
+        hintTimer = null;
+        const format = detectTranscriptFormat(contentInput.value);
+        updateTranscriptHint(format);
+      }, 250);
     });
   }
   // Dropzone drag-drop (modal-scoped — separate from the items-region
@@ -9708,13 +10026,34 @@ async function submitNewAsset(): Promise<void> {
       // Larger or non-text files take the GSX path below (ADR-050).
       if (shouldInlineTextFile(file.name, file.type, file.size)) {
         const text = await file.text();
+        // Transcript intake: .vtt/.srt exports and speaker-labeled
+        // text convert to consistent Markdown and land as kind
+        // 'transcript' (conservative detection — non-transcripts pass
+        // through untouched).
+        const transcript = convertTranscript(text);
+        const content = transcript !== null ? transcript.markdown : text;
+        const kind = transcript !== null ? 'transcript' : 'document';
+        const mimeType =
+          transcript !== null ? 'text/markdown' : file.type !== '' ? file.type : '';
+        const meta: Record<string, unknown> = {
+          ...(metadata as Record<string, unknown>),
+          ...(transcript !== null
+            ? {
+                transcript_format: transcript.format,
+                transcript_turns: transcript.turnCount,
+                ...(transcript.speakers.length > 0
+                  ? { transcript_speakers: transcript.speakers }
+                  : {}),
+              }
+            : {}),
+        };
         const envelope = await bridge.items.create({
           spaceId,
           title,
-          kind: 'document',
-          content: text,
-          ...(file.type !== '' ? { mimeType: file.type } : {}),
-          metadata: metadata as Record<string, unknown>,
+          kind,
+          content,
+          ...(mimeType !== '' ? { mimeType } : {}),
+          metadata: meta,
           ...(creatorId !== null ? { creatorId } : {}),
         });
         if (envelope.ok === false) {
@@ -9722,11 +10061,20 @@ async function submitNewAsset(): Promise<void> {
           if (submit instanceof HTMLButtonElement) submit.disabled = false;
           return;
         }
+        if (transcript !== null) {
+          showToast(
+            `Transcript formatted — ${transcript.turnCount} turns${
+              transcript.speakers.length > 0
+                ? `, ${transcript.speakers.length} speakers`
+                : ''
+            }`
+          );
+        }
         createdEnrich = {
           id: envelope.value.id,
-          kind: 'document',
-          ...(file.type !== '' ? { mimeType: file.type } : {}),
-          hasContent: text.trim().length > 0,
+          kind,
+          ...(mimeType !== '' ? { mimeType } : {}),
+          hasContent: content.trim().length > 0,
         };
       } else {
       // GSX-first (ADR-050): raw bytes cross the bridge; the main
@@ -9761,20 +10109,37 @@ async function submitNewAsset(): Promise<void> {
       createdEnrich = { id: envelope.value.id, kind, mimeType: file.type, hasContent: false };
       }
     } else {
-      const content =
+      const raw =
         contentInput instanceof HTMLTextAreaElement ? contentInput.value : '';
+      // Transcript intake (paste path): detected transcripts convert
+      // to Markdown turns and land as kind 'transcript'.
+      const transcript = convertTranscript(raw);
+      const content = transcript !== null ? transcript.markdown : raw;
+      const kind = transcript !== null ? 'transcript' : 'text';
       // Auto-extract metadata for text-mode (paste) as well — word
       // count, line count, CSV/JSON shape if the title hints at it.
       const language = detectTextPreviewLanguage(undefined, title);
-      const meta = extractMetadataFromText(content, {
-        ...(language !== null ? { language } : {}),
-      });
+      const meta: Record<string, unknown> = {
+        ...(extractMetadataFromText(content, {
+          ...(language !== null ? { language } : {}),
+        }) as Record<string, unknown>),
+        ...(transcript !== null
+          ? {
+              transcript_format: transcript.format,
+              transcript_turns: transcript.turnCount,
+              ...(transcript.speakers.length > 0
+                ? { transcript_speakers: transcript.speakers }
+                : {}),
+            }
+          : {}),
+      };
       const envelope = await bridge.items.create({
         spaceId,
         title,
-        kind: 'text',
+        kind,
         content,
-        metadata: meta as Record<string, unknown>,
+        ...(transcript !== null ? { mimeType: 'text/markdown' } : {}),
+        metadata: meta,
         ...(creatorId !== null ? { creatorId } : {}),
       });
       if (envelope.ok === false) {
@@ -9782,9 +10147,18 @@ async function submitNewAsset(): Promise<void> {
         if (submit instanceof HTMLButtonElement) submit.disabled = false;
         return;
       }
+      if (transcript !== null) {
+        showToast(
+          `Transcript formatted — ${transcript.turnCount} turns${
+            transcript.speakers.length > 0
+              ? `, ${transcript.speakers.length} speakers`
+              : ''
+          }`
+        );
+      }
       createdEnrich = {
         id: envelope.value.id,
-        kind: 'text',
+        kind,
         hasContent: content.trim().length > 0,
       };
     }

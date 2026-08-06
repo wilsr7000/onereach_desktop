@@ -578,6 +578,7 @@ type LiteSpaceItemKind =
   | 'playbook'
   | 'ticket'
   | 'agent'
+  | 'transcript'
   | 'other';
 
 type LiteSpaceKind = 'user' | 'shared';
@@ -1268,6 +1269,15 @@ interface LiteAiBridge {
    * `source` is a URL (when `isUrl`) or pasted text; returns OKF +
    * classified agentType + suggested name. Powers "add an agent".
    */
+  /**
+   * Shortlist the Spaces an item belongs in (each with a one-line
+   * reason) by reading Space names + descriptions. Empty list when
+   * nothing fits or AI isn't configured — the picker still shows all.
+   */
+  suggestSpaces(
+    item: { title: string; kind?: string; text?: string },
+    spaces: Array<{ id: string; name: string; description?: string }>
+  ): Promise<LiteAiIpcResult<{ suggestions: Array<{ spaceId: string; reason: string }> }>>;
   convertToOkf(
     source: string,
     isUrl: boolean

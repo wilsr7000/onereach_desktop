@@ -181,6 +181,7 @@ const AI_STATUS = 'lite:ai:status';
 const AI_SPACE_ASSIST = 'lite:ai:space-assist';
 const AI_ENRICH_ASSET = 'lite:ai:enrich-asset';
 const AI_CONVERT_OKF = 'lite:ai:convert-okf';
+const AI_SUGGEST_SPACES = 'lite:ai:suggest-spaces';
 const AI_KEY_SAVE = 'lite:ai:key-save';
 const AI_KEY_HAS = 'lite:ai:key-has';
 const AI_KEY_DELETE = 'lite:ai:key-delete';
@@ -2148,6 +2149,10 @@ interface AiBridge {
    * (when `isUrl`) or pasted text. Returns the OKF text + classified
    * agentType + suggested name. Powers "add an agent" in Spaces.
    */
+  suggestSpaces(
+    item: { title: string; kind?: string; text?: string },
+    spaces: Array<{ id: string; name: string; description?: string }>
+  ): Promise<AiIpcResultView<{ suggestions: Array<{ spaceId: string; reason: string }> }>>;
   convertToOkf(
     source: string,
     isUrl: boolean
@@ -2174,6 +2179,10 @@ const ai: AiBridge = {
   convertToOkf: (source, isUrl) =>
     ipcRenderer.invoke(AI_CONVERT_OKF, { source, isUrl }) as Promise<
       AiIpcResultView<AiOkfResultView>
+    >,
+  suggestSpaces: (item, spaces) =>
+    ipcRenderer.invoke(AI_SUGGEST_SPACES, { item, spaces }) as Promise<
+      AiIpcResultView<{ suggestions: Array<{ spaceId: string; reason: string }> }>
     >,
   saveKey: (key) =>
     ipcRenderer.invoke(AI_KEY_SAVE, { key }) as Promise<AiIpcResultView<{ ok: true }>>,

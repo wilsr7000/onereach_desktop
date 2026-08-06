@@ -138,3 +138,20 @@ export interface AiStatus {
 
 /** Bumped when the public shape of the module changes (parallels other modules). */
 export const AI_MODULE_VERSION = 1;
+
+/** Input for `suggestSpaces` — the item plus candidate Spaces. */
+export interface SuggestSpacesInput {
+  item: { title: string; kind?: string; text?: string };
+  /** Spaces the item is NOT already in. */
+  spaces: Array<{ id: string; name: string; description?: string }>;
+}
+
+/** One AI-proposed Space placement with its justification. */
+export interface SpaceSuggestion {
+  spaceId: string;
+  reason: string;
+}
+
+export interface SuggestSpacesResult {
+  suggestions: SpaceSuggestion[];
+}

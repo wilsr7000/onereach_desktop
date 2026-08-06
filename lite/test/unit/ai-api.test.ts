@@ -24,6 +24,7 @@ runApiConformanceContract<AiApi>({
     'spaceAssist',
     'extractAssetMetadata',
     'convertToOkf',
+    'suggestSpaces',
     'chat',
     'chatStream',
   ],
@@ -49,6 +50,7 @@ describe('AiApi override', () => {
     const stub: AiApi = {
       getStatus: async () => ({ configured: true, provider: 'claude' }),
       spaceAssist: async () => ({ description: 'D', objectives: ['a', 'b', 'c'] }),
+      suggestSpaces: async () => ({ suggestions: [] }),
       extractAssetMetadata: async () => ({
         summary: '',
         suggestedTitle: '',

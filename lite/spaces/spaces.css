@@ -1057,6 +1057,84 @@ body {
   padding-left: 24px;
 }
 
+/* Transcript tile — the conversation at a glance. Cool teal surface,
+   ❝ chip, speaker-labeled turn rows, participants footer. */
+.spaces-card-preview-transcript {
+  background:
+    radial-gradient(circle at 30% 20%, rgba(111, 215, 196, 0.16), transparent 58%),
+    linear-gradient(165deg, #12211F, #0D1413);
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 14px 16px;
+}
+
+.spaces-card-transcript-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.spaces-card-transcript-mark {
+  color: #6fd7c4;
+  font-size: 15px;
+  line-height: 1;
+  font-family: 'New York', Georgia, serif;
+}
+
+.spaces-card-transcript-label {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: rgba(111, 215, 196, 0.85);
+}
+
+.spaces-card-transcript-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.spaces-card-transcript-turn {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.spaces-card-transcript-speaker {
+  flex: 0 0 auto;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8fe6d5;
+}
+
+.spaces-card-transcript-text {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(235, 244, 242, 0.82);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.spaces-card-transcript-foot {
+  font-size: 10.5px;
+  color: rgba(111, 215, 196, 0.6);
+  margin-top: 2px;
+}
+
 /* Ticket tile — hash badge + a peek at the excerpt body. */
 .spaces-card-preview-ticket {
   background:
@@ -1189,6 +1267,7 @@ body {
 .spaces-card-kind-audio { color: #88f0a3; }
 .spaces-card-kind-video { color: #ffb37a; }
 .spaces-card-kind-playbook { color: #d6c2ff; }
+.spaces-card-kind-transcript { color: #6fd7c4; }
 .spaces-card-kind-ticket { color: #ffd07a; }
 .spaces-card-kind-agent { color: #b898ff; }
 
@@ -4887,6 +4966,102 @@ body {
 
 /* ─── Sprint 3: move / add-to-space / search ────────────────────────── */
 
+/* ── Multi-space membership panel ──────────────────────────────────
+   Every Space as a checkbox (current membership ticked), with Claude's
+   shortlist above it. Suggestions carry a short "why" so choosing is
+   recognition rather than recall. */
+.spaces-detail-membership {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+.spaces-membership-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgba(150, 120, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(150, 120, 255, 0.06);
+}
+.spaces-membership-suggest-heading {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(184, 152, 255, 0.85);
+}
+.spaces-membership-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.spaces-membership-suggestion-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.spaces-membership-suggestion-name {
+  font-size: 13px;
+  color: var(--or-text-primary, #f4f6fb);
+}
+.spaces-membership-suggestion-why {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.6));
+}
+.spaces-membership-suggestion-add {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 1px solid rgba(150, 120, 255, 0.45);
+  background: rgba(150, 120, 255, 0.16);
+  color: #d9c8ff;
+  border-radius: 6px;
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.spaces-membership-suggestion-add:hover { background: rgba(150, 120, 255, 0.26); }
+.spaces-membership-suggestion-add[disabled] { opacity: 0.6; cursor: default; }
+.spaces-membership-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.spaces-membership-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--or-text-primary, #f4f6fb);
+}
+.spaces-membership-row:hover { background: rgba(255, 255, 255, 0.05); }
+.spaces-membership-check { cursor: pointer; }
+.spaces-membership-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.spaces-membership-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spaces-membership-kind {
+  font-size: 10px;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.5));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+/* Dark scrollbar — never a white default on this dark pane. */
+.spaces-membership-list::-webkit-scrollbar { width: 8px; }
+.spaces-membership-list::-webkit-scrollbar-track { background: transparent; }
+.spaces-membership-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
+.spaces-membership-list::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
+
 .spaces-detail-move-wrap,
 .spaces-detail-add-to-space-wrap {
   display: flex;
@@ -5310,6 +5485,17 @@ body {
 
 .spaces-new-asset-label-row .spaces-new-asset-label {
   margin-bottom: 0;
+}
+
+/* Live transcript-detected hint under the paste textarea. */
+.spaces-new-asset-transcript-hint {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: #6fd7c4;
+  background: rgba(111, 215, 196, 0.08);
+  border: 1px solid rgba(111, 215, 196, 0.25);
+  border-radius: 6px;
+  padding: 6px 10px;
 }
 
 .spaces-new-asset-label-hint {

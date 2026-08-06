@@ -24,6 +24,8 @@ import type {
   AssetMetadataInput,
   AssetMetadataResult,
   OkfConversionInput,
+  SuggestSpacesInput,
+  SuggestSpacesResult,
   OkfConversionResult,
 } from './types.js';
 import type { AiChatInput, AiChatResult } from './chat.js';
@@ -38,6 +40,9 @@ export type {
   AssetMetadataResult,
   OkfConversionInput,
   OkfConversionResult,
+  SuggestSpacesInput,
+  SuggestSpacesResult,
+  SpaceSuggestion,
 } from './types.js';
 export type { AiChatInput, AiChatResult, AiChatMessage, AiChatProfile } from './chat.js';
 export { AI_MODULE_VERSION } from './types.js';
@@ -87,6 +92,14 @@ export interface AiApi {
    * `AI_PROVIDER_ERROR`, `AI_BAD_RESPONSE`).
    */
   convertToOkf(input: OkfConversionInput): Promise<OkfConversionResult>;
+
+  /**
+   * Shortlist the Spaces an item belongs in, each with a one-line
+   * reason, by reading the Space names + descriptions. Returns an
+   * empty list when nothing fits — the caller still shows the full
+   * Space picker, so this is an accelerant, never a gate.
+   */
+  suggestSpaces(input: SuggestSpacesInput): Promise<SuggestSpacesResult>;
 
   /**
    * Generic single-shot Claude chat. Powers the embedded WISER Playbooks

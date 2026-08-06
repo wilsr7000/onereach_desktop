@@ -31,6 +31,7 @@ import {
   type AiStatus,
   type SpaceAssistResult,
   type OkfConversionResult,
+  type SuggestSpacesResult,
   type AiChatInput,
   type AiChatResult,
   type AiChatMessage,
@@ -48,6 +49,7 @@ export const AI_IPC = {
   SPACE_ASSIST: 'lite:ai:space-assist',
   ENRICH_ASSET: 'lite:ai:enrich-asset',
   CONVERT_OKF: 'lite:ai:convert-okf',
+  SUGGEST_SPACES: 'lite:ai:suggest-spaces',
   KEY_SAVE: 'lite:ai:key-save',
   KEY_HAS: 'lite:ai:key-has',
   KEY_DELETE: 'lite:ai:key-delete',
@@ -190,6 +192,45 @@ export function initAi(opts: InitAiOptions = {}): AiHandle {
   // Convert an agent definition (URL contents or pasted text) into OKF.
   // Powers the Spaces "add an agent" flow; the renderer then calls
   // spaces.items.createAgent with the returned OKF + agentType.
+  // Shortlist which Spaces an item belongs in. Soft by contract: a
+  // provider failure returns an empty list rather than an error, so the
+  // Space picker still works without AI configured.
+  ipcMain.handle(
+    AI_IPC.SUGGEST_SPACES,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { item?: unknown; spaces?: unknown }
+    ): Promise<AiIpcResult<SuggestSpacesResult>> => {
+      try {
+        const rawItem = (payload?.item ?? {}) as Record<string, unknown>;
+        const item = {
+          title: typeof rawItem['title'] === 'string' ? rawItem['title'] : '',
+          ...(typeof rawItem['kind'] === 'string' ? { kind: rawItem['kind'] } : {}),
+          ...(typeof rawItem['text'] === 'string' ? { text: rawItem['text'] } : {}),
+        };
+        const spaces = Array.isArray(payload?.spaces)
+          ? (payload.spaces as Array<Record<string, unknown>>)
+              .filter((x) => x !== null && typeof x === 'object')
+              .map((x) => ({
+                id: typeof x['id'] === 'string' ? x['id'] : '',
+                name: typeof x['name'] === 'string' ? x['name'] : '',
+                ...(typeof x['description'] === 'string'
+                  ? { description: x['description'] }
+                  : {}),
+              }))
+              .filter((x) => x.id.length > 0)
+          : [];
+        const value = await api.suggestSpaces({ item, spaces });
+        log.info('suggest-spaces ok', { count: value.suggestions.length });
+        return { ok: true, value };
+      } catch (err) {
+        const code = err instanceof AiError ? err.code : 'AI_PROVIDER_ERROR';
+        log.warn('suggest-spaces rejected', { code });
+        return { ok: false, error: serializeAiError(err) };
+      }
+    }
+  );
+
   ipcMain.handle(
     AI_IPC.CONVERT_OKF,
     async (

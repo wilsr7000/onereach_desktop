@@ -20,6 +20,8 @@
  */
 
 import { AiError, AI_ERROR_CODES } from './errors.js';
+import { callClaudeSuggestSpaces } from './suggest-spaces.js';
+import type { SuggestSpacesInput, SuggestSpacesResult } from './types.js';
 import type { ClaudeConfig, ResolvedAiConfig } from './config.js';
 import {
   callClaude,
@@ -235,6 +237,32 @@ export class AiService {
    * pasted URL) into OKF via Claude. Claude-only. When `isUrl`, the URL
    * contents are fetched first (https only + basic SSRF guard).
    */
+  async suggestSpaces(input: SuggestSpacesInput): Promise<SuggestSpacesResult> {
+    const candidates = Array.isArray(input?.spaces) ? input.spaces : [];
+    const title = typeof input?.item?.title === 'string' ? input.item.title.trim() : '';
+    // No candidates (already in every Space) or nothing to reason about
+    // -> an empty shortlist is the correct answer, not an error. The
+    // picker still lists every Space.
+    if (candidates.length === 0 || title.length === 0) return { suggestions: [] };
+    const cfg = this.requireClaudeConfig('suggest-spaces');
+    this.log('info', 'suggest-spaces start', {
+      provider: 'claude',
+      model: cfg.model,
+      candidates: candidates.length,
+    });
+    try {
+      const result = await callClaudeSuggestSpaces(input.item, candidates, {
+        model: cfg.model,
+        createMessage: this.makeCreator(cfg),
+      });
+      this.log('info', 'suggest-spaces ok', { count: result.suggestions.length });
+      return result;
+    } catch (err) {
+      this.log('warn', 'suggest-spaces failed', { error: (err as Error).message });
+      throw err;
+    }
+  }
+
   async convertToOkf(input: OkfConversionInput): Promise<OkfConversionResult> {
     const source = typeof input?.source === 'string' ? input.source.trim() : '';
     if (source.length === 0) {

@@ -222,7 +222,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -269,7 +269,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -411,7 +411,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -503,7 +503,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -872,7 +872,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -1357,7 +1357,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) = 'playbook'
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -3383,6 +3383,7 @@ const ITEM_KINDS: ReadonlySet<ItemKind> = new Set([
   'playbook',
   'ticket',
   'agent',
+  'transcript',
   'other',
 ]);
 
