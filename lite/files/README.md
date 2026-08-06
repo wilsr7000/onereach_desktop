@@ -44,6 +44,16 @@ Every method requires a signed-in OneReach account. Signed-out callers see `FILE
 
 Every method takes an optional `isPublic: boolean` (default `false`). Private files require a signed URL to download; public files can be hot-linked indefinitely. There is no per-account ACL layer beyond this -- if you need fine-grained sharing, layer it in the consumer module.
 
+**The bucket is part of the file's identity, not a transient upload setting.** A key written to the public bucket cannot be read, TTL'd, or deleted as private -- every later call must pass the same `isPublic` the upload used. Consumers that persist a key must therefore persist its bucket alongside it; `lite/spaces/create-binary.ts` records `metadata.fileIsPublic` on the asset for exactly this reason.
+
+Use `setPrivacy(key, 'public' | 'private')` to flip an existing file in place, rather than re-uploading.
+
+## TTL (auto-expiry)
+
+`upload({ expiresAt })` sets an expiry at write time; `setTtl(key, expiresAt | null, { isPublic })` adds, changes, or (with `null`) clears one afterwards. No TTL is the default -- files persist until explicitly deleted.
+
+Callers should **validate the timestamp rather than forward it blindly**. A malformed or past `expiresAt` that the bucket quietly ignores leaves the user believing a file self-destructs when it never will; `create-binary.ts` rejects both cases up front.
+
 ## Error catalog
 
 | Code | When | Remediation |

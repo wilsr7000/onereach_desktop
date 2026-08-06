@@ -643,6 +643,8 @@ interface LiteSpaceItemSummary {
   agentType?: string;
   /** Agent rows only: reachability endpoints for the tile chips. */
   agentEndpoints?: LiteAgentEndpoint[];
+  /** Metadata bag on summary rows — powers tile hover text. */
+  metadata?: Record<string, unknown>;
   otherSpaces: LiteSpaceChipRef[];
   producedBy: LiteSpaceItemProvenance | null;
 }
@@ -755,6 +757,18 @@ interface LiteSpacesItemsBridge {
     description?: string;
     creatorId?: string;
     metadata?: Record<string, unknown>;
+    /**
+     * Write to the PUBLIC bucket. Omit or false (the default) keeps the
+     * file private. Must be an explicit `true` — anything else is
+     * treated as private, since the cost of guessing wrong is exposing
+     * a user's file.
+     */
+    isPublic?: boolean;
+    /**
+     * ISO-8601 auto-delete time (GSX TTL). Omit for no expiry, the
+     * default. A malformed or past value is rejected, not ignored.
+     */
+    expiresAt?: string;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
   /** Add an agent asset (OKF text stored as content; per-type graph node). */
   createAgent(input: {
@@ -1021,6 +1035,15 @@ interface LiteSpacesMembersBridge {
   ): Promise<LiteSpacesIpcResult<LiteSpacesMemberView>>;
   /** Revoke access. No-op when already absent. */
   remove(spaceId: string, memberId: string): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  /** Search the account's people + agents for the add-member picker. */
+  searchLibrary(
+    q: string,
+    limit?: number
+  ): Promise<
+    LiteSpacesIpcResult<
+      Array<{ kind: 'Person' | 'Agent'; id: string; name: string; email: string }>
+    >
+  >;
 }
 
 interface LiteSpacesPlaybooksBridge {

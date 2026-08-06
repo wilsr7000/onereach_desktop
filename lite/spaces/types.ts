@@ -195,6 +195,14 @@ export interface AgentEndpoint {
  * `'duplicate'` without breaking the renderer (UI just gets a new pill
  * color and the SDK projection passes the new value through).
  */
+/** One row of the add-member picker (graph `:Person` / `:Agent`). */
+export interface MemberLibraryEntry {
+  kind: 'Person' | 'Agent';
+  id: string;
+  name: string;
+  email: string;
+}
+
 /** One row of the account's agent library (graph `:Agent` nodes). */
 export interface AgentLibraryEntry {
   id: string;
@@ -310,6 +318,12 @@ export interface ItemSummary {
   agentType?: string;
   /** Agent rows only: reachability endpoints for the tile chips. */
   agentEndpoints?: AgentEndpoint[];
+  /**
+   * Metadata bag on summary rows — powers tile hover text (objective,
+   * ai_summary) without a getItem round-trip. Same JSON property the
+   * full Item carries.
+   */
+  metadata?: ItemMetadata;
   /**
    * Spaces this item participates in OTHER than the currently-viewed
    * Space. Already permission-filtered server-side (Phase 0.5 Q4/Q6).
@@ -867,6 +881,32 @@ export interface CreateBinaryAssetInput {
   creatorId?: string;
   /** Free-form metadata to persist on creation (renderer auto-extract). */
   metadata?: ItemMetadata;
+  /**
+   * Write the bytes to the PUBLIC bucket instead of the private one.
+   *
+   * Defaults to `false` — private. Must be an explicit `true` to take
+   * effect; anything else is treated as private, because the failure
+   * mode of guessing wrong is exposing a user's file to the world.
+   *
+   * The bucket is part of the file's identity: a key written to the
+   * public bucket cannot later be read or deleted as private. The
+   * choice is therefore recorded on the asset (`metadata.fileIsPublic`)
+   * so every later resolve/download/delete targets the same bucket.
+   * To flip an existing file, use `files.setPrivacy()`.
+   */
+  isPublic?: boolean;
+  /**
+   * Optional ISO-8601 expiry. The bucket deletes the object at this
+   * time (GSX TTL). Omit for no expiry, which is the default.
+   *
+   * Validated, not trusted: a malformed or past timestamp is rejected
+   * rather than dropped, because a TTL the caller believes is set but
+   * that never applied is worse than an error. Mirrored onto the asset
+   * as `metadata.fileExpiresAt` for display; the bucket stays the
+   * authority on actual deletion. To change it later, use
+   * `files.setTtl()`.
+   */
+  expiresAt?: string;
 }
 
 /**

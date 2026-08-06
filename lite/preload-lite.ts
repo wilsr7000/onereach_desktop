@@ -83,6 +83,7 @@ const SPACES_TICKETS_UPDATE = 'lite:spaces:tickets:update';
 const SPACES_IDENTITY_GET_OR_CREATE_PERSON = 'lite:spaces:identity:getOrCreatePerson';
 const SPACES_MEMBERS_LIST = 'lite:spaces:members:list';
 const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
+const SPACES_MEMBERS_SEARCH_LIBRARY = 'lite:spaces:members:searchLibrary';
 const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
 
 const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
@@ -559,6 +560,10 @@ interface SpacesItemsBridge {
     description?: string;
     creatorId?: string;
     metadata?: Record<string, unknown>;
+    /** Public bucket. Omit or false (the default) keeps the file private. */
+    isPublic?: boolean;
+    /** ISO-8601 auto-delete time. Omit for no expiry (the default). */
+    expiresAt?: string;
   }): Promise<SpacesIpcResultView<unknown>>;
   update(
     id: string,
@@ -802,6 +807,11 @@ interface SpacesMembersBridge {
     spaceId: string,
     memberId: string
   ): Promise<SpacesIpcResultView<{ kind: string; id: string; name: string }>>;
+  /** Search the account's people + agents for the add-member picker. */
+  searchLibrary(
+    q: string,
+    limit?: number
+  ): Promise<SpacesIpcResultView<Array<{ kind: 'Person' | 'Agent'; id: string; name: string; email: string }>>>;
   remove(spaceId: string, memberId: string): Promise<SpacesIpcResultView<{ ok: true }>>;
 }
 
@@ -1662,6 +1672,15 @@ const spaces: SpacesBridge = {
     add: (spaceId, memberId) =>
       ipcRenderer.invoke(SPACES_MEMBERS_ADD, { spaceId, memberId }) as Promise<
         SpacesIpcResultView<{ kind: string; id: string; name: string }>
+      >,
+    searchLibrary: (q, limit) =>
+      ipcRenderer.invoke(SPACES_MEMBERS_SEARCH_LIBRARY, {
+        q,
+        ...(limit !== undefined ? { limit } : {}),
+      }) as Promise<
+        SpacesIpcResultView<
+          Array<{ kind: 'Person' | 'Agent'; id: string; name: string; email: string }>
+        >
       >,
     remove: (spaceId, memberId) =>
       ipcRenderer.invoke(SPACES_MEMBERS_REMOVE, { spaceId, memberId }) as Promise<
