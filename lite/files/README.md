@@ -42,7 +42,14 @@ Every method requires a signed-in OneReach account. Signed-out callers see `FILE
 
 ## Public vs private
 
-Every method takes an optional `isPublic: boolean` (default `false`). Private files require a signed URL to download; public files can be hot-linked indefinitely. There is no per-account ACL layer beyond this -- if you need fine-grained sharing, layer it in the consumer module.
+Every method takes an optional `isPublic: boolean` (default `false`). Private files require a signed URL to download -- the platform documents those links as valid for **24 hours** -- while public files can be hot-linked with no stated expiry. There is no per-account ACL layer beyond this -- if you need fine-grained sharing, layer it in the consumer module.
+
+> **This client inverts the platform default.** The OneReach Files docs state: *"If no preference is specified by default, the file is set to public."* Every call site here resolves the bucket through `wantsPublicBucket()`, which returns true only for a literal `true`. Omitting the flag — or passing a JSON-round-tripped `'true'` string — yields **private**. Publishing a user's file is the failure mode worth engineering against; refusing to publish is the recoverable one. Guarded by `test/unit/files-private-by-default.test.ts`, one case per operation.
+
+Two platform constraints worth knowing:
+
+- **You can only overwrite a file with another file of the same privacy.** Asset uploads use `rewriteMode: 'prevent-rewrite'`, so this never bites today — but it becomes live the moment anyone switches to `'rewrite'`.
+- **`setPrivacy`'s options carry the file's CURRENT bucket, not the target.** `setPrivacy(key, 'private', { isPublic: true })` demotes a public file. Get it backwards and the call addresses the wrong bucket.
 
 **The bucket is part of the file's identity, not a transient upload setting.** A key written to the public bucket cannot be read, TTL'd, or deleted as private -- every later call must pass the same `isPublic` the upload used. Consumers that persist a key must therefore persist its bucket alongside it; `lite/spaces/create-binary.ts` records `metadata.fileIsPublic` on the asset for exactly this reason.
 

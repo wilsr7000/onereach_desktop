@@ -175,7 +175,7 @@ export class SdkFilesClient {
         ...(sdkPrefix !== '' ? { prefix: sdkPrefix } : {}),
         fileContent: content,
         contentType: options.contentType ?? 'application/octet-stream',
-        isPublic: options.isPublic ?? false,
+        isPublic: wantsPublicBucket(options),
         ...(options.rewriteMode !== undefined ? { rewriteMode: options.rewriteMode } : {}),
         ...(options.maxFileSize !== undefined ? { maxFileSize: options.maxFileSize } : {}),
         ...(options.cacheControl !== undefined ? { cacheControl: options.cacheControl } : {}),
@@ -202,7 +202,7 @@ export class SdkFilesClient {
     this.assertNonEmpty(key, 'key');
     return this.runRequest('download', key, async () => {
       const sdk = this.getSdk();
-      const isPublic = options.isPublic ?? false;
+      const isPublic = wantsPublicBucket(options);
       return await sdk.getDownloadUrl(key, isPublic, options.expiresMs);
     });
   }
@@ -236,7 +236,7 @@ export class SdkFilesClient {
     this.assertNonEmpty(key, 'key');
     return this.runRequest('get', key, async () => {
       const sdk = this.getSdk();
-      const isPublic = options.isPublic ?? false;
+      const isPublic = wantsPublicBucket(options);
       try {
         const raw = await sdk.getFile(key, isPublic);
         return normalizeFileItem(raw);
@@ -254,7 +254,7 @@ export class SdkFilesClient {
   async list(prefix: string, options: FilesListOptions = {}): Promise<FilesItem[]> {
     return this.runRequest('list', prefix, async () => {
       const sdk = this.getSdk();
-      const isPublic = options.isPublic ?? false;
+      const isPublic = wantsPublicBucket(options);
       const raw = await sdk.getItemsList(prefix, isPublic);
       const items: FilesItem[] = [];
       for (const item of Array.isArray(raw) ? raw : []) {
@@ -285,7 +285,7 @@ export class SdkFilesClient {
     this.assertNonEmpty(key, 'key');
     return this.runRequest('delete', key, async () => {
       const sdk = this.getSdk();
-      const isPublic = options.isPublic ?? false;
+      const isPublic = wantsPublicBucket(options);
       try {
         await sdk.deleteFile(key, isPublic);
       } catch (err) {
@@ -317,7 +317,7 @@ export class SdkFilesClient {
     this.assertNonEmpty(key, 'key');
     return this.runRequest('ttl.set', key, async () => {
       const sdk = this.getSdk();
-      const isPublic = options.isPublic ?? false;
+      const isPublic = wantsPublicBucket(options);
       if (expiresAt === null) {
         await sdk.deleteTtl(key, isPublic);
         return;
@@ -342,7 +342,7 @@ export class SdkFilesClient {
     this.assertNonEmpty(key, 'key');
     return this.runRequest('privacy', key, async () => {
       const sdk = this.getSdk();
-      const isPublic = options.isPublic ?? false;
+      const isPublic = wantsPublicBucket(options);
       await sdk.changePrivacy(key, newPrivacy, isPublic);
     });
   }
@@ -516,6 +516,27 @@ export class SdkFilesClient {
       cause: err,
     });
   }
+}
+
+/**
+ * Which bucket an operation targets. Private unless the caller passed a
+ * literal `true`.
+ *
+ * This deliberately inverts the platform default. The OneReach Files
+ * docs state: "If no preference is specified by default, the file is
+ * set to public." So an omitted flag would publish — every call site in
+ * this client therefore resolves the bucket through here.
+ *
+ * Strict `=== true`, not `?? false`: `??` only substitutes for
+ * null/undefined, so a string `'true'` (or `'false'`, which is truthy!)
+ * would sail through to the SDK and be read as public. Values reach
+ * this client across IPC and JSON boundaries that erase types, so the
+ * check has to survive a non-boolean arriving where a boolean was
+ * declared. Publishing a user's file is the failure mode; refusing to
+ * publish is the safe one.
+ */
+export function wantsPublicBucket(options: { isPublic?: boolean }): boolean {
+  return options.isPublic === true;
 }
 
 function isNotFoundError(err: unknown): boolean {

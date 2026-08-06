@@ -27,7 +27,12 @@ export interface FilesItem {
   lastModified: string | null;
   /** ISO timestamp the entry expires at, or null when no TTL is set. */
   ttl: string | null;
-  /** Pre-signed URL good for ~15 minutes; refreshed by `getDownloadUrl`. */
+  /**
+   * Download URL. For a PRIVATE file this is a signed link the platform
+   * documents as valid for 24 hours; public files are hot-linkable with
+   * no stated expiry. Re-mint with `getDownloadUrl` rather than
+   * persisting this anywhere.
+   */
   downloadUrl: string;
 }
 
@@ -41,7 +46,14 @@ export type FilesRewriteMode = 'rewrite' | 'prevent-rewrite';
 export interface FilesUploadOptions {
   /** MIME type to advertise. Defaults to `application/octet-stream`. */
   contentType?: string;
-  /** True writes to the public bucket; false (default) to private. */
+  /**
+   * True writes to the public bucket; anything else writes private.
+   *
+   * NOTE: this INVERTS the platform default. OneReach Files documents
+   * "if no preference is specified by default, the file is set to
+   * public" — this client resolves an omitted (or non-boolean) flag to
+   * private instead, so forgetting it is safe rather than publishing.
+   */
   isPublic?: boolean;
   /** What to do when a file at the same key already exists. */
   rewriteMode?: FilesRewriteMode;
