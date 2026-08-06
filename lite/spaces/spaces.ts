@@ -3236,6 +3236,8 @@ function getTileImageObserver(): IntersectionObserver | null {
         observer.unobserve(el);
         const key = el.getAttribute('data-thumb-key');
         if (key !== null && key.length > 0) loadTileThumbnail(el, key);
+        const pdfKey = el.getAttribute('data-pdf-key');
+        if (pdfKey !== null && pdfKey.length > 0) loadTilePdfPreview(el, pdfKey);
       }
     },
     { rootMargin: '300px' }
@@ -3424,11 +3426,136 @@ function buildTextTilePreview(
     preview.appendChild(paper);
     return;
   }
+  // Binary-backed doc with nothing to excerpt: PDFs get a real
+  // first-page preview (lazy, same near-viewport gate as image
+  // thumbnails); other files get a file-card with the extension so
+  // the tile never reads as an empty grey rectangle.
+  if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
+    if (isPdfTitle(item.title)) {
+      preview.classList.add('is-loading');
+      swapTilePreviewToFileBadge(preview, item.title, { keepLoading: true });
+      preview.setAttribute('data-pdf-key', item.fileKey);
+      const observer = getTileImageObserver();
+      if (observer === null) {
+        loadTilePdfPreview(preview, item.fileKey);
+        return;
+      }
+      observer.observe(preview);
+      return;
+    }
+    swapTilePreviewToFileBadge(preview, item.title);
+    return;
+  }
   const glyph = document.createElement('span');
   glyph.className = 'spaces-card-glyph spaces-card-glyph-doc';
   glyph.setAttribute('aria-hidden', 'true');
   glyph.textContent = '¶';
   preview.appendChild(glyph);
+}
+
+/** True when the title names a PDF (summaries don't carry mimeType). */
+export function isPdfTitle(title: string): boolean {
+  return typeof title === 'string' && title.trim().toLowerCase().endsWith('.pdf');
+}
+
+/**
+ * Uppercase extension badge for a file title ("PDF", "DOCX"); "FILE"
+ * when the title has no usable extension. Exported for tests.
+ */
+export function fileExtBadge(title: string): string {
+  const m = /\.([A-Za-z0-9]{1,8})$/.exec((title ?? '').trim());
+  const ext = m?.[1] ?? '';
+  return ext.length > 0 ? ext.toUpperCase() : 'FILE';
+}
+
+/**
+ * Tile PDF bytes cache — re-renders (refresh, enrich completion,
+ * selection changes) rebuild every card, and re-fetching a PDF's
+ * bytes each time would hammer GSX. Keyed by fileKey; evicted
+ * oldest-first once the stored data URLs exceed ~24M chars (~18MB).
+ */
+const tilePdfDataCache = new Map<string, string>();
+const TILE_PDF_CACHE_MAX_CHARS = 24_000_000;
+
+function tilePdfCachePut(key: string, dataUrl: string): void {
+  tilePdfDataCache.delete(key);
+  tilePdfDataCache.set(key, dataUrl);
+  let total = 0;
+  for (const v of tilePdfDataCache.values()) total += v.length;
+  for (const k of tilePdfDataCache.keys()) {
+    if (total <= TILE_PDF_CACHE_MAX_CHARS) break;
+    const v = tilePdfDataCache.get(k);
+    tilePdfDataCache.delete(k);
+    total -= v?.length ?? 0;
+  }
+}
+
+/**
+ * Resolve a PDF tile's bytes to a data URL and swap in the embedded
+ * first-page preview; on any failure (404 key, over the inline cap,
+ * no bridge) the tile keeps the extension badge.
+ */
+function loadTilePdfPreview(preview: HTMLElement, key: string): void {
+  const cached = tilePdfDataCache.get(key);
+  if (cached !== undefined) {
+    swapTilePreviewToPdf(preview, cached);
+    return;
+  }
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    preview.classList.remove('is-loading');
+    return;
+  }
+  void bridge.items
+    .readFileData(key)
+    .then((env) => {
+      const dataUrl = env.ok === true && env.value !== null ? env.value.dataUrl : null;
+      if (typeof dataUrl !== 'string' || dataUrl.length === 0) {
+        preview.classList.remove('is-loading');
+        return;
+      }
+      tilePdfCachePut(key, dataUrl);
+      swapTilePreviewToPdf(preview, dataUrl);
+    })
+    .catch(() => {
+      preview.classList.remove('is-loading');
+    });
+}
+
+function swapTilePreviewToPdf(preview: HTMLElement, dataUrl: string): void {
+  preview.classList.remove('is-loading');
+  preview.removeAttribute('data-pdf-key');
+  preview.replaceChildren();
+  const embed = document.createElement('embed');
+  embed.className = 'spaces-card-pdf-embed';
+  embed.type = 'application/pdf';
+  // PDF open params suppress the viewer chrome inside the tile; the
+  // embed is pointer-events:none so the card's click still opens the
+  // detail pane.
+  embed.src = `${dataUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`;
+  embed.setAttribute('aria-hidden', 'true');
+  preview.appendChild(embed);
+}
+
+function swapTilePreviewToFileBadge(
+  preview: HTMLElement,
+  title: string,
+  opts: { keepLoading?: boolean } = {}
+): void {
+  if (opts.keepLoading !== true) preview.classList.remove('is-loading');
+  preview.replaceChildren();
+  const card = document.createElement('span');
+  card.className = 'spaces-card-filecard';
+  card.setAttribute('aria-hidden', 'true');
+  const glyph = document.createElement('span');
+  glyph.className = 'spaces-card-glyph spaces-card-glyph-doc';
+  glyph.textContent = '¶';
+  card.appendChild(glyph);
+  const ext = document.createElement('span');
+  ext.className = 'spaces-card-filecard-ext';
+  ext.textContent = fileExtBadge(title);
+  card.appendChild(ext);
+  preview.appendChild(card);
 }
 
 /**
@@ -7657,6 +7784,9 @@ function messageFrom(err: unknown): string {
   buildCsvPreview,
   detectTextPreviewLanguage,
   isBase64DataUrl,
+  isPdfTitle,
+  fileExtBadge,
+  tileExcerptText,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,

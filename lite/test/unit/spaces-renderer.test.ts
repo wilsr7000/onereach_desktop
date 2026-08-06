@@ -30,6 +30,8 @@ import '../../spaces/spaces.js';
 interface RendererTestHandle {
   buildSpaceRow(space: TestSpace, active: boolean): HTMLLIElement;
   buildItemCard(item: TestItemSummary, active: boolean): HTMLElement;
+  isPdfTitle(title: string): boolean;
+  fileExtBadge(title: string): string;
   buildSpaceChip(chip: TestChip): HTMLElement;
   buildDetailPane(item: TestItem, onClose: () => void): HTMLElement;
   buildBinaryPreview(item: TestItem, url: string): HTMLElement;
@@ -250,6 +252,73 @@ describe('buildItemCard (content-forward asset tile)', () => {
     const card = handle().buildItemCard(baseItem({ excerpt: '   \n  ' }), false);
     expect(card.querySelector('.spaces-card-excerpt')).toBeNull();
     expect(card.querySelector('.spaces-card-glyph-doc')).not.toBeNull();
+  });
+
+  it('detects PDFs by title and derives extension badges', () => {
+    expect(handle().isPdfTitle('Deck v3.PDF')).toBe(true);
+    expect(handle().isPdfTitle('notes.pdf ')).toBe(true);
+    expect(handle().isPdfTitle('report.docx')).toBe(false);
+    expect(handle().fileExtBadge('report.docx')).toBe('DOCX');
+    expect(handle().fileExtBadge('archive.tar.gz')).toBe('GZ');
+    expect(handle().fileExtBadge('no-extension')).toBe('FILE');
+  });
+
+  it('renders a file-card badge for binary docs with no excerpt', () => {
+    const card = handle().buildItemCard(
+      baseItem({ title: 'report.docx', fileKey: 'lite-spaces/assets/k1-report.docx' }),
+      false
+    );
+    const badge = card.querySelector('.spaces-card-filecard-ext');
+    expect(badge?.textContent).toBe('DOCX');
+    expect(card.querySelector('.spaces-card-pdf-embed')).toBeNull();
+  });
+
+  it('swaps a PDF tile to an embedded preview when readFileData succeeds', async () => {
+    const dataUrl = 'data:application/pdf;base64,JVBERi0xLjc=';
+    (window as unknown as { lite?: unknown }).lite = {
+      spaces: {
+        items: {
+          readFileData: async () => ({ ok: true, value: { dataUrl } }),
+        },
+      },
+    };
+    const card = handle().buildItemCard(
+      baseItem({ title: 'deck-ok.pdf', fileKey: 'lite-spaces/assets/k2-deck-ok.pdf' }),
+      false
+    );
+    // jsdom has no IntersectionObserver, so the load is eager; the
+    // badge placeholder shows until the promise resolves.
+    expect(card.querySelector('.spaces-card-filecard-ext')?.textContent).toBe('PDF');
+    await new Promise((r) => setTimeout(r, 0));
+    const embed = card.querySelector<HTMLElement>('embed.spaces-card-pdf-embed');
+    expect(embed).not.toBeNull();
+    expect(embed?.getAttribute('src')).toBe(
+      `${dataUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`
+    );
+    expect(embed?.getAttribute('type')).toBe('application/pdf');
+    const preview = card.querySelector('.spaces-card-preview');
+    expect(preview?.classList.contains('is-loading')).toBe(false);
+    delete (window as unknown as { lite?: unknown }).lite;
+  });
+
+  it('keeps the PDF badge when readFileData fails (404 / over cap)', async () => {
+    (window as unknown as { lite?: unknown }).lite = {
+      spaces: {
+        items: {
+          readFileData: async () => ({ ok: false, error: { message: 'HTTP 404' } }),
+        },
+      },
+    };
+    const card = handle().buildItemCard(
+      baseItem({ title: 'deck-404.pdf', fileKey: 'lite-spaces/assets/k3-deck-404.pdf' }),
+      false
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(card.querySelector('.spaces-card-pdf-embed')).toBeNull();
+    expect(card.querySelector('.spaces-card-filecard-ext')?.textContent).toBe('PDF');
+    const preview = card.querySelector('.spaces-card-preview');
+    expect(preview?.classList.contains('is-loading')).toBe(false);
+    delete (window as unknown as { lite?: unknown }).lite;
   });
 
   it('renders an audio waveform + play glyph for audio assets', () => {
