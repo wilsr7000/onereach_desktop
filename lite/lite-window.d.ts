@@ -676,6 +676,8 @@ interface LiteSpacesItemsBridge {
    * binary download links.
    */
   resolveFileUrl(key: string): Promise<LiteSpacesIpcResult<string | null>>;
+  /** Read stored bytes as a data: URL for inline preview (null on failure). */
+  readFileData(key: string): Promise<LiteSpacesIpcResult<{ dataUrl: string } | null>>;
   /**
    * Phase 3b item mutations. Each returns the updated server state
    * (the full Item for `update`, the post-mutation tag list for

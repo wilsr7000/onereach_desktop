@@ -57,7 +57,7 @@ const SUPPORTED_ASSETS: AssetCase[] = [
   // action card (an inline <embed> of a signed URL shows a blank white
   // slab), so what matters is that the OPEN AFFORDANCE exists and
   // carries the real URL.
-  { kind: 'document', mimeType: 'application/pdf', binary: true, expectAction: 'Open PDF' },
+  { kind: 'document', mimeType: 'application/pdf', binary: true, expectAction: 'Open in browser' },
   { kind: 'other', mimeType: 'application/zip', binary: true },
 ];
 

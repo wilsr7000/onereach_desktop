@@ -4490,6 +4490,47 @@ body {
 }
 
 /* Remote-PDF "Open PDF" card — replaces the blank white embed. */
+/* PDF viewer + its action row (Open in browser / Download / Copy link). */
+.spaces-detail-pdf-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.spaces-detail-pdf-note {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(230, 180, 80, 0.35);
+  border-radius: 8px;
+  background: rgba(230, 180, 80, 0.07);
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.7));
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.spaces-detail-pdf-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.spaces-detail-pdf-action {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--or-text-primary, #f4f6fb);
+  font: inherit;
+  font-size: 12.5px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.spaces-detail-pdf-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
 .spaces-detail-pdf-card {
   display: flex;
   align-items: center;

@@ -52,6 +52,7 @@ export const SPACES_IPC = {
   OPEN: 'lite:spaces:open',
   LIST_SPACES: 'lite:spaces:listSpaces',
   REFRESH: 'lite:spaces:refresh',
+  ITEMS_READ_FILE_DATA: 'lite:spaces:items:readFileData',
   UNCATEGORIZED_COUNT: 'lite:spaces:uncategorizedCount',
   ITEMS_LIST: 'lite:spaces:items:list',
   ITEMS_GET: 'lite:spaces:items:get',
@@ -164,6 +165,25 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     opts.onOpen();
     return { ok: true };
   });
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_READ_FILE_DATA,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload: unknown
+    ): Promise<SpacesIpcResult<{ dataUrl: string } | null>> => {
+      try {
+        const key =
+          typeof (payload as { key?: unknown })?.key === 'string'
+            ? ((payload as { key: string }).key)
+            : '';
+        const value = await getSpacesApi().items.readFileData(key);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
 
   handleSpacesIpc(
     SPACES_IPC.REFRESH,

@@ -204,6 +204,23 @@ export interface SpacesItemsApi {
   resolveFileUrl(key: string): Promise<string | null>;
 
   /**
+   * Read a stored file's BYTES and hand back a `data:` URL.
+   *
+   * The detail pane needs this to render a PDF inline. It cannot fetch
+   * the signed URL itself -- the Spaces window's CSP is
+   * `default-src 'self'`, so a cross-origin fetch is blocked -- and
+   * even if it could, signed URLs are frequently served
+   * `Content-Disposition: attachment`, which makes an embedded viewer
+   * paint a blank page. A data: URL sidesteps both (CSP allows
+   * `object-src`/`frame-src` data:).
+   *
+   * Returns null when the key is missing from storage, the download
+   * fails, or the file exceeds the inline-preview cap -- callers show
+   * an explicit message rather than a dead viewer.
+   */
+  readFileData(key: string): Promise<{ dataUrl: string } | null>;
+
+  /**
    * Update mutable fields on an Item (Phase 3b). Returns the freshly
    * re-fetched Item so callers can update their state with the new
    * `updatedAt`, `lastEditedBy`, etc. in one shape.
@@ -656,6 +673,10 @@ class UninitializedSpacesApi implements SpacesApi {
       // Soft contract: the resolver never throws even in the uninit
       // state -- it just returns null so the detail pane degrades to
       // "no preview" instead of an error banner.
+      return null;
+    },
+    async readFileData(_key: string): Promise<{ dataUrl: string } | null> {
+      // Same soft contract as resolveFileUrl.
       return null;
     },
     async update(_id: string, _patch: ItemUpdatePatch): Promise<Item> {

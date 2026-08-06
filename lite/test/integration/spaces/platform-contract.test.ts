@@ -152,6 +152,7 @@ function buildStubConsumer(): {
         calls.itemsResolveFileUrl.push(key);
         return maybeFail(fileUrlMap.get(key) ?? null);
       },
+      readFileData: async () => null,
       // Phase 3b — item mutations. Default stubs return the
       // canonical empty shapes; specific Phase 3b unit tests
       // exercise the real behavior. The platform contract just

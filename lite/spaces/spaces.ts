@@ -788,6 +788,25 @@ async function resolveAndInjectFileUrl(
     swapPreviewToUnavailable(item, 'Bridge unavailable. Reload the window.');
     return;
   }
+  const isPdf = (item.mimeType ?? '').toLowerCase() === 'application/pdf';
+  if (isPdf) {
+    // PDFs want BOTH: the bytes (inline render) and the signed URL
+    // (browser-facing actions). Fetch in parallel; either may fail
+    // independently and the viewer degrades explicitly.
+    try {
+      const [dataEnv, urlEnv] = await Promise.all([
+        bridge.items.readFileData(item.fileKey),
+        bridge.items.resolveFileUrl(item.fileKey),
+      ]);
+      if (state.activeItemId !== itemId) return;
+      const dataUrl = dataEnv.ok === true && dataEnv.value !== null ? dataEnv.value.dataUrl : null;
+      const remoteUrl = urlEnv.ok === true && typeof urlEnv.value === 'string' ? urlEnv.value : null;
+      injectPdfViewer(item, dataUrl, remoteUrl);
+    } catch (err) {
+      swapPreviewToUnavailable(item, (err as Error).message);
+    }
+    return;
+  }
   try {
     const envelope = await bridge.items.resolveFileUrl(item.fileKey);
     // Bail if the user switched items mid-flight.
@@ -820,6 +839,24 @@ async function resolveAndInjectFileUrl(
  * the preview lands in the same position regardless of when it
  * arrives.
  */
+function injectPdfViewer(
+  item: RendererItem,
+  dataUrl: string | null,
+  remoteUrl: string | null
+): void {
+  const pane = document.querySelector<HTMLElement>(
+    '#spaces-detail .spaces-detail-pane'
+  );
+  if (pane === null) return;
+  const next = document.createElement('div');
+  next.className = 'spaces-detail-preview';
+  next.setAttribute('data-kind', item.kind);
+  next.appendChild(buildPdfViewer(item, dataUrl, remoteUrl));
+  const existing = pane.querySelector('.spaces-detail-preview');
+  if (existing !== null) existing.replaceWith(next);
+  else pane.appendChild(next);
+}
+
 function injectBinaryPreview(item: RendererItem, url: string): void {
   const pane = document.querySelector<HTMLElement>(
     '#spaces-detail .spaces-detail-pane'
@@ -926,23 +963,17 @@ export function buildBinaryPreview(
 
   // ── PDF ──────────────────────────────────────────────────────────────
   if (mime === 'application/pdf') {
-    // Base64 data-URL PDFs render reliably in the embedded viewer, so
-    // keep the inline <embed> for those. But a *remote* signed URL —
-    // the common case for uploaded files — is frequently served with
-    // `Content-Disposition: attachment`, which makes the embedded
-    // viewer render a blank white page. A 600px white slab in a dark
-    // pane reads as "broken / blank screen", so for remote PDFs show a
-    // clean dark document card with an explicit open action instead.
+    // Delegates to buildPdfViewer: inline <embed> when we hold the
+    // BYTES (data: URL -- the async path fetches them via
+    // items.readFileData because the CSP blocks a renderer fetch and
+    // signed URLs embed as a blank white slab), plus the action row
+    // (Open in browser / Download / Copy link). With only a remote
+    // URL, the viewer renders the document card + actions instead.
     if (url.startsWith('data:')) {
-      const embed = document.createElement('embed');
-      embed.src = url;
-      embed.type = 'application/pdf';
-      embed.className = 'spaces-detail-pdf';
-      wrap.appendChild(embed);
-      appendDownloadLink(wrap, url, 'Download PDF');
+      wrap.appendChild(buildPdfViewer(item, url, null));
       return wrap;
     }
-    wrap.appendChild(buildPdfCard(item, url));
+    wrap.appendChild(buildPdfViewer(item, null, url));
     return wrap;
   }
 
@@ -972,6 +1003,87 @@ function appendDownloadLink(parent: HTMLElement, url: string, text: string): voi
  * slab. Opens the signed URL externally (where the OS PDF viewer
  * renders it correctly).
  */
+/**
+ * PDF preview with the full action row the detail pane owes the user:
+ * render inline when we hold the bytes, and ALWAYS offer
+ * Open in browser / Download / Copy link.
+ *
+ * `dataUrl` — base64 bytes fetched through items.readFileData (main
+ * process; the renderer cannot fetch cross-origin under this CSP).
+ * `remoteUrl` — the signed short-TTL URL, used by the browser-facing
+ * actions. Either may be null:
+ *   - dataUrl only  → inline viewer; Open-in-browser hidden.
+ *   - remoteUrl only → document card + actions (bytes unavailable).
+ *   - neither       → explicit "couldn't be read" message — the
+ *     NoSuchKey case where storage lost the object but the graph node
+ *     still points at it. Never a silent blank.
+ *
+ * Pure DOM; exported for the asset-matrix tests.
+ */
+export function buildPdfViewer(
+  item: RendererItem,
+  dataUrl: string | null,
+  remoteUrl: string | null
+): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'spaces-detail-pdf-viewer';
+
+  if (dataUrl !== null) {
+    const embed = document.createElement('embed');
+    embed.src = dataUrl;
+    embed.type = 'application/pdf';
+    embed.className = 'spaces-detail-pdf';
+    box.appendChild(embed);
+  } else if (remoteUrl !== null) {
+    box.appendChild(buildPdfCard(item, remoteUrl));
+  } else {
+    const note = document.createElement('p');
+    note.className = 'spaces-detail-pdf-note';
+    note.textContent =
+      'This file couldn’t be read from storage — it may have been removed. The reference still exists, but there is nothing to preview.';
+    box.appendChild(note);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'spaces-detail-pdf-actions';
+
+  if (remoteUrl !== null) {
+    const open = document.createElement('a');
+    open.className = 'spaces-detail-pdf-action';
+    open.href = remoteUrl;
+    open.target = '_blank';
+    open.rel = 'noopener noreferrer';
+    open.textContent = 'Open in browser';
+    actions.appendChild(open);
+  }
+
+  if (dataUrl !== null) {
+    const dl = document.createElement('a');
+    dl.className = 'spaces-detail-pdf-action';
+    dl.href = dataUrl;
+    dl.download = item.title.length > 0 ? `${item.title.replace(/\.pdf$/i, '')}.pdf` : 'document.pdf';
+    dl.textContent = 'Download';
+    actions.appendChild(dl);
+  }
+
+  if (remoteUrl !== null) {
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'spaces-detail-pdf-action';
+    copy.textContent = 'Copy link';
+    copy.addEventListener('click', () => {
+      void navigator.clipboard
+        .writeText(remoteUrl)
+        .then(() => showToast('Link copied — note it expires after a short while'))
+        .catch(() => showToast('Couldn’t copy the link'));
+    });
+    actions.appendChild(copy);
+  }
+
+  if (actions.children.length > 0) box.appendChild(actions);
+  return box;
+}
+
 function buildPdfCard(
   item: { title: string; size?: number },
   url: string
@@ -7436,6 +7548,7 @@ function messageFrom(err: unknown): string {
   renderInlineMarkdown,
   formatBytes,
   buildBinaryPreview,
+  buildPdfViewer,
   buildItemsToolbar,
   buildBulkSelectToolbar,
   formatCount,

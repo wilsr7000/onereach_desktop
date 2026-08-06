@@ -65,6 +65,7 @@ const HEALTH_SNAPSHOT = 'lite:health:snapshot';
 const SPACES_OPEN = 'lite:spaces:open';
 const SPACES_LIST_SPACES = 'lite:spaces:listSpaces';
 const SPACES_REFRESH = 'lite:spaces:refresh';
+const SPACES_ITEMS_READ_FILE_DATA = 'lite:spaces:items:readFileData';
 const SPACES_UNCATEGORIZED_COUNT = 'lite:spaces:uncategorizedCount';
 const SPACES_ITEMS_LIST = 'lite:spaces:items:list';
 const SPACES_ITEMS_GET = 'lite:spaces:items:get';
@@ -543,6 +544,8 @@ interface SpacesItemsBridge {
   ): Promise<SpacesIpcResultView<unknown[]>>;
   get(id: string): Promise<SpacesIpcResultView<unknown | null>>;
   resolveFileUrl(key: string): Promise<SpacesIpcResultView<string | null>>;
+  /** Read stored bytes as a data: URL for inline preview (null on failure). */
+  readFileData(key: string): Promise<SpacesIpcResultView<{ dataUrl: string } | null>>;
   createBinary(input: {
     spaceId: string;
     title: string;
@@ -1454,6 +1457,10 @@ const spaces: SpacesBridge = {
     resolveFileUrl: (key) =>
       ipcRenderer.invoke(SPACES_ITEMS_RESOLVE_FILE_URL, { key }) as Promise<
         SpacesIpcResultView<string | null>
+      >,
+    readFileData: (key) =>
+      ipcRenderer.invoke(SPACES_ITEMS_READ_FILE_DATA, { key }) as Promise<
+        SpacesIpcResultView<{ dataUrl: string } | null>
       >,
     update: (id, patch) =>
       ipcRenderer.invoke(SPACES_ITEMS_UPDATE, { id, patch }) as Promise<

@@ -49,6 +49,26 @@ import {
 /** IPC channel: broadcasts when a cached read refreshes so the renderer can re-paint. */
 export const SPACES_CACHE_UPDATED_EVENT = 'lite:spaces:cache-updated';
 
+/**
+ * Cap on bytes we will inline as a data: URL. A data URL is ~33% larger
+ * than the source and lives in the renderer's memory, so a huge file
+ * would bloat the pane rather than help. Over the cap the pane keeps
+ * its Open / Download actions and says why it isn't rendering.
+ */
+const MAX_INLINE_PREVIEW_BYTES = 25 * 1024 * 1024;
+
+/** Minimal extension -> mime map for inlining. Defaults to octet-stream. */
+function guessMimeFromKey(key: string): string {
+  const lower = key.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.svg')) return 'image/svg+xml';
+  return 'application/octet-stream';
+}
+
 let activeCache: SpacesCache | null = null;
 /** Live SDK client for background jobs (GSX migration sweep). */
 let activeClient: SdkSpacesClient | null = null;
@@ -428,6 +448,32 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       try {
         return await getFilesApi().getDownloadUrl(key);
       } catch {
+        return null;
+      }
+    },
+    async readFileData(key: string): Promise<{ dataUrl: string } | null> {
+      // Soft API, same contract as resolveFileUrl: any failure returns
+      // null and the pane shows an explicit message. NOT cached -- the
+      // bytes are large and the pane holds its own copy.
+      if (typeof key !== 'string' || key.length === 0) return null;
+      try {
+        const bytes = await getFilesApi().download(key);
+        const buf = Buffer.from(bytes);
+        if (buf.byteLength > MAX_INLINE_PREVIEW_BYTES) {
+          getLoggingApi().info('spaces', 'readFileData: over inline cap', {
+            bytes: buf.byteLength,
+            cap: MAX_INLINE_PREVIEW_BYTES,
+          });
+          return null;
+        }
+        const mime = guessMimeFromKey(key);
+        return { dataUrl: `data:${mime};base64,${buf.toString('base64')}` };
+      } catch (err) {
+        // The common real-world case: the object is gone from storage
+        // (NoSuchKey) while the graph node still points at it.
+        getLoggingApi().warn('spaces', 'readFileData failed', {
+          error: (err as Error).message,
+        });
         return null;
       }
     },
