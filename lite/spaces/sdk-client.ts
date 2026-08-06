@@ -111,6 +111,13 @@ export interface SdkSpacesClientConfig {
    * (silent fallback). Mirrors `SdkFilesClientConfig.spanEmitter`.
    */
   spanEmitter?: (name: string, data?: unknown) => Span;
+  /**
+   * ADR-051 — resolver for the viewing `:Person.id` (the signed-in
+   * user's lowercased email, falling back to accountId; same
+   * convention as the renderer's boot-time whoAmI probe). '' / null
+   * means "unknown viewer" and every restricted Space is gated out.
+   */
+  viewerId?: () => string | null;
 }
 
 const DEFAULT_LIMIT = 100;
@@ -135,10 +142,43 @@ const MAX_LIMIT = 500;
  * still renders correctly while new producers can move to canonical
  * field names (`name`/`type`/`url`/`createdAt`) at their own pace.
  */
+/**
+ * ADR-051 — per-space visibility gating. A Space is visible when it is
+ * 'open' (the default; every pre-existing Space) or when the viewer
+ * holds a `[:HAS_ACCESS]` edge to it. `$viewerId` is always bound ('':
+ * signed-out / unknown viewer sees only open content). Alias contract:
+ * the space being tested must be bound as `s`.
+ */
+const SPACE_VISIBLE = `(
+        coalesce(s.visibility, 'open') <> 'restricted'
+        OR ($viewerId <> '' AND EXISTS {
+          MATCH (:Person {id: $viewerId})-[:HAS_ACCESS]->(s)
+        })
+      )`;
+
+/**
+ * ADR-051 — item-level visibility. An asset (bound as `a`) is visible
+ * when it is uncategorized (no space at all) or belongs to at least one
+ * space the viewer can see. An item in both a restricted space and an
+ * open one is visible — it genuinely lives in the open space.
+ */
+const ASSET_VISIBLE = `(
+        NOT EXISTS { MATCH (a)-[:BELONGS_TO]->(:Space) }
+        OR EXISTS {
+          MATCH (a)-[:BELONGS_TO]->(vs:Space)
+          WHERE vs.deletedAt IS NULL
+            AND (coalesce(vs.visibility, 'open') <> 'restricted'
+                 OR ($viewerId <> '' AND EXISTS {
+                   MATCH (:Person {id: $viewerId})-[:HAS_ACCESS]->(vs)
+                 }))
+        }
+      )`;
+
 export const CYPHER = {
   LIST_SPACES: `
     MATCH (s:Space)
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)
     WITH s, count(a) AS itemCount
     RETURN s.id AS id,
@@ -147,6 +187,7 @@ export const CYPHER = {
            coalesce(s.color, '') AS color,
            coalesce(s.iconKey, s.icon, '') AS iconKey,
            coalesce(s.kind, 'user') AS kind,
+           coalesce(s.visibility, 'open') AS visibility,
            itemCount AS itemCount,
            coalesce(toString(s.createdAt), toString(s.created_at), '') AS createdAt,
            coalesce(toString(s.updatedAt), toString(s.updated_at), '') AS updatedAt
@@ -187,6 +228,7 @@ export const CYPHER = {
     MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
         AND a.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(other:Space)
       WHERE other.id <> s.id
         AND other.deletedAt IS NULL
@@ -308,6 +350,7 @@ export const CYPHER = {
   GET_ITEM: `
     MATCH (a:Asset {id: $id})
       WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     OPTIONAL MATCH (editor:Person)-[:LAST_EDITED]->(a)
@@ -400,6 +443,7 @@ export const CYPHER = {
    */
   HOME_RECENT_ITEMS: `
     MATCH (a:Asset)
+      WHERE ${ASSET_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
     WITH a, head(collect(s)) AS firstSpace
@@ -595,11 +639,19 @@ export const CYPHER = {
     FOREACH (_ IN CASE WHEN $writeIconKey THEN [1] ELSE [] END |
       SET s.iconKey = $iconKey
     )
+    FOREACH (_ IN CASE WHEN $writeVisibility THEN [1] ELSE [] END |
+      SET s.visibility = $visibility
+    )
+    FOREACH (_ IN CASE WHEN $writeVisibility AND $visibility = 'restricted' AND $viewerId <> '' THEN [1] ELSE [] END |
+      MERGE (viewer:Person {id: $viewerId})
+      MERGE (viewer)-[:HAS_ACCESS]->(s)
+    )
     RETURN s.id AS id,
            coalesce(s.name, s.id) AS name,
            coalesce(s.description, '') AS description,
            coalesce(s.color, '') AS color,
            coalesce(s.iconKey, '') AS iconKey,
+           coalesce(s.visibility, 'open') AS visibility,
            toString(s.createdAt) AS createdAt,
            toString(s.updatedAt) AS updatedAt
   `,
@@ -917,6 +969,41 @@ export const CYPHER = {
     RETURN $memberId AS id
   `,
 
+  /**
+   * GSX migration sweep (ADR-050): page through assets still carrying
+   * the v1 inline-base64 stub (`a.content` is a `data:` URL). The
+   * sweep uploads each payload to GSX and then converts the node via
+   * CONVERT_INLINE_ASSET_TO_FILE, so a migrated asset stops matching
+   * this predicate — the query is its own progress cursor.
+   */
+  LIST_INLINE_BINARY_ASSETS: `
+    MATCH (a:Asset)
+    WHERE a.deletedAt IS NULL
+      AND a.content STARTS WITH 'data:'
+    RETURN a.id AS id,
+           a.content AS content,
+           coalesce(a.name, a.title, '') AS title,
+           coalesce(a.mimeType, a.contentType, '') AS mimeType
+    ORDER BY a.id
+    LIMIT $limit
+  `,
+
+  /**
+   * Flip one inline-stub asset to its GSX-backed form: set the file
+   * key + true byte size, clear the inline blob (SET x = null removes
+   * the property in Cypher). Idempotent per asset — after this runs
+   * the node no longer matches LIST_INLINE_BINARY_ASSETS.
+   */
+  CONVERT_INLINE_ASSET_TO_FILE: `
+    MATCH (a:Asset {id: $id})
+    WHERE a.deletedAt IS NULL
+    SET a.url = $fileKey,
+        a.size = $size,
+        a.content = null,
+        a.updatedAt = $now
+    RETURN a.id AS id
+  `,
+
   // ─── Asset CRUD (Sprint 1) ───────────────────────────────────────────────
 
   /**
@@ -1178,6 +1265,7 @@ export const CYPHER = {
         )
         AND ($spaceId IS NULL
              OR EXISTS { MATCH (a)-[:BELONGS_TO]->(:Space {id: $spaceId}) })
+        AND ${ASSET_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
@@ -1216,10 +1304,12 @@ export class SdkSpacesClient {
   protected readonly getAuthEnv: () => string | null;
   protected readonly queryFn: SpacesQueryFn;
   protected readonly spanEmitter: NonNullable<SdkSpacesClientConfig['spanEmitter']> | null;
+  protected readonly getViewerId: (() => string | null) | null;
 
   constructor(config: SdkSpacesClientConfig = {}) {
     this.getAuthEnv = config.getAuthEnv ?? ((): string | null => null);
     this.spanEmitter = config.spanEmitter ?? null;
+    this.getViewerId = config.viewerId ?? null;
     this.queryFn =
       config.query ??
       (async (): Promise<Array<Record<string, unknown>>> => {
@@ -1256,9 +1346,41 @@ export class SdkSpacesClient {
 
   async listSpaces(): Promise<Space[]> {
     return this.withSpan('spaces.listSpaces', async () => {
-      const rows = await this.run(CYPHER.LIST_SPACES);
+      const rows = await this.run(CYPHER.LIST_SPACES, { viewerId: this.viewerParam() });
       return rows.map(toSpace);
     });
+  }
+
+  /**
+   * GSX migration sweep (ADR-050) — list assets still carrying the v1
+   * inline-base64 stub. Unspanned like the other asset-level ops; the
+   * sweep in `gsx-migration.ts` wraps the whole pass in its own
+   * `spaces.gsxMigrate` span.
+   */
+  async listInlineBinaryAssets(limit = 25): Promise<InlineBinaryAssetRow[]> {
+    const rows = await this.run(CYPHER.LIST_INLINE_BINARY_ASSETS, {
+      limit: Math.max(1, Math.min(100, Math.floor(limit))),
+    });
+    return rows.map((r) => ({
+      id: optString(r, 'id') ?? '',
+      content: optString(r, 'content') ?? '',
+      title: optString(r, 'title') ?? '',
+      mimeType: optString(r, 'mimeType') ?? '',
+    }));
+  }
+
+  /**
+   * GSX migration sweep (ADR-050) — convert one inline-stub asset to
+   * its GSX-backed form. Returns true when the node was found+updated.
+   */
+  async convertInlineAssetToFile(id: string, fileKey: string, size: number): Promise<boolean> {
+    const rows = await this.run(CYPHER.CONVERT_INLINE_ASSET_TO_FILE, {
+      id,
+      fileKey,
+      size: Math.max(0, Math.floor(size)),
+      now: new Date().toISOString(),
+    });
+    return rows.length > 0;
   }
 
   async getUncategorizedCount(): Promise<number> {
@@ -1285,7 +1407,12 @@ export class SdkSpacesClient {
           context: { spaceId },
         });
       }
-      const rows = await this.run(CYPHER.LIST_ITEMS_IN_SPACE, { spaceId, offset, limit });
+      const rows = await this.run(CYPHER.LIST_ITEMS_IN_SPACE, {
+        spaceId,
+        offset,
+        limit,
+        viewerId: this.viewerParam(),
+      });
       return rows.map((r) => toItemSummary(r, { stripOtherSpaces: false }));
     });
   }
@@ -1300,7 +1427,7 @@ export class SdkSpacesClient {
           context: { id },
         });
       }
-      const rows = await this.run(CYPHER.GET_ITEM, { id });
+      const rows = await this.run(CYPHER.GET_ITEM, { id, viewerId: this.viewerParam() });
       if (rows.length === 0) return null;
       return toItem(rows[0] as Record<string, unknown>);
     });
@@ -1460,7 +1587,10 @@ export class SdkSpacesClient {
    */
   async listRecentItems(opts: RecentItemsOpts = {}): Promise<ItemSummary[]> {
     const limit = clampSmallLimit(opts.limit, 3, 50);
-    const rows = await this.run(CYPHER.HOME_RECENT_ITEMS, { limit });
+    const rows = await this.run(CYPHER.HOME_RECENT_ITEMS, {
+      limit,
+      viewerId: this.viewerParam(),
+    });
     // Same row shape as LIST_ITEMS_*; reuse the existing helper. The
     // `otherSpaces` projection on this query is always 0 or 1 chip, but
     // the helper handles both cases uniformly.
@@ -1607,6 +1737,15 @@ export class SdkSpacesClient {
       const writeDescription = patch.description !== undefined;
       const writeColor = patch.color !== undefined;
       const writeIconKey = patch.iconKey !== undefined;
+      const writeVisibility = patch.visibility !== undefined;
+      if (writeVisibility && patch.visibility !== 'open' && patch.visibility !== 'restricted') {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `visibility must be 'open' or 'restricted' (got ${String(patch.visibility)})`,
+          remediation: "Pass visibility: 'open' | 'restricted'.",
+          context: { id: validId },
+        });
+      }
 
       // Normalize + validate description when present.
       const description = writeDescription
@@ -1625,6 +1764,12 @@ export class SdkSpacesClient {
         color,
         writeIconKey,
         iconKey,
+        writeVisibility,
+        visibility: writeVisibility ? patch.visibility : '',
+        // Auto-grant: whoever flips a Space to members-only gets a
+        // HAS_ACCESS edge in the same transaction, so you can never
+        // lock yourself out of your own Space.
+        viewerId: this.viewerParam(),
       });
       if (rows.length === 0) {
         throw new SpacesError({
@@ -2502,6 +2647,7 @@ export class SdkSpacesClient {
         : null;
     const limit = clampSmallLimit(opts.limit, 50, 200);
     const rows = await this.run(CYPHER.SEARCH_ITEMS, {
+      viewerId: this.viewerParam(),
       query,
       spaceId,
       limit,
@@ -2641,6 +2787,12 @@ export class SdkSpacesClient {
    * exception type. Errors that are already `SpacesError` pass
    * through unchanged.
    */
+  /** ADR-051 — the `$viewerId` bound into every gated query. */
+  private viewerParam(): string {
+    const raw = this.getViewerId !== null ? this.getViewerId() : null;
+    return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  }
+
   private async run(
     cypher: string,
     parameters?: Record<string, unknown>
@@ -2873,6 +3025,8 @@ function toSpace(row: Record<string, unknown>): Space {
   if (updatedAt !== undefined) space.updatedAt = updatedAt;
   const kind = optString(row, 'kind');
   if (kind === 'shared' || kind === 'user') space.kind = kind;
+  const visibility = optString(row, 'visibility');
+  if (visibility === 'open' || visibility === 'restricted') space.visibility = visibility;
   return space;
 }
 
@@ -3539,4 +3693,12 @@ function normalizeTag(raw: unknown): string | null {
   const trimmed = raw.trim();
   if (trimmed.length === 0 || trimmed.length > MAX_ITEM_TAG_LENGTH) return null;
   return trimmed;
+}
+
+/** Row shape returned by `listInlineBinaryAssets` (GSX migration sweep). */
+export interface InlineBinaryAssetRow {
+  id: string;
+  content: string;
+  title: string;
+  mimeType: string;
 }

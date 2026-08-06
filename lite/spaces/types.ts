@@ -51,6 +51,14 @@ export type SpaceKind = 'user' | 'shared';
  * Cypher returns `null` for missing properties; we map to `undefined`
  * so renderer code can use `??` defaults uniformly).
  */
+/**
+ * ADR-051 — per-space visibility. 'open' (default): every account
+ * member sees the Space (pre-ADR behavior, and what every existing
+ * Space keeps). 'restricted': only members with `[:HAS_ACCESS]` see
+ * it (list, items, search, home feed, direct get).
+ */
+export type SpaceVisibility = 'open' | 'restricted';
+
 export interface Space {
   /** Neo4j-side id (elementId or external uuid; whichever the graph uses). */
   id: string;
@@ -75,6 +83,8 @@ export interface Space {
    * dashboard layout.
    */
   kind?: SpaceKind;
+  /** ADR-051 — 'open' (default) or 'restricted' (members-only). */
+  visibility?: SpaceVisibility;
 }
 
 // ─── Items ───────────────────────────────────────────────────────────────
@@ -432,6 +442,12 @@ export interface UpdateSpaceInput {
   description?: string;
   color?: string;
   iconKey?: string;
+  /**
+   * ADR-051 — flip the Space between 'open' (account-wide) and
+   * 'restricted' (members-only). Restricting auto-grants the caller
+   * `[:HAS_ACCESS]` so a Space can never be orphaned from its owner.
+   */
+  visibility?: SpaceVisibility;
 }
 
 /** Options for `spaces.delete(id, opts?)`. */
@@ -768,6 +784,35 @@ export interface CreateAssetInput {
    * `a.metadata` (JSON). Populated automatically by the renderer's
    * auto-extract pass when files are uploaded.
    */
+  metadata?: ItemMetadata;
+}
+
+/**
+ * Input for `items.createBinary(...)` — GSX-first asset creation
+ * (ADR-050). The caller hands over raw bytes; the API uploads them to
+ * the account's GSX file bucket and creates the `:Asset` with the
+ * resulting `fileKey` — inline base64 never touches the graph. This is
+ * what makes binary assets shareable across apps: any client of the
+ * same GSX account (full app, Lite, agents) resolves the same key.
+ */
+export interface CreateBinaryAssetInput {
+  /** Target Space id. Required — assets always live in a Space. */
+  spaceId: string;
+  /** Display title. 1..MAX_ITEM_TITLE_LENGTH after trim. */
+  title: string;
+  /** Asset kind (`'image'`, `'video'`, `'document'`, ...). Defaults to `'other'`. */
+  kind?: ItemKind;
+  /** Original file name — sanitized into the GSX key for readability. */
+  fileName: string;
+  /** MIME type. Advertised to GSX and stored on the node. */
+  mimeType?: string;
+  /** The file's raw bytes. Size is derived from this. */
+  bytes: ArrayBuffer | Uint8Array;
+  /** Free-form description. */
+  description?: string;
+  /** Optional :Person.id of the creator — MERGEs [:CREATED] edge. */
+  creatorId?: string;
+  /** Free-form metadata to persist on creation (renderer auto-extract). */
   metadata?: ItemMetadata;
 }
 

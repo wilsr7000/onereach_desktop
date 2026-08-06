@@ -343,6 +343,12 @@ function init(): void {
  * second call via `cacheUpdateUnsubscribe`.
  */
 let cacheUpdateUnsubscribe: (() => void) | null = null;
+/** Guards against overlapping refreshes (focus + click racing). */
+let refreshInFlight = false;
+/** Epoch ms of the last focus-triggered refresh. */
+let lastFocusRefreshAt = 0;
+/** Don't refetch more than once per this window on focus. */
+const FOCUS_REFRESH_THROTTLE_MS = 10_000;
 function wireCacheUpdates(): void {
   if (cacheUpdateUnsubscribe !== null) {
     try {
@@ -1469,6 +1475,17 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
     li.appendChild(badge);
   }
 
+  // ADR-051: members-only spaces get a lock pill so it's obvious at a
+  // glance which Spaces are gated. Open spaces stay clean.
+  if (space.visibility === 'restricted') {
+    const lock = document.createElement('span');
+    lock.className = 'spaces-row-lock-badge';
+    lock.setAttribute('aria-label', 'Members-only space');
+    lock.title = 'Members only — visible to people and agents with access';
+    lock.textContent = '🔒';
+    li.appendChild(lock);
+  }
+
   const count = document.createElement('span');
   count.className = 'spaces-row-count';
   count.textContent =
@@ -1723,7 +1740,11 @@ function buildSharedMembersRow(
   return row;
 }
 
-function buildMemberChip(spaceId: string, member: LiteSpacesMemberView): HTMLElement {
+function buildMemberChip(
+  spaceId: string,
+  member: LiteSpacesMemberView,
+  refresh?: () => Promise<void>
+): HTMLElement {
   const chip = document.createElement('span');
   chip.className = 'spaces-shared-member-chip';
   chip.setAttribute('data-member-kind', member.kind);
@@ -1742,7 +1763,7 @@ function buildMemberChip(spaceId: string, member: LiteSpacesMemberView): HTMLEle
   remove.textContent = '×';
   remove.setAttribute('aria-label', `Remove ${member.name}`);
   remove.addEventListener('click', () => {
-    void removeMember(spaceId, member.id);
+    void removeMember(spaceId, member.id, refresh);
   });
   chip.appendChild(remove);
   return chip;
@@ -2037,7 +2058,10 @@ async function openCreateTicketPrompt(spaceId: string): Promise<void> {
   }
 }
 
-async function openAddMemberPrompt(spaceId: string): Promise<void> {
+async function openAddMemberPrompt(
+  spaceId: string,
+  refresh?: () => Promise<void>
+): Promise<void> {
   const id = window.prompt('Add member by id (email for a Person, agent id for an Agent)');
   if (id === null) return;
   const trimmed = id.trim().toLowerCase();
@@ -2056,13 +2080,18 @@ async function openAddMemberPrompt(spaceId: string): Promise<void> {
       return;
     }
     showToast(`Added ${envelope.value.name || trimmed}`);
-    await loadSharedSpaceDashboard(spaceId);
+    if (refresh !== undefined) await refresh();
+    else await loadSharedSpaceDashboard(spaceId);
   } catch (err) {
     showToast(messageFrom(err));
   }
 }
 
-async function removeMember(spaceId: string, memberId: string): Promise<void> {
+async function removeMember(
+  spaceId: string,
+  memberId: string,
+  refresh?: () => Promise<void>
+): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
   try {
@@ -2072,9 +2101,109 @@ async function removeMember(spaceId: string, memberId: string): Promise<void> {
       return;
     }
     showToast('Member removed');
-    await loadSharedSpaceDashboard(spaceId);
+    if (refresh !== undefined) await refresh();
+    else await loadSharedSpaceDashboard(spaceId);
   } catch (err) {
     showToast(messageFrom(err));
+  }
+}
+
+/**
+ * ADR-051 — the per-space visibility option. A toggle chip flips the
+ * Space between 'open' (account-wide — the default every pre-existing
+ * Space keeps) and 'restricted' (members-only). Restricting a Space
+ * auto-grants the current user access server-side, and surfaces the
+ * member strip here so access can be managed on any Space kind (the
+ * shared dashboard keeps its own richer row).
+ */
+function buildSpaceVisibilityRow(space: RendererSpace): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-visibility-row';
+
+  const restricted = space.visibility === 'restricted';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = restricted
+    ? 'spaces-visibility-toggle is-restricted'
+    : 'spaces-visibility-toggle';
+  toggle.textContent = restricted ? '🔒 Members only' : '🔓 Open to account';
+  toggle.title = restricted
+    ? 'Only members see this Space. Click to open it to everyone in the account.'
+    : 'Everyone in the account sees this Space. Click to restrict it to members.';
+  toggle.addEventListener('click', () => {
+    void toggleSpaceVisibility(space);
+  });
+  wrap.appendChild(toggle);
+
+  if (restricted) {
+    const strip = document.createElement('div');
+    strip.className = 'spaces-visibility-members';
+    strip.textContent = 'Loading members…';
+    wrap.appendChild(strip);
+    void populateVisibilityMembers(strip, space);
+  }
+  return wrap;
+}
+
+async function toggleSpaceVisibility(space: RendererSpace): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const next = space.visibility === 'restricted' ? 'open' : 'restricted';
+  try {
+    const envelope = await bridge.updateSpace(space.id, { visibility: next });
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(
+      next === 'restricted'
+        ? '🔒 Members only — you were added as a member.'
+        : '🔓 Open to everyone in the account.'
+    );
+    // Refresh sidebar + the active view (the header rebuilds with it).
+    await loadSpaces();
+    await loadItems();
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
+async function populateVisibilityMembers(
+  strip: HTMLElement,
+  space: RendererSpace
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    strip.textContent = '';
+    return;
+  }
+  const refresh = async (): Promise<void> => {
+    await populateVisibilityMembers(strip, space);
+  };
+  try {
+    const envelope = await bridge.members.list(space.id);
+    if (envelope.ok === false) {
+      strip.textContent = '';
+      return;
+    }
+    strip.textContent = '';
+    const label = document.createElement('span');
+    label.className = 'spaces-shared-members-label';
+    label.textContent = 'Members';
+    strip.appendChild(label);
+    for (const m of envelope.value) {
+      strip.appendChild(buildMemberChip(space.id, m, refresh));
+    }
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'spaces-shared-members-add';
+    addBtn.textContent = '+ Member';
+    addBtn.addEventListener('click', () => {
+      void openAddMemberPrompt(space.id, refresh);
+    });
+    strip.appendChild(addBtn);
+  } catch {
+    strip.textContent = '';
   }
 }
 
@@ -2109,6 +2238,9 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
     const space = state.spaces.find((s) => s.id === state.activeScopeId);
     if (space !== undefined) {
       titleWrap.appendChild(buildSpaceObjectiveRow(space));
+      // ADR-051: per-space visibility control + (when restricted) the
+      // member management strip, on every Space kind.
+      titleWrap.appendChild(buildSpaceVisibilityRow(space));
     }
   }
 
@@ -7379,6 +7511,8 @@ const toastState: ToastState = {
 function wireMutationsUI(): void {
   wireNewSpaceButton();
   wireNewSharedSpaceButton();
+  wireRefreshButton();
+  wireRefreshOnFocus();
   wireNewSpaceDialog();
   wireRowMenuTriggers();
   wireRowMenu();
@@ -7430,6 +7564,72 @@ const WIZARD_STEP_LABELS: Record<NewSpaceWizardState['step'], string> = {
 const MAX_WIZARD_OBJECTIVES = 6;
 
 let newSpaceWizard: NewSpaceWizardState | null = null;
+
+/**
+ * Pull fresh data from the graph on demand.
+ *
+ * Spaces can be created OUTSIDE this app — in WISER Playbooks, or by an
+ * agent writing straight to the graph. Those writes don't invalidate
+ * our cache, so until now the only path to seeing them was waiting on
+ * the background refresh timer, with no way to force it. This is that
+ * way.
+ */
+async function refreshFromGraph(trigger: 'button' | 'focus'): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined || typeof bridge.refresh !== 'function') return;
+  if (refreshInFlight) return; // coalesce: focus + click can race
+  refreshInFlight = true;
+  const button = document.getElementById('spaces-refresh-button');
+  if (button instanceof HTMLButtonElement) {
+    button.disabled = true;
+    button.classList.add('is-refreshing');
+  }
+  try {
+    const result = await bridge.refresh();
+    if (result.ok === false && trigger === 'button') {
+      showToast(`Couldn't refresh: ${result.error.message}`);
+      return;
+    }
+    // The main process broadcasts cache-updated per key, which routes
+    // to loadSpaces()/loadItems(). Reload the sidebar directly too so a
+    // manual click always repaints even if a broadcast is missed.
+    await loadSpaces();
+    void loadUncategorizedCount();
+    if (state.activeScopeId === HOME_SCOPE_ID) void loadHome();
+    else void loadItems();
+  } catch (err) {
+    if (trigger === 'button') showToast(`Couldn't refresh: ${(err as Error).message}`);
+  } finally {
+    refreshInFlight = false;
+    if (button instanceof HTMLButtonElement) {
+      button.disabled = false;
+      button.classList.remove('is-refreshing');
+    }
+  }
+}
+
+function wireRefreshButton(): void {
+  const button = document.getElementById('spaces-refresh-button');
+  if (button === null) return;
+  button.addEventListener('click', () => {
+    void refreshFromGraph('button');
+  });
+}
+
+/**
+ * Refresh when the window regains focus. This is what makes the
+ * cross-app flow feel right: create a Space in WISER Playbooks, click
+ * back to Spaces, and it's there. Throttled so alt-tabbing doesn't
+ * hammer the graph.
+ */
+function wireRefreshOnFocus(): void {
+  window.addEventListener('focus', () => {
+    const now = Date.now();
+    if (now - lastFocusRefreshAt < FOCUS_REFRESH_THROTTLE_MS) return;
+    lastFocusRefreshAt = now;
+    void refreshFromGraph('focus');
+  });
+}
 
 function wireNewSharedSpaceButton(): void {
   const button = document.getElementById('spaces-new-shared-button');
@@ -8766,31 +8966,35 @@ async function submitNewAsset(): Promise<void> {
       // video duration, PDF page count, CSV row/col, etc. Best-effort
       // (returns {} on failure). See lite/spaces/metadata-extractor.ts.
       const metadata = await extractMetadataFromFile(file);
-      const bytes = await readFileAsBase64(file);
+      // GSX-first (ADR-050): raw bytes cross the bridge; the main
+      // process uploads them to the account's GSX bucket and stores
+      // only the fileKey on the graph node. This is what makes the
+      // asset readable from every app on the account.
+      const bytes = await file.arrayBuffer();
       const kind = inferKindFromMime(file.type) as
         | 'image'
         | 'video'
         | 'audio'
         | 'document'
         | 'other';
-      const payload: Parameters<typeof bridge.items.create>[0] = {
+      const envelope = await bridge.items.createBinary({
         spaceId,
         title,
         kind,
+        fileName: file.name,
         mimeType: file.type,
-        size: file.size,
-        content: bytes, // base64 stub for v1
+        bytes,
         metadata: metadata as Record<string, unknown>,
         ...(creatorId !== null ? { creatorId } : {}),
-      };
-      const envelope = await bridge.items.create(payload);
+      });
       if (envelope.ok === false) {
         showDialogError(error, envelope.error.message);
         if (submit instanceof HTMLButtonElement) submit.disabled = false;
         return;
       }
-      // hasContent: false — the base64 stub isn't readable text; image/
-      // PDF eligibility is driven by kind + mimeType in the enricher.
+      // hasContent: false — binary payload lives in GSX, not inline;
+      // image/PDF enrich eligibility is driven by kind + mimeType and
+      // the enricher downloads via the fileKey.
       createdEnrich = { id: envelope.value.id, kind, mimeType: file.type, hasContent: false };
     } else {
       const content =
@@ -8838,19 +9042,6 @@ async function submitNewAsset(): Promise<void> {
   } finally {
     if (submit instanceof HTMLButtonElement) submit.disabled = false;
   }
-}
-
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (): void => {
-      const result = reader.result;
-      if (typeof result === 'string') resolve(result);
-      else reject(new Error('Unexpected reader result'));
-    };
-    reader.onerror = (): void => reject(reader.error ?? new Error('Read failed'));
-    reader.readAsDataURL(file);
-  });
 }
 
 function inferKindFromMime(mime: string): string {

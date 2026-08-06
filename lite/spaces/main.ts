@@ -50,6 +50,10 @@ import {
 export const SPACES_CACHE_UPDATED_EVENT = 'lite:spaces:cache-updated';
 
 let activeCache: SpacesCache | null = null;
+/** Live SDK client for background jobs (GSX migration sweep). */
+let activeClient: SdkSpacesClient | null = null;
+/** Delayed-start handle for the boot-time GSX migration sweep. */
+let gsxMigrationTimer: ReturnType<typeof setTimeout> | null = null;
 let cacheUnsubscribe: (() => void) | null = null;
 /**
  * Unsubscribe handle for the auth-session listener. Drops cached
@@ -86,12 +90,15 @@ import type {
   PersonUpsertInput,
   SpaceMember,
   CreateAssetInput,
+  CreateBinaryAssetInput,
   CreateAgentInput,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
+import { createBinaryAsset } from './create-binary.js';
+import { runGsxMigration } from './gsx-migration.js';
 
 // ─── Menu wiring ────────────────────────────────────────────────────────
 
@@ -201,6 +208,24 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
 
   registerSpacesIpc({ onOpen: handle.open });
 
+  // ADR-050: lift any v1 inline-base64 asset stubs into GSX. Delayed
+  // well past boot so sign-in (auto or manual) has a chance to settle;
+  // the sweep aborts quietly when signed out and retries next boot.
+  gsxMigrationTimer = setTimeout(() => {
+    gsxMigrationTimer = null;
+    const client = activeClient;
+    if (client === null) return;
+    void runGsxMigration({
+      client,
+      files: getFilesApi(),
+      log: getLoggingApi(),
+    }).then((r) => {
+      if (r.scanned > 0 || r.aborted) {
+        log.info('gsx-migrate sweep done', { ...r });
+      }
+    });
+  }, 20_000);
+
   // Drop the in-memory graph cache whenever an env's session becomes
   // null (sign-out, expiry, manual revoke). Without this, signing
   // back in as a DIFFERENT user paints the previous user's home
@@ -243,6 +268,11 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
 }
 
 function teardownInternal(): void {
+  if (gsxMigrationTimer !== null) {
+    clearTimeout(gsxMigrationTimer);
+    gsxMigrationTimer = null;
+  }
+  activeClient = null;
   if (!registered) return;
   unregisterSpacesIpc();
   try {
@@ -324,7 +354,18 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     // reads/writes are traceable in /logs?category=spaces -- including
     // the boot prewarm + background refresh paths that never cross IPC.
     spanEmitter: (name, data) => getLoggingApi().start(name, data),
+    // ADR-051: the viewing :Person.id for visibility gating. Same
+    // convention as the renderer's boot whoAmI probe — lowercased
+    // session email, falling back to accountId; null when signed out
+    // (restricted Spaces are then gated out entirely).
+    viewerId: () => {
+      const session = getAuthApi().getSession('edison');
+      if (session === null) return null;
+      const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
+      return email.length > 0 ? email : session.accountId;
+    },
   });
+  activeClient = client;
 
   // In-process cache. Pre-warms the home-view + sidebar reads at boot
   // so the renderer's first paint is instant. Mutations invalidate
@@ -412,6 +453,23 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
     async create(input: CreateAssetInput): Promise<Item> {
       const result = await client.createAsset(input);
+      nukeReadCache();
+      return result;
+    },
+    async createBinary(input: CreateBinaryAssetInput): Promise<Item> {
+      // GSX-first (ADR-050): bytes go to the account's file bucket,
+      // the graph gets only the fileKey. Orchestration (validation,
+      // upload-before-create, orphan cleanup) lives in
+      // `create-binary.ts` behind an injected-deps seam so it's
+      // unit-testable; this wrapper supplies the live deps + cache.
+      const result = await createBinaryAsset(
+        {
+          files: getFilesApi(),
+          createAsset: (assetInput) => client.createAsset(assetInput),
+          warn: (message, data) => getLoggingApi().warn('spaces', message, data),
+        },
+        input
+      );
       nukeReadCache();
       return result;
     },
@@ -532,6 +590,18 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     open: handle.open,
     listSpaces(): Promise<Space[]> {
       return cache.getOrFetch(SPACES_CACHE_KEYS.LIST_SPACES, () => client.listSpaces());
+    },
+    async refresh(): Promise<void> {
+      // Nuke the whole read cache: a Space created elsewhere changes
+      // the list AND the home rollups AND (potentially) any scope's
+      // item list, so a targeted invalidation would leave stale
+      // corners behind. Entries refetch lazily on next read; we await
+      // the space list so callers can trust it landed.
+      const removed = cache.invalidate(() => true);
+      getLoggingApi().info('spaces', 'manual refresh -- cache invalidated', {
+        invalidated: removed,
+      });
+      await cache.getOrFetch(SPACES_CACHE_KEYS.LIST_SPACES, () => client.listSpaces());
     },
     getUncategorizedCount(): Promise<number> {
       return cache.getOrFetch(SPACES_CACHE_KEYS.UNCATEGORIZED_COUNT, () =>

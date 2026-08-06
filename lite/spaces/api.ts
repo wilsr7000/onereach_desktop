@@ -53,6 +53,7 @@ import type {
   PersonUpsertInput,
   SpaceMember,
   CreateAssetInput,
+  CreateBinaryAssetInput,
   CreateAgentInput,
   DeleteAssetOpts,
   SearchItemsOpts,
@@ -97,6 +98,7 @@ export type {
   PersonUpsertInput,
   SpaceMember,
   CreateAssetInput,
+  CreateBinaryAssetInput,
   CreateAgentInput,
   AgentEndpoint,
   AgentEndpointKind,
@@ -252,6 +254,23 @@ export interface SpacesItemsApi {
    *   `SPACES_NOT_FOUND` if the target space is missing/soft-deleted.
    */
   create(input: CreateAssetInput): Promise<Item>;
+
+  /**
+   * Create a binary asset GSX-first (ADR-050): uploads the raw bytes
+   * to the account's GSX bucket under `lite-spaces/assets/…`, then
+   * creates the `:Asset` with the resulting `fileKey`. Inline base64
+   * never enters the graph, so the asset is readable by every app on
+   * the account (full app, Lite, agents) via the shared bucket.
+   *
+   * If the graph create fails after the upload succeeded, the
+   * just-uploaded file is best-effort deleted so no orphan remains.
+   *
+   * @throws {SpacesError} `SPACES_INVALID_INPUT` for empty
+   *   title/fileName/bytes or an over-cap payload;
+   *   `SPACES_NOT_FOUND` if the target space is missing/soft-deleted.
+   *   Files-layer failures (`FILES_NOT_AUTHENTICATED`, ...) propagate.
+   */
+  createBinary(input: CreateBinaryAssetInput): Promise<Item>;
 
   /**
    * Create an agent asset in a Space. The OKF definition text (already
@@ -450,6 +469,15 @@ export interface SpacesApi {
   listSpaces(): Promise<Space[]>;
 
   /**
+   * Drop the cached read set and refetch, so data created OUTSIDE this
+   * app (a Space made in WISER Playbooks, an asset added by an agent)
+   * shows up on demand instead of waiting on the background timer.
+   * Resolves once the space list has been refetched; the cache's
+   * update broadcast repaints any open window.
+   */
+  refresh(): Promise<void>;
+
+  /**
    * Count of items in the Uncategorized scope. Surfaced in the sidebar
    * row so users see intake pressure at a glance.
    */
@@ -645,6 +673,9 @@ class UninitializedSpacesApi implements SpacesApi {
     async create(_input: CreateAssetInput): Promise<Item> {
       throw notInitialized('items.create');
     },
+    async createBinary(_input: CreateBinaryAssetInput): Promise<Item> {
+      throw notInitialized('items.createBinary');
+    },
     async createAgent(_input: CreateAgentInput): Promise<Item> {
       throw notInitialized('items.createAgent');
     },
@@ -734,6 +765,10 @@ class UninitializedSpacesApi implements SpacesApi {
 
   async listSpaces(): Promise<Space[]> {
     throw notInitialized('listSpaces');
+  }
+
+  async refresh(): Promise<void> {
+    throw notInitialized('refresh');
   }
 
   async getUncategorizedCount(): Promise<number> {

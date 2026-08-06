@@ -128,6 +128,9 @@ function buildStubConsumer(): {
     open: () => {
       calls.open++;
     },
+    refresh: async () => {
+      /* stub: the contract only needs the method to exist */
+    },
     listSpaces: async () => {
       calls.listSpaces++;
       return maybeFail(spaces);
@@ -161,6 +164,7 @@ function buildStubConsumer(): {
       recentCommits: async (_id, _opts) => maybeFail([]),
       // Sprint 1 — asset CRUD stubs.
       create: async (_input) => maybeFail({} as unknown as Item),
+      createBinary: async (_input) => maybeFail({} as unknown as Item),
       createAgent: async (_input) => maybeFail({} as unknown as Item),
       delete: async (_id, _opts) => {
         maybeFail(undefined);

@@ -3958,6 +3958,39 @@ body {
   align-items: center;
 }
 
+/* Refresh the space list from the graph. Sits beside "+ Shared" in the
+   Spaces section header. Spins while a refresh is in flight so the
+   click has visible feedback even when nothing changes. */
+.spaces-refresh-button {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--or-text-muted, rgba(244, 246, 251, 0.55));
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.spaces-refresh-button:hover {
+  color: var(--or-text-primary, #f4f6fb);
+  background: rgba(255, 255, 255, 0.06);
+}
+.spaces-refresh-button[disabled] {
+  cursor: default;
+  opacity: 0.7;
+}
+.spaces-refresh-button.is-refreshing {
+  animation: spaces-refresh-spin 700ms linear infinite;
+}
+@keyframes spaces-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spaces-refresh-button.is-refreshing { animation: none; }
+}
+
 .spaces-new-shared-button {
   background: transparent;
   border: 1px solid rgba(123, 219, 255, 0.4);
@@ -5506,4 +5539,56 @@ body {
   cursor: progress;
   opacity: 0.6;
   transform: none;
+}
+
+/* ── ADR-051: per-space visibility option ─────────────────────────── */
+
+/* Sidebar lock pill for members-only spaces. Sits after the name (and
+ * the AI badge when both apply); emoji glyph needs no bg treatment. */
+.spaces-row-lock-badge {
+  font-size: 10px;
+  margin-left: 5px;
+  align-self: center;
+  opacity: 0.85;
+}
+
+/* Header row hosting the toggle chip + (restricted) member strip. */
+.spaces-visibility-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.spaces-visibility-toggle {
+  font-size: 11.5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.1));
+  background: var(--or-bg-elevated, #1b1b20);
+  color: var(--or-text-secondary, #aab2c5);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.spaces-visibility-toggle:hover {
+  border-color: var(--or-border-signal, rgba(79, 140, 255, 0.46));
+  color: var(--or-text-primary, #f4f6fb);
+}
+
+.spaces-visibility-toggle.is-restricted {
+  border-color: rgba(255, 193, 94, 0.45);
+  color: #ffd9a1;
+}
+
+/* Compact member strip on restricted spaces (any kind). Reuses the
+ * shared-member chip styles for the chips themselves. */
+.spaces-visibility-members {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--or-text-secondary, #aab2c5);
 }

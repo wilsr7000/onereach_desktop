@@ -602,6 +602,8 @@ interface LiteSpace {
   updatedAt?: string;
   /** 'user' (default) or 'shared' (AI-managed). */
   kind?: LiteSpaceKind;
+  /** ADR-051 — 'open' (default) or 'restricted' (members-only). */
+  visibility?: 'open' | 'restricted';
 }
 
 interface LiteSpaceChipRef {
@@ -718,6 +720,22 @@ interface LiteSpacesItemsBridge {
     size?: number;
     description?: string;
     sourceUrl?: string;
+    creatorId?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /**
+   * GSX-first binary create (ADR-050): raw bytes are uploaded to the
+   * account's GSX bucket in the main process; the graph node gets the
+   * resulting fileKey. No inline base64 in the graph.
+   */
+  createBinary(input: {
+    spaceId: string;
+    title: string;
+    kind?: LiteSpaceItemKind;
+    fileName: string;
+    mimeType?: string;
+    bytes: ArrayBuffer;
+    description?: string;
     creatorId?: string;
     metadata?: Record<string, unknown>;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
@@ -868,12 +886,20 @@ interface LiteSpacesUpdateSpaceInput {
   description?: string;
   color?: string;
   iconKey?: string;
+  /** ADR-051 — flip between 'open' (account-wide) and 'restricted' (members-only). */
+  visibility?: 'open' | 'restricted';
 }
 
 interface LiteSpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
   listSpaces(): Promise<LiteSpacesIpcResult<LiteSpace[]>>;
+  /**
+   * Drop cached reads and refetch. Use when data may have been created
+   * outside this app (a Space made in WISER Playbooks, an asset added
+   * by an agent) so it appears without waiting on the background timer.
+   */
+  refresh(): Promise<LiteSpacesIpcResult<{ ok: true }>>;
   getUncategorizedCount(): Promise<LiteSpacesIpcResult<number>>;
   items: LiteSpacesItemsBridge;
   /** Phase 0.5 -- run Q1-Q4 verification queries. */

@@ -64,6 +64,7 @@ const HEALTH_SNAPSHOT = 'lite:health:snapshot';
 // surface is bridged once Phase 1 lands real fetches.
 const SPACES_OPEN = 'lite:spaces:open';
 const SPACES_LIST_SPACES = 'lite:spaces:listSpaces';
+const SPACES_REFRESH = 'lite:spaces:refresh';
 const SPACES_UNCATEGORIZED_COUNT = 'lite:spaces:uncategorizedCount';
 const SPACES_ITEMS_LIST = 'lite:spaces:items:list';
 const SPACES_ITEMS_GET = 'lite:spaces:items:get';
@@ -84,6 +85,7 @@ const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
 const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
 
 const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
+const SPACES_ITEMS_CREATE_BINARY = 'lite:spaces:items:createBinary';
 const SPACES_ITEMS_CREATE_AGENT = 'lite:spaces:items:createAgent';
 const SPACES_ITEMS_DELETE = 'lite:spaces:items:delete';
 const SPACES_ITEMS_RESTORE = 'lite:spaces:items:restore';
@@ -541,6 +543,17 @@ interface SpacesItemsBridge {
   ): Promise<SpacesIpcResultView<unknown[]>>;
   get(id: string): Promise<SpacesIpcResultView<unknown | null>>;
   resolveFileUrl(key: string): Promise<SpacesIpcResultView<string | null>>;
+  createBinary(input: {
+    spaceId: string;
+    title: string;
+    kind?: string;
+    fileName: string;
+    mimeType?: string;
+    bytes: ArrayBuffer;
+    description?: string;
+    creatorId?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<SpacesIpcResultView<unknown>>;
   update(
     id: string,
     patch: {
@@ -786,6 +799,11 @@ interface SpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
   listSpaces(): Promise<SpacesIpcResultView<unknown[]>>;
+  /**
+   * Drop cached reads and refetch, so Spaces created OUTSIDE this app
+   * (e.g. in WISER Playbooks) appear on demand.
+   */
+  refresh(): Promise<SpacesIpcResultView<{ ok: true }>>;
   getUncategorizedCount(): Promise<SpacesIpcResultView<number>>;
   items: SpacesItemsBridge;
   /**
@@ -1419,6 +1437,8 @@ const spaces: SpacesBridge = {
   open: () => ipcRenderer.invoke(SPACES_OPEN) as Promise<{ ok: true }>,
   listSpaces: () =>
     ipcRenderer.invoke(SPACES_LIST_SPACES) as Promise<SpacesIpcResultView<unknown[]>>,
+  refresh: () =>
+    ipcRenderer.invoke(SPACES_REFRESH) as Promise<SpacesIpcResultView<{ ok: true }>>,
   getUncategorizedCount: () =>
     ipcRenderer.invoke(SPACES_UNCATEGORIZED_COUNT) as Promise<SpacesIpcResultView<number>>,
   items: {
@@ -1455,6 +1475,10 @@ const spaces: SpacesBridge = {
       }) as Promise<SpacesIpcResultView<unknown[]>>,
     create: (input) =>
       ipcRenderer.invoke(SPACES_ITEMS_CREATE, { input }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    createBinary: (input) =>
+      ipcRenderer.invoke(SPACES_ITEMS_CREATE_BINARY, { input }) as Promise<
         SpacesIpcResultView<unknown>
       >,
     createAgent: (input) =>
