@@ -22,7 +22,7 @@
  * @internal -- consumers go through `getSpacesApi()`.
  */
 
-import { BrowserWindow, screen, type Rectangle } from 'electron';
+import { BrowserWindow, screen, shell, type Rectangle } from 'electron';
 import { getKVApi } from '../kv/api.js';
 import type { KVApi } from '../kv/api.js';
 
@@ -87,6 +87,29 @@ export function createSpacesWindow(config: SpacesWindowConfig): BrowserWindow {
       nodeIntegration: false,
       webSecurity: true,
     },
+  });
+
+  // Route target="_blank" / window.open to the OS browser.
+  //
+  // This window had NO handler, so Electron's default swallowed the
+  // click: the detail pane's "Open PDF" button (an <a target="_blank">
+  // pointing at the signed file URL) did nothing at all. Verified from
+  // the event log that the upload and the signed-URL resolve both
+  // succeeded -- the failure was purely this missing hop. Applies to
+  // every external link in the Spaces window, not just PDFs.
+  //
+  // http(s) only: a signed file URL is https, and refusing everything
+  // else keeps `file:` / `javascript:` out of shell.openExternal.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const scheme = new URL(url).protocol;
+      if (scheme === 'https:' || scheme === 'http:') {
+        void shell.openExternal(url);
+      }
+    } catch {
+      /* unparseable URL -- drop it */
+    }
+    return { action: 'deny' };
   });
 
   void win.loadFile(config.htmlPath);
