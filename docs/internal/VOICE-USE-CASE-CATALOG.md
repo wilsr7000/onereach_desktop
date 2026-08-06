@@ -38,13 +38,13 @@ Status legend:
 **Given** an interaction that teaches the system something durable
 **When** the task completes
 **Then** the fact is saved (agent memory / user profile) AND the user is told *what was remembered* ("I'll remember you prefer Celsius").
-**Status:** 🔴 memory writes exist (learnFromInteraction, user-profile facts) but **disclosure is not implemented** — nothing tells the user a memory changed. Build: a `memoryUpdated` field on results → spoken suffix + HUD chip; then test via text path.
+**Status:** ✅ agents report durable learnings via `result.memoryUpdated`; the middleware appends the spoken disclosure ("I've updated my memory: …"); `learnFromInteraction` returns learned keys and the local executor surfaces them (`memory-disclosure-and-dependency-ux.test.js`).
 
 ### UC-05 · Agent fails → fixes ITSELF with Claude Code → retries (max 3)
 **Given** the winning agent errors at execution
 **When** the failure is not transient (not rate-limit/timeout)
 **Then** the system diagnoses, patches the agent via the Claude Code builder (playbook as spec), re-verifies, and retries the original request — up to 3 attempts, then honest failure + self-heal offer.
-**Status:** 🔴 today: bust → backup agents → error-agent (`agentic-retry.js` retries the *task*, not the *agent*). The fix-the-agent loop is not built. Depends on the `agent:execution-failure` structured event + failure-streak tracker (flagged gap). This is the flagship self-heal case.
+**Status:** ✅ built: middleware emits structured `agent:execution-failure` (transient vs hard); `agent-health-tracker` accrues consecutive-failure streaks (successes reset); on threshold `auto-heal` rebuilds the store agent IN PLACE from its playbook, announces honestly, retries the original request on a live-tested fix, and gives up honestly after 3 attempts (`auto-heal.test.js`). Built-ins never auto-rebuild.
 
 ### UC-06 · Three agents answer → ONE sequenced response with visuals
 **Given** a request that legitimately spans agents (e.g. daily brief: calendar + email + weather)
@@ -62,7 +62,7 @@ Status legend:
 **Given** the winner returns a response graded bad (delivery-eval / reflector / counterfactual judge)
 **When** the grade lands
 **Then** the quality streak for that agent accrues; on threshold, the agent is rebuilt/patched from its playbook via Claude Code, re-verified, and the fix is announced.
-**Status:** 🔴 grading exists and is tested (`delivery-eval.test.js`); the quality→heal wiring is not built (flagged gap). Pairs with UC-05.
+**Status:** ✅ built: `learning:low-quality-answer` grades accrue a per-agent quality streak feeding the SAME auto-heal path as UC-05 (rebuild from playbook, verify, announce, 3-attempt cap) (`auto-heal.test.js` + bridge wiring invariants).
 
 ### UC-09 · Broken agent detected → proactive rebuild offer (self-heal loop)
 **Given** an agent that fails contract validation or has an unservable config
@@ -110,7 +110,7 @@ Stray fragments ("um", "yes" with no question pending, multi-script hallucinatio
 
 ### UC-18 · Dependency-down visibility (no silent degradation)
 A tool/agent whose backend is unavailable (e.g. Neo4j unconfigured — live on this machine) must fail VISIBLY with a next step ("configure in Settings"), feeding the self-heal/gap flow — never a shrug.
-**Status:** 🔴 tools return `{error}` but the spoken UX for dependency-down isn't asserted anywhere. Add: events_add with no graph creds → honest spoken guidance.
+**Status:** ✅ graph-backed tools classify config errors and return spoken-ready guidance with a Settings pointer + `dependencyDown` marker (`memory-disclosure-and-dependency-ux.test.js`).
 
 ### UC-19 · Pending-input isolation (no hijack)
 When agent A awaits an answer and a proactive flow wants to ask something else, the user's reply must reach the agent they were actually answering.
@@ -122,10 +122,10 @@ Build consent at the daily cap → refused with the reason + Playbooks (no-cost)
 
 ---
 
-## Roadmap order for the 🔴s
-1. **UC-05 + UC-08** (agent self-fix on failure/bad-grade, ≤3 attempts) — closes the loop the self-heal system was built for; needs `agent:execution-failure` events + per-agent failure/quality streaks feeding the existing rebuild-offer/rebuild machinery, plus an autonomous (no-consent) mode gated by a setting.
-2. **UC-04** (memory-update disclosure) — small: result field + spoken suffix.
-3. **UC-18** (dependency-down UX) — small: standard error phrasing + settings pointer.
+## Roadmap
+All four originally-🔴 cases (UC-04, UC-05, UC-08, UC-18) were built and
+automated on 2026-08-05. Remaining work is upgrading the 🟡 partials to full
+turn-by-turn text-path coverage.
 
 Run the whole catalog: `npx vitest run test/unit` (each ✅ names its file).
 When adding a conversational feature, add its UC here and its flow test in the

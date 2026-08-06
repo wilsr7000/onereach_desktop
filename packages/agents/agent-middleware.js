@@ -104,6 +104,17 @@ function normalizeResult(raw) {
     result.message = String(result.message);
   }
 
+  // Memory-update disclosure (UC-04): when an agent learned something
+  // durable it sets `memoryUpdated` (short summary); the user is TOLD, not
+  // left to wonder what the assistant remembers about them.
+  if (
+    typeof result.memoryUpdated === 'string' &&
+    result.memoryUpdated.trim() &&
+    !/memory/i.test(result.message)
+  ) {
+    result.message += ` I've updated my memory: ${result.memoryUpdated.trim().slice(0, 80)}.`;
+  }
+
   // Convert declarative UI spec to HTML if agent returned one
   if (result.ui && !result.html) {
     try {
@@ -186,6 +197,16 @@ async function safeExecuteAgent(agent, task, options = {}) {
     // 4. Normalize output
     const result = normalizeResult(raw);
 
+    // A clean execution resets the agent's failure/quality streaks so the
+    // auto-heal thresholds mean CONSECUTIVE problems, not lifetime totals.
+    if (result.success !== false) {
+      try {
+        require('../../lib/exchange/agent-health-tracker')
+          .getAgentHealthTracker()
+          .recordSuccess(agent?.id || agentName);
+      } catch (_e) { /* tracker optional */ }
+    }
+
     const elapsed = Date.now() - startTime;
     if (elapsed > 5000) {
       log.info('agent', `[Middleware] ${agentName} slow execution: ${elapsed}ms`);
@@ -200,7 +221,15 @@ async function safeExecuteAgent(agent, task, options = {}) {
       err.message?.toLowerCase().includes('rate limit') ||
       err.message?.toLowerCase().includes('too many requests');
 
+    // Structured event: the auto-heal loop (lib/exchange/auto-heal) tracks
+    // per-agent failure streaks off this marker. Rate limits and timeouts
+    // are 'transient' -- they never count toward a heal.
     log.error('agent', `[Middleware] ${agentName} execution failed (${elapsed}ms)`, {
+      event: 'agent:execution-failure',
+      agentId: agent?.id || null,
+      agentName,
+      errorClass: isTimeout || isRateLimit ? 'transient' : 'hard',
+      taskContent: (safeTask.content || '').slice(0, 200),
       error: err.message,
       isTimeout,
       isRateLimit,

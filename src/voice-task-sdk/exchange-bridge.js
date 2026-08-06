@@ -2020,7 +2020,7 @@ async function executeLocalAgent(agent, task, _executionContext = {}) {
     if (memoryEnabled && memory) {
       try {
         const { learnFromInteraction } = require('../../lib/thinking-agent');
-        await learnFromInteraction(
+        const learned = await learnFromInteraction(
           memory,
           task,
           {
@@ -2029,6 +2029,11 @@ async function executeLocalAgent(agent, task, _executionContext = {}) {
           },
           {}
         );
+        // UC-04: surface durable learnings so the middleware can disclose
+        // "I've updated my memory: ..." to the user.
+        if (learned && Array.isArray(learned.learnedKeys) && learned.learnedKeys.length) {
+          execResult.memoryUpdated = learned.learnedKeys.slice(0, 3).join(', ');
+        }
       } catch (learnErr) {
         log.warn('voice', 'Agent learning failed', { agent: agent.name, error: learnErr.message });
       }
@@ -3003,6 +3008,82 @@ async function initializeExchangeBridge(config = {}) {
       log.info('voice', 'Self-heal notifier wired (broken agents get rebuild offers)');
     } catch (shErr) {
       log.warn('voice', 'Self-heal notifier unavailable (non-fatal)', { error: shErr.message });
+    }
+
+    // ---------------------------------------------------------------------
+    // AUTO-heal (UC-05/UC-08): behavioral failures fix themselves. Hard
+    // execution failures and low-quality grades accrue per-agent streaks;
+    // on threshold the agent is rebuilt IN PLACE from its playbook via the
+    // Claude Code builder, re-verified, announced, and the original request
+    // retried — capped at 3 attempts per agent per session. Store agents
+    // only; transient errors (rate limit / timeout) never count.
+    // ---------------------------------------------------------------------
+    try {
+      const { getAgentHealthTracker } = require('../../lib/exchange/agent-health-tracker');
+      const { attemptAutoHeal } = require('../../lib/exchange/auto-heal');
+      const healTracker = getAgentHealthTracker();
+      const healDeps = {
+        tracker: healTracker,
+        getAgentDef: (agentId) => {
+          try {
+            const { getAgentStore } = require('./agent-store');
+            return getAgentStore().getAgent(agentId) || null;
+          } catch {
+            return null;
+          }
+        },
+        builder: (request, opts) =>
+          require('../../lib/claude-code-agent-builder').buildAgentWithClaudeCode(request, opts),
+        speak: async (text) => {
+          const { getVoiceSpeaker } = require('../../voice-speaker');
+          const speaker = getVoiceSpeaker();
+          if (speaker) await speaker.speak(text, { taskResult: true, skipAffectMatching: true });
+        },
+        resubmit: (text, meta) => processSubmit(text, { toolId: 'orb', skipFilter: true, metadata: meta }),
+        log,
+      };
+      let healInFlight = false;
+      const maybeAutoHeal = async (agentId, agentName) => {
+        if (healInFlight) return; // one heal at a time; streaks persist
+        const decision = healTracker.evaluate(agentId);
+        if (!decision.heal) return;
+        healInFlight = true;
+        try {
+          await attemptAutoHeal(
+            {
+              agentId,
+              agentName,
+              reason: decision.reason,
+              originalRequest: decision.lastTaskContent,
+            },
+            healDeps
+          );
+        } finally {
+          healInFlight = false;
+        }
+      };
+      log.subscribe({ level: 'error' }, (entry) => {
+        const d = entry?.data || {};
+        if (d.event === 'agent:execution-failure' && d.agentId) {
+          healTracker.recordFailure(d.agentId, {
+            transient: d.errorClass === 'transient',
+            taskContent: d.taskContent || null,
+          });
+          Promise.resolve(maybeAutoHeal(d.agentId, d.agentName)).catch((err) =>
+            log.warn('voice', 'Auto-heal attempt errored', { agentId: d.agentId, error: err.message })
+          );
+        }
+      });
+      exchangeBus.on('learning:low-quality-answer', (evt = {}) => {
+        if (!evt.agentId) return;
+        healTracker.recordBadGrade(evt.agentId, { taskContent: evt.userInput || null });
+        Promise.resolve(maybeAutoHeal(evt.agentId, evt.agentId)).catch((err) =>
+          log.warn('voice', 'Auto-heal (quality) attempt errored', { agentId: evt.agentId, error: err.message })
+        );
+      });
+      log.info('voice', 'Auto-heal wired (failure/quality streaks rebuild store agents, max 3 attempts)');
+    } catch (ahErr) {
+      log.warn('voice', 'Auto-heal unavailable (non-fatal)', { error: ahErr.message });
     }
 
     // ---------------------------------------------------------------------
